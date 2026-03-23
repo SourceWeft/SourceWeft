@@ -1,7 +1,9 @@
 import Image from "next/image";
-import { Card } from "@repo/ui/card";
-import { Gradient } from "@repo/ui/gradient";
-import { TurborepoLogo } from "@repo/ui/turborepo-logo";
+import { Card } from "@polyer/ui/card";
+import { Gradient } from "@polyer/ui/gradient";
+import { TurborepoLogo } from "@polyer/ui/turborepo-logo";
+
+import { AiElementsDemo } from "./ai-demo";
 
 const LINKS = [
   {
@@ -102,6 +104,10 @@ export default function Page() {
             </svg>
           </div>
         </div>
+      </div>
+
+      <div className="mb-16 flex w-full max-w-5xl justify-center px-4">
+        <AiElementsDemo />
       </div>
 
       <div className="grid mb-32 text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">

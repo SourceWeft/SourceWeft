@@ -1,5 +1,8 @@
 @import "tailwindcss";
-@import "@repo/tailwind-config";
+@import "@polyer/tailwind-config";
+
+/* Scan shared UI package so app Tailwind sees utilities used in workspace components. */
+@source "../../packages/ui/src";
 
 :root {
   --foreground-rgb: 0, 0, 0;

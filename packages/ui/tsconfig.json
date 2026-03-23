@@ -1,8 +1,13 @@
 {
-  "extends": "@repo/typescript-config/react-library.json",
+  "extends": "@polyer/typescript-config/react-library.json",
   "compilerOptions": {
     "outDir": "dist",
-    "strictNullChecks": true
+    "rootDir": "src",
+    "strictNullChecks": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src"],
   "exclude": ["dist", "build", "node_modules"]
