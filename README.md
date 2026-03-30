@@ -1,58 +1,80 @@
-# Turborepo Tailwind CSS starter
+# VelaMind Monorepo
 
-This Turborepo starter is maintained by the Turborepo core team.
+This repository contains the VelaMind skeleton architecture.
 
-## Using this example
+Current platform scope:
 
-Run the following command:
+- `apps/web`: Next.js web app
+- `apps/extension`: browser extension (WXT, Chrome/Edge MV3)
+- `apps/desktop`: desktop app (Tauri)
+- `apps/backend`: backend runtime (`api`, `worker`, `scheduler`)
 
-```sh
-npx create-turbo@latest -e with-tailwind
+Shared packages:
+
+- `packages/contracts`: shared API/job contracts
+- `packages/credits-core`: pure billing and metering primitives
+- `packages/sdk`: shared frontend API client
+- `packages/domain`: shared business rules
+- `packages/ui` (package name: `@polyer/ui-web`): shared web UI components
+
+Queue/runtime skeleton:
+
+- BullMQ + Redis
+- No in-memory queue
+- Cancel/events are placeholder behavior in this phase
+
+Billing MVP skeleton:
+
+- Team-scoped billing API shape (`/v1/teams/:teamId/billing/*`)
+- Individual-first `pages + credits` metering backed by PostgreSQL
+- Team subscription flow with Creem (`team_standard`) and webhook-driven plan sync
+- Webhook audit + alerts (`billing_webhook_events`, `ops_alerts`) and scheduler reconcile
+- Config-driven billing modes: `disabled | shadow | enforced`
+
+Auth + workspace MVP:
+
+- Better Auth mounted in backend at `/api/auth/*`
+- Web supports Google One Tap, Email OTP, GitHub OAuth, Passkey, Password, and Magic Link
+- Organization plugin used for team-level identity boundary
+- Workspace operations exposed via `/v1/teams/:teamId/workspaces` and shell-based switching UI
+- Team management UI at `/app/team` (members + invitations)
+- Extension uses OAuth2 PKCE (`launchWebAuthFlow`) with bearer token requests
+
+## Environment Variables
+
+- Each app has its own `.env.example`.
+- Root does not store concrete env values.
+- See `docs/env.md` for env policy and setup.
+
+## Quick Start
+
+Install dependencies:
+
+```bash
+pnpm install
 ```
 
-## What's inside?
+Run all dev tasks via turbo:
 
-This Turborepo includes the following packages/apps:
-
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app with [Tailwind CSS](https://tailwindcss.com/)
-- `web`: another [Next.js](https://nextjs.org/) app with [Tailwind CSS](https://tailwindcss.com/)
-- `ui`: a stub React component library with [Tailwind CSS](https://tailwindcss.com/) shared by both `web` and `docs` applications
-- `@polyer/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@polyer/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Building packages/ui
-
-This example is set up to produce compiled styles for `ui` components into the `dist` directory. The component `.tsx` files are consumed by the Next.js apps directly using `transpilePackages` in `next.config.ts`. This was chosen for several reasons:
-
-- Make sharing one `tailwind.config.ts` to apps and packages as easy as possible.
-- Make package compilation simple by only depending on the Next.js Compiler and `tailwindcss`.
-- Ensure Tailwind classes do not overwrite each other. The `ui` package uses a `ui-` prefix for it's classes.
-- Maintain clear package export boundaries.
-
-Another option is to consume `packages/ui` directly from source without building. If using this option, you will need to update the `tailwind.config.ts` in your apps to be aware of your package locations, so it can find all usages of the `tailwindcss` class names for CSS compilation.
-
-For example, in [tailwind.config.ts](packages/tailwind-config/tailwind.config.ts):
-
-```js
-  content: [
-    // app content
-    `src/**/*.{js,ts,jsx,tsx}`,
-    // include packages if not transpiling
-    "../../packages/ui/*.{js,ts,jsx,tsx}",
-  ],
+```bash
+pnpm dev
 ```
 
-If you choose this strategy, you can remove the `tailwindcss` and `autoprefixer` dependencies from the `ui` package.
+Run backend only:
 
-### Utilities
+```bash
+pnpm --filter @polyer/backend dev
+```
 
-This Turborepo has some additional tools already setup for you:
+Type check everything:
 
-- [Tailwind CSS](https://tailwindcss.com/) for styles
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+```bash
+pnpm check-types
+```
+
+## Architecture Reference
+
+- Main architecture doc: `docs/architecture.md`
+- AI runtime integration guide: `docs/ai-runtime-integration-guide.md`
+- Env management doc: `docs/env.md`
+- Team billing ops runbook: `docs/team-billing-ops-runbook.md`

@@ -28,9 +28,24 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+**/.env
+**/.env.*
+!**/.env.example
 
 # turbo
 .turbo
 
+# extension (wxt)
+.wxt/
+.output/
+
 # ui
 dist/
+
+# rust
+target/
+
+
+.agents
+.claude
+.tmp

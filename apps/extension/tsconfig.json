@@ -1,0 +1,12 @@
+{
+  "extends": "../../packages/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["node", "chrome"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "baseUrl": "."
+  },
+  "include": ["entrypoints/**/*.ts", "lib/**/*.ts", "wxt.config.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,5 +1,5 @@
 {
-  "name": "@polyer/ui",
+  "name": "@polyer/ui-web",
   "version": "0.0.0",
   "sideEffects": [
     "**/*.css"
@@ -28,6 +28,7 @@
   },
   "license": "MIT",
   "scripts": {
+    "build": "pnpm run build:styles && pnpm run build:components",
     "build:styles": "tailwindcss -i ./src/styles.css -o ./dist/index.css",
     "build:components": "tsc",
     "check-types": "tsc --noEmit",

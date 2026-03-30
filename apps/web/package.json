@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3001",
+    "predev": "pnpm --filter @polyer/ui-web build",
+    "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
@@ -12,11 +13,19 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.136",
-    "@polyer/ui": "workspace:*",
+    "@better-auth/api-key": "^1.5.6",
+    "@better-auth/oauth-provider": "^1.5.6",
+    "@better-auth/passkey": "^1.5.6",
+    "@daveyplate/better-auth-ui": "^3.4.0",
+    "@polyer/sdk": "workspace:*",
+    "@polyer/ui-web": "workspace:*",
     "ai": "^6.0.134",
+    "better-auth": "^1.5.6",
     "next": "16.2.0",
+    "next-themes": "^0.4.6",
     "react": "^19.2.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sonner": "^2.0.7"
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "^16.2.0",
@@ -30,6 +39,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^9.39.1",
     "postcss": "^8.5.3",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.1.5",
     "typescript": "5.9.2"
   }

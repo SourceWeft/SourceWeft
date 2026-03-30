@@ -4,14 +4,15 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3000",
+    "predev": "pnpm --filter @polyer/ui-web build",
+    "dev": "next dev --port 3003",
     "build": "next build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@polyer/ui": "workspace:*",
+    "@polyer/ui-web": "workspace:*",
     "next": "16.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.1.0"

@@ -1,0 +1,24 @@
+{
+  "name": "@polyer/extension",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt --browser chrome",
+    "dev:edge": "wxt --browser edge",
+    "build": "wxt build --browser chrome",
+    "build:edge": "wxt build --browser edge",
+    "zip": "wxt zip --browser chrome",
+    "zip:edge": "wxt zip --browser edge",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@polyer/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@rolldown/binding-darwin-arm64": "1.0.0-rc.11",
+    "@types/chrome": "^0.1.10",
+    "typescript": "5.9.2",
+    "wxt": "^0.20.7"
+  }
+}

@@ -1,7 +1,12 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────
+   VelaMind — Extended Zinc palette tokens
+   Additional steps beyond Tailwind's default scale
+   ───────────────────────────────────────────────── */
 @theme {
-  --color-blue-1000: #2a8af6;
-  --color-purple-1000: #a853ba;
-  --color-red-1000: #e92a67;
+  /* Zinc-950 equivalent — deepest near-black */
+  --color-zinc-950: #09090b;
+  /* Zinc-1000 — absolute black for special use */
+  --color-zinc-1000: #000000;
 }
