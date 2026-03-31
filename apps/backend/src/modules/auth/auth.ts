@@ -20,7 +20,7 @@ import { config } from "../../shared/config";
 import { database } from "../../shared/database";
 import { logger } from "../../shared/logger";
 import { billingService } from "../billing";
-import { mailService } from "../mail";
+import { mailService } from "../../shared/mail";
 import { opsAlertService } from "../ops";
 import { workspaceService } from "../workspace";
 import { renderLinkTemplate, renderOtpTemplate } from "./templates";

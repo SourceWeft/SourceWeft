@@ -486,7 +486,7 @@ function FeaturesSection() {
       bullets: [
         "macOS & Windows desktop",
         "Chrome & Edge extension",
-        "Offline-ready (coming soon)",
+        "Mobile app (coming soon)",
       ],
     },
   ];

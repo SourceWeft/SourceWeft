@@ -1,5 +1,5 @@
-import { config } from "../../shared/config";
-import { logger } from "../../shared/logger";
+import { config } from "../config";
+import { logger } from "../logger";
 import { PlunkApiProvider } from "./providers/plunk-provider";
 import type { MailProvider, MailSendInput, MailSendResult } from "./types";
 
