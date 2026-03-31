@@ -150,7 +150,7 @@ export class OpsAlertService {
     try {
       await mailService.send({
         to: this.runtimeConfig.alertEmails,
-        subject: `[VelaMind][${alert.level.toUpperCase()}][${alert.source}] ${alert.title}`,
+        subject: `[SourceWeft][${alert.level.toUpperCase()}][${alert.source}] ${alert.title}`,
         html: `
           <h2>${alert.title}</h2>
           <p><strong>Level:</strong> ${alert.level}</p>

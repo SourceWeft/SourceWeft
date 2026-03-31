@@ -3,7 +3,7 @@ import {
   createCheckout,
   createPortal,
 } from "@creem_io/better-auth/server";
-import type { BillingSubscriptionStatus } from "@polyer/contracts";
+import type { BillingSubscriptionStatus } from "@sourceweft/contracts";
 import type { BillingRuntimeConfig } from "../types";
 import type {
   BillingProviderAdapter,

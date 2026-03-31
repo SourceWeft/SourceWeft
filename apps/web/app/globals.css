@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "@polyer/tailwind-config";
+@import "@sourceweft/tailwind-config";
 @import "@daveyplate/better-auth-ui/css";
 
 /* Scan shared UI package so app Tailwind sees utilities used in workspace components. */

@@ -1,4 +1,4 @@
-import { createLiteLLMSDK } from "@polyer/litellm-sdk";
+import { createLiteLLMSDK } from "@sourceweft/litellm-sdk";
 import { config } from "./config";
 
 export const litellm = createLiteLLMSDK({

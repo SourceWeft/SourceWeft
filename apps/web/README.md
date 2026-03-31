@@ -1,6 +1,6 @@
 # Web App
 
-Next.js web client for VelaMind.
+Next.js web client for SourceWeft.
 
 ## MVP Features
 

@@ -1,4 +1,4 @@
-import { HttpClient, JobsClient } from "@polyer/sdk";
+import { HttpClient, JobsClient } from "@sourceweft/sdk";
 
 type ExtensionEnv = {
   VITE_API_BASE_URL?: string;
@@ -11,7 +11,7 @@ type StoredTokens = {
 const env = (import.meta as unknown as { env?: ExtensionEnv }).env;
 
 const apiBaseUrl = env?.VITE_API_BASE_URL || "http://localhost:3001";
-const storageKey = "velamind.auth.tokens";
+const storageKey = "sourceweft.auth.tokens";
 
 async function readAccessToken() {
   const payload = await chrome.storage.local.get(storageKey);

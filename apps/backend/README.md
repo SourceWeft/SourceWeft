@@ -1,6 +1,6 @@
 # Backend
 
-This directory contains the backend runtime for VelaMind.
+This directory contains the backend runtime for SourceWeft.
 
 Queue backend: BullMQ + Redis (skeleton only, minimal implementation).
 

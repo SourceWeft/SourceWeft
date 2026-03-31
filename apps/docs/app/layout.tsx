@@ -1,4 +1,4 @@
-import "@polyer/ui-web/styles.css";
+import "@sourceweft/ui-web/styles.css";
 import "./globals.css";
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
@@ -6,8 +6,8 @@ import { Geist } from "next/font/google";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "VelaMind Docs",
-  description: "VelaMind Documentation",
+  title: "SourceWeft Docs",
+  description: "SourceWeft Documentation",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },

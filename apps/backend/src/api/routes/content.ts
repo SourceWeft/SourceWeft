@@ -4,7 +4,7 @@ import {
   createThreadRequestSchema,
   indexSourceRequestSchema,
   streamThreadRequestSchema,
-} from "@polyer/contracts";
+} from "@sourceweft/contracts";
 import { contentService } from "../../modules/content";
 import { getSessionUserId, requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";

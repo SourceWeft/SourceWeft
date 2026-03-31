@@ -1,3 +1,3 @@
-import { postcssConfig } from "@polyer/tailwind-config/postcss";
+import { postcssConfig } from "@sourceweft/tailwind-config/postcss";
 
 export default postcssConfig;

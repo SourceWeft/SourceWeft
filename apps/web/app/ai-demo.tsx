@@ -5,16 +5,16 @@ import {
   Message,
   MessageContent,
   MessageResponse,
-} from "@polyer/ui-web/components/ai-elements/message";
+} from "@sourceweft/ui-web/components/ai-elements/message";
 
-/** AI Elements live in `packages/ui` (package: `@polyer/ui-web`); `useChat` runs in the app. */
+/** AI Elements live in `packages/ui` (package: `@sourceweft/ui-web`); `useChat` runs in the app. */
 export function AiElementsDemo() {
   const { messages } = useChat();
 
   return (
     <section className="w-full max-w-xl rounded-lg border border-border bg-card p-6 text-card-foreground shadow-sm">
       <h2 className="mb-2 text-lg font-semibold">
-        AI Elements (@polyer/ui-web)
+        AI Elements (@sourceweft/ui-web)
       </h2>
       <p className="mb-4 text-sm text-muted-foreground">
         Chat hook (app): {messages.length} message

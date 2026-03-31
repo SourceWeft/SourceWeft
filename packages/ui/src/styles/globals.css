@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@polyer/tailwind-config";
+@import "@sourceweft/tailwind-config";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -48,7 +48,7 @@
 }
 
 /* ─────────────────────────────────────────────────
-   VelaMind Design System — "Cold Black Precision"
+   SourceWeft Design System — "Cold Black Precision"
    Inspired by: SurfSense · Linear · Vercel
    Palette: Zinc monochromatic, fully achromatic
    ───────────────────────────────────────────────── */

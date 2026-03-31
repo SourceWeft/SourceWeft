@@ -1,5 +1,5 @@
 {
-  "extends": "@polyer/typescript-config/nextjs.json",
+  "extends": "@sourceweft/typescript-config/nextjs.json",
   "compilerOptions": {
     "plugins": [
       {

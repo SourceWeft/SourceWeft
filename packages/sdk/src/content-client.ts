@@ -7,7 +7,7 @@ import type {
   IndexSourceResponse,
   StreamThreadRequest,
   StreamThreadResponse,
-} from "@polyer/contracts";
+} from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
 function encode(value: string) {

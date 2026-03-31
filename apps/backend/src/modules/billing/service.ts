@@ -8,7 +8,7 @@ import {
   toUsdFromCredits,
   type LedgerEventType,
   type LedgerUnitType,
-} from "@polyer/credits-core";
+} from "@sourceweft/credits-core";
 import type {
   BillingSubscriptionResponse,
   BillingSubscriptionStatus,
@@ -29,7 +29,7 @@ import type {
   MeterIngestionResponse,
   UpdateSpendLimitsRequest,
   UpdateSpendLimitsResponse,
-} from "@polyer/contracts";
+} from "@sourceweft/contracts";
 import { BillingError } from "./errors";
 import { PostgresBillingStore } from "./store";
 import type {

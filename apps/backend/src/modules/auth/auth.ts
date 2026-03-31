@@ -15,7 +15,7 @@ import { apiKey } from "@better-auth/api-key";
 import { creem } from "@creem_io/better-auth";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
-import type { BillingSubscriptionStatus } from "@polyer/contracts";
+import type { BillingSubscriptionStatus } from "@sourceweft/contracts";
 import { config } from "../../shared/config";
 import { database } from "../../shared/database";
 import { logger } from "../../shared/logger";
@@ -492,7 +492,7 @@ async function syncCreemSubscriptionEvent(
 }
 
 export const auth: any = betterAuth({
-  appName: "VelaMind",
+  appName: "SourceWeft",
   baseURL: config.auth.baseUrl,
   secret: config.auth.secret,
   silenceWarnings: {
@@ -546,7 +546,7 @@ export const auth: any = betterAuth({
           html: renderLinkTemplate({
             title: "Confirm account deletion",
             message:
-              "We received a request to delete your VelaMind account. This action is permanent.",
+              "We received a request to delete your SourceWeft account. This action is permanent.",
             buttonLabel: "Delete account",
             buttonUrl: data.url,
           }),
@@ -562,7 +562,7 @@ export const auth: any = betterAuth({
     async sendResetPassword(data) {
       await mailService.send({
         to: data.user.email,
-        subject: "Reset your VelaMind password",
+        subject: "Reset your SourceWeft password",
         html: renderLinkTemplate({
           title: "Reset your password",
           message:
@@ -580,7 +580,7 @@ export const auth: any = betterAuth({
     async sendVerificationEmail(data) {
       await mailService.send({
         to: data.user.email,
-        subject: "Verify your VelaMind email",
+        subject: "Verify your SourceWeft email",
         html: renderLinkTemplate({
           title: "Verify your email",
           message:
@@ -626,7 +626,7 @@ export const auth: any = betterAuth({
           html: renderLinkTemplate({
             title: `Join ${data.organization.name}`,
             message:
-              "You were invited to join an organization on VelaMind. Sign in and accept the invitation.",
+              "You were invited to join an organization on SourceWeft. Sign in and accept the invitation.",
             buttonLabel: "Accept invitation",
             buttonUrl: withBaseUrl(
               `/auth/accept-invitation?invitationId=${encodeURIComponent(data.id)}`,
@@ -647,7 +647,7 @@ export const auth: any = betterAuth({
       },
     }),
     twoFactor({
-      issuer: "VelaMind",
+      issuer: "SourceWeft",
       otpOptions: {
         async sendOTP({ user, otp }) {
           await mailService.send({
@@ -656,7 +656,7 @@ export const auth: any = betterAuth({
             html: renderOtpTemplate({
               title: "Two-factor verification",
               message:
-                "Use this verification code to complete your VelaMind sign-in.",
+                "Use this verification code to complete your SourceWeft sign-in.",
               otp,
             }),
             templateId: "auth.two-factor-otp",
@@ -772,7 +772,7 @@ export const auth: any = betterAuth({
         const labels: Record<string, { title: string; message: string }> = {
           "sign-in": {
             title: "Your sign-in code",
-            message: "Use this code to sign in to VelaMind.",
+            message: "Use this code to sign in to SourceWeft.",
           },
           "email-verification": {
             title: "Verify your email",
@@ -787,7 +787,7 @@ export const auth: any = betterAuth({
 
         const content = labels[type] || {
           title: "Your sign-in code",
-          message: "Use this code to sign in to VelaMind.",
+          message: "Use this code to sign in to SourceWeft.",
         };
 
         await mailService.send({
@@ -807,7 +807,7 @@ export const auth: any = betterAuth({
       async sendMagicLink({ email, url }) {
         await mailService.send({
           to: email,
-          subject: "Your VelaMind magic link",
+          subject: "Your SourceWeft magic link",
           html: renderLinkTemplate({
             title: "Sign in with magic link",
             message: "Use this secure link to continue signing in.",

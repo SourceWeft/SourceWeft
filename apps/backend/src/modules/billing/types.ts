@@ -3,7 +3,7 @@ import type {
   BillingProvider,
   BillingScope,
   PlanFamily,
-} from "@polyer/credits-core";
+} from "@sourceweft/credits-core";
 import type {
   BillingSubscriptionStatus,
   BillingLedgerEntry,
@@ -12,7 +12,7 @@ import type {
   CreateTeamBillingPortalResponse,
   CreateTeamSubscriptionCheckoutRequest,
   CreateTeamSubscriptionCheckoutResponse,
-} from "@polyer/contracts";
+} from "@sourceweft/contracts";
 
 export type BillingRuntimeConfig = {
   mode: BillingMode;

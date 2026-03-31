@@ -28,7 +28,7 @@ function renderEmailTemplate(input: {
       content: input.content,
       heading: input.heading,
       preview: input.preview,
-      siteName: "VelaMind",
+      siteName: "SourceWeft",
       url: input.url,
       variant: "vercel",
     }),

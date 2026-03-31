@@ -15,7 +15,7 @@ import type {
   MeterIngestionResponse,
   UpdateSpendLimitsRequest,
   UpdateSpendLimitsResponse,
-} from "@polyer/contracts";
+} from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
 function encodeTeamId(teamId: string) {

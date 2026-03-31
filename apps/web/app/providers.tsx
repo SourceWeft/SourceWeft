@@ -1,7 +1,7 @@
 "use client";
 
 import { AuthUIProvider } from "@daveyplate/better-auth-ui";
-import { TooltipProvider } from "@polyer/ui-web/components/ui/tooltip";
+import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import Link from "next/link";
 import { ThemeProvider } from "next-themes";
 import { useRouter } from "next/navigation";

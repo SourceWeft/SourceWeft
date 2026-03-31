@@ -1,5 +1,5 @@
 {
-  "name": "@polyer/eslint-config",
+  "name": "@sourceweft/eslint-config",
   "version": "0.0.0",
   "type": "module",
   "private": true,

@@ -9,5 +9,5 @@ Purpose of this directory:
 
 Notes:
 
-- Package name is `@polyer/ui-web`.
-- This folder keeps the existing implementation during migration from the old `@polyer/ui` naming.
+- Package name is `@sourceweft/ui-web`.
+- This folder keeps the existing implementation during migration from the old `@sourceweft/ui` naming.

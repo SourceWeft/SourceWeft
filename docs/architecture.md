@@ -1,8 +1,8 @@
-# VelaMind Architecture (V1)
+# SourceWeft Architecture (V1)
 
 ## 1. Purpose
 
-This document defines the final architecture for the current VelaMind phase and serves as the implementation reference.
+This document defines the final architecture for the current SourceWeft phase and serves as the implementation reference.
 
 Design principles for this version:
 
@@ -32,7 +32,7 @@ Design principles for this version:
 ## 3. Target Directory Layout
 
 ```txt
-VelaMind/
+SourceWeft/
   apps/
     web/                          # Next.js app
     extension/                    # Browser extension (WXT)
@@ -58,7 +58,7 @@ VelaMind/
     contracts/                    # Shared API + job contracts (zod/types)
     sdk/                          # Unified frontend API client layer
     domain/                       # Platform-agnostic business logic
-    ui/                           # Shared web UI package (`@polyer/ui-web` during migration)
+    ui/                           # Shared web UI package (`@sourceweft/ui-web` during migration)
     config-eslint/
     config-typescript/
     config-tailwind/
@@ -90,7 +90,7 @@ VelaMind/
 - `packages/contracts`: request/response schemas and job payload contracts.
 - `packages/sdk`: shared request client with auth/retry/error handling.
 - `packages/domain`: reusable business rules without platform APIs.
-- `packages/ui` (`@polyer/ui-web`): reusable components for web/extension/desktop frontend.
+- `packages/ui` (`@sourceweft/ui-web`): reusable components for web/extension/desktop frontend.
 
 ---
 
@@ -168,7 +168,7 @@ Skeleton note:
 
 ## 9. UI Strategy (Current Phase)
 
-Keep only `ui-web` in this phase (currently implemented in `packages/ui` as package `@polyer/ui-web`).
+Keep only `ui-web` in this phase (currently implemented in `packages/ui` as package `@sourceweft/ui-web`).
 
 Consumers:
 

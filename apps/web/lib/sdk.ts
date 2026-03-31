@@ -4,7 +4,7 @@ import {
   HttpClient,
   JobsClient,
   WorkspaceClient,
-} from "@polyer/sdk";
+} from "@sourceweft/sdk";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";

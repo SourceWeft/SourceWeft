@@ -1,4 +1,4 @@
-name: velamind
+name: sourceweft
 
 services:
   postgres:
@@ -6,9 +6,9 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      POSTGRES_USER: ${DB_USER:-velamind}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-velamind}
-      POSTGRES_DB: ${DB_NAME:-velamind}
+      POSTGRES_USER: ${DB_USER:-sourceweft}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sourceweft}
+      POSTGRES_DB: ${DB_NAME:-sourceweft}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -16,7 +16,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${DB_USER:-velamind} -d ${DB_NAME:-velamind}",
+          "pg_isready -U ${DB_USER:-sourceweft} -d ${DB_NAME:-sourceweft}",
         ]
       interval: 10s
       timeout: 5s
@@ -103,11 +103,11 @@ services:
   api:
     image: node:20-alpine
     working_dir: /app
-    command: ["pnpm", "--filter", "@polyer/backend", "dev:api"]
+    command: ["pnpm", "--filter", "@sourceweft/backend", "dev:api"]
     volumes:
       - ..:/app
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-velamind}:${DB_PASSWORD:-velamind}@postgres:5432/${DB_NAME:-velamind}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       LITELLM_BASE_URL: ${LITELLM_BASE_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-dev-master-key}
@@ -123,11 +123,11 @@ services:
   worker:
     image: node:20-alpine
     working_dir: /app
-    command: ["pnpm", "--filter", "@polyer/backend", "dev:worker"]
+    command: ["pnpm", "--filter", "@sourceweft/backend", "dev:worker"]
     volumes:
       - ..:/app
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-velamind}:${DB_PASSWORD:-velamind}@postgres:5432/${DB_NAME:-velamind}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       LITELLM_BASE_URL: ${LITELLM_BASE_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-dev-master-key}
@@ -142,6 +142,6 @@ services:
 
 volumes:
   postgres_data:
-    name: velamind-postgres
+    name: sourceweft-postgres
   redis_data:
-    name: velamind-redis
+    name: sourceweft-redis

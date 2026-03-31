@@ -1,10 +1,10 @@
-# VelaMind 组件规范
+# SourceWeft 组件规范
 
 > **版本**: V1  
 > **更新**: 2026-03-27  
 > **依赖**: shadcn/ui + Tailwind CSS v4 + 本项目 design tokens
 
-本文档定义 VelaMind 核心 UI 组件的视觉规范、状态规范与 Tailwind 类名约定。所有组件基于 `packages/ui/src` 内的 shadcn 组件二次封装。
+本文档定义 SourceWeft 核心 UI 组件的视觉规范、状态规范与 Tailwind 类名约定。所有组件基于 `packages/ui/src` 内的 shadcn 组件二次封装。
 
 ---
 

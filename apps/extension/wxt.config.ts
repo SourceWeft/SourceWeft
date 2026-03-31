@@ -20,8 +20,8 @@ export default defineConfig({
   targetBrowsers: ["chrome", "edge"],
   manifestVersion: 3,
   manifest: {
-    name: "VelaMind",
-    description: "VelaMind browser extension",
+    name: "SourceWeft",
+    description: "SourceWeft browser extension",
     permissions: ["storage", "activeTab", "scripting", "identity"],
     host_permissions: [apiHostPermission()],
     icons: {

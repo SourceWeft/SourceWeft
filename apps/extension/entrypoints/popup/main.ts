@@ -44,7 +44,7 @@ if (!root) {
 
 root.innerHTML = `
   <div style="font-family: Inter, system-ui, -apple-system, sans-serif; width: 320px; padding: 14px; color: #0f172a;">
-    <h1 style="margin: 0 0 10px; font-size: 16px;">VelaMind Extension</h1>
+    <h1 style="margin: 0 0 10px; font-size: 16px;">SourceWeft Extension</h1>
     <p id="status" style="margin: 0 0 10px; font-size: 12px; color: #475569;">Checking session...</p>
     <p id="userinfo" style="margin: 0 0 10px; font-size: 12px; color: #334155;"></p>
     <div style="display: grid; gap: 8px;">

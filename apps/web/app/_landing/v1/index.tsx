@@ -101,7 +101,7 @@ function Navbar() {
             V
           </span>
           <span className="text-sm font-semibold text-zinc-900 tracking-tight dark:text-white">
-            VelaMind
+            SourceWeft
           </span>
         </Link>
 
@@ -248,7 +248,7 @@ function HeroSection() {
                 <span className="h-2.5 w-2.5 rounded-full bg-zinc-200 dark:bg-zinc-700" />
                 <span className="h-2.5 w-2.5 rounded-full bg-zinc-200 dark:bg-zinc-700" />
                 <span className="ml-3 text-xs text-zinc-400 dark:text-zinc-600">
-                  VelaMind — Research workspace
+                  SourceWeft — Research workspace
                 </span>
               </div>
 
@@ -471,7 +471,7 @@ function FeaturesSection() {
       icon: <IconDatabase />,
       title: "Connect everything",
       description:
-        "Don't just upload files — connect Notion, Google Drive, Gmail, Slack, and more. VelaMind indexes your existing tools so your knowledge is always at hand.",
+        "Don't just upload files — connect Notion, Google Drive, Gmail, Slack, and more. SourceWeft indexes your existing tools so your knowledge is always at hand.",
       bullets: [
         "Notion, Google Drive, Gmail, Slack",
         "25+ file formats supported",
@@ -576,7 +576,7 @@ function HowItWorks() {
     {
       num: "02",
       title: "Connect your knowledge sources",
-      body: "Connect Notion, Google Drive, Gmail, or Slack — or drop in PDFs, paste URLs, and capture any web page. VelaMind indexes everything, wherever your knowledge lives.",
+      body: "Connect Notion, Google Drive, Gmail, or Slack — or drop in PDFs, paste URLs, and capture any web page. SourceWeft indexes everything, wherever your knowledge lives.",
       visual: (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
           <p className="mb-3 text-zinc-400 dark:text-zinc-500">Sources added</p>
@@ -736,7 +736,7 @@ function Footer() {
                 V
               </span>
               <span className="text-sm font-semibold text-zinc-900 dark:text-white">
-                VelaMind
+                SourceWeft
               </span>
             </Link>
             <p className="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
@@ -815,8 +815,8 @@ function Footer() {
         </div>
 
         <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-zinc-100 pt-8 text-xs text-zinc-400 dark:border-white/[0.06] dark:text-zinc-700">
-          <p>© {new Date().getFullYear()} VelaMind. All rights reserved.</p>
-          <span className="transition-colors">Build By VelaMind</span>
+          <p>© {new Date().getFullYear()} SourceWeft. All rights reserved.</p>
+          <span className="transition-colors">Build By SourceWeft</span>
         </div>
       </div>
     </footer>

@@ -1,7 +1,7 @@
 import Image from "next/image";
-import { Card } from "@polyer/ui-web/card";
-import { Gradient } from "@polyer/ui-web/gradient";
-import { TurborepoLogo } from "@polyer/ui-web/turborepo-logo";
+import { Card } from "@sourceweft/ui-web/card";
+import { Gradient } from "@sourceweft/ui-web/gradient";
+import { TurborepoLogo } from "@sourceweft/ui-web/turborepo-logo";
 
 const LINKS = [
   {

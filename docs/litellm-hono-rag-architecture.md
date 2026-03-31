@@ -50,7 +50,7 @@ Status:
 ## 3) Target Repository Layout
 
 ```txt
-VelaMind/
+SourceWeft/
   apps/
     api/                           # Hono API (REST + SSE)
     worker/                        # BullMQ workers (ingestion/reindex)

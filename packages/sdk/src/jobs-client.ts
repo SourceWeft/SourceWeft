@@ -4,7 +4,7 @@ import type {
   CreateJobResponse,
   JobDetailsResponse,
   JobEventsResponse,
-} from "@polyer/contracts";
+} from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
 export class JobsClient {

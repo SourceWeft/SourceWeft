@@ -1,6 +1,6 @@
-# @polyer/litellm-sdk
+# @sourceweft/litellm-sdk
 
-Internal LiteLLM-first SDK for VelaMind.
+Internal LiteLLM-first SDK for SourceWeft.
 
 This package provides:
 

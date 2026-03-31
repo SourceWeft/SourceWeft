@@ -1,6 +1,6 @@
-# VelaMind Monorepo
+# SourceWeft Monorepo
 
-This repository contains the VelaMind skeleton architecture.
+This repository contains the SourceWeft skeleton architecture.
 
 Current platform scope:
 
@@ -15,7 +15,7 @@ Shared packages:
 - `packages/credits-core`: pure billing and metering primitives
 - `packages/sdk`: shared frontend API client
 - `packages/domain`: shared business rules
-- `packages/ui` (package name: `@polyer/ui-web`): shared web UI components
+- `packages/ui` (package name: `@sourceweft/ui-web`): shared web UI components
 
 Queue/runtime skeleton:
 
@@ -63,7 +63,7 @@ pnpm dev
 Run backend only:
 
 ```bash
-pnpm --filter @polyer/backend dev
+pnpm --filter @sourceweft/backend dev
 ```
 
 Type check everything:

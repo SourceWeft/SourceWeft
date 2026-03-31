@@ -24,7 +24,7 @@ export function getPricingConfig(): PlanConfig[] {
       name: "Free",
       monthlyPrice: 0,
       yearlyPrice: 0,
-      description: "For individuals exploring VelaMind",
+      description: "For individuals exploring SourceWeft",
       features: [
         "300 pages / month",
         "3,000 credits / month",

@@ -7,8 +7,8 @@ import { Providers } from "./providers";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "VelaMind",
-  description: "VelaMind Web",
+  title: "SourceWeft",
+  description: "SourceWeft Web",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },

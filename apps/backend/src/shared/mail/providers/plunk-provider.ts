@@ -78,7 +78,7 @@ export class PlunkApiProvider implements MailProvider {
         body: input.html,
         data: input.variables,
         headers: {
-          "X-App": "velamind",
+          "X-App": "sourceweft",
           "X-Mail-Type": input.messageType,
           ...(input.templateId ? { "X-Template-Id": input.templateId } : {}),
         },

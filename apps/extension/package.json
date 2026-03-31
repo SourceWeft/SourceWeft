@@ -1,5 +1,5 @@
 {
-  "name": "@polyer/extension",
+  "name": "@sourceweft/extension",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@polyer/sdk": "workspace:*"
+    "@sourceweft/sdk": "workspace:*"
   },
   "devDependencies": {
     "@rolldown/binding-darwin-arm64": "1.0.0-rc.11",

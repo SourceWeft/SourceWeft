@@ -1,4 +1,4 @@
-import type { ApiErrorResponse } from "@polyer/contracts";
+import type { ApiErrorResponse } from "@sourceweft/contracts";
 
 export type HttpClientOptions = {
   baseUrl: string;

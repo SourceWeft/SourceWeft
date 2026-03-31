@@ -1,5 +1,5 @@
 {
-  "extends": "@polyer/typescript-config/react-library.json",
+  "extends": "@sourceweft/typescript-config/react-library.json",
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",

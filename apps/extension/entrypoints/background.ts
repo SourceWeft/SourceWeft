@@ -9,7 +9,7 @@ type AuthTokens = {
   clientId: string;
 };
 
-const STORAGE_KEY = "velamind.auth.tokens";
+const STORAGE_KEY = "sourceweft.auth.tokens";
 const DEFAULT_SCOPE = "openid profile email offline_access";
 
 type ExtensionEnv = {
@@ -25,7 +25,7 @@ function getApiBaseUrl() {
 }
 
 function getClientId() {
-  return extensionEnv?.VITE_AUTH_CLIENT_ID || "velamind-extension";
+  return extensionEnv?.VITE_AUTH_CLIENT_ID || "sourceweft-extension";
 }
 
 function toBase64Url(bytes: Uint8Array) {
@@ -112,7 +112,7 @@ async function registerPublicClient(redirectUri: string) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      client_name: "VelaMind Extension",
+      client_name: "SourceWeft Extension",
       redirect_uris: [redirectUri],
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code", "refresh_token"],

@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "predev": "pnpm --filter @polyer/ui-web build",
+    "predev": "pnpm --filter @sourceweft/ui-web build",
     "dev": "next dev --port 3003",
     "build": "next build",
     "start": "next start",
@@ -12,16 +12,16 @@
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@polyer/ui-web": "workspace:*",
+    "@sourceweft/ui-web": "workspace:*",
     "next": "16.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "^16.2.0",
-    "@polyer/eslint-config": "workspace:*",
-    "@polyer/tailwind-config": "workspace:*",
-    "@polyer/typescript-config": "workspace:*",
+    "@sourceweft/eslint-config": "workspace:*",
+    "@sourceweft/tailwind-config": "workspace:*",
+    "@sourceweft/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.1.5",
     "@types/node": "^22.15.30",
     "@types/react": "^19.1.0",

@@ -1,4 +1,4 @@
-import { HttpClient, JobsClient } from "@polyer/sdk";
+import { HttpClient, JobsClient } from "@sourceweft/sdk";
 
 type DesktopEnv = {
   VITE_API_BASE_URL?: string;

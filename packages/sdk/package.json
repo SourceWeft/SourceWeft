@@ -1,5 +1,5 @@
 {
-  "name": "@polyer/sdk",
+  "name": "@sourceweft/sdk",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@polyer/contracts": "workspace:*"
+    "@sourceweft/contracts": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.2"

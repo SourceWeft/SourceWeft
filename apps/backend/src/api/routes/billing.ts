@@ -5,7 +5,7 @@ import {
   meterConsumeRequestSchema,
   meterIngestionRequestSchema,
   updateSpendLimitsRequestSchema,
-} from "@polyer/contracts";
+} from "@sourceweft/contracts";
 import { billingService } from "../../modules/billing";
 import { workspaceService } from "../../modules/workspace";
 import type { OrganizationMembership } from "../../modules/workspace";

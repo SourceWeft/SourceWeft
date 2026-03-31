@@ -41,13 +41,13 @@ importers:
       '@hono/node-server':
         specifier: ^1.19.6
         version: 1.19.11(hono@4.12.8)
-      '@polyer/contracts':
+      '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@polyer/credits-core':
+      '@sourceweft/credits-core':
         specifier: workspace:*
         version: link:../../packages/credits-core
-      '@polyer/litellm-sdk':
+      '@sourceweft/litellm-sdk':
         specifier: workspace:*
         version: link:../../packages/litellm-sdk
       better-auth:
@@ -105,7 +105,7 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@polyer/sdk':
+      '@sourceweft/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
     devDependencies:
@@ -115,7 +115,7 @@ importers:
 
   apps/docs:
     dependencies:
-      '@polyer/ui-web':
+      '@sourceweft/ui-web':
         specifier: workspace:*
         version: link:../../packages/ui
       next:
@@ -131,13 +131,13 @@ importers:
       '@next/eslint-plugin-next':
         specifier: ^16.2.0
         version: 16.2.0
-      '@polyer/eslint-config':
+      '@sourceweft/eslint-config':
         specifier: workspace:*
         version: link:../../packages/eslint-config
-      '@polyer/tailwind-config':
+      '@sourceweft/tailwind-config':
         specifier: workspace:*
         version: link:../../packages/tailwind-config
-      '@polyer/typescript-config':
+      '@sourceweft/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
       '@tailwindcss/postcss':
@@ -170,7 +170,7 @@ importers:
 
   apps/extension:
     dependencies:
-      '@polyer/sdk':
+      '@sourceweft/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
     devDependencies:
@@ -204,10 +204,10 @@ importers:
       '@daveyplate/better-auth-ui':
         specifier: ^3.4.0
         version: 3.4.0(3ba0ec92226c212ac7206bc25651c8f4)
-      '@polyer/sdk':
+      '@sourceweft/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@polyer/ui-web':
+      '@sourceweft/ui-web':
         specifier: workspace:*
         version: link:../../packages/ui
       ai:
@@ -235,13 +235,13 @@ importers:
       '@next/eslint-plugin-next':
         specifier: ^16.2.0
         version: 16.2.0
-      '@polyer/eslint-config':
+      '@sourceweft/eslint-config':
         specifier: workspace:*
         version: link:../../packages/eslint-config
-      '@polyer/tailwind-config':
+      '@sourceweft/tailwind-config':
         specifier: workspace:*
         version: link:../../packages/tailwind-config
-      '@polyer/typescript-config':
+      '@sourceweft/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
       '@tailwindcss/postcss':
@@ -293,7 +293,7 @@ importers:
 
   packages/domain:
     dependencies:
-      '@polyer/contracts':
+      '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
     devDependencies:
@@ -361,7 +361,7 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@polyer/contracts':
+      '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
     devDependencies:
@@ -425,13 +425,13 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
     devDependencies:
-      '@polyer/eslint-config':
+      '@sourceweft/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
-      '@polyer/tailwind-config':
+      '@sourceweft/tailwind-config':
         specifier: workspace:*
         version: link:../tailwind-config
-      '@polyer/typescript-config':
+      '@sourceweft/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
       '@tailwindcss/cli':

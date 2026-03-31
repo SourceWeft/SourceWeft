@@ -1,4 +1,4 @@
-import { LiteLLMError, type UsageInfo } from "@polyer/litellm-sdk";
+import { LiteLLMError, type UsageInfo } from "@sourceweft/litellm-sdk";
 import {
   createMessageRecord,
   createSourceRecord,

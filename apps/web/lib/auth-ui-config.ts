@@ -65,7 +65,7 @@ export const additionalFields: AdditionalFields = {
   company: {
     description: "Used for organization and billing context",
     label: "Company",
-    placeholder: "VelaMind Inc.",
+    placeholder: "SourceWeft Inc.",
     required: false,
     type: "string",
   },

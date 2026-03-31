@@ -29,12 +29,12 @@ Short answer:
 
 Layer ownership:
 
-| Layer                            | Primary responsibility                                                     | Runs in                        | Must not do                                    |
-| -------------------------------- | -------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------- |
-| `ai-elements` (`@polyer/ui-web`) | Rendering message UI, tool UI, markdown, chat visuals                      | Frontend shared UI package     | Own transport, model calls, auth, or RAG logic |
-| AI SDK (`ai`, `@ai-sdk/react`)   | Chat state, message lifecycle, stream consumption in UI                    | Frontend app                   | Implement retrieval/orchestration logic        |
-| `@ai-sdk/langchain`              | Convert message and stream protocol between AI SDK and LangChain/LangGraph | Server route or server runtime | Contain business/domain rules                  |
-| `LangChain` / `LangGraph`        | Agent workflow, tools, retrieval orchestration, state graph                | Backend/API/worker             | Render UI or hold client view state            |
+| Layer                                | Primary responsibility                                                     | Runs in                        | Must not do                                    |
+| ------------------------------------ | -------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------- |
+| `ai-elements` (`@sourceweft/ui-web`) | Rendering message UI, tool UI, markdown, chat visuals                      | Frontend shared UI package     | Own transport, model calls, auth, or RAG logic |
+| AI SDK (`ai`, `@ai-sdk/react`)       | Chat state, message lifecycle, stream consumption in UI                    | Frontend app                   | Implement retrieval/orchestration logic        |
+| `@ai-sdk/langchain`                  | Convert message and stream protocol between AI SDK and LangChain/LangGraph | Server route or server runtime | Contain business/domain rules                  |
+| `LangChain` / `LangGraph`            | Agent workflow, tools, retrieval orchestration, state graph                | Backend/API/worker             | Render UI or hold client view state            |
 
 ---
 
@@ -42,10 +42,10 @@ Layer ownership:
 
 Current implementation in this repository:
 
-1. `ai-elements` are in shared UI package and exported from `@polyer/ui-web`.
+1. `ai-elements` are in shared UI package and exported from `@sourceweft/ui-web`.
 2. `@ai-sdk/react` is installed and currently used in demo pages.
 3. Current backend chat route named `.../stream` is MVP JSON response (not SSE token stream yet).
-4. LangChain/LangGraph are architecture decisions in docs for the main VelaMind runtime, but not yet wired in the active backend path.
+4. LangChain/LangGraph are architecture decisions in docs for the main SourceWeft runtime, but not yet wired in the active backend path.
 
 This means the repo is in a bridge phase: UI and contracts exist, runtime orchestration upgrade is planned.
 
@@ -80,7 +80,7 @@ To avoid accidental architecture drift, enforce these rules:
 1. Keep exactly one message translation boundary (`@ai-sdk/langchain`) in the server path.
 2. Keep `ai-elements` presentation-only.
 3. Keep all model/provider/workflow logic in backend runtime.
-4. Keep frontend API access through `@polyer/sdk` unless there is a dedicated chat route designed for `useChat` streaming.
+4. Keep frontend API access through `@sourceweft/sdk` unless there is a dedicated chat route designed for `useChat` streaming.
 5. Do not expose provider-native payloads to UI; expose normalized message parts/events only.
 
 ---
@@ -141,7 +141,7 @@ This provides streaming/tool events while preserving current frontend architectu
 ### Phase C: Switch frontend chat transport
 
 - Move production chat UI from manual request/response to `useChat` transport.
-- Keep the same message rendering components in `@polyer/ui-web`.
+- Keep the same message rendering components in `@sourceweft/ui-web`.
 
 ### Phase D: Decommission legacy path
 
@@ -155,10 +155,10 @@ This provides streaming/tool events while preserving current frontend architectu
 `apps/web`
 
 - Own page-level UX and chat interaction state.
-- Consume shared UI from `@polyer/ui-web`.
+- Consume shared UI from `@sourceweft/ui-web`.
 - Use AI SDK hooks only at app layer, not in shared component package.
 
-`packages/ui` (`@polyer/ui-web`)
+`packages/ui` (`@sourceweft/ui-web`)
 
 - Own visual and interaction components (`ai-elements`, base UI primitives).
 - No direct API calls, no backend model bindings.

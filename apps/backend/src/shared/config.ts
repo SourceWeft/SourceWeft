@@ -5,7 +5,7 @@ import type {
   BillingProvider,
   BillingScope,
   PlanFamily,
-} from "@polyer/credits-core";
+} from "@sourceweft/credits-core";
 
 type AlertLevel = "warn" | "error" | "critical";
 
@@ -167,9 +167,9 @@ export const config = {
   apiPort: Number(process.env.BACKEND_API_PORT || 3001),
   databaseUrl:
     process.env.DATABASE_URL ||
-    "postgres://postgres:postgres@127.0.0.1:5432/velamind",
+    "postgres://postgres:postgres@127.0.0.1:5432/sourceweft",
   redisUrl: process.env.REDIS_URL || "redis://127.0.0.1:6379",
-  queueName: process.env.JOB_QUEUE_NAME || "velamind-jobs",
+  queueName: process.env.JOB_QUEUE_NAME || "sourceweft-jobs",
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 2),
   schedulerIntervalMs: Number(process.env.SCHEDULER_INTERVAL_MS || 60000),
   schedulerExampleJobEnabled: parseBoolean(
@@ -197,11 +197,11 @@ export const config = {
     oneTapClientId: process.env.AUTH_ONE_TAP_CLIENT_ID || "",
     passkey: {
       rpId: process.env.AUTH_PASSKEY_RP_ID || "localhost",
-      rpName: process.env.AUTH_PASSKEY_RP_NAME || "VelaMind",
+      rpName: process.env.AUTH_PASSKEY_RP_NAME || "SourceWeft",
       origin: process.env.AUTH_PASSKEY_ORIGIN || "http://localhost:3000",
     },
     extensionClientId:
-      process.env.AUTH_EXTENSION_CLIENT_ID || "velamind-extension",
+      process.env.AUTH_EXTENSION_CLIENT_ID || "sourceweft-extension",
     extensionRedirectUri:
       process.env.AUTH_EXTENSION_REDIRECT_URI ||
       "https://<extension-id>.chromiumapp.org/provider_cb",
@@ -209,7 +209,7 @@ export const config = {
   mail: {
     provider: process.env.MAIL_PROVIDER || "plunk",
     fromAddress: process.env.MAIL_FROM_ADDRESS || "noreply@example.com",
-    fromName: process.env.MAIL_FROM_NAME || "VelaMind",
+    fromName: process.env.MAIL_FROM_NAME || "SourceWeft",
     plunkApiBaseUrl:
       process.env.PLUNK_API_BASE_URL || "https://next-api.useplunk.com",
     plunkApiKey: process.env.PLUNK_API_KEY || "",

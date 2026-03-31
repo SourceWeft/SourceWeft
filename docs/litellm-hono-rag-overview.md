@@ -68,7 +68,7 @@ Hard constraints:
 ## 4) Repository Layout
 
 ```txt
-VelaMind/
+SourceWeft/
   apps/
     api/
     worker/

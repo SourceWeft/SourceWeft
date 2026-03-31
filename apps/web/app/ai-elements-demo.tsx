@@ -5,7 +5,7 @@ import {
   Message,
   MessageContent,
   MessageResponse,
-} from "@polyer/ui-web/components/ai-elements/message";
+} from "@sourceweft/ui-web/components/ai-elements/message";
 
 export function AiElementsDemo() {
   const { messages } = useChat({});
@@ -13,7 +13,7 @@ export function AiElementsDemo() {
   return (
     <section className="flex w-full max-w-xl flex-col gap-4 rounded-lg border border-border bg-card p-6 text-card-foreground shadow-sm">
       <h2 className="text-lg font-semibold">
-        AI Elements (packages/ui, package: @polyer/ui-web)
+        AI Elements (packages/ui, package: @sourceweft/ui-web)
       </h2>
       <p className="text-sm text-muted-foreground">
         Static preview.{" "}
@@ -25,7 +25,7 @@ export function AiElementsDemo() {
       <Message from="assistant">
         <MessageContent>
           <MessageResponse>
-            Hello from `@polyer/ui-web` ai-elements.
+            Hello from `@sourceweft/ui-web` ai-elements.
           </MessageResponse>
         </MessageContent>
       </Message>

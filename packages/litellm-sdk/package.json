@@ -1,5 +1,5 @@
 {
-  "name": "@polyer/litellm-sdk",
+  "name": "@sourceweft/litellm-sdk",
   "version": "0.0.0",
   "private": true,
   "type": "module",

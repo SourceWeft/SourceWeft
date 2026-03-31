@@ -1,4 +1,4 @@
-import type { JobStatus } from "@polyer/contracts";
+import type { JobStatus } from "@sourceweft/contracts";
 
 const terminalStatus: ReadonlySet<JobStatus> = new Set<JobStatus>([
   "succeeded",

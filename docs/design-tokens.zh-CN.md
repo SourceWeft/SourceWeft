@@ -1,4 +1,4 @@
-# VelaMind Design Tokens — CSS 变量速查表
+# SourceWeft Design Tokens — CSS 变量速查表
 
 > **版本**: V1  
 > **更新**: 2026-03-27  

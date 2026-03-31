@@ -1,10 +1,10 @@
-# VelaMind 竞品视觉分析
+# SourceWeft 竞品视觉分析
 
 > **版本**: V1  
 > **分析日期**: 2026-03-27  
-> **用途**: VelaMind 设计系统的决策依据
+> **用途**: SourceWeft 设计系统的决策依据
 
-本文档记录对 5 款 AI 笔记/知识工具产品的视觉设计分析，提炼 VelaMind「冷黑精密」设计方案的竞品参照依据。
+本文档记录对 5 款 AI 笔记/知识工具产品的视觉设计分析，提炼 SourceWeft「冷黑精密」设计方案的竞品参照依据。
 
 ---
 
@@ -53,9 +53,9 @@
 - **渐变登录页**：`linear-gradient` 从 `rgba(233,233,233,0)` 到 `rgb(233,233,233)`
 - **自定义插画**：Google 风格彩色 hero 插画
 
-### VelaMind 的借鉴与规避
+### SourceWeft 的借鉴与规避
 
-| 维度   | NotebookLM     | VelaMind 选择            |
+| 维度   | NotebookLM     | SourceWeft 选择          |
 | ------ | -------------- | ------------------------ |
 | 圆角   | 超高（28px）   | 低圆角（6px），更精密    |
 | 强调色 | Google Blue    | 无彩色，消除品牌色依赖   |
@@ -95,13 +95,13 @@
 - **开发者密度**：信息密集，文档驱动
 - **Fumadocs 框架**：侧边栏 + TOC 文档布局
 
-### VelaMind 的借鉴
+### SourceWeft 的借鉴
 
 - ✅ 借鉴无彩色策略
 - ✅ 借鉴 border 为主的层级分隔
 - ✅ 借鉴 Geist/monospace 等宽字体用于代码
-- ⚠️ 规避：Dark mode 过于极黑（`#0a0a0a`），VelaMind 用 `#09090b`（来自 Zinc-950，同级但语义更明确）
-- ⚠️ 规避：文档工具感太强，VelaMind 需要更高的组件温度
+- ⚠️ 规避：Dark mode 过于极黑（`#0a0a0a`），SourceWeft 用 `#09090b`（来自 Zinc-950，同级但语义更明确）
+- ⚠️ 规避：文档工具感太强，SourceWeft 需要更高的组件温度
 
 ---
 
@@ -135,7 +135,7 @@
 - 卡片：`8–12px` 圆角，`border + box-shadow` 悬浮效果
 - hover: `translateY(-2px)` 卡片浮起效果
 
-### VelaMind 参照价值
+### SourceWeft 参照价值
 
 - 参照价值有限（基本为框架默认样式）
 - **对比启示**：不做靛蓝强调，不做悬浮卡片动效
@@ -175,9 +175,9 @@
 - 图片主导的双栏特性介绍区
 - 红色 ping 动效通知点
 
-### VelaMind 的借鉴与规避
+### SourceWeft 的借鉴与规避
 
-| 维度 | YouMind      | VelaMind 选择               |
+| 维度 | YouMind      | SourceWeft 选择             |
 | ---- | ------------ | --------------------------- |
 | 圆角 | `32px` 极高  | `6px` 精密低圆角            |
 | 字体 | 衬线标题混排 | 单一 Inter 无衬线，减少冲突 |
@@ -233,19 +233,19 @@
 - 近黑文字色 `#34322d`（带暖棕），与冷黑的 `#09090b` 形成明显差异
 - Logo 颜色 token = `--logo-color: #34322d`，确认品牌基调偏暖
 
-### VelaMind 的借鉴
+### SourceWeft 的借鉴
 
 - ✅ **最大借鉴来源**：分层 token 体系（background-gray / white / card / canvas 分级）
 - ✅ Sidebar 独立 token 体系的思路
 - ✅ 卡片与背景的色阶分离策略
-- ⚠️ **关键差异**：Manus 用暖色调（`#f8f8f7`, `#34322d`），VelaMind 选冷调（`#ffffff`, `#09090b`）
-- ⚠️ Manus 保留功能蓝 `#0081f2`，VelaMind 全色无彩（连功能色都克制）
+- ⚠️ **关键差异**：Manus 用暖色调（`#f8f8f7`, `#34322d`），SourceWeft 选冷调（`#ffffff`, `#09090b`）
+- ⚠️ Manus 保留功能蓝 `#0081f2`，SourceWeft 全色无彩（连功能色都克制）
 
 ---
 
 ## 综合对比矩阵
 
-| 维度           | NotebookLM     | SurfSense      | Open Notebook    | YouMind            | Manus               | **VelaMind**         |
+| 维度           | NotebookLM     | SurfSense      | Open Notebook    | YouMind            | Manus               | **SourceWeft**       |
 | -------------- | -------------- | -------------- | ---------------- | ------------------ | ------------------- | -------------------- |
 | 浅色背景       | 暖白 `#f8f8f8` | 纯白 `#ffffff` | 柔白 `#f6f6f7`   | 纯白 `#ffffff`     | 暖米 `#f8f8f7`      | **纯白 `#ffffff`**   |
 | 深色背景       | `#1f1f1f`      | `#0a0a0a`      | `#1b1b1f`        | 无深色             | `#272728`           | **`#09090b`**        |
@@ -260,7 +260,7 @@
 
 ## 设计决策总结
 
-VelaMind「冷黑精密」方案的核心选择依据：
+SourceWeft「冷黑精密」方案的核心选择依据：
 
 1. **纯白背景**（取自 SurfSense/YouMind）而非暖白（Manus），强化冷调
 2. **Zinc 色板**而非自定义暖色（对比 Manus 的暖棕），选择 Tailwind 生态标准色
