@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { getPricingConfig } from "../pricing-config";
 import { PricingToggle } from "./pricing-toggle";
 import { ThemeToggle } from "./theme-toggle";
@@ -86,6 +87,27 @@ function IconCheck() {
   );
 }
 
+function BrandMark({
+  className = "h-6 w-6 rounded-md",
+}: {
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-flex shrink-0 overflow-hidden ${className}`}
+    >
+      <Image
+        src="/icon-512.png"
+        alt=""
+        width={24}
+        height={24}
+        className="h-full w-full object-contain"
+      />
+    </span>
+  );
+}
+
 // ─── Navbar ───────────────────────────────────────────────────────────────────
 
 function Navbar() {
@@ -94,12 +116,7 @@ function Navbar() {
       <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 group">
-          <span
-            className="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-900 text-white text-xs font-black transition-transform group-hover:scale-105 dark:bg-white dark:text-zinc-900"
-            aria-hidden
-          >
-            V
-          </span>
+          <BrandMark className="h-6 w-6 rounded-md transition-transform group-hover:scale-105" />
           <span className="text-sm font-semibold text-zinc-900 tracking-tight dark:text-white">
             SourceWeft
           </span>
@@ -263,9 +280,7 @@ function HeroSection() {
 
                 {/* AI reply */}
                 <div className="flex gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-black text-white dark:bg-white dark:text-zinc-900">
-                    V
-                  </span>
+                  <BrandMark className="mt-0.5 h-6 w-6 rounded-full" />
                   <div className="flex-1 space-y-2">
                     <div className="rounded-xl rounded-tl-sm border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm text-zinc-700 leading-relaxed dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-200">
                       Based on your Q4 research notes, here are the key
@@ -378,9 +393,7 @@ function HeroSection() {
 
                 {/* Typing indicator */}
                 <div className="flex gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-black text-white dark:bg-white dark:text-zinc-900">
-                    V
-                  </span>
+                  <BrandMark className="mt-0.5 h-6 w-6 rounded-full" />
                   <div className="flex items-center gap-1.5 rounded-xl rounded-tl-sm border border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-white/8 dark:bg-zinc-800/60">
                     <span
                       className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-500"
@@ -634,9 +647,7 @@ function HowItWorks() {
             </div>
           </div>
           <div className="flex gap-2">
-            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[9px] font-black text-white dark:bg-white dark:text-zinc-900">
-              V
-            </span>
+            <BrandMark className="mt-0.5 h-5 w-5 rounded-full" />
             <div className="rounded-lg rounded-tl-sm border border-zinc-100 bg-white px-3 py-2 text-zinc-700 leading-relaxed dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-200">
               From your thesis draft: attention is a mechanism that allows
               models to focus on relevant parts of the input…{" "}
@@ -732,9 +743,7 @@ function Footer() {
           {/* Brand */}
           <div>
             <Link href="/" className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-900 text-xs font-black text-white dark:bg-white dark:text-zinc-900">
-                V
-              </span>
+              <BrandMark className="h-6 w-6 rounded-md" />
               <span className="text-sm font-semibold text-zinc-900 dark:text-white">
                 SourceWeft
               </span>
