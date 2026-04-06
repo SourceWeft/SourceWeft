@@ -878,6 +878,88 @@ export class ContentService {
     return { thread };
   }
 
+  async listThreadSources(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }) {
+    const workspace = await requireWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const thread = await findThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+
+    if (!thread) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    const items = await resolveThreadSourceItems({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: thread.id,
+    });
+
+    return { items };
+  }
+
+  async setThreadSources(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    sourceIds: string[];
+  }) {
+    const workspace = await requireWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const thread = await findThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+
+    if (!thread) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    for (const sourceId of input.sourceIds) {
+      const source = await findSourceRecord({
+        sourceId,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+      });
+      if (!source) {
+        throw new ContentError(
+          404,
+          "SOURCE_NOT_FOUND",
+          `Source '${sourceId}' not found in workspace`,
+        );
+      }
+    }
+
+    await replaceThreadSourceRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: thread.id,
+      selectedBy: input.userId,
+      sourceIds: [...new Set(input.sourceIds)],
+    });
+
+    const items = await resolveThreadSourceItems({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: thread.id,
+    });
+
+    return { items };
+  }
+
   async streamThread(input: {
     workspaceId: string;
     threadId: string;

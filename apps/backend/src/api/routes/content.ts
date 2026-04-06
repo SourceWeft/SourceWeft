@@ -3,6 +3,7 @@ import {
   createSourceRequestSchema,
   createThreadRequestSchema,
   indexSourceRequestSchema,
+  setThreadSourcesRequestSchema,
   streamThreadRequestSchema,
   updateSourceRequestSchema,
 } from "@sourceweft/contracts";

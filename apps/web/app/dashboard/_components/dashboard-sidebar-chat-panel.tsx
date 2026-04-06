@@ -1,6 +1,19 @@
-import { Archive, Clock3, PenSquare, Share2, Trash2 } from "lucide-react";
-import type { MouseEvent } from "react";
+import { useState } from "react";
+import {
+  Archive,
+  Clock3,
+  MoreHorizontal,
+  PenSquare,
+  Share2,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import {
   SidebarContent,
   SidebarFooter,
@@ -9,6 +22,8 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarInput,
+  SidebarMenu,
+  SidebarMenuItem,
 } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { workspaceSummary, type ChatItem } from "../chat/_components/mock-data";
@@ -34,8 +49,117 @@ function StatusDot({ status }: { status?: ChatItem["status"] }) {
   );
 }
 
+function ChatListRow({
+  active,
+  canArchive = true,
+  item,
+  onArchive,
+  onDelete,
+  onOpen,
+}: {
+  active: boolean;
+  canArchive?: boolean;
+  item: ChatItem;
+  onArchive: (id: string) => void;
+  onDelete: (id: string) => void;
+  onOpen: (id: string, title: string) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  return (
+    <SidebarMenuItem className="relative px-2">
+      <button
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "flex h-auto w-full items-start gap-2 px-3 py-2 text-left text-sm leading-snug transition-colors",
+          active
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+        )}
+        onClick={() => onOpen(item.id, item.title)}
+        type="button"
+      >
+        <StatusDot status={item.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex w-full items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="relative min-w-0 pr-12">
+                <span className="line-clamp-1 flex-1 text-[13px] font-medium leading-4.5">
+                  {item.title}
+                </span>
+                <span
+                  className={cn(
+                    "pointer-events-none absolute right-0 top-0 shrink-0 text-[10px] leading-4 text-muted-foreground/80 transition-opacity",
+                    "group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0",
+                    menuOpen && "opacity-0",
+                  )}
+                >
+                  {item.updatedAt}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
+                <span>{item.sourceCount} sources</span>
+                <span aria-hidden="true">·</span>
+                <span>{item.status || "ready"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </button>
+
+      <div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute inset-y-1.5 right-2.5 w-12 rounded-r-md bg-gradient-to-l from-sidebar via-sidebar/70 to-transparent invisible opacity-0 transition-opacity",
+          "group-hover/menu-item:visible group-hover/menu-item:opacity-100 group-focus-within/menu-item:visible group-focus-within/menu-item:opacity-100",
+          menuOpen && "visible opacity-100",
+        )}
+      />
+      <div
+        className={cn(
+          "absolute right-3 top-2 z-10 shrink-0 invisible opacity-0 pointer-events-none transition-opacity",
+          "group-hover/menu-item:visible group-hover/menu-item:opacity-100 group-hover/menu-item:pointer-events-auto group-focus-within/menu-item:visible group-focus-within/menu-item:opacity-100 group-focus-within/menu-item:pointer-events-auto",
+          menuOpen && "visible opacity-100 pointer-events-auto",
+        )}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <DropdownMenu onOpenChange={setMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              className="size-7 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground"
+              size="icon-xs"
+              type="button"
+              variant="ghost"
+            >
+              <MoreHorizontal className="size-3.5" />
+              <span className="sr-only">Open chat actions</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-36">
+            {canArchive ? (
+              <DropdownMenuItem onSelect={() => onArchive(item.id)}>
+                <Archive className="size-4" />
+                <span>Archive</span>
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem
+              onSelect={() => onDelete(item.id)}
+              variant="destructive"
+            >
+              <Trash2 className="size-4" />
+              <span>Delete</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </SidebarMenuItem>
+  );
+}
+
 function ChatSection({
   activeId,
+  canArchive = true,
   items,
   onArchive,
   onDelete,
@@ -43,6 +167,7 @@ function ChatSection({
   title,
 }: {
   activeId?: string;
+  canArchive?: boolean;
   items: ChatItem[];
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
@@ -55,69 +180,19 @@ function ChatSection({
         {title}
       </SidebarGroupLabel>
       <SidebarGroupContent>
-        {items.map((item) => (
-          <div
-            key={item.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpen(item.id, item.title)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onOpen(item.id, item.title);
-              }
-            }}
-            className={cn(
-              "group flex w-full cursor-pointer items-start gap-2.5 border-b px-3.5 py-2 text-left text-sm leading-tight last:border-b-0 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-              item.id === activeId &&
-                "bg-sidebar-accent/60 shadow-[inset_2px_0_0_0_hsl(var(--primary))]",
-            )}
-          >
-            <StatusDot status={item.status} />
-            <div className="min-w-0 flex-1">
-              <div className="flex w-full items-center gap-2">
-                <span className="line-clamp-1 flex-1 text-[13px] font-medium leading-5">
-                  {item.title}
-                </span>
-                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                  {item.updatedAt}
-                </span>
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                <span>{item.sourceCount} sources</span>
-                <span>·</span>
-                <span>{item.status || "ready"}</span>
-              </div>
-
-              <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                <Button
-                  onClick={(event: MouseEvent<HTMLButtonElement>) => {
-                    event.stopPropagation();
-                    onArchive(item.id);
-                  }}
-                  size="icon-xs"
-                  type="button"
-                  variant="outline"
-                >
-                  <Archive className="size-3" />
-                  <span className="sr-only">Archive</span>
-                </Button>
-                <Button
-                  onClick={(event: MouseEvent<HTMLButtonElement>) => {
-                    event.stopPropagation();
-                    onDelete(item.id);
-                  }}
-                  size="icon-xs"
-                  type="button"
-                  variant="outline"
-                >
-                  <Trash2 className="size-3" />
-                  <span className="sr-only">Delete</span>
-                </Button>
-              </div>
-            </div>
-          </div>
-        ))}
+        <SidebarMenu className="gap-1 py-0.5">
+          {items.map((item) => (
+            <ChatListRow
+              key={item.id}
+              active={item.id === activeId}
+              canArchive={canArchive}
+              item={item}
+              onArchive={onArchive}
+              onDelete={onDelete}
+              onOpen={onOpen}
+            />
+          ))}
+        </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
   );
@@ -205,6 +280,7 @@ export function DashboardSidebarChatPanel({
         />
         <ChatSection
           activeId={activeChatId}
+          canArchive={false}
           items={archivedChats}
           onArchive={onArchiveChat}
           onDelete={onDeleteChat}

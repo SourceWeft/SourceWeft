@@ -284,7 +284,7 @@ export function SourcesHub({
   }
 
   return (
-    <aside className="hidden w-[410px] shrink-0 border-l bg-background xl:flex xl:flex-col">
+    <aside className="flex w-[410px] shrink-0 flex-col border-l bg-background">
       {/* Header */}
       <div className="shrink-0 border-b px-3 py-3">
         <div className="flex items-center justify-between gap-3">

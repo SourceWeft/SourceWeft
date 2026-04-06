@@ -40,6 +40,7 @@ import {
   PromptInputTabsList,
   PromptInputTextarea,
   PromptInputTools,
+  type PromptInputMessage,
 } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import {
   Suggestion,
@@ -69,8 +70,10 @@ function toAttachmentData(source: SourceItem) {
   return {
     id: source.id,
     mediaType: source.type,
+    sourceId: source.id,
     subtitle: source.meta,
     title: source.title,
+    type: "source-document" as const,
   };
 }
 
@@ -94,93 +97,99 @@ function Composer({
   const visible = selectedSources.slice(0, 2);
   const overflow = selectedSources.length - 2;
   const hasSelectedSources = selectedSources.length > 0;
+  const handlePromptSubmit = (_message: PromptInputMessage) => {
+    onSubmit?.();
+  };
 
   return (
     <div className={className}>
-      <div className="w-full">
-        <PromptInput>
-          {hasSelectedSources ? (
-            <PromptInputHeader>
-              <Attachments className="gap-2.5 pt-0.5" variant="inline">
-                {visible.map((source) => (
-                  <Attachment
-                    className="rounded-2xl bg-muted/55 px-3.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
-                    data={toAttachmentData(source)}
-                    key={source.id}
-                    onRemove={() => onRemoveSource?.(source.id)}
-                  >
-                    <AttachmentPreview
-                      className="text-foreground/75"
-                      fallbackIcon={<FileText className="size-4" />}
-                    />
-                    <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
-                    <AttachmentRemove
-                      className="text-foreground/55 hover:bg-background/60"
-                      label={`Remove ${source.title}`}
-                    />
-                  </Attachment>
-                ))}
-                {overflow > 0 && (
-                  <Attachment
-                    className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
-                    data={{
-                      id: "overflow",
-                      title: `+${overflow} more`,
-                    }}
-                  >
-                    +{overflow} more
-                  </Attachment>
-                )}
-              </Attachments>
-            </PromptInputHeader>
-          ) : null}
-          <PromptInputBody>
-            <PromptInputTextarea
-              placeholder={
-                placeholder ||
-                "Ask about your documents, links, or connected tools..."
-              }
-            />
-          </PromptInputBody>
-          <PromptInputFooter className="border-t-0">
-            <PromptInputTools className="justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <PromptInputButton
-                  className="rounded-xl text-muted-foreground hover:text-foreground"
-                  size="icon-sm"
-                  tooltip="Settings"
-                  type="button"
-                  variant="ghost"
+      <PromptInput onSubmit={handlePromptSubmit}>
+        {hasSelectedSources ? (
+          <PromptInputHeader>
+            <Attachments className="gap-2.5 pt-0.5" variant="inline">
+              {visible.map((source) => (
+                <Attachment
+                  className="rounded-2xl bg-muted/55 px-3.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
+                  data={toAttachmentData(source)}
+                  key={source.id}
+                  onRemove={() => onRemoveSource?.(source.id)}
                 >
-                  <Settings2 className="size-4" />
-                  <span className="sr-only">Open settings</span>
-                </PromptInputButton>
-
-                <PromptInputButton
-                  aria-pressed={searchEnabled}
-                  className={
-                    searchEnabled
-                      ? "rounded-xl text-foreground shadow-xs"
-                      : "rounded-xl text-muted-foreground hover:text-foreground"
-                  }
-                  onClick={() => setSearchEnabled((value) => !value)}
-                  size="icon-sm"
-                  tooltip={{ content: "Search sources", shortcut: "S" }}
-                  type="button"
-                  variant={searchEnabled ? "secondary" : "ghost"}
+                  <AttachmentPreview
+                    className="text-foreground/75"
+                    fallbackIcon={<FileText className="size-4" />}
+                  />
+                  <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
+                  <AttachmentRemove
+                    className="text-foreground/55 hover:bg-background/60"
+                    label={`Remove ${source.title}`}
+                  />
+                </Attachment>
+              ))}
+              {overflow > 0 && (
+                <Attachment
+                  className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
+                  data={{
+                    id: "overflow",
+                    mediaType: "text/plain",
+                    sourceId: "overflow",
+                    title: `+${overflow} more`,
+                    type: "source-document",
+                  }}
                 >
-                  <Search className="size-4" />
-                  <span className="sr-only">Search</span>
-                </PromptInputButton>
-              </div>
+                  +{overflow} more
+                </Attachment>
+              )}
+            </Attachments>
+          </PromptInputHeader>
+        ) : null}
+        <PromptInputBody>
+          <PromptInputTextarea
+            placeholder={
+              placeholder ||
+              "Ask about your documents, links, or connected tools..."
+            }
+          />
+        </PromptInputBody>
+        <PromptInputFooter className="border-t-0">
+          <PromptInputTools className="w-full flex-wrap gap-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <PromptInputButton
+                className="rounded-xl text-muted-foreground hover:text-foreground"
+                size="icon-sm"
+                tooltip="Settings"
+                type="button"
+                variant="ghost"
+              >
+                <Settings2 className="size-4" />
+                <span className="sr-only">Open settings</span>
+              </PromptInputButton>
 
-              <PromptInputTabsList className="shrink-0 gap-0.5 bg-transparent p-0.5">
+              <PromptInputButton
+                aria-pressed={searchEnabled}
+                className={
+                  searchEnabled
+                    ? "rounded-xl bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+                    : "rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
+                }
+                onClick={() => setSearchEnabled((value) => !value)}
+                size="icon-sm"
+                tooltip={{ content: "Search sources", shortcut: "S" }}
+                type="button"
+                variant={searchEnabled ? "secondary" : "ghost"}
+              >
+                <Search className="size-4" />
+                <span className="sr-only">Search</span>
+              </PromptInputButton>
+            </div>
+
+            <div className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+              <PromptInputTabsList className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/70 bg-muted/50 p-1 shadow-inner">
                 <PromptInputTab>
                   <PromptInputButton
                     className={
                       interactionMode === "ask"
-                        ? "rounded-lg px-2.5 text-foreground shadow-xs"
-                        : "rounded-lg px-2.5 text-muted-foreground hover:text-foreground"
+                        ? "rounded-full bg-background px-3 text-foreground shadow-sm"
+                        : "rounded-full px-3 text-muted-foreground hover:bg-background/70 hover:text-foreground"
                     }
                     onClick={() => setInteractionMode("ask")}
                     size="sm"
@@ -194,15 +203,13 @@ function Composer({
                   <PromptInputButton
                     className={
                       interactionMode === "agent"
-                        ? "rounded-lg px-2.5 text-foreground shadow-xs"
-                        : "rounded-lg px-2.5 text-muted-foreground hover:text-foreground"
+                        ? "rounded-full bg-background px-3 text-foreground shadow-sm"
+                        : "rounded-full px-3 text-muted-foreground hover:bg-background/70 hover:text-foreground"
                     }
                     onClick={() => setInteractionMode("agent")}
                     size="sm"
                     type="button"
-                    variant={
-                      interactionMode === "agent" ? "secondary" : "ghost"
-                    }
+                    variant={interactionMode === "agent" ? "secondary" : "ghost"}
                   >
                     Agent
                   </PromptInputButton>
@@ -217,10 +224,10 @@ function Composer({
                 <ArrowUp className="size-4" />
                 <span className="sr-only">Send</span>
               </PromptInputSubmit>
-            </PromptInputTools>
-          </PromptInputFooter>
-        </PromptInput>
-      </div>
+            </div>
+          </PromptInputTools>
+        </PromptInputFooter>
+      </PromptInput>
     </div>
   );
 }
@@ -237,20 +244,32 @@ function EmptyState({
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent>
-          <div className="mx-auto flex min-h-full w-full max-w-3xl px-6 pt-8 pb-4">
-            <ConversationEmptyState
-              className="justify-center gap-3 py-0"
-              description="Ask about your selected sources and every answer will stay anchored to them."
-              title="Start a grounded conversation"
-            >
-              <Suggestions className="gap-1.5 pt-1">
+        <ConversationContent className="flex min-h-full items-center justify-center px-6 py-10">
+          <div className="mx-auto flex w-full max-w-4xl flex-col items-start justify-center gap-8">
+            <ConversationEmptyState className="w-full items-start gap-4 p-0 text-left">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+                  New chat
+                </p>
+                <div className="space-y-3">
+                  <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                    Ask grounded questions across your selected sources.
+                  </h1>
+                  <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+                    Start with a question, compare evidence, or ask the
+                    assistant to synthesize what matters most before you open a
+                    thread.
+                  </p>
+                </div>
+              </div>
+              <Suggestions className="justify-start gap-2 pt-2">
                 {starterSuggestions.map((suggestion) => (
                   <Suggestion
-                    className="border-border/70 bg-background/70 text-muted-foreground hover:text-foreground"
+                    className="h-auto rounded-full border-border/70 bg-background px-4 py-2 text-sm text-muted-foreground whitespace-normal hover:bg-muted hover:text-foreground"
                     key={suggestion}
-                    onClick={() => onSelectThread(suggestion)}
+                    onClick={onSelectThread}
                     suggestion={suggestion}
+                    variant="outline"
                   />
                 ))}
               </Suggestions>
@@ -259,14 +278,16 @@ function EmptyState({
         </ConversationContent>
       </Conversation>
 
-      <div className="border-t border-border bg-background px-6 py-4">
-        <Composer
-          className="mx-auto w-full max-w-3xl"
-          onRemoveSource={onRemoveSource}
-          onSubmit={() => onSelectThread("New conversation")}
-          placeholder="Ask about your sources..."
-          selectedSources={selectedSources}
-        />
+      <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+          <Composer
+            className="w-full"
+            onRemoveSource={onRemoveSource}
+            onSubmit={() => onSelectThread("New conversation")}
+            placeholder="Ask about your documents, links, or connected tools..."
+            selectedSources={selectedSources}
+          />
+        </div>
       </div>
     </section>
   );
@@ -302,8 +323,8 @@ export function ChatCanvas({
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent>
-          <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-4 px-6 py-6">
+        <ConversationContent className="px-6 py-8">
+          <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-4">
             {messages.map((message, messageIndex) =>
               message.parts.map((part, partIndex) => {
                 if (part.type !== "text") {
@@ -388,13 +409,15 @@ export function ChatCanvas({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="border-t border-border bg-background px-6 py-4">
-        <Composer
-          className="mx-auto w-full max-w-3xl"
-          onRemoveSource={onRemoveSource}
-          onSubmit={() => onSelectThread(threadTitle)}
-          selectedSources={selectedSources}
-        />
+      <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+          <Composer
+            className="w-full"
+            onRemoveSource={onRemoveSource}
+            onSubmit={() => onSelectThread(threadTitle)}
+            selectedSources={selectedSources}
+          />
+        </div>
       </div>
     </section>
   );

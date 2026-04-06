@@ -34,7 +34,7 @@
     "build:components": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
     "check-types": "tsc --noEmit",
     "dev:styles": "tailwindcss -i ./src/styles.css -o ./dist/index.css --watch",
-    "dev:components": "tsc --watch",
+    "dev:components": "tsc --watch --preserveWatchOutput & tsc-alias --watch --resolve-full-paths --resolve-full-extension .js",
     "lint": "eslint src --max-warnings 0"
   },
   "peerDependencies": {
