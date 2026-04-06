@@ -5,6 +5,8 @@
     "rootDir": "src",
     "strictNullChecks": true,
     "baseUrl": ".",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "paths": {
       "@/*": ["./src/*"]
     }

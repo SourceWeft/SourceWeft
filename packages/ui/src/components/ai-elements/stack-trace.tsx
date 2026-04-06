@@ -73,13 +73,14 @@ const parseStackFrame = (line: string): StackFrame => {
   const withParensMatch = trimmed.match(STACK_FRAME_WITH_PARENS_REGEX);
   if (withParensMatch) {
     const [, functionName, filePath, lineNum, colNum] = withParensMatch;
+    const parsedFilePath = filePath ?? null;
     const isInternal =
-      filePath.includes("node_modules") ||
-      filePath.startsWith("node:") ||
-      filePath.includes("internal/");
+      (parsedFilePath?.includes("node_modules") ?? false) ||
+      (parsedFilePath?.startsWith("node:") ?? false) ||
+      (parsedFilePath?.includes("internal/") ?? false);
     return {
       columnNumber: colNum ? Number.parseInt(colNum, 10) : null,
-      filePath: filePath ?? null,
+      filePath: parsedFilePath,
       functionName: functionName ?? null,
       isInternal,
       lineNumber: lineNum ? Number.parseInt(lineNum, 10) : null,
@@ -128,7 +129,7 @@ const parseStackTrace = (trace: string): ParsedStackTrace => {
     };
   }
 
-  const firstLine = lines[0].trim();
+  const firstLine = lines[0]?.trim() ?? "";
   let errorType: string | null = null;
   let errorMessage = firstLine;
 
@@ -136,7 +137,7 @@ const parseStackTrace = (trace: string): ParsedStackTrace => {
   const errorMatch = firstLine.match(ERROR_TYPE_REGEX);
   if (errorMatch) {
     const [, type, msg] = errorMatch;
-    errorType = type;
+    errorType = type ?? null;
     errorMessage = msg || "";
   }
 

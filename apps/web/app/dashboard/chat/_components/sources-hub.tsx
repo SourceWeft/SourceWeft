@@ -15,8 +15,8 @@ import {
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
+  Collapsible,
   CollapsibleContent,
-  CollapsibleRoot,
   CollapsibleTrigger,
 } from "@sourceweft/ui-web/components/ui/collapsible";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
@@ -140,7 +140,7 @@ function FolderGroup({
   }
 
   return (
-    <CollapsibleRoot onOpenChange={setOpen} open={open}>
+    <Collapsible onOpenChange={setOpen} open={open}>
       <div className="flex items-center gap-1.5 py-1">
         <Checkbox
           checked={folderChecked}
@@ -177,7 +177,7 @@ function FolderGroup({
           ))}
         </div>
       </CollapsibleContent>
-    </CollapsibleRoot>
+    </Collapsible>
   );
 }
 

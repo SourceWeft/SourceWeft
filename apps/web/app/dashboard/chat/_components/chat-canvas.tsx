@@ -39,7 +39,6 @@ import {
   PromptInputTab,
   PromptInputTabsList,
   PromptInputTextarea,
-  PromptInputToolbar,
   PromptInputTools,
 } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import {
@@ -143,76 +142,73 @@ function Composer({
               }
             />
           </PromptInputBody>
-          <PromptInputFooter>
-            <PromptInputToolbar className="border-t-0">
-              <PromptInputTools className="min-w-0 flex-1 justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <PromptInputButton
-                    className="rounded-xl text-muted-foreground hover:text-foreground"
-                    size="icon-sm"
-                    tooltip="Settings"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Settings2 className="size-4" />
-                    <span className="sr-only">Open settings</span>
-                  </PromptInputButton>
+          <PromptInputFooter className="border-t-0">
+            <PromptInputTools className="justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <PromptInputButton
+                  className="rounded-xl text-muted-foreground hover:text-foreground"
+                  size="icon-sm"
+                  tooltip="Settings"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Settings2 className="size-4" />
+                  <span className="sr-only">Open settings</span>
+                </PromptInputButton>
 
+                <PromptInputButton
+                  aria-pressed={searchEnabled}
+                  className={
+                    searchEnabled
+                      ? "rounded-xl text-foreground shadow-xs"
+                      : "rounded-xl text-muted-foreground hover:text-foreground"
+                  }
+                  onClick={() => setSearchEnabled((value) => !value)}
+                  size="icon-sm"
+                  tooltip={{ content: "Search sources", shortcut: "S" }}
+                  type="button"
+                  variant={searchEnabled ? "secondary" : "ghost"}
+                >
+                  <Search className="size-4" />
+                  <span className="sr-only">Search</span>
+                </PromptInputButton>
+              </div>
+
+              <PromptInputTabsList className="shrink-0 gap-0.5 bg-transparent p-0.5">
+                <PromptInputTab>
                   <PromptInputButton
-                    aria-pressed={searchEnabled}
                     className={
-                      searchEnabled
-                        ? "rounded-xl text-foreground shadow-xs"
-                        : "rounded-xl text-muted-foreground hover:text-foreground"
+                      interactionMode === "ask"
+                        ? "rounded-lg px-2.5 text-foreground shadow-xs"
+                        : "rounded-lg px-2.5 text-muted-foreground hover:text-foreground"
                     }
-                    onClick={() => setSearchEnabled((value) => !value)}
-                    size="icon-sm"
-                    tooltip={{ content: "Search sources", shortcut: "S" }}
+                    onClick={() => setInteractionMode("ask")}
+                    size="sm"
                     type="button"
-                    variant={searchEnabled ? "secondary" : "ghost"}
+                    variant={interactionMode === "ask" ? "secondary" : "ghost"}
                   >
-                    <Search className="size-4" />
-                    <span className="sr-only">Search</span>
+                    Ask
                   </PromptInputButton>
-                </div>
+                </PromptInputTab>
+                <PromptInputTab>
+                  <PromptInputButton
+                    className={
+                      interactionMode === "agent"
+                        ? "rounded-lg px-2.5 text-foreground shadow-xs"
+                        : "rounded-lg px-2.5 text-muted-foreground hover:text-foreground"
+                    }
+                    onClick={() => setInteractionMode("agent")}
+                    size="sm"
+                    type="button"
+                    variant={
+                      interactionMode === "agent" ? "secondary" : "ghost"
+                    }
+                  >
+                    Agent
+                  </PromptInputButton>
+                </PromptInputTab>
+              </PromptInputTabsList>
 
-                <PromptInputTabsList className="shrink-0 gap-0.5 bg-transparent p-0.5">
-                  <PromptInputTab>
-                    <PromptInputButton
-                      className={
-                        interactionMode === "ask"
-                          ? "rounded-lg px-2.5 text-foreground shadow-xs"
-                          : "rounded-lg px-2.5 text-muted-foreground hover:text-foreground"
-                      }
-                      onClick={() => setInteractionMode("ask")}
-                      size="sm"
-                      type="button"
-                      variant={
-                        interactionMode === "ask" ? "secondary" : "ghost"
-                      }
-                    >
-                      Ask
-                    </PromptInputButton>
-                  </PromptInputTab>
-                  <PromptInputTab>
-                    <PromptInputButton
-                      className={
-                        interactionMode === "agent"
-                          ? "rounded-lg px-2.5 text-foreground shadow-xs"
-                          : "rounded-lg px-2.5 text-muted-foreground hover:text-foreground"
-                      }
-                      onClick={() => setInteractionMode("agent")}
-                      size="sm"
-                      type="button"
-                      variant={
-                        interactionMode === "agent" ? "secondary" : "ghost"
-                      }
-                    >
-                      Agent
-                    </PromptInputButton>
-                  </PromptInputTab>
-                </PromptInputTabsList>
-              </PromptInputTools>
               <PromptInputSubmit
                 className="size-9 shrink-0 rounded-full px-0 shadow-xs"
                 onClick={onSubmit}
@@ -221,7 +217,7 @@ function Composer({
                 <ArrowUp className="size-4" />
                 <span className="sr-only">Send</span>
               </PromptInputSubmit>
-            </PromptInputToolbar>
+            </PromptInputTools>
           </PromptInputFooter>
         </PromptInput>
       </div>

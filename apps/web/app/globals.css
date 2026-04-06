@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@sourceweft/ui-web/styles.css";
 @import "@sourceweft/tailwind-config";
 @import "@daveyplate/better-auth-ui/css";
 

@@ -1,6 +1,7 @@
 {
   "name": "@sourceweft/ui-web",
   "version": "0.0.0",
+  "type": "module",
   "sideEffects": [
     "**/*.css"
   ],
@@ -30,7 +31,7 @@
   "scripts": {
     "build": "pnpm run build:styles && pnpm run build:components",
     "build:styles": "tailwindcss -i ./src/styles.css -o ./dist/index.css",
-    "build:components": "tsc",
+    "build:components": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
     "check-types": "tsc --noEmit",
     "dev:styles": "tailwindcss -i ./src/styles.css -o ./dist/index.css --watch",
     "dev:components": "tsc --watch",
@@ -46,6 +47,7 @@
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
+    "@xyflow/react": "^12.10.2",
     "ai": "^6.0.134",
     "ansi-to-react": "^6.2.6",
     "class-variance-authority": "^0.7.1",
@@ -74,6 +76,7 @@
     "@types/react": "^19.1.0",
     "eslint": "^9.39.1",
     "tailwindcss": "^4.1.5",
+    "tsc-alias": "^1.8.16",
     "typescript": "5.9.2"
   }
 }

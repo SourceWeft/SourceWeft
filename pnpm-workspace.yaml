@@ -4,5 +4,11 @@ packages:
 
 onlyBuiltDependencies:
   - '@parcel/watcher'
+  - '@prisma/client'
+  - better-sqlite3
+  - core-js
   - esbuild
+  - msgpackr-extract
+  - msw
   - sharp
+  - spawn-sync
