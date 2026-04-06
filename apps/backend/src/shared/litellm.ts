@@ -6,7 +6,7 @@ export const litellm = createLiteLLMSDK({
   apiKey: config.litellm.masterKey || undefined,
   timeoutMs: config.litellm.timeoutMs,
   maxRetries: config.litellm.maxRetries,
-  allowNonDefaultAliases: false,
+  allowNonDefaultAliases: true,
   allowedModelAliases: [
     config.litellm.chatModelAlias,
     config.litellm.embedModelAlias,

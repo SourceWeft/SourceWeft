@@ -73,6 +73,30 @@ export class HttpClient {
     });
   }
 
+  async patch<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>(path, {
+      method: "PATCH",
+      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+  }
+
+  async put<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>(path, {
+      method: "PUT",
+      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+  }
+
+  async delete<T>(path: string): Promise<T> {
+    return this.request<T>(path, { method: "DELETE" });
+  }
+
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
     const token = await this.getToken?.();

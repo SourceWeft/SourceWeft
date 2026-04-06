@@ -15,6 +15,7 @@ import { apiKey } from "@better-auth/api-key";
 import { creem } from "@creem_io/better-auth";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
+import { APIError } from "better-auth/api";
 import type { BillingSubscriptionStatus } from "@sourceweft/contracts";
 import { config } from "../../shared/config";
 import { database } from "../../shared/database";
@@ -181,6 +182,43 @@ function resolveTeamId(
   }
 
   return pickString(data, ["teamId"]);
+}
+
+type SoleOwnerOrganizationRow = {
+  organization_id: string;
+  organization_name: string | null;
+};
+
+async function assertUserHardDeleteAllowed(userId: string) {
+  const result = await database.query<SoleOwnerOrganizationRow>(
+    `
+      select
+        m."organizationId" as organization_id,
+        o.name as organization_name
+      from member m
+      left join organization o on o.id = m."organizationId"
+      where m."userId" = $1
+        and m.role = 'owner'
+        and (
+          select count(*)
+          from member m2
+          where m2."organizationId" = m."organizationId"
+            and m2.role = 'owner'
+        ) = 1
+      limit 1
+    `,
+    [userId],
+  );
+
+  const row = result.rows?.[0];
+  if (!row) {
+    return;
+  }
+
+  const organizationLabel = row.organization_name || row.organization_id;
+  throw new APIError("BAD_REQUEST", {
+    message: `Transfer the owner role for organization '${organizationLabel}' before deleting this account.`,
+  });
 }
 
 function resolvePlanFamily(
@@ -539,6 +577,9 @@ export const auth: any = betterAuth({
     },
     deleteUser: {
       enabled: true,
+      async beforeDelete(user) {
+        await assertUserHardDeleteAllowed(user.id);
+      },
       async sendDeleteAccountVerification(data) {
         await mailService.send({
           to: data.user.email,

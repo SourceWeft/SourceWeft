@@ -54,10 +54,22 @@ Install dependencies:
 pnpm install
 ```
 
-Run all dev tasks via turbo:
+Run core dev tasks via turbo (excluding extension and desktop):
 
 ```bash
 pnpm dev
+```
+
+Run Chrome extension dev only:
+
+```bash
+pnpm dev:chrome
+```
+
+Run desktop dev only:
+
+```bash
+pnpm dev:desktop
 ```
 
 Run backend only:

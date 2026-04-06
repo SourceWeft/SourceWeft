@@ -5,7 +5,7 @@ export const workspaceSchema = z.object({
   organizationId: z.string(),
   name: z.string(),
   slug: z.string(),
-  createdBy: z.string(),
+  createdBy: z.string().nullable(),
   createdAt: z.string(),
 });
 

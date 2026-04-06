@@ -1,10 +1,15 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { cookies, headers } from "next/headers";
+
+import {
+  getLocaleDirection,
+  LOCALE_COOKIE_NAME,
+  resolveRequestLocale,
+} from "../lib/locale";
+import { typographyVariableClassName } from "../lib/typography";
 
 import { Providers } from "./providers";
-
-const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "SourceWeft",
@@ -20,15 +25,25 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const cookieStore = await cookies();
+  const requestHeaders = await headers();
+
+  const locale = resolveRequestLocale({
+    acceptLanguage: requestHeaders.get("accept-language"),
+    cookieLocale: cookieStore.get(LOCALE_COOKIE_NAME)?.value,
+    headerLocale: requestHeaders.get("x-sourceweft-locale"),
+  });
+  const direction = getLocaleDirection(locale);
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} dir={direction} suppressHydrationWarning>
       <body
-        className={`${geist.className} flex min-h-svh flex-col antialiased`}
+        className={`${typographyVariableClassName} flex min-h-svh flex-col antialiased`}
       >
         <Providers>{children}</Providers>
       </body>

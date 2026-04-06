@@ -21,6 +21,11 @@
       "sourceType": "github",
       "computedHash": "691c8794e65bd0fbc5e223190d23d354cd590a664ec8db53acf8b1e628ce94d6"
     },
+    "ai-elements": {
+      "source": "vercel/ai-elements",
+      "sourceType": "github",
+      "computedHash": "84f3a2a57fa71ae5061786280987575d673792d6dda9a63941efb2795b83543a"
+    },
     "ai-sdk": {
       "source": "vercel/ai",
       "sourceType": "github",

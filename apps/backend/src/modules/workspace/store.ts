@@ -4,7 +4,10 @@ import { db } from "../../shared/database";
 import { workspaceMemberships, workspaces } from "../../shared/db/schema";
 import type { Workspace, WorkspaceMembership, WorkspaceRole } from "./types";
 
-type WorkspaceRow = typeof workspaces.$inferSelect;
+type WorkspaceRow = Pick<
+  typeof workspaces.$inferSelect,
+  "id" | "organizationId" | "name" | "slug" | "createdBy" | "createdAt"
+>;
 type WorkspaceMembershipRow = typeof workspaceMemberships.$inferSelect;
 
 type OrganizationMembershipRow = {

@@ -1,0 +1,14 @@
+▲ Next.js 16.2.0 (Turbopack)
+- Local:         http://localhost:3100
+- Network:       http://192.168.3.68:3100
+- Environments: .env.local
+✓ Ready in 387ms
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          15854
+- Dir:          /Users/thans/working/SW/SourceWeft/apps/web
+- Log:          .next/dev/logs/next-development.log
+
+Run kill 15854 to stop it.
+[?25h

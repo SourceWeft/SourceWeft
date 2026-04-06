@@ -5,7 +5,7 @@ export type Workspace = {
   organizationId: string;
   name: string;
   slug: string;
-  createdBy: string;
+  createdBy: string | null;
   createdAt: string;
 };
 

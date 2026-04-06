@@ -27,6 +27,14 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar-background);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -40,6 +48,9 @@
 
 :root {
   --radius: 0.625rem;
+  --font-ui: var(--font-ui-latin);
+  --font-brand: var(--font-brand-sora);
+  --font-mono: var(--font-mono-latin);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -58,11 +69,67 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
+  --sidebar-background: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.205 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+}
+
+html:lang(zh),
+html:lang(zh-CN),
+html:lang(zh-SG) {
+  --font-ui: var(--font-ui-cjk-sc);
+}
+
+html:lang(zh-TW),
+html:lang(zh-HK),
+html:lang(zh-MO) {
+  --font-ui: var(--font-ui-cjk-tc);
+}
+
+html:lang(ja) {
+  --font-ui: var(--font-ui-cjk-jp);
+}
+
+html:lang(ko) {
+  --font-ui: var(--font-ui-cjk-kr);
+}
+
+html:lang(ar) {
+  --font-ui: var(--font-ui-arabic);
+}
+
+html:lang(he) {
+  --font-ui: var(--font-ui-hebrew);
+}
+
+html:lang(hi),
+html:lang(mr),
+html:lang(ne) {
+  --font-ui: var(--font-ui-devanagari);
+}
+
+html:lang(th) {
+  --font-ui: var(--font-ui-thai);
+}
+
+.font-brand {
+  font-family:
+    var(--font-brand), var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+}
+
+html:lang(ar) .font-brand,
+html:lang(he) .font-brand {
+  letter-spacing: normal;
 }
 
 .dark {
@@ -84,6 +151,14 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+  --sidebar-background: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -98,6 +173,12 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  :where(code, kbd, samp, pre) {
+    font-family:
+      var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 
   button:not(:disabled),

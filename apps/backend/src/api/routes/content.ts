@@ -4,6 +4,7 @@ import {
   createThreadRequestSchema,
   indexSourceRequestSchema,
   streamThreadRequestSchema,
+  updateSourceRequestSchema,
 } from "@sourceweft/contracts";
 import { contentService } from "../../modules/content";
 import { getSessionUserId, requireSession } from "../middleware/auth-session";
@@ -18,6 +19,20 @@ function ensureObjectBody(value: unknown) {
 }
 
 export function registerContentRoutes(app: Hono) {
+  app.get("/v1/workspaces/:workspaceId/sources", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.listSources({
+      workspaceId: c.req.param("workspaceId"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
   app.post("/v1/workspaces/:workspaceId/sources", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -42,6 +57,63 @@ export function registerContentRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result, 201);
+  });
+
+  app.get("/v1/workspaces/:workspaceId/sources/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.getSource({
+      workspaceId: c.req.param("workspaceId"),
+      sourceId: c.req.param("id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.patch("/v1/workspaces/:workspaceId/sources/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = updateSourceRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentService.updateSource({
+      workspaceId: c.req.param("workspaceId"),
+      sourceId: c.req.param("id"),
+      userId: getSessionUserId(session),
+      title: parsed.data.title,
+      contentText: parsed.data.contentText,
+      estimatedPages: parsed.data.estimatedPages,
+      parsedTokens: parsed.data.parsedTokens,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.delete("/v1/workspaces/:workspaceId/sources/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.deleteSource({
+      workspaceId: c.req.param("workspaceId"),
+      sourceId: c.req.param("id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
   });
 
   app.post("/v1/workspaces/:workspaceId/sources/:id/index", async (c) => {

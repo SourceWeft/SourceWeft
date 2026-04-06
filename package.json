@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=!@sourceweft/extension --filter=!@sourceweft/desktop",
+    "dev:chrome": "pnpm --filter @sourceweft/extension dev",
+    "dev:desktop": "turbo run dev --filter=@sourceweft/desktop",
     "lint": "turbo run lint",
     "check-types": "turbo run check-types",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
