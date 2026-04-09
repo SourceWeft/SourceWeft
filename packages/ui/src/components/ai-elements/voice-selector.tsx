@@ -16,6 +16,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
@@ -106,20 +107,22 @@ export const VoiceSelectorTrigger = (props: VoiceSelectorTriggerProps) => (
 
 export type VoiceSelectorContentProps = ComponentProps<typeof DialogContent> & {
   title?: ReactNode;
+  description?: ReactNode;
 };
 
 export const VoiceSelectorContent = ({
   className,
   children,
   title = "Voice Selector",
+  description = "Search and select a voice.",
   ...props
 }: VoiceSelectorContentProps) => (
   <DialogContent
-    aria-describedby={undefined}
     className={cn("p-0", className)}
     {...props}
   >
     <DialogTitle className="sr-only">{title}</DialogTitle>
+    <DialogDescription className="sr-only">{description}</DialogDescription>
     <Command className="**:data-[slot=command-input-wrapper]:h-auto">
       {children}
     </Command>

@@ -559,21 +559,7 @@ export const auth: any = betterAuth({
       },
     },
     changeEmail: {
-      enabled: true,
-      async sendChangeEmailConfirmation(data) {
-        await mailService.send({
-          to: data.user.email,
-          subject: "Confirm your email change",
-          html: renderLinkTemplate({
-            title: "Confirm email change",
-            message: `A request was made to change your account email to ${data.newEmail}. Approve this change to continue.`,
-            buttonLabel: "Approve email change",
-            buttonUrl: data.url,
-          }),
-          templateId: "auth.change-email",
-          messageType: "auth.change-email",
-        });
-      },
+      enabled: false,
     },
     deleteUser: {
       enabled: true,
@@ -879,6 +865,21 @@ export const auth: any = betterAuth({
       cachedTrustedClients: new Set([config.auth.extensionClientId]),
     }),
   ],
+  databaseHooks: {
+    session: {
+      create: {
+        after: async (session) => {
+          const userId = session.userId;
+          const { findMembershipByUser } = await import("../workspace/store");
+          const existing = await findMembershipByUser(userId);
+          if (!existing) {
+            const { ensurePersonalTeamForUser } = await import("../workspace/service");
+            await ensurePersonalTeamForUser(userId);
+          }
+        },
+      },
+    },
+  },
 });
 
 export async function getSession(headers: Headers) {

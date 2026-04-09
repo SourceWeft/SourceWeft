@@ -1,17 +1,21 @@
 import { useState } from "react";
 import {
   Archive,
+  ChevronDown,
   Clock3,
   MoreHorizontal,
   PenSquare,
   Share2,
   Trash2,
 } from "lucide-react";
+import { Logo } from "@sourceweft/ui-web/logo";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import {
@@ -33,6 +37,54 @@ const workspaces = [
   "Product Positioning",
   "Customer Insights",
 ];
+
+function WorkspaceSwitcher({
+  activeWorkspace,
+  onWorkspaceChange,
+}: {
+  activeWorkspace: string;
+  onWorkspaceChange: (workspace: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="flex w-full min-w-36 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent aria-expanded:bg-sidebar-accent"
+          type="button"
+        >
+          <span className="flex-1 truncate font-medium text-left">{activeWorkspace}</span>
+          <ChevronDown className="size-3.5 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        className="w-64 rounded-lg"
+        align="start"
+        side="bottom"
+        sideOffset={4}
+      >
+        <DropdownMenuLabel className="text-xs text-muted-foreground">
+          Workspaces
+        </DropdownMenuLabel>
+        {workspaces.map((workspace, index) => (
+          <DropdownMenuItem
+            key={workspace}
+            onClick={() => onWorkspaceChange(workspace)}
+            className="gap-2 p-2"
+          >
+            <span className="flex-1 truncate text-left">{workspace}</span>
+            <span className="text-xs text-muted-foreground">⌘{index + 1}</span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="gap-2 p-2">
+          <span className="flex-1 truncate font-medium text-muted-foreground text-left">
+            Add workspace
+          </span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function StatusDot({ status }: { status?: ChatItem["status"] }) {
   return (
@@ -127,7 +179,7 @@ function ChatListRow({
         <DropdownMenu onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
             <Button
-              className="size-7 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground"
+              className="size-7 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground"
               size="icon-xs"
               type="button"
               variant="ghost"
@@ -221,28 +273,18 @@ export function DashboardSidebarChatPanel({
   onWorkspaceChange: (workspaceName: string) => void;
   workspaceName: string;
 }) {
-  const currentIndex = Math.max(0, workspaces.indexOf(workspaceName));
-  const nextWorkspace =
-    workspaces[(currentIndex + 1) % workspaces.length] ||
-    workspaces[0] ||
-    "AI Research Desk";
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SidebarHeader className="gap-2.5 border-b px-3.5 py-2.5">
         <div className="flex w-full items-center justify-between gap-2">
-          <button
-            className="truncate text-left text-sm font-semibold text-foreground"
-            onClick={() => onWorkspaceChange(nextWorkspace)}
-            type="button"
-            title="Switch workspace"
-          >
-            {workspaceName}
-          </button>
           <span className="text-[10px] text-muted-foreground">
             {workspaceSummary.organizationName}
           </span>
         </div>
+        <WorkspaceSwitcher
+          activeWorkspace={workspaceName}
+          onWorkspaceChange={onWorkspaceChange}
+        />
         <SidebarInput className="h-7 text-xs" placeholder="Search threads..." />
         <div className="flex items-center gap-2">
           <Button

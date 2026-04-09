@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
+import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import { getPricingConfig } from "../pricing-config";
 import { PricingToggle } from "./pricing-toggle";
 import { ThemeToggle } from "./theme-toggle";
@@ -163,6 +166,9 @@ function BrandLockup({ size = "nav" }: { size?: "nav" | "footer" }) {
 // ─── Navbar ───────────────────────────────────────────────────────────────────
 
 function Navbar() {
+  const authState = useAuthenticate();
+  const isLoggedIn = Boolean(authState.data);
+
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-200/80 bg-white/85 backdrop-blur-[12px] dark:border-white/[0.06] dark:bg-zinc-950/85">
       <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
@@ -191,18 +197,29 @@ function Navbar() {
         {/* Right CTAs */}
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <Link
-            href="/auth/sign-in"
-            className="hidden text-sm text-zinc-500 transition-colors hover:text-zinc-900 sm:block dark:text-zinc-400 dark:hover:text-white"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/auth/sign-up"
-            className="rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
-          >
-            Get Started
-          </Link>
+          {isLoggedIn ? (
+            <Link
+              href="/dashboard"
+              className="text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+            >
+              Go to dashboard →
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/auth/sign-in"
+                className="hidden text-sm text-zinc-500 transition-colors hover:text-zinc-900 sm:block dark:text-zinc-400 dark:hover:text-white"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/auth/sign-up"
+                className="rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+              >
+                Get Started
+              </Link>
+            </>
+          )}
         </div>
       </nav>
     </header>
@@ -212,6 +229,9 @@ function Navbar() {
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 function HeroSection() {
+  const authState = useAuthenticate();
+  const isLoggedIn = Boolean(authState.data);
+
   return (
     <section className="relative overflow-hidden pt-32 pb-20 md:pt-40 md:pb-28">
       {/* Grid + glow background */}
@@ -267,7 +287,7 @@ function HeroSection() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
-                href="/auth/sign-up"
+                href={isLoggedIn ? "/dashboard" : "/auth/sign-up"}
                 className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
               >
                 Start for free

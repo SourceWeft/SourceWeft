@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <svg x="102" y="102" width="820" height="820" viewBox="0 0 530 422" preserveAspectRatio="xMidYMid meet">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 530 422">
     <g transform="matrix(2 0 0 2 -357.15 -356.65)">
         <g>
           <g>
@@ -22,5 +21,4 @@
           </g>
         </g>
       </g>
-  </svg>
 </svg>

@@ -126,8 +126,21 @@ const authUsers = pgTable("user", {
   id: text("id").primaryKey(),
 });
 
-const authOrganizations = pgTable("organization", {
+export const authOrganizations = pgTable("organization", {
   id: text("id").primaryKey(),
+});
+
+export const authOrganizationMembers = pgTable("member", {
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => authOrganizations.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => authUsers.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
 });
 
 export const workspaces = pgTable(

@@ -1,8 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { ArrowLeft, Check, ChevronDown, CreditCard, Download, Receipt, Sparkles } from "lucide-react";
+import { Check, ChevronDown, CreditCard, Download, Receipt, Sparkles } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import {
@@ -13,10 +12,13 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
+import { getPricingConfig } from "../../_landing/pricing-config";
 import {
   DashboardMetaRow,
+  DashboardModalShell,
   DashboardSection,
-} from "../_components/dashboard-modal-shell";
+} from "./dashboard-modal-shell";
+import { DashboardPricingModal } from "./dashboard-pricing-modal";
 
 const invoices = [
   { period: "Apr 2026", amount: "$20.00", status: "Paid" },
@@ -34,7 +36,7 @@ function SummaryCard({
   meta: string;
 }) {
   return (
-    <article className="rounded-2xl border border-border bg-background p-4">
+    <article className="rounded-2xl border border-border/80 bg-background/95 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
       <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
         {label}
       </p>
@@ -124,9 +126,19 @@ function OrgSwitcher({
   );
 }
 
-export default function BillingPage() {
+export function DashboardBillingModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const { data: activeOrg } = authClient.useActiveOrganization();
   const isTeam = !!activeOrg;
+
+  const [pricingOpen, setPricingOpen] = React.useState(false);
+  const [billingPeriod, setBillingPeriod] = React.useState<"monthly" | "yearly">("yearly");
+  const plans = getPricingConfig();
 
   const content = isTeam
     ? {
@@ -155,44 +167,40 @@ export default function BillingPage() {
       };
 
   return (
-    <main className="flex flex-1 flex-col bg-background">
-      <header className="border-b border-border bg-background">
-        <div className="flex h-14 items-center justify-between gap-3 px-4 md:px-6">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-              Billing Preview
-            </p>
-            <h1 className="text-base font-semibold text-foreground">Billing</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <OrgSwitcher />
-            <Button asChild size="sm" type="button" variant="outline">
-              <Link href="/dashboard">
-                <ArrowLeft className="h-4 w-4" />
-                Back to dashboard
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
-        <DashboardSection eyebrow="Current Plan" meta={content.description}>
+    <>
+      <DashboardModalShell
+        actions={<OrgSwitcher />}
+        className="sm:max-w-3xl"
+        description={content.description}
+        onOpenChange={onOpenChange}
+        open={open}
+        title="Billing"
+      >
+      <div className="space-y-3">
+        <DashboardSection eyebrow="Current Plan">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
                 <Sparkles className="h-3.5 w-3.5" />
                 {isTeam ? "Team billing" : "Personal billing"}
               </div>
-              <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">
+              <h3 className="mt-3 text-xl font-semibold tracking-tight text-foreground">
                 {content.plan}
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
+              </h3>
+              <p className="mt-1.5 text-sm text-muted-foreground">
                 {content.status} · {content.cycle}
               </p>
+              <p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">
+                A single billing surface for usage, invoices, and subscription state without leaving the active workspace shell.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="rounded-full border border-border bg-background px-2 py-0.5">Auto-renew enabled</span>
+                <span className="rounded-full border border-border bg-background px-2 py-0.5">Invoices emailed monthly</span>
+                <span className="rounded-full border border-border bg-background px-2 py-0.5">Tax profile complete</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" type="button" variant="outline">
+              <Button onClick={() => setPricingOpen(true)} size="sm" type="button" variant="outline">
                 View pricing
               </Button>
               <Button size="sm" type="button">
@@ -202,7 +210,7 @@ export default function BillingPage() {
           </div>
         </DashboardSection>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <SummaryCard label="Plan" meta={content.status} value={content.plan} />
           <SummaryCard label="Current usage" meta={content.usageLabel} value={content.usageValue} />
           <SummaryCard label="Next payment" meta={content.cycle} value={content.nextPayment} />
@@ -213,8 +221,29 @@ export default function BillingPage() {
           />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <DashboardSection eyebrow="Payment Method" title="Default payment method">
+        <DashboardSection
+          eyebrow="Billing Health"
+          meta="A compact status surface inspired by workspace control centers"
+          title="Account health"
+        >
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-border bg-background px-3 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Payment reliability</p>
+              <p className="mt-1 text-sm font-medium text-foreground">No failed charges</p>
+            </div>
+            <div className="rounded-xl border border-border bg-background px-3 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Usage trend</p>
+              <p className="mt-1 text-sm font-medium text-foreground">+8% vs last cycle</p>
+            </div>
+            <div className="rounded-xl border border-border bg-background px-3 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Plan fit</p>
+              <p className="mt-1 text-sm font-medium text-foreground">Within recommended range</p>
+            </div>
+          </div>
+        </DashboardSection>
+
+        <div className="grid gap-3 lg:grid-cols-2">
+          <DashboardSection eyebrow="Payment Method" meta="Keep your renewal path uninterrupted" title="Default payment method">
             <div className="rounded-lg border border-border bg-background px-4 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
@@ -233,7 +262,7 @@ export default function BillingPage() {
             </div>
           </DashboardSection>
 
-          <DashboardSection eyebrow="Usage" title="Current cycle usage">
+          <DashboardSection eyebrow="Usage" meta="Live product usage summary" title="Current cycle usage">
             <div className="rounded-lg border border-border bg-background px-4 py-3">
               <div className="flex items-center justify-between gap-3 text-sm">
                 <span className="font-medium text-foreground">Credits</span>
@@ -279,17 +308,35 @@ export default function BillingPage() {
           </div>
         </DashboardSection>
 
-        <DashboardSection eyebrow="Scope" title="Billing context">
+        <DashboardSection
+          eyebrow="Scope"
+          meta="Clarifies whether charges apply to your personal account or active organization"
+          title="Billing context"
+        >
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-lg border border-border bg-background px-4 py-3">
               <DashboardMetaRow label="Personal" value="Individual account usage and invoices" />
             </div>
             <div className="rounded-lg border border-border bg-background px-4 py-3">
-              <DashboardMetaRow label="Team" value="Organization-level subscription and shared billing" />
+              <DashboardMetaRow
+                label="Team"
+                value="Organization-level subscription and shared billing"
+              />
             </div>
+          </div>
+          <div className="mt-3 rounded-lg border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
+            Switch between personal and team workspaces using the selector above.
           </div>
         </DashboardSection>
       </div>
-    </main>
+    </DashboardModalShell>
+    <DashboardPricingModal
+      billingPeriod={billingPeriod}
+      onBillingPeriodChange={setBillingPeriod}
+      onOpenChange={setPricingOpen}
+      open={pricingOpen}
+      plans={plans}
+    />
+    </>
   );
 }

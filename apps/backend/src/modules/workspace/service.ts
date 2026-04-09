@@ -1,6 +1,8 @@
 import {
+  createOrganizationRecord,
   createWorkspaceRecord,
   ensureWorkspaceMembership,
+  addMemberRecord,
   findFirstWorkspaceByOrganization,
   findOrganizationMembership,
   findWorkspaceByIdInOrganization,
@@ -123,6 +125,31 @@ export class WorkspaceService {
     userId: string;
   }) {
     return isOrganizationMember(input);
+  }
+
+  async ensurePersonalTeamForUser(userId: string) {
+    const { randomUUID } = await import("node:crypto");
+    const personalOrgId = randomUUID();
+    const personalOrgSlug = `personal-${personalOrgId.slice(0, 8)}`;
+
+    await createOrganizationRecord({
+      id: personalOrgId,
+      name: "Personal",
+      slug: personalOrgSlug,
+    });
+
+    await addMemberRecord({
+      organizationId: personalOrgId,
+      userId,
+      role: "owner",
+    });
+
+    await this.ensureDefaultWorkspace({
+      organizationId: personalOrgId,
+      userId,
+    });
+
+    return { organizationId: personalOrgId };
   }
 }
 

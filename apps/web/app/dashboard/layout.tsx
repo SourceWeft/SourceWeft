@@ -26,9 +26,9 @@ export default function DashboardLayout({
       <SignedIn>
         <SidebarProvider>
           <DashboardChatStateProvider>
-            <div className="flex h-svh w-full overflow-hidden bg-background text-foreground">
+            <div className="flex h-svh min-h-0 w-full overflow-hidden bg-background text-foreground">
               <DashboardSidebar />
-              <main className="min-w-0 flex flex-1 flex-col overflow-hidden">
+              <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden">
                 {children}
               </main>
             </div>

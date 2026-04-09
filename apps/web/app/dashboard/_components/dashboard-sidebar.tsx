@@ -2,17 +2,31 @@
 
 import * as React from "react";
 import { usePathname } from "next/navigation";
-import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
-  CreditCard,
   FolderKanban,
   LayoutDashboard,
   MessageSquareText,
-  Settings,
+  Plus,
   Sparkles,
-  Users,
 } from "lucide-react";
+import { Logo } from "@sourceweft/ui-web/logo";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@sourceweft/ui-web/components/ui/dropdown-menu";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { toast } from "sonner";
+import { authClient } from "../../../lib/auth-client";
+import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { useDashboardChatState } from "./dashboard-chat-state";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 
@@ -36,24 +50,6 @@ const navMain: NavItem[] = [
     icon: MessageSquareText,
     match: (p) => p.startsWith("/dashboard/chat"),
   },
-  {
-    title: "Team",
-    href: "/dashboard/team",
-    icon: Users,
-    match: (p) => p.startsWith("/dashboard/team"),
-  },
-  {
-    title: "Billing",
-    href: "/dashboard/billing",
-    icon: CreditCard,
-    match: (p) => p.startsWith("/dashboard/billing"),
-  },
-  {
-    title: "Settings",
-    href: "/dashboard/settings",
-    icon: Settings,
-    match: (p) => p.startsWith("/dashboard/settings"),
-  },
 ];
 
 const secondaryRoutes = [
@@ -66,21 +62,6 @@ const secondaryRoutes = [
     title: "Notebook chat",
     href: "/dashboard/chat",
     description: "Source-grounded conversations.",
-  },
-  {
-    title: "Team",
-    href: "/dashboard/team",
-    description: "Organizations, members, invites.",
-  },
-  {
-    title: "Billing",
-    href: "/dashboard/billing",
-    description: "Usage, subscriptions, ledger.",
-  },
-  {
-    title: "Settings",
-    href: "/dashboard/settings",
-    description: "Sessions, providers, keys.",
   },
 ];
 
@@ -97,7 +78,7 @@ function RailButton({
 }) {
   const className = cn(
     "flex h-10 w-10 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-    active && "border-border bg-card text-foreground shadow-xs",
+    active && "bg-accent text-foreground",
   );
 
   const content = (
@@ -122,36 +103,81 @@ function RailButton({
   );
 }
 
-function NavUser() {
-  const authState = useAuthenticate();
-  const user = authState.data?.user as
-    | { email?: string; name?: string }
-    | undefined;
+function TeamSwitcher() {
+  const { data: orgs } = authClient.useListOrganizations();
+  const { data: activeOrg } = authClient.useActiveOrganization();
 
-  const initials = React.useMemo(() => {
-    const v = user?.name || user?.email || "SW";
-    return v
-      .split(/\s+|@/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((s) => s[0]?.toUpperCase() || "")
-      .join("");
-  }, [user?.email, user?.name]);
+  const orgList = (orgs ?? []) as Array<{ id: string; name: string; slug?: string }>;
+  const activeOrgName = activeOrg?.name || "Personal workspace";
+
+  async function handleSwitch(orgId: string | null) {
+    try {
+      await authClient.organization.setActive({ organizationId: orgId });
+    } catch {
+      toast.error("Failed to switch workspace.");
+    }
+  }
 
   return (
-    <button
-      className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-xs"
-      title={user?.email || "Account"}
-      type="button"
-    >
-      {initials || "SW"}
-    </button>
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton className="w-fit px-1.5">
+              <div className="flex aspect-square size-5 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+                <Sparkles className="size-3" />
+              </div>
+              <span className="truncate font-medium">{activeOrgName}</span>
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            className="w-64 rounded-lg"
+            align="start"
+            side="bottom"
+            sideOffset={4}
+          >
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Teams
+            </DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => void handleSwitch(null)} className="gap-2 p-2">
+              <div className="flex size-6 items-center justify-center rounded-xs border">
+                <Sparkles className="size-4 shrink-0" />
+              </div>
+              Personal workspace
+            </DropdownMenuItem>
+            {orgList.map((org) => (
+              <DropdownMenuItem
+                key={org.id}
+                onClick={() => void handleSwitch(org.id)}
+                className="gap-2 p-2"
+              >
+                <div className="flex size-6 items-center justify-center rounded-xs border">
+                  <Sparkles className="size-4 shrink-0" />
+                </div>
+                {org.name}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="gap-2 p-2">
+              <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                <Plus className="size-4" />
+              </div>
+              <div className="font-medium text-muted-foreground">Add team</div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }
 
 function GenericRoutePanel({ pathname }: { pathname: string }) {
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-card">
+      <div className="border-b border-border px-4 pt-4 pb-3">
+        <TeamSwitcher />
+      </div>
+
       <div className="border-b border-border px-5 py-5">
         <div className="text-base font-semibold text-foreground">Dashboard</div>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -187,6 +213,7 @@ function GenericRoutePanel({ pathname }: { pathname: string }) {
 
 export function DashboardSidebar() {
   const pathname = usePathname();
+  const isOverviewRoute = pathname === "/dashboard";
   const {
     activeChatId,
     archivedChats,
@@ -201,15 +228,20 @@ export function DashboardSidebar() {
   } = useDashboardChatState();
 
   return (
-    <aside className="hidden h-svh w-[360px] shrink-0 border-r border-border bg-sidebar text-sidebar-foreground md:flex">
+    <aside
+      className={cn(
+        "hidden h-svh shrink-0 bg-sidebar text-sidebar-foreground md:flex",
+        isOverviewRoute ? "w-14" : "w-[360px] border-r border-border",
+      )}
+    >
       <div className="flex h-full w-14 shrink-0 flex-col items-center justify-between border-r border-sidebar-border px-2 py-4">
         <div className="flex flex-col items-center gap-2">
           <a
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs"
+            className="flex h-10 w-10 items-center justify-center text-primary"
             href="/dashboard"
             title="SourceWeft"
           >
-            <Sparkles className="h-4.5 w-4.5" />
+            <Logo className="h-9 w-9 bg-sidebar-accent text-sidebar-accent-foreground" />
             <span className="sr-only">SourceWeft</span>
           </a>
 
@@ -227,27 +259,29 @@ export function DashboardSidebar() {
           </div>
         </div>
 
-        <NavUser />
+        <DashboardAccountMenu />
       </div>
 
-      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-sidebar-border bg-card">
-        {pathname.startsWith("/dashboard/chat") ? (
-          <DashboardSidebarChatPanel
-            archivedChats={archivedChats}
-            activeChatId={activeChatId}
-            onArchiveChat={archiveChat}
-            onCreateChat={() => createChat()}
-            onDeleteChat={deleteChat}
-            onOpenChat={openChat}
-            privateChats={privateChats}
-            sharedChats={sharedChats}
-            onWorkspaceChange={setWorkspaceName}
-            workspaceName={workspaceName}
-          />
-        ) : (
-          <GenericRoutePanel pathname={pathname} />
-        )}
-      </div>
+      {!isOverviewRoute ? (
+        <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-sidebar-border bg-card">
+          {pathname.startsWith("/dashboard/chat") ? (
+            <DashboardSidebarChatPanel
+              archivedChats={archivedChats}
+              activeChatId={activeChatId}
+              onArchiveChat={archiveChat}
+              onCreateChat={() => createChat()}
+              onDeleteChat={deleteChat}
+              onOpenChat={openChat}
+              privateChats={privateChats}
+              sharedChats={sharedChats}
+              onWorkspaceChange={setWorkspaceName}
+              workspaceName={workspaceName}
+            />
+          ) : (
+            <GenericRoutePanel pathname={pathname} />
+          )}
+        </div>
+      ) : null}
     </aside>
   );
 }

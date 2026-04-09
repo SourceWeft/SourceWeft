@@ -166,6 +166,45 @@ export function registerContentRoutes(app: Hono) {
     return ApiResponse.success(c, result, 201);
   });
 
+  app.get("/v1/workspaces/:workspaceId/threads/:id/sources", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.listThreadSources({
+      workspaceId: c.req.param("workspaceId"),
+      threadId: c.req.param("id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.put("/v1/workspaces/:workspaceId/threads/:id/sources", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = setThreadSourcesRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentService.setThreadSources({
+      workspaceId: c.req.param("workspaceId"),
+      threadId: c.req.param("id"),
+      userId: getSessionUserId(session),
+      sourceIds: parsed.data.sourceIds,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
   app.post("/v1/workspaces/:workspaceId/threads/:id/stream", async (c) => {
     const session = await requireSession(c);
     if (!session) {

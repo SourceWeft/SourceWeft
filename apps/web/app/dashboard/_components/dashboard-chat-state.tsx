@@ -64,6 +64,7 @@ export function DashboardChatStateProvider({
   }, []);
 
   const startNewChat = useCallback(() => {
+    setActiveChatId("");
     setMode("new");
     setThreadTitle("New chat");
   }, []);

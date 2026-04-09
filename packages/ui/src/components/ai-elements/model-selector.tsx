@@ -12,6 +12,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
@@ -32,16 +33,17 @@ export const ModelSelectorTrigger = (props: ModelSelectorTriggerProps) => (
 
 export type ModelSelectorContentProps = ComponentProps<typeof DialogContent> & {
   title?: ReactNode;
+  description?: ReactNode;
 };
 
 export const ModelSelectorContent = ({
   className,
   children,
   title = "Model Selector",
+  description = "Search and select a model.",
   ...props
 }: ModelSelectorContentProps) => (
   <DialogContent
-    aria-describedby={undefined}
     className={cn(
       "outline! border-none! p-0 outline-border! outline-solid!",
       className
@@ -49,6 +51,7 @@ export const ModelSelectorContent = ({
     {...props}
   >
     <DialogTitle className="sr-only">{title}</DialogTitle>
+    <DialogDescription className="sr-only">{description}</DialogDescription>
     <Command className="**:data-[slot=command-input-wrapper]:h-auto">
       {children}
     </Command>

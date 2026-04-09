@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "../../shared/database";
-import { workspaceMemberships, workspaces } from "../../shared/db/schema";
+import {
+  authOrganizationMembers,
+  workspaceMemberships,
+  workspaces,
+} from "../../shared/db/schema";
 import type { Workspace, WorkspaceMembership, WorkspaceRole } from "./types";
 
 type WorkspaceRow = Pick<
@@ -226,4 +230,43 @@ export async function findFirstWorkspaceByOrganization(input: {
     .limit(1);
 
   return row ? mapWorkspaceRow(row) : null;
+}
+
+export async function findMembershipByUser(userId: string) {
+  const [row] = await db
+    .select()
+    .from(workspaceMemberships)
+    .where(eq(workspaceMemberships.userId, userId))
+    .limit(1);
+  return row ? mapMembershipRow(row) : null;
+}
+
+export async function createOrganizationRecord(input: {
+  id: string;
+  name: string;
+  slug: string;
+}) {
+  const [row] = await db
+    .insert(authOrganizations)
+    .values({
+      id: input.id,
+    })
+    .returning();
+  return row;
+}
+
+export async function addMemberRecord(input: {
+  organizationId: string;
+  userId: string;
+  role: string;
+}) {
+  const [row] = await db
+    .insert(authOrganizationMembers)
+    .values({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      role: input.role,
+    })
+    .returning();
+  return row;
 }
