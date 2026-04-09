@@ -533,6 +533,9 @@ export const auth: any = betterAuth({
   appName: "SourceWeft",
   baseURL: config.auth.baseUrl,
   secret: config.auth.secret,
+  onAPIError: {
+    errorURL: config.auth.errorUrl,
+  },
   silenceWarnings: {
     oauthAuthServerConfig: true,
   },

@@ -163,6 +163,111 @@ function parseAlertLevel(value: string | undefined, fallback: AlertLevel) {
   return fallback;
 }
 
+function stripTrailingSlash(value: string) {
+  return value.replace(/\/$/, "");
+}
+
+function isValidExtensionId(value: string) {
+  return /^[a-z]{32}$/.test(value);
+}
+
+function resolveExtensionId() {
+  const explicitId = process.env.AUTH_EXTENSION_ID?.trim().toLowerCase();
+  if (explicitId && isValidExtensionId(explicitId)) {
+    return explicitId;
+  }
+
+  const redirectUri = process.env.AUTH_EXTENSION_REDIRECT_URI?.trim();
+  if (!redirectUri) {
+    return null;
+  }
+
+  try {
+    const url = new URL(redirectUri);
+    const match = url.hostname.match(/^([a-z]{32})\.chromiumapp\.org$/);
+    if (match?.[1] && isValidExtensionId(match[1])) {
+      return match[1];
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function resolveExtensionOrigins() {
+  const extensionId = resolveExtensionId();
+  if (!extensionId) {
+    return [];
+  }
+
+  return [
+    `chrome-extension://${extensionId}`,
+    `https://${extensionId}.chromiumapp.org`,
+  ];
+}
+
+function resolveExtensionRedirectUri() {
+  const configured = process.env.AUTH_EXTENSION_REDIRECT_URI?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  const extensionId = resolveExtensionId();
+  if (extensionId) {
+    return `https://${extensionId}.chromiumapp.org/provider_cb`;
+  }
+
+  return "https://<extension-id>.chromiumapp.org/provider_cb";
+}
+
+function resolveApiBaseUrl() {
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (configured) {
+    return stripTrailingSlash(configured);
+  }
+
+  return "http://localhost:3001";
+}
+
+function resolveWebBaseUrl() {
+  const configured = process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim();
+  if (configured) {
+    return stripTrailingSlash(configured);
+  }
+
+  return "http://localhost:3000";
+}
+
+function resolveTrustedOrigins() {
+  const configured = parseCsv(process.env.BETTER_AUTH_TRUSTED_ORIGINS);
+  const defaults = [
+    resolveApiBaseUrl(),
+    resolveWebBaseUrl(),
+    ...resolveExtensionOrigins(),
+  ];
+
+  return Array.from(new Set([...defaults, ...configured]));
+}
+
+function resolveAuthErrorUrl() {
+  const configured = process.env.BETTER_AUTH_ERROR_URL?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  return `${resolveWebBaseUrl()}/auth/error`;
+}
+
+function resolvePasskeyOrigin() {
+  const configured = process.env.AUTH_PASSKEY_ORIGIN?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  return resolveWebBaseUrl();
+}
+
 export const config = {
   apiPort: Number(process.env.BACKEND_API_PORT || 3001),
   databaseUrl:
@@ -188,8 +293,9 @@ export const config = {
   },
   auth: {
     secret: process.env.BETTER_AUTH_SECRET || "replace_with_dev_secret_only",
-    baseUrl: process.env.BETTER_AUTH_URL || "http://localhost:3001",
-    trustedOrigins: parseCsv(process.env.BETTER_AUTH_TRUSTED_ORIGINS),
+    baseUrl: resolveApiBaseUrl(),
+    errorUrl: resolveAuthErrorUrl(),
+    trustedOrigins: resolveTrustedOrigins(),
     googleClientId: process.env.AUTH_GOOGLE_CLIENT_ID || "",
     googleClientSecret: process.env.AUTH_GOOGLE_CLIENT_SECRET || "",
     githubClientId: process.env.AUTH_GITHUB_CLIENT_ID || "",
@@ -198,13 +304,11 @@ export const config = {
     passkey: {
       rpId: process.env.AUTH_PASSKEY_RP_ID || "localhost",
       rpName: process.env.AUTH_PASSKEY_RP_NAME || "SourceWeft",
-      origin: process.env.AUTH_PASSKEY_ORIGIN || "http://localhost:3000",
+      origin: resolvePasskeyOrigin(),
     },
     extensionClientId:
       process.env.AUTH_EXTENSION_CLIENT_ID || "sourceweft-extension",
-    extensionRedirectUri:
-      process.env.AUTH_EXTENSION_REDIRECT_URI ||
-      "https://<extension-id>.chromiumapp.org/provider_cb",
+    extensionRedirectUri: resolveExtensionRedirectUri(),
   },
   mail: {
     provider: process.env.MAIL_PROVIDER || "plunk",

@@ -345,15 +345,16 @@ email-templates/
 ### 9.1 Core variables
 
 ```env
-# Public URLs
-APP_PUBLIC_URL=https://app.example.com
-API_PUBLIC_URL=https://api.example.com
-EXTENSION_ID=abcdefghijklmnopabcdefghijklmnop
+# Two-domain model
+NEXT_PUBLIC_WEB_BASE_URL=https://app.example.com
+NEXT_PUBLIC_API_BASE_URL=https://api.example.com
 
 # Better Auth
-BETTER_AUTH_URL=${API_PUBLIC_URL}
 BETTER_AUTH_SECRET=replace_me
-BETTER_AUTH_TRUSTED_ORIGINS=${APP_PUBLIC_URL},https://${EXTENSION_ID}.chromiumapp.org
+# Optional extension id (32 lowercase chars)
+AUTH_EXTENSION_ID=abcdefghijklmnopabcdefghijklmnop
+# Optional extra origins only (web/api + extension origins are auto-included)
+BETTER_AUTH_TRUSTED_ORIGINS=
 
 # Google / One Tap
 AUTH_GOOGLE_CLIENT_ID=web_client_id.apps.googleusercontent.com
@@ -381,6 +382,11 @@ MAIL_TEMPLATE_VERSION=v1
 - Auth and backend runtime read from one env source
 - Web reads public-safe subset only
 - Extension reads public-safe subset only
+
+Notes:
+
+- `BETTER_AUTH_URL` is intentionally omitted. Backend auth base URL is derived from `NEXT_PUBLIC_API_BASE_URL`.
+- `BETTER_AUTH_TRUSTED_ORIGINS` is for additional origins only.
 
 ---
 
