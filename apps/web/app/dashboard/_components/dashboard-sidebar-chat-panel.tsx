@@ -8,7 +8,6 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { Logo } from "@sourceweft/ui-web/logo";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   DropdownMenu,
@@ -30,20 +29,21 @@ import {
   SidebarMenuItem,
 } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { formatShortRelativeTime } from "../../../lib/relative-time";
 import { workspaceSummary, type ChatItem } from "../chat/_components/mock-data";
 
-const workspaces = [
-  "AI Research Desk",
-  "Product Positioning",
-  "Customer Insights",
-];
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function WorkspaceSwitcher({
+  workspaceId,
   activeWorkspace,
+  workspaces,
   onWorkspaceChange,
 }: {
+  workspaceId: string | null;
   activeWorkspace: string;
-  onWorkspaceChange: (workspace: string) => void;
+  workspaces: Array<{ id: string; name: string }>;
+  onWorkspaceChange: (workspaceId: string) => void;
 }) {
   return (
     <DropdownMenu>
@@ -67,11 +67,11 @@ function WorkspaceSwitcher({
         </DropdownMenuLabel>
         {workspaces.map((workspace, index) => (
           <DropdownMenuItem
-            key={workspace}
-            onClick={() => onWorkspaceChange(workspace)}
-            className="gap-2 p-2"
+            key={workspace.id}
+            onClick={() => onWorkspaceChange(workspace.id)}
+            className={cn("gap-2 p-2", workspace.id === workspaceId && "bg-accent/60")}
           >
-            <span className="flex-1 truncate text-left">{workspace}</span>
+            <span className="flex-1 truncate text-left">{workspace.name}</span>
             <span className="text-xs text-muted-foreground">⌘{index + 1}</span>
           </DropdownMenuItem>
         ))}
@@ -117,6 +117,8 @@ function ChatListRow({
   onOpen: (id: string, title: string) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const status = item.status || "ready";
+  const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt);
 
   return (
     <SidebarMenuItem className="relative px-2">
@@ -139,20 +141,13 @@ function ChatListRow({
                 <span className="line-clamp-1 flex-1 text-[13px] font-medium leading-4.5">
                   {item.title}
                 </span>
-                <span
-                  className={cn(
-                    "pointer-events-none absolute right-0 top-0 shrink-0 text-[10px] leading-4 text-muted-foreground/80 transition-opacity",
-                    "group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0",
-                    menuOpen && "opacity-0",
-                  )}
-                >
-                  {item.updatedAt}
-                </span>
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
                 <span>{item.sourceCount} sources</span>
-                <span aria-hidden="true">·</span>
-                <span>{item.status || "ready"}</span>
+                <span aria-hidden="true">|</span>
+                <span>{status}</span>
+                <span aria-hidden="true">|</span>
+                <span>{relativeUpdatedAt}</span>
               </div>
             </div>
           </div>
@@ -212,7 +207,10 @@ function ChatListRow({
 function ChatSection({
   activeId,
   canArchive = true,
+  hasMore = false,
+  isLoadingMore = false,
   items,
+  onLoadMore,
   onArchive,
   onDelete,
   onOpen,
@@ -220,7 +218,10 @@ function ChatSection({
 }: {
   activeId?: string;
   canArchive?: boolean;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
   items: ChatItem[];
+  onLoadMore?: () => void;
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
   onOpen: (id: string, title: string) => void;
@@ -245,6 +246,20 @@ function ChatSection({
             />
           ))}
         </SidebarMenu>
+        {hasMore && onLoadMore ? (
+          <div className="px-3.5 py-1.5">
+            <Button
+              className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+              disabled={isLoadingMore}
+              onClick={onLoadMore}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              {isLoadingMore ? "Loading..." : "Load more"}
+            </Button>
+          </div>
+        ) : null}
       </SidebarGroupContent>
     </SidebarGroup>
   );
@@ -256,9 +271,14 @@ export function DashboardSidebarChatPanel({
   onArchiveChat,
   onCreateChat,
   onDeleteChat,
+  onLoadMoreChats,
   onOpenChat,
+  hasMorePrivateChats,
+  isLoadingPrivateChats,
   privateChats,
   sharedChats,
+  workspaceId,
+  workspaces,
   onWorkspaceChange,
   workspaceName,
 }: {
@@ -267,12 +287,36 @@ export function DashboardSidebarChatPanel({
   onArchiveChat: (id: string) => void;
   onCreateChat: () => void;
   onDeleteChat: (id: string) => void;
+  onLoadMoreChats: () => void;
   onOpenChat: (id: string, title: string) => void;
+  hasMorePrivateChats: boolean;
+  isLoadingPrivateChats: boolean;
   privateChats: ChatItem[];
   sharedChats: ChatItem[];
-  onWorkspaceChange: (workspaceName: string) => void;
+  workspaceId: string | null;
+  workspaces: Array<{ id: string; name: string }>;
+  onWorkspaceChange: (workspaceId: string) => void;
   workspaceName: string;
 }) {
+  const weekAgo = Date.now() - ONE_WEEK_MS;
+  const seenIds = new Set<string>();
+  const threadsThisWeek = [...sharedChats, ...privateChats, ...archivedChats].reduce(
+    (count, item) => {
+      if (seenIds.has(item.id)) {
+        return count;
+      }
+
+      seenIds.add(item.id);
+      const updatedAt = new Date(item.updatedAt);
+      if (Number.isNaN(updatedAt.getTime())) {
+        return count;
+      }
+
+      return updatedAt.getTime() >= weekAgo ? count + 1 : count;
+    },
+    0,
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SidebarHeader className="gap-2.5 border-b px-3.5 py-2.5">
@@ -283,6 +327,8 @@ export function DashboardSidebarChatPanel({
         </div>
         <WorkspaceSwitcher
           activeWorkspace={workspaceName}
+          workspaceId={workspaceId}
+          workspaces={workspaces}
           onWorkspaceChange={onWorkspaceChange}
         />
         <SidebarInput className="h-7 text-xs" placeholder="Search threads..." />
@@ -314,7 +360,10 @@ export function DashboardSidebarChatPanel({
         />
         <ChatSection
           activeId={activeChatId}
+          hasMore={hasMorePrivateChats}
+          isLoadingMore={isLoadingPrivateChats}
           items={privateChats}
+          onLoadMore={onLoadMoreChats}
           onArchive={onArchiveChat}
           onDelete={onDeleteChat}
           onOpen={onOpenChat}
@@ -334,7 +383,9 @@ export function DashboardSidebarChatPanel({
       <SidebarFooter className="border-t px-3.5 py-2.5">
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <Clock3 className="size-3.5" />
-          <span>7 threads this week</span>
+          <span>
+            {threadsThisWeek} {threadsThisWeek === 1 ? "thread" : "threads"} this week
+          </span>
         </div>
       </SidebarFooter>
     </div>

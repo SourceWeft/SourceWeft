@@ -25,6 +25,7 @@
     "@sourceweft/ui-web": "workspace:*",
     "ai": "^6.0.134",
     "better-auth": "^1.5.6",
+    "date-fns": "^4.1.0",
     "lucide-react": "^0.562.0",
     "next": "16.2.0",
     "next-themes": "^0.4.6",

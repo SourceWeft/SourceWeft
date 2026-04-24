@@ -533,6 +533,30 @@ export const auth: any = betterAuth({
   appName: "SourceWeft",
   baseURL: config.auth.baseUrl,
   secret: config.auth.secret,
+  logger: {
+    level: (process.env.BETTER_AUTH_LOG_LEVEL as
+      | "debug"
+      | "info"
+      | "warn"
+      | "error"
+      | undefined) || "info",
+    log: (level, message, ...args) => {
+      const meta = args.length > 0 ? { args } : undefined;
+      if (level === "debug") {
+        logger.debug(`[BetterAuth] ${message}`, meta);
+        return;
+      }
+      if (level === "info") {
+        logger.info(`[BetterAuth] ${message}`, meta);
+        return;
+      }
+      if (level === "warn") {
+        logger.warn(`[BetterAuth] ${message}`, meta);
+        return;
+      }
+      logger.error(`[BetterAuth] ${message}`, meta);
+    },
+  },
   onAPIError: {
     errorURL: config.auth.errorUrl,
   },

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   FolderKanban,
   LayoutDashboard,
@@ -213,18 +213,28 @@ function GenericRoutePanel({ pathname }: { pathname: string }) {
 
 export function DashboardSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const isOverviewRoute = pathname === "/dashboard";
+
+  // Derive the active thread from the URL instead of context state.
+  // Pattern: /dashboard/chat/[threadId]
+  const activeThreadId = pathname.startsWith("/dashboard/chat/")
+    ? pathname.slice("/dashboard/chat/".length).split("/")[0] ?? ""
+    : "";
+
   const {
-    activeChatId,
     archivedChats,
     archiveChat,
-    createChat,
     deleteChat,
-    openChat,
     privateChats,
-    setWorkspaceName,
+    hasMorePrivateChats,
+    isLoadingPrivateChats,
+    loadMorePrivateChats,
+    switchWorkspace,
     sharedChats,
+    workspaceId,
     workspaceName,
+    workspaces,
   } = useDashboardChatState();
 
   return (
@@ -267,15 +277,20 @@ export function DashboardSidebar() {
           {pathname.startsWith("/dashboard/chat") ? (
             <DashboardSidebarChatPanel
               archivedChats={archivedChats}
-              activeChatId={activeChatId}
+              activeChatId={activeThreadId}
               onArchiveChat={archiveChat}
-              onCreateChat={() => createChat()}
+              onCreateChat={() => router.push("/dashboard/chat")}
               onDeleteChat={deleteChat}
-              onOpenChat={openChat}
+              onLoadMoreChats={() => void loadMorePrivateChats()}
+              onOpenChat={(id) => router.push(`/dashboard/chat/${id}`)}
+              hasMorePrivateChats={hasMorePrivateChats}
+              isLoadingPrivateChats={isLoadingPrivateChats}
               privateChats={privateChats}
               sharedChats={sharedChats}
-              onWorkspaceChange={setWorkspaceName}
+              onWorkspaceChange={(nextId) => void switchWorkspace(nextId)}
+              workspaceId={workspaceId}
               workspaceName={workspaceName}
+              workspaces={workspaces}
             />
           ) : (
             <GenericRoutePanel pathname={pathname} />

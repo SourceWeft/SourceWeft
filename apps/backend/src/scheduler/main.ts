@@ -1,9 +1,15 @@
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
+import { ensureModelConfigBootstrapped } from "../shared/model-gateway";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
 import { scheduleExampleJob } from "./schedules/example-schedule";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
+import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
+
+const MODEL_PRICING_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+
+await ensureModelConfigBootstrapped();
 
 let tickInFlight = false;
 
@@ -67,10 +73,24 @@ async function tick() {
   }
 }
 
+async function scheduleModelPricingSyncTick() {
+  try {
+    await scheduleSyncModelPricing();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to schedule model pricing sync job", { message });
+  }
+}
+
 void tick();
 const timer = setInterval(() => {
   void tick();
 }, config.schedulerIntervalMs);
+
+void scheduleModelPricingSyncTick();
+const modelPricingSyncTimer = setInterval(() => {
+  void scheduleModelPricingSyncTick();
+}, MODEL_PRICING_SYNC_INTERVAL_MS);
 
 logger.info("Scheduler started", {
   intervalMs: config.schedulerIntervalMs,
@@ -81,6 +101,7 @@ logger.info("Scheduler started", {
 
 async function shutdown() {
   clearInterval(timer);
+  clearInterval(modelPricingSyncTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();
   process.exit(0);

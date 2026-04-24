@@ -29,7 +29,7 @@ Status:
    - Dedicated hosted (one team per isolated stack)
    - Self-hosted (customer-managed stack)
 5. AI stack remains:
-   - Hono + LangGraph.js + LangChain.js + LiteLLM (day 1)
+   - Hono + LangGraph.js + LangChain.js + model gateway (day 1)
    - PostgreSQL + pgvector + tsvector
    - Redis + BullMQ
    - S3 only (no MinIO)
@@ -209,7 +209,7 @@ S3 key structure:
   - dedicated DB
   - dedicated Redis
   - dedicated S3 prefix/bucket policy
-  - optional dedicated LiteLLM gateway
+  - optional dedicated model gateway service
 - Operated by platform team.
 
 ### 8.3 Self-hosted
@@ -227,7 +227,7 @@ S3 key structure:
 - API: `Hono`
 - Orchestration: `LangGraph.js`
 - LLM integration: `LangChain.js`
-- Gateway: `LiteLLM`
+- Gateway: `Model Gateway`
 - Data: `PostgreSQL + pgvector + tsvector`
 - Queue: `BullMQ + Redis`
 - Storage: `AWS S3`
@@ -239,15 +239,15 @@ S3 key structure:
 Client
   -> Hono API
      -> LangGraph flows
-     -> internal LiteLLM SDK
-     -> LiteLLM proxy
+     -> internal `@sourceweft/model-gateway` package
+     -> model gateway service
      -> PostgreSQL
      -> Redis/BullMQ
 
 Worker
   -> S3 read
   -> Docling parse
-  -> embedding/rerank via LiteLLM
+  -> embedding/rerank via model gateway
   -> PostgreSQL writes
 ```
 
@@ -289,12 +289,12 @@ Output constraints:
 
 ---
 
-## 11. LiteLLM-First Strategy
+## 11. Model-Gateway Strategy
 
 ### 11.1 Gateway policy
 
 - App code never calls provider SDKs directly.
-- All model traffic routes through LiteLLM.
+- All model traffic routes through the model gateway.
 - Model usage uses aliases only:
   - `chat-default`
   - `embed-default`
@@ -302,7 +302,7 @@ Output constraints:
 
 ### 11.2 Internal SDK
 
-Use internal package `packages/litellm-sdk` for:
+Use internal package `packages/model-gateway` for:
 
 - chat complete/stream
 - embedding
@@ -435,7 +435,7 @@ Dashboards must support:
 ### Phase 3: Runtime hardening
 
 - Enforce worker and queue team fairness
-- Add team-aware cost controls in LiteLLM metadata path
+- Add team-aware cost controls in model-gateway metadata path
 - Add retrieval guard checks for team/workspace scope
 
 ### Phase 4: Enterprise deployment profiles

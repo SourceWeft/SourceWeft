@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -8,10 +8,18 @@ import {
   Folder,
   FolderPlus,
   Link2,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  RotateCcw,
   Search,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
+import { HttpClientError } from "@sourceweft/sdk";
+import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
@@ -19,23 +27,85 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@sourceweft/ui-web/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@sourceweft/ui-web/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
+import { Progress } from "@sourceweft/ui-web/components/ui/progress";
+import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { contentClient } from "../../../../lib/sdk";
 import {
   citations,
   connectors,
-  librarySources,
+  type CitationItem,
+  type ConnectorItem,
   type SourceItem,
 } from "./mock-data";
 
 const tabs = ["Library", "Citations", "Connectors"] as const;
-
-const tabCounts: Partial<Record<(typeof tabs)[number], number>> = {
-  Citations: citations.length,
-  Connectors: connectors.length,
-};
+const addTabs = ["Text", "File"] as const;
+const MAX_FILES = 20;
+const MAX_FILE_SIZE_MB = 50;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 type CheckedState = boolean | "indeterminate";
+type AddTab = (typeof addTabs)[number];
+type SourceApiRecord = Awaited<
+  ReturnType<typeof contentClient.listSources>
+>["items"][number];
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof HttpClientError) {
+    return error.message || fallback;
+  }
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  return fallback;
+}
+
+function apiStatusToSourceStatus(status: string): SourceItem["status"] {
+  if (status === "indexed") return "Indexed";
+  if (status === "processing" || status === "queued") return "Syncing";
+  return "Needs review";
+}
+
+function apiTypeToSourceType(
+  sourceType: string,
+  mimeType: string | null,
+): SourceItem["type"] {
+  if (sourceType === "web_url" || sourceType === "youtube") return "WEB";
+  if (sourceType === "note") return "NOTE";
+  if (mimeType?.includes("pdf")) return "PDF";
+  return "DOC";
+}
+
+function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
+  return items.map((item) => ({
+    id: item.id,
+    title: item.title || "Untitled",
+    type: apiTypeToSourceType(item.sourceType, item.mimeType),
+    status: apiStatusToSourceStatus(item.status),
+    meta:
+      item.status === "failed"
+        ? "Processing failed"
+        : item.status === "queued" || item.status === "processing"
+          ? "Sync in progress"
+          : new Date(item.updatedAt).toLocaleString(),
+  }));
+}
 
 function TypeBadge({ label }: { label: string }) {
   return (
@@ -60,60 +130,164 @@ function StatusDot({ status }: { status: SourceItem["status"] }) {
   );
 }
 
-// ---- Individual file row ----
-
 function SourceRow({
   source,
   selected,
   onToggle,
+  isBusy,
+  isEditing,
+  editTitle,
+  onEditTitleChange,
+  onStartRename,
+  onCancelRename,
+  onSubmitRename,
+  onDelete,
+  onReindex,
 }: {
   source: SourceItem;
   selected: boolean;
   onToggle: (id: string) => void;
+  isBusy: boolean;
+  isEditing: boolean;
+  editTitle: string;
+  onEditTitleChange: (value: string) => void;
+  onStartRename: () => void;
+  onCancelRename: () => void;
+  onSubmitRename: () => void;
+  onDelete: () => void;
+  onReindex: () => void;
 }) {
   return (
-    <label
+    <div
       className={cn(
-        "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
+        "group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
         selected ? "bg-primary/5" : "hover:bg-accent/60",
       )}
     >
       <Checkbox
         checked={selected}
         className="mt-0.5"
+        disabled={isBusy}
         onCheckedChange={() => onToggle(source.id)}
       />
+
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <FileText className="size-3 shrink-0 text-muted-foreground" />
-          <span className="truncate text-xs font-medium text-foreground">
-            {source.title}
-          </span>
-        </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          <StatusDot status={source.status} />
-          <span className="truncate text-[10px] text-muted-foreground">
-            {source.meta}
-          </span>
-          <TypeBadge label={source.type} />
-        </div>
+        {isEditing ? (
+          <div className="space-y-2">
+            <Input
+              autoFocus
+              className="h-7 text-xs"
+              disabled={isBusy}
+              onChange={(e) => onEditTitleChange(e.target.value)}
+              value={editTitle}
+            />
+            <div className="flex items-center gap-1.5">
+              <Button
+                disabled={isBusy || !editTitle.trim()}
+                onClick={onSubmitRename}
+                size="xs"
+                type="button"
+                variant="outline"
+              >
+                Save
+              </Button>
+              <Button
+                disabled={isBusy}
+                onClick={onCancelRename}
+                size="xs"
+                type="button"
+                variant="ghost"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5">
+              <FileText className="size-3 shrink-0 text-muted-foreground" />
+              <span className="truncate text-xs font-medium text-foreground">
+                {source.title}
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <StatusDot status={source.status} />
+              <span className="truncate text-[10px] text-muted-foreground">
+                {source.meta}
+              </span>
+              <TypeBadge label={source.type} />
+            </div>
+          </>
+        )}
       </div>
-    </label>
+
+      {!isEditing ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              className="opacity-100 md:opacity-0 md:group-hover:opacity-100"
+              disabled={isBusy}
+              size="icon-xs"
+              title="Source actions"
+              type="button"
+              variant="ghost"
+            >
+              {isBusy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <MoreHorizontal className="size-3.5" />
+              )}
+              <span className="sr-only">Source actions</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-36">
+            <DropdownMenuItem onClick={onStartRename}>
+              <Pencil className="size-3.5" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onReindex}>
+              <RotateCcw className="size-3.5" />
+              Re-index
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onDelete} variant="destructive">
+              <Trash2 className="size-3.5" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
   );
 }
-
-// ---- Folder group ----
 
 function FolderGroup({
   name,
   sources,
   selectedIds,
   onToggle,
+  rowBusyById,
+  editingId,
+  editingTitle,
+  onEditTitleChange,
+  onStartRename,
+  onCancelRename,
+  onSubmitRename,
+  onDelete,
+  onReindex,
 }: {
   name: string;
   sources: SourceItem[];
   selectedIds: string[];
   onToggle: (id: string) => void;
+  rowBusyById: Record<string, boolean>;
+  editingId: string | null;
+  editingTitle: string;
+  onEditTitleChange: (value: string) => void;
+  onStartRename: (source: SourceItem) => void;
+  onCancelRename: () => void;
+  onSubmitRename: (id: string) => void;
+  onDelete: (source: SourceItem) => void;
+  onReindex: (source: SourceItem) => void;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -169,7 +343,16 @@ function FolderGroup({
         <div className="ml-5 space-y-0.5 border-l border-border pl-2.5 pb-1">
           {sources.map((source) => (
             <SourceRow
+              editTitle={editingTitle}
+              isBusy={Boolean(rowBusyById[source.id])}
+              isEditing={editingId === source.id}
               key={source.id}
+              onCancelRename={onCancelRename}
+              onDelete={() => onDelete(source)}
+              onEditTitleChange={onEditTitleChange}
+              onReindex={() => onReindex(source)}
+              onStartRename={() => onStartRename(source)}
+              onSubmitRename={() => onSubmitRename(source.id)}
               onToggle={onToggle}
               selected={selectedIds.includes(source.id)}
               source={source}
@@ -181,25 +364,41 @@ function FolderGroup({
   );
 }
 
-// ---- Library tab ----
-
 function LibraryTab({
+  sources,
   searchQuery,
   selectedIds,
   onToggle,
+  rowBusyById,
+  editingId,
+  editingTitle,
+  onEditTitleChange,
+  onStartRename,
+  onCancelRename,
+  onSubmitRename,
+  onDelete,
+  onReindex,
 }: {
+  sources: SourceItem[];
   searchQuery: string;
   selectedIds: string[];
   onToggle: (id: string) => void;
+  rowBusyById: Record<string, boolean>;
+  editingId: string | null;
+  editingTitle: string;
+  onEditTitleChange: (value: string) => void;
+  onStartRename: (source: SourceItem) => void;
+  onCancelRename: () => void;
+  onSubmitRename: (id: string) => void;
+  onDelete: (source: SourceItem) => void;
+  onReindex: (source: SourceItem) => void;
 }) {
   const q = searchQuery.toLowerCase();
 
   const filtered = useMemo(
     () =>
-      q
-        ? librarySources.filter((s) => s.title.toLowerCase().includes(q))
-        : librarySources,
-    [q],
+      q ? sources.filter((s) => s.title.toLowerCase().includes(q)) : sources,
+    [sources, q],
   );
 
   const folders = useMemo(() => {
@@ -222,7 +421,9 @@ function LibraryTab({
   if (filtered.length === 0) {
     return (
       <p className="py-6 text-center text-xs text-muted-foreground">
-        No sources match &quot;{searchQuery}&quot;
+        {searchQuery
+          ? `No sources match "${searchQuery}"`
+          : "No sources in this workspace yet."}
       </p>
     );
   }
@@ -231,9 +432,18 @@ function LibraryTab({
     <div className="space-y-1">
       {folderNames.map((name) => (
         <FolderGroup
+          editingId={editingId}
+          editingTitle={editingTitle}
           key={name}
           name={name}
+          onCancelRename={onCancelRename}
+          onDelete={onDelete}
+          onEditTitleChange={onEditTitleChange}
+          onReindex={onReindex}
+          onStartRename={onStartRename}
+          onSubmitRename={onSubmitRename}
           onToggle={onToggle}
+          rowBusyById={rowBusyById}
           selectedIds={selectedIds}
           sources={folders.get(name)!}
         />
@@ -243,7 +453,16 @@ function LibraryTab({
         <div className="space-y-0.5">
           {rootItems.map((source) => (
             <SourceRow
+              editTitle={editingTitle}
+              isBusy={Boolean(rowBusyById[source.id])}
+              isEditing={editingId === source.id}
               key={source.id}
+              onCancelRename={onCancelRename}
+              onDelete={() => onDelete(source)}
+              onEditTitleChange={onEditTitleChange}
+              onReindex={() => onReindex(source)}
+              onStartRename={() => onStartRename(source)}
+              onSubmitRename={() => onSubmitRename(source.id)}
               onToggle={onToggle}
               selected={selectedIds.includes(source.id)}
               source={source}
@@ -255,25 +474,148 @@ function LibraryTab({
   );
 }
 
-// ---- SourcesHub ----
-
 export function SourcesHub({
   mode,
   selectedIds,
   onSelectionChange,
+  workspaceId,
+  onSourceLoad,
 }: {
   mode: "thread" | "new";
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  workspaceId?: string | null;
+  onSourceLoad?: (sources: SourceItem[]) => void;
 }) {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>(
     mode === "thread" ? "Citations" : "Library",
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [sources, setSources] = useState<SourceItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addTab, setAddTab] = useState<AddTab>("Text");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [textTitle, setTextTitle] = useState("");
+  const [textContent, setTextContent] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
+
+  const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([]);
+
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setActiveTab(mode === "thread" ? "Citations" : "Library");
   }, [mode]);
+
+  const refreshSources = useCallback(async () => {
+    if (!workspaceId) {
+      setSources([]);
+      onSourceLoad?.([]);
+      return;
+    }
+
+    setIsLoading(true);
+    setLoadingError(null);
+    try {
+      const result = await contentClient.listSources(workspaceId);
+      const mapped = mapSourcesToUi(result.items);
+      setSources(mapped);
+      onSourceLoad?.(mapped);
+
+      const syncing = result.items
+        .filter((item) => item.status === "queued" || item.status === "processing")
+        .map((item) => item.id);
+      if (syncing.length > 0) {
+        setPendingSourceIds((prev) => Array.from(new Set([...prev, ...syncing])));
+      }
+    } catch (error) {
+      const message = getErrorMessage(error, "Failed to load sources.");
+      setLoadingError(message);
+      setSources([]);
+      onSourceLoad?.([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [workspaceId, onSourceLoad]);
+
+  useEffect(() => {
+    void refreshSources();
+  }, [refreshSources]);
+
+  useEffect(() => {
+    if (!workspaceId || pendingSourceIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const statuses = await Promise.all(
+          pendingSourceIds.map(async (id) => ({
+            id,
+            status: await contentClient.getSourceStatus(workspaceId, id),
+          })),
+        );
+        if (cancelled) {
+          return;
+        }
+
+        const nextPending: string[] = [];
+        let shouldRefresh = false;
+        for (const result of statuses) {
+          const current = result.status.status;
+          if (current === "queued" || current === "processing") {
+            nextPending.push(result.id);
+            continue;
+          }
+
+          shouldRefresh = true;
+          if (current === "failed") {
+            toast.error("Source processing failed.");
+          }
+        }
+
+        setPendingSourceIds(nextPending);
+        if (shouldRefresh) {
+          void refreshSources();
+        }
+      } catch {
+        // Keep polling quietly; source listing refresh will surface errors.
+      }
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [workspaceId, pendingSourceIds, refreshSources]);
+
+  useEffect(() => {
+    setEditingSourceId((prev) => {
+      if (!prev) return prev;
+      return sources.some((s) => s.id === prev) ? prev : null;
+    });
+
+    const sourceIds = new Set(sources.map((s) => s.id));
+    const nextSelected = selectedIds.filter((id) => sourceIds.has(id));
+    if (nextSelected.length !== selectedIds.length) {
+      onSelectionChange(nextSelected);
+    }
+  }, [sources, selectedIds, onSelectionChange]);
+
+  const tabCounts: Partial<Record<(typeof tabs)[number], number>> = {
+    Citations: citations.length,
+    Connectors: connectors.length,
+  };
 
   function handleToggle(id: string) {
     if (selectedIds.includes(id)) {
@@ -283,206 +625,640 @@ export function SourcesHub({
     }
   }
 
+  function setRowBusy(id: string, busy: boolean) {
+    setRowBusyById((prev) => {
+      if (busy) return { ...prev, [id]: true };
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  const handleStartRename = useCallback((source: SourceItem) => {
+    setEditingSourceId(source.id);
+    setEditingTitle(source.title);
+  }, []);
+
+  const handleCancelRename = useCallback(() => {
+    setEditingSourceId(null);
+    setEditingTitle("");
+  }, []);
+
+  const handleSubmitRename = useCallback(
+    async (id: string) => {
+      if (!workspaceId) return;
+      const title = editingTitle.trim();
+      if (!title) return;
+
+      setRowBusy(id, true);
+      try {
+        await contentClient.updateSource(workspaceId, id, { title });
+        toast.success("Source renamed.");
+        setEditingSourceId(null);
+        setEditingTitle("");
+        await refreshSources();
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to rename source."));
+      } finally {
+        setRowBusy(id, false);
+      }
+    },
+    [workspaceId, editingTitle, refreshSources],
+  );
+
+  const handleDeleteSource = useCallback(
+    async (source: SourceItem) => {
+      if (!workspaceId) return;
+      const confirmed = window.confirm(`Delete source "${source.title}"?`);
+      if (!confirmed) return;
+
+      setRowBusy(source.id, true);
+      try {
+        await contentClient.deleteSource(workspaceId, source.id);
+        toast.success("Source deleted.");
+        onSelectionChange(selectedIds.filter((id) => id !== source.id));
+        await refreshSources();
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to delete source."));
+      } finally {
+        setRowBusy(source.id, false);
+      }
+    },
+    [workspaceId, refreshSources, onSelectionChange, selectedIds],
+  );
+
+  const handleReindexSource = useCallback(
+    async (source: SourceItem) => {
+      if (!workspaceId) return;
+
+      setRowBusy(source.id, true);
+      try {
+        await contentClient.indexSource(workspaceId, source.id, {});
+        toast.success("Re-index queued.");
+        setPendingSourceIds((prev) =>
+          prev.includes(source.id) ? prev : [...prev, source.id],
+        );
+        await refreshSources();
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to re-index source."));
+      } finally {
+        setRowBusy(source.id, false);
+      }
+    },
+    [workspaceId, refreshSources],
+  );
+
+  const resetAddForm = useCallback(() => {
+    setTextTitle("");
+    setTextContent("");
+    setFiles([]);
+    setUploadProgress(0);
+    setAddTab("Text");
+    setIsDragActive(false);
+    dragDepthRef.current = 0;
+  }, []);
+
+  const handleOpenAddDialog = useCallback(() => {
+    setIsAddOpen(true);
+  }, []);
+
+  const handleCloseAddDialog = useCallback((open: boolean) => {
+    setIsAddOpen(open);
+    if (!open) {
+      resetAddForm();
+    }
+  }, [resetAddForm]);
+
+  const handleAddFiles = useCallback((incoming: File[] | null) => {
+    if (!incoming || incoming.length === 0) return;
+
+    const nextFiles = [...files];
+    for (const file of incoming) {
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        toast.error(`\"${file.name}\" exceeds ${MAX_FILE_SIZE_MB}MB.`);
+        continue;
+      }
+      if (nextFiles.length >= MAX_FILES) {
+        toast.error(`You can upload up to ${MAX_FILES} files at once.`);
+        break;
+      }
+      nextFiles.push(file);
+    }
+    setFiles(nextFiles);
+  }, [files]);
+
+  const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  }, []);
+
+  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragActive(false);
+    dragDepthRef.current = 0;
+    const dropped = Array.from(event.dataTransfer.files ?? []);
+    handleAddFiles(dropped);
+  }, [handleAddFiles]);
+
+  const handleCreateTextSource = useCallback(async () => {
+    if (!workspaceId) {
+      toast.error("No workspace selected yet.");
+      return;
+    }
+
+    const contentText = textContent.trim();
+    if (!contentText) {
+      toast.error("Source content cannot be empty.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const created = await contentClient.createSource(workspaceId, {
+        title: textTitle.trim() || undefined,
+        contentText,
+      });
+
+      await contentClient.indexSource(workspaceId, created.source.id, {});
+      setPendingSourceIds((prev) =>
+        prev.includes(created.source.id) ? prev : [...prev, created.source.id],
+      );
+
+      toast.success("Source added and indexing started.");
+      setIsAddOpen(false);
+      resetAddForm();
+      await refreshSources();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to create source."));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [workspaceId, textTitle, textContent, resetAddForm, refreshSources]);
+
+  const handleUploadFiles = useCallback(async () => {
+    if (!workspaceId) {
+      toast.error("No workspace selected yet.");
+      return;
+    }
+    if (files.length === 0) {
+      toast.error("Select files to upload first.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setUploadProgress(0);
+    const createdSourceIds: string[] = [];
+    const total = files.length;
+    let processed = 0;
+
+    try {
+      for (const file of files) {
+        const result = await contentClient.uploadSource(workspaceId, file);
+        createdSourceIds.push(result.source.id);
+        processed += 1;
+        setUploadProgress(Math.round((processed / total) * 100));
+      }
+
+      if (createdSourceIds.length > 0) {
+        setPendingSourceIds((prev) =>
+          Array.from(new Set([...prev, ...createdSourceIds])),
+        );
+      }
+
+      toast.success(
+        createdSourceIds.length === 1
+          ? "1 source uploaded. Processing started."
+          : `${createdSourceIds.length} sources uploaded. Processing started.`,
+      );
+      setIsAddOpen(false);
+      resetAddForm();
+      await refreshSources();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to upload files."));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [workspaceId, files, resetAddForm, refreshSources]);
+
   return (
-    <aside className="flex h-full w-[410px] shrink-0 flex-col border-l bg-background">
-      {/* Header */}
-      <div className="shrink-0 border-b px-3 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-foreground">Sources</h2>
-        </div>
+    <>
+      <aside className="flex h-full w-[410px] shrink-0 flex-col border-l bg-background">
+        <div className="shrink-0 border-b px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-medium text-foreground">Sources</h2>
+            {pendingSourceIds.length > 0 ? (
+              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" />
+                syncing {pendingSourceIds.length}
+              </span>
+            ) : null}
+          </div>
 
-        {/* Search */}
-        <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="h-8 pl-8 text-xs"
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search sources..."
-            value={searchQuery}
-          />
-          {searchQuery && (
-            <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => setSearchQuery("")}
-              type="button"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
-        </div>
+          <div className="relative mt-2">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="h-8 pl-8 text-xs"
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search sources..."
+              value={searchQuery}
+            />
+            {searchQuery && (
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setSearchQuery("")}
+                type="button"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
 
-        {/* Tabs */}
-        <div className="mt-2 flex flex-wrap gap-1 border-t pt-2">
-          {tabs.map((tab) => (
-            <button
-              className={cn(
-                "rounded-lg px-2.5 py-1 text-[11px] transition-colors",
-                activeTab === tab
-                  ? "bg-secondary text-foreground shadow-xs ring-1 ring-border"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              type="button"
-            >
-              <span>{tab}</span>
-              {tabCounts[tab] !== undefined ? (
-                <span className="ml-1.5 text-[10px] text-current/70">
-                  {tabCounts[tab]}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Scrollable content */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {/* Library */}
-        {activeTab === "Library" && (
-          <section className="space-y-1">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium text-foreground">Library</h3>
-                <span className="text-[10px] text-muted-foreground">
-                  {librarySources.length} sources
-                </span>
-                {selectedIds.length > 0 ? (
-                  <span className="text-[10px] text-primary">
-                    {selectedIds.length} selected
+          <div className="mt-2 flex flex-wrap gap-1 border-t pt-2">
+            {tabs.map((tab) => (
+              <button
+                className={cn(
+                  "rounded-lg px-2.5 py-1 text-[11px] transition-colors",
+                  activeTab === tab
+                    ? "bg-secondary text-foreground shadow-xs ring-1 ring-border"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                type="button"
+              >
+                <span>{tab}</span>
+                {tabCounts[tab] !== undefined ? (
+                  <span className="ml-1.5 text-[10px] text-current/70">
+                    {tabCounts[tab]}
                   </span>
                 ) : null}
-              </div>
-              <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
-                <Button
-                  size="icon-xs"
-                  title="Create folder"
-                  type="button"
-                  variant="ghost"
-                >
-                  <FolderPlus className="size-3.5" />
-                  <span className="sr-only">Create folder</span>
-                </Button>
-                <Button size="xs" type="button" variant="outline">
-                  <Upload className="size-3.5" />
-                  Add source
-                </Button>
-              </div>
-            </div>
-            <LibraryTab
-              onToggle={handleToggle}
-              searchQuery={searchQuery}
-              selectedIds={selectedIds}
-            />
-          </section>
-        )}
+              </button>
+            ))}
+          </div>
+        </div>
 
-        {/* Citations */}
-        {activeTab === "Citations" && (
-          <section className="space-y-1">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium text-foreground">
-                  Citations
-                </h3>
-                <span className="text-[10px] text-muted-foreground">
-                  {citations.length} citations
-                </span>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {activeTab === "Library" && (
+            <section className="space-y-1">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium text-foreground">Library</h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    {sources.length} sources
+                  </span>
+                  {selectedIds.length > 0 ? (
+                    <span className="text-[10px] text-primary">
+                      {selectedIds.length} selected
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex min-h-8 items-center justify-end gap-1.5">
+                  <Button
+                    disabled
+                    size="icon-xs"
+                    title="Folder management is not available yet"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <FolderPlus className="size-3.5" />
+                    <span className="sr-only">Create folder</span>
+                  </Button>
+                  <Button
+                    onClick={handleOpenAddDialog}
+                    size="xs"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Upload className="size-3.5" />
+                    Add source
+                  </Button>
+                </div>
               </div>
-              <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5" />
-            </div>
-            {mode === "new" ? (
-              <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
-                Citations appear after the assistant grounds an answer in your
-                sources.
+
+              {loadingError ? (
+                <Alert className="mb-2" variant="destructive">
+                  <AlertDescription>{loadingError}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              {isLoading ? (
+                <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  Loading sources...
+                </div>
+              ) : (
+                <LibraryTab
+                  editingId={editingSourceId}
+                  editingTitle={editingTitle}
+                  onCancelRename={handleCancelRename}
+                  onDelete={handleDeleteSource}
+                  onEditTitleChange={setEditingTitle}
+                  onReindex={handleReindexSource}
+                  onStartRename={handleStartRename}
+                  onSubmitRename={handleSubmitRename}
+                  onToggle={handleToggle}
+                  rowBusyById={rowBusyById}
+                  searchQuery={searchQuery}
+                  selectedIds={selectedIds}
+                  sources={sources}
+                />
+              )}
+            </section>
+          )}
+
+          {activeTab === "Citations" && (
+            <section className="space-y-1">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium text-foreground">
+                    Citations
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    {citations.length} citations
+                  </span>
+                </div>
+                <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5" />
               </div>
-            ) : (
+              {mode === "new" ? (
+                <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
+                  Citations appear after the assistant grounds an answer in your
+                  sources.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {citations.map((citation: CitationItem, index: number) => (
+                    <article
+                      className="rounded-lg border bg-background p-2.5 shadow-xs"
+                      key={citation.id}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                            {citation.messageLabel}
+                          </div>
+                          <h4 className="mt-0.5 truncate text-sm font-medium text-foreground">
+                            [{index + 1}] {citation.sourceTitle}
+                          </h4>
+                        </div>
+                        <Button size="xs" type="button" variant="outline">
+                          <FileText className="size-3.5" />
+                          Open
+                        </Button>
+                      </div>
+                      <div className="mt-2 rounded-md border border-input bg-muted/20 px-2 py-2 text-sm leading-6 text-foreground">
+                        {citation.excerpt}
+                      </div>
+                      <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
+                        <span className="rounded-full border border-input bg-background px-2 py-0.5">
+                          grounded excerpt
+                        </span>
+                        <span>Jump back to message</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {activeTab === "Connectors" && (
+            <section className="space-y-1">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium text-foreground">
+                    Connectors
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    {connectors.length} connectors
+                  </span>
+                </div>
+                <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
+                  <Button size="xs" type="button" variant="outline">
+                    <Link2 className="size-3.5" />
+                    Connect
+                  </Button>
+                </div>
+              </div>
               <div className="space-y-1.5">
-                {citations.map((citation, index) => (
+                {connectors.map((connector: ConnectorItem) => (
                   <article
                     className="rounded-lg border bg-background p-2.5 shadow-xs"
-                    key={citation.id}
+                    key={connector.id}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                          {citation.messageLabel}
-                        </div>
-                        <h4 className="mt-0.5 truncate text-sm font-medium text-foreground">
-                          [{index + 1}] {citation.sourceTitle}
-                        </h4>
-                      </div>
-                      <Button size="xs" type="button" variant="outline">
-                        <FileText className="size-3.5" />
-                        Open
-                      </Button>
-                    </div>
-                    <div className="mt-2 rounded-md border border-input bg-muted/20 px-2 py-2 text-sm leading-6 text-foreground">
-                      {citation.excerpt}
-                    </div>
-                    <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
-                      <span className="rounded-full border border-input bg-background px-2 py-0.5">
-                        grounded excerpt
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-foreground">
+                        {connector.name}
+                      </p>
+                      <span className="text-[11px] text-muted-foreground">
+                        {connector.status}
                       </span>
-                      <span>Jump back to message</span>
                     </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {connector.meta}
+                    </p>
+                    {mode === "new" ? (
+                      <div className="mt-3">
+                        <Button size="xs" type="button" variant="outline">
+                          <Upload className="size-3.5" />
+                          Pull sources
+                        </Button>
+                      </div>
+                    ) : null}
                   </article>
                 ))}
               </div>
-            )}
-          </section>
-        )}
+            </section>
+          )}
+        </div>
+      </aside>
 
-        {/* Connectors */}
-        {activeTab === "Connectors" && (
-          <section className="space-y-1">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-medium text-foreground">
-                  Connectors
-                </h3>
-                <span className="text-[10px] text-muted-foreground">
-                  {connectors.length} connectors
-                </span>
-              </div>
-              <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
-                <Button size="xs" type="button" variant="outline">
-                  <Link2 className="size-3.5" />
-                  Connect
-                </Button>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              {connectors.map((connector) => (
-                <article
-                  className="rounded-lg border bg-background p-2.5 shadow-xs"
-                  key={connector.id}
+      <Dialog onOpenChange={handleCloseAddDialog} open={isAddOpen}>
+        <DialogContent
+          className="w-[640px] max-w-[calc(100%-2rem)]"
+          constrainWidth={false}
+        >
+          <DialogHeader>
+            <DialogTitle>Add source</DialogTitle>
+            <DialogDescription>
+              Add text notes or upload files into your workspace library.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="flex gap-1 rounded-lg border bg-muted/30 p-1">
+              {addTabs.map((tab) => (
+                <button
+                  className={cn(
+                    "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                    addTab === tab
+                      ? "bg-background text-foreground shadow-xs ring-1 ring-border"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  key={tab}
+                  onClick={() => setAddTab(tab)}
+                  type="button"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-foreground">
-                      {connector.name}
-                    </p>
-                    <span className="text-[11px] text-muted-foreground">
-                      {connector.status}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {connector.meta}
-                  </p>
-                  {mode === "new" ? (
-                    <div className="mt-3">
-                      <Button size="xs" type="button" variant="outline">
-                        <Upload className="size-3.5" />
-                        Pull sources
-                      </Button>
-                    </div>
-                  ) : null}
-                </article>
+                  {tab}
+                </button>
               ))}
             </div>
-          </section>
-        )}
-      </div>
-    </aside>
+
+            <div className="h-72">
+              {addTab === "Text" ? (
+                <div className="flex h-full flex-col gap-2">
+                  <Input
+                    onChange={(e) => setTextTitle(e.target.value)}
+                    placeholder="Title (optional)"
+                    value={textTitle}
+                  />
+                  <Textarea
+                    className="min-h-0 flex-1"
+                    onChange={(e) => setTextContent(e.target.value)}
+                    placeholder="Paste or write source content..."
+                    value={textContent}
+                  />
+                </div>
+              ) : (
+                <div className="flex h-full min-h-0 flex-col gap-2">
+                  <div
+                    className={cn(
+                      "rounded-lg border border-dashed px-4 py-5 text-center text-xs transition-colors",
+                      isDragActive
+                        ? "border-primary bg-primary/5 text-foreground"
+                        : "border-border text-muted-foreground hover:bg-accent/40",
+                    )}
+                    onDragEnter={handleDragEnter}
+                    onDragLeave={handleDragLeave}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                  >
+                    <input
+                      className="hidden"
+                      ref={fileInputRef}
+                      multiple
+                      onChange={(e) => {
+                        handleAddFiles(Array.from(e.target.files ?? []));
+                        e.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                    <span className="inline-flex items-center gap-1.5 text-foreground">
+                      <Upload className="size-3.5" />
+                      {isDragActive ? "Drop files here" : "Drag files here"}
+                    </span>
+                    <p className="mt-1 text-[10px]">
+                      or
+                      <button
+                        className="mx-1 inline font-medium text-foreground underline underline-offset-2"
+                        onClick={() => fileInputRef.current?.click()}
+                        type="button"
+                      >
+                        browse
+                      </button>
+                      files
+                    </p>
+                    <p className="mt-1 text-[10px]">
+                      Up to {MAX_FILES} files, {MAX_FILE_SIZE_MB}MB each
+                    </p>
+                  </div>
+
+                  <div className="min-h-0 flex-1 rounded-lg border p-2">
+                    {files.length > 0 ? (
+                      <div className="h-full space-y-1.5 overflow-y-auto">
+                        {files.map((file, idx) => (
+                          <div
+                            className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5"
+                            key={`${file.name}-${file.size}-${idx}`}
+                          >
+                            <span className="truncate text-xs text-foreground">
+                              {file.name}
+                            </span>
+                            <Button
+                              onClick={() =>
+                                setFiles((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              size="icon-xs"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <X className="size-3.5" />
+                              <span className="sr-only">Remove file</span>
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
+                        No files selected
+                      </div>
+                    )}
+                  </div>
+
+                  {isSubmitting ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                        <span>Uploading</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <Progress className="h-1.5" value={uploadProgress} />
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              disabled={isSubmitting}
+              onClick={() => handleCloseAddDialog(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                isSubmitting ||
+                (addTab === "Text" && !textContent.trim()) ||
+                (addTab === "File" && files.length === 0)
+              }
+              onClick={() =>
+                addTab === "Text"
+                  ? void handleCreateTextSource()
+                  : void handleUploadFiles()
+              }
+              type="button"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Working...
+                </>
+              ) : (
+                <>{addTab === "Text" ? "Create source" : "Upload files"}</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

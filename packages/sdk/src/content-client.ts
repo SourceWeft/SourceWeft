@@ -1,18 +1,28 @@
 import type {
   CreateSourceRequest,
   CreateSourceResponse,
+  EditThreadRequest,
+  EditThreadResponse,
   CreateThreadRequest,
   CreateThreadResponse,
   DeleteSourceResponse,
+  GetThreadResponse,
+  RefreshThreadRequest,
+  RefreshThreadResponse,
   GetSourceResponse,
   IndexSourceRequest,
   IndexSourceResponse,
+  ListThreadModelCatalogResponse,
+  ListThreadsRequest,
   ListSourcesResponse,
-  ListThreadSourcesResponse,
-  SetThreadSourcesRequest,
-  SetThreadSourcesResponse,
+  SourceStatusResponse,
+  ListThreadsResponse,
   StreamThreadRequest,
   StreamThreadResponse,
+  UploadSourceResponse,
+  UpdateThreadModelSettingsRequest,
+  UpdateThreadModelSettingsResponse,
+  ListThreadMessagesResponse,
   UpdateSourceRequest,
   UpdateSourceResponse,
 } from "@sourceweft/contracts";
@@ -38,9 +48,25 @@ export class ContentClient {
     );
   }
 
+  uploadSource(workspaceId: string, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    return this.http.postForm<UploadSourceResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/upload`,
+      formData,
+    );
+  }
+
   getSource(workspaceId: string, sourceId: string) {
     return this.http.get<GetSourceResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}`,
+    );
+  }
+
+  getSourceStatus(workspaceId: string, sourceId: string) {
+    return this.http.get<SourceStatusResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/status`,
     );
   }
 
@@ -79,20 +105,47 @@ export class ContentClient {
     );
   }
 
-  listThreadSources(workspaceId: string, threadId: string) {
-    return this.http.get<ListThreadSourcesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/sources`,
+  listThreads(workspaceId: string, input: ListThreadsRequest = {}) {
+    const params = new URLSearchParams();
+    if (typeof input.limit === "number") {
+      params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+
+    const query = params.toString();
+    return this.http.get<ListThreadsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads${query ? `?${query}` : ""}`,
     );
   }
 
-  setThreadSources(
+  listThreadMessages(workspaceId: string, threadId: string) {
+    return this.http.get<ListThreadMessagesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/messages`,
+    );
+  }
+
+  getThread(workspaceId: string, threadId: string) {
+    return this.http.get<GetThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}`,
+    );
+  }
+
+  updateThreadModelSettings(
     workspaceId: string,
     threadId: string,
-    input: SetThreadSourcesRequest,
+    input: UpdateThreadModelSettingsRequest,
   ) {
-    return this.http.put<SetThreadSourcesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/sources`,
+    return this.http.patch<UpdateThreadModelSettingsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/model-settings`,
       input,
+    );
+  }
+
+  listThreadModelCatalog(workspaceId: string) {
+    return this.http.get<ListThreadModelCatalogResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/models`,
     );
   }
 
@@ -104,6 +157,34 @@ export class ContentClient {
     return this.http.post<StreamThreadResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
       input,
+    );
+  }
+
+  refreshThread(
+    workspaceId: string,
+    threadId: string,
+    input: RefreshThreadRequest = {},
+  ) {
+    return this.http.post<RefreshThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
+      {
+        ...input,
+        mode: "refresh",
+      },
+    );
+  }
+
+  editThread(
+    workspaceId: string,
+    threadId: string,
+    input: EditThreadRequest,
+  ) {
+    return this.http.post<EditThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
+      {
+        ...input,
+        mode: "edit",
+      },
     );
   }
 }

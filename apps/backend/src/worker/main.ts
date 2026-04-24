@@ -1,13 +1,20 @@
 import { Worker, type Job } from "bullmq";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
+import { ensureModelConfigBootstrapped } from "../shared/model-gateway";
 import { connectionOptions } from "../shared/redis-connection";
 import { processExampleJob } from "./processors/example-job";
+import { processSourceParseJob } from "./processors/source-parse";
+import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
+
+await ensureModelConfigBootstrapped();
 
 type JobPayload = Record<string, unknown>;
 
 const processors: Record<string, (job: Job<JobPayload>) => Promise<void>> = {
   example: processExampleJob,
+  "source-parse": processSourceParseJob,
+  "sync-model-pricing": processSyncModelPricingJob,
 };
 
 const defaultProcessor: (job: Job<JobPayload>) => Promise<void> =

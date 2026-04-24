@@ -163,6 +163,15 @@ function parseAlertLevel(value: string | undefined, fallback: AlertLevel) {
   return fallback;
 }
 
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
+
 function stripTrailingSlash(value: string) {
   return value.replace(/\/$/, "");
 }
@@ -277,20 +286,22 @@ export const config = {
   queueName: process.env.JOB_QUEUE_NAME || "sourceweft-jobs",
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 2),
   schedulerIntervalMs: Number(process.env.SCHEDULER_INTERVAL_MS || 60000),
+  s3: {
+    region: process.env.S3_REGION || process.env.AWS_REGION || "us-east-1",
+    bucket: process.env.S3_BUCKET || "",
+    endpoint: process.env.S3_ENDPOINT || "",
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.S3_ACCESS_KEY_ID || "",
+    secretAccessKey:
+      process.env.AWS_SECRET_ACCESS_KEY || process.env.S3_SECRET_ACCESS_KEY || "",
+    forcePathStyle: parseBoolean(process.env.S3_FORCE_PATH_STYLE, false),
+  },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
     false,
   ),
-  litellm: {
-    baseUrl: process.env.LITELLM_BASE_URL || "http://127.0.0.1:4000",
-    masterKey: process.env.LITELLM_MASTER_KEY || "",
-    chatModelAlias: process.env.LITELLM_CHAT_MODEL_ALIAS || "chat-default",
-    embedModelAlias: process.env.LITELLM_EMBED_MODEL_ALIAS || "embed-default",
-    rerankModelAlias:
-      process.env.LITELLM_RERANK_MODEL_ALIAS || "rerank-default",
-    timeoutMs: parsePositiveNumber(process.env.LITELLM_TIMEOUT_MS, 30_000),
-    maxRetries: parseNonNegativeNumber(process.env.LITELLM_MAX_RETRIES, 2),
-  },
+  modelGatewayEncryptionSecret: requireEnv("MODEL_GATEWAY_ENCRYPTION_SECRET"),
+  modelGatewayGlobalConfigPath:
+    process.env.MODEL_GATEWAY_GLOBAL_CONFIG_PATH?.trim() || null,
   auth: {
     secret: process.env.BETTER_AUTH_SECRET || "replace_with_dev_secret_only",
     baseUrl: resolveApiBaseUrl(),

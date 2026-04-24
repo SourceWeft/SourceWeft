@@ -36,70 +36,6 @@ services:
       timeout: 5s
       retries: 5
 
-  litellm:
-    image: docker.litellm.ai/berriai/litellm:main-latest
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    ports:
-      - "${LITELLM_PORT:-4000}:4000"
-    environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-dev-master-key}
-      LITELLM_CONFIG_FILE: /app/config.yaml
-      SYSTEM_DEFAULT_CHAT_MODEL: ${SYSTEM_DEFAULT_CHAT_MODEL:-openrouter/moonshotai/kimi-k2.5}
-      SYSTEM_DEFAULT_EMBED_MODEL: ${SYSTEM_DEFAULT_EMBED_MODEL:-openrouter/qwen/qwen3-embedding-8b}
-      SYSTEM_DEFAULT_RERANK_MODEL: ${SYSTEM_DEFAULT_RERANK_MODEL:-deepinfra/Qwen/Qwen3-Reranker-8B}
-      SYSTEM_DEFAULT_VIDEO_MODEL: ${SYSTEM_DEFAULT_VIDEO_MODEL:-}
-      SYSTEM_DEFAULT_TTS_MODEL: ${SYSTEM_DEFAULT_TTS_MODEL:-}
-      SYSTEM_DEFAULT_ASR_MODEL: ${SYSTEM_DEFAULT_ASR_MODEL:-}
-
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_API_BASE: ${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}
-
-      DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:-}
-      DEEPINFRA_API_BASE: ${DEEPINFRA_API_BASE:-https://api.deepinfra.com/v1/openai}
-
-      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
-      MOONSHOT_API_BASE: ${MOONSHOT_API_BASE:-https://api.moonshot.ai/v1}
-
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_API_BASE: ${DEEPSEEK_API_BASE:-https://api.deepseek.com/v1}
-
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_API_BASE: ${ANTHROPIC_API_BASE:-}
-
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-
-      AZURE_API_KEY: ${AZURE_API_KEY:-}
-      AZURE_API_BASE: ${AZURE_API_BASE:-}
-      AZURE_API_VERSION: ${AZURE_API_VERSION:-}
-
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_REGION_NAME: ${AWS_REGION_NAME:-}
-
-      COHERE_API_KEY: ${COHERE_API_KEY:-}
-      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      TOGETHERAI_API_KEY: ${TOGETHERAI_API_KEY:-}
-      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
-      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
-
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-    volumes:
-      - ./litellm/config.yaml:/app/config.yaml:ro
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:4000/health/liveliness'', timeout=3)"',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   api:
     image: node:20-alpine
     working_dir: /app
@@ -109,14 +45,12 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      LITELLM_BASE_URL: ${LITELLM_BASE_URL:-http://litellm:4000}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-dev-master-key}
+      MODEL_GATEWAY_GLOBAL_CONFIG_PATH: ${MODEL_GATEWAY_GLOBAL_CONFIG_PATH:-/app/apps/backend/config/model-gateway.global.json}
+      MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      litellm:
         condition: service_healthy
     restart: unless-stopped
 
@@ -129,14 +63,12 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      LITELLM_BASE_URL: ${LITELLM_BASE_URL:-http://litellm:4000}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-dev-master-key}
+      MODEL_GATEWAY_GLOBAL_CONFIG_PATH: ${MODEL_GATEWAY_GLOBAL_CONFIG_PATH:-/app/apps/backend/config/model-gateway.global.json}
+      MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      litellm:
         condition: service_healthy
     restart: unless-stopped
 

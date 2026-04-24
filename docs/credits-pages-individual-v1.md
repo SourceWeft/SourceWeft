@@ -85,7 +85,7 @@
 
 字段含义：
 
-- `provider_cost_usd`：模型/API 实际成本（由 LiteLLM usage + price book 计算）
+- `provider_cost_usd`：模型/API 实际成本（由 model gateway usage + price book 计算）
 - `platform_cost_usd`：平台额外成本（检索、编排、存储、网络摊销）
 - `markup_rate`：毛利系数（可按 feature 调整）
 - `credit_unit_usd`：每 credit 对应美元价值（默认 0.002）

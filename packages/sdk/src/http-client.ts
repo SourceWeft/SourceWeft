@@ -73,6 +73,13 @@ export class HttpClient {
     });
   }
 
+  async postForm<T>(path: string, body: FormData): Promise<T> {
+    return this.request<T>(path, {
+      method: "POST",
+      body,
+    });
+  }
+
   async patch<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>(path, {
       method: "PATCH",

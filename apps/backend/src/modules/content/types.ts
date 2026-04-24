@@ -1,14 +1,16 @@
+import type { Chunk } from "@chonkiejs/core";
+
 export type EmbeddingVectorStrategy =
   | "ann_hnsw"
   | "exact_vector"
-  | "bm25_only"
-  | "bm25_prefilter_exact";
+  | "bm25_only";
 
 export type EmbeddingProfileRecord = {
   id: string;
-  alias: string;
-  providerKind: "litellm";
-  providerModelAlias: string;
+  kind: "embedding";
+  profileAlias: string;
+  gatewayConfigId: string;
+  modelAlias: string;
   requestedDimensions: number | null;
   vectorStrategy: "auto" | "exact" | "disabled";
   isDefault: boolean;
@@ -42,15 +44,86 @@ export type SourceStatus =
   | "failed"
   | "archived";
 
+export type SourceType =
+  | "manual_upload"
+  | "file_upload"
+  | "web_url"
+  | "youtube"
+  | "note"
+  | "artifact"
+  | "connector";
+
+export type ParsingConfig = {
+  chunkSize: number;
+  parserVersion: string;
+};
+
+export type ChunkSpec = Chunk;
+
+export type SourceMetadata = {
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  pageCount?: number;
+  wordCount?: number;
+  charCount?: number;
+  extractedAt?: string;
+  uploadMethod?: "manual" | "api";
+  [key: string]: unknown;
+};
+
+export type SourceStatusStep =
+  | "created"
+  | "uploading"
+  | "queued"
+  | "parsing"
+  | "chunking"
+  | "embedding"
+  | "completed"
+  | "failed";
+
+export type SourceStatusDetail = {
+  status: SourceStatus;
+  progress: number;
+  currentStep: SourceStatusStep;
+  parsedPages: number | null;
+  totalPages: number | null;
+  error: string | null;
+  jobId: string | null;
+};
+
+export type SourceRevisionRecord = {
+  id: string;
+  sourceId: string;
+  revisionNo: number;
+  contentHash: string | null;
+  storageBucket: string | null;
+  storageKey: string | null;
+  parserVersion: string | null;
+  isLatest: boolean;
+  createdAt: string;
+};
+
 export type SourceRecord = {
   id: string;
   teamId: string;
   workspaceId: string;
+  ingestKind: "connector" | "manual_upload" | "web_url" | "youtube" | "note" | "artifact";
+  sourceType: SourceType;
   title: string;
   contentText: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  contentHash: string | null;
+  storageBucket: string | null;
+  storageKey: string | null;
   status: SourceStatus;
   estimatedPages: number | null;
   parsedTokens: number | null;
+  parserVersion: string | null;
+  parsingConfig: ParsingConfig | null;
+  metadata: SourceMetadata;
+  error: Record<string, unknown>;
   createdBy: string | null;
   indexedAt: string | null;
   createdAt: string;
@@ -94,6 +167,7 @@ export type SourceDetailRecord = {
   documents: SourceDocumentRecord[];
   chunks: SourceChunkRecord[];
   embeddings: SourceEmbeddingRecord[];
+  revisions: SourceRevisionRecord[];
 };
 
 export type ThreadRecord = {
@@ -101,6 +175,11 @@ export type ThreadRecord = {
   teamId: string;
   workspaceId: string;
   title: string;
+  modelSettings: {
+    llmProfileAlias: string | null;
+    imageProfileAlias: string | null;
+    visionProfileAlias: string | null;
+  };
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -113,6 +192,7 @@ export type MessageRecord = {
   teamId: string;
   workspaceId: string;
   threadId: string;
+  parentMessageId: string | null;
   role: MessageRole;
   content: string;
   createdBy: string | null;
@@ -120,4 +200,17 @@ export type MessageRecord = {
   creditsConsumed: number | null;
   metadata: Record<string, unknown>;
   createdAt: string;
+};
+
+export type ByokKeyRefRecord = {
+  id: string;
+  teamId: string;
+  workspaceId: string;
+  userId: string | null;
+  providerName: string;
+  keyRef: string;
+  isActive: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 };

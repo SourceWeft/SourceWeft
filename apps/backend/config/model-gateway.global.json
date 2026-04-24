@@ -1,0 +1,136 @@
+{
+  "gateways": [
+    {
+      "slug": "openrouter-default",
+      "providerName": "openrouter",
+      "providerKind": "openrouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "defaultHeaders": {
+        "X-Title": "SourceWeft",
+        "HTTP-Referer": "https://SourceWeft.com"
+      },
+      "supports": [
+        "chat",
+        "embeddings",
+        "rerank",
+        "tool_calling",
+        "json_schema"
+      ],
+      "timeoutMs": 30000,
+      "maxRetries": 2,
+      "isDefault": true,
+      "isActive": true,
+      "isBYOK": false
+    },
+    {
+      "slug": "deepinfra-default",
+      "providerName": "deepinfra",
+      "providerKind": "deepinfra",
+      "baseUrl": "https://api.deepinfra.com/v1/openai",
+      "apiKeyEnv": "DEEPINFRA_API_KEY",
+      "supports": [
+        "chat",
+        "embeddings",
+        "rerank"
+      ],
+      "timeoutMs": 30000,
+      "maxRetries": 2,
+      "isDefault": false,
+      "isActive": true,
+      "isBYOK": false
+    },
+    {
+      "slug": "siliconflow-default",
+      "providerName": "siliconflow",
+      "providerKind": "openai-compatible",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "apiKeyEnv": "SILICONFLOW_API_KEY",
+      "supports": [
+        "chat",
+        "embeddings",
+        "rerank",
+        "tool_calling",
+        "json_schema"
+      ],
+      "timeoutMs": 30000,
+      "maxRetries": 2,
+      "isDefault": false,
+      "isActive": true,
+      "isBYOK": false
+    }
+  ],
+  "chatProfiles": [
+    {
+      "modelAlias": "chat-default",
+      "gatewaySlug": "openrouter-default",
+      "providerName": "openrouter",
+      "targetModel": "minimax/minimax-m2.5",
+      "routingStrategy": "priority",
+      "priority": 1,
+      "weight": 100,
+      "isDefault": true,
+      "isActive": true
+    }
+  ],
+  "imageProfiles": [
+    {
+      "modelAlias": "image-default",
+      "gatewaySlug": "openrouter-default",
+      "providerName": "openrouter",
+      "targetModel": "openai/gpt-image-1",
+      "routingStrategy": "priority",
+      "priority": 1,
+      "weight": 100,
+      "isDefault": true,
+      "isActive": true
+    }
+  ],
+  "visionProfiles": [
+    {
+      "modelAlias": "vision-default",
+      "gatewaySlug": "openrouter-default",
+      "providerName": "openrouter",
+      "targetModel": "openai/gpt-4o-mini",
+      "routingStrategy": "priority",
+      "priority": 1,
+      "weight": 100,
+      "isDefault": true,
+      "isActive": true
+    }
+  ],
+  "rerankProfiles": [
+    {
+      "modelAlias": "rerank-default",
+      "gatewaySlug": "deepinfra-default",
+      "providerName": "deepinfra",
+      "targetModel": "Qwen/Qwen3-Reranker-4B",
+      "routingStrategy": "priority",
+      "priority": 1,
+      "weight": 100,
+      "isDefault": true,
+      "isActive": true,
+      "pricing": {
+        "litellmKey": "Qwen/Qwen3-Reranker-4B",
+        "inputCostPerToken": 2.5e-08,
+        "outputCostPerToken": 0
+      }
+    }
+  ],
+  "embeddingProfiles": [
+    {
+      "profileAlias": "embed-default",
+      "gatewaySlug": "deepinfra-default",
+      "providerName": "deepinfra",
+      "modelAlias": "embed-default",
+      "targetModel": "BAAI/bge-m3",
+      "routingStrategy": "priority",
+      "priority": 1,
+      "weight": 100,
+      "requestedDimensions": 1024,
+      "vectorStrategy": "auto",
+      "isDefault": true,
+      "isActive": true
+    }
+  ]
+}

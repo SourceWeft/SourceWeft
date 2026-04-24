@@ -94,12 +94,31 @@ export function registerWorkspaceRoutes(app: Hono) {
     const requestedWorkspaceId =
       c.req.header("x-workspace-id") || c.req.query("workspaceId") || null;
 
+    const organizationId = activeOrganizationId || null;
+    const ensureDefaultWorkspace = async (teamId: string) => {
+      const listed = await workspaceService.listWorkspaces({
+        organizationId: teamId,
+        userId,
+      });
+
+      if (listed.length > 0) {
+        return listed[0] ?? null;
+      }
+
+      return workspaceService.ensureDefaultWorkspace({
+        organizationId: teamId,
+        userId,
+      });
+    };
+
     const workspace = requestedWorkspaceId
       ? await workspaceService.resolveWorkspace({
           workspaceId: requestedWorkspaceId,
           userId,
         })
-      : null;
+      : organizationId
+        ? await ensureDefaultWorkspace(organizationId)
+        : null;
 
     return ApiResponse.success(c, {
       authenticated: true,

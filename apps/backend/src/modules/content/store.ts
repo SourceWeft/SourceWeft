@@ -1,41 +1,67 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
 import { db } from "../../shared/database";
 import {
   chunkEmbeddings,
   chunks,
   citations,
   documents,
-  embeddingProfiles,
   messages,
+  modelGatewayByokKeyRefs,
+  modelGatewayProfiles,
   retrievalHits,
   retrievalRuns,
   sources,
-  threadSources,
+  sourceRevisions,
   threads,
 } from "../../shared/db/schema";
 import type {
   ChunkRecord,
+  ChunkSpec,
   EmbeddingProfileRecord,
   EmbeddingVectorStrategy,
+  ByokKeyRefRecord,
   MessageRecord,
   MessageRole,
   SourceDetailRecord,
   SourceDocumentRecord,
   SourceEmbeddingRecord,
+  SourceMetadata,
   SourceRecord,
+  SourceRevisionRecord,
   SourceStatus,
+  SourceStatusDetail,
+  SourceStatusStep,
   ThreadRecord,
+  ParsingConfig,
 } from "./types";
 
 type SourceRow = typeof sources.$inferSelect;
 type ThreadRow = typeof threads.$inferSelect;
 type MessageRow = typeof messages.$inferSelect;
-type EmbeddingProfileRow = typeof embeddingProfiles.$inferSelect;
+type EmbeddingProfileRow = typeof modelGatewayProfiles.$inferSelect;
 type ChunkRow = typeof chunks.$inferSelect;
 type DocumentRow = typeof documents.$inferSelect;
 type ChunkEmbeddingRow = typeof chunkEmbeddings.$inferSelect;
-type ThreadSourceRow = typeof threadSources.$inferSelect;
+type ByokKeyRefRow = typeof modelGatewayByokKeyRefs.$inferSelect;
+type SourceRevisionRow = typeof sourceRevisions.$inferSelect;
+
+function normalizeThreadModelSettings(value: unknown) {
+  const record = value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+
+  const asNullableAlias = (candidate: unknown) =>
+    typeof candidate === "string" && candidate.trim().length > 0
+      ? candidate.trim()
+      : null;
+
+  return {
+    llmProfileAlias: asNullableAlias(record.llmProfileAlias),
+    imageProfileAlias: asNullableAlias(record.imageProfileAlias),
+    visionProfileAlias: asNullableAlias(record.visionProfileAlias),
+  };
+}
 
 type RetrievalSqlRow = {
   chunk_id: string;
@@ -45,27 +71,45 @@ type RetrievalSqlRow = {
   score: number;
 };
 
-type ThreadSourceRecord = {
-  threadId: string;
-  sourceId: string;
-  selectedBy: string | null;
-  createdAt: string;
-};
-
 function mapSource(row: SourceRow): SourceRecord {
   return {
     id: row.id,
     teamId: row.teamId,
     workspaceId: row.workspaceId,
+    ingestKind: row.ingestKind,
+    sourceType: row.sourceType as SourceRecord["sourceType"],
     title: row.title,
     contentText: row.contentText,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    contentHash: row.contentHash,
+    storageBucket: row.storageBucket,
+    storageKey: row.storageKey,
     status: row.status,
     estimatedPages: row.estimatedPages,
     parsedTokens: row.parsedTokens,
+    parserVersion: row.parserVersion,
+    parsingConfig: (row.parsingConfig ?? null) as ParsingConfig | null,
+    metadata: (row.metadataJson ?? {}) as SourceMetadata,
+    error: row.errorJson ?? {},
     createdBy: row.createdBy,
     indexedAt: row.indexedAt ? row.indexedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function mapSourceRevision(row: SourceRevisionRow): SourceRevisionRecord {
+  return {
+    id: row.id,
+    sourceId: row.sourceId,
+    revisionNo: row.revisionNo,
+    contentHash: row.contentHash,
+    storageBucket: row.storageBucket,
+    storageKey: row.storageKey,
+    parserVersion: row.parserVersion,
+    isLatest: row.isLatest,
+    createdAt: row.createdAt.toISOString(),
   };
 }
 
@@ -75,6 +119,7 @@ function mapThread(row: ThreadRow): ThreadRecord {
     teamId: row.teamId,
     workspaceId: row.workspaceId,
     title: row.title,
+    modelSettings: normalizeThreadModelSettings(row.modelSettingsJson),
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -87,6 +132,7 @@ function mapMessage(row: MessageRow): MessageRecord {
     teamId: row.teamId,
     workspaceId: row.workspaceId,
     threadId: row.threadId,
+    parentMessageId: row.parentMessageId,
     role: row.role,
     content: row.content,
     createdBy: row.createdBy,
@@ -100,9 +146,10 @@ function mapMessage(row: MessageRow): MessageRecord {
 function mapEmbeddingProfile(row: EmbeddingProfileRow): EmbeddingProfileRecord {
   return {
     id: row.id,
-    alias: row.alias,
-    providerKind: row.providerKind,
-    providerModelAlias: row.providerModelAlias,
+    profileAlias: row.profileAlias,
+    kind: "embedding",
+    gatewayConfigId: row.gatewayConfigId,
+    modelAlias: row.modelAlias,
     requestedDimensions: row.requestedDimensions,
     vectorStrategy: row.vectorStrategy,
     isDefault: row.isDefault,
@@ -155,12 +202,18 @@ function mapSourceEmbedding(row: ChunkEmbeddingRow): SourceEmbeddingRecord {
   };
 }
 
-function mapThreadSource(row: ThreadSourceRow): ThreadSourceRecord {
+function mapByokKeyRef(row: ByokKeyRefRow): ByokKeyRefRecord {
   return {
-    threadId: row.threadId,
-    sourceId: row.sourceId,
-    selectedBy: row.selectedBy,
+    id: row.id,
+    teamId: row.teamId,
+    workspaceId: row.workspaceId,
+    userId: row.userId,
+    providerName: row.providerName,
+    keyRef: row.keyRef,
+    isActive: row.isActive,
+    metadata: row.metadataJson ?? {},
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -172,6 +225,16 @@ export async function createSourceRecord(input: {
   createdBy: string;
   estimatedPages?: number;
   parsedTokens?: number;
+  sourceType?: SourceRecord["sourceType"];
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  contentHash?: string | null;
+  storageBucket?: string | null;
+  storageKey?: string | null;
+  parserVersion?: string | null;
+  parsingConfig?: ParsingConfig | null;
+  metadata?: SourceMetadata;
+  error?: Record<string, unknown>;
 }) {
   const id = randomUUID();
   const [row] = await db
@@ -180,11 +243,22 @@ export async function createSourceRecord(input: {
       id,
       teamId: input.teamId,
       workspaceId: input.workspaceId,
+      ingestKind: "manual_upload",
+      sourceType: input.sourceType ?? "manual_upload",
       title: input.title,
       contentText: input.contentText,
+      mimeType: input.mimeType ?? null,
+      sizeBytes: input.sizeBytes ?? null,
+      contentHash: input.contentHash ?? null,
+      storageBucket: input.storageBucket ?? null,
+      storageKey: input.storageKey ?? null,
+      parserVersion: input.parserVersion ?? null,
+      parsingConfig: input.parsingConfig ?? {},
       status: "created",
       estimatedPages: input.estimatedPages ?? null,
       parsedTokens: input.parsedTokens ?? null,
+      errorJson: input.error ?? {},
+      metadataJson: input.metadata ?? {},
       createdBy: input.createdBy,
       indexedAt: null,
     })
@@ -243,6 +317,16 @@ export async function updateSourceRecord(input: {
   contentText?: string;
   estimatedPages?: number | null;
   parsedTokens?: number | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  contentHash?: string | null;
+  storageBucket?: string | null;
+  storageKey?: string | null;
+  parserVersion?: string | null;
+  parsingConfig?: ParsingConfig | null;
+  metadata?: SourceMetadata;
+  error?: Record<string, unknown>;
+  status?: SourceStatus;
 }) {
   const updates: Partial<typeof sources.$inferInsert> & { updatedAt: Date } = {
     updatedAt: new Date(),
@@ -264,6 +348,46 @@ export async function updateSourceRecord(input: {
 
   if (input.parsedTokens !== undefined) {
     updates.parsedTokens = input.parsedTokens;
+  }
+
+  if (input.mimeType !== undefined) {
+    updates.mimeType = input.mimeType;
+  }
+
+  if (input.sizeBytes !== undefined) {
+    updates.sizeBytes = input.sizeBytes;
+  }
+
+  if (input.contentHash !== undefined) {
+    updates.contentHash = input.contentHash;
+  }
+
+  if (input.storageBucket !== undefined) {
+    updates.storageBucket = input.storageBucket;
+  }
+
+  if (input.storageKey !== undefined) {
+    updates.storageKey = input.storageKey;
+  }
+
+  if (input.parserVersion !== undefined) {
+    updates.parserVersion = input.parserVersion;
+  }
+
+  if (input.parsingConfig !== undefined) {
+    updates.parsingConfig = input.parsingConfig ?? {};
+  }
+
+  if (input.metadata !== undefined) {
+    updates.metadataJson = input.metadata;
+  }
+
+  if (input.error !== undefined) {
+    updates.errorJson = input.error;
+  }
+
+  if (input.status !== undefined) {
+    updates.status = input.status;
   }
 
   const [row] = await db
@@ -310,7 +434,7 @@ export async function getSourceDetailRecord(input: {
     return null;
   }
 
-  const [documentRows, chunkRows, embeddingRows] = await Promise.all([
+  const [documentRows, chunkRows, embeddingRows, revisionRows] = await Promise.all([
     db
       .select()
       .from(documents)
@@ -347,6 +471,17 @@ export async function getSourceDetailRecord(input: {
         ),
       )
       .orderBy(asc(chunkEmbeddings.createdAt)),
+    db
+      .select()
+      .from(sourceRevisions)
+      .where(
+        and(
+          eq(sourceRevisions.sourceId, input.sourceId),
+          eq(sourceRevisions.teamId, input.teamId),
+          eq(sourceRevisions.workspaceId, input.workspaceId),
+        ),
+      )
+      .orderBy(desc(sourceRevisions.revisionNo), desc(sourceRevisions.createdAt)),
   ]);
 
   return {
@@ -364,6 +499,7 @@ export async function getSourceDetailRecord(input: {
       createdAt: row.createdAt.toISOString(),
     })),
     embeddings: embeddingRows.map((row) => mapSourceEmbedding(row.embedding)),
+    revisions: revisionRows.map(mapSourceRevision),
   };
 }
 
@@ -375,6 +511,8 @@ export async function updateSourceStatus(input: {
   estimatedPages?: number | null;
   parsedTokens?: number | null;
   indexedAt?: Date | null;
+  error?: Record<string, unknown>;
+  metadata?: SourceMetadata;
 }) {
   const updates: {
     status: SourceStatus;
@@ -382,6 +520,8 @@ export async function updateSourceStatus(input: {
     updatedAt: Date;
     estimatedPages?: number | null;
     parsedTokens?: number | null;
+    errorJson?: Record<string, unknown>;
+    metadataJson?: SourceMetadata;
   } = {
     status: input.status,
     updatedAt: new Date(),
@@ -397,6 +537,14 @@ export async function updateSourceStatus(input: {
 
   if (input.parsedTokens !== undefined) {
     updates.parsedTokens = input.parsedTokens;
+  }
+
+  if (input.error !== undefined) {
+    updates.errorJson = input.error;
+  }
+
+  if (input.metadata !== undefined) {
+    updates.metadataJson = input.metadata;
   }
 
   const [row] = await db
@@ -418,11 +566,185 @@ export async function updateSourceStatus(input: {
   return mapSource(row);
 }
 
+export async function listSourceRevisionRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(sourceRevisions)
+    .where(
+      and(
+        eq(sourceRevisions.teamId, input.teamId),
+        eq(sourceRevisions.workspaceId, input.workspaceId),
+        eq(sourceRevisions.sourceId, input.sourceId),
+      ),
+    )
+    .orderBy(desc(sourceRevisions.revisionNo), desc(sourceRevisions.createdAt));
+
+  return rows.map(mapSourceRevision);
+}
+
+export async function listSourceChunks(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(chunks)
+    .where(
+      and(
+        eq(chunks.teamId, input.teamId),
+        eq(chunks.workspaceId, input.workspaceId),
+        eq(chunks.sourceId, input.sourceId),
+      ),
+    )
+    .orderBy(asc(chunks.chunkNo));
+
+  return rows.map(mapChunk);
+}
+
+export async function createSourceRevisionRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+  contentHash?: string | null;
+  storageBucket?: string | null;
+  storageKey?: string | null;
+  parserVersion?: string | null;
+  externalUpdatedAt?: Date | null;
+}) {
+  return db.transaction(async (tx) => {
+    const [latest] = await tx
+      .select({ revisionNo: sourceRevisions.revisionNo })
+      .from(sourceRevisions)
+      .where(
+        and(
+          eq(sourceRevisions.teamId, input.teamId),
+          eq(sourceRevisions.workspaceId, input.workspaceId),
+          eq(sourceRevisions.sourceId, input.sourceId),
+          eq(sourceRevisions.isLatest, true),
+        ),
+      )
+      .limit(1);
+
+    await tx
+      .update(sourceRevisions)
+      .set({ isLatest: false })
+      .where(
+        and(
+          eq(sourceRevisions.teamId, input.teamId),
+          eq(sourceRevisions.workspaceId, input.workspaceId),
+          eq(sourceRevisions.sourceId, input.sourceId),
+          eq(sourceRevisions.isLatest, true),
+        ),
+      );
+
+    const [row] = await tx
+      .insert(sourceRevisions)
+      .values({
+        id: randomUUID(),
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceId: input.sourceId,
+        revisionNo: (latest?.revisionNo ?? 0) + 1,
+        contentHash: input.contentHash ?? null,
+        storageBucket: input.storageBucket ?? null,
+        storageKey: input.storageKey ?? null,
+        externalUpdatedAt: input.externalUpdatedAt ?? null,
+        parserVersion: input.parserVersion ?? null,
+        isLatest: true,
+        createdAt: new Date(),
+      })
+      .returning();
+
+    if (!row) {
+      throw new Error("Failed to create source revision");
+    }
+
+    return mapSourceRevision(row);
+  });
+}
+
+function deriveStatusDetail(source: SourceRecord): SourceStatusDetail {
+  const metadata = source.metadata ?? {};
+  const status = source.status;
+  const progress =
+    typeof metadata.progress === "number" && Number.isFinite(metadata.progress)
+      ? Math.max(0, Math.min(100, metadata.progress))
+      : status === "indexed"
+        ? 100
+        : status === "failed"
+          ? 100
+          : status === "processing"
+            ? 50
+            : status === "queued"
+              ? 10
+              : 0;
+
+  const currentStep =
+    typeof metadata.currentStep === "string"
+      ? (metadata.currentStep as SourceStatusStep)
+      : status === "indexed"
+        ? "completed"
+        : status === "failed"
+          ? "failed"
+          : status === "processing"
+            ? "parsing"
+            : status === "queued"
+              ? "queued"
+              : "created";
+
+  const parsedPages =
+    typeof metadata.parsedPages === "number" ? metadata.parsedPages : null;
+  const totalPages =
+    typeof metadata.totalPages === "number"
+      ? metadata.totalPages
+      : source.estimatedPages;
+  const error =
+    typeof source.error?.message === "string"
+      ? source.error.message
+      : typeof metadata.error === "string"
+        ? metadata.error
+        : null;
+  const jobId = typeof metadata.jobId === "string" ? metadata.jobId : null;
+
+  return {
+    status,
+    progress,
+    currentStep,
+    parsedPages,
+    totalPages,
+    error,
+    jobId,
+  };
+}
+
+export async function getSourceStatusDetail(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+}) {
+  const source = await findSourceRecord(input);
+  if (!source) {
+    return null;
+  }
+
+  return deriveStatusDetail(source);
+}
+
 export async function createThreadRecord(input: {
   teamId: string;
   workspaceId: string;
   title: string;
   createdBy: string;
+  modelSettings?: {
+    llmProfileAlias?: string | null;
+    imageProfileAlias?: string | null;
+    visionProfileAlias?: string | null;
+  };
 }) {
   const id = randomUUID();
   const [row] = await db
@@ -432,6 +754,11 @@ export async function createThreadRecord(input: {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       title: input.title,
+      modelSettingsJson: {
+        llmProfileAlias: input.modelSettings?.llmProfileAlias ?? null,
+        imageProfileAlias: input.modelSettings?.imageProfileAlias ?? null,
+        visionProfileAlias: input.modelSettings?.visionProfileAlias ?? null,
+      },
       createdBy: input.createdBy,
     })
     .returning();
@@ -441,6 +768,43 @@ export async function createThreadRecord(input: {
   }
 
   return mapThread(row);
+}
+
+
+export async function listThreadRecordsByWorkspace(input: {
+  teamId: string;
+  workspaceId: string;
+  limit: number;
+  cursor?: {
+    id: string;
+    updatedAt: string;
+  };
+}) {
+  const cursorDate = input.cursor ? new Date(input.cursor.updatedAt) : null;
+  const whereConditions = [
+    eq(threads.teamId, input.teamId),
+    eq(threads.workspaceId, input.workspaceId),
+    eq(threads.archived, false),
+  ];
+
+  if (input.cursor && cursorDate) {
+    const cursorConditions = or(
+      lt(threads.updatedAt, cursorDate),
+      and(eq(threads.updatedAt, cursorDate), lt(threads.id, input.cursor.id)),
+    );
+    if (cursorConditions) {
+      whereConditions.push(cursorConditions);
+    }
+  }
+
+  const rows = await db
+    .select()
+    .from(threads)
+    .where(and(...whereConditions))
+    .orderBy(desc(threads.updatedAt), desc(threads.id))
+    .limit(input.limit);
+
+  return rows.map(mapThread);
 }
 
 export async function findThreadRecord(input: {
@@ -463,10 +827,39 @@ export async function findThreadRecord(input: {
   return row ? mapThread(row) : null;
 }
 
+export async function updateThreadModelSettingsRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  modelSettings: {
+    llmProfileAlias: string | null;
+    imageProfileAlias: string | null;
+    visionProfileAlias: string | null;
+  };
+}) {
+  const [row] = await db
+    .update(threads)
+    .set({
+      modelSettingsJson: input.modelSettings,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(threads.id, input.threadId),
+        eq(threads.teamId, input.teamId),
+        eq(threads.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+
+  return row ? mapThread(row) : null;
+}
+
 export async function createMessageRecord(input: {
   teamId: string;
   workspaceId: string;
   threadId: string;
+  parentMessageId?: string | null;
   role: MessageRole;
   content: string;
   createdBy?: string | null;
@@ -482,6 +875,7 @@ export async function createMessageRecord(input: {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       threadId: input.threadId,
+      parentMessageId: input.parentMessageId ?? null,
       role: input.role,
       content: input.content,
       createdBy: input.createdBy ?? null,
@@ -499,14 +893,35 @@ export async function createMessageRecord(input: {
   return mapMessage(row);
 }
 
+export async function listMessageRecordsByThread(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.teamId, input.teamId),
+        eq(messages.workspaceId, input.workspaceId),
+        eq(messages.threadId, input.threadId),
+      ),
+    )
+    .orderBy(asc(messages.createdAt));
+
+  return rows.map(mapMessage);
+}
+
 export async function findDefaultEmbeddingProfile() {
   const [row] = await db
     .select()
-    .from(embeddingProfiles)
+    .from(modelGatewayProfiles)
     .where(
       and(
-        eq(embeddingProfiles.isDefault, true),
-        eq(embeddingProfiles.isActive, true),
+        eq(modelGatewayProfiles.kind, "embedding"),
+        eq(modelGatewayProfiles.isDefault, true),
+        eq(modelGatewayProfiles.isActive, true),
       ),
     )
     .limit(1);
@@ -524,39 +939,12 @@ export async function replaceSourceDocumentsAndEmbeddings(input: {
   modelAlias: string;
   embeddings: number[][];
   requestedDimensions: number | null;
+  chunks: ChunkSpec[];
+  parsingConfig?: ParsingConfig | null;
 }) {
   const normalizedText = input.sourceContentText.trim();
   const baseTitle = input.sourceTitle.trim() || "Untitled Source";
-  const chunkSize = 1200;
-  const overlap = 200;
-  const segments: Array<{
-    content: string;
-    startOffset: number;
-    endOffset: number;
-    chunkNo: number;
-  }> = [];
-
-  if (normalizedText.length > 0) {
-    let start = 0;
-    let chunkNo = 0;
-    while (start < normalizedText.length) {
-      const end = Math.min(start + chunkSize, normalizedText.length);
-      const content = normalizedText.slice(start, end).trim();
-      if (content.length > 0) {
-        segments.push({
-          content,
-          startOffset: start,
-          endOffset: end,
-          chunkNo,
-        });
-        chunkNo += 1;
-      }
-      if (end >= normalizedText.length) {
-        break;
-      }
-      start = Math.max(0, end - overlap);
-    }
-  }
+  const segments = input.chunks;
 
   const now = new Date();
 
@@ -578,6 +966,7 @@ export async function replaceSourceDocumentsAndEmbeddings(input: {
       documentMetadata: {
         requestedDimensions: input.requestedDimensions,
         chunkCount: segments.length,
+        chunkSize: input.parsingConfig?.chunkSize ?? null,
       },
       createdAt: now,
       updatedAt: now,
@@ -585,7 +974,7 @@ export async function replaceSourceDocumentsAndEmbeddings(input: {
 
     const chunkIds: string[] = [];
     if (segments.length > 0) {
-      const chunkRows = segments.map((segment) => {
+      const chunkRows = segments.map((segment, index) => {
         const chunkId = randomUUID();
         chunkIds.push(chunkId);
         return {
@@ -594,13 +983,17 @@ export async function replaceSourceDocumentsAndEmbeddings(input: {
           workspaceId: input.workspaceId,
           sourceId: input.sourceId,
           documentId,
-          chunkNo: segment.chunkNo,
-          content: segment.content,
+          chunkNo: index,
+          content: segment.text,
+          // chonkiejs chunks do not carry heading hierarchy, so structural
+          // heading paths stay null until a parser-specific extractor exists.
           headingPath: null,
-          startOffset: segment.startOffset,
-          endOffset: segment.endOffset,
+          startOffset: segment.startIndex,
+          endOffset: segment.endIndex,
           language: null,
-          chunkMetadata: {},
+          chunkMetadata: {
+            tokenCount: segment.tokenCount,
+          },
           createdAt: now,
         };
       });
@@ -672,93 +1065,17 @@ export async function listSourceChunksByProfile(input: {
   }));
 }
 
-export async function listThreadSourceIds(input: {
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-}) {
-  const rows = await db
-    .select()
-    .from(threadSources)
-    .where(
-      and(
-        eq(threadSources.teamId, input.teamId),
-        eq(threadSources.workspaceId, input.workspaceId),
-        eq(threadSources.threadId, input.threadId),
-      ),
-    )
-    .orderBy(asc(threadSources.createdAt));
-
-  return rows.map((row) => row.sourceId);
-}
-
-export async function listThreadSourceRecords(input: {
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-}) {
-  const rows = await db
-    .select()
-    .from(threadSources)
-    .where(
-      and(
-        eq(threadSources.teamId, input.teamId),
-        eq(threadSources.workspaceId, input.workspaceId),
-        eq(threadSources.threadId, input.threadId),
-      ),
-    )
-    .orderBy(asc(threadSources.createdAt));
-
-  return rows.map(mapThreadSource);
-}
-
-export async function replaceThreadSourceRecords(input: {
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-  selectedBy: string;
-  sourceIds: string[];
-}) {
-  return db.transaction(async (tx) => {
-    await tx
-      .delete(threadSources)
-      .where(
-        and(
-          eq(threadSources.teamId, input.teamId),
-          eq(threadSources.workspaceId, input.workspaceId),
-          eq(threadSources.threadId, input.threadId),
-        ),
-      );
-
-    if (input.sourceIds.length === 0) {
-      return [] as ThreadSourceRecord[];
-    }
-
-    const inserted = await tx
-      .insert(threadSources)
-      .values(
-        input.sourceIds.map((sourceId) => ({
-          teamId: input.teamId,
-          workspaceId: input.workspaceId,
-          threadId: input.threadId,
-          sourceId,
-          selectedBy: input.selectedBy,
-          createdAt: new Date(),
-        })),
-      )
-      .returning();
-
-    return inserted.map(mapThreadSource);
-  });
-}
-
 export async function searchChunksByBm25(input: {
   teamId: string;
   workspaceId: string;
   queryText: string;
   topK: number;
-  sourceIds?: string[];
+  sourceIds: string[];
 }) {
+  if (input.sourceIds.length === 0) {
+    return [];
+  }
+
   const rows = await db.execute<RetrievalSqlRow>(sql`
     select
       id as chunk_id,
@@ -770,11 +1087,7 @@ export async function searchChunksByBm25(input: {
     where workspace_id = ${input.workspaceId}
       and team_id = ${input.teamId}
       and content ||| ${input.queryText}
-      ${
-        input.sourceIds && input.sourceIds.length > 0
-          ? sql`and source_id = any(${input.sourceIds})`
-          : sql``
-      }
+      and source_id = any(${input.sourceIds})
     order by pdb.score(id) desc
     limit ${input.topK}
   `);
@@ -795,8 +1108,12 @@ export async function searchChunksByVectorExact(input: {
   embeddingProfileId: string;
   queryEmbedding: number[];
   topK: number;
-  sourceIds?: string[];
+  sourceIds: string[];
 }) {
+  if (input.sourceIds.length === 0) {
+    return [];
+  }
+
   const rows = await db.execute<RetrievalSqlRow>(sql`
     select
       c.id as chunk_id,
@@ -809,11 +1126,7 @@ export async function searchChunksByVectorExact(input: {
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
-      ${
-        input.sourceIds && input.sourceIds.length > 0
-          ? sql`and c.source_id = any(${input.sourceIds})`
-          : sql``
-      }
+      and c.source_id = any(${input.sourceIds})
     order by ce.embedding <=> ${`[${input.queryEmbedding.join(",")}]`}::vector asc
     limit ${input.topK}
   `);
@@ -835,32 +1148,35 @@ export async function searchChunksByVectorAnn(input: {
   queryEmbedding: number[];
   dim: number;
   topK: number;
-  sourceIds?: string[];
+  sourceIds: string[];
 }) {
+  if (input.sourceIds.length === 0) {
+    return [];
+  }
+
+  if (!Number.isInteger(input.dim) || input.dim <= 0 || input.dim > 2000) {
+    throw new Error("Invalid vector dimensions for ANN search");
+  }
+
+  const dimLiteral = sql.raw(String(input.dim));
   const queryVector = `[${input.queryEmbedding.join(",")}]`;
-  const sourceFilter =
-    input.sourceIds && input.sourceIds.length > 0
-      ? `and c.source_id = any(array[${input.sourceIds.map((value) => `'${value.replace(/'/g, "''")}'`).join(",")}])`
-      : "";
-  const rows = await db.execute<RetrievalSqlRow>(
-    sql.raw(`
+  const rows = await db.execute<RetrievalSqlRow>(sql`
     select
       c.id as chunk_id,
       c.document_id,
       c.source_id,
       c.content,
-      1 - (ce.embedding::vector(${input.dim}) <=> '${queryVector}'::vector(${input.dim})) as score
+      1 - (ce.embedding::vector(${dimLiteral}) <=> ${queryVector}::vector(${dimLiteral})) as score
     from chunk_embeddings ce
     inner join chunks c on c.id = ce.chunk_id
-    where ce.team_id = '${input.teamId.replace(/'/g, "''")}'
-      and ce.workspace_id = '${input.workspaceId.replace(/'/g, "''")}'
-      and ce.embedding_profile_id = '${input.embeddingProfileId.replace(/'/g, "''")}'
-      ${sourceFilter}
+    where ce.team_id = ${input.teamId}
+      and ce.workspace_id = ${input.workspaceId}
+      and ce.embedding_profile_id = ${input.embeddingProfileId}
+      and c.source_id = any(${input.sourceIds})
       and ce.dim = ${input.dim}
-    order by ce.embedding::vector(${input.dim}) <=> '${queryVector}'::vector(${input.dim}) asc
+    order by ce.embedding::vector(${dimLiteral}) <=> ${queryVector}::vector(${dimLiteral}) asc
     limit ${input.topK}
-  `),
-  );
+  `);
 
   return rows.rows.map((row) => ({
     chunkId: row.chunk_id,
@@ -908,6 +1224,42 @@ export async function createCitationRecords(input: {
       createdAt: new Date(),
     })),
   );
+}
+
+
+export async function findCitationByMessageRank(input: {
+  teamId: string;
+  workspaceId: string;
+  messageId: string;
+  rank: number;
+}) {
+  const rows = await db
+    .select({
+      id: citations.id,
+      messageId: citations.messageId,
+      sourceId: citations.sourceId,
+      documentId: citations.documentId,
+      chunkId: citations.chunkId,
+      quoteText: citations.quoteText,
+      rank: citations.rank,
+      score: citations.score,
+      sourceTitle: sources.title,
+      chunkContent: chunks.content,
+    })
+    .from(citations)
+    .leftJoin(sources, eq(sources.id, citations.sourceId))
+    .leftJoin(chunks, eq(chunks.id, citations.chunkId))
+    .where(
+      and(
+        eq(citations.teamId, input.teamId),
+        eq(citations.workspaceId, input.workspaceId),
+        eq(citations.messageId, input.messageId),
+        eq(citations.rank, input.rank),
+      ),
+    )
+    .limit(1);
+
+  return rows[0] ?? null;
 }
 
 export async function createRetrievalRun(input: {
@@ -986,4 +1338,97 @@ export async function createRetrievalHits(input: {
       createdAt: new Date(),
     })),
   );
+}
+
+
+export async function listByokKeyRefRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(modelGatewayByokKeyRefs)
+    .where(
+      and(
+        eq(modelGatewayByokKeyRefs.teamId, input.teamId),
+        eq(modelGatewayByokKeyRefs.workspaceId, input.workspaceId),
+        eq(modelGatewayByokKeyRefs.isActive, true),
+      ),
+    )
+    .orderBy(desc(modelGatewayByokKeyRefs.updatedAt));
+
+  return rows
+    .filter((row) => row.userId === null || row.userId === input.userId)
+    .map(mapByokKeyRef);
+}
+
+export async function createByokKeyRefRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  providerName: string;
+  keyRef: string;
+  apiKeyEncrypted: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const [row] = await db
+    .insert(modelGatewayByokKeyRefs)
+    .values({
+      id: randomUUID(),
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      providerName: input.providerName,
+      keyRef: input.keyRef,
+      apiKeyEncrypted: input.apiKeyEncrypted,
+      isActive: true,
+      metadataJson: input.metadata ?? {},
+    })
+    .onConflictDoUpdate({
+      target: [
+        modelGatewayByokKeyRefs.workspaceId,
+        modelGatewayByokKeyRefs.userId,
+        modelGatewayByokKeyRefs.providerName,
+        modelGatewayByokKeyRefs.keyRef,
+      ],
+      set: {
+        apiKeyEncrypted: input.apiKeyEncrypted,
+        isActive: true,
+        metadataJson: input.metadata ?? {},
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+
+  if (!row) {
+    throw new Error("Failed to create BYOK key ref");
+  }
+
+  return mapByokKeyRef(row);
+}
+
+export async function deleteByokKeyRefRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  providerName: string;
+  keyRef: string;
+}) {
+  const [row] = await db
+    .update(modelGatewayByokKeyRefs)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(modelGatewayByokKeyRefs.teamId, input.teamId),
+        eq(modelGatewayByokKeyRefs.workspaceId, input.workspaceId),
+        eq(modelGatewayByokKeyRefs.userId, input.userId),
+        eq(modelGatewayByokKeyRefs.providerName, input.providerName),
+        eq(modelGatewayByokKeyRefs.keyRef, input.keyRef),
+        eq(modelGatewayByokKeyRefs.isActive, true),
+      ),
+    )
+    .returning();
+
+  return row ? mapByokKeyRef(row) : null;
 }

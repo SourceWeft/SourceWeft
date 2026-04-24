@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "../../shared/database";
-import {
-  authOrganizationMembers,
-  workspaceMemberships,
-  workspaces,
-} from "../../shared/db/schema";
+import { workspaceMemberships, workspaces } from "../../shared/db/schema";
 import type { Workspace, WorkspaceMembership, WorkspaceRole } from "./types";
 
 type WorkspaceRow = Pick<
@@ -18,7 +14,7 @@ type OrganizationMembershipRow = {
   organization_id: string;
   user_id: string;
   role: string;
-  created_at: Date;
+  created_at: string;
 };
 
 function mapWorkspaceRow(row: WorkspaceRow): Workspace {
@@ -185,7 +181,7 @@ export async function findOrganizationMembership(input: {
       "organizationId" as organization_id,
       "userId" as user_id,
       role,
-      "createdAt" as created_at
+      "createdAt"::text as created_at
     from member
     where "organizationId" = ${input.organizationId} and "userId" = ${input.userId}
     limit 1
@@ -200,7 +196,7 @@ export async function findOrganizationMembership(input: {
     organizationId: row.organization_id,
     userId: row.user_id,
     role: row.role,
-    createdAt: row.created_at.toISOString(),
+    createdAt: row.created_at,
   };
 }
 
@@ -239,34 +235,4 @@ export async function findMembershipByUser(userId: string) {
     .where(eq(workspaceMemberships.userId, userId))
     .limit(1);
   return row ? mapMembershipRow(row) : null;
-}
-
-export async function createOrganizationRecord(input: {
-  id: string;
-  name: string;
-  slug: string;
-}) {
-  const [row] = await db
-    .insert(authOrganizations)
-    .values({
-      id: input.id,
-    })
-    .returning();
-  return row;
-}
-
-export async function addMemberRecord(input: {
-  organizationId: string;
-  userId: string;
-  role: string;
-}) {
-  const [row] = await db
-    .insert(authOrganizationMembers)
-    .values({
-      organizationId: input.organizationId,
-      userId: input.userId,
-      role: input.role,
-    })
-    .returning();
-  return row;
 }

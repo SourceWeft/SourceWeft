@@ -15,7 +15,7 @@ Status:
 
 - Architecture guide for implementation
 - Compatible with current MVP behavior in this repository
-- Aligned with `docs/architecture.md`, `docs/litellm-hono-rag-overview.md`, and `docs/litellm-hono-rag-architecture.md`
+- Aligned with `docs/architecture.md`, `docs/model-gateway-rag-overview.md`, and `docs/model-gateway-rag-architecture.md`
 
 ---
 

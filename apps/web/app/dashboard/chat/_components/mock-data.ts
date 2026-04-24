@@ -54,18 +54,26 @@ export const workspaceSummary = {
   workspaceMeta: "12 sources · 4 collaborators",
 };
 
+function isoMinutesAgo(minutesAgo: number) {
+  return new Date(Date.now() - minutesAgo * 60 * 1000).toISOString();
+}
+
+function isoHoursAgo(hoursAgo: number) {
+  return new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString();
+}
+
 export const sharedChats: ChatItem[] = [
   {
     id: "shared-1",
     title: "Q2 launch narrative and evidence map",
-    updatedAt: "12 min ago",
+    updatedAt: isoMinutesAgo(12),
     sourceCount: 6,
     status: "running",
   },
   {
     id: "shared-2",
     title: "Competitor notes distilled into strategy",
-    updatedAt: "1 h ago",
+    updatedAt: isoHoursAgo(1),
     sourceCount: 4,
     status: "ready",
   },
@@ -75,21 +83,21 @@ export const privateChats: ChatItem[] = [
   {
     id: "private-1",
     title: "What should we ship in the notebook chat MVP?",
-    updatedAt: "Now",
+    updatedAt: new Date().toISOString(),
     sourceCount: 5,
     status: "ready",
   },
   {
     id: "private-2",
     title: "Draft product positioning against NotebookLM",
-    updatedAt: "Yesterday",
+    updatedAt: isoHoursAgo(24),
     sourceCount: 3,
     status: "attention",
   },
   {
     id: "private-3",
     title: "Meeting synthesis for team review",
-    updatedAt: "2 days ago",
+    updatedAt: isoHoursAgo(48),
     sourceCount: 2,
     status: "ready",
   },
@@ -99,7 +107,7 @@ export const archivedChats: ChatItem[] = [
   {
     id: "archived-1",
     title: "Legacy IA exploration",
-    updatedAt: "Last week",
+    updatedAt: isoHoursAgo(24 * 7),
     sourceCount: 2,
     status: "ready",
   },

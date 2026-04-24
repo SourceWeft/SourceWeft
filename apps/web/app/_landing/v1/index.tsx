@@ -166,7 +166,7 @@ function BrandLockup({ size = "nav" }: { size?: "nav" | "footer" }) {
 // ─── Navbar ───────────────────────────────────────────────────────────────────
 
 function Navbar() {
-  const authState = useAuthenticate();
+  const authState = useAuthenticate({ enabled: false });
   const isLoggedIn = Boolean(authState.data);
 
   return (
@@ -229,7 +229,7 @@ function Navbar() {
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 function HeroSection() {
-  const authState = useAuthenticate();
+  const authState = useAuthenticate({ enabled: false });
   const isLoggedIn = Boolean(authState.data);
 
   return (

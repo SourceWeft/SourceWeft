@@ -35,9 +35,31 @@ export type ModelItem = {
   chefSlug: string;
   id: string;
   name: string;
+  logoSrc?: string;
   provider: string;
   subtitle: string;
   badges?: string[];
+};
+
+export type ModelAliasSettings = {
+  llmProfileAlias?: string | null;
+  imageProfileAlias?: string | null;
+  visionProfileAlias?: string | null;
+};
+
+type CatalogModelEntry = {
+  modelAlias: string;
+  providerName: string;
+  providerKind: string;
+  displayName: string;
+  subtitle: string;
+  badges: string[];
+};
+
+type CatalogModelKinds = {
+  llm: CatalogModelEntry[];
+  image: CatalogModelEntry[];
+  vision: CatalogModelEntry[];
 };
 
 const llmModels = [
@@ -287,6 +309,214 @@ export const allModels: Record<ModelType, ModelItem[]> = {
   vision: visionModels,
 };
 
+function normalizeProviderSlug(value: string) {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug.length > 0 ? slug : "model";
+}
+
+const GLOBAL_AUTO_MODEL_ALIASES = new Set([
+  "chat-default",
+  "image-default",
+  "vision-default",
+]);
+
+const SOURCEWEFT_LOGO_SRC = "/logo.svg";
+
+function isInternalOpenRouterAlias(alias: string) {
+  return alias.startsWith("global-openrouter-");
+}
+
+function deriveDisplayNameFromAlias(alias: string) {
+  const modelPart = alias.replace(/^global-openrouter-(chat|image|vision):/, "");
+  if (!modelPart || modelPart === alias) {
+    return alias;
+  }
+  const tail = modelPart.split("/").at(-1) ?? modelPart;
+  return tail;
+}
+
+function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
+  const providerName = entry.providerName.trim();
+  const providerKind = entry.providerKind.trim();
+  const provider = providerName || providerKind || "unknown";
+  const isGlobalAutoModel = GLOBAL_AUTO_MODEL_ALIASES.has(entry.modelAlias);
+  const isOpenrouterModel =
+    providerName.toLowerCase() === "openrouter" ||
+    providerKind.toLowerCase() === "openrouter";
+  const displayName = entry.displayName.trim() || entry.modelAlias;
+  const subtitle = entry.subtitle.trim() || entry.modelAlias;
+  const chef = isGlobalAutoModel || isOpenrouterModel
+    ? "Global models"
+    : providerName || providerKind || "Model";
+  const name = isGlobalAutoModel
+    ? "Auto (Default)"
+    : displayName === entry.modelAlias && isInternalOpenRouterAlias(entry.modelAlias)
+      ? subtitle !== entry.modelAlias
+        ? subtitle
+        : deriveDisplayNameFromAlias(entry.modelAlias)
+      : displayName;
+  const itemSubtitle = isGlobalAutoModel
+    ? "Global models"
+    : subtitle;
+
+  return {
+    chef,
+    chefSlug: normalizeProviderSlug(
+      isGlobalAutoModel
+        ? "sourceweft"
+        : isOpenrouterModel
+          ? "openrouter"
+          : providerName || providerKind || "model",
+    ),
+    id: entry.modelAlias,
+    name,
+    logoSrc: isGlobalAutoModel ? SOURCEWEFT_LOGO_SRC : undefined,
+    provider: isOpenrouterModel ? "openrouter" : provider,
+    subtitle: itemSubtitle,
+    badges: entry.badges,
+  };
+}
+
+function scoreModelDisplayQuality(model: ModelItem) {
+  let score = 0;
+  if (!isInternalOpenRouterAlias(model.id)) {
+    score += 2;
+  }
+  if (model.name !== model.subtitle) {
+    score += 1;
+  }
+  if (model.name !== model.id) {
+    score += 1;
+  }
+  return score;
+}
+
+function dedupeCatalogModelItems(items: ModelItem[]) {
+  const output: ModelItem[] = [];
+  const openrouterIndexByTarget = new Map<string, number>();
+
+  for (const model of items) {
+    if (GLOBAL_AUTO_MODEL_ALIASES.has(model.id)) {
+      output.push(model);
+      continue;
+    }
+
+    const isOpenrouter = model.provider === "openrouter";
+    if (!isOpenrouter) {
+      output.push(model);
+      continue;
+    }
+
+    const dedupeTarget = model.subtitle.trim().toLowerCase();
+    if (!dedupeTarget) {
+      output.push(model);
+      continue;
+    }
+
+    const existingIndex = openrouterIndexByTarget.get(dedupeTarget);
+    if (existingIndex === undefined) {
+      openrouterIndexByTarget.set(dedupeTarget, output.length);
+      output.push(model);
+      continue;
+    }
+
+    const existing = output[existingIndex]!;
+    if (scoreModelDisplayQuality(model) > scoreModelDisplayQuality(existing)) {
+      output[existingIndex] = model;
+    }
+  }
+
+  return output;
+}
+
+export function mapCatalogKindsToModelItems(
+  kinds: CatalogModelKinds,
+): Record<ModelType, ModelItem[]> {
+  return {
+    llm: dedupeCatalogModelItems(kinds.llm.map(mapCatalogEntryToModelItem)),
+    image: dedupeCatalogModelItems(kinds.image.map(mapCatalogEntryToModelItem)),
+    vision: dedupeCatalogModelItems(kinds.vision.map(mapCatalogEntryToModelItem)),
+  };
+}
+
+function resolveAliasForType(type: ModelType, aliases?: ModelAliasSettings) {
+  if (!aliases) {
+    return null;
+  }
+
+  if (type === "llm") {
+    return aliases.llmProfileAlias ?? null;
+  }
+  if (type === "image") {
+    return aliases.imageProfileAlias ?? null;
+  }
+
+  return aliases.visionProfileAlias ?? null;
+}
+
+function pickSelectedModelForType(input: {
+  type: ModelType;
+  availableModels: Record<ModelType, ModelItem[]>;
+  threadAliases?: ModelAliasSettings;
+  fallbackAliases?: ModelAliasSettings;
+  fallbackModels?: Record<ModelType, ModelItem[]>;
+}) {
+  const kindModels = input.availableModels[input.type];
+  const fallbackKindModels = input.fallbackModels?.[input.type] ?? [];
+
+  const resolveByAlias = (alias: string | null) => {
+    if (!alias) {
+      return null;
+    }
+    return (
+      kindModels.find((model) => model.id === alias) ??
+      fallbackKindModels.find((model) => model.id === alias) ??
+      null
+    );
+  };
+
+  const fromThread = resolveByAlias(resolveAliasForType(input.type, input.threadAliases));
+  if (fromThread) {
+    return fromThread;
+  }
+
+  const fromDefaults = resolveByAlias(
+    resolveAliasForType(input.type, input.fallbackAliases),
+  );
+  if (fromDefaults) {
+    return fromDefaults;
+  }
+
+  return kindModels[0] ?? fallbackKindModels[0] ?? allModels[input.type][0]!;
+}
+
+export function resolveSelectedModels(input: {
+  availableModels: Record<ModelType, ModelItem[]>;
+  threadAliases?: ModelAliasSettings;
+  fallbackAliases?: ModelAliasSettings;
+  fallbackModels?: Record<ModelType, ModelItem[]>;
+}): Record<ModelType, ModelItem> {
+  return {
+    llm: pickSelectedModelForType({
+      ...input,
+      type: "llm",
+    }),
+    image: pickSelectedModelForType({
+      ...input,
+      type: "image",
+    }),
+    vision: pickSelectedModelForType({
+      ...input,
+      type: "vision",
+    }),
+  };
+}
+
 const modelTypeLabels: Record<ModelType, string> = {
   image: "Image",
   llm: "LLM",
@@ -305,21 +535,21 @@ function ModelTypeIcon({ type }: { type: ModelType }) {
 
 function SelectorPanel({
   activeTab,
+  availableModels,
+  onModelSelect,
   selectedModels,
   setActiveTab,
   setOpen,
   setSelectedModels,
 }: {
   activeTab: ModelType;
+  availableModels: Record<ModelType, ModelItem[]>;
+  onModelSelect?: (input: { type: ModelType; model: ModelItem }) => void;
   selectedModels: Record<ModelType, ModelItem>;
   setActiveTab: Dispatch<SetStateAction<ModelType>>;
   setOpen: Dispatch<SetStateAction<boolean>>;
   setSelectedModels: Dispatch<SetStateAction<Record<ModelType, ModelItem>>>;
 }) {
-  const chefs = [
-    ...new Set(allModels[activeTab].map((model) => model.chef)),
-  ];
-
   return (
     <Tabs
       className="w-full gap-0"
@@ -351,42 +581,57 @@ function SelectorPanel({
           </div>
           <ModelSelectorList className="max-h-[360px] overflow-y-auto">
             <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
-            {chefs.map((chef) => (
-              <ModelSelectorGroup heading={chef} key={chef}>
-                {allModels[type]
-                  .filter((model) => model.chef === chef)
-                  .map((model) => {
-                    const selected = selectedModels[type].id === model.id;
+            {(() => {
+              const modelsForType = availableModels[type] ?? [];
+              const chefs = [
+                ...new Set(modelsForType.map((model) => model.chef)),
+              ];
 
-                    return (
-                      <ModelSelectorItem
-                        data-checked={selected ? true : undefined}
-                        key={model.id}
-                        onSelect={() => {
-                          setSelectedModels((current) => ({
-                            ...current,
-                            [type]: model,
-                          }));
-                          setOpen(false);
-                        }}
-                        value={`${model.name} ${model.subtitle} ${model.provider} ${model.chef}`}
-                      >
-                        <ModelSelectorLogo provider={model.chefSlug} />
-                        <ModelSelectorName>{model.name}</ModelSelectorName>
-                        {model.badges?.map((badge) => (
-                          <Badge
-                            className="h-4 rounded-md px-1.5 text-[9px]"
-                            key={badge}
-                            variant="outline"
-                          >
-                            {badge}
-                          </Badge>
-                        ))}
-                      </ModelSelectorItem>
-                    );
-                  })}
-              </ModelSelectorGroup>
-            ))}
+              return chefs.map((chef) => (
+                <ModelSelectorGroup heading={chef} key={chef}>
+                  {modelsForType
+                    .concat()
+                    .filter((model) => model.chef === chef)
+                    .map((model) => {
+                      const selected = selectedModels[type].id === model.id;
+
+                      return (
+                        <ModelSelectorItem
+                          data-checked={selected ? true : undefined}
+                          key={model.id}
+                          onSelect={() => {
+                            setSelectedModels((current) => ({
+                              ...current,
+                              [type]: model,
+                            }));
+                            onModelSelect?.({
+                              type,
+                              model,
+                            });
+                            setOpen(false);
+                          }}
+                          value={`${model.name} ${model.subtitle} ${model.provider} ${model.chef}`}
+                        >
+                          <ModelSelectorLogo
+                            provider={model.chefSlug}
+                            src={model.logoSrc}
+                          />
+                          <ModelSelectorName>{model.name}</ModelSelectorName>
+                          {model.badges?.map((badge) => (
+                            <Badge
+                              className="h-4 rounded-md px-1.5 text-[9px]"
+                              key={badge}
+                              variant="outline"
+                            >
+                              {badge}
+                            </Badge>
+                          ))}
+                        </ModelSelectorItem>
+                      );
+                    })}
+                </ModelSelectorGroup>
+              ));
+            })()}
           </ModelSelectorList>
         </TabsContent>
       ))}
@@ -395,9 +640,13 @@ function SelectorPanel({
 }
 
 export function HeaderModelSelector({
+  availableModels = allModels,
+  onModelSelect,
   selectedModels,
   setSelectedModels,
 }: {
+  availableModels?: Record<ModelType, ModelItem[]>;
+  onModelSelect?: (input: { type: ModelType; model: ModelItem }) => void;
   selectedModels: Record<ModelType, ModelItem>;
   setSelectedModels: Dispatch<SetStateAction<Record<ModelType, ModelItem>>>;
 }) {
@@ -409,7 +658,13 @@ export function HeaderModelSelector({
       <TooltipProvider>
         <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs">
           {(["llm", "image", "vision"] as ModelType[]).map((type) => {
-            const model = selectedModels[type];
+            const model = selectedModels[type]
+              ?? availableModels[type]?.[0]
+              ?? allModels[type][0];
+
+            if (!model) {
+              return null;
+            }
 
             return (
               <Tooltip key={type}>
@@ -442,6 +697,8 @@ export function HeaderModelSelector({
       <ModelSelectorContent className="max-w-[92vw] sm:max-w-[460px]" title="Select model">
         <SelectorPanel
           activeTab={activeTab}
+          availableModels={availableModels}
+          onModelSelect={onModelSelect}
           selectedModels={selectedModels}
           setActiveTab={setActiveTab}
           setOpen={setOpen}
