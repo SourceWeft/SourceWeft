@@ -9,7 +9,7 @@ import {
   type ModelGateway,
   type ModelGatewayConfig,
 } from "@sourceweft/model-gateway";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { config } from "./config";
 import { db } from "./database";
 import {
@@ -336,7 +336,9 @@ const gatewayClientCache = new Map<
   }
 >();
 
-let modelConfigBootstrapPromise: Promise<void> | null = null;
+let modelConfigSyncPromise: Promise<void> | null = null;
+
+const MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID = 7_344_001;
 
 export function resolveGlobalModelGatewayConfigPath() {
   const configuredPath = config.modelGatewayGlobalConfigPath?.trim();
@@ -619,6 +621,7 @@ async function findDefaultModelGatewayProfileRow(kind: ModelGatewayProfileKind) 
 async function upsertModelGatewayProfileFromGlobalConfig(
   kind: ModelGatewayProfileKind,
   entry: {
+    profileId?: string;
     profileAlias: string;
     modelAlias: string;
     isDefault: boolean;
@@ -637,7 +640,11 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   const [existing] = await tx
     .select({ id: modelGatewayProfiles.id })
     .from(modelGatewayProfiles)
-    .where(eq(modelGatewayProfiles.profileAlias, entry.profileAlias))
+    .where(
+      entry.profileId
+        ? eq(modelGatewayProfiles.id, entry.profileId)
+        : eq(modelGatewayProfiles.profileAlias, entry.profileAlias),
+    )
     .limit(1);
 
   const setPayload = {
@@ -667,7 +674,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   }
 
   await tx.insert(modelGatewayProfiles).values({
-    id: randomUUID(),
+    id: entry.profileId ?? randomUUID(),
     ...setPayload,
     createdAt: now,
   });
@@ -747,47 +754,53 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
 
   const now = new Date();
   await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID})`);
+
     await tx
       .update(modelGatewayConfigVersions)
       .set({ isActive: false, updatedAt: now })
       .where(eq(modelGatewayConfigVersions.isActive, true));
 
-    const [existingVersion] = await tx
-      .select({ id: modelGatewayConfigVersions.id })
-      .from(modelGatewayConfigVersions)
-      .where(eq(modelGatewayConfigVersions.versionHash, loaded.versionHash))
-      .limit(1);
-
-    const configVersionId = existingVersion?.id ?? randomUUID();
-
-    if (existingVersion) {
-      await tx
-        .update(modelGatewayConfigVersions)
-        .set({
-          sourcePath: configPath,
-          isActive: true,
-          payloadJson: loaded.sourceJson,
-          updatedAt: now,
-        })
-        .where(eq(modelGatewayConfigVersions.id, existingVersion.id));
-
-      await tx
-        .delete(modelGatewayProviderConfigs)
-        .where(eq(modelGatewayProviderConfigs.configVersionId, existingVersion.id));
-      await tx
-        .delete(modelGatewayRoutes)
-        .where(eq(modelGatewayRoutes.configVersionId, existingVersion.id));
-    } else {
-      await tx.insert(modelGatewayConfigVersions).values({
-        id: configVersionId,
+    await tx
+      .insert(modelGatewayConfigVersions)
+      .values({
+        id: randomUUID(),
         versionHash: loaded.versionHash,
         sourcePath: configPath,
         isActive: true,
         payloadJson: loaded.sourceJson,
         createdAt: now,
         updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: modelGatewayConfigVersions.versionHash,
+        set: {
+          sourcePath: configPath,
+          isActive: true,
+          payloadJson: loaded.sourceJson,
+          updatedAt: now,
+        },
       });
+
+    const [versionRow] = await tx
+      .select({ id: modelGatewayConfigVersions.id })
+      .from(modelGatewayConfigVersions)
+      .where(eq(modelGatewayConfigVersions.versionHash, loaded.versionHash))
+      .limit(1);
+
+    if (!versionRow) {
+      throw new Error("Failed to resolve synchronized model gateway config version");
     }
+
+    const configVersionId = versionRow.id;
+
+    await tx
+      .delete(modelGatewayProviderConfigs)
+      .where(eq(modelGatewayProviderConfigs.configVersionId, configVersionId));
+    await tx
+      .delete(modelGatewayRoutes)
+      .where(eq(modelGatewayRoutes.configVersionId, configVersionId));
+
     await tx
       .update(modelGatewayConfigs)
       .set({ isDefault: false, updatedAt: now })
@@ -1094,20 +1107,37 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
   }
 }
 
-export async function ensureModelConfigBootstrapped() {
-  if (modelConfigBootstrapPromise) {
-    return modelConfigBootstrapPromise;
+export async function syncGlobalModelGatewayConfig() {
+  if (modelConfigSyncPromise) {
+    return modelConfigSyncPromise;
   }
 
-  modelConfigBootstrapPromise = (async () => {
+  modelConfigSyncPromise = (async () => {
     const globalConfigPath = resolveGlobalModelGatewayConfigPath();
     await syncGlobalModelGatewayConfigFromFile(globalConfigPath);
   })().catch((error) => {
-    modelConfigBootstrapPromise = null;
+    modelConfigSyncPromise = null;
     throw error;
   });
 
-  return modelConfigBootstrapPromise;
+  return modelConfigSyncPromise;
+}
+
+export async function ensureModelConfigAvailable() {
+  const deadline = Date.now() + 30_000;
+
+  while (Date.now() <= deadline) {
+    const activeVersion = await findActiveConfigVersionRow();
+    if (activeVersion) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(
+    "Global model gateway configuration is not synchronized. Start the scheduler or run the model gateway sync before starting API/worker.",
+  );
 }
 
 export async function getModelGatewayClient(gatewayConfigId?: string | null) {

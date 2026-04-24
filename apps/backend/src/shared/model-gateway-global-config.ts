@@ -33,6 +33,7 @@ export type GlobalProfilePricingEntry = {
 };
 
 export type GlobalModelProfileEntry = {
+  profileId?: string;
   profileAlias: string;
   modelAlias: string;
   gatewaySlug: string;
@@ -52,6 +53,7 @@ export type GlobalModelProfileEntry = {
 };
 
 export type GlobalEmbeddingProfileEntry = {
+  profileId?: string;
   profileAlias: string;
   gatewaySlug: string;
   providerName: string;
@@ -98,6 +100,7 @@ type RawGlobalGatewayEntry = {
 };
 
 type RawGlobalModelProfileEntry = {
+  profileId?: unknown;
   modelAlias?: unknown;
   gatewaySlug?: unknown;
   providerName?: unknown;
@@ -111,6 +114,7 @@ type RawGlobalModelProfileEntry = {
 };
 
 type RawGlobalEmbeddingProfileEntry = {
+  profileId?: unknown;
   profileAlias?: unknown;
   gatewaySlug?: unknown;
   providerName?: unknown;
@@ -380,6 +384,10 @@ function parseModelProfileEntry(
   );
 
   return {
+    profileId:
+      typeof entry.profileId === "string" && entry.profileId.trim().length > 0
+        ? entry.profileId.trim()
+        : undefined,
     profileAlias: modelAlias,
     modelAlias,
     gatewaySlug: asNonEmptyString(
@@ -446,6 +454,10 @@ function parseEmbeddingProfileEntry(
   );
 
   return {
+    profileId:
+      typeof entry.profileId === "string" && entry.profileId.trim().length > 0
+        ? entry.profileId.trim()
+        : undefined,
     profileAlias: asNonEmptyString(
       entry.profileAlias,
       `embeddingProfiles[${index}].profileAlias`,

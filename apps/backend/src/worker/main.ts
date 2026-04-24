@@ -1,13 +1,13 @@
 import { Worker, type Job } from "bullmq";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
-import { ensureModelConfigBootstrapped } from "../shared/model-gateway";
+import { ensureModelConfigAvailable } from "../shared/model-gateway";
 import { connectionOptions } from "../shared/redis-connection";
 import { processExampleJob } from "./processors/example-job";
 import { processSourceParseJob } from "./processors/source-parse";
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 
-await ensureModelConfigBootstrapped();
+await ensureModelConfigAvailable();
 
 type JobPayload = Record<string, unknown>;
 

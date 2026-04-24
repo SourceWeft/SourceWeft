@@ -33,7 +33,7 @@ import { billingService } from "../billing";
 import { createModelGatewayEvent } from "../../shared/model-gateway-observe";
 import { vectorSearchProvider } from "./vector";
 import {
-  ensureModelConfigBootstrapped,
+  ensureModelConfigAvailable,
   getModelGatewayClient,
   requireDefaultModelGatewayProfile,
 } from "../../shared/model-gateway";
@@ -1458,7 +1458,7 @@ async function runRetrieval(input: {
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
 }) {
-  await ensureModelConfigBootstrapped();
+  await ensureModelConfigAvailable();
   const profile = await requireDefaultEmbeddingProfile();
   const embeddingGateway = await getModelGatewayClient(profile.gatewayConfigId);
   const planner = planRetrievalStrategy(profile);
@@ -1985,7 +1985,7 @@ export class ContentService {
   }) {
     const { workspace, source } = await requireSource(input);
 
-    await ensureModelConfigBootstrapped();
+    await ensureModelConfigAvailable();
     const profile = await requireDefaultEmbeddingProfile();
     const embeddingGateway = await getModelGatewayClient(profile.gatewayConfigId);
     const planner = planRetrievalStrategy(profile);

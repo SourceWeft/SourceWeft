@@ -32,13 +32,7 @@ USING bm25 (
 WITH (key_field = 'id');
 --> statement-breakpoint
 
-CREATE INDEX IF NOT EXISTS "chunk_embeddings_embed_default_1024_hnsw_idx"
+CREATE INDEX IF NOT EXISTS "chunk_embeddings_global_embedding_bge_m3_1024_hnsw_idx"
 ON "chunk_embeddings"
 USING hnsw (("embedding"::vector(1024)) vector_cosine_ops)
-WHERE "embedding_profile_id" = 'embed-default' AND "dim" = 1024;
---> statement-breakpoint
-
-CREATE INDEX IF NOT EXISTS "chunk_embeddings_embed_default_1536_hnsw_idx"
-ON "chunk_embeddings"
-USING hnsw (("embedding"::vector(1536)) vector_cosine_ops)
-WHERE "embedding_profile_id" = 'embed-default' AND "dim" = 1536;
+WHERE "embedding_profile_id" = 'global:embedding:bge-m3-1024' AND "dim" = 1024;

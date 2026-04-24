@@ -19,6 +19,19 @@ export type RetrievalPlannerResult = {
   requestedDimensions: number | null;
 };
 
+const STATIC_ANN_INDEXES: Record<string, string> = {
+  "global:embedding:bge-m3-1024:1024":
+    "chunk_embeddings_global_embedding_bge_m3_1024_hnsw_idx",
+};
+
+function getStaticAnnIndex(profileId: string, dimensions: number | null) {
+  if (dimensions === null) {
+    return null;
+  }
+
+  return STATIC_ANN_INDEXES[`${profileId}:${dimensions}`] ?? null;
+}
+
 export function reciprocalRankFusion(input: {
   vectorCandidates: RetrievalCandidate[];
   bm25Candidates: RetrievalCandidate[];
@@ -83,10 +96,11 @@ export function planRetrievalStrategy(
     };
   }
 
-  if (vectorSearchProvider.supportsAnn(dimensions)) {
+  const annIndex = getStaticAnnIndex(profile.id, dimensions);
+  if (annIndex && vectorSearchProvider.supportsAnn(dimensions)) {
     return {
       strategy: "ann_hnsw",
-      annIndexUsed: `${profile.id}_${dimensions}_hnsw`,
+      annIndexUsed: annIndex,
       requestedDimensions: dimensions,
     };
   }

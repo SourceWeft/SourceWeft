@@ -3,7 +3,7 @@ import { logger } from "../../shared/logger";
 
 function buildHourlyPricingJobId(date: Date) {
   const bucket = date.toISOString().slice(0, 13);
-  return `sync-model-pricing:${bucket}`;
+  return `sync-model-pricing-${bucket}`;
 }
 
 export async function scheduleSyncModelPricing(): Promise<void> {

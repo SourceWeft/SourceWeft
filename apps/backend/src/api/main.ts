@@ -11,7 +11,7 @@ import { logger } from "../shared/logger";
 import { closeQueue, jobsQueue } from "../shared/queue";
 import { closeDatabase } from "../shared/database";
 import { config } from "../shared/config";
-import { ensureModelConfigBootstrapped } from "../shared/model-gateway";
+import { ensureModelConfigAvailable } from "../shared/model-gateway";
 import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
@@ -19,7 +19,7 @@ import { healthResponse } from "./routes/health";
 import { registerWorkspaceRoutes } from "./routes/workspace";
 import { ApiError, ApiResponse, toApiError } from "./response/api-response";
 
-await ensureModelConfigBootstrapped();
+await ensureModelConfigAvailable();
 
 const app = new Hono();
 

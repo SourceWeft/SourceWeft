@@ -119,6 +119,7 @@
   ],
   "embeddingProfiles": [
     {
+      "profileId": "global:embedding:bge-m3-1024",
       "profileAlias": "embed-default",
       "gatewaySlug": "deepinfra-default",
       "providerName": "deepinfra",

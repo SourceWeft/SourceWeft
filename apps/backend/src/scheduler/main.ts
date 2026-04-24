@@ -1,6 +1,6 @@
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
-import { ensureModelConfigBootstrapped } from "../shared/model-gateway";
+import { syncGlobalModelGatewayConfig } from "../shared/model-gateway";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
 import { scheduleExampleJob } from "./schedules/example-schedule";
@@ -9,7 +9,7 @@ import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
 
 const MODEL_PRICING_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
-await ensureModelConfigBootstrapped();
+await syncGlobalModelGatewayConfig();
 
 let tickInFlight = false;
 
