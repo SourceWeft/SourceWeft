@@ -36,7 +36,6 @@
     "@langchain/tavily": "^1.2.0",
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/credits-core": "workspace:*",
-    "@sourceweft/graph": "workspace:*",
     "@sourceweft/model-gateway": "workspace:*",
     "better-auth": "^1.5.6",
     "bullmq": "^5.63.0",

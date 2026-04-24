@@ -53,7 +53,7 @@ import { buildSourceStorageKey, downloadSourceObject, uploadSourceObject } from 
 import { enqueueSourceParseJob, type SourceParseJobPayload } from "./queue";
 import { chunkSourceContent } from "./chunker";
 import { buildAgentConfig, createThreadAgent } from "./agent";
-import { createRetrievalTool } from "@sourceweft/graph";
+import { createRetrievalTool } from "./agent/tools/retrieval-tool";
 import {
   buildCitationMetadata,
   planRetrievalStrategy,

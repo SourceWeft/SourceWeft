@@ -11,7 +11,7 @@
 import { createDeepAgent } from "deepagents";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
-import { CHAT_SYSTEM_PROMPT } from "@sourceweft/graph";
+import { CHAT_SYSTEM_PROMPT } from "./agent/prompts";
 import { getChatCheckpointer } from "../../shared/chat-checkpointer";
 import { createAgentChatModel } from "../../shared/model-gateway";
 
