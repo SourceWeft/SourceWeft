@@ -8,6 +8,8 @@ export type RetrievalCandidate = {
   chunkId: string;
   documentId: string;
   sourceId: string;
+  sourceTitle: string;
+  chunkNo: number;
   content: string;
   score: number;
   stage: "bm25" | "vector";
@@ -114,11 +116,29 @@ export function planRetrievalStrategy(
 
 export function buildCitationMetadata(candidates: RetrievalCandidate[]) {
   return candidates.map((candidate, index) => ({
-    citation: index + 1,
+    citation: `c${index + 1}`,
     sourceId: candidate.sourceId,
+    sourceTitle: candidate.sourceTitle,
     documentId: candidate.documentId,
     chunkId: candidate.chunkId,
+    chunkNo: candidate.chunkNo,
     score: Number(candidate.score.toFixed(6)),
-    excerpt: candidate.content.slice(0, 240),
+    excerpt: cleanCitationExcerpt(candidate.content).slice(0, 320),
   }));
+}
+
+function cleanCitationExcerpt(content: string) {
+  return content
+    .replace(/<\/?(?:table|thead|tbody|tr|th|td)[^>]*>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\\\$/g, "$ ")
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

@@ -1,9 +1,22 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  cloneElement,
+  createElement,
+  isValidElement,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import {
   ArrowUp,
+  CheckCircle2,
+  ChevronRight,
   Copy,
   FileText,
   Globe,
+  Loader2,
   Pencil,
   RotateCcw,
   Settings2,
@@ -85,10 +98,24 @@ function toAttachmentData(source: SourceItem) {
 export type MessageVersion = {
   id: string;
   content: string;
+  citations?: CitationRecord[];
   isError?: boolean;
+  sourceIds?: string[];
   sourceAssistantMessageId?: string | null;
   sourceUserMessageId?: string | null;
   toolCalls?: ToolCallRecord[];
+  thinkingSteps?: ThinkingStepRecord[];
+};
+
+export type CitationRecord = {
+  citation: string;
+  sourceId: string;
+  sourceTitle?: string;
+  documentId: string;
+  chunkId: string;
+  chunkNo?: number;
+  score: number;
+  excerpt: string;
 };
 
 export type ToolCallRecord = {
@@ -101,6 +128,13 @@ export type ToolCallRecord = {
   error: string | null;
 };
 
+export type ThinkingStepRecord = {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed";
+  items: string[];
+};
+
 export type VersionedMessageGroup = {
   groupId: string;
   turnId?: string;
@@ -111,6 +145,369 @@ export type VersionedMessageGroup = {
 
 function getMessageText(version: MessageVersion): string {
   return version.content;
+}
+
+const CITATION_PATTERN = /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
+
+function splitCitationIds(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function resolveCitationFromId(input: {
+  citationByChunkId: Map<string, CitationRecord>;
+  citationByKey: Map<string, CitationRecord>;
+  id: string;
+}) {
+  return input.citationByKey.get(input.id) ?? input.citationByChunkId.get(input.id);
+}
+
+function getCitationLabel(citation: CitationRecord | undefined, fallback: string) {
+  return citation?.sourceTitle?.trim() || (citation ? "Source" : fallback || "Source");
+}
+
+function CitationBadge({
+  citation,
+  label,
+  onCitationClick,
+}: {
+  citation?: CitationRecord;
+  label: string;
+  onCitationClick?: (citation: CitationRecord) => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "mx-0.5 inline-flex max-w-[14rem] cursor-pointer items-center justify-center rounded-full bg-primary/10 px-1.5 py-0.5 align-baseline text-[11px] font-medium leading-none text-primary transition-colors hover:bg-primary/15",
+        !citation && "cursor-default bg-muted text-muted-foreground hover:bg-muted",
+      )}
+      disabled={!citation}
+      onClick={() => {
+        if (citation) {
+          onCitationClick?.(citation);
+        }
+      }}
+      title={citation?.excerpt ?? `Citation ${label}`}
+      type="button"
+    >
+      <span className="min-w-0 truncate">{label}</span>
+    </button>
+  );
+}
+
+function makeCitationNode(input: {
+  citationByChunkId: Map<string, CitationRecord>;
+  citationByKey: Map<string, CitationRecord>;
+  id: string;
+  instanceIndex: number;
+  onCitationClick?: (citation: CitationRecord) => void;
+}) {
+  const citation = resolveCitationFromId(input);
+  const label = getCitationLabel(citation, input.id);
+
+  return (
+    <CitationBadge
+      citation={citation}
+      key={`citation-${input.id}-${input.instanceIndex}`}
+      label={label}
+      onCitationClick={input.onCitationClick}
+    />
+  );
+}
+
+function parseCitationText(input: {
+  citationByChunkId: Map<string, CitationRecord>;
+  citationByKey: Map<string, CitationRecord>;
+  onCitationClick?: (citation: CitationRecord) => void;
+  text: string;
+}) {
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let instanceIndex = 0;
+
+  CITATION_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = CITATION_PATTERN.exec(input.text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(input.text.slice(lastIndex, match.index));
+    }
+
+    for (const id of splitCitationIds(match[1] ?? "")) {
+      parts.push(
+        makeCitationNode({
+          citationByChunkId: input.citationByChunkId,
+          citationByKey: input.citationByKey,
+          id,
+          instanceIndex: instanceIndex++,
+          onCitationClick: input.onCitationClick,
+        }),
+      );
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < input.text.length) {
+    parts.push(input.text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [input.text];
+}
+
+function processCitationChildren(input: {
+  children: ReactNode;
+  citationByChunkId: Map<string, CitationRecord>;
+  citationByKey: Map<string, CitationRecord>;
+  onCitationClick?: (citation: CitationRecord) => void;
+}): ReactNode {
+  if (typeof input.children === "string") {
+    return parseCitationText({
+      citationByChunkId: input.citationByChunkId,
+      citationByKey: input.citationByKey,
+      onCitationClick: input.onCitationClick,
+      text: input.children,
+    });
+  }
+
+  if (Array.isArray(input.children)) {
+    return input.children.map((child, index) => (
+      <span key={index}>
+        {processCitationChildren({
+          ...input,
+          children: child,
+        })}
+      </span>
+    ));
+  }
+
+  if (isValidElement(input.children)) {
+    const child = input.children as ReactElement<{ children?: ReactNode }>;
+    if (child.type === "code" || child.type === "pre" || child.type === "a") {
+      return child;
+    }
+    return cloneElement(child, {
+      children: processCitationChildren({
+        ...input,
+        children: child.props.children,
+      }),
+    });
+  }
+
+  return input.children;
+}
+
+function CitationAwareMessageResponse({
+  citations,
+  children,
+  onCitationClick,
+}: {
+  citations: CitationRecord[] | undefined;
+  children: string;
+  onCitationClick?: (citation: CitationRecord) => void;
+}) {
+  const citationByKey = new Map(
+    (citations ?? []).map((citation) => [citation.citation, citation]),
+  );
+  const citationByChunkId = new Map(
+    (citations ?? []).map((citation) => [citation.chunkId, citation]),
+  );
+  const textComponent = ({ children: nodeChildren }: { children?: ReactNode }) => (
+    <>
+      {processCitationChildren({
+        children: nodeChildren,
+        citationByChunkId,
+        citationByKey,
+        onCitationClick,
+      })}
+    </>
+  );
+
+  const paragraphComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("p", null, textComponent({ children: nodeChildren }));
+  const listItemComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("li", null, textComponent({ children: nodeChildren }));
+  const strongComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("strong", null, textComponent({ children: nodeChildren }));
+  const emphasisComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("em", null, textComponent({ children: nodeChildren }));
+  const blockquoteComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("blockquote", null, textComponent({ children: nodeChildren }));
+  const h1Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("h1", null, textComponent({ children: nodeChildren }));
+  const h2Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("h2", null, textComponent({ children: nodeChildren }));
+  const h3Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("h3", null, textComponent({ children: nodeChildren }));
+  const h4Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("h4", null, textComponent({ children: nodeChildren }));
+  const h5Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("h5", null, textComponent({ children: nodeChildren }));
+  const h6Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("h6", null, textComponent({ children: nodeChildren }));
+  const tableCellComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("td", null, textComponent({ children: nodeChildren }));
+  const tableHeaderComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+    createElement("th", null, textComponent({ children: nodeChildren }));
+
+  return (
+    <div>
+      <MessageResponse
+        components={{
+          a: ({ children: nodeChildren, ...props }) => <a {...props}>{nodeChildren}</a>,
+          blockquote: blockquoteComponent as never,
+          em: emphasisComponent as never,
+          h1: h1Component as never,
+          h2: h2Component as never,
+          h3: h3Component as never,
+          h4: h4Component as never,
+          h5: h5Component as never,
+          h6: h6Component as never,
+          li: listItemComponent as never,
+          p: paragraphComponent as never,
+          strong: strongComponent as never,
+          td: tableCellComponent as never,
+          th: tableHeaderComponent as never,
+        }}
+      >
+        {children}
+      </MessageResponse>
+    </div>
+  );
+}
+
+function ReferencedFiles({ sources }: { sources: SourceItem[] }) {
+  if (sources.length === 0) {
+    return null;
+  }
+
+  const visible = sources.slice(0, 4);
+  const overflow = sources.length - visible.length;
+
+  return (
+    <div className="ml-auto flex max-w-[85%] flex-wrap justify-end gap-1.5 pb-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center px-1 font-medium text-foreground/70">
+        Referenced files
+      </span>
+      {visible.map((source) => (
+        <span
+          className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs"
+          key={source.id}
+          title={source.title}
+        >
+          <FileText className="size-3" />
+          <span className="truncate">{source.title}</span>
+        </span>
+      ))}
+      {overflow > 0 ? (
+        <span className="rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs">
+          +{overflow} more
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function ChainOfThoughtDisplay({
+  isStreaming,
+  steps,
+}: {
+  isStreaming: boolean;
+  steps: ThinkingStepRecord[] | undefined;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+  const safeSteps = steps ?? [];
+  const completedCount = safeSteps.filter((step) => step.status === "completed").length;
+  const activeStep = safeSteps.find((step) => step.status === "in_progress");
+  const allComplete = safeSteps.length > 0 && completedCount === safeSteps.length && !isStreaming;
+
+  useEffect(() => {
+    if (allComplete) {
+      setIsOpen(false);
+    }
+  }, [allComplete]);
+
+  if (safeSteps.length === 0) {
+    return null;
+  }
+
+  const headerText = activeStep
+    ? activeStep.title
+    : `Reviewed ${completedCount} ${completedCount === 1 ? "step" : "steps"}`;
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2 text-sm">
+      <button
+        className="flex w-full items-center gap-2 text-left text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setIsOpen((value) => !value)}
+        type="button"
+      >
+        {activeStep ? (
+          <Loader2 className="size-3.5 animate-spin text-primary" />
+        ) : (
+          <CheckCircle2 className="size-3.5 text-emerald-500" />
+        )}
+        <span className={cn("flex-1", activeStep && "text-foreground")}>{headerText}</span>
+        <ChevronRight className={cn("size-4 transition-transform", isOpen && "rotate-90")} />
+      </button>
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out",
+          isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className="overflow-hidden">
+          <div className="mt-3 space-y-3 pl-0.5">
+            {safeSteps.map((step, index) => {
+              const isLast = index === safeSteps.length - 1;
+              const isActive = step.status === "in_progress";
+              return (
+                <div className="relative flex gap-3" key={step.id}>
+                  <div className="relative flex w-3 shrink-0 flex-col items-center pt-1.5">
+                    {!isLast ? (
+                      <span className="absolute left-1/2 top-4 h-[calc(100%+0.5rem)] w-px -translate-x-1/2 bg-border" />
+                    ) : null}
+                    {isActive ? (
+                      <span className="relative z-10 flex size-2.5">
+                        <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/60" />
+                        <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
+                      </span>
+                    ) : (
+                      <span className="relative z-10 size-2.5 rounded-full bg-muted-foreground/35" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 pb-1">
+                    <div
+                      className={cn(
+                        "leading-5",
+                        isActive ? "font-medium text-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      {step.title}
+                    </div>
+                    {step.items.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                        {step.items.map((item) => (
+                          <span
+                            className="max-w-[240px] truncate rounded-full border border-input bg-background px-2 py-0.5"
+                            key={`${step.id}:${item}`}
+                            title={item}
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Composer({
@@ -399,9 +796,11 @@ export function ChatCanvas({
   threadTitle,
   onActiveVersionChange,
   onCancelEditing,
+  onCitationClick,
   onRestartFromMessage,
   onRefreshLatest,
   onSendMessage,
+  allSources = [],
   selectedSources = [],
   onRemoveSource,
   workspaceId,
@@ -418,6 +817,7 @@ export function ChatCanvas({
   threadTitle: string;
   onActiveVersionChange?: (input: { groupId: string; branchIndex: number }) => void;
   onCancelEditing?: () => void;
+  onCitationClick?: (citation: CitationRecord) => void;
   onRestartFromMessage?: (input: {
     groupId: string;
     messageId: string;
@@ -431,6 +831,7 @@ export function ChatCanvas({
     branchIndex: number;
   }) => void;
   onSendMessage?: (content: string) => void;
+  allSources?: SourceItem[];
   selectedSources?: SourceItem[];
   onRemoveSource?: (id: string) => void;
   workspaceId?: string | null;
@@ -609,6 +1010,7 @@ export function ChatCanvas({
 
                 return null;
               })();
+              const sourceById = new Map(allSources.map((source) => [source.id, source]));
               const toolbarVisibilityClass =
                 "invisible pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:visible group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:visible group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100";
 
@@ -637,12 +1039,20 @@ export function ChatCanvas({
                         isAssistant &&
                         isLatestAssistantGroup &&
                         versionIndex === activeVisibleBranchIndex;
+                      const referencedSources = !isAssistant
+                        ? (version.sourceIds ?? [])
+                            .map((sourceId) => sourceById.get(sourceId))
+                            .filter((source): source is SourceItem => Boolean(source))
+                        : [];
 
                       return (
-                        <div
-                          className="flex w-full flex-col gap-1"
-                          key={version.id}
-                        >
+                          <div
+                            className="flex w-full flex-col gap-1"
+                            key={version.id}
+                          >
+                          {!isAssistant && referencedSources.length > 0 ? (
+                            <ReferencedFiles sources={referencedSources} />
+                          ) : null}
                           <Message from={group.role}>
                             <MessageContent
                               className={
@@ -672,6 +1082,10 @@ export function ChatCanvas({
                                 </div>
                               ) : (
                                 <div className="space-y-3">
+                                  <ChainOfThoughtDisplay
+                                    isStreaming={isStreamingThisVersion}
+                                    steps={version.thinkingSteps}
+                                  />
                                   {(version.toolCalls ?? []).length > 0 ? (
                                     <div className="space-y-2">
                                       {(version.toolCalls ?? []).map((toolCall) => {
@@ -711,7 +1125,12 @@ export function ChatCanvas({
                                       })}
                                     </div>
                                   ) : null}
-                                  <MessageResponse>{messageText}</MessageResponse>
+                                  <CitationAwareMessageResponse
+                                    citations={version.citations}
+                                    onCitationClick={onCitationClick}
+                                  >
+                                    {messageText}
+                                  </CitationAwareMessageResponse>
                                 </div>
                               )}
                             </MessageContent>
@@ -774,8 +1193,7 @@ export function ChatCanvas({
                                     onClick={() => {
                                       onRefreshLatest?.({
                                         groupId: group.groupId,
-                                        assistantMessageId:
-                                          version.sourceAssistantMessageId ?? version.id,
+                                        assistantMessageId: version.id,
                                         branchIndex: activeOriginalBranchIndex,
                                       });
                                     }}

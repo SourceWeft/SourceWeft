@@ -67,6 +67,8 @@ type RetrievalSqlRow = {
   chunk_id: string;
   document_id: string;
   source_id: string;
+  source_title: string;
+  chunk_no: number;
   content: string;
   score: number;
 };
@@ -119,17 +121,51 @@ function mapSourceRevision(row: SourceRevisionRow): SourceRevisionRecord {
   };
 }
 
-function mapThread(row: ThreadRow): ThreadRecord {
+function mapThread(row: ThreadRow, sourceCount = 0): ThreadRecord {
   return {
     id: row.id,
     teamId: row.teamId,
     workspaceId: row.workspaceId,
     title: row.title,
     modelSettings: normalizeThreadModelSettings(row.modelSettingsJson),
+    sourceCount,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+async function countUsedSourceIdsByThread(input: {
+  teamId: string;
+  workspaceId: string;
+  threadIds: string[];
+}) {
+  if (input.threadIds.length === 0) {
+    return new Map<string, number>();
+  }
+
+  const rows = await db.execute<{ thread_id: string; source_count: number | string }>(sql`
+    select
+      m.thread_id,
+      count(distinct source_id.value)::int as source_count
+    from messages m
+    cross join lateral jsonb_array_elements_text(
+      case
+        when jsonb_typeof(m.metadata->'sourceIds') = 'array'
+        then m.metadata->'sourceIds'
+        else '[]'::jsonb
+      end
+    ) as source_id(value)
+    where m.team_id = ${input.teamId}
+      and m.workspace_id = ${input.workspaceId}
+      and m.role = 'user'
+      and m.thread_id = any(${toPostgresTextArray(input.threadIds)}::text[])
+    group by m.thread_id
+  `);
+
+  return new Map(
+    rows.rows.map((row) => [row.thread_id, Number(row.source_count)]),
+  );
 }
 
 function mapMessage(row: MessageRow): MessageRecord {
@@ -810,7 +846,13 @@ export async function listThreadRecordsByWorkspace(input: {
     .orderBy(desc(threads.updatedAt), desc(threads.id))
     .limit(input.limit);
 
-  return rows.map(mapThread);
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: rows.map((row) => row.id),
+  });
+
+  return rows.map((row) => mapThread(row, sourceCounts.get(row.id) ?? 0));
 }
 
 export async function findThreadRecord(input: {
@@ -830,7 +872,17 @@ export async function findThreadRecord(input: {
     )
     .limit(1);
 
-  return row ? mapThread(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: [row.id],
+  });
+
+  return mapThread(row, sourceCounts.get(row.id) ?? 0);
 }
 
 export async function updateThreadModelSettingsRecord(input: {
@@ -858,7 +910,17 @@ export async function updateThreadModelSettingsRecord(input: {
     )
     .returning();
 
-  return row ? mapThread(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: [row.id],
+  });
+
+  return mapThread(row, sourceCounts.get(row.id) ?? 0);
 }
 
 export async function createMessageRecord(input: {
@@ -1086,17 +1148,20 @@ export async function searchChunksByBm25(input: {
 
   const rows = await db.execute<RetrievalSqlRow>(sql`
     select
-      id as chunk_id,
-      document_id,
-      source_id,
-      content,
-      pdb.score(id) as score
-    from chunks
-    where workspace_id = ${input.workspaceId}
-      and team_id = ${input.teamId}
-      and content ||| ${input.queryText}
-      and source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
-    order by pdb.score(id) desc
+      c.id as chunk_id,
+      c.document_id,
+      c.source_id,
+      s.title as source_title,
+      c.chunk_no,
+      c.content,
+      pdb.score(c.id) as score
+    from chunks c
+    inner join sources s on s.id = c.source_id
+    where c.workspace_id = ${input.workspaceId}
+      and c.team_id = ${input.teamId}
+      and c.content ||| ${input.queryText}
+      and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
+    order by pdb.score(c.id) desc
     limit ${input.topK}
   `);
 
@@ -1104,6 +1169,8 @@ export async function searchChunksByBm25(input: {
     chunkId: row.chunk_id,
     documentId: row.document_id,
     sourceId: row.source_id,
+    sourceTitle: row.source_title,
+    chunkNo: Number(row.chunk_no),
     content: row.content,
     score: Number(row.score),
     stage: "bm25" as const,
@@ -1127,10 +1194,13 @@ export async function searchChunksByVectorExact(input: {
       c.id as chunk_id,
       c.document_id,
       c.source_id,
+      s.title as source_title,
+      c.chunk_no,
       c.content,
       1 - (ce.embedding <=> ${`[${input.queryEmbedding.join(",")}]`}::vector) as score
     from chunk_embeddings ce
     inner join chunks c on c.id = ce.chunk_id
+    inner join sources s on s.id = c.source_id
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
@@ -1143,6 +1213,8 @@ export async function searchChunksByVectorExact(input: {
     chunkId: row.chunk_id,
     documentId: row.document_id,
     sourceId: row.source_id,
+    sourceTitle: row.source_title,
+    chunkNo: Number(row.chunk_no),
     content: row.content,
     score: Number(row.score),
     stage: "vector" as const,
@@ -1173,10 +1245,13 @@ export async function searchChunksByVectorAnn(input: {
       c.id as chunk_id,
       c.document_id,
       c.source_id,
+      s.title as source_title,
+      c.chunk_no,
       c.content,
       1 - (ce.embedding::vector(${dimLiteral}) <=> ${queryVector}::vector(${dimLiteral})) as score
     from chunk_embeddings ce
     inner join chunks c on c.id = ce.chunk_id
+    inner join sources s on s.id = c.source_id
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
@@ -1190,6 +1265,8 @@ export async function searchChunksByVectorAnn(input: {
     chunkId: row.chunk_id,
     documentId: row.document_id,
     sourceId: row.source_id,
+    sourceTitle: row.source_title,
+    chunkNo: Number(row.chunk_no),
     content: row.content,
     score: Number(row.score),
     stage: "vector" as const,
@@ -1202,6 +1279,7 @@ export async function createCitationRecords(input: {
   threadId: string;
   messageId: string;
   citations: Array<{
+    citationKey: string;
     sourceId: string;
     documentId: string;
     chunkId: string;
@@ -1224,7 +1302,7 @@ export async function createCitationRecords(input: {
       sourceId: citation.sourceId,
       documentId: citation.documentId,
       chunkId: citation.chunkId,
-      citationKey: `${input.messageId}:${citation.rank}`,
+      citationKey: citation.citationKey,
       quoteText: citation.quoteText,
       rank: citation.rank,
       score: citation.score,

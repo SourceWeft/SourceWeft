@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   PanelRightClose,
@@ -103,36 +103,29 @@ export default function DashboardChatPage() {
     };
   }, [workspaceId]);
 
-  const selectionStorageKey = useMemo(
-    () => (workspaceId ? `chat:sources:${workspaceId}:new` : null),
-    [workspaceId],
-  );
-
   useEffect(() => {
-    if (!selectionStorageKey) { setSelectedSourceIds([]); return; }
-    const raw = window.sessionStorage.getItem(selectionStorageKey);
-    if (!raw) { setSelectedSourceIds([]); return; }
+    if (!workspaceId) {
+      setSelectedSourceIds([]);
+      return;
+    }
+
+    const raw = window.sessionStorage.getItem(`chat:sources:${workspaceId}:current`);
+    if (!raw) {
+      setSelectedSourceIds([]);
+      return;
+    }
+
     try {
       const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        setSelectedSourceIds(
-          parsed.filter((item): item is string => typeof item === "string"),
-        );
-      } else {
-        setSelectedSourceIds([]);
-      }
+      setSelectedSourceIds(
+        Array.isArray(parsed)
+          ? parsed.filter((item): item is string => typeof item === "string")
+          : [],
+      );
     } catch {
       setSelectedSourceIds([]);
     }
-  }, [selectionStorageKey]);
-
-  useEffect(() => {
-    if (!selectionStorageKey) return;
-    window.sessionStorage.setItem(
-      selectionStorageKey,
-      JSON.stringify(selectedSourceIds),
-    );
-  }, [selectedSourceIds, selectionStorageKey]);
+  }, [workspaceId]);
 
   const selectedSources = librarySources.filter((s) =>
     selectedSourceIds.includes(s.id),

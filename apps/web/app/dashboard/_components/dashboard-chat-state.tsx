@@ -44,6 +44,7 @@ type DashboardChatState = {
     title?: string;
     modelSettings?: ThreadModelSettingsInput;
   }) => Promise<{ id: string; title: string } | null>;
+  updateChatSourceCount: (id: string, sourceCount: number) => void;
   openChat: (id: string, title: string) => void;
   archiveChat: (id: string) => void;
   deleteChat: (id: string) => void;
@@ -64,13 +65,14 @@ function normalizeUpdatedAt(value?: string | null) {
 function mapThreadToChatItem(item: {
   id: string;
   title: string;
+  sourceCount?: number | null;
   updatedAt?: string | null;
 }): ChatItem {
   return {
     id: item.id,
     title: item.title,
     updatedAt: normalizeUpdatedAt(item.updatedAt),
-    sourceCount: 0,
+    sourceCount: item.sourceCount ?? 0,
     status: "ready",
   };
 }
@@ -262,6 +264,16 @@ export function DashboardChatStateProvider({
     setThreadTitle(title);
   }, []);
 
+  const updateChatSourceCount = useCallback((id: string, sourceCount: number) => {
+    setPrivateChats((value) =>
+      value.map((item) =>
+        item.id === id
+          ? { ...item, sourceCount: Math.max(item.sourceCount, sourceCount) }
+          : item,
+      ),
+    );
+  }, []);
+
   const createChat = useCallback(
     async (input?: {
       title?: string;
@@ -354,6 +366,7 @@ export function DashboardChatStateProvider({
       loadMorePrivateChats,
       startNewChat,
       createChat,
+      updateChatSourceCount,
       openChat,
       archiveChat,
       deleteChat,
@@ -375,6 +388,7 @@ export function DashboardChatStateProvider({
       switchWorkspace,
       openChat,
       createChat,
+      updateChatSourceCount,
       archiveChat,
       deleteChat,
       startNewChat,

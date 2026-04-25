@@ -14,8 +14,10 @@ const retrievalVectorStrategySchema = z.enum([
 const retrievalCitationSchema = z.object({
   citation: z.number().int().positive(),
   sourceId: z.string(),
+  sourceTitle: z.string().optional(),
   documentId: z.string(),
   chunkId: z.string(),
+  chunkNo: z.number().int().nonnegative().optional(),
   score: z.number(),
   excerpt: z.string(),
 });
@@ -229,6 +231,7 @@ export const threadSchema = z.object({
     imageProfileAlias: z.string().nullable(),
     visionProfileAlias: z.string().nullable(),
   }),
+  sourceCount: z.number().int().nonnegative(),
   createdBy: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -297,6 +300,7 @@ export const streamThreadRequestSchema = z.object({
   mode: streamThreadModeSchema.optional(),
   content: z.string().trim().min(1).max(20000).optional(),
   sourceIds: z.array(z.string()).max(100).optional(),
+  selectedSourceIds: z.array(z.string()).max(100).optional(),
   stream: z.boolean().optional(),
   userMessageId: z.string().trim().min(1).max(128).optional(),
   assistantMessageId: z.string().trim().min(1).max(128).optional(),

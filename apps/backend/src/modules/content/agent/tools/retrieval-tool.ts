@@ -2,23 +2,27 @@ import { tool, type ToolRuntime } from "langchain";
 import { z } from "zod";
 
 export type RetrievalChunk = {
+  citation: string;
   chunkId: string;
   content: string;
+  sourceTitle?: string;
 };
 
 export function formatRetrievalContext(chunks: RetrievalChunk[]) {
   if (chunks.length === 0) {
-    return `Context:
-<chunk id="1"><![CDATA[No relevant context found.]]></chunk>`;
+    return "No relevant evidence was found.";
   }
 
-  return `Context:
+  return `Use these source chunks internally. Every factual claim from these chunks MUST cite the exact chunk id as [citation:cN]. cN is the id attribute from the chunk tag.
+
+Before finalizing your answer, verify every sentence or bullet that uses these chunks ends with one or more markers like [citation:c1]. Do not omit citation markers.
+
 ${chunks
     .map(
-      (chunk, index) =>
-        `<chunk id="${index + 1}"><![CDATA[${chunk.content.slice(0, 1000)}]]></chunk>`,
+      (chunk) =>
+        `<chunk id='${chunk.citation}' source_chunk_id='${chunk.chunkId}' source_title='${chunk.sourceTitle ?? "Untitled source"}'>${chunk.content.replace(/\s+/g, " ").trim().slice(0, 1000)}</chunk>`,
     )
-    .join("\n")}`;
+    .join("\n\n")}`;
 }
 
 export function createRetrievalTool(input: {

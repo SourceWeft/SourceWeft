@@ -47,12 +47,12 @@ import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
 import {
-  citations,
   connectors,
   type CitationItem,
   type ConnectorItem,
   type SourceItem,
 } from "./mock-data";
+import type { CitationRecord } from "./chat-canvas";
 
 const tabs = ["Library", "Citations", "Connectors"] as const;
 const addTabs = ["Text", "File"] as const;
@@ -104,6 +104,15 @@ function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
         : item.status === "queued" || item.status === "processing"
           ? "Sync in progress"
           : new Date(item.updatedAt).toLocaleString(),
+  }));
+}
+
+function mapCitationsToUi(citations: CitationRecord[]): CitationItem[] {
+  return citations.map((citation, index) => ({
+    id: `citation-${citation.citation}-${citation.chunkId}`,
+    sourceTitle: citation.sourceTitle?.trim() || "Untitled source",
+    messageLabel: `Reference ${index + 1}`,
+    excerpt: citation.excerpt,
   }));
 }
 
@@ -475,26 +484,32 @@ function LibraryTab({
 }
 
 export function SourcesHub({
+  activeCitationIndex = null,
+  citations = [],
   mode,
+  onCitationOpen,
   selectedIds,
   onSelectionChange,
   workspaceId,
   onSourceLoad,
 }: {
+  activeCitationIndex?: number | null;
+  citations?: CitationRecord[];
   mode: "thread" | "new";
+  onCitationOpen?: (citation: CitationRecord) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
   workspaceId?: string | null;
   onSourceLoad?: (sources: SourceItem[]) => void;
 }) {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>(
-    mode === "thread" ? "Citations" : "Library",
+    "Library",
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
-
+  const citationItems = useMemo(() => mapCitationsToUi(citations), [citations]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addTab, setAddTab] = useState<AddTab>("Text");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -513,8 +528,14 @@ export function SourcesHub({
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    setActiveTab(mode === "thread" ? "Citations" : "Library");
+    setActiveTab("Library");
   }, [mode]);
+
+  useEffect(() => {
+    if (activeCitationIndex !== null) {
+      setActiveTab("Citations");
+    }
+  }, [activeCitationIndex]);
 
   const refreshSources = useCallback(async () => {
     if (!workspaceId) {
@@ -604,6 +625,10 @@ export function SourcesHub({
       if (!prev) return prev;
       return sources.some((s) => s.id === prev) ? prev : null;
     });
+
+    if (sources.length === 0) {
+      return;
+    }
 
     const sourceIds = new Set(sources.map((s) => s.id));
     const nextSelected = selectedIds.filter((id) => sourceIds.has(id));
@@ -987,52 +1012,66 @@ export function SourcesHub({
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">
-                    Citations
-                  </h3>
+                  <h3 className="text-xs font-medium text-foreground">Citations</h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {citations.length} citations
+                    {citations.length} used
                   </span>
                 </div>
-                <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5" />
               </div>
-              {mode === "new" ? (
+              {citationItems.length === 0 ? (
                 <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
-                  Citations appear after the assistant grounds an answer in your
-                  sources.
+                  No citations used in the selected answer.
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {citations.map((citation: CitationItem, index: number) => (
-                    <article
-                      className="rounded-lg border bg-background p-2.5 shadow-xs"
-                      key={citation.id}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                            {citation.messageLabel}
+                  {citationItems.map((citation, index) => {
+                    const citationRecord = citations[index] ?? null;
+                    const displayIndex = index + 1;
+                    const isActive = activeCitationIndex === displayIndex;
+
+                    return (
+                      <article
+                        className={cn(
+                          "rounded-xl border bg-background p-3 shadow-xs transition-colors",
+                          isActive && "border-primary/45 bg-primary/5 shadow-sm",
+                        )}
+                        key={citation.id}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-2.5">
+                            <span className="mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary">
+                              {displayIndex}
+                            </span>
+                            <div className="min-w-0">
+                              <h4 className="truncate text-sm font-medium text-foreground">
+                                {citation.sourceTitle}
+                              </h4>
+                              <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                                {citation.messageLabel}
+                              </div>
+                            </div>
                           </div>
-                          <h4 className="mt-0.5 truncate text-sm font-medium text-foreground">
-                            [{index + 1}] {citation.sourceTitle}
-                          </h4>
+                          <Button
+                            disabled={!citationRecord}
+                            onClick={() => {
+                              if (citationRecord) {
+                                onCitationOpen?.(citationRecord);
+                              }
+                            }}
+                            size="xs"
+                            type="button"
+                            variant="outline"
+                          >
+                            <FileText className="size-3.5" />
+                            Open
+                          </Button>
                         </div>
-                        <Button size="xs" type="button" variant="outline">
-                          <FileText className="size-3.5" />
-                          Open
-                        </Button>
-                      </div>
-                      <div className="mt-2 rounded-md border border-input bg-muted/20 px-2 py-2 text-sm leading-6 text-foreground">
-                        {citation.excerpt}
-                      </div>
-                      <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
-                        <span className="rounded-full border border-input bg-background px-2 py-0.5">
-                          grounded excerpt
-                        </span>
-                        <span>Jump back to message</span>
-                      </div>
-                    </article>
-                  ))}
+                        <div className="mt-2 line-clamp-4 rounded-lg border border-input bg-muted/20 px-2.5 py-2 text-sm leading-6 text-foreground/90">
+                          {citation.excerpt}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
             </section>

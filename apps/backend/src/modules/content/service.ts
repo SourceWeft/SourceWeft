@@ -768,9 +768,37 @@ function collapseSupersededMessages(items: MessageRecord[]) {
   return items.filter((item) => !supersededIds.has(item.id));
 }
 
-function resolveSourceIdsFromMessage(message: MessageRecord): string[] {
+function isContextExcludedMessage(message: MessageRecord | null | undefined) {
+  if (!message?.metadata || typeof message.metadata !== "object") {
+    return false;
+  }
+
+  const metadata = message.metadata as Record<string, unknown>;
+  return metadata.excludeFromContext === true || metadata.isError === true;
+}
+
+function resolveAssistantContextParentId(message: MessageRecord | null | undefined) {
+  if (!message) {
+    return null;
+  }
+
+  if (!isContextExcludedMessage(message)) {
+    return message.id;
+  }
+
+  const metadata = message.metadata as Record<string, unknown>;
+  if (typeof metadata.sourceAssistantMessageId === "string") {
+    return metadata.sourceAssistantMessageId;
+  }
+  if (typeof metadata.versionOf === "string") {
+    return metadata.versionOf;
+  }
+  return message.parentMessageId;
+}
+
+function resolveSourceIdsFromMessage(message: MessageRecord | null | undefined): string[] {
   const sourceIds =
-    message.metadata && typeof message.metadata === "object"
+    message?.metadata && typeof message.metadata === "object"
       ? (message.metadata as { sourceIds?: unknown }).sourceIds
       : undefined;
 
@@ -939,7 +967,7 @@ async function resolveImplicitRefreshInput(input: {
       workspaceId: input.workspaceId,
       threadId: input.threadId,
     }),
-  );
+  ).filter((message) => !isContextExcludedMessage(message));
 
   const { latestUserMessage, latestAssistantMessage } =
     resolveLatestThreadTurn(messages);
@@ -964,10 +992,7 @@ async function resolveImplicitRefreshInput(input: {
   }
 
   return {
-    sourceIds:
-      input.sourceIds.length > 0
-        ? input.sourceIds
-        : resolveSourceIdsFromMessage(latestUserMessage),
+    sourceIds: input.sourceIds,
     existingUserMessage: latestUserMessage,
     assistantMessageParentId: latestAssistantMessage.id,
   };
@@ -1165,6 +1190,32 @@ function extractTextDeltasFromMessageChunk(chunk: unknown): string[] {
     return extractTextDeltas(chunk);
   }
 
+  const role = typeof record.role === "string" ? record.role : "";
+  const type = typeof record.type === "string" ? record.type : "";
+  const messageType = typeof record._getType === "function"
+    ? String(record._getType())
+    : typeof record.getType === "function"
+      ? String(record.getType())
+      : "";
+  const constructorName =
+    typeof record.constructor === "function" && typeof record.constructor.name === "string"
+      ? record.constructor.name
+      : "";
+  const isAssistant =
+    role === "assistant" ||
+    role === "ai" ||
+    type === "assistant" ||
+    type === "ai" ||
+    type === "AIMessageChunk" ||
+    messageType === "assistant" ||
+    messageType === "ai" ||
+    constructorName === "AIMessageChunk" ||
+    constructorName === "AIMessage";
+
+  if (!isAssistant) {
+    return [];
+  }
+
   const contentBlocks = Array.isArray(record.contentBlocks)
     ? record.contentBlocks
     : Array.isArray(record.content_blocks)
@@ -1267,10 +1318,12 @@ type StreamThreadEventInput = {
   userId: string;
   content: string;
   sourceIds?: string[];
+  selectedSourceIds?: string[];
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
   userMessageParentId?: string | null;
   assistantMessageParentId?: string | null;
+  agentAssistantMessageParentId?: string | null;
   existingUserMessage?: MessageRecord;
 };
 
@@ -1280,6 +1333,7 @@ type PreparedThreadTurn = {
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;
   messageContent: string;
   sourceIds: string[];
+  selectedSourceIds: string[];
   userMessage: MessageRecord;
   assistantMessageParentId: string | null;
   modelAlias: string;
@@ -1308,11 +1362,19 @@ type ToolCallTrace = {
   error: string | null;
 };
 
+type ThinkingStepTrace = {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed";
+  items: string[];
+};
+
 type DeepAgentTurnOutcome = {
   assistantContent: string;
   retrieval: Awaited<ReturnType<typeof runRetrieval>>;
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
+  thinkingSteps: ThinkingStepTrace[];
 };
 
 type DeepAgentTurnEvent =
@@ -1363,9 +1425,58 @@ type DeepAgentTurnEvent =
       toolCall: ToolCallTrace;
     }
   | {
+      type: "thinking-step";
+      step: ThinkingStepTrace;
+    }
+  | {
+      type: "citations";
+      citations: ReturnType<typeof buildCitationMetadata>;
+    }
+  | {
       type: "done";
       outcome: DeepAgentTurnOutcome;
     };
+
+function upsertThinkingStep(input: {
+  stepsById: Map<string, ThinkingStepTrace>;
+  stepOrder: string[];
+  step: ThinkingStepTrace;
+}) {
+  if (!input.stepsById.has(input.step.id)) {
+    input.stepOrder.push(input.step.id);
+  }
+  input.stepsById.set(input.step.id, input.step);
+  return input.step;
+}
+
+function listThinkingSteps(input: {
+  stepsById: Map<string, ThinkingStepTrace>;
+  stepOrder: string[];
+}) {
+  return input.stepOrder
+    .map((stepId) => input.stepsById.get(stepId))
+    .filter((step): step is ThinkingStepTrace => Boolean(step));
+}
+
+function summarizeReviewedSources(
+  retrieval: Awaited<ReturnType<typeof runRetrieval>> | null,
+) {
+  if (!retrieval) {
+    return [] as string[];
+  }
+
+  const titles: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of retrieval.fusedCandidates) {
+    const key = candidate.sourceId;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    titles.push(candidate.sourceTitle || "Untitled source");
+  }
+  return titles;
+}
 
 function summarizeRetrievalCalls(retrievalCalls: RetrievalCallTrace[]) {
   const totalHitCount = retrievalCalls.reduce((sum, call) => sum + call.hitCount, 0);
@@ -3125,7 +3236,9 @@ export class ContentService {
     });
 
     if (!input.userMessageId && !input.assistantMessageId) {
-      const messages = collapseSupersededMessages(allMessages);
+      const messages = collapseSupersededMessages(allMessages).filter(
+        (message) => !isContextExcludedMessage(message),
+      );
       const { latestUserMessage, latestAssistantMessage } =
         resolveLatestThreadTurn(messages);
 
@@ -3260,6 +3373,7 @@ export class ContentService {
     });
 
     const sourceIds = dedupeSourceIds(implicitRefresh.sourceIds);
+    const selectedSourceIds = dedupeSourceIds(input.selectedSourceIds);
     const existingUserMessage = implicitRefresh.existingUserMessage;
     const assistantMessageParentId = implicitRefresh.assistantMessageParentId;
 
@@ -3281,7 +3395,7 @@ export class ContentService {
         createdBy: input.userId,
         metadata: {
           source: "api",
-          sourceIds,
+          sourceIds: selectedSourceIds,
           versionOf: input.userMessageParentId ?? null,
         },
       }));
@@ -3310,7 +3424,8 @@ export class ContentService {
     const deepAgentThreadId = resolveAgentThreadId({
       threadId: thread.id,
       userMessageParentId: input.userMessageParentId,
-      assistantMessageParentId,
+      assistantMessageParentId:
+        input.agentAssistantMessageParentId ?? assistantMessageParentId,
     });
 
     return {
@@ -3319,6 +3434,7 @@ export class ContentService {
       thread,
       messageContent,
       sourceIds,
+      selectedSourceIds,
       userMessage,
       assistantMessageParentId,
       modelAlias,
@@ -3333,6 +3449,7 @@ export class ContentService {
     retrieval: Awaited<ReturnType<typeof runRetrieval>>;
     retrievalCalls: RetrievalCallTrace[];
     toolCalls: ToolCallTrace[];
+    thinkingSteps: ThinkingStepTrace[];
     llm?: LlmExecutionConfig;
     operation: "chat.stream" | "chat.complete";
     assistantContent: string;
@@ -3426,6 +3543,7 @@ export class ContentService {
           latencyMs: call.latencyMs,
           error: call.error,
         })),
+        thinkingSteps: input.thinkingSteps,
         retrieval: {
           embeddingProfileId: retrieval.profile.id,
           vectorStrategy: retrieval.planner.strategy,
@@ -3441,6 +3559,7 @@ export class ContentService {
       threadId: prepared.thread.id,
       messageId: assistantMessage.id,
       citations: retrieval.fusedCandidates.map((candidate, index) => ({
+        citationKey: retrieval.retrievalSummary[index]?.citation ?? `c${index + 1}`,
         sourceId: candidate.sourceId,
         documentId: candidate.documentId,
         chunkId: candidate.chunkId,
@@ -3465,14 +3584,41 @@ export class ContentService {
     const toolCallsById = new Map<string, ToolCallTrace>();
     const toolCallOrder: string[] = [];
     const toolStartedAtById = new Map<string, number>();
+    const thinkingStepsById = new Map<string, ThinkingStepTrace>();
+    const thinkingStepOrder: string[] = [];
     let latestToolRetrieval: Awaited<ReturnType<typeof runToolRetrieval>> | null =
       null;
     let assistantContent = "";
     let fallbackAssistantContent: string | null = null;
+    let hasStartedSynthesis = false;
+
+    const setThinkingStep = (step: ThinkingStepTrace) =>
+      upsertThinkingStep({
+        stepsById: thinkingStepsById,
+        stepOrder: thinkingStepOrder,
+        step,
+      });
+
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: "understand",
+        title: "Understanding the question",
+        status: "completed",
+        items: [],
+      }),
+    };
 
     const retrievalTool = createRetrievalTool({
       retrieve: async (query, runtime) => {
         const retrievalStartedAt = Date.now();
+        const searchStep = setThinkingStep({
+          id: "search",
+          title: "Searching selected sources",
+          status: "in_progress",
+          items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
+        });
+        void searchStep;
         const retrieval = await runToolRetrieval({
           prepared: input.prepared,
           query,
@@ -3499,6 +3645,21 @@ export class ContentService {
         };
         retrievalCallsById.set(callId, retrievalCall);
 
+        setThinkingStep({
+          id: "search",
+          title: "Searched selected sources",
+          status: "completed",
+          items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
+        });
+        setThinkingStep({
+          id: "review",
+          title: `Reviewed ${summarizeReviewedSources(retrieval).length} ${
+            summarizeReviewedSources(retrieval).length === 1 ? "file" : "files"
+          }`,
+          status: "completed",
+          items: summarizeReviewedSources(retrieval),
+        });
+
         if (!toolCallsById.has(callId)) {
           toolCallOrder.push(callId);
           toolCallsById.set(callId, {
@@ -3514,9 +3675,14 @@ export class ContentService {
           });
         }
 
-        return retrieval.fusedCandidates.map((candidate) => ({
+        const citationByChunkId = new Map(
+          retrieval.retrievalSummary.map((item) => [item.chunkId, item]),
+        );
+        return retrieval.fusedCandidates.map((candidate, index) => ({
+          citation: citationByChunkId.get(candidate.chunkId)?.citation ?? `c${index + 1}`,
           chunkId: candidate.chunkId,
           content: candidate.content,
+          sourceTitle: citationByChunkId.get(candidate.chunkId)?.sourceTitle,
         }));
       },
     });
@@ -3579,6 +3745,18 @@ export class ContentService {
           if (!delta) {
             continue;
           }
+          if (!hasStartedSynthesis) {
+            hasStartedSynthesis = true;
+            yield {
+              type: "thinking-step",
+              step: setThinkingStep({
+                id: "synthesize",
+                title: "Synthesizing answer with citations",
+                status: "in_progress",
+                items: [],
+              }),
+            };
+          }
           assistantContent += delta;
           yield {
             type: "text-delta",
@@ -3638,6 +3816,19 @@ export class ContentService {
       if (event === "on_tool_start") {
         const normalizedInput = normalizeToolInput(toolPayload.input);
         toolStartedAtById.set(toolCallId, Date.now());
+        if (toolName === "retrieve") {
+          const query =
+            typeof normalizedInput.query === "string" ? normalizedInput.query.trim() : "";
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: "search",
+              title: "Searching selected sources",
+              status: "in_progress",
+              items: query.length > 0 ? [`Query: ${query}`] : [],
+            }),
+          };
+        }
         const nextToolCall: ToolCallTrace = {
           ...currentToolCall,
           tool: toolName,
@@ -3697,6 +3888,31 @@ export class ContentService {
           error: null,
         };
         toolCallsById.set(toolCallId, nextToolCall);
+        if (toolName === "retrieve") {
+          const query = retrievalCall?.query ?? "";
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: "search",
+              title: "Searched selected sources",
+              status: "completed",
+              items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
+            }),
+          };
+
+          const reviewedSources = summarizeReviewedSources(latestToolRetrieval);
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: "review",
+              title: `Reviewed ${reviewedSources.length} ${
+                reviewedSources.length === 1 ? "file" : "files"
+              }`,
+              status: "completed",
+              items: reviewedSources,
+            }),
+          };
+        }
         yield {
           type: "tool-call-result",
           id: toolCallId,
@@ -3771,6 +3987,51 @@ export class ContentService {
         llm: input.llm,
       }));
 
+    if (!latestToolRetrieval) {
+      const reviewedSources = summarizeReviewedSources(finalRetrieval);
+      yield {
+        type: "thinking-step",
+        step: setThinkingStep({
+          id: "search",
+          title: "Searched selected sources",
+          status: "completed",
+          items: [],
+        }),
+      };
+      yield {
+        type: "thinking-step",
+        step: setThinkingStep({
+          id: "review",
+          title: `Reviewed ${reviewedSources.length} ${
+            reviewedSources.length === 1 ? "file" : "files"
+          }`,
+          status: "completed",
+          items: reviewedSources,
+        }),
+      };
+      yield {
+        type: "citations",
+        citations: finalRetrieval.retrievalSummary,
+      };
+    }
+
+    if (latestToolRetrieval) {
+      yield {
+        type: "citations",
+        citations: finalRetrieval.retrievalSummary,
+      };
+    }
+
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: "synthesize",
+        title: "Synthesized answer with citations",
+        status: "completed",
+        items: [],
+      }),
+    };
+
     const retrievalCalls = retrievalCallOrder
       .map((callId) => retrievalCallsById.get(callId))
       .filter((call): call is RetrievalCallTrace => Boolean(call));
@@ -3799,6 +4060,10 @@ export class ContentService {
         retrieval: finalRetrieval,
         retrievalCalls,
         toolCalls,
+        thinkingSteps: listThinkingSteps({
+          stepsById: thinkingStepsById,
+          stepOrder: thinkingStepOrder,
+        }),
       },
     };
   }
@@ -3808,6 +4073,7 @@ export class ContentService {
     threadId: string;
     userId: string;
     sourceIds?: string[];
+    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -3824,10 +4090,7 @@ export class ContentService {
       );
     }
 
-    const sourceIds =
-      dedupeSourceIds(input.sourceIds).length > 0
-        ? dedupeSourceIds(input.sourceIds)
-        : resolveSourceIdsFromMessage(latestUserMessage);
+    const sourceIds = dedupeSourceIds(input.sourceIds);
 
     return this.streamThread({
       workspaceId: input.workspaceId,
@@ -3835,10 +4098,12 @@ export class ContentService {
       userId: input.userId,
       content: latestUserMessage.content,
       sourceIds,
+      selectedSourceIds: input.selectedSourceIds,
       idempotencyKey: input.idempotencyKey,
       llm: input.llm,
       existingUserMessage: latestUserMessage,
       assistantMessageParentId: latestAssistantMessage.id,
+      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
     });
   }
 
@@ -3847,6 +4112,7 @@ export class ContentService {
     threadId: string;
     userId: string;
     sourceIds?: string[];
+    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -3863,10 +4129,7 @@ export class ContentService {
       );
     }
 
-    const sourceIds =
-      dedupeSourceIds(input.sourceIds).length > 0
-        ? dedupeSourceIds(input.sourceIds)
-        : resolveSourceIdsFromMessage(latestUserMessage);
+    const sourceIds = dedupeSourceIds(input.sourceIds);
 
     yield* this.streamThreadEvents({
       workspaceId: input.workspaceId,
@@ -3874,10 +4137,12 @@ export class ContentService {
       userId: input.userId,
       content: latestUserMessage.content,
       sourceIds,
+      selectedSourceIds: input.selectedSourceIds,
       idempotencyKey: input.idempotencyKey,
       llm: input.llm,
       existingUserMessage: latestUserMessage,
       assistantMessageParentId: latestAssistantMessage.id,
+      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
     });
   }
 
@@ -3887,6 +4152,7 @@ export class ContentService {
     userId: string;
     content: string;
     sourceIds?: string[];
+    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -3903,10 +4169,7 @@ export class ContentService {
       );
     }
 
-    const sourceIds =
-      dedupeSourceIds(input.sourceIds).length > 0
-        ? dedupeSourceIds(input.sourceIds)
-        : resolveSourceIdsFromMessage(latestUserMessage);
+    const sourceIds = dedupeSourceIds(input.sourceIds);
 
     return this.streamThread({
       workspaceId: input.workspaceId,
@@ -3914,10 +4177,12 @@ export class ContentService {
       userId: input.userId,
       content: input.content,
       sourceIds,
+      selectedSourceIds: input.selectedSourceIds,
       idempotencyKey: input.idempotencyKey,
       llm: input.llm,
       userMessageParentId: latestUserMessage.id,
       assistantMessageParentId: latestAssistantMessage?.id ?? null,
+      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
     });
   }
 
@@ -3927,6 +4192,7 @@ export class ContentService {
     userId: string;
     content: string;
     sourceIds?: string[];
+    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -3943,10 +4209,7 @@ export class ContentService {
       );
     }
 
-    const sourceIds =
-      dedupeSourceIds(input.sourceIds).length > 0
-        ? dedupeSourceIds(input.sourceIds)
-        : resolveSourceIdsFromMessage(latestUserMessage);
+    const sourceIds = dedupeSourceIds(input.sourceIds);
 
     yield* this.streamThreadEvents({
       workspaceId: input.workspaceId,
@@ -3954,10 +4217,12 @@ export class ContentService {
       userId: input.userId,
       content: input.content,
       sourceIds,
+      selectedSourceIds: input.selectedSourceIds,
       idempotencyKey: input.idempotencyKey,
       llm: input.llm,
       userMessageParentId: latestUserMessage.id,
       assistantMessageParentId: latestAssistantMessage?.id ?? null,
+      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
     });
   }
 
@@ -4053,6 +4318,22 @@ export class ContentService {
           continue;
         }
 
+        if (event.type === "thinking-step") {
+          yield toSseData({
+            type: "thinking-step",
+            step: event.step,
+          });
+          continue;
+        }
+
+        if (event.type === "citations") {
+          yield toSseData({
+            type: "citations",
+            citations: event.citations,
+          });
+          continue;
+        }
+
         if (event.type === "done") {
           outcome = event.outcome;
         }
@@ -4067,6 +4348,7 @@ export class ContentService {
         retrieval: outcome.retrieval,
         retrievalCalls: outcome.retrievalCalls,
         toolCalls: outcome.toolCalls,
+        thinkingSteps: outcome.thinkingSteps,
         llm: input.llm,
         operation: "chat.stream",
         assistantContent: outcome.assistantContent,
@@ -4100,10 +4382,36 @@ export class ContentService {
         },
       });
 
+      const errorAssistantMessage = await createMessageRecord({
+        teamId: prepared.workspace.organizationId,
+        workspaceId: prepared.workspace.id,
+        threadId: prepared.thread.id,
+        parentMessageId: prepared.assistantMessageParentId,
+        role: "assistant",
+        content: contentError.message,
+        createdBy: null,
+        model: prepared.modelAlias,
+        metadata: {
+          status: "error",
+          isError: true,
+          excludeFromContext: true,
+          errorCode: contentError.code,
+          errorMessage: contentError.message,
+          userMessageId: prepared.userMessage.id,
+          sourceAssistantMessageId: prepared.assistantMessageParentId,
+          versionOf: prepared.assistantMessageParentId,
+          modelAlias: prepared.modelAlias,
+          gateway: buildGatewayAuditMetadata({ llm: input.llm }),
+        },
+      });
+
       yield toSseData({
         type: "error",
         code: contentError.code,
         error: contentError.message,
+        messageId: errorAssistantMessage.id,
+        userMessageId: prepared.userMessage.id,
+        parentMessageId: errorAssistantMessage.parentMessageId,
       });
     }
 
@@ -4163,6 +4471,7 @@ export class ContentService {
       retrieval: outcome.retrieval,
       retrievalCalls: outcome.retrievalCalls,
       toolCalls: outcome.toolCalls,
+      thinkingSteps: outcome.thinkingSteps,
       llm: input.llm,
       operation: "chat.complete",
       assistantContent: outcome.assistantContent,

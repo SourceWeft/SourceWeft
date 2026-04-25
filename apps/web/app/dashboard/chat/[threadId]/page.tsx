@@ -20,10 +20,13 @@ import {
 } from "../_components/header-model-selector";
 import {
   ChatCanvas,
+  type CitationRecord,
+  type ThinkingStepRecord,
   type ToolCallRecord,
   type VersionedMessageGroup,
 } from "../_components/chat-canvas";
 import { SourcesHub } from "../_components/sources-hub";
+import { SourcePreviewPanel } from "../_components/source-preview-panel";
 import type { SourceItem } from "../_components/mock-data";
 import { contentClient } from "../../../../lib/sdk";
 import { HttpClientError } from "@sourceweft/sdk";
@@ -36,6 +39,7 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   image: false,
   vision: false,
 };
+const EMPTY_CITATIONS: CitationRecord[] = [];
 
 const TOOLS_WITHOUT_UI = new Set([
   "retrieve",
@@ -58,10 +62,6 @@ function getDisplayErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Failed to send message.";
 }
 
-function isLocalErrorMessage(message: ChatMessageItem) {
-  return message.role === "assistant" && message.metadata.isError === true;
-}
-
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -75,6 +75,135 @@ function toNullableNumber(value: unknown): number | null {
 
 function toNullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function resolveCitationsFromMetadata(metadata: Record<string, unknown>): CitationRecord[] {
+  const retrieval = toObjectRecord(metadata.retrieval);
+  return normalizeCitationRecords(retrieval?.citations);
+}
+
+function normalizeCitationRecords(value: unknown): CitationRecord[] {
+  const rawCitations = value;
+  if (!Array.isArray(rawCitations)) {
+    return [] as CitationRecord[];
+  }
+
+  return rawCitations
+    .map((item) => {
+      const record = toObjectRecord(item);
+      if (!record) {
+        return null;
+      }
+
+      const citation = toNullableString(record.citation);
+      const sourceId = toNullableString(record.sourceId);
+      const documentId = toNullableString(record.documentId);
+      const chunkId = toNullableString(record.chunkId);
+      const sourceTitle = toNullableString(record.sourceTitle) ?? undefined;
+      const chunkNo = toNullableNumber(record.chunkNo) ?? undefined;
+      const score = toNullableNumber(record.score);
+      const excerpt = toNullableString(record.excerpt);
+
+      if (
+        citation === null ||
+        !sourceId ||
+        !documentId ||
+        !chunkId ||
+        score === null ||
+        excerpt === null
+      ) {
+        return null;
+      }
+
+      const citationRecord: CitationRecord = {
+        citation,
+        sourceId,
+        documentId,
+        chunkId,
+        score,
+        excerpt,
+      };
+
+      if (sourceTitle !== undefined) {
+        citationRecord.sourceTitle = sourceTitle;
+      }
+      if (chunkNo !== undefined) {
+        citationRecord.chunkNo = chunkNo;
+      }
+
+      return citationRecord;
+    })
+    .filter((item): item is CitationRecord => item !== null);
+}
+
+function resolveMessageSourceIds(message: ChatMessageItem) {
+  const rawSourceIds = message.metadata.sourceIds;
+  if (!Array.isArray(rawSourceIds)) {
+    return [] as string[];
+  }
+
+  return rawSourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string");
+}
+
+const CITATION_PATTERN = /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
+
+function splitCitationIds(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function resolveUsedCitationsForText(input: {
+  citations: CitationRecord[] | undefined;
+  text: string;
+}) {
+  const citationByKey = new Map(
+    (input.citations ?? []).map((citation) => [citation.citation, citation]),
+  );
+  const citationByChunkId = new Map(
+    (input.citations ?? []).map((citation) => [citation.chunkId, citation]),
+  );
+  const used: CitationRecord[] = [];
+  const seen = new Set<string>();
+
+  const pushCitation = (id: string) => {
+    const citation = citationByKey.get(id) ?? citationByChunkId.get(id);
+    if (!citation || seen.has(citation.chunkId)) {
+      return;
+    }
+    seen.add(citation.chunkId);
+    used.push(citation);
+  };
+
+  CITATION_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = CITATION_PATTERN.exec(input.text)) !== null) {
+    splitCitationIds(match[1] ?? "").forEach(pushCitation);
+  }
+
+  return used;
+}
+
+function resolveContextSourceIds(input: {
+  messages: ChatMessageItem[];
+  selectedSourceIds: string[];
+}) {
+  if (input.selectedSourceIds.length > 0) {
+    return input.selectedSourceIds;
+  }
+
+  const sourceIds: string[] = [];
+  const seen = new Set<string>();
+  for (const message of input.messages) {
+    for (const sourceId of resolveMessageSourceIds(message)) {
+      if (!seen.has(sourceId)) {
+        seen.add(sourceId);
+        sourceIds.push(sourceId);
+      }
+    }
+  }
+  return sourceIds;
 }
 
 function normalizeToolCallStatus(
@@ -119,6 +248,45 @@ function normalizeToolCallRecord(
   };
 }
 
+function normalizeThinkingStepRecord(value: unknown): ThinkingStepRecord | null {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const id = toNullableString(record.id);
+  const title = toNullableString(record.title);
+  const status = record.status;
+  if (
+    !id ||
+    !title ||
+    (status !== "pending" && status !== "in_progress" && status !== "completed")
+  ) {
+    return null;
+  }
+
+  const items = Array.isArray(record.items)
+    ? record.items.filter((item): item is string => typeof item === "string")
+    : [];
+
+  return {
+    id,
+    title,
+    status,
+    items,
+  };
+}
+
+function resolveThinkingStepsFromMetadata(metadata: Record<string, unknown>) {
+  if (!Array.isArray(metadata.thinkingSteps)) {
+    return [] as ThinkingStepRecord[];
+  }
+
+  return metadata.thinkingSteps
+    .map((item) => normalizeThinkingStepRecord(item))
+    .filter((item): item is ThinkingStepRecord => item !== null);
+}
+
 function shouldRenderToolCall(toolCall: ToolCallRecord) {
   return !TOOLS_WITHOUT_UI.has(toolCall.tool);
 }
@@ -137,7 +305,9 @@ type StreamEventPayload = {
   error?: string;
   id?: string;
   messageId?: string;
+  parentMessageId?: string | null;
   tool?: string;
+  userMessageId?: string;
   query?: string;
   hitCount?: number;
   latencyMs?: number;
@@ -146,6 +316,8 @@ type StreamEventPayload = {
   input?: unknown;
   output?: unknown;
   toolCall?: unknown;
+  step?: unknown;
+  citations?: unknown;
 };
 
 function isToolCallEventType(value: string): value is ToolCallEventType {
@@ -449,7 +621,13 @@ function buildVersionedMessageGroups(
         versions: sortedVersions.map((version) => ({
           id: version.id,
           content: version.content,
+          citations: group.role === "assistant"
+            ? resolveCitationsFromMetadata(version.metadata)
+            : undefined,
           isError: version.metadata.isError === true,
+          sourceIds: group.role === "user"
+            ? resolveMessageSourceIds(version)
+            : undefined,
           sourceAssistantMessageId: group.role === "assistant"
             ? (toNullableString(version.metadata.sourceAssistantMessageId) ?? null)
             : undefined,
@@ -457,6 +635,9 @@ function buildVersionedMessageGroups(
             ? (assistantSourceUserById.get(version.id) ?? null)
             : undefined,
           toolCalls: resolveToolCallsFromMetadata(version.metadata),
+          thinkingSteps: group.role === "assistant"
+            ? resolveThinkingStepsFromMetadata(version.metadata)
+            : undefined,
         })),
       } satisfies VersionedMessageGroup;
     })
@@ -491,6 +672,7 @@ export default function DashboardChatThreadPage({
     privateChats,
     sourcesVisible,
     toggleSourcesVisible,
+    updateChatSourceCount,
     workspaceId,
   } = useDashboardChatState();
 
@@ -513,11 +695,15 @@ export default function DashboardChatThreadPage({
   const [activeVersionByGroup, setActiveVersionByGroup] = useState<
     Record<string, number>
   >({});
+  const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(null);
+  const [previewCitation, setPreviewCitation] = useState<CitationRecord | null>(null);
+  const [displayedCitations, setDisplayedCitations] = useState<CitationRecord[]>([]);
   const latestSignatureByGroupRef = useRef<Record<string, string>>({});
 
   // ── Sources state ──────────────────────────────────────────────────────────
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [selectionLoaded, setSelectionLoaded] = useState(false);
 
   // ── Composer state ─────────────────────────────────────────────────────────
   const [composerInitialInput, setComposerInitialInput] = useState("");
@@ -555,11 +741,24 @@ export default function DashboardChatThreadPage({
       workspaceId ? `chat:sources:${workspaceId}:${threadId}` : null,
     [workspaceId, threadId],
   );
+  const currentSelectionStorageKey = useMemo(
+    () => (workspaceId ? `chat:sources:${workspaceId}:current` : null),
+    [workspaceId],
+  );
 
   useEffect(() => {
-    if (!selectionStorageKey) { setSelectedSourceIds([]); return; }
+    setSelectionLoaded(false);
+    if (!selectionStorageKey) {
+      setSelectedSourceIds([]);
+      setSelectionLoaded(true);
+      return;
+    }
     const raw = window.sessionStorage.getItem(selectionStorageKey);
-    if (!raw) { setSelectedSourceIds([]); return; }
+    if (!raw) {
+      setSelectedSourceIds([]);
+      setSelectionLoaded(true);
+      return;
+    }
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed)) {
@@ -571,21 +770,145 @@ export default function DashboardChatThreadPage({
       }
     } catch {
       setSelectedSourceIds([]);
+    } finally {
+      setSelectionLoaded(true);
     }
   }, [selectionStorageKey]);
 
+  const persistSelectedSourceIds = useCallback((sourceIds: string[]) => {
+    setSelectedSourceIds(sourceIds);
+    if (selectionStorageKey) {
+      window.sessionStorage.setItem(selectionStorageKey, JSON.stringify(sourceIds));
+    }
+    if (currentSelectionStorageKey) {
+      window.sessionStorage.setItem(currentSelectionStorageKey, JSON.stringify(sourceIds));
+    }
+  }, [currentSelectionStorageKey, selectionStorageKey]);
+
   useEffect(() => {
-    if (!selectionStorageKey) return;
+    if (!selectionLoaded || !selectionStorageKey) return;
     window.sessionStorage.setItem(
       selectionStorageKey,
       JSON.stringify(selectedSourceIds),
     );
-  }, [selectedSourceIds, selectionStorageKey]);
+    if (currentSelectionStorageKey) {
+      window.sessionStorage.setItem(
+        currentSelectionStorageKey,
+        JSON.stringify(selectedSourceIds),
+      );
+    }
+  }, [currentSelectionStorageKey, selectedSourceIds, selectionLoaded, selectionStorageKey]);
 
   const messageGroups = useMemo(
     () => buildVersionedMessageGroups(messages),
     [messages],
   );
+
+  const activeAssistantVersion = useMemo(() => {
+    for (let groupIndex = messageGroups.length - 1; groupIndex >= 0; groupIndex -= 1) {
+      const group = messageGroups[groupIndex];
+      if (!group || group.role !== "assistant") {
+        continue;
+      }
+
+      const selectedUserVersionIdForAssistant = group.turnId
+        ? (() => {
+            const userGroup = messageGroups.find(
+              (candidate) =>
+                candidate.role === "user" &&
+                candidate.turnId === group.turnId,
+            );
+            if (!userGroup) {
+              return null;
+            }
+
+            const latestUserVersionIndex = Math.max(
+              userGroup.versions.length - 1,
+              0,
+            );
+            const activeUserBranchIndex = Math.min(
+              Math.max(
+                activeVersionByGroup[userGroup.groupId] ?? latestUserVersionIndex,
+                0,
+              ),
+              latestUserVersionIndex,
+            );
+            return userGroup.versions[activeUserBranchIndex]?.id ?? null;
+          })()
+        : null;
+
+      const versionEntries = group.versions.map((version, originalIndex) => ({
+        version,
+        originalIndex,
+      }));
+      const scopedEntries = selectedUserVersionIdForAssistant
+        ? versionEntries.filter(
+            (entry) =>
+              entry.version.sourceUserMessageId === selectedUserVersionIdForAssistant,
+          )
+        : versionEntries;
+      const visibleEntries = scopedEntries.length > 0 ? scopedEntries : versionEntries;
+      const latestVisibleIndex = Math.max(visibleEntries.length - 1, 0);
+      const desiredOriginalIndex =
+        activeVersionByGroup[group.groupId] ??
+        visibleEntries[latestVisibleIndex]?.originalIndex ??
+        0;
+      const matchedVisibleIndex = visibleEntries.findIndex(
+        (entry) => entry.originalIndex === desiredOriginalIndex,
+      );
+      const activeVisibleIndex =
+        matchedVisibleIndex >= 0 ? matchedVisibleIndex : latestVisibleIndex;
+      return visibleEntries[activeVisibleIndex]?.version ?? null;
+    }
+
+    return null;
+  }, [activeVersionByGroup, messageGroups]);
+
+  const activeCitations = useMemo(
+    () => resolveUsedCitationsForText({
+      citations: activeAssistantVersion?.citations,
+      text: activeAssistantVersion?.content ?? "",
+    }),
+    [activeAssistantVersion],
+  );
+  const activeAssistantCitations = activeAssistantVersion?.citations ?? EMPTY_CITATIONS;
+  const visibleCitations = useMemo(
+    () => (activeCitations.length > 0 ? activeCitations : activeAssistantCitations),
+    [activeAssistantCitations, activeCitations],
+  );
+
+  useEffect(() => {
+    if (!isStreaming || visibleCitations.length > 0) {
+      setDisplayedCitations((current) => {
+        if (
+          current.length === visibleCitations.length &&
+          current.every((citation, index) => citation.chunkId === visibleCitations[index]?.chunkId)
+        ) {
+          return current;
+        }
+        return visibleCitations;
+      });
+    }
+  }, [isStreaming, visibleCitations]);
+
+  const handleCitationClick = useCallback(
+    (citation: CitationRecord) => {
+      const citationIndex = displayedCitations.findIndex(
+        (item) => item.chunkId === citation.chunkId,
+      );
+      setActiveCitationIndex(citationIndex >= 0 ? citationIndex + 1 : null);
+      setPreviewCitation(citation);
+      if (!sourcesVisible) {
+        toggleSourcesVisible();
+      }
+    },
+    [displayedCitations, sourcesVisible, toggleSourcesVisible],
+  );
+
+  useEffect(() => {
+    setActiveCitationIndex(null);
+    setPreviewCitation(null);
+  }, [activeAssistantVersion?.id]);
 
   useEffect(() => {
     setActiveVersionByGroup((previous) => {
@@ -620,7 +943,7 @@ export default function DashboardChatThreadPage({
   }, [messageGroups]);
 
   const loadThreadMessages = useCallback(
-    async (localErrors?: ChatMessageItem[]) => {
+    async () => {
     if (!workspaceId) {
       setMessages([]);
       return;
@@ -628,7 +951,6 @@ export default function DashboardChatThreadPage({
 
     try {
       const result = await contentClient.listThreadMessages(workspaceId, threadId);
-      const localErrorMessages = localErrors ?? messages.filter(isLocalErrorMessage);
       const serverMessages = result.items
         .filter(
           (
@@ -652,7 +974,7 @@ export default function DashboardChatThreadPage({
         );
 
       setMessages(
-        [...serverMessages, ...localErrorMessages].sort(
+        serverMessages.sort(
           (left, right) =>
             new Date(left.createdAt).getTime() -
             new Date(right.createdAt).getTime(),
@@ -752,6 +1074,7 @@ export default function DashboardChatThreadPage({
       mode: "send" | "refresh" | "edit";
       content?: string;
       sourceIds: string[];
+      selectedSourceIds?: string[];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
     }) => {
@@ -787,7 +1110,7 @@ export default function DashboardChatThreadPage({
             ? (input.userMessageId ?? latestUserMessage?.id ?? null)
             : null,
           metadata: {
-            sourceIds: input.sourceIds,
+            sourceIds: input.selectedSourceIds ?? input.sourceIds,
             versionOf: input.mode === "edit"
               ? (input.userMessageId ?? latestUserMessage?.id ?? null)
               : null,
@@ -810,6 +1133,7 @@ export default function DashboardChatThreadPage({
             ? null
             : (input.assistantMessageId ?? latestAssistantMessage?.id ?? null),
           toolCalls: [],
+          thinkingSteps: [],
         },
         createdAt: new Date(now + 1).toISOString(),
       });
@@ -823,12 +1147,15 @@ export default function DashboardChatThreadPage({
 
       let thinkingTimer: number | null = null;
       let persistedUserMessageId = tempUserId ?? input.userMessageId ?? null;
+      let persistedAssistantMessageId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
+      const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
 
       try {
         const requestBody: Record<string, unknown> = {
           mode: input.mode,
           sourceIds: input.sourceIds,
+          selectedSourceIds: input.selectedSourceIds ?? input.sourceIds,
         };
         const selectedLlmAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
@@ -972,6 +1299,46 @@ export default function DashboardChatThreadPage({
           });
         };
 
+        const syncStreamingThinkingSteps = () => {
+          const thinkingSteps = [...streamThinkingStepsById.values()];
+          flushSync(() => {
+            setMessages((previous) =>
+              previous.map((message) =>
+                message.id === tempAssistantId
+                  ? {
+                      ...message,
+                      metadata: {
+                        ...message.metadata,
+                        thinkingSteps,
+                      },
+                    }
+                  : message,
+              ),
+            );
+          });
+        };
+
+        const syncStreamingCitations = (citations: CitationRecord[]) => {
+          flushSync(() => {
+            setMessages((previous) =>
+              previous.map((message) =>
+                message.id === tempAssistantId
+                  ? {
+                      ...message,
+                      metadata: {
+                        ...message.metadata,
+                        retrieval: {
+                          ...(toObjectRecord(message.metadata.retrieval) ?? {}),
+                          citations,
+                        },
+                      },
+                    }
+                  : message,
+              ),
+            );
+          });
+        };
+
         readLoop: while (true) {
           const { done, value } = await reader.read();
           if (done) {
@@ -1031,6 +1398,17 @@ export default function DashboardChatThreadPage({
 
               streamToolCallsById.set(nextToolCall.id, nextToolCall);
               syncStreamingToolCalls();
+            } else if (data.type === "thinking-step") {
+              const nextStep = normalizeThinkingStepRecord(data.step);
+              if (nextStep) {
+                streamThinkingStepsById.set(nextStep.id, nextStep);
+                syncStreamingThinkingSteps();
+              }
+            } else if (data.type === "citations") {
+              const citations = normalizeCitationRecords(data.citations);
+              if (citations.length > 0) {
+                syncStreamingCitations(citations);
+              }
             } else if (data.type === "error") {
               if (streamToolCallsById.size > 0) {
                 for (const [toolId, toolCall] of streamToolCallsById.entries()) {
@@ -1044,9 +1422,65 @@ export default function DashboardChatThreadPage({
                 }
                 syncStreamingToolCalls();
               }
-              streamError = new Error(data.error ?? "Model error");
+              const errorMessage = data.error ?? "Model error";
+              persistedAssistantMessageId =
+                typeof data.messageId === "string" ? data.messageId : null;
+              const messageId = persistedAssistantMessageId ?? tempAssistantId;
+              const userMessageId = data.userMessageId ?? persistedUserMessageId;
+              flushSync(() => {
+                setMessages((previous) =>
+                  previous.map((message) =>
+                    message.id === tempAssistantId
+                      ? {
+                          ...message,
+                          id: messageId,
+                          content: errorMessage,
+                          parentMessageId:
+                            data.parentMessageId === undefined
+                              ? message.parentMessageId
+                              : data.parentMessageId,
+                          metadata: {
+                            ...message.metadata,
+                            isError: true,
+                            excludeFromContext: true,
+                            error: errorMessage,
+                            errorCode: data.code ?? null,
+                            userMessageId,
+                            sourceUserMessageId: userMessageId,
+                            toolCalls: [...streamToolCallsById.values()].filter(shouldRenderToolCall),
+                            thinkingSteps: [...streamThinkingStepsById.values()],
+                          },
+                        }
+                      : message,
+                  ),
+                );
+              });
+              streamError = new Error(errorMessage);
               streamEnded = true;
               break readLoop;
+            } else if (
+              data.type === "assistant-message" &&
+              typeof data.messageId === "string"
+            ) {
+              persistedAssistantMessageId = data.messageId;
+              flushSync(() => {
+                setMessages((previous) =>
+                  previous.map((message) =>
+                    message.id === tempAssistantId
+                      ? {
+                          ...message,
+                          id: data.messageId as string,
+                          content: assistantText || message.content,
+                          metadata: {
+                            ...message.metadata,
+                            isError: false,
+                            excludeFromContext: false,
+                          },
+                        }
+                      : message,
+                  ),
+                );
+              });
             } else if (data.type === "finish") {
               if (streamToolCallsById.size > 0) {
                 for (const [toolId, toolCall] of streamToolCallsById.entries()) {
@@ -1058,6 +1492,17 @@ export default function DashboardChatThreadPage({
                   }
                 }
                 syncStreamingToolCalls();
+              }
+              if (streamThinkingStepsById.size > 0) {
+                for (const [stepId, step] of streamThinkingStepsById.entries()) {
+                  if (step.status === "in_progress") {
+                    streamThinkingStepsById.set(stepId, {
+                      ...step,
+                      status: "completed",
+                    });
+                  }
+                }
+                syncStreamingThinkingSteps();
               }
               streamEnded = true;
               break readLoop;
@@ -1080,7 +1525,17 @@ export default function DashboardChatThreadPage({
           throw streamError;
         }
 
-        await loadThreadMessages();
+        const usedSourceIds = new Set(input.sourceIds);
+        messages.forEach((message) => {
+          resolveMessageSourceIds(message).forEach((sourceId) => {
+            usedSourceIds.add(sourceId);
+          });
+        });
+        updateChatSourceCount(threadId, usedSourceIds.size);
+
+        window.setTimeout(() => {
+          void loadThreadMessages();
+        }, 0);
       } catch (error) {
         if (thinkingTimer) {
           window.clearTimeout(thinkingTimer);
@@ -1089,58 +1544,17 @@ export default function DashboardChatThreadPage({
         setShowThinkingPlaceholder(false);
 
         const errorMessage = getDisplayErrorMessage(error);
-        const errorToolCalls = [...streamToolCallsById.values()]
-          .map((toolCall) =>
-            toolCall.status === "running"
-              ? {
-                  ...toolCall,
-                  status: "error" as const,
-                  error: toolCall.error ?? "Tool execution failed.",
-                }
-              : toolCall,
-          )
-          .filter(shouldRenderToolCall);
-        const existingUserMessageId =
-          persistedUserMessageId && !persistedUserMessageId.startsWith("temp-")
-            ? persistedUserMessageId
-            : input.userMessageId ?? latestUserMessage?.id ?? null;
-        const fallbackUserMessage =
-          temporaryMessages.find((message) => message.id === tempUserId) ?? null;
-        const existingAssistantMessageId =
-          input.assistantMessageId ?? latestAssistantMessage?.id ?? null;
-        const errorAssistantMessage: ChatMessageItem = {
-          id: `${tempAssistantId}-error`,
-          role: "assistant",
-          content: errorMessage,
-          parentMessageId: input.mode === "send" ? null : existingAssistantMessageId,
-          metadata: {
-            isError: true,
-            error: errorMessage,
-            sourceAssistantMessageId: existingAssistantMessageId,
-            userMessageId: existingUserMessageId ?? fallbackUserMessage?.id ?? null,
-            sourceUserMessageId: existingUserMessageId ?? fallbackUserMessage?.id ?? null,
-            versionOf: input.mode === "send" ? null : existingAssistantMessageId,
-            toolCalls: errorToolCalls,
-          },
-          createdAt: new Date(Date.now()).toISOString(),
-        };
-
-        if (existingUserMessageId) {
-          setMessages((previous) => {
-            const withoutTemporary = previous.filter(
-              (message) =>
-                message.id !== tempUserId && message.id !== tempAssistantId,
-            );
-            return [...withoutTemporary, errorAssistantMessage];
-          });
-          await loadThreadMessages([errorAssistantMessage]);
-        } else {
+        if (!persistedAssistantMessageId) {
           setMessages((previous) => {
             const withoutAssistant = previous.filter(
               (message) => message.id !== tempAssistantId,
             );
-            return [...withoutAssistant, errorAssistantMessage];
+            return withoutAssistant;
           });
+        } else {
+          window.setTimeout(() => {
+            void loadThreadMessages();
+          }, 0);
         }
 
         toast.error(errorMessage);
@@ -1160,6 +1574,7 @@ export default function DashboardChatThreadPage({
       selectedModels,
       streamWithSelectedLlm,
       threadId,
+      updateChatSourceCount,
       workspaceId,
     ],
   );
@@ -1179,6 +1594,9 @@ export default function DashboardChatThreadPage({
     setShowThinkingPlaceholder(false);
     clearEditingState();
     setActiveVersionByGroup({});
+    setDisplayedCitations([]);
+    setActiveCitationIndex(null);
+    setPreviewCitation(null);
     latestSignatureByGroupRef.current = {};
   }, [clearEditingState, threadId, workspaceId]);
 
@@ -1209,10 +1627,15 @@ export default function DashboardChatThreadPage({
             content: string;
             sourceIds: string[];
           };
+          const pendingSourceIds = Array.isArray(sourceIds)
+            ? sourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string")
+            : [];
+          persistSelectedSourceIds(pendingSourceIds);
           void streamThreadActionRef.current({
             mode: "send",
             content,
-            sourceIds,
+            sourceIds: pendingSourceIds,
+            selectedSourceIds: pendingSourceIds,
           });
         } catch {
           void loadThreadMessagesRef.current();
@@ -1226,7 +1649,7 @@ export default function DashboardChatThreadPage({
     return () => {
       window.clearTimeout(bootstrapTimer);
     };
-  }, [threadId, workspaceId]);
+  }, [persistSelectedSourceIds, threadId, workspaceId]);
 
   // ── Public send handler (called by Composer) ──────────────────────────────
   const handleActiveVersionChange = useCallback(
@@ -1303,6 +1726,11 @@ export default function DashboardChatThreadPage({
         return;
       }
 
+      const contextSourceIds = resolveContextSourceIds({
+        messages,
+        selectedSourceIds,
+      });
+
       if (editingMessageId) {
         setActiveVersionByGroup((previous) => {
           const next = { ...previous };
@@ -1345,7 +1773,8 @@ export default function DashboardChatThreadPage({
         await streamThreadAction({
           mode: "edit",
           content: text,
-          sourceIds: selectedSourceIds,
+          sourceIds: contextSourceIds,
+          selectedSourceIds,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
         });
@@ -1355,7 +1784,8 @@ export default function DashboardChatThreadPage({
       await streamThreadAction({
         mode: "send",
         content: text,
-        sourceIds: selectedSourceIds,
+        sourceIds: contextSourceIds,
+        selectedSourceIds,
       });
     },
     [
@@ -1365,6 +1795,7 @@ export default function DashboardChatThreadPage({
       editingMessageId,
       isStreaming,
       messageGroups,
+      messages,
       selectedSourceIds,
       streamThreadAction,
     ],
@@ -1391,12 +1822,18 @@ export default function DashboardChatThreadPage({
       [input.groupId]: Math.max(previous[input.groupId] ?? 0, nextBranchIndex),
     }));
 
+    const contextSourceIds = resolveContextSourceIds({
+      messages,
+      selectedSourceIds,
+    });
+
     await streamThreadAction({
       mode: "refresh",
-      sourceIds: selectedSourceIds,
+      sourceIds: contextSourceIds,
+      selectedSourceIds,
       assistantMessageId: input.assistantMessageId,
     });
-  }, [isStreaming, messageGroups, selectedSourceIds, streamThreadAction]);
+  }, [isStreaming, messageGroups, messages, selectedSourceIds, streamThreadAction]);
 
   const handleRestartFromMessage = useCallback(
     (input: {
@@ -1467,6 +1904,7 @@ export default function DashboardChatThreadPage({
 
         <ChatCanvas
           activeVersionByGroup={activeVersionByGroup}
+          allSources={librarySources}
           composerInitialInput={composerInitialInput}
           composerResetKey={composerResetKey}
           isEditing={Boolean(editingMessageId && editingGroupId)}
@@ -1476,8 +1914,9 @@ export default function DashboardChatThreadPage({
           mode="thread"
           onActiveVersionChange={handleActiveVersionChange}
           onCancelEditing={cancelEditing}
+          onCitationClick={handleCitationClick}
           onRemoveSource={(id) =>
-            setSelectedSourceIds((prev) => prev.filter((x) => x !== id))
+            persistSelectedSourceIds(selectedSourceIds.filter((x) => x !== id))
           }
           onRefreshLatest={handleRefreshLatest}
           onRestartFromMessage={handleRestartFromMessage}
@@ -1491,13 +1930,27 @@ export default function DashboardChatThreadPage({
 
       {sourcesVisible ? (
         <SourcesHub
+          activeCitationIndex={activeCitationIndex}
+          citations={displayedCitations}
           mode="thread"
-          onSelectionChange={setSelectedSourceIds}
+          onCitationOpen={setPreviewCitation}
+          onSelectionChange={persistSelectedSourceIds}
           onSourceLoad={setLibrarySources}
           selectedIds={selectedSourceIds}
           workspaceId={workspaceId}
         />
       ) : null}
+
+      <SourcePreviewPanel
+        citation={previewCitation}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewCitation(null);
+          }
+        }}
+        open={Boolean(previewCitation)}
+        workspaceId={workspaceId}
+      />
     </div>
   );
 }

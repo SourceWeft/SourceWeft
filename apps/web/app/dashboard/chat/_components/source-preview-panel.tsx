@@ -1,0 +1,262 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { FileText, Hash, Loader2, Sparkles } from "lucide-react";
+import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@sourceweft/ui-web/components/ui/dialog";
+import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
+import { cn } from "@sourceweft/ui-web/lib/utils";
+import { contentClient } from "../../../../lib/sdk";
+import type { CitationRecord } from "./chat-canvas";
+
+type SourceDetail = Awaited<ReturnType<typeof contentClient.getSource>>;
+
+export function SourcePreviewPanel({
+  citation,
+  onOpenChange,
+  open,
+  workspaceId,
+}: {
+  citation: CitationRecord | null;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  workspaceId?: string | null;
+}) {
+  const [detail, setDetail] = useState<SourceDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open || !workspaceId || !citation) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    contentClient
+      .getSource(workspaceId, citation.sourceId)
+      .then((result) => {
+        if (!cancelled) {
+          setDetail(result);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setDetail(null);
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load source preview.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [citation, open, workspaceId]);
+
+  useEffect(() => {
+    if (!open || !detail || !citation) {
+      return;
+    }
+
+    const timers = [80, 180, 360].map((delay) =>
+      window.setTimeout(() => {
+        const root = scrollRootRef.current;
+        if (!root) {
+          return;
+        }
+
+        const viewport = root.querySelector(
+          "[data-slot='scroll-area-viewport']",
+        ) as HTMLElement | null;
+        const target = root.querySelector(
+          `[data-source-chunk-id="${CSS.escape(citation.chunkId)}"]`,
+        ) as HTMLElement | null;
+
+        if (!viewport || !target) {
+          return;
+        }
+
+        const viewportRect = viewport.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const targetTop = targetRect.top - viewportRect.top + viewport.scrollTop;
+        viewport.scrollTo({
+          behavior: delay === 80 ? "auto" : "smooth",
+          top: Math.max(0, targetTop - viewportRect.height * 0.2),
+        });
+      }, delay),
+    );
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [citation, detail, open]);
+
+  const citedChunk = detail?.chunks.find((chunk) => chunk.id === citation?.chunkId);
+  const title = detail?.source.title ?? citation?.sourceTitle ?? "Source";
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent
+        className="flex h-[min(900px,calc(100vh-3rem))] w-[min(1120px,calc(100vw-2rem))] max-w-none flex-col overflow-hidden p-0"
+        constrainWidth={false}
+      >
+        <DialogHeader className="border-b bg-muted/30 px-5 py-4">
+          <div className="flex min-w-0 items-start justify-between gap-4 pr-9">
+            <div className="min-w-0">
+              <DialogTitle className="truncate text-lg font-semibold">
+                {title}
+              </DialogTitle>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5">
+                  <Hash className="size-3" />
+                  {typeof citation?.chunkNo === "number"
+                    ? `Chunk ${citation.chunkNo + 1}`
+                    : "Cited chunk"}
+                </span>
+                {detail?.chunks ? <span>{detail.chunks.length} chunks</span> : null}
+                {detail?.source.mimeType ? <span>{detail.source.mimeType}</span> : null}
+              </div>
+            </div>
+            {citedChunk ? (
+              <Button
+                className="hidden shrink-0 gap-1.5 md:inline-flex"
+                onClick={() => {
+                  const target = scrollRootRef.current?.querySelector(
+                    `[data-source-chunk-id="${CSS.escape(citedChunk.id)}"]`,
+                  ) as HTMLElement | null;
+                  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+                size="xs"
+                type="button"
+                variant="outline"
+              >
+                <Sparkles className="size-3.5" />
+                Jump to cited
+              </Button>
+            ) : null}
+          </div>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 size-4 animate-spin" />
+            Loading source preview...
+          </div>
+        ) : error ? (
+          <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-destructive">
+            {error}
+          </div>
+        ) : detail ? (
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            {detail.chunks.length > 1 ? (
+              <aside className="hidden w-16 shrink-0 border-r bg-muted/15 p-2 lg:block">
+                <ScrollArea className="h-full">
+                  <div className="flex flex-col gap-1.5">
+                    {detail.chunks.map((chunk, index) => {
+                      const isCited = chunk.id === citation?.chunkId;
+                      return (
+                        <button
+                          className={cn(
+                            "relative mx-auto flex h-9 w-10 items-center justify-center rounded-lg text-xs font-semibold transition-colors",
+                            isCited
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                          )}
+                          key={chunk.id}
+                          onClick={() => {
+                            const target = scrollRootRef.current?.querySelector(
+                              `[data-source-chunk-id="${CSS.escape(chunk.id)}"]`,
+                            ) as HTMLElement | null;
+                            target?.scrollIntoView({ behavior: "smooth", block: "center" });
+                          }}
+                          title={`Chunk ${index + 1}`}
+                          type="button"
+                        >
+                          {index + 1}
+                          {isCited ? (
+                            <span className="absolute -right-1 -top-1 rounded-full bg-primary ring-2 ring-background">
+                              <Sparkles className="size-3 text-primary-foreground" />
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </aside>
+            ) : null}
+
+            <ScrollArea className="min-w-0 flex-1" ref={scrollRootRef}>
+              <div className="mx-auto max-w-4xl space-y-4 px-5 py-6 lg:px-8">
+                {detail.chunks.map((chunk, index) => {
+                  const isCited = chunk.id === citation?.chunkId;
+                  return (
+                    <article
+                      className={cn(
+                        "overflow-hidden rounded-2xl border bg-background shadow-xs transition-colors",
+                        isCited && "border-primary/50 bg-primary/5 shadow-md shadow-primary/10",
+                      )}
+                      data-source-chunk-id={chunk.id}
+                      key={chunk.id}
+                    >
+                      <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={cn(
+                              "inline-flex h-7 min-w-7 items-center justify-center rounded-full text-xs font-semibold",
+                              isCited
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {index + 1}
+                          </span>
+                          <span className="text-sm font-medium text-foreground">
+                            Chunk {index + 1}
+                          </span>
+                        </div>
+                        {isCited ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                            <Sparkles className="size-3.5" />
+                            Cited source
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="px-4 py-4 text-sm leading-7 lg:px-5">
+                        <MessageResponse>{chunk.content}</MessageResponse>
+                      </div>
+                    </article>
+                  );
+                })}
+
+                {detail.chunks.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground">
+                    <FileText className="mx-auto mb-2 size-5" />
+                    This source has no indexed chunks yet.
+                  </div>
+                ) : null}
+              </div>
+            </ScrollArea>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}

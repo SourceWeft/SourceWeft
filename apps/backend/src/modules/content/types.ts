@@ -216,6 +216,7 @@ export type ThreadRecord = {
     imageProfileAlias: string | null;
     visionProfileAlias: string | null;
   };
+  sourceCount: number;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
