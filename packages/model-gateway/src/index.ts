@@ -20,6 +20,7 @@ export { createLangChainChatModel } from "./bridge/utils";
 export type { LangChainModelExecutionConfig } from "./bridge/utils";
 
 export { createOpenAICompatibleProvider } from "./providers/openai-compatible";
+export { createDeepInfraProvider } from "./providers/deepinfra";
 
 export type {
   ByokCredentialsInput,

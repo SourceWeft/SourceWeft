@@ -27,7 +27,7 @@
       "slug": "deepinfra-default",
       "providerName": "deepinfra",
       "providerKind": "deepinfra",
-      "baseUrl": "https://api.deepinfra.com/v1/openai",
+      "baseUrl": "https://api.deepinfra.com/v1",
       "apiKeyEnv": "DEEPINFRA_API_KEY",
       "supports": [
         "chat",

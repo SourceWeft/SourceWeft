@@ -54,6 +54,14 @@ type ChatMessageItem = {
   createdAt: string;
 };
 
+function getDisplayErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Failed to send message.";
+}
+
+function isLocalErrorMessage(message: ChatMessageItem) {
+  return message.role === "assistant" && message.metadata.isError === true;
+}
+
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -124,9 +132,11 @@ type ToolCallEventType =
 
 type StreamEventPayload = {
   type: string;
+  code?: string;
   delta?: string;
   error?: string;
   id?: string;
+  messageId?: string;
   tool?: string;
   query?: string;
   hitCount?: number;
@@ -439,6 +449,10 @@ function buildVersionedMessageGroups(
         versions: sortedVersions.map((version) => ({
           id: version.id,
           content: version.content,
+          isError: version.metadata.isError === true,
+          sourceAssistantMessageId: group.role === "assistant"
+            ? (toNullableString(version.metadata.sourceAssistantMessageId) ?? null)
+            : undefined,
           sourceUserMessageId: group.role === "assistant"
             ? (assistantSourceUserById.get(version.id) ?? null)
             : undefined,
@@ -605,7 +619,8 @@ export default function DashboardChatThreadPage({
     });
   }, [messageGroups]);
 
-  const loadThreadMessages = useCallback(async () => {
+  const loadThreadMessages = useCallback(
+    async (localErrors?: ChatMessageItem[]) => {
     if (!workspaceId) {
       setMessages([]);
       return;
@@ -613,33 +628,42 @@ export default function DashboardChatThreadPage({
 
     try {
       const result = await contentClient.listThreadMessages(workspaceId, threadId);
+      const localErrorMessages = localErrors ?? messages.filter(isLocalErrorMessage);
+      const serverMessages = result.items
+        .filter(
+          (
+            message,
+          ): message is ThreadMessageItem & {
+            role: "user" | "assistant";
+          } => message.role === "user" || message.role === "assistant",
+        )
+        .map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          parentMessageId: message.parentMessageId,
+          metadata: message.metadata,
+          createdAt: message.createdAt,
+        }))
+        .sort(
+          (left, right) =>
+            new Date(left.createdAt).getTime() -
+            new Date(right.createdAt).getTime(),
+        );
+
       setMessages(
-        result.items
-          .filter(
-            (
-              message,
-            ): message is ThreadMessageItem & {
-              role: "user" | "assistant";
-            } => message.role === "user" || message.role === "assistant",
-          )
-          .map((message) => ({
-            id: message.id,
-            role: message.role,
-            content: message.content,
-            parentMessageId: message.parentMessageId,
-            metadata: message.metadata,
-            createdAt: message.createdAt,
-          }))
-          .sort(
-            (left, right) =>
-              new Date(left.createdAt).getTime() -
-              new Date(right.createdAt).getTime(),
-          ),
+        [...serverMessages, ...localErrorMessages].sort(
+          (left, right) =>
+            new Date(left.createdAt).getTime() -
+            new Date(right.createdAt).getTime(),
+        ),
       );
     } catch {
       setMessages([]);
     }
-  }, [threadId, workspaceId]);
+    },
+    [messages, threadId, workspaceId],
+  );
 
   const loadThreadModelState = useCallback(async () => {
     if (!workspaceId) {
@@ -798,6 +822,8 @@ export default function DashboardChatThreadPage({
       }
 
       let thinkingTimer: number | null = null;
+      let persistedUserMessageId = tempUserId ?? input.userMessageId ?? null;
+      const streamToolCallsById = new Map<string, ToolCallRecord>();
 
       try {
         const requestBody: Record<string, unknown> = {
@@ -852,7 +878,6 @@ export default function DashboardChatThreadPage({
         const deltaQueue: string[] = [];
         let streamEnded = false;
         let drainPromise: Promise<void> | null = null;
-        const streamToolCallsById = new Map<string, ToolCallRecord>();
 
         if (!isFirstThreadMessage) {
           thinkingTimer = window.setTimeout(() => {
@@ -970,7 +995,24 @@ export default function DashboardChatThreadPage({
               continue;
             }
 
-            if (data.type === "text-delta" && typeof data.delta === "string") {
+            if (data.type === "start" && typeof data.messageId === "string") {
+              persistedUserMessageId = data.messageId;
+              flushSync(() => {
+                setMessages((previous) =>
+                  previous.map((message) =>
+                    message.id === tempAssistantId
+                      ? {
+                          ...message,
+                          metadata: {
+                            ...message.metadata,
+                            userMessageId: persistedUserMessageId,
+                          },
+                        }
+                      : message,
+                  ),
+                );
+              });
+            } else if (data.type === "text-delta" && typeof data.delta === "string") {
               enqueueDelta(data.delta);
               startDeltaDrain();
             } else if (isToolCallEvent(data)) {
@@ -1046,13 +1088,62 @@ export default function DashboardChatThreadPage({
         }
         setShowThinkingPlaceholder(false);
 
-        const temporaryIds = new Set(temporaryMessages.map((message) => message.id));
-        setMessages((previous) =>
-          previous.filter((message) => !temporaryIds.has(message.id)),
-        );
-        toast.error(
-          error instanceof Error ? error.message : "Failed to send message.",
-        );
+        const errorMessage = getDisplayErrorMessage(error);
+        const errorToolCalls = [...streamToolCallsById.values()]
+          .map((toolCall) =>
+            toolCall.status === "running"
+              ? {
+                  ...toolCall,
+                  status: "error" as const,
+                  error: toolCall.error ?? "Tool execution failed.",
+                }
+              : toolCall,
+          )
+          .filter(shouldRenderToolCall);
+        const existingUserMessageId =
+          persistedUserMessageId && !persistedUserMessageId.startsWith("temp-")
+            ? persistedUserMessageId
+            : input.userMessageId ?? latestUserMessage?.id ?? null;
+        const fallbackUserMessage =
+          temporaryMessages.find((message) => message.id === tempUserId) ?? null;
+        const existingAssistantMessageId =
+          input.assistantMessageId ?? latestAssistantMessage?.id ?? null;
+        const errorAssistantMessage: ChatMessageItem = {
+          id: `${tempAssistantId}-error`,
+          role: "assistant",
+          content: errorMessage,
+          parentMessageId: input.mode === "send" ? null : existingAssistantMessageId,
+          metadata: {
+            isError: true,
+            error: errorMessage,
+            sourceAssistantMessageId: existingAssistantMessageId,
+            userMessageId: existingUserMessageId ?? fallbackUserMessage?.id ?? null,
+            sourceUserMessageId: existingUserMessageId ?? fallbackUserMessage?.id ?? null,
+            versionOf: input.mode === "send" ? null : existingAssistantMessageId,
+            toolCalls: errorToolCalls,
+          },
+          createdAt: new Date(Date.now()).toISOString(),
+        };
+
+        if (existingUserMessageId) {
+          setMessages((previous) => {
+            const withoutTemporary = previous.filter(
+              (message) =>
+                message.id !== tempUserId && message.id !== tempAssistantId,
+            );
+            return [...withoutTemporary, errorAssistantMessage];
+          });
+          await loadThreadMessages([errorAssistantMessage]);
+        } else {
+          setMessages((previous) => {
+            const withoutAssistant = previous.filter(
+              (message) => message.id !== tempAssistantId,
+            );
+            return [...withoutAssistant, errorAssistantMessage];
+          });
+        }
+
+        toast.error(errorMessage);
       } finally {
         if (thinkingTimer) {
           window.clearTimeout(thinkingTimer);

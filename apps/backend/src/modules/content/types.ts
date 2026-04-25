@@ -58,6 +58,25 @@ export type ParsingConfig = {
   parserVersion: string;
 };
 
+export type DocumentParseProviderId =
+  | "langchain"
+  | "pdf2markdown"
+  | "docling"
+  | "llamaparse"
+  | "unstructured";
+
+export type DocumentParseStrategy =
+  | "explicit"
+  | "balanced"
+  | "cost"
+  | "quality";
+
+export type DocumentParseMode =
+  | "pure_text_pdf"
+  | "ocr_pdf"
+  | "image_ocr"
+  | "generic";
+
 export type ChunkSpec = Chunk;
 
 export type SourceMetadata = {
@@ -69,6 +88,23 @@ export type SourceMetadata = {
   charCount?: number;
   extractedAt?: string;
   uploadMethod?: "manual" | "api";
+  documentParseStrategy?: DocumentParseStrategy;
+  documentParseProvider?: DocumentParseProviderId;
+  documentParseBackend?: DocumentParseProviderId;
+  documentParseProviderRequested?: DocumentParseProviderId;
+  documentParseProviderResolved?: DocumentParseProviderId;
+  documentParseMode?: DocumentParseMode;
+  providerTaskId?: string;
+  providerStatus?: string;
+  providerAttempts?: number;
+  providerUpdatedAt?: string;
+  pdfClassification?: "pure_text" | "non_pure_text";
+  pdfClassificationConfidence?: number;
+  pdfBitmapCoverageSummary?: {
+    min: number;
+    max: number;
+    avg: number;
+  };
   [key: string]: unknown;
 };
 

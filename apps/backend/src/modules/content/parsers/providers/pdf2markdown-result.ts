@@ -1,0 +1,84 @@
+import type { ParsedPage } from "../types";
+import { normalizeWhitespace } from "./utils";
+
+type RecordLike = Record<string, unknown>;
+
+function asRecord(value: unknown): RecordLike | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as RecordLike)
+    : null;
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function extractPageContent(page: unknown) {
+  const record = asRecord(page);
+  if (!record) {
+    return "";
+  }
+
+  const direct =
+    asString(record.markdown) ||
+    asString(record.md) ||
+    asString(record.text) ||
+    asString(record.content);
+  if (direct) {
+    return direct;
+  }
+
+  const layout = asRecord(record.layout);
+  const blocks = Array.isArray(layout?.blocks) ? layout.blocks : Array.isArray(record.blocks) ? record.blocks : [];
+  return blocks
+    .map((block) => {
+      const blockRecord = asRecord(block);
+      return blockRecord ? asString(blockRecord.text) || asString(blockRecord.content) : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export function extractPdf2MarkdownResult(resultJson: unknown): {
+  content: string;
+  pages: ParsedPage[];
+  pageCount?: number;
+} {
+  const root = asRecord(resultJson);
+  const data = asRecord(root?.data) ?? root;
+  const result = asRecord(data?.result) ?? data;
+  const directMarkdown = asString(result?.markdown) || asString(result?.text) || asString(result?.content);
+  const pagesValue = Array.isArray(result?.pages) ? result.pages : [];
+  const pages = pagesValue
+    .map((page, index) => {
+      const record = asRecord(page);
+      const content = normalizeWhitespace(extractPageContent(page));
+      if (!content) {
+        return null;
+      }
+
+      const pageNumber = typeof record?.page_number === "number"
+        ? record.page_number
+        : typeof record?.pageNumber === "number"
+          ? record.pageNumber
+          : typeof record?.page_idx === "number"
+            ? record.page_idx + 1
+            : index + 1;
+
+      return { pageNumber, content };
+    })
+    .filter((page): page is ParsedPage => page !== null);
+  const content = normalizeWhitespace(directMarkdown || pages.map((page) => page.content).join("\n\n"));
+  const pageCount =
+    typeof result?.page_count === "number"
+      ? result.page_count
+      : typeof data?.page_count === "number"
+        ? data.page_count
+        : pages.length || undefined;
+
+  return {
+    content,
+    pages: pages.length > 0 ? pages : content ? [{ pageNumber: 1, content }] : [],
+    pageCount,
+  };
+}

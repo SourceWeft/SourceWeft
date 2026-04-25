@@ -70,6 +70,23 @@ const billingProviders: ReadonlySet<BillingProvider> = new Set([
   "manual",
 ]);
 
+const documentParseProviders = new Set([
+  "langchain",
+  "pdf2markdown",
+  "docling",
+  "llamaparse",
+  "unstructured",
+]);
+
+const documentParseStrategies = new Set([
+  "explicit",
+  "balanced",
+  "cost",
+  "quality",
+]);
+
+const pdf2MarkdownOutputs = new Set(["markdown", "json", "all"]);
+
 const planFamilies: ReadonlySet<PlanFamily> = new Set([
   "individual_free",
   "individual_pro",
@@ -161,6 +178,33 @@ function parseAlertLevel(value: string | undefined, fallback: AlertLevel) {
   }
 
   return fallback;
+}
+
+function parseDocumentParseProvider(value: string | undefined, fallback: string) {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return documentParseProviders.has(normalized) ? normalized : fallback;
+}
+
+function parseDocumentParseStrategy(value: string | undefined, fallback: string) {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return documentParseStrategies.has(normalized) ? normalized : fallback;
+}
+
+function parsePdf2MarkdownOutput(value: string | undefined, fallback: string) {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return pdf2MarkdownOutputs.has(normalized) ? normalized : fallback;
 }
 
 function requireEnv(name: string): string {
@@ -294,6 +338,47 @@ export const config = {
     secretAccessKey:
       process.env.AWS_SECRET_ACCESS_KEY || process.env.S3_SECRET_ACCESS_KEY || "",
     forcePathStyle: parseBoolean(process.env.S3_FORCE_PATH_STYLE, false),
+  },
+  documentParsing: {
+    strategy: parseDocumentParseStrategy(
+      process.env.DOCUMENT_PARSE_STRATEGY,
+      "explicit",
+    ),
+    provider: parseDocumentParseProvider(
+      process.env.DOCUMENT_PARSE_PROVIDER,
+      "pdf2markdown",
+    ),
+    pureTextBitmapThreshold: parseNonNegativeNumber(
+      process.env.DOCUMENT_PARSE_PURE_TEXT_BITMAP_THRESHOLD,
+      0.05,
+    ),
+    pureTextMinCharsPerPage: parseNonNegativeNumber(
+      process.env.DOCUMENT_PARSE_PURE_TEXT_MIN_CHARS_PER_PAGE,
+      80,
+    ),
+  },
+  pdf2markdown: {
+    apiKey: process.env.PDF2MARKDOWN_API_KEY || "",
+    baseUrl: stripTrailingSlash(
+      process.env.PDF2MARKDOWN_BASE_URL || "https://pdf2markdown.io/api",
+    ),
+    output: parsePdf2MarkdownOutput(process.env.PDF2MARKDOWN_OUTPUT, "all"),
+    pollInitialDelayMs: parsePositiveNumber(
+      process.env.PDF2MARKDOWN_POLL_INITIAL_DELAY_MS,
+      2000,
+    ),
+    pollMaxDelayMs: parsePositiveNumber(
+      process.env.PDF2MARKDOWN_POLL_MAX_DELAY_MS,
+      15000,
+    ),
+    pollMaxAttempts: parsePositiveNumber(
+      process.env.PDF2MARKDOWN_POLL_MAX_ATTEMPTS,
+      40,
+    ),
+    requestTimeoutMs: parsePositiveNumber(
+      process.env.PDF2MARKDOWN_REQUEST_TIMEOUT_MS,
+      30000,
+    ),
   },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,

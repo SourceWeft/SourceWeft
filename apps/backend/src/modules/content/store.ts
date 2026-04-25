@@ -71,6 +71,12 @@ type RetrievalSqlRow = {
   score: number;
 };
 
+function toPostgresTextArray(values: string[]) {
+  return `{${values
+    .map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+    .join(",")}}`;
+}
+
 function mapSource(row: SourceRow): SourceRecord {
   return {
     id: row.id,
@@ -1040,7 +1046,9 @@ export async function listSourceChunksByProfile(input: {
   ];
 
   if (input.sourceIds && input.sourceIds.length > 0) {
-    conditions.push(sql`${chunks.sourceId} = ANY(${input.sourceIds})` as never);
+    conditions.push(
+      sql`${chunks.sourceId} = ANY(${toPostgresTextArray(input.sourceIds)}::text[])` as never,
+    );
   }
 
   const rows = await db
@@ -1087,7 +1095,7 @@ export async function searchChunksByBm25(input: {
     where workspace_id = ${input.workspaceId}
       and team_id = ${input.teamId}
       and content ||| ${input.queryText}
-      and source_id = any(${input.sourceIds})
+      and source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
     order by pdb.score(id) desc
     limit ${input.topK}
   `);
@@ -1126,7 +1134,7 @@ export async function searchChunksByVectorExact(input: {
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
-      and c.source_id = any(${input.sourceIds})
+      and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
     order by ce.embedding <=> ${`[${input.queryEmbedding.join(",")}]`}::vector asc
     limit ${input.topK}
   `);
@@ -1172,7 +1180,7 @@ export async function searchChunksByVectorAnn(input: {
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
-      and c.source_id = any(${input.sourceIds})
+      and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
       and ce.dim = ${input.dim}
     order by ce.embedding::vector(${dimLiteral}) <=> ${queryVector}::vector(${dimLiteral}) asc
     limit ${input.topK}

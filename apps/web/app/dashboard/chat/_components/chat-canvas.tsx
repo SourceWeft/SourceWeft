@@ -85,6 +85,8 @@ function toAttachmentData(source: SourceItem) {
 export type MessageVersion = {
   id: string;
   content: string;
+  isError?: boolean;
+  sourceAssistantMessageId?: string | null;
   sourceUserMessageId?: string | null;
   toolCalls?: ToolCallRecord[];
 };
@@ -661,6 +663,13 @@ export function ChatCanvas({
                                 <div className="whitespace-pre-wrap break-words leading-6">
                                   {messageText}
                                 </div>
+                              ) : version.isError ? (
+                                <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                                  <p className="font-medium">Message failed</p>
+                                  <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
+                                    {messageText}
+                                  </p>
+                                </div>
                               ) : (
                                 <div className="space-y-3">
                                   {(version.toolCalls ?? []).length > 0 ? (
@@ -765,7 +774,8 @@ export function ChatCanvas({
                                     onClick={() => {
                                       onRefreshLatest?.({
                                         groupId: group.groupId,
-                                        assistantMessageId: version.id,
+                                        assistantMessageId:
+                                          version.sourceAssistantMessageId ?? version.id,
                                         branchIndex: activeOriginalBranchIndex,
                                       });
                                     }}

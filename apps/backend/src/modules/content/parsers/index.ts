@@ -1,6 +1,7 @@
 import type { SourceParser } from "./types";
 import { csvSourceParser } from "./csv";
 import { docxSourceParser } from "./docx";
+import { documentProviderParser } from "./document-provider-parser";
 import { epubSourceParser } from "./epub";
 import { jsonSourceParser } from "./json";
 import { pdfSourceParser } from "./pdf";
@@ -9,7 +10,7 @@ import { srtSourceParser } from "./srt";
 import { textSourceParser } from "./text";
 
 const registeredParsers: SourceParser[] = [
-  pdfSourceParser,
+  documentProviderParser,
   docxSourceParser,
   epubSourceParser,
   csvSourceParser,
@@ -32,9 +33,10 @@ export function listSupportedSourceMimeTypes() {
 export {
   csvSourceParser,
   docxSourceParser,
+  documentProviderParser,
   epubSourceParser,
-  jsonSourceParser,
   pdfSourceParser,
+  jsonSourceParser,
   pptxSourceParser,
   srtSourceParser,
   textSourceParser,

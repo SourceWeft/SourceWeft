@@ -3,6 +3,9 @@ import type { ProviderKind } from "../types";
 import { AnthropicChatAdapter } from "./anthropic-chat";
 import { AzureEmbeddingsAdapter } from "./azure-embeddings";
 import { AzureChatAdapter } from "./azure-chat";
+import { DeepInfraChatAdapter } from "./deepinfra-chat";
+import { DeepInfraEmbeddingsAdapter } from "./deepinfra-embeddings";
+import { DeepInfraRerankTransport } from "./deepinfra-rerank";
 import { GeminiEmbeddingsAdapter } from "./gemini-embeddings";
 import { GeminiChatAdapter } from "./gemini-chat";
 import { OpenAICompatibleEmbeddingsAdapter } from "./openai-compatible-embeddings";
@@ -13,11 +16,14 @@ import type { ChatAdapter, EmbeddingsAdapter, RerankTransport } from "./types";
 const openAICompatibleChat = new OpenAICompatibleChatAdapter();
 const openAICompatibleEmbeddings = new OpenAICompatibleEmbeddingsAdapter();
 const openAICompatibleRerank = new OpenAICompatibleRerankTransport();
+const deepInfraChat = new DeepInfraChatAdapter();
+const deepInfraEmbeddings = new DeepInfraEmbeddingsAdapter();
+const deepInfraRerank = new DeepInfraRerankTransport();
 
 const chatAdapters = new Map<ProviderKind, ChatAdapter>([
   ["openai-compatible", openAICompatibleChat],
   ["openrouter", openAICompatibleChat],
-  ["deepinfra", openAICompatibleChat],
+  ["deepinfra", deepInfraChat],
   ["openai", openAICompatibleChat],
   ["azure-openai", new AzureChatAdapter()],
   ["anthropic", new AnthropicChatAdapter()],
@@ -27,7 +33,7 @@ const chatAdapters = new Map<ProviderKind, ChatAdapter>([
 const embeddingsAdapters = new Map<ProviderKind, EmbeddingsAdapter>([
   ["openai-compatible", openAICompatibleEmbeddings],
   ["openrouter", openAICompatibleEmbeddings],
-  ["deepinfra", openAICompatibleEmbeddings],
+  ["deepinfra", deepInfraEmbeddings],
   ["openai", openAICompatibleEmbeddings],
   ["azure-openai", new AzureEmbeddingsAdapter()],
   ["gemini", new GeminiEmbeddingsAdapter()],
@@ -36,7 +42,7 @@ const embeddingsAdapters = new Map<ProviderKind, EmbeddingsAdapter>([
 const rerankTransports = new Map<ProviderKind, RerankTransport>([
   ["openai-compatible", openAICompatibleRerank],
   ["openrouter", openAICompatibleRerank],
-  ["deepinfra", openAICompatibleRerank],
+  ["deepinfra", deepInfraRerank],
   ["openai", openAICompatibleRerank],
 ]);
 

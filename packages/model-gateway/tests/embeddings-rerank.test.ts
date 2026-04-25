@@ -1,7 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createModelGateway } from "../src/index";
+import { createDeepInfraProvider, createModelGateway } from "../src/index";
+import { DeepInfraChatAdapter } from "../src/adapters/deepinfra-chat";
+import { DeepInfraEmbeddingsAdapter } from "../src/adapters/deepinfra-embeddings";
+import { resolveDeepInfraBaseUrls } from "../src/adapters/deepinfra-url";
 import { createJsonResponse } from "./helpers";
+
+test("createDeepInfraProvider defaults to provider root URL", () => {
+  assert.deepEqual(createDeepInfraProvider({ apiKey: "deepinfra-key" }), {
+    kind: "deepinfra",
+    baseUrl: "https://api.deepinfra.com/v1",
+    apiKey: "deepinfra-key",
+    defaultHeaders: undefined,
+    supports: ["chat", "embeddings", "rerank"],
+    enabled: true,
+  });
+});
+
+test("resolveDeepInfraBaseUrls accepts root and OpenAI-compatible URLs", () => {
+  assert.deepEqual(resolveDeepInfraBaseUrls("https://api.deepinfra.com/v1"), {
+    rootBaseUrl: "https://api.deepinfra.com/v1",
+    openAICompatibleBaseUrl: "https://api.deepinfra.com/v1/openai",
+    inferenceBaseUrl: "https://api.deepinfra.com/v1/inference",
+  });
+  assert.deepEqual(resolveDeepInfraBaseUrls("https://api.deepinfra.com/v1/openai"), {
+    rootBaseUrl: "https://api.deepinfra.com/v1",
+    openAICompatibleBaseUrl: "https://api.deepinfra.com/v1/openai",
+    inferenceBaseUrl: "https://api.deepinfra.com/v1/inference",
+  });
+});
+
+test("DeepInfra chat and embeddings adapters expose provider identity", () => {
+  assert.equal(new DeepInfraChatAdapter().kind, "deepinfra");
+  assert.equal(new DeepInfraEmbeddingsAdapter().kind, "deepinfra");
+});
 
 test("embeddings.embedBatch normalizes LangChain embeddings output", async () => {
   const gateway = createModelGateway({
@@ -79,4 +111,55 @@ test("rerank.rank supports siliconflow via openai-compatible provider", async ()
   assert.equal(requests[0]?.url, "https://api.siliconflow.cn/v1/rerank");
   assert.equal(result.results[0]?.relevanceScore, 0.77);
   assert.equal(result.provider, "siliconflow");
+});
+
+test("rerank.rank supports DeepInfra inference endpoint", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return createJsonResponse({
+        scores: [[0.82, 0.11]],
+      });
+    },
+    providers: {
+      deepinfra: {
+        kind: "deepinfra",
+        baseUrl: "https://api.deepinfra.com/v1",
+        apiKey: "deepinfra-key",
+      },
+    },
+    modelRoutes: {
+      "rerank-default": {
+        strategy: "priority",
+        targets: [{ provider: "deepinfra", model: "Qwen/Qwen3-Reranker-4B", priority: 1 }],
+      },
+    },
+  });
+
+  const result = await gateway.rerank.rank({
+    model: "rerank-default",
+    query: "capital of usa",
+    documents: ["Washington DC", "Paris"],
+    topN: 1,
+  });
+
+  assert.equal(
+    requests[0]?.url,
+    "https://api.deepinfra.com/v1/inference/Qwen/Qwen3-Reranker-4B",
+  );
+  assert.equal(requests[0]?.init.headers instanceof Headers, false);
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    "Bearer deepinfra-key",
+  );
+  assert.deepEqual(JSON.parse(String(requests[0]?.init.body)), {
+    queries: ["capital of usa"],
+    documents: ["Washington DC", "Paris"],
+  });
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0]?.index, 0);
+  assert.equal(result.results[0]?.relevanceScore, 0.82);
+  assert.equal(result.provider, "deepinfra");
 });

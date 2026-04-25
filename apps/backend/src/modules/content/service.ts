@@ -49,8 +49,15 @@ import {
 import { config as sharedConfig } from "../../shared/config";
 import { encryptSecret } from "../../shared/secrets";
 import { getSourceParser, listSupportedSourceMimeTypes } from "./parsers";
+import { startDocumentParse } from "./parsers/providers/document-parse-orchestrator";
+import { getDocumentProviderForResume } from "./parsers/providers/registry";
 import { buildSourceStorageKey, downloadSourceObject, uploadSourceObject } from "./storage";
-import { enqueueSourceParseJob, type SourceParseJobPayload } from "./queue";
+import {
+  enqueueSourceParseJob,
+  enqueueSourceParsePollJob,
+  type SourceParseJobPayload,
+  type SourceParsePollJobPayload,
+} from "./queue";
 import { chunkSourceContent } from "./chunker";
 import { buildAgentConfig, createThreadAgent } from "./agent";
 import { createRetrievalTool } from "./agent/tools/retrieval-tool";
@@ -63,6 +70,7 @@ import {
 import type { ModelPricing } from "../../shared/db/schema-types";
 import type {
   ChunkSpec,
+  DocumentParseProviderId,
   MessageRecord,
   ParsingConfig,
   SourceRecord,
@@ -73,7 +81,7 @@ const DEFAULT_MODEL_ALIAS = "chat-default";
 const DEFAULT_RRF_K = 60;
 const DEFAULT_VECTOR_TOP_K = 8;
 const DEFAULT_BM25_TOP_K = 12;
-const DEFAULT_PARSER_VERSION = "v1";
+const DEFAULT_PARSER_VERSION = "v2-document-provider";
 const DEFAULT_CHUNK_SIZE = 512;
 const DEFAULT_THREAD_PAGE_LIMIT = 20;
 
@@ -155,6 +163,26 @@ function mergeStatusMetadata(
     ...(source.metadata ?? {}),
     ...status,
   };
+}
+
+function isDocumentProviderMimeType(mimeType: string) {
+  return [
+    "application/pdf",
+    "image/avif",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/tiff",
+    "image/bmp",
+    "image/gif",
+  ].includes(mimeType);
+}
+
+function nextProviderPollDelay(attempt: number) {
+  const initial = sharedConfig.pdf2markdown.pollInitialDelayMs;
+  const max = sharedConfig.pdf2markdown.pollMaxDelayMs;
+  return Math.min(max, initial * 2 ** Math.max(0, attempt));
 }
 
 type LlmExecutionConfig = {
@@ -1801,7 +1829,7 @@ export class ContentService {
       workspaceId: workspace.id,
       teamId: workspace.organizationId,
       userId: input.userId,
-      idempotencyKey: `source-parse:${updatedSource.id}:${revision.revisionNo}`,
+      idempotencyKey: `source_parse_${updatedSource.id}_${revision.revisionNo}`,
     });
 
     const queuedSource = await updateSourceRecord({
@@ -2158,7 +2186,7 @@ export class ContentService {
       workspaceId: workspace.id,
       teamId: workspace.organizationId,
       userId: input.userId,
-      idempotencyKey: `source-parse:${source.id}:${revision.revisionNo}`,
+      idempotencyKey: `source_parse_${source.id}_${revision.revisionNo}`,
     });
 
     const queuedSource = await updateSourceRecord({
@@ -2226,13 +2254,58 @@ export class ContentService {
         bucket: source.storageBucket,
         key: source.storageKey,
       });
-      const parsed = await parser.parse({
+      const parseInput = {
         fileName: source.metadata.fileName || source.title,
         mimeType: source.mimeType,
         fileSize: source.sizeBytes ?? fileBuffer.length,
         content: fileBuffer,
         config: parsingConfig,
-      });
+      };
+      const providerOutcome = isDocumentProviderMimeType(source.mimeType)
+        ? await startDocumentParse({
+            ...parseInput,
+            sourceId: input.sourceId,
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            userId: input.userId,
+          })
+        : null;
+
+      if (providerOutcome?.kind === "pending") {
+        await updateSourceRecord({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          sourceId: input.sourceId,
+          metadata: mergeStatusMetadata(source, {
+            ...(providerOutcome.diagnostics?.metadata ?? {}),
+            progress: 30,
+            currentStep: "parsing",
+          }),
+        });
+
+        await enqueueSourceParsePollJob(
+          {
+            sourceId: input.sourceId,
+            workspaceId: input.workspaceId,
+            teamId: input.teamId,
+            userId: input.userId,
+            idempotencyKey: input.idempotencyKey,
+            backendId: providerOutcome.token.backendId,
+            taskId: providerOutcome.token.taskId,
+            fileName: providerOutcome.token.fileName,
+            mimeType: providerOutcome.token.mimeType,
+            fileSize: providerOutcome.token.fileSize,
+            parsingConfig,
+            attempt: 0,
+          },
+          nextProviderPollDelay(0),
+        );
+        return;
+      }
+
+      const parsed = providerOutcome?.kind === "completed"
+        ? providerOutcome.document
+        : await parser.parse(parseInput);
 
       const contentHash = computeContentHash(parsed.content);
 
@@ -2295,6 +2368,141 @@ export class ContentService {
         error: {
           message,
         },
+        metadata: {
+          ...(source.metadata ?? {}),
+          progress: 100,
+          currentStep: "failed",
+          error: message,
+        },
+      });
+      throw error;
+    }
+  }
+
+  async processSourceParsePollJob(input: SourceParsePollJobPayload) {
+    const source = await findSourceRecord({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      sourceId: input.sourceId,
+    });
+
+    if (!source) {
+      throw new ContentError(404, "SOURCE_NOT_FOUND", "Source not found");
+    }
+
+    if (!source.storageKey) {
+      throw new ContentError(400, "SOURCE_STORAGE_MISSING", "Source file storage is incomplete");
+    }
+
+    const provider = getDocumentProviderForResume(input.backendId as DocumentParseProviderId);
+    const fileBuffer = await downloadSourceObject({
+      bucket: source.storageBucket,
+      key: source.storageKey,
+    });
+
+    try {
+      const outcome = await provider.resume(
+        {
+          backendId: input.backendId as DocumentParseProviderId,
+          taskId: input.taskId,
+          sourceId: input.sourceId,
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          fileName: input.fileName,
+          mimeType: input.mimeType,
+          fileSize: input.fileSize,
+          parsingConfig: input.parsingConfig,
+          attempt: input.attempt,
+        },
+        fileBuffer,
+      );
+
+      if (outcome.kind === "pending") {
+        if (outcome.token.attempt >= sharedConfig.pdf2markdown.pollMaxAttempts) {
+          throw new ContentError(504, "PROVIDER_PARSE_TIMEOUT", "Document parse provider timed out");
+        }
+
+        await updateSourceRecord({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          sourceId: input.sourceId,
+          metadata: mergeStatusMetadata(source, {
+            ...(outcome.diagnostics?.metadata ?? {}),
+            progress: Math.min(55, 30 + outcome.token.attempt),
+            currentStep: "parsing",
+          }),
+        });
+
+        await enqueueSourceParsePollJob(
+          {
+            ...input,
+            attempt: outcome.token.attempt,
+          },
+          nextProviderPollDelay(outcome.token.attempt),
+        );
+        return;
+      }
+
+      const parsed = outcome.document;
+      const contentHash = computeContentHash(parsed.content);
+      const parsedSource = await updateSourceRecord({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceId: input.sourceId,
+        title: normalizeTitle(parsed.title, source.title),
+        contentText: parsed.content,
+        contentHash,
+        parserVersion: input.parsingConfig.parserVersion,
+        parsingConfig: input.parsingConfig,
+        estimatedPages: parsed.metadata.pageCount ?? source.estimatedPages,
+        parsedTokens: estimateTokens(parsed.content),
+        metadata: {
+          ...(source.metadata ?? {}),
+          ...parsed.metadata,
+          parsedPages: parsed.pages.length,
+          totalPages: parsed.metadata.pageCount ?? parsed.pages.length,
+          progress: 60,
+          currentStep: "chunking",
+          error: null,
+        },
+      });
+
+      if (!parsedSource) {
+        throw new ContentError(500, "SOURCE_PARSE_FAILED", "Failed to update parsed source");
+      }
+
+      const result = await this.indexSource({
+        workspaceId: input.workspaceId,
+        sourceId: input.sourceId,
+        userId: input.userId,
+        estimatedPages: parsed.metadata.pageCount,
+        parsedTokens: estimateTokens(parsed.content),
+        idempotencyKey: input.idempotencyKey,
+        chunks: parsed.chunks,
+      });
+
+      await updateSourceRecord({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceId: input.sourceId,
+        metadata: mergeStatusMetadata(result.source, {
+          parsedPages: parsed.pages.length,
+          totalPages: parsed.metadata.pageCount ?? parsed.pages.length,
+          progress: 100,
+          currentStep: "completed",
+          error: null,
+        }),
+        error: {},
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Source parse failed";
+      await updateSourceStatus({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceId: input.sourceId,
+        status: "failed",
+        error: { message },
         metadata: {
           ...(source.metadata ?? {}),
           progress: 100,
@@ -3890,6 +4098,12 @@ export class ContentService {
         attributes: {
           retrievalCalls: summarizeRetrievalCalls([]),
         },
+      });
+
+      yield toSseData({
+        type: "error",
+        code: contentError.code,
+        error: contentError.message,
       });
     }
 
