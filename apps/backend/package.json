@@ -10,7 +10,7 @@
     "dev:scheduler": "tsx src/scheduler/main.ts",
     "test": "node --test --import tsx src/modules/content/parsers/parsers.test.ts",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
+    "db:migrate": "pnpm run migrate:auth && drizzle-kit migrate --config drizzle.config.ts",
     "migrate:auth": "better-auth migrate --yes --config src/modules/auth/auth.ts",
     "migrate:workspace": "tsx src/scripts/migrate-workspace.ts",
     "migrate:billing-backfill": "tsx src/scripts/backfill-billing-accounts.ts",
