@@ -44,6 +44,7 @@ type DashboardChatState = {
     title?: string;
     modelSettings?: ThreadModelSettingsInput;
   }) => Promise<{ id: string; title: string } | null>;
+  updateChatTitle: (id: string, title: string) => void;
   updateChatSourceCount: (id: string, sourceCount: number) => void;
   openChat: (id: string, title: string) => void;
   archiveChat: (id: string) => void;
@@ -274,6 +275,21 @@ export function DashboardChatStateProvider({
     );
   }, []);
 
+  const updateChatTitle = useCallback((id: string, title: string) => {
+    const safeTitle = title.trim();
+    if (!safeTitle) return;
+
+    const updateItem = (item: ChatItem) =>
+      item.id === id
+        ? { ...item, title: safeTitle, updatedAt: new Date().toISOString() }
+        : item;
+
+    setPrivateChats((value) => value.map(updateItem));
+    setSharedChats((value) => value.map(updateItem));
+    setArchivedChats((value) => value.map(updateItem));
+    setThreadTitle((value) => (activeChatId === id ? safeTitle : value));
+  }, [activeChatId]);
+
   const createChat = useCallback(
     async (input?: {
       title?: string;
@@ -366,6 +382,7 @@ export function DashboardChatStateProvider({
       loadMorePrivateChats,
       startNewChat,
       createChat,
+      updateChatTitle,
       updateChatSourceCount,
       openChat,
       archiveChat,
@@ -388,6 +405,7 @@ export function DashboardChatStateProvider({
       switchWorkspace,
       openChat,
       createChat,
+      updateChatTitle,
       updateChatSourceCount,
       archiveChat,
       deleteChat,

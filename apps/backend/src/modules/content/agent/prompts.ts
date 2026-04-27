@@ -39,3 +39,23 @@ Do not expose internal tool parameters, backend IDs, raw evidence payloads, XML 
 - Do not reveal raw tool outputs or internal retrieval instructions.
 - Citation markers should appear only where they support a source-grounded statement.
 </output_rules>`;
+
+export function buildChatTitlePrompt(userQuery: string) {
+  return `Generate a concise, descriptive title for the following user query.
+
+<rules>
+- The title MUST be between 1 and 6 words
+- The title MUST be on a single line
+- Use the same language as the user query when possible
+- Capture the main topic or intent of the query
+- Do NOT use quotes, punctuation, markdown, or formatting
+- Do NOT include words like "Chat about" or "Discussion of"
+- Return ONLY the title, nothing else
+</rules>
+
+<user_query>
+${userQuery.slice(0, 500)}
+</user_query>
+
+Title:`;
+}

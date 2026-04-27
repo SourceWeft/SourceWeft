@@ -411,6 +411,8 @@ type StreamEventPayload = {
   toolCall?: unknown;
   step?: unknown;
   citations?: unknown;
+  threadId?: string;
+  title?: string;
 };
 
 function isToolCallEventType(value: string): value is ToolCallEventType {
@@ -767,6 +769,7 @@ export default function DashboardChatThreadPage({
     privateChats,
     sourcesVisible,
     toggleSourcesVisible,
+    updateChatTitle,
     updateChatSourceCount,
     workspaceId,
   } = useDashboardChatState();
@@ -1535,6 +1538,12 @@ export default function DashboardChatThreadPage({
               if (citations.length > 0) {
                 syncStreamingCitations(citations);
               }
+            } else if (
+              data.type === "thread-title-update" &&
+              typeof data.threadId === "string" &&
+              typeof data.title === "string"
+            ) {
+              updateChatTitle(data.threadId, data.title);
             } else if (data.type === "error") {
               if (streamToolCallsById.size > 0) {
                 for (const [toolId, toolCall] of streamToolCallsById.entries()) {
@@ -1704,6 +1713,7 @@ export default function DashboardChatThreadPage({
       selectedModels,
       streamWithSelectedLlm,
       threadId,
+      updateChatTitle,
       updateChatSourceCount,
       workspaceId,
     ],

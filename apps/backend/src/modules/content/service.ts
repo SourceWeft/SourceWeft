@@ -27,6 +27,7 @@ import {
   listSourceRevisionRecords,
   listThreadRecordsByWorkspace,
   listMessageRecordsByThread,
+  updateThreadTitleIfMatches,
   updateThreadModelSettingsRecord,
   searchChunksByBm25,
   updateSourceRecord,
@@ -75,6 +76,7 @@ import {
   type AgentCitation,
 } from "./agent/citation-registry";
 import { DatabaseKnowledgeBackend } from "./agent/database-fs-backend";
+import { buildChatTitlePrompt } from "./agent/prompts";
 import { createRetrievalTool } from "./agent/tools/retrieval-tool";
 import {
   buildCitationMetadata,
@@ -99,6 +101,8 @@ const DEFAULT_BM25_TOP_K = 12;
 const DEFAULT_PARSER_VERSION = "v2-document-provider";
 const DEFAULT_CHUNK_SIZE = 512;
 const DEFAULT_THREAD_PAGE_LIMIT = 20;
+const CHAT_TITLE_WAIT_MS = 500;
+const CHAT_TITLE_MAX_LENGTH = 80;
 
 type ThreadsCursor = {
   id: string;
@@ -112,6 +116,47 @@ function normalizeTitle(value: string | undefined, fallback: string) {
   }
 
   return normalized.slice(0, 200);
+}
+
+function normalizeChatTitle(value: string | undefined, fallback = "New Thread") {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return fallback;
+  }
+
+  return normalized.slice(0, CHAT_TITLE_MAX_LENGTH);
+}
+
+function normalizeGeneratedChatTitle(value: string | undefined) {
+  const title = normalizeChatTitle(value?.replace(/^['\"]+|['\"]+$/g, ""), "");
+  if (!title) {
+    return null;
+  }
+
+  return title.replace(/[.!?。！？]+$/u, "").slice(0, CHAT_TITLE_MAX_LENGTH).trim() || null;
+}
+
+function buildAutomaticTitleCandidates(input: {
+  currentTitle: string;
+  firstMessageTitle: string;
+}) {
+  return [input.currentTitle, input.firstMessageTitle].filter(
+    (title, index, titles) => title && titles.indexOf(title) === index,
+  );
+}
+
+function isPlaceholderThreadTitle(title: string) {
+  return title === "New chat";
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(null), timeoutMs);
+    promise
+      .then((value) => resolve(value))
+      .catch(() => resolve(null))
+      .finally(() => clearTimeout(timeout));
+  });
 }
 
 function estimateTokens(text: string) {
@@ -1410,6 +1455,9 @@ type PreparedThreadTurn = {
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
   llmIdempotencyKey: string;
   deepAgentThreadId: string;
+  isFirstAssistantResponse: boolean;
+  initialTitle: string;
+  firstMessageTitle: string;
 };
 
 type RetrievalCallTrace = {
@@ -3642,6 +3690,17 @@ export class ContentService {
         },
       }));
 
+    const messageRecords = await listMessageRecordsByThread({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: thread.id,
+    });
+    const isFirstAssistantResponse = !messageRecords.some(
+      (message) => message.role === "assistant",
+    );
+    const initialTitle = thread.title;
+    const firstMessageTitle = normalizeChatTitle(messageContent, "New Thread");
+
     const retrieval = await runRetrieval({
       workspaceId: workspace.id,
       teamId: workspace.organizationId,
@@ -3683,6 +3742,9 @@ export class ContentService {
       chatProfile,
       llmIdempotencyKey,
       deepAgentThreadId,
+      isFirstAssistantResponse,
+      initialTitle,
+      firstMessageTitle,
     };
   }
 
@@ -3820,6 +3882,77 @@ export class ContentService {
       assistantMessage,
       billing,
     };
+  }
+
+  private async generateChatTitle(input: {
+    prepared: PreparedThreadTurn;
+    llm?: LlmExecutionConfig;
+  }) {
+    try {
+      const gateway = await getModelGatewayClient(input.prepared.chatProfile.gatewayConfigId);
+      const completion = await gateway.chat.complete(
+        {
+          model: input.prepared.modelAlias,
+          messages: [
+            {
+              role: "user",
+              content: buildChatTitlePrompt(input.prepared.messageContent),
+            },
+          ],
+          metadata: {
+            team_id: input.prepared.workspace.organizationId,
+            workspace_id: input.prepared.workspace.id,
+            user_id: input.prepared.userId,
+            thread_id: input.prepared.thread.id,
+            feature: "chat",
+          },
+          executionMode: input.llm?.executionMode,
+          providerHint: input.llm?.providerHint,
+          byok: input.llm?.byok,
+        },
+        {
+          idempotencyKey: `thread-title:${input.prepared.userMessage.id}`,
+          traceId: input.prepared.userMessage.id,
+          metadata: buildGatewayRequestMetadata({
+            teamId: input.prepared.workspace.organizationId,
+            workspaceId: input.prepared.workspace.id,
+            userId: input.prepared.userId,
+            threadId: input.prepared.thread.id,
+            messageId: input.prepared.userMessage.id,
+            feature: "chat",
+            operation: "chat.title",
+            modelAlias: input.prepared.modelAlias,
+            llm: input.llm,
+          }),
+        },
+      );
+
+      return normalizeGeneratedChatTitle(resolveAssistantContent({ raw: completion.raw }));
+    } catch {
+      return null;
+    }
+  }
+
+  private async applyAutomaticThreadTitle(input: {
+    prepared: PreparedThreadTurn;
+    title: string;
+    expectedTitle: string;
+  }) {
+    const title = normalizeGeneratedChatTitle(input.title);
+    if (!title || title === input.expectedTitle) {
+      return null;
+    }
+
+    return updateThreadTitleIfMatches({
+      threadId: input.prepared.thread.id,
+      teamId: input.prepared.workspace.organizationId,
+      workspaceId: input.prepared.workspace.id,
+      expectedTitles: buildAutomaticTitleCandidates({
+        currentTitle: input.expectedTitle,
+        firstMessageTitle: input.prepared.firstMessageTitle,
+      }),
+      title,
+    });
   }
 
   private async *invokeDeepAgentTurn(input: {
@@ -4494,10 +4627,34 @@ export class ContentService {
   ): AsyncGenerator<string> {
     const prepared = await this.prepareThreadTurn(input);
     const chatStartedAt = Date.now();
+    const shouldGenerateTitle =
+      prepared.isFirstAssistantResponse && !prepared.assistantMessageParentId;
+    let titleExpectedTitle = prepared.initialTitle;
+    let titleTask: Promise<string | null> | null = null;
+
+    if (shouldGenerateTitle) {
+      titleTask = this.generateChatTitle({ prepared, llm: input.llm });
+    }
 
     const textId = `text-${prepared.userMessage.id}`;
     yield toSseData({ type: "start", messageId: prepared.userMessage.id });
     yield toSseData({ type: "text-start", id: textId });
+
+    if (shouldGenerateTitle && isPlaceholderThreadTitle(prepared.initialTitle)) {
+      const firstMessageThread = await this.applyAutomaticThreadTitle({
+        prepared,
+        title: prepared.firstMessageTitle,
+        expectedTitle: titleExpectedTitle,
+      });
+      if (firstMessageThread) {
+        titleExpectedTitle = firstMessageThread.title;
+        yield toSseData({
+          type: "thread-title-update",
+          threadId: prepared.thread.id,
+          title: firstMessageThread.title,
+        });
+      }
+    }
 
     let streamError: Error | undefined;
 
@@ -4634,6 +4791,24 @@ export class ContentService {
         type: "assistant-message",
         messageId: assistantMessage.id,
       });
+      if (titleTask) {
+        const generatedTitle = await withTimeout(titleTask, CHAT_TITLE_WAIT_MS);
+        if (generatedTitle) {
+          const titleThread = await this.applyAutomaticThreadTitle({
+            prepared,
+            title: generatedTitle,
+            expectedTitle: titleExpectedTitle,
+          });
+          if (titleThread) {
+            titleExpectedTitle = titleThread.title;
+            yield toSseData({
+              type: "thread-title-update",
+              threadId: prepared.thread.id,
+              title: titleThread.title,
+            });
+          }
+        }
+      }
     } catch (error) {
       const contentError =
         error instanceof ContentError ? error : toContentServiceError(error);

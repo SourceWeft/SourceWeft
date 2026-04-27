@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "../../shared/database";
 import {
   chunkEmbeddings,
@@ -1085,6 +1085,51 @@ export async function updateThreadModelSettingsRecord(input: {
         eq(threads.id, input.threadId),
         eq(threads.teamId, input.teamId),
         eq(threads.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+
+  if (!row) {
+    return null;
+  }
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: [row.id],
+  });
+
+  return mapThread(row, sourceCounts.get(row.id) ?? 0);
+}
+
+export async function updateThreadTitleIfMatches(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  expectedTitles: string[];
+  title: string;
+}) {
+  const expectedTitles = [
+    ...new Set(input.expectedTitles.map((title) => title.trim()).filter(Boolean)),
+  ];
+  const nextTitle = input.title.trim();
+
+  if (expectedTitles.length === 0 || nextTitle.length === 0) {
+    return null;
+  }
+
+  const [row] = await db
+    .update(threads)
+    .set({
+      title: nextTitle,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(threads.id, input.threadId),
+        eq(threads.teamId, input.teamId),
+        eq(threads.workspaceId, input.workspaceId),
+        inArray(threads.title, expectedTitles),
       ),
     )
     .returning();
