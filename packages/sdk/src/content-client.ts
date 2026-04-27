@@ -9,6 +9,7 @@ import type {
   GetThreadResponse,
   RefreshThreadRequest,
   RefreshThreadResponse,
+  GetSourceDocumentResponse,
   GetSourceResponse,
   IndexSourceRequest,
   IndexSourceResponse,
@@ -61,6 +62,12 @@ export class ContentClient {
   getSource(workspaceId: string, sourceId: string) {
     return this.http.get<GetSourceResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}`,
+    );
+  }
+
+  getSourceDocument(workspaceId: string, sourceId: string, documentId: string) {
+    return this.http.get<GetSourceDocumentResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/documents/${encode(documentId)}`,
     );
   }
 
@@ -174,11 +181,7 @@ export class ContentClient {
     );
   }
 
-  editThread(
-    workspaceId: string,
-    threadId: string,
-    input: EditThreadRequest,
-  ) {
+  editThread(workspaceId: string, threadId: string, input: EditThreadRequest) {
     return this.http.post<EditThreadResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
       {

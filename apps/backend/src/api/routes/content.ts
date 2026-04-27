@@ -31,8 +31,11 @@ function createSseResponse(stream: AsyncGenerator<string>) {
         }
         controller.close();
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Stream failed";
-        controller.enqueue(`data: ${JSON.stringify({ type: "error", error: message })}\n\n`);
+        const message =
+          error instanceof Error ? error.message : "Stream failed";
+        controller.enqueue(
+          `data: ${JSON.stringify({ type: "error", error: message })}\n\n`,
+        );
         controller.close();
       }
     },
@@ -50,7 +53,11 @@ export function registerContentRoutes(app: Hono) {
 
     const form = await c.req.formData().catch(() => null);
     if (!form) {
-      throw new ApiError(400, "INVALID_MULTIPART", "Invalid multipart form data");
+      throw new ApiError(
+        400,
+        "INVALID_MULTIPART",
+        "Invalid multipart form data",
+      );
     }
 
     const file = form.get("file");
@@ -125,6 +132,25 @@ export function registerContentRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get(
+    "/v1/workspaces/:workspaceId/sources/:id/documents/:documentId",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
+
+      const result = await contentService.getSourceDocument({
+        workspaceId: c.req.param("workspaceId"),
+        sourceId: c.req.param("id"),
+        documentId: c.req.param("documentId"),
+        userId: getSessionUserId(session),
+      });
+
+      return ApiResponse.success(c, result);
+    },
+  );
+
   app.get("/v1/workspaces/:workspaceId/sources/:id/status", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -153,6 +179,21 @@ export function registerContentRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result);
+  });
+
+  app.get("/v1/workspaces/:workspaceId/sources/:id/download", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.downloadSource({
+      workspaceId: c.req.param("workspaceId"),
+      sourceId: c.req.param("id"),
+      userId: getSessionUserId(session),
+    });
+
+    return c.redirect(result.url, 302);
   });
 
   app.patch("/v1/workspaces/:workspaceId/sources/:id", async (c) => {
@@ -287,22 +328,24 @@ export function registerContentRoutes(app: Hono) {
     return ApiResponse.success(c, result, 201);
   });
 
-  app.delete("/v1/workspaces/:workspaceId/model-gateway/byok-keys/:provider/:keyRef", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
+  app.delete(
+    "/v1/workspaces/:workspaceId/model-gateway/byok-keys/:provider/:keyRef",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
 
-    const result = await contentService.deleteByokKeyRef({
-      workspaceId: c.req.param("workspaceId"),
-      userId: getSessionUserId(session),
-      providerName: c.req.param("provider"),
-      keyRef: c.req.param("keyRef"),
-    });
+      const result = await contentService.deleteByokKeyRef({
+        workspaceId: c.req.param("workspaceId"),
+        userId: getSessionUserId(session),
+        providerName: c.req.param("provider"),
+        keyRef: c.req.param("keyRef"),
+      });
 
-    return ApiResponse.success(c, result);
-  });
-
+      return ApiResponse.success(c, result);
+    },
+  );
 
   app.get("/v1/workspaces/:workspaceId/threads", async (c) => {
     const session = await requireSession(c);
@@ -385,52 +428,62 @@ export function registerContentRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
-  app.patch("/v1/workspaces/:workspaceId/threads/:id/model-settings", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
+  app.patch(
+    "/v1/workspaces/:workspaceId/threads/:id/model-settings",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
 
-    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
-    const parsed = updateThreadModelSettingsRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw ApiError.validation(
-        parsed.error.flatten() as Record<string, unknown>,
-      );
-    }
+      const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+      const parsed = updateThreadModelSettingsRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw ApiError.validation(
+          parsed.error.flatten() as Record<string, unknown>,
+        );
+      }
 
-    const result = await contentService.updateThreadModelSettings({
-      workspaceId: c.req.param("workspaceId"),
-      threadId: c.req.param("id"),
-      userId: getSessionUserId(session),
-      llmProfileAlias: parsed.data.llmProfileAlias,
-      imageProfileAlias: parsed.data.imageProfileAlias,
-      visionProfileAlias: parsed.data.visionProfileAlias,
-    });
+      const result = await contentService.updateThreadModelSettings({
+        workspaceId: c.req.param("workspaceId"),
+        threadId: c.req.param("id"),
+        userId: getSessionUserId(session),
+        llmProfileAlias: parsed.data.llmProfileAlias,
+        imageProfileAlias: parsed.data.imageProfileAlias,
+        visionProfileAlias: parsed.data.visionProfileAlias,
+      });
 
-    return ApiResponse.success(c, result);
-  });
+      return ApiResponse.success(c, result);
+    },
+  );
 
-  app.get("/v1/workspaces/:workspaceId/messages/:messageId/citations/:rank", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
+  app.get(
+    "/v1/workspaces/:workspaceId/messages/:messageId/citations/:rank",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
 
-    const rank = Number.parseInt(c.req.param("rank"), 10);
-    if (!Number.isFinite(rank) || rank <= 0) {
-      throw new ApiError(400, "VALIDATION_ERROR", "rank must be a positive integer");
-    }
+      const rank = Number.parseInt(c.req.param("rank"), 10);
+      if (!Number.isFinite(rank) || rank <= 0) {
+        throw new ApiError(
+          400,
+          "VALIDATION_ERROR",
+          "rank must be a positive integer",
+        );
+      }
 
-    const result = await contentService.getCitationDetail({
-      workspaceId: c.req.param("workspaceId"),
-      messageId: c.req.param("messageId"),
-      rank,
-      userId: getSessionUserId(session),
-    });
+      const result = await contentService.getCitationDetail({
+        workspaceId: c.req.param("workspaceId"),
+        messageId: c.req.param("messageId"),
+        rank,
+        userId: getSessionUserId(session),
+      });
 
-    return ApiResponse.success(c, result);
-  });
+      return ApiResponse.success(c, result);
+    },
+  );
 
   app.get("/v1/workspaces/:workspaceId/threads/:id/messages", async (c) => {
     const session = await requireSession(c);
@@ -467,7 +520,11 @@ export function registerContentRoutes(app: Hono) {
     const mode = parsed.data.mode ?? "send";
 
     if ((mode === "send" || mode === "edit") && !parsed.data.content) {
-      throw new ApiError(400, "VALIDATION_ERROR", "content is required for send/edit mode");
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "content is required for send/edit mode",
+      );
     }
 
     if (parsed.data.stream === false) {

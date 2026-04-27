@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "../../shared/config";
 
 function getConfiguredBucket() {
@@ -58,4 +59,23 @@ export async function downloadSourceObject(input: { bucket?: string | null; key:
 
   const bytes = await response.Body?.transformToByteArray();
   return Buffer.from(bytes ?? []);
+}
+
+export function getSourceObjectDownloadUrl(input: {
+  bucket?: string | null;
+  key: string;
+  fileName: string;
+  contentType: string;
+  expiresInSeconds?: number;
+}) {
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+      ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(input.fileName)}`,
+      ResponseContentType: input.contentType,
+    }),
+    { expiresIn: input.expiresInSeconds ?? 15 * 60 },
+  );
 }

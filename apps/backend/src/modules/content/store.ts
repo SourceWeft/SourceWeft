@@ -47,9 +47,10 @@ type ByokKeyRefRow = typeof modelGatewayByokKeyRefs.$inferSelect;
 type SourceRevisionRow = typeof sourceRevisions.$inferSelect;
 
 function normalizeThreadModelSettings(value: unknown) {
-  const record = value && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : {};
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
 
   const asNullableAlias = (candidate: unknown) =>
     typeof candidate === "string" && candidate.trim().length > 0
@@ -77,6 +78,25 @@ function toPostgresTextArray(values: string[]) {
   return `{${values
     .map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
     .join(",")}}`;
+}
+
+function currentDocumentCondition() {
+  return sql`
+    not exists (
+      select 1
+      from "documents" newer_documents
+      where newer_documents.team_id = ${documents.teamId}
+        and newer_documents.workspace_id = ${documents.workspaceId}
+        and newer_documents.source_id = ${documents.sourceId}
+        and (
+          newer_documents.created_at > ${documents.createdAt}
+          or (
+            newer_documents.created_at = ${documents.createdAt}
+            and newer_documents.id > ${documents.id}
+          )
+        )
+    )
+  `;
 }
 
 function mapSource(row: SourceRow): SourceRecord {
@@ -144,7 +164,10 @@ async function countUsedSourceIdsByThread(input: {
     return new Map<string, number>();
   }
 
-  const rows = await db.execute<{ thread_id: string; source_count: number | string }>(sql`
+  const rows = await db.execute<{
+    thread_id: string;
+    source_count: number | string;
+  }>(sql`
     select
       m.thread_id,
       count(distinct source_id.value)::int as source_count
@@ -225,6 +248,7 @@ function mapSourceDocument(row: DocumentRow): SourceDocumentRecord {
     id: row.id,
     title: row.title,
     language: row.language,
+    contentText: row.contentText,
     status: row.status,
     tokenCount: row.tokenCount,
     charCount: row.charCount,
@@ -476,7 +500,7 @@ export async function getSourceDetailRecord(input: {
     return null;
   }
 
-  const [documentRows, chunkRows, embeddingRows, revisionRows] = await Promise.all([
+  const [documentRows, revisionRows] = await Promise.all([
     db
       .select()
       .from(documents)
@@ -487,13 +511,112 @@ export async function getSourceDetailRecord(input: {
           eq(documents.workspaceId, input.workspaceId),
         ),
       )
-      .orderBy(asc(documents.createdAt)),
+      .orderBy(
+        desc(documents.createdAt),
+        desc(documents.updatedAt),
+        desc(documents.id),
+      ),
+    db
+      .select()
+      .from(sourceRevisions)
+      .where(
+        and(
+          eq(sourceRevisions.sourceId, input.sourceId),
+          eq(sourceRevisions.teamId, input.teamId),
+          eq(sourceRevisions.workspaceId, input.workspaceId),
+        ),
+      )
+      .orderBy(
+        desc(sourceRevisions.revisionNo),
+        desc(sourceRevisions.createdAt),
+      ),
+  ]);
+
+  const currentDocument = documentRows[0] ?? null;
+  const [chunkRows, embeddingRows] = currentDocument
+    ? await Promise.all([
+        db
+          .select()
+          .from(chunks)
+          .where(
+            and(
+              eq(chunks.documentId, currentDocument.id),
+              eq(chunks.teamId, input.teamId),
+              eq(chunks.workspaceId, input.workspaceId),
+            ),
+          )
+          .orderBy(asc(chunks.chunkNo)),
+        db
+          .select({
+            embedding: chunkEmbeddings,
+          })
+          .from(chunkEmbeddings)
+          .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
+          .where(
+            and(
+              eq(chunks.documentId, currentDocument.id),
+              eq(chunkEmbeddings.teamId, input.teamId),
+              eq(chunkEmbeddings.workspaceId, input.workspaceId),
+            ),
+          )
+          .orderBy(asc(chunkEmbeddings.createdAt)),
+      ])
+    : [[], []];
+
+  return {
+    source,
+    documents: currentDocument ? [mapSourceDocument(currentDocument)] : [],
+    chunks: chunkRows.map((row) => ({
+      id: row.id,
+      documentId: row.documentId,
+      chunkNo: row.chunkNo,
+      content: row.content,
+      headingPath: row.headingPath,
+      startOffset: row.startOffset,
+      endOffset: row.endOffset,
+      language: row.language,
+      createdAt: row.createdAt.toISOString(),
+    })),
+    embeddings: embeddingRows.map((row) => mapSourceEmbedding(row.embedding)),
+    revisions: revisionRows.map(mapSourceRevision),
+  };
+}
+
+export async function getSourceDocumentDetailRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+  documentId: string;
+}): Promise<SourceDetailRecord | null> {
+  const source = await findSourceRecord(input);
+  if (!source) {
+    return null;
+  }
+
+  const [documentRow] = await db
+    .select()
+    .from(documents)
+    .where(
+      and(
+        eq(documents.id, input.documentId),
+        eq(documents.sourceId, input.sourceId),
+        eq(documents.teamId, input.teamId),
+        eq(documents.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+
+  if (!documentRow) {
+    return null;
+  }
+
+  const [chunkRows, embeddingRows, revisionRows] = await Promise.all([
     db
       .select()
       .from(chunks)
       .where(
         and(
-          eq(chunks.sourceId, input.sourceId),
+          eq(chunks.documentId, documentRow.id),
           eq(chunks.teamId, input.teamId),
           eq(chunks.workspaceId, input.workspaceId),
         ),
@@ -507,7 +630,7 @@ export async function getSourceDetailRecord(input: {
       .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
       .where(
         and(
-          eq(chunks.sourceId, input.sourceId),
+          eq(chunks.documentId, documentRow.id),
           eq(chunkEmbeddings.teamId, input.teamId),
           eq(chunkEmbeddings.workspaceId, input.workspaceId),
         ),
@@ -523,12 +646,15 @@ export async function getSourceDetailRecord(input: {
           eq(sourceRevisions.workspaceId, input.workspaceId),
         ),
       )
-      .orderBy(desc(sourceRevisions.revisionNo), desc(sourceRevisions.createdAt)),
+      .orderBy(
+        desc(sourceRevisions.revisionNo),
+        desc(sourceRevisions.createdAt),
+      ),
   ]);
 
   return {
     source,
-    documents: documentRows.map(mapSourceDocument),
+    documents: [mapSourceDocument(documentRow)],
     chunks: chunkRows.map((row) => ({
       id: row.id,
       documentId: row.documentId,
@@ -634,18 +760,20 @@ export async function listSourceChunks(input: {
   sourceId: string;
 }) {
   const rows = await db
-    .select()
+    .select({ chunk: chunks })
     .from(chunks)
+    .innerJoin(documents, eq(documents.id, chunks.documentId))
     .where(
       and(
         eq(chunks.teamId, input.teamId),
         eq(chunks.workspaceId, input.workspaceId),
         eq(chunks.sourceId, input.sourceId),
+        currentDocumentCondition(),
       ),
     )
     .orderBy(asc(chunks.chunkNo));
 
-  return rows.map(mapChunk);
+  return rows.map((row) => mapChunk(row.chunk));
 }
 
 export async function createSourceRevisionRecord(input: {
@@ -811,7 +939,6 @@ export async function createThreadRecord(input: {
 
   return mapThread(row);
 }
-
 
 export async function listThreadRecordsByWorkspace(input: {
   teamId: string;
@@ -997,15 +1124,17 @@ export async function findDefaultEmbeddingProfile() {
   return row ? mapEmbeddingProfile(row) : null;
 }
 
-export async function replaceSourceDocumentsAndEmbeddings(input: {
+export async function createSourceDocumentChunksAndEmbeddings(input: {
   teamId: string;
   workspaceId: string;
   sourceId: string;
+  sourceRevisionId?: string | null;
   sourceTitle: string;
   sourceContentText: string;
   embeddingProfileId: string;
   modelAlias: string;
   embeddings: number[][];
+  requireEmbeddings: boolean;
   requestedDimensions: number | null;
   chunks: ChunkSpec[];
   parsingConfig?: ParsingConfig | null;
@@ -1017,7 +1146,18 @@ export async function replaceSourceDocumentsAndEmbeddings(input: {
   const now = new Date();
 
   return db.transaction(async (tx) => {
-    await tx.delete(documents).where(eq(documents.sourceId, input.sourceId));
+    await tx.execute(sql`
+      delete from ${chunkEmbeddings}
+      where ${chunkEmbeddings.teamId} = ${input.teamId}
+        and ${chunkEmbeddings.workspaceId} = ${input.workspaceId}
+        and ${chunkEmbeddings.chunkId} in (
+          select ${chunks.id}
+          from ${chunks}
+          where ${chunks.teamId} = ${input.teamId}
+            and ${chunks.workspaceId} = ${input.workspaceId}
+            and ${chunks.sourceId} = ${input.sourceId}
+        )
+    `);
 
     const documentId = randomUUID();
     await tx.insert(documents).values({
@@ -1025,6 +1165,7 @@ export async function replaceSourceDocumentsAndEmbeddings(input: {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       sourceId: input.sourceId,
+      sourceRevisionId: input.sourceRevisionId ?? null,
       title: baseTitle,
       language: null,
       contentText: normalizedText,
@@ -1068,23 +1209,28 @@ export async function replaceSourceDocumentsAndEmbeddings(input: {
 
       await tx.insert(chunks).values(chunkRows);
 
-      if (input.embeddings.length !== chunkRows.length) {
+      if (
+        (input.requireEmbeddings || input.embeddings.length > 0) &&
+        input.embeddings.length !== chunkRows.length
+      ) {
         throw new Error("Embedding count does not match chunk count");
       }
 
-      await tx.insert(chunkEmbeddings).values(
-        chunkRows.map((chunkRow, index) => ({
-          id: randomUUID(),
-          teamId: input.teamId,
-          workspaceId: input.workspaceId,
-          chunkId: chunkRow.id,
-          embeddingProfileId: input.embeddingProfileId,
-          modelAlias: input.modelAlias,
-          dim: input.embeddings[index]?.length ?? 0,
-          embedding: input.embeddings[index] ?? [],
-          createdAt: now,
-        })),
-      );
+      if (input.embeddings.length > 0) {
+        await tx.insert(chunkEmbeddings).values(
+          chunkRows.map((chunkRow, index) => ({
+            id: randomUUID(),
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            chunkId: chunkRow.id,
+            embeddingProfileId: input.embeddingProfileId,
+            modelAlias: input.modelAlias,
+            dim: input.embeddings[index]?.length ?? 0,
+            embedding: input.embeddings[index] ?? [],
+            createdAt: now,
+          })),
+        );
+      }
     }
 
     return {
@@ -1105,6 +1251,7 @@ export async function listSourceChunksByProfile(input: {
     eq(chunks.teamId, input.teamId),
     eq(chunks.workspaceId, input.workspaceId),
     eq(chunkEmbeddings.embeddingProfileId, input.embeddingProfileId),
+    currentDocumentCondition(),
   ];
 
   if (input.sourceIds && input.sourceIds.length > 0) {
@@ -1123,6 +1270,7 @@ export async function listSourceChunksByProfile(input: {
     })
     .from(chunkEmbeddings)
     .innerJoin(chunks, eq(chunkEmbeddings.chunkId, chunks.id))
+    .innerJoin(documents, eq(documents.id, chunks.documentId))
     .where(and(...conditions))
     .orderBy(asc(chunks.createdAt), asc(chunks.chunkNo));
 
@@ -1157,10 +1305,25 @@ export async function searchChunksByBm25(input: {
       pdb.score(c.id) as score
     from chunks c
     inner join sources s on s.id = c.source_id
+    inner join documents d on d.id = c.document_id
     where c.workspace_id = ${input.workspaceId}
       and c.team_id = ${input.teamId}
       and c.content ||| ${input.queryText}
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
+      and not exists (
+        select 1
+        from documents newer_documents
+        where newer_documents.team_id = d.team_id
+          and newer_documents.workspace_id = d.workspace_id
+          and newer_documents.source_id = d.source_id
+          and (
+            newer_documents.created_at > d.created_at
+            or (
+              newer_documents.created_at = d.created_at
+              and newer_documents.id > d.id
+            )
+          )
+      )
     order by pdb.score(c.id) desc
     limit ${input.topK}
   `);
@@ -1200,11 +1363,26 @@ export async function searchChunksByVectorExact(input: {
       1 - (ce.embedding <=> ${`[${input.queryEmbedding.join(",")}]`}::vector) as score
     from chunk_embeddings ce
     inner join chunks c on c.id = ce.chunk_id
+    inner join documents d on d.id = c.document_id
     inner join sources s on s.id = c.source_id
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
+      and not exists (
+        select 1
+        from documents newer_documents
+        where newer_documents.team_id = d.team_id
+          and newer_documents.workspace_id = d.workspace_id
+          and newer_documents.source_id = d.source_id
+          and (
+            newer_documents.created_at > d.created_at
+            or (
+              newer_documents.created_at = d.created_at
+              and newer_documents.id > d.id
+            )
+          )
+      )
     order by ce.embedding <=> ${`[${input.queryEmbedding.join(",")}]`}::vector asc
     limit ${input.topK}
   `);
@@ -1251,12 +1429,27 @@ export async function searchChunksByVectorAnn(input: {
       1 - (ce.embedding::vector(${dimLiteral}) <=> ${queryVector}::vector(${dimLiteral})) as score
     from chunk_embeddings ce
     inner join chunks c on c.id = ce.chunk_id
+    inner join documents d on d.id = c.document_id
     inner join sources s on s.id = c.source_id
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
       and ce.dim = ${input.dim}
+      and not exists (
+        select 1
+        from documents newer_documents
+        where newer_documents.team_id = d.team_id
+          and newer_documents.workspace_id = d.workspace_id
+          and newer_documents.source_id = d.source_id
+          and (
+            newer_documents.created_at > d.created_at
+            or (
+              newer_documents.created_at = d.created_at
+              and newer_documents.id > d.id
+            )
+          )
+      )
     order by ce.embedding::vector(${dimLiteral}) <=> ${queryVector}::vector(${dimLiteral}) asc
     limit ${input.topK}
   `);
@@ -1311,7 +1504,6 @@ export async function createCitationRecords(input: {
     })),
   );
 }
-
 
 export async function findCitationByMessageRank(input: {
   teamId: string;
@@ -1425,7 +1617,6 @@ export async function createRetrievalHits(input: {
     })),
   );
 }
-
 
 export async function listByokKeyRefRecords(input: {
   teamId: string;

@@ -22,6 +22,7 @@ export type SourceItem = {
   status: "Indexed" | "Syncing" | "Needs review";
   meta: string;
   folder?: string;
+  storageKey?: string | null;
 };
 
 export type CitationItem = {

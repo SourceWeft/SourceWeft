@@ -9,11 +9,54 @@
  */
 
 import { createDeepAgent } from "deepagents";
+import type { AnyBackendProtocol } from "deepagents";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
+import { createMiddleware } from "langchain";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import { CHAT_SYSTEM_PROMPT } from "./agent/prompts";
 import { getChatCheckpointer } from "../../shared/chat-checkpointer";
 import { createAgentChatModel } from "../../shared/model-gateway";
+
+const KB_LS_TOOL_DESCRIPTION = `Lists files in a directory. In SourceWeft, /kb is the read-only workspace knowledge view. When the user has selected or referenced sources for the current turn, /kb is scoped to those selected/current sources, so ls('/kb') lists the selected/current source files. Use this for questions about selected file names/paths, source identity, file enumeration, and source-wide coverage tasks that need to inspect selected sources. Do not call ls before retrieve or grep just to discover selected sources; those tools are already scoped to the selected/current sources.`;
+
+const KB_READ_FILE_TOOL_DESCRIPTION = `Reads a file from the filesystem. In SourceWeft, files under /kb are indexed workspace sources, scoped to the selected/current sources when the user has selected or referenced sources for the current turn. Use read_file('/kb/...') when completeness across source content matters, including source-wide summarizing, reviewing, comparison, extracting all key points, listing document contents, analyzing full documents, preparing source material, or gathering surrounding context. Use pagination with offset and limit for long files.`;
+
+const KB_GLOB_TOOL_DESCRIPTION = `Finds files matching a glob pattern. In SourceWeft, /kb is scoped to selected/current sources when sources are selected for the turn. Use glob under /kb to narrow selected/current source paths by filename or path pattern when the task depends on file identity or a file subset. Do not call glob before retrieve or grep just to discover selected sources.`;
+
+const KB_GREP_TOOL_DESCRIPTION = `Searches /kb candidate chunks with a case-insensitive regular expression and returns matching lines. In SourceWeft, /kb is scoped to selected/current sources when sources are selected for the turn, so grep('/kb') does not need a prior ls. Use grep when the user's goal is lexical or regex location: finding where terms appear, checking whether a pattern exists, or locating identifiers, field labels, codes, URLs, names, invoice/order numbers, quoted terms, and simple OR patterns like "invoice|order|receipt". For targeted source-grounded Q&A that can be answered from relevant passages, use retrieve first; grep is a fallback or lexical-location tool, not a required preflight step. Escape regex metacharacters when literal matching is needed. Broad regex patterns without literal terms require a small selected/current source set or a narrowed source/chunk path.`;
+
+function createKnowledgeFilesystemToolDescriptionMiddleware() {
+  const setToolDescription = (tool: { description?: string }, description: string) => {
+    tool.description = description;
+    return tool;
+  };
+
+  return createMiddleware({
+    name: "SourceWeftKnowledgeFilesystemDescriptions",
+    wrapModelCall: async (request, handler) => {
+      const tools = request.tools.map((tool) => {
+        if (tool.name === "ls") {
+          return setToolDescription(tool, KB_LS_TOOL_DESCRIPTION);
+        }
+        if (tool.name === "read_file") {
+          return setToolDescription(tool, KB_READ_FILE_TOOL_DESCRIPTION);
+        }
+        if (tool.name === "glob") {
+          return setToolDescription(tool, KB_GLOB_TOOL_DESCRIPTION);
+        }
+        if (tool.name === "grep") {
+          return setToolDescription(tool, KB_GREP_TOOL_DESCRIPTION);
+        }
+        return tool;
+      });
+
+      return handler({
+        ...request,
+        tools,
+      });
+    },
+  });
+}
 
 export interface CreateThreadAgentParams {
   /** The model alias to use (e.g., "chat-default") */
@@ -21,6 +64,7 @@ export interface CreateThreadAgentParams {
   gatewayConfigId?: string | null;
   execution?: LangChainModelExecutionConfig;
   tools?: Array<ClientTool | ServerTool>;
+  backend?: AnyBackendProtocol;
 }
 
 /**
@@ -47,7 +91,9 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
     model,
     tools: params.tools ?? [],
     systemPrompt: CHAT_SYSTEM_PROMPT,
+    middleware: [createKnowledgeFilesystemToolDescriptionMiddleware()],
     checkpointer,
+    backend: params.backend,
   });
 
   return agent;

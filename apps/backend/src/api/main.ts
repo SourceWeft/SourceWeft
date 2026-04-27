@@ -161,7 +161,12 @@ app.use(
     },
     allowHeaders: ["Content-Type", "Authorization", "X-Workspace-Id"],
     allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    exposeHeaders: ["set-auth-token", "set-auth-jwt", "content-length"],
+    exposeHeaders: [
+      "set-auth-token",
+      "set-auth-jwt",
+      "content-length",
+      "content-disposition",
+    ],
     credentials: true,
     maxAge: 600,
   }),

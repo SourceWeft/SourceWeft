@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Download,
   FileText,
   Folder,
   FolderPlus,
@@ -19,7 +20,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { HttpClientError } from "@sourceweft/sdk";
-import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert";
+import {
+  Alert,
+  AlertDescription,
+} from "@sourceweft/ui-web/components/ui/alert";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
@@ -45,7 +49,7 @@ import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { contentClient } from "../../../../lib/sdk";
+import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
 import {
   connectors,
   type CitationItem,
@@ -53,6 +57,7 @@ import {
   type SourceItem,
 } from "./mock-data";
 import type { CitationRecord } from "./chat-canvas";
+import { SourcePreviewPanel } from "./source-preview-panel";
 
 const tabs = ["Library", "Citations", "Connectors"] as const;
 const addTabs = ["Text", "File"] as const;
@@ -102,8 +107,9 @@ function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
       item.status === "failed"
         ? "Processing failed"
         : item.status === "queued" || item.status === "processing"
-          ? "Sync in progress"
-          : new Date(item.updatedAt).toLocaleString(),
+        ? "Sync in progress"
+        : new Date(item.updatedAt).toLocaleString(),
+    storageKey: item.storageKey,
   }));
 }
 
@@ -151,6 +157,8 @@ function SourceRow({
   onCancelRename,
   onSubmitRename,
   onDelete,
+  onDownload,
+  onPreview,
   onReindex,
 }: {
   source: SourceItem;
@@ -164,6 +172,8 @@ function SourceRow({
   onCancelRename: () => void;
   onSubmitRename: () => void;
   onDelete: () => void;
+  onDownload: () => void;
+  onPreview: () => void;
   onReindex: () => void;
 }) {
   return (
@@ -215,9 +225,15 @@ function SourceRow({
           <>
             <div className="flex items-center gap-1.5">
               <FileText className="size-3 shrink-0 text-muted-foreground" />
-              <span className="truncate text-xs font-medium text-foreground">
+              <button
+                className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isBusy}
+                onClick={onPreview}
+                title="Preview source"
+                type="button"
+              >
                 {source.title}
-              </span>
+              </button>
             </div>
             <div className="mt-0.5 flex items-center gap-1.5">
               <StatusDot status={source.status} />
@@ -250,6 +266,17 @@ function SourceRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-36">
+            <DropdownMenuItem onClick={onPreview}>
+              <FileText className="size-3.5" />
+              Preview
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!source.storageKey}
+              onClick={onDownload}
+            >
+              <Download className="size-3.5" />
+              Download
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onStartRename}>
               <Pencil className="size-3.5" />
               Rename
@@ -282,6 +309,8 @@ function FolderGroup({
   onCancelRename,
   onSubmitRename,
   onDelete,
+  onDownload,
+  onPreview,
   onReindex,
 }: {
   name: string;
@@ -296,6 +325,8 @@ function FolderGroup({
   onCancelRename: () => void;
   onSubmitRename: (id: string) => void;
   onDelete: (source: SourceItem) => void;
+  onDownload: (source: SourceItem) => void;
+  onPreview: (source: SourceItem) => void;
   onReindex: (source: SourceItem) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -358,7 +389,9 @@ function FolderGroup({
               key={source.id}
               onCancelRename={onCancelRename}
               onDelete={() => onDelete(source)}
+              onDownload={() => onDownload(source)}
               onEditTitleChange={onEditTitleChange}
+              onPreview={() => onPreview(source)}
               onReindex={() => onReindex(source)}
               onStartRename={() => onStartRename(source)}
               onSubmitRename={() => onSubmitRename(source.id)}
@@ -386,6 +419,8 @@ function LibraryTab({
   onCancelRename,
   onSubmitRename,
   onDelete,
+  onDownload,
+  onPreview,
   onReindex,
 }: {
   sources: SourceItem[];
@@ -400,6 +435,8 @@ function LibraryTab({
   onCancelRename: () => void;
   onSubmitRename: (id: string) => void;
   onDelete: (source: SourceItem) => void;
+  onDownload: (source: SourceItem) => void;
+  onPreview: (source: SourceItem) => void;
   onReindex: (source: SourceItem) => void;
 }) {
   const q = searchQuery.toLowerCase();
@@ -447,7 +484,9 @@ function LibraryTab({
           name={name}
           onCancelRename={onCancelRename}
           onDelete={onDelete}
+          onDownload={onDownload}
           onEditTitleChange={onEditTitleChange}
+          onPreview={onPreview}
           onReindex={onReindex}
           onStartRename={onStartRename}
           onSubmitRename={onSubmitRename}
@@ -468,7 +507,9 @@ function LibraryTab({
               key={source.id}
               onCancelRename={onCancelRename}
               onDelete={() => onDelete(source)}
+              onDownload={() => onDownload(source)}
               onEditTitleChange={onEditTitleChange}
+              onPreview={() => onPreview(source)}
               onReindex={() => onReindex(source)}
               onStartRename={() => onStartRename(source)}
               onSubmitRename={() => onSubmitRename(source.id)}
@@ -502,9 +543,7 @@ export function SourcesHub({
   workspaceId?: string | null;
   onSourceLoad?: (sources: SourceItem[]) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>(
-    "Library",
-  );
+  const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("Library");
   const [searchQuery, setSearchQuery] = useState("");
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -526,6 +565,7 @@ export function SourcesHub({
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
+  const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
 
   useEffect(() => {
     setActiveTab("Library");
@@ -553,10 +593,14 @@ export function SourcesHub({
       onSourceLoad?.(mapped);
 
       const syncing = result.items
-        .filter((item) => item.status === "queued" || item.status === "processing")
+        .filter(
+          (item) => item.status === "queued" || item.status === "processing",
+        )
         .map((item) => item.id);
       if (syncing.length > 0) {
-        setPendingSourceIds((prev) => Array.from(new Set([...prev, ...syncing])));
+        setPendingSourceIds((prev) =>
+          Array.from(new Set([...prev, ...syncing])),
+        );
       }
     } catch (error) {
       const message = getErrorMessage(error, "Failed to load sources.");
@@ -733,6 +777,28 @@ export function SourcesHub({
     [workspaceId, refreshSources],
   );
 
+  const handlePreviewSource = useCallback((source: SourceItem) => {
+    setPreviewSource(source);
+  }, []);
+
+  const handleDownloadSource = useCallback(
+    async (source: SourceItem) => {
+      if (!workspaceId) return;
+      if (!source.storageKey) {
+        toast.error("This source has no original uploaded file.");
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(workspaceId)}/sources/${encodeURIComponent(source.id)}/download`;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    },
+    [workspaceId],
+  );
+
   const resetAddForm = useCallback(() => {
     setTextTitle("");
     setTextContent("");
@@ -747,60 +813,78 @@ export function SourcesHub({
     setIsAddOpen(true);
   }, []);
 
-  const handleCloseAddDialog = useCallback((open: boolean) => {
-    setIsAddOpen(open);
-    if (!open) {
-      resetAddForm();
-    }
-  }, [resetAddForm]);
-
-  const handleAddFiles = useCallback((incoming: File[] | null) => {
-    if (!incoming || incoming.length === 0) return;
-
-    const nextFiles = [...files];
-    for (const file of incoming) {
-      if (file.size > MAX_FILE_SIZE_BYTES) {
-        toast.error(`\"${file.name}\" exceeds ${MAX_FILE_SIZE_MB}MB.`);
-        continue;
+  const handleCloseAddDialog = useCallback(
+    (open: boolean) => {
+      setIsAddOpen(open);
+      if (!open) {
+        resetAddForm();
       }
-      if (nextFiles.length >= MAX_FILES) {
-        toast.error(`You can upload up to ${MAX_FILES} files at once.`);
-        break;
+    },
+    [resetAddForm],
+  );
+
+  const handleAddFiles = useCallback(
+    (incoming: File[] | null) => {
+      if (!incoming || incoming.length === 0) return;
+
+      const nextFiles = [...files];
+      for (const file of incoming) {
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          toast.error(`\"${file.name}\" exceeds ${MAX_FILE_SIZE_MB}MB.`);
+          continue;
+        }
+        if (nextFiles.length >= MAX_FILES) {
+          toast.error(`You can upload up to ${MAX_FILES} files at once.`);
+          break;
+        }
+        nextFiles.push(file);
       }
-      nextFiles.push(file);
-    }
-    setFiles(nextFiles);
-  }, [files]);
+      setFiles(nextFiles);
+    },
+    [files],
+  );
 
-  const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current += 1;
-    setIsDragActive(true);
-  }, []);
+  const handleDragEnter = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepthRef.current += 1;
+      setIsDragActive(true);
+    },
+    [],
+  );
 
-  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  }, []);
+  const handleDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [],
+  );
 
-  const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) {
+  const handleDragLeave = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsDragActive(false);
+      }
+    },
+    [],
+  );
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
       setIsDragActive(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setIsDragActive(false);
-    dragDepthRef.current = 0;
-    const dropped = Array.from(event.dataTransfer.files ?? []);
-    handleAddFiles(dropped);
-  }, [handleAddFiles]);
+      dragDepthRef.current = 0;
+      const dropped = Array.from(event.dataTransfer.files ?? []);
+      handleAddFiles(dropped);
+    },
+    [handleAddFiles],
+  );
 
   const handleCreateTextSource = useCallback(async () => {
     if (!workspaceId) {
@@ -944,7 +1028,9 @@ export function SourcesHub({
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">Library</h3>
+                  <h3 className="text-xs font-medium text-foreground">
+                    Library
+                  </h3>
                   <span className="text-[10px] text-muted-foreground">
                     {sources.length} sources
                   </span>
@@ -994,7 +1080,9 @@ export function SourcesHub({
                   editingTitle={editingTitle}
                   onCancelRename={handleCancelRename}
                   onDelete={handleDeleteSource}
+                  onDownload={handleDownloadSource}
                   onEditTitleChange={setEditingTitle}
+                  onPreview={handlePreviewSource}
                   onReindex={handleReindexSource}
                   onStartRename={handleStartRename}
                   onSubmitRename={handleSubmitRename}
@@ -1012,7 +1100,9 @@ export function SourcesHub({
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">Citations</h3>
+                  <h3 className="text-xs font-medium text-foreground">
+                    Citations
+                  </h3>
                   <span className="text-[10px] text-muted-foreground">
                     {citations.length} used
                   </span>
@@ -1033,7 +1123,8 @@ export function SourcesHub({
                       <article
                         className={cn(
                           "rounded-xl border bg-background p-3 shadow-xs transition-colors",
-                          isActive && "border-primary/45 bg-primary/5 shadow-sm",
+                          isActive &&
+                            "border-primary/45 bg-primary/5 shadow-sm",
                         )}
                         key={citation.id}
                       >
@@ -1231,7 +1322,9 @@ export function SourcesHub({
                             </span>
                             <Button
                               onClick={() =>
-                                setFiles((prev) => prev.filter((_, i) => i !== idx))
+                                setFiles((prev) =>
+                                  prev.filter((_, i) => i !== idx),
+                                )
                               }
                               size="icon-xs"
                               type="button"
@@ -1298,6 +1391,17 @@ export function SourcesHub({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SourcePreviewPanel
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewSource(null);
+          }
+        }}
+        open={Boolean(previewSource)}
+        source={previewSource}
+        workspaceId={workspaceId}
+      />
     </>
   );
 }

@@ -241,11 +241,45 @@ function normalizeToolCallRecord(
     id,
     tool,
     input: toObjectRecord(record.input) ?? {},
-    output: record.output ?? null,
+    output: normalizeToolOutput(record.output),
     latencyMs: toNullableNumber(record.latencyMs),
     status,
     error: toNullableString(record.error),
+    sequence: toNullableNumber(record.sequence) ?? undefined,
   };
+}
+
+function normalizeToolOutput(value: unknown): unknown {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return value ?? null;
+  }
+
+  const kwargs = toObjectRecord(record.kwargs);
+  if (Array.isArray(record.id) && record.id.includes("ToolMessage") && kwargs) {
+    const content = Array.isArray(kwargs.content)
+      ? kwargs.content
+          .map((item) => {
+            const itemRecord = toObjectRecord(item);
+            if (itemRecord && typeof itemRecord.text === "string") {
+              return itemRecord.text;
+            }
+            return typeof item === "string" ? item : null;
+          })
+          .filter((item): item is string => item !== null)
+          .join("\n")
+      : typeof kwargs.content === "string"
+        ? kwargs.content
+        : null;
+
+    return {
+      content,
+      status: typeof kwargs.status === "string" ? kwargs.status : undefined,
+      name: typeof kwargs.name === "string" ? kwargs.name : undefined,
+    };
+  }
+
+  return value;
 }
 
 function normalizeThinkingStepRecord(value: unknown): ThinkingStepRecord | null {
@@ -274,6 +308,7 @@ function normalizeThinkingStepRecord(value: unknown): ThinkingStepRecord | null 
     title,
     status,
     items,
+    sequence: toNullableNumber(record.sequence) ?? undefined,
   };
 }
 
@@ -373,7 +408,8 @@ function resolveToolCallFromStreamEvent(input: {
       : existing?.input ?? {});
 
   const normalizedOutput =
-    normalizedToolCall?.output ??
+    normalizeToolOutput(
+      normalizedToolCall?.output ??
     (input.event.type === "tool-call-event"
       ? (input.event.data ?? existing?.output ?? null)
       : input.event.type === "tool-call-result"
@@ -382,7 +418,8 @@ function resolveToolCallFromStreamEvent(input: {
             : typeof input.event.hitCount === "number"
               ? { hitCount: input.event.hitCount }
               : (existing?.output ?? null))
-        : (existing?.output ?? null));
+        : (existing?.output ?? null)),
+    );
 
   const normalizedStatus = (() => {
     if (normalizedToolCall) {
@@ -1150,6 +1187,7 @@ export default function DashboardChatThreadPage({
       let persistedAssistantMessageId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
+      let streamingAssistantMessageId = tempAssistantId;
 
       try {
         const requestBody: Record<string, unknown> = {
@@ -1240,7 +1278,7 @@ export default function DashboardChatThreadPage({
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
-                    message.id === tempAssistantId
+                    message.id === streamingAssistantMessageId
                       ? { ...message, content: assistantText }
                       : message,
                   ),
@@ -1285,7 +1323,7 @@ export default function DashboardChatThreadPage({
           flushSync(() => {
             setMessages((previous) =>
               previous.map((message) =>
-                message.id === tempAssistantId
+                message.id === streamingAssistantMessageId
                   ? {
                       ...message,
                       metadata: {
@@ -1304,7 +1342,7 @@ export default function DashboardChatThreadPage({
           flushSync(() => {
             setMessages((previous) =>
               previous.map((message) =>
-                message.id === tempAssistantId
+                message.id === streamingAssistantMessageId
                   ? {
                       ...message,
                       metadata: {
@@ -1322,7 +1360,7 @@ export default function DashboardChatThreadPage({
           flushSync(() => {
             setMessages((previous) =>
               previous.map((message) =>
-                message.id === tempAssistantId
+                message.id === streamingAssistantMessageId
                   ? {
                       ...message,
                       metadata: {
@@ -1367,7 +1405,7 @@ export default function DashboardChatThreadPage({
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
-                    message.id === tempAssistantId
+                    message.id === streamingAssistantMessageId
                       ? {
                           ...message,
                           metadata: {
@@ -1427,10 +1465,12 @@ export default function DashboardChatThreadPage({
                 typeof data.messageId === "string" ? data.messageId : null;
               const messageId = persistedAssistantMessageId ?? tempAssistantId;
               const userMessageId = data.userMessageId ?? persistedUserMessageId;
+              const previousAssistantMessageId = streamingAssistantMessageId;
+              streamingAssistantMessageId = messageId;
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
-                    message.id === tempAssistantId
+                    message.id === previousAssistantMessageId
                       ? {
                           ...message,
                           id: messageId,
@@ -1463,14 +1503,16 @@ export default function DashboardChatThreadPage({
               typeof data.messageId === "string"
             ) {
               persistedAssistantMessageId = data.messageId;
+              const previousAssistantMessageId = streamingAssistantMessageId;
+              streamingAssistantMessageId = data.messageId;
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
-                    message.id === tempAssistantId
+                    message.id === previousAssistantMessageId
                       ? {
                           ...message,
                           id: data.messageId as string,
-                          content: assistantText || message.content,
+                          content: message.content,
                           metadata: {
                             ...message.metadata,
                             isError: false,
@@ -1547,7 +1589,7 @@ export default function DashboardChatThreadPage({
         if (!persistedAssistantMessageId) {
           setMessages((previous) => {
             const withoutAssistant = previous.filter(
-              (message) => message.id !== tempAssistantId,
+              (message) => message.id !== streamingAssistantMessageId,
             );
             return withoutAssistant;
           });

@@ -33,6 +33,7 @@ const sourceDocumentSchema = z.object({
   id: z.string(),
   title: z.string().nullable(),
   language: z.string().nullable(),
+  contentText: z.string(),
   status: z.enum(["pending", "processing", "ready", "failed"]),
   tokenCount: z.number().int().nonnegative().nullable(),
   charCount: z.number().int().nonnegative().nullable(),
@@ -187,6 +188,8 @@ export const getSourceResponseSchema = z.object({
   embeddings: z.array(sourceEmbeddingSchema),
   revisions: z.array(sourceRevisionSchema),
 });
+
+export const getSourceDocumentResponseSchema = getSourceResponseSchema;
 
 export const updateSourceRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
@@ -402,6 +405,9 @@ export type CreateSourceRequest = z.infer<typeof createSourceRequestSchema>;
 export type CreateSourceResponse = z.infer<typeof createSourceResponseSchema>;
 export type ListSourcesResponse = z.infer<typeof listSourcesResponseSchema>;
 export type GetSourceResponse = z.infer<typeof getSourceResponseSchema>;
+export type GetSourceDocumentResponse = z.infer<
+  typeof getSourceDocumentResponseSchema
+>;
 export type SourceStatusResponse = z.infer<typeof sourceStatusResponseSchema>;
 export type UploadSourceResponse = z.infer<typeof uploadSourceResponseSchema>;
 export type UpdateSourceRequest = z.infer<typeof updateSourceRequestSchema>;
@@ -413,7 +419,9 @@ export type SourceContentResponse = z.infer<typeof sourceContentResponseSchema>;
 export type IndexSourceRequest = z.infer<typeof indexSourceRequestSchema>;
 export type IndexSourceResponse = z.infer<typeof indexSourceResponseSchema>;
 export type Thread = z.infer<typeof threadSchema>;
-export type ThreadModelSettingsPatch = z.infer<typeof threadModelSettingsPatchSchema>;
+export type ThreadModelSettingsPatch = z.infer<
+  typeof threadModelSettingsPatchSchema
+>;
 export type CreateThreadRequest = z.infer<typeof createThreadRequestSchema>;
 export type CreateThreadResponse = z.infer<typeof createThreadResponseSchema>;
 export type GetThreadResponse = z.infer<typeof getThreadResponseSchema>;
@@ -442,7 +450,15 @@ export type ListThreadModelCatalogResponse = z.infer<
 >;
 
 export type ByokKeyRef = z.infer<typeof byokKeyRefSchema>;
-export type ListByokKeyRefsResponse = z.infer<typeof listByokKeyRefsResponseSchema>;
-export type CreateByokKeyRefRequest = z.infer<typeof createByokKeyRefRequestSchema>;
-export type CreateByokKeyRefResponse = z.infer<typeof createByokKeyRefResponseSchema>;
-export type DeleteByokKeyRefResponse = z.infer<typeof deleteByokKeyRefResponseSchema>;
+export type ListByokKeyRefsResponse = z.infer<
+  typeof listByokKeyRefsResponseSchema
+>;
+export type CreateByokKeyRefRequest = z.infer<
+  typeof createByokKeyRefRequestSchema
+>;
+export type CreateByokKeyRefResponse = z.infer<
+  typeof createByokKeyRefResponseSchema
+>;
+export type DeleteByokKeyRefResponse = z.infer<
+  typeof deleteByokKeyRefResponseSchema
+>;

@@ -11,8 +11,6 @@ import {
 } from "react";
 import {
   ArrowUp,
-  CheckCircle2,
-  ChevronRight,
   Copy,
   FileText,
   Globe,
@@ -20,6 +18,7 @@ import {
   Pencil,
   RotateCcw,
   Settings2,
+  WrenchIcon,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -68,12 +67,13 @@ import {
 } from "@sourceweft/ui-web/components/ai-elements/suggestion";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@sourceweft/ui-web/components/ai-elements/tool";
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtSearchResult,
+  ChainOfThoughtSearchResults,
+  ChainOfThoughtStep,
+} from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { SourceItem } from "./mock-data";
 
@@ -126,6 +126,7 @@ export type ToolCallRecord = {
   latencyMs: number | null;
   status: "running" | "completed" | "error";
   error: string | null;
+  sequence?: number;
 };
 
 export type ThinkingStepRecord = {
@@ -133,6 +134,7 @@ export type ThinkingStepRecord = {
   title: string;
   status: "pending" | "in_progress" | "completed";
   items: string[];
+  sequence?: number;
 };
 
 export type VersionedMessageGroup = {
@@ -347,9 +349,17 @@ function CitationAwareMessageResponse({
   const h6Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
     createElement("h6", null, textComponent({ children: nodeChildren }));
   const tableCellComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
-    createElement("td", null, textComponent({ children: nodeChildren }));
+    createElement(
+      "td",
+      { className: "border border-border px-3 py-2 align-top" },
+      textComponent({ children: nodeChildren }),
+    );
   const tableHeaderComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
-    createElement("th", null, textComponent({ children: nodeChildren }));
+    createElement(
+      "th",
+      { className: "border border-border bg-muted/40 px-3 py-2 text-left align-top font-semibold text-foreground" },
+      textComponent({ children: nodeChildren }),
+    );
 
   return (
     <div>
@@ -382,45 +392,114 @@ function ReferencedFiles({ sources }: { sources: SourceItem[] }) {
     return null;
   }
 
-  const visible = sources.slice(0, 4);
-  const overflow = sources.length - visible.length;
+  const showCountOnly = sources.length > 2;
+  const visible = showCountOnly ? [] : sources;
 
   return (
     <div className="ml-auto flex max-w-[85%] flex-wrap justify-end gap-1.5 pb-1 text-xs text-muted-foreground">
       <span className="inline-flex items-center px-1 font-medium text-foreground/70">
         Referenced files
       </span>
-      {visible.map((source) => (
-        <span
-          className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs"
-          key={source.id}
-          title={source.title}
-        >
-          <FileText className="size-3" />
-          <span className="truncate">{source.title}</span>
-        </span>
-      ))}
-      {overflow > 0 ? (
+      {showCountOnly ? (
         <span className="rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs">
-          +{overflow} more
+          {sources.length} files
         </span>
-      ) : null}
+      ) : (
+        visible.map((source) => (
+          <span
+            className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs"
+            key={source.id}
+            title={source.title}
+          >
+            <FileText className="size-3" />
+            <span className="truncate">{source.title}</span>
+          </span>
+        ))
+      )}
     </div>
   );
 }
 
-function ChainOfThoughtDisplay({
+function compactText(value: string, maxLength = 160) {
+  const compacted = value.replace(/\s+/g, " ").trim();
+  return compacted.length > maxLength ? `${compacted.slice(0, maxLength - 1)}…` : compacted;
+}
+
+function getToolOutputContent(output: unknown) {
+  if (output === null || output === undefined) {
+    return null;
+  }
+
+  if (typeof output === "string") {
+    return output;
+  }
+
+  if (typeof output === "object") {
+    const record = output as Record<string, unknown>;
+    if (typeof record.content === "string") {
+      return record.content;
+    }
+    return JSON.stringify(output);
+  }
+
+  return String(output);
+}
+
+function summarizeToolOutput(output: unknown) {
+  const content = getToolOutputContent(output);
+  return content ? compactText(content) : null;
+}
+
+function formatToolName(toolName: string) {
+  return toolName.replace(/[_-]+/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function getToolDisplayLabel(toolCall: ToolCallRecord) {
+  const inputPreview = Object.entries(toolCall.input)
+    .map(([key, value]) =>
+      typeof value === "string" && value.trim().length > 0
+        ? `${key}: ${compactText(value, 48)}`
+        : null,
+    )
+    .find((value): value is string => value !== null);
+
+  const toolName = formatToolName(toolCall.tool);
+  const prefix =
+    toolCall.status === "running"
+      ? "Using"
+      : toolCall.status === "error"
+        ? "Failed"
+        : "Used";
+
+  return inputPreview ? `${prefix} ${toolName} (${inputPreview})` : `${prefix} ${toolName}`;
+}
+
+function ReasoningTrace({
   isStreaming,
   steps,
+  toolCalls,
 }: {
   isStreaming: boolean;
   steps: ThinkingStepRecord[] | undefined;
+  toolCalls: ToolCallRecord[] | undefined;
 }) {
-  const [isOpen, setIsOpen] = useState(true);
   const safeSteps = steps ?? [];
-  const completedCount = safeSteps.filter((step) => step.status === "completed").length;
+  const safeToolCalls = (toolCalls ?? []).filter((toolCall, index, calls) => {
+    const key = `${toolCall.tool}:${JSON.stringify(toolCall.input)}`;
+    return (
+      calls.findIndex((call) => `${call.tool}:${JSON.stringify(call.input)}` === key) ===
+      index
+    );
+  });
   const activeStep = safeSteps.find((step) => step.status === "in_progress");
-  const allComplete = safeSteps.length > 0 && completedCount === safeSteps.length && !isStreaming;
+  const hasRunningToolCall = safeToolCalls.some((toolCall) => toolCall.status === "running");
+  const isThinking = isStreaming || Boolean(activeStep) || hasRunningToolCall;
+  const allComplete =
+    safeSteps.length + safeToolCalls.length > 0 &&
+    safeSteps.every((step) => step.status === "completed") &&
+    !hasRunningToolCall &&
+    !isStreaming;
+  const [isOpen, setIsOpen] = useState(!allComplete);
 
   useEffect(() => {
     if (allComplete) {
@@ -428,85 +507,110 @@ function ChainOfThoughtDisplay({
     }
   }, [allComplete]);
 
-  if (safeSteps.length === 0) {
+  if (safeSteps.length === 0 && safeToolCalls.length === 0) {
     return null;
   }
 
-  const headerText = activeStep
-    ? activeStep.title
-    : `Reviewed ${completedCount} ${completedCount === 1 ? "step" : "steps"}`;
+  const timelineItems = [
+    ...safeSteps.map((step, index) => ({
+      kind: "step" as const,
+      key: `step:${step.id}`,
+      sequence: step.sequence ?? index,
+      step,
+    })),
+    ...safeToolCalls.map((toolCall, index) => ({
+      kind: "tool" as const,
+      key: `tool:${toolCall.id}`,
+      sequence: toolCall.sequence ?? safeSteps.length + index,
+      toolCall,
+    })),
+  ].sort((left, right) => left.sequence - right.sequence);
 
   return (
-    <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2 text-sm">
-      <button
-        className="flex w-full items-center gap-2 text-left text-muted-foreground transition-colors hover:text-foreground"
-        onClick={() => setIsOpen((value) => !value)}
-        type="button"
-      >
-        {activeStep ? (
-          <Loader2 className="size-3.5 animate-spin text-primary" />
-        ) : (
-          <CheckCircle2 className="size-3.5 text-emerald-500" />
-        )}
-        <span className={cn("flex-1", activeStep && "text-foreground")}>{headerText}</span>
-        <ChevronRight className={cn("size-4 transition-transform", isOpen && "rotate-90")} />
-      </button>
-      <div
-        className={cn(
-          "grid transition-[grid-template-rows] duration-200 ease-out",
-          isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-        )}
-      >
-        <div className="overflow-hidden">
-          <div className="mt-3 space-y-3 pl-0.5">
-            {safeSteps.map((step, index) => {
-              const isLast = index === safeSteps.length - 1;
-              const isActive = step.status === "in_progress";
+    <ChainOfThought
+      className="space-y-0 rounded-xl border border-border/60 bg-muted/10 px-3 py-2"
+      onOpenChange={setIsOpen}
+      open={isOpen}
+    >
+      <ChainOfThoughtHeader className="py-0">
+        <span className="flex min-w-0 items-center gap-2">
+          {isThinking ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : null}
+          <span className="truncate">
+            {activeStep ? `Thinking · ${activeStep.title}` : "Thinking"}
+          </span>
+          {isThinking ? (
+            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
+              Running
+            </span>
+          ) : allComplete ? (
+            <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-[11px] text-emerald-600 dark:text-emerald-400">
+              Completed
+            </span>
+          ) : null}
+        </span>
+      </ChainOfThoughtHeader>
+      {isOpen ? (
+        <ChainOfThoughtContent className="max-h-64 overflow-y-auto pr-1">
+          {timelineItems.map((item) => {
+            if (item.kind === "step") {
+              const { step } = item;
               return (
-                <div className="relative flex gap-3" key={step.id}>
-                  <div className="relative flex w-3 shrink-0 flex-col items-center pt-1.5">
-                    {!isLast ? (
-                      <span className="absolute left-1/2 top-4 h-[calc(100%+0.5rem)] w-px -translate-x-1/2 bg-border" />
-                    ) : null}
-                    {isActive ? (
-                      <span className="relative z-10 flex size-2.5">
-                        <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/60" />
-                        <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
+                <ChainOfThoughtStep
+                  key={item.key}
+                  label={
+                    step.status === "in_progress" ? (
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{step.title}</span>
+                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
+                          Running
+                        </span>
                       </span>
                     ) : (
-                      <span className="relative z-10 size-2.5 rounded-full bg-muted-foreground/35" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1 pb-1">
-                    <div
-                      className={cn(
-                        "leading-5",
-                        isActive ? "font-medium text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {step.title}
-                    </div>
-                    {step.items.length > 0 ? (
-                      <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-                        {step.items.map((item) => (
-                          <span
-                            className="max-w-[240px] truncate rounded-full border border-input bg-background px-2 py-0.5"
-                            key={`${step.id}:${item}`}
-                            title={item}
-                          >
-                            {item}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
+                      step.title
+                    )
+                  }
+                  status={
+                    step.status === "in_progress"
+                      ? "active"
+                      : step.status === "pending"
+                        ? "pending"
+                        : "complete"
+                  }
+                >
+                  {step.items.length > 0 ? (
+                    <ChainOfThoughtSearchResults>
+                      {step.items.map((result) => (
+                        <ChainOfThoughtSearchResult key={`${step.id}:${result}`} title={result}>
+                          <span className="max-w-[220px] truncate">{result}</span>
+                        </ChainOfThoughtSearchResult>
+                      ))}
+                    </ChainOfThoughtSearchResults>
+                  ) : null}
+                </ChainOfThoughtStep>
               );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
+            }
+
+            const { toolCall } = item;
+            const summary = summarizeToolOutput(toolCall.output);
+            return (
+              <ChainOfThoughtStep
+                description={summary}
+                icon={WrenchIcon}
+                key={item.key}
+                label={getToolDisplayLabel(toolCall)}
+                status={
+                  toolCall.status === "running"
+                    ? "active"
+                    : toolCall.status === "error"
+                      ? "pending"
+                      : "complete"
+                }
+              />
+            );
+          })}
+        </ChainOfThoughtContent>
+      ) : null}
+    </ChainOfThought>
   );
 }
 
@@ -535,8 +639,8 @@ function Composer({
 }) {
   const [searchEnabled, setSearchEnabled] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const visible = selectedSources.slice(0, 2);
-  const overflow = selectedSources.length - 2;
+  const showSourceCountOnly = selectedSources.length > 2;
+  const visible = showSourceCountOnly ? [] : selectedSources;
   const hasSelectedSources = selectedSources.length > 0;
 
   useEffect(() => {
@@ -576,37 +680,38 @@ function Composer({
           {hasSelectedSources ? (
             <PromptInputHeader>
               <Attachments className="gap-2.5 pt-0.5" variant="inline">
-                {visible.map((source) => (
-                  <Attachment
-                    className="rounded-2xl bg-muted/55 px-3.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
-                    data={toAttachmentData(source)}
-                    key={source.id}
-                    onRemove={() => onRemoveSource?.(source.id)}
-                  >
-                    <AttachmentPreview
-                      className="text-foreground/75"
-                      fallbackIcon={<FileText className="size-4" />}
-                    />
-                    <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
-                    <AttachmentRemove
-                      className="text-foreground/55 hover:bg-background/60"
-                      label={`Remove ${source.title}`}
-                    />
-                  </Attachment>
-                ))}
-                {overflow > 0 && (
+                {showSourceCountOnly ? (
                   <Attachment
                     className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
                     data={{
-                      id: "overflow",
+                      id: "source-count",
                       mediaType: "text/plain",
-                      sourceId: "overflow",
-                      title: `+${overflow} more`,
+                      sourceId: "source-count",
+                      title: `${selectedSources.length} selected files`,
                       type: "source-document",
                     }}
                   >
-                    +{overflow} more
+                    {selectedSources.length} selected files
                   </Attachment>
+                ) : (
+                  visible.map((source) => (
+                    <Attachment
+                      className="rounded-2xl bg-muted/55 px-3.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
+                      data={toAttachmentData(source)}
+                      key={source.id}
+                      onRemove={() => onRemoveSource?.(source.id)}
+                    >
+                      <AttachmentPreview
+                        className="text-foreground/75"
+                        fallbackIcon={<FileText className="size-4" />}
+                      />
+                      <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
+                      <AttachmentRemove
+                        className="text-foreground/55 hover:bg-background/60"
+                        label={`Remove ${source.title}`}
+                      />
+                    </Attachment>
+                  ))
                 )}
               </Attachments>
             </PromptInputHeader>
@@ -1039,6 +1144,9 @@ export function ChatCanvas({
                         isAssistant &&
                         isLatestAssistantGroup &&
                         versionIndex === activeVisibleBranchIndex;
+                      const hasAssistantActivity =
+                        (version.toolCalls?.length ?? 0) > 0 ||
+                        (version.thinkingSteps?.length ?? 0) > 0;
                       const referencedSources = !isAssistant
                         ? (version.sourceIds ?? [])
                             .map((sourceId) => sourceById.get(sourceId))
@@ -1061,7 +1169,7 @@ export function ChatCanvas({
                                   : "w-fit max-w-full rounded-3xl bg-secondary px-4 py-3 text-foreground shadow-sm"
                               }
                             >
-                              {isStreamingThisVersion && !messageText ? (
+                              {isStreamingThisVersion && !messageText && !hasAssistantActivity ? (
                                 showThinkingPlaceholder ? (
                                   <Shimmer className="text-muted-foreground">
                                     Thinking...
@@ -1082,49 +1190,11 @@ export function ChatCanvas({
                                 </div>
                               ) : (
                                 <div className="space-y-3">
-                                  <ChainOfThoughtDisplay
+                                  <ReasoningTrace
                                     isStreaming={isStreamingThisVersion}
                                     steps={version.thinkingSteps}
+                                    toolCalls={version.toolCalls}
                                   />
-                                  {(version.toolCalls ?? []).length > 0 ? (
-                                    <div className="space-y-2">
-                                      {(version.toolCalls ?? []).map((toolCall) => {
-                                        const state =
-                                          toolCall.status === "running"
-                                            ? "input-available"
-                                            : toolCall.status === "error"
-                                              ? "output-error"
-                                              : "output-available";
-                                        const output =
-                                          toolCall.output ??
-                                          (toolCall.latencyMs !== null
-                                            ? { latencyMs: toolCall.latencyMs }
-                                            : null);
-
-                                        return (
-                                          <Tool defaultOpen={toolCall.status !== "completed"} key={toolCall.id}>
-                                            <ToolHeader
-                                              state={state}
-                                              title={`Tool · ${toolCall.tool}`}
-                                              toolName={toolCall.tool}
-                                              type="dynamic-tool"
-                                            />
-                                            <ToolContent>
-                                              <ToolInput input={toolCall.input} />
-                                              <ToolOutput
-                                                errorText={
-                                                  toolCall.status === "error"
-                                                    ? (toolCall.error ?? "Tool execution failed.")
-                                                    : undefined
-                                                }
-                                                output={output}
-                                              />
-                                            </ToolContent>
-                                          </Tool>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null}
                                   <CitationAwareMessageResponse
                                     citations={version.citations}
                                     onCitationClick={onCitationClick}

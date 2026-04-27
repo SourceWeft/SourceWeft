@@ -137,7 +137,7 @@ function ChatListRow({
         <div className="min-w-0 flex-1">
           <div className="flex w-full items-start gap-2">
             <div className="min-w-0 flex-1">
-              <div className="relative min-w-0 pr-12">
+              <div className="relative min-w-0 pr-8">
                 <span className="line-clamp-1 flex-1 text-[13px] font-medium leading-4.5">
                   {item.title}
                 </span>

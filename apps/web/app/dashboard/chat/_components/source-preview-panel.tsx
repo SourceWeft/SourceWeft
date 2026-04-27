@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FileText, Hash, Loader2, Sparkles } from "lucide-react";
-import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   Dialog,
   DialogContent,
@@ -10,43 +9,79 @@ import {
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
 import type { CitationRecord } from "./chat-canvas";
+import type { SourceItem } from "./mock-data";
 
 type SourceDetail = Awaited<ReturnType<typeof contentClient.getSource>>;
+type PreviewMode = "chunks" | "raw";
 
 export function SourcePreviewPanel({
   citation,
   onOpenChange,
   open,
+  source,
   workspaceId,
 }: {
-  citation: CitationRecord | null;
+  citation?: CitationRecord | null;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  source?: SourceItem | null;
   workspaceId?: string | null;
 }) {
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isHistoricalCitation, setIsHistoricalCitation] = useState(false);
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("chunks");
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!open || !workspaceId || !citation) {
+    if (open) {
+      setPreviewMode("chunks");
+    }
+  }, [citation?.chunkId, open, source?.id]);
+
+  useEffect(() => {
+    if (!open || !workspaceId || (!citation && !source)) {
       return;
     }
 
     let cancelled = false;
     setIsLoading(true);
     setError(null);
+    setDetail(null);
+    setIsHistoricalCitation(false);
 
-    contentClient
-      .getSource(workspaceId, citation.sourceId)
+    const request = citation
+      ? Promise.all([
+          contentClient.getSourceDocument(
+            workspaceId,
+            citation.sourceId,
+            citation.documentId,
+          ),
+          contentClient.getSource(workspaceId, citation.sourceId),
+        ]).then(([detailResult, currentResult]) => ({
+          detail: detailResult,
+          isHistorical:
+            currentResult.documents[0]?.id !== undefined &&
+            currentResult.documents[0]?.id !== citation.documentId,
+        }))
+      : contentClient
+          .getSource(workspaceId, source!.id)
+          .then((detailResult) => ({
+            detail: detailResult,
+            isHistorical: false,
+          }));
+
+    request
       .then((result) => {
         if (!cancelled) {
-          setDetail(result);
+          setDetail(result.detail);
+          setIsHistoricalCitation(result.isHistorical);
         }
       })
       .catch((loadError: unknown) => {
@@ -68,7 +103,7 @@ export function SourcePreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [citation, open, workspaceId]);
+  }, [citation, open, source, workspaceId]);
 
   useEffect(() => {
     if (!open || !detail || !citation) {
@@ -95,7 +130,8 @@ export function SourcePreviewPanel({
 
         const viewportRect = viewport.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
-        const targetTop = targetRect.top - viewportRect.top + viewport.scrollTop;
+        const targetTop =
+          targetRect.top - viewportRect.top + viewport.scrollTop;
         viewport.scrollTo({
           behavior: delay === 80 ? "auto" : "smooth",
           top: Math.max(0, targetTop - viewportRect.height * 0.2),
@@ -108,8 +144,13 @@ export function SourcePreviewPanel({
     };
   }, [citation, detail, open]);
 
-  const citedChunk = detail?.chunks.find((chunk) => chunk.id === citation?.chunkId);
-  const title = detail?.source.title ?? citation?.sourceTitle ?? "Source";
+  const citedChunk = detail?.chunks.find(
+    (chunk) => chunk.id === citation?.chunkId,
+  );
+  const rawMarkdown =
+    detail?.documents[0]?.contentText ?? detail?.source.contentText ?? "";
+  const title =
+    detail?.source.title ?? citation?.sourceTitle ?? source?.title ?? "Source";
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -128,29 +169,73 @@ export function SourcePreviewPanel({
                   <Hash className="size-3" />
                   {typeof citation?.chunkNo === "number"
                     ? `Chunk ${citation.chunkNo + 1}`
-                    : "Cited chunk"}
+                    : citation
+                      ? "Cited chunk"
+                      : "Source preview"}
                 </span>
-                {detail?.chunks ? <span>{detail.chunks.length} chunks</span> : null}
-                {detail?.source.mimeType ? <span>{detail.source.mimeType}</span> : null}
+                {detail?.chunks ? (
+                  <span>{detail.chunks.length} chunks</span>
+                ) : null}
+                {detail?.source.mimeType ? (
+                  <span>{detail.source.mimeType}</span>
+                ) : null}
+                {isHistoricalCitation ? (
+                  <span className="inline-flex items-center rounded-full border border-amber-300/70 bg-amber-100/80 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
+                    Historical
+                  </span>
+                ) : null}
               </div>
             </div>
-            {citedChunk ? (
-              <Button
-                className="hidden shrink-0 gap-1.5 md:inline-flex"
-                onClick={() => {
-                  const target = scrollRootRef.current?.querySelector(
-                    `[data-source-chunk-id="${CSS.escape(citedChunk.id)}"]`,
-                  ) as HTMLElement | null;
-                  target?.scrollIntoView({ behavior: "smooth", block: "center" });
-                }}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                <Sparkles className="size-3.5" />
-                Jump to cited
-              </Button>
-            ) : null}
+            <div className="flex shrink-0 items-center gap-2">
+              {detail ? (
+                <div className="flex rounded-lg border bg-background p-0.5">
+                  <button
+                    className={cn(
+                      "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                      previewMode === "chunks"
+                        ? "bg-secondary text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setPreviewMode("chunks")}
+                    type="button"
+                  >
+                    Chunks
+                  </button>
+                  <button
+                    className={cn(
+                      "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                      previewMode === "raw"
+                        ? "bg-secondary text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setPreviewMode("raw")}
+                    type="button"
+                  >
+                    Raw MD
+                  </button>
+                </div>
+              ) : null}
+              {previewMode === "chunks" && citedChunk ? (
+                <Button
+                  className="hidden shrink-0 gap-1.5 md:inline-flex"
+                  onClick={() => {
+                    const target = scrollRootRef.current?.querySelector(
+                      `[data-source-chunk-id="${CSS.escape(citedChunk.id)}"]`,
+                    ) as HTMLElement | null;
+                    target?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "center",
+                    });
+                  }}
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  <Sparkles className="size-3.5" />
+                  Jump to cited
+                </Button>
+              ) : null}
+            </div>
           </div>
         </DialogHeader>
 
@@ -164,97 +249,112 @@ export function SourcePreviewPanel({
             {error}
           </div>
         ) : detail ? (
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            {detail.chunks.length > 1 ? (
-              <aside className="hidden w-16 shrink-0 border-r bg-muted/15 p-2 lg:block">
-                <ScrollArea className="h-full">
-                  <div className="flex flex-col gap-1.5">
-                    {detail.chunks.map((chunk, index) => {
-                      const isCited = chunk.id === citation?.chunkId;
-                      return (
-                        <button
-                          className={cn(
-                            "relative mx-auto flex h-9 w-10 items-center justify-center rounded-lg text-xs font-semibold transition-colors",
-                            isCited
-                              ? "bg-primary text-primary-foreground shadow-sm"
-                              : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                          key={chunk.id}
-                          onClick={() => {
-                            const target = scrollRootRef.current?.querySelector(
-                              `[data-source-chunk-id="${CSS.escape(chunk.id)}"]`,
-                            ) as HTMLElement | null;
-                            target?.scrollIntoView({ behavior: "smooth", block: "center" });
-                          }}
-                          title={`Chunk ${index + 1}`}
-                          type="button"
-                        >
-                          {index + 1}
-                          {isCited ? (
-                            <span className="absolute -right-1 -top-1 rounded-full bg-primary ring-2 ring-background">
-                              <Sparkles className="size-3 text-primary-foreground" />
-                            </span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
-              </aside>
-            ) : null}
-
-            <ScrollArea className="min-w-0 flex-1" ref={scrollRootRef}>
-              <div className="mx-auto max-w-4xl space-y-4 px-5 py-6 lg:px-8">
-                {detail.chunks.map((chunk, index) => {
-                  const isCited = chunk.id === citation?.chunkId;
-                  return (
-                    <article
-                      className={cn(
-                        "overflow-hidden rounded-2xl border bg-background shadow-xs transition-colors",
-                        isCited && "border-primary/50 bg-primary/5 shadow-md shadow-primary/10",
-                      )}
-                      data-source-chunk-id={chunk.id}
-                      key={chunk.id}
-                    >
-                      <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <span
+          previewMode === "raw" ? (
+            <ScrollArea className="min-h-0 flex-1">
+              <pre className="mx-auto min-h-full max-w-5xl whitespace-pre-wrap break-words px-5 py-6 font-mono text-xs leading-6 text-foreground lg:px-8">
+                {rawMarkdown || "No markdown content available."}
+              </pre>
+            </ScrollArea>
+          ) : (
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              {detail.chunks.length > 1 ? (
+                <aside className="hidden w-16 shrink-0 border-r bg-muted/15 p-2 lg:block">
+                  <ScrollArea className="h-full">
+                    <div className="flex flex-col gap-1.5">
+                      {detail.chunks.map((chunk, index) => {
+                        const isCited = chunk.id === citation?.chunkId;
+                        return (
+                          <button
                             className={cn(
-                              "inline-flex h-7 min-w-7 items-center justify-center rounded-full text-xs font-semibold",
+                              "relative mx-auto flex h-9 w-10 items-center justify-center rounded-lg text-xs font-semibold transition-colors",
                               isCited
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted text-muted-foreground",
+                                ? "bg-primary text-primary-foreground shadow-sm"
+                                : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
                             )}
+                            key={chunk.id}
+                            onClick={() => {
+                              const target =
+                                scrollRootRef.current?.querySelector(
+                                  `[data-source-chunk-id="${CSS.escape(chunk.id)}"]`,
+                                ) as HTMLElement | null;
+                              target?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center",
+                              });
+                            }}
+                            title={`Chunk ${index + 1}`}
+                            type="button"
                           >
                             {index + 1}
-                          </span>
-                          <span className="text-sm font-medium text-foreground">
-                            Chunk {index + 1}
-                          </span>
-                        </div>
-                        {isCited ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                            <Sparkles className="size-3.5" />
-                            Cited source
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="px-4 py-4 text-sm leading-7 lg:px-5">
-                        <MessageResponse>{chunk.content}</MessageResponse>
-                      </div>
-                    </article>
-                  );
-                })}
+                            {isCited ? (
+                              <span className="absolute -right-1 -top-1 rounded-full bg-primary ring-2 ring-background">
+                                <Sparkles className="size-3 text-primary-foreground" />
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                </aside>
+              ) : null}
 
-                {detail.chunks.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground">
-                    <FileText className="mx-auto mb-2 size-5" />
-                    This source has no indexed chunks yet.
-                  </div>
-                ) : null}
-              </div>
-            </ScrollArea>
-          </div>
+              <ScrollArea className="min-w-0 flex-1" ref={scrollRootRef}>
+                <div className="mx-auto max-w-4xl space-y-4 px-5 py-6 lg:px-8">
+                  {detail.chunks.map((chunk, index) => {
+                    const isCited = chunk.id === citation?.chunkId;
+                    return (
+                      <article
+                        className={cn(
+                          "overflow-hidden rounded-2xl border bg-background shadow-xs transition-colors",
+                          isCited &&
+                            "border-primary/50 bg-primary/5 shadow-md shadow-primary/10",
+                        )}
+                        data-source-chunk-id={chunk.id}
+                        key={chunk.id}
+                      >
+                        <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className={cn(
+                                "inline-flex h-7 min-w-7 items-center justify-center rounded-full text-xs font-semibold",
+                                isCited
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {index + 1}
+                            </span>
+                            <span className="text-sm font-medium text-foreground">
+                              Chunk {index + 1}
+                            </span>
+                          </div>
+                          {isCited ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                              <Sparkles className="size-3.5" />
+                              Cited source
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="px-4 py-4 lg:px-5">
+                          <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                            {chunk.content}
+                          </MessageResponse>
+                        </div>
+                      </article>
+                    );
+                  })}
+
+                  {detail.chunks.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground">
+                      <FileText className="mx-auto mb-2 size-5" />
+                      This source has no indexed chunks yet.
+                    </div>
+                  ) : null}
+                </div>
+              </ScrollArea>
+            </div>
+          )
         ) : null}
       </DialogContent>
     </Dialog>

@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { ModelGatewayError, type ChatCompleteResult, type UsageInfo } from "@sourceweft/model-gateway";
+import {
+  ModelGatewayError,
+  type ChatCompleteResult,
+  type UsageInfo,
+} from "@sourceweft/model-gateway";
 import {
   createByokKeyRefRecord,
   createCitationRecords,
@@ -8,20 +12,21 @@ import {
   createRetrievalRun,
   createSourceRecord,
   createSourceRevisionRecord,
+  createSourceDocumentChunksAndEmbeddings,
   createThreadRecord,
   deleteByokKeyRefRecord,
   deleteSourceRecord,
   findCitationByMessageRank,
   findSourceRecord,
   findThreadRecord,
+  getSourceDocumentDetailRecord,
   getSourceDetailRecord,
   getSourceStatusDetail,
   listByokKeyRefRecords,
-  listSourceChunks,
   listSourceRecords,
+  listSourceRevisionRecords,
   listThreadRecordsByWorkspace,
   listMessageRecordsByThread,
-  replaceSourceDocumentsAndEmbeddings,
   updateThreadModelSettingsRecord,
   searchChunksByBm25,
   updateSourceRecord,
@@ -51,7 +56,12 @@ import { encryptSecret } from "../../shared/secrets";
 import { getSourceParser, listSupportedSourceMimeTypes } from "./parsers";
 import { startDocumentParse } from "./parsers/providers/document-parse-orchestrator";
 import { getDocumentProviderForResume } from "./parsers/providers/registry";
-import { buildSourceStorageKey, downloadSourceObject, uploadSourceObject } from "./storage";
+import {
+  buildSourceStorageKey,
+  downloadSourceObject,
+  getSourceObjectDownloadUrl,
+  uploadSourceObject,
+} from "./storage";
 import {
   enqueueSourceParseJob,
   enqueueSourceParsePollJob,
@@ -60,6 +70,11 @@ import {
 } from "./queue";
 import { chunkSourceContent } from "./chunker";
 import { buildAgentConfig, createThreadAgent } from "./agent";
+import {
+  AgentCitationRegistry,
+  type AgentCitation,
+} from "./agent/citation-registry";
+import { DatabaseKnowledgeBackend } from "./agent/database-fs-backend";
 import { createRetrievalTool } from "./agent/tools/retrieval-tool";
 import {
   buildCitationMetadata,
@@ -103,7 +118,9 @@ function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
-function defaultParsingConfig(overrides?: Partial<ParsingConfig>): ParsingConfig {
+function defaultParsingConfig(
+  overrides?: Partial<ParsingConfig>,
+): ParsingConfig {
   return {
     chunkSize: overrides?.chunkSize ?? DEFAULT_CHUNK_SIZE,
     parserVersion: overrides?.parserVersion ?? DEFAULT_PARSER_VERSION,
@@ -562,7 +579,14 @@ async function recordGatewayOperationEvent(input: {
   messageId?: string | null;
   feature: string;
   operation: string;
-  modelKind?: "chat" | "rerank" | "embedding" | "asr" | "tts" | "vision" | "video";
+  modelKind?:
+    | "chat"
+    | "rerank"
+    | "embedding"
+    | "asr"
+    | "tts"
+    | "vision"
+    | "video";
   modelAlias?: string | null;
   llm?: LlmExecutionConfig;
   provider?: string | null;
@@ -601,9 +625,12 @@ async function recordGatewayOperationEvent(input: {
       typeof gateway.providerModel === "string" ? gateway.providerModel : null,
     modelAlias: input.modelAlias ?? null,
     routeStrategy:
-      gateway.routeDecision && typeof gateway.routeDecision === "object" &&
-      typeof (gateway.routeDecision as Record<string, unknown>).strategy === "string"
-        ? ((gateway.routeDecision as Record<string, unknown>).strategy as string)
+      gateway.routeDecision &&
+      typeof gateway.routeDecision === "object" &&
+      typeof (gateway.routeDecision as Record<string, unknown>).strategy ===
+        "string"
+        ? ((gateway.routeDecision as Record<string, unknown>)
+            .strategy as string)
         : null,
     success: input.success,
     errorCode: input.errorCode ?? null,
@@ -630,7 +657,14 @@ function buildGatewayRequestMetadata(input: {
   messageId?: string | null;
   feature: string;
   operation: string;
-  modelKind?: "chat" | "rerank" | "embedding" | "asr" | "tts" | "vision" | "video";
+  modelKind?:
+    | "chat"
+    | "rerank"
+    | "embedding"
+    | "asr"
+    | "tts"
+    | "vision"
+    | "video";
   modelAlias?: string | null;
   llm?: LlmExecutionConfig;
 }) {
@@ -659,9 +693,7 @@ function buildGatewayRequestMetadata(input: {
   } satisfies Record<string, unknown>;
 }
 
-function resolveAssistantContent(input: {
-  raw: ChatCompleteResult["raw"];
-}) {
+function resolveAssistantContent(input: { raw: ChatCompleteResult["raw"] }) {
   const raw = input.raw;
   const content =
     raw && typeof raw === "object"
@@ -762,7 +794,10 @@ function collapseSupersededMessages(items: MessageRecord[]) {
   const supersededIds = new Set(
     items
       .map((item) => item.parentMessageId)
-      .filter((value): value is string => typeof value === "string" && value.length > 0),
+      .filter(
+        (value): value is string =>
+          typeof value === "string" && value.length > 0,
+      ),
   );
 
   return items.filter((item) => !supersededIds.has(item.id));
@@ -777,7 +812,9 @@ function isContextExcludedMessage(message: MessageRecord | null | undefined) {
   return metadata.excludeFromContext === true || metadata.isError === true;
 }
 
-function resolveAssistantContextParentId(message: MessageRecord | null | undefined) {
+function resolveAssistantContextParentId(
+  message: MessageRecord | null | undefined,
+) {
   if (!message) {
     return null;
   }
@@ -796,7 +833,9 @@ function resolveAssistantContextParentId(message: MessageRecord | null | undefin
   return message.parentMessageId;
 }
 
-function resolveSourceIdsFromMessage(message: MessageRecord | null | undefined): string[] {
+function resolveSourceIdsFromMessage(
+  message: MessageRecord | null | undefined,
+): string[] {
   const sourceIds =
     message?.metadata && typeof message.metadata === "object"
       ? (message.metadata as { sourceIds?: unknown }).sourceIds
@@ -848,7 +887,7 @@ function resolveLatestThreadTurn(messages: MessageRecord[]) {
     latestUserMessage,
     latestAssistantMessage:
       assistantMessages.length > 0
-        ? assistantMessages[assistantMessages.length - 1] ?? null
+        ? (assistantMessages[assistantMessages.length - 1] ?? null)
         : null,
   };
 }
@@ -866,15 +905,18 @@ function resolveAssistantForUserMessage(
       return false;
     }
 
-    const metadataUserMessageId =
-      (message.metadata as { userMessageId?: unknown }).userMessageId;
+    const metadataUserMessageId = (
+      message.metadata as { userMessageId?: unknown }
+    ).userMessageId;
     return metadataUserMessageId === userMessage.id;
   });
   if (assistantsFromMetadata.length > 0) {
     return assistantsFromMetadata[assistantsFromMetadata.length - 1] ?? null;
   }
 
-  const userIndex = messages.findIndex((message) => message.id === userMessage.id);
+  const userIndex = messages.findIndex(
+    (message) => message.id === userMessage.id,
+  );
   if (userIndex < 0) {
     return null;
   }
@@ -893,14 +935,20 @@ function resolveUserForAssistantMessage(
   messages: MessageRecord[],
   assistantMessage: MessageRecord,
 ) {
-  if (assistantMessage.metadata && typeof assistantMessage.metadata === "object") {
-    const metadataUserMessageId =
-      (assistantMessage.metadata as { userMessageId?: unknown }).userMessageId;
-    if (typeof metadataUserMessageId === "string" && metadataUserMessageId.length > 0) {
+  if (
+    assistantMessage.metadata &&
+    typeof assistantMessage.metadata === "object"
+  ) {
+    const metadataUserMessageId = (
+      assistantMessage.metadata as { userMessageId?: unknown }
+    ).userMessageId;
+    if (
+      typeof metadataUserMessageId === "string" &&
+      metadataUserMessageId.length > 0
+    ) {
       const userFromMetadata = messages.find(
         (message) =>
-          message.id === metadataUserMessageId &&
-          message.role === "user",
+          message.id === metadataUserMessageId && message.role === "user",
       );
       if (userFromMetadata) {
         return userFromMetadata;
@@ -1102,7 +1150,6 @@ async function requireDefaultEmbeddingProfile() {
 
 // citation metadata helper moved to ./retrieval/planner
 
-
 function sanitizeSseValue(value: string) {
   return value.replace(/\u0000/g, "");
 }
@@ -1192,13 +1239,15 @@ function extractTextDeltasFromMessageChunk(chunk: unknown): string[] {
 
   const role = typeof record.role === "string" ? record.role : "";
   const type = typeof record.type === "string" ? record.type : "";
-  const messageType = typeof record._getType === "function"
-    ? String(record._getType())
-    : typeof record.getType === "function"
-      ? String(record.getType())
-      : "";
+  const messageType =
+    typeof record._getType === "function"
+      ? String(record._getType())
+      : typeof record.getType === "function"
+        ? String(record.getType())
+        : "";
   const constructorName =
-    typeof record.constructor === "function" && typeof record.constructor.name === "string"
+    typeof record.constructor === "function" &&
+    typeof record.constructor.name === "string"
       ? record.constructor.name
       : "";
   const isAssistant =
@@ -1240,7 +1289,9 @@ function extractTextDeltasFromMessageChunk(chunk: unknown): string[] {
   return extractTextDeltas(record.content ?? chunk);
 }
 
-function resolveAssistantContentFromUpdatesChunk(chunk: unknown): string | null {
+function resolveAssistantContentFromUpdatesChunk(
+  chunk: unknown,
+): string | null {
   const updates = toObjectRecord(chunk);
   if (!updates) {
     return null;
@@ -1268,7 +1319,10 @@ function resolveAssistantContentFromUpdatesChunk(chunk: unknown): string | null 
               ? String(message.getType())
               : "";
       const isAssistant =
-        role === "assistant" || role === "ai" || type === "assistant" || type === "ai";
+        role === "assistant" ||
+        role === "ai" ||
+        type === "assistant" ||
+        type === "ai";
       if (!isAssistant) {
         continue;
       }
@@ -1360,6 +1414,7 @@ type ToolCallTrace = {
   status: ToolCallStatus;
   latencyMs: number | null;
   error: string | null;
+  sequence: number;
 };
 
 type ThinkingStepTrace = {
@@ -1367,11 +1422,13 @@ type ThinkingStepTrace = {
   title: string;
   status: "pending" | "in_progress" | "completed";
   items: string[];
+  sequence: number;
 };
 
 type DeepAgentTurnOutcome = {
   assistantContent: string;
-  retrieval: Awaited<ReturnType<typeof runRetrieval>>;
+  retrieval: Awaited<ReturnType<typeof runRetrieval>> | null;
+  citations: AgentCitation[];
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
@@ -1479,8 +1536,14 @@ function summarizeReviewedSources(
 }
 
 function summarizeRetrievalCalls(retrievalCalls: RetrievalCallTrace[]) {
-  const totalHitCount = retrievalCalls.reduce((sum, call) => sum + call.hitCount, 0);
-  const totalLatencyMs = retrievalCalls.reduce((sum, call) => sum + call.latencyMs, 0);
+  const totalHitCount = retrievalCalls.reduce(
+    (sum, call) => sum + call.hitCount,
+    0,
+  );
+  const totalLatencyMs = retrievalCalls.reduce(
+    (sum, call) => sum + call.latencyMs,
+    0,
+  );
   const maxLatencyMs = retrievalCalls.reduce(
     (max, call) => (call.latencyMs > max ? call.latencyMs : max),
     0,
@@ -1495,6 +1558,31 @@ function summarizeRetrievalCalls(retrievalCalls: RetrievalCallTrace[]) {
         ? Math.round(totalLatencyMs / retrievalCalls.length)
         : null,
     maxLatencyMs: retrievalCalls.length > 0 ? maxLatencyMs : null,
+  };
+}
+
+function extractCitationKeys(text: string) {
+  return [...text.matchAll(/\[citation:(c\d+)\]/g)].map(
+    (match) => match[1] ?? "",
+  );
+}
+
+function validateAssistantCitations(input: {
+  assistantText: string;
+  citations: AgentCitation[];
+}) {
+  const referencedKeys = extractCitationKeys(input.assistantText);
+  if (referencedKeys.length === 0) {
+    return { valid: true, invalidKeys: [] as string[] };
+  }
+
+  const allowed = new Set(input.citations.map((citation) => citation.citation));
+  const invalidKeys = [
+    ...new Set(referencedKeys.filter((key) => !allowed.has(key))),
+  ];
+  return {
+    valid: invalidKeys.length === 0,
+    invalidKeys,
   };
 }
 
@@ -1519,36 +1607,38 @@ async function rerankCandidates(input: {
   const gateway = await getModelGatewayClient(rerankProfile.gatewayConfigId);
   const rerankStartedAt = Date.now();
   const rerankResult = await gateway.rerank
-    .rank({
-      model: rerankProfile.modelAlias,
-      query: input.queryText,
-      documents: input.candidates.map((candidate) => candidate.content),
-      topN: Math.min(input.candidates.length, 6),
-      returnDocuments: false,
-      metadata: {
-        team_id: input.teamId,
-        workspace_id: input.workspaceId,
-        user_id: input.userId,
-        thread_id: input.threadId,
-        feature: "retrieval_rerank",
+    .rank(
+      {
+        model: rerankProfile.modelAlias,
+        query: input.queryText,
+        documents: input.candidates.map((candidate) => candidate.content),
+        topN: Math.min(input.candidates.length, 6),
+        returnDocuments: false,
+        metadata: {
+          team_id: input.teamId,
+          workspace_id: input.workspaceId,
+          user_id: input.userId,
+          thread_id: input.threadId,
+          feature: "retrieval_rerank",
+        },
+        executionMode: input.llm?.executionMode,
+        providerHint: input.llm?.providerHint,
+        byok: input.llm?.byok,
       },
-      executionMode: input.llm?.executionMode,
-      providerHint: input.llm?.providerHint,
-      byok: input.llm?.byok,
-    },
-    {
-      metadata: buildGatewayRequestMetadata({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        userId: input.userId,
-        threadId: input.threadId,
-        feature: "retrieval_rerank",
-        operation: "rerank.rank",
-        modelKind: "rerank",
-        modelAlias: rerankProfile.modelAlias,
-        llm: input.llm,
-      }),
-    })
+      {
+        metadata: buildGatewayRequestMetadata({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          threadId: input.threadId,
+          feature: "retrieval_rerank",
+          operation: "rerank.rank",
+          modelKind: "rerank",
+          modelAlias: rerankProfile.modelAlias,
+          llm: input.llm,
+        }),
+      },
+    )
     .catch(async (error: unknown) => {
       const contentError = toContentServiceError(error);
       await recordGatewayOperationEvent({
@@ -1582,7 +1672,9 @@ async function rerankCandidates(input: {
           score: item.relevanceScore,
         };
       })
-      .filter((candidate): candidate is RetrievalCandidate => candidate !== null),
+      .filter(
+        (candidate): candidate is RetrievalCandidate => candidate !== null,
+      ),
   };
 }
 
@@ -1692,7 +1784,9 @@ async function runRetrieval(input: {
       llm: input.llm,
       provider: embedResult.provider,
       providerModel: embedResult.providerModel,
-      routeDecision: embedResult.routeDecision as Record<string, unknown> | undefined,
+      routeDecision: embedResult.routeDecision as
+        | Record<string, unknown>
+        | undefined,
     });
     await recordGatewayOperationEvent({
       teamId: input.teamId,
@@ -1707,7 +1801,9 @@ async function runRetrieval(input: {
       llm: input.llm,
       provider: embedResult.provider,
       providerModel: embedResult.providerModel,
-      routeDecision: embedResult.routeDecision as Record<string, unknown> | undefined,
+      routeDecision: embedResult.routeDecision as
+        | Record<string, unknown>
+        | undefined,
       usage: embedResult.usage,
       traceId: input.userMessageId,
       success: true,
@@ -1923,7 +2019,11 @@ export class ContentService {
     });
 
     if (!updatedSource) {
-      throw new ContentError(500, "SOURCE_UPLOAD_FAILED", "Failed to queue uploaded source");
+      throw new ContentError(
+        500,
+        "SOURCE_UPLOAD_FAILED",
+        "Failed to queue uploaded source",
+      );
     }
 
     const revision = await createSourceRevisionRecord({
@@ -2029,6 +2129,31 @@ export class ContentService {
     return detail;
   }
 
+  async getSourceDocument(input: {
+    workspaceId: string;
+    sourceId: string;
+    documentId: string;
+    userId: string;
+  }) {
+    const { workspace, source } = await requireSource(input);
+    const detail = await getSourceDocumentDetailRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceId: source.id,
+      documentId: input.documentId,
+    });
+
+    if (!detail) {
+      throw new ContentError(
+        404,
+        "DOCUMENT_NOT_FOUND",
+        "Source document not found",
+      );
+    }
+
+    return detail;
+  }
+
   async getSourceStatus(input: {
     workspaceId: string;
     sourceId: string;
@@ -2057,6 +2182,32 @@ export class ContentService {
     return {
       source,
       content: source.contentText,
+    };
+  }
+
+  async downloadSource(input: {
+    workspaceId: string;
+    sourceId: string;
+    userId: string;
+  }) {
+    const { source } = await requireSource(input);
+    if (!source.storageKey) {
+      throw new ContentError(
+        400,
+        "SOURCE_ORIGINAL_FILE_MISSING",
+        "Source has no original uploaded file to download",
+      );
+    }
+
+    const url = await getSourceObjectDownloadUrl({
+      bucket: source.storageBucket,
+      key: source.storageKey,
+      fileName: String(source.metadata.fileName || source.title || "source"),
+      contentType: source.mimeType || "application/octet-stream",
+    });
+
+    return {
+      url,
     };
   }
 
@@ -2126,28 +2277,22 @@ export class ContentService {
 
     await ensureModelConfigAvailable();
     const profile = await requireDefaultEmbeddingProfile();
-    const embeddingGateway = await getModelGatewayClient(profile.gatewayConfigId);
+    const embeddingGateway = await getModelGatewayClient(
+      profile.gatewayConfigId,
+    );
     const planner = planRetrievalStrategy(profile);
-    const existingChunks = input.chunks
-      ? null
-      : await listSourceChunks({
-          teamId: workspace.organizationId,
-          workspaceId: workspace.id,
-          sourceId: source.id,
-        });
     const chunkSpecs =
       input.chunks ??
-      (existingChunks && existingChunks.length > 0
-        ? existingChunks.map((chunk) => ({
-            text: chunk.content,
-            startIndex: chunk.startOffset ?? 0,
-            endIndex: chunk.endOffset ?? chunk.content.length,
-            tokenCount:
-              typeof chunk.chunkMetadata.tokenCount === "number"
-                ? chunk.chunkMetadata.tokenCount
-                : Math.max(1, Math.ceil(chunk.content.length / 4)),
-          }))
-        : await chunkSourceContent(source.contentText, source.parsingConfig));
+      (await chunkSourceContent(source.contentText, source.parsingConfig));
+    const sourceRevisions = await listSourceRevisionRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceId: source.id,
+    });
+    const latestRevision =
+      sourceRevisions.find((revision) => revision.isLatest) ??
+      sourceRevisions[0] ??
+      null;
 
     await updateSourceStatus({
       sourceId: source.id,
@@ -2188,15 +2333,18 @@ export class ContentService {
         embeddings = result.embeddings;
       }
 
-      await replaceSourceDocumentsAndEmbeddings({
+      await createSourceDocumentChunksAndEmbeddings({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
         sourceId: source.id,
+        sourceRevisionId: latestRevision?.id ?? null,
         sourceTitle: source.title,
         sourceContentText: source.contentText,
         embeddingProfileId: profile.id,
         modelAlias: profile.modelAlias,
         embeddings,
+        requireEmbeddings:
+          chunkSpecs.length > 0 && profile.vectorStrategy !== "disabled",
         requestedDimensions: planner.requestedDimensions,
         chunks: chunkSpecs,
         parsingConfig: source.parsingConfig,
@@ -2256,7 +2404,11 @@ export class ContentService {
   }) {
     const { workspace, source } = await requireSource(input);
     if (!source.storageKey) {
-      throw new ContentError(400, "SOURCE_NOT_UPLOADED", "Source has no uploaded file to reparse");
+      throw new ContentError(
+        400,
+        "SOURCE_NOT_UPLOADED",
+        "Source has no uploaded file to reparse",
+      );
     }
 
     const parsingConfig = defaultParsingConfig({
@@ -2279,7 +2431,11 @@ export class ContentService {
     });
 
     if (!updatedSource) {
-      throw new ContentError(500, "SOURCE_REPARSE_FAILED", "Failed to queue source reparse");
+      throw new ContentError(
+        500,
+        "SOURCE_REPARSE_FAILED",
+        "Failed to queue source reparse",
+      );
     }
 
     const revision = await createSourceRevisionRecord({
@@ -2334,7 +2490,11 @@ export class ContentService {
     }
 
     if (!source.storageKey || !source.mimeType) {
-      throw new ContentError(400, "SOURCE_STORAGE_MISSING", "Source file storage is incomplete");
+      throw new ContentError(
+        400,
+        "SOURCE_STORAGE_MISSING",
+        "Source file storage is incomplete",
+      );
     }
 
     const parser = getSourceParser(source.mimeType);
@@ -2346,7 +2506,9 @@ export class ContentService {
       );
     }
 
-    const parsingConfig = defaultParsingConfig(source.parsingConfig ?? undefined);
+    const parsingConfig = defaultParsingConfig(
+      source.parsingConfig ?? undefined,
+    );
 
     await updateSourceStatus({
       teamId: input.teamId,
@@ -2414,9 +2576,10 @@ export class ContentService {
         return;
       }
 
-      const parsed = providerOutcome?.kind === "completed"
-        ? providerOutcome.document
-        : await parser.parse(parseInput);
+      const parsed =
+        providerOutcome?.kind === "completed"
+          ? providerOutcome.document
+          : await parser.parse(parseInput);
 
       const contentHash = computeContentHash(parsed.content);
 
@@ -2443,7 +2606,11 @@ export class ContentService {
       });
 
       if (!parsedSource) {
-        throw new ContentError(500, "SOURCE_PARSE_FAILED", "Failed to update parsed source");
+        throw new ContentError(
+          500,
+          "SOURCE_PARSE_FAILED",
+          "Failed to update parsed source",
+        );
       }
 
       const result = await this.indexSource({
@@ -2470,7 +2637,8 @@ export class ContentService {
         error: {},
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Source parse failed";
+      const message =
+        error instanceof Error ? error.message : "Source parse failed";
       await updateSourceStatus({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
@@ -2502,10 +2670,16 @@ export class ContentService {
     }
 
     if (!source.storageKey) {
-      throw new ContentError(400, "SOURCE_STORAGE_MISSING", "Source file storage is incomplete");
+      throw new ContentError(
+        400,
+        "SOURCE_STORAGE_MISSING",
+        "Source file storage is incomplete",
+      );
     }
 
-    const provider = getDocumentProviderForResume(input.backendId as DocumentParseProviderId);
+    const provider = getDocumentProviderForResume(
+      input.backendId as DocumentParseProviderId,
+    );
     const fileBuffer = await downloadSourceObject({
       bucket: source.storageBucket,
       key: source.storageKey,
@@ -2530,8 +2704,14 @@ export class ContentService {
       );
 
       if (outcome.kind === "pending") {
-        if (outcome.token.attempt >= sharedConfig.pdf2markdown.pollMaxAttempts) {
-          throw new ContentError(504, "PROVIDER_PARSE_TIMEOUT", "Document parse provider timed out");
+        if (
+          outcome.token.attempt >= sharedConfig.pdf2markdown.pollMaxAttempts
+        ) {
+          throw new ContentError(
+            504,
+            "PROVIDER_PARSE_TIMEOUT",
+            "Document parse provider timed out",
+          );
         }
 
         await updateSourceRecord({
@@ -2580,7 +2760,11 @@ export class ContentService {
       });
 
       if (!parsedSource) {
-        throw new ContentError(500, "SOURCE_PARSE_FAILED", "Failed to update parsed source");
+        throw new ContentError(
+          500,
+          "SOURCE_PARSE_FAILED",
+          "Failed to update parsed source",
+        );
       }
 
       const result = await this.indexSource({
@@ -2607,7 +2791,8 @@ export class ContentService {
         error: {},
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Source parse failed";
+      const message =
+        error instanceof Error ? error.message : "Source parse failed";
       await updateSourceStatus({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
@@ -2625,10 +2810,7 @@ export class ContentService {
     }
   }
 
-  async listByokKeyRefs(input: {
-    workspaceId: string;
-    userId: string;
-  }) {
+  async listByokKeyRefs(input: { workspaceId: string; userId: string }) {
     const workspace = await requireWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -2692,7 +2874,11 @@ export class ContentService {
     });
 
     if (!deleted) {
-      throw new ContentError(404, "BYOK_KEY_REF_NOT_FOUND", "BYOK key ref not found");
+      throw new ContentError(
+        404,
+        "BYOK_KEY_REF_NOT_FOUND",
+        "BYOK key ref not found",
+      );
     }
 
     return { deleted: true as const, keyRef: input.keyRef };
@@ -2710,7 +2896,9 @@ export class ContentService {
     });
 
     const limit = input.limit ?? DEFAULT_THREAD_PAGE_LIMIT;
-    const decodedCursor = input.cursor ? decodeThreadsCursor(input.cursor) : undefined;
+    const decodedCursor = input.cursor
+      ? decodeThreadsCursor(input.cursor)
+      : undefined;
 
     const items = await listThreadRecordsByWorkspace({
       teamId: workspace.organizationId,
@@ -2734,9 +2922,9 @@ export class ContentService {
   }
 
   private async validateThreadModelSettings(settings: ThreadModelSettings) {
-    for (const [threadKind, profileKind] of Object.entries(MODEL_KIND_BY_THREAD_KIND) as Array<
-      [ThreadModelKind, ModelProfileKind]
-    >) {
+    for (const [threadKind, profileKind] of Object.entries(
+      MODEL_KIND_BY_THREAD_KIND,
+    ) as Array<[ThreadModelKind, ModelProfileKind]>) {
       const alias =
         threadKind === "llm"
           ? settings.llmProfileAlias
@@ -2812,7 +3000,10 @@ export class ContentService {
       patch,
     );
 
-    const nextSettings = mergeThreadModelSettings(sanitizedCurrentSettings, patch);
+    const nextSettings = mergeThreadModelSettings(
+      sanitizedCurrentSettings,
+      patch,
+    );
 
     await this.validateThreadModelSettings(nextSettings);
 
@@ -2824,16 +3015,17 @@ export class ContentService {
     });
 
     if (!updated) {
-      throw new ContentError(500, "THREAD_UPDATE_FAILED", "Failed to update thread settings");
+      throw new ContentError(
+        500,
+        "THREAD_UPDATE_FAILED",
+        "Failed to update thread settings",
+      );
     }
 
     return { thread: updated };
   }
 
-  async listThreadModelCatalog(input: {
-    workspaceId: string;
-    userId: string;
-  }) {
+  async listThreadModelCatalog(input: { workspaceId: string; userId: string }) {
     await requireWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -2994,18 +3186,18 @@ export class ContentService {
         row.modelAlias === "chat-default" ||
         row.modelAlias === "image-default" ||
         row.modelAlias === "vision-default";
-      const displayName =
-        isGlobalDefaultAlias
-          ? "Auto (Default)"
-          : typeof configJson.displayName === "string" && configJson.displayName.trim().length > 0
-            ? configJson.displayName.trim()
-            : row.modelAlias;
-      const subtitle =
-        isGlobalDefaultAlias
-          ? "Global models"
-          : typeof configJson.subtitle === "string" && configJson.subtitle.trim().length > 0
-            ? configJson.subtitle.trim()
-            : route?.targetModel ?? row.modelAlias;
+      const displayName = isGlobalDefaultAlias
+        ? "Auto (Default)"
+        : typeof configJson.displayName === "string" &&
+            configJson.displayName.trim().length > 0
+          ? configJson.displayName.trim()
+          : row.modelAlias;
+      const subtitle = isGlobalDefaultAlias
+        ? "Global models"
+        : typeof configJson.subtitle === "string" &&
+            configJson.subtitle.trim().length > 0
+          ? configJson.subtitle.trim()
+          : (route?.targetModel ?? row.modelAlias);
       const badges = Array.isArray(configJson.badges)
         ? configJson.badges.filter(
             (badge): badge is string =>
@@ -3013,9 +3205,7 @@ export class ContentService {
           )
         : [];
       const pricing =
-        typeof configJson.price_source === "string"
-          ? configJson
-          : null;
+        typeof configJson.price_source === "string" ? configJson : null;
 
       const entry = {
         kind: threadKind,
@@ -3047,13 +3237,17 @@ export class ContentService {
       }
     }
 
-    const dedupeByTarget = <T extends {
-      isDefault: boolean;
-      providerName: string;
-      targetModel: string | null;
-      modelAlias: string;
-      displayName: string;
-    }>(items: T[]) => {
+    const dedupeByTarget = <
+      T extends {
+        isDefault: boolean;
+        providerName: string;
+        targetModel: string | null;
+        modelAlias: string;
+        displayName: string;
+      },
+    >(
+      items: T[],
+    ) => {
       const indexByTargetKey = new Map<string, number>();
       const deduped: T[] = [];
 
@@ -3064,7 +3258,9 @@ export class ContentService {
         }
 
         const provider = item.providerName.trim().toLowerCase();
-        const target = (item.targetModel ?? item.modelAlias).trim().toLowerCase();
+        const target = (item.targetModel ?? item.modelAlias)
+          .trim()
+          .toLowerCase();
         if (!provider || !target) {
           deduped.push(item);
           continue;
@@ -3083,7 +3279,8 @@ export class ContentService {
           existing.displayName.trim().toLowerCase() !==
           existing.modelAlias.trim().toLowerCase();
         const currentHasReadableName =
-          item.displayName.trim().toLowerCase() !== item.modelAlias.trim().toLowerCase();
+          item.displayName.trim().toLowerCase() !==
+          item.modelAlias.trim().toLowerCase();
         if (!existingHasReadableName && currentHasReadableName) {
           deduped[existingIndex] = item;
         }
@@ -3096,7 +3293,10 @@ export class ContentService {
     kinds.image = dedupeByTarget(kinds.image);
     kinds.vision = dedupeByTarget(kinds.vision);
 
-    const sorter = (left: { isDefault: boolean; displayName: string }, right: { isDefault: boolean; displayName: string }) => {
+    const sorter = (
+      left: { isDefault: boolean; displayName: string },
+      right: { isDefault: boolean; displayName: string },
+    ) => {
       if (left.isDefault !== right.isDefault) {
         return left.isDefault ? -1 : 1;
       }
@@ -3171,6 +3371,7 @@ export class ContentService {
         score: citation.score,
         sourceId: citation.sourceId,
         sourceTitle: citation.sourceTitle,
+        documentId: citation.documentId,
         chunkId: citation.chunkId,
         excerpt: citation.quoteText ?? citation.chunkContent ?? "",
         chunkContent: citation.chunkContent ?? "",
@@ -3250,7 +3451,9 @@ export class ContentService {
       };
     }
 
-    const messageById = new Map(allMessages.map((message) => [message.id, message]));
+    const messageById = new Map(
+      allMessages.map((message) => [message.id, message]),
+    );
     const requestedUserMessage = input.userMessageId
       ? messageById.get(input.userMessageId)
       : undefined;
@@ -3259,7 +3462,11 @@ export class ContentService {
       : undefined;
 
     if (input.userMessageId && !requestedUserMessage) {
-      throw new ContentError(404, "MESSAGE_NOT_FOUND", "User message not found");
+      throw new ContentError(
+        404,
+        "MESSAGE_NOT_FOUND",
+        "User message not found",
+      );
     }
     if (input.assistantMessageId && !requestedAssistantMessage) {
       throw new ContentError(
@@ -3269,7 +3476,11 @@ export class ContentService {
       );
     }
 
-    ensureMessageIsInThread(requestedUserMessage, thread.id, "INVALID_USER_MESSAGE");
+    ensureMessageIsInThread(
+      requestedUserMessage,
+      thread.id,
+      "INVALID_USER_MESSAGE",
+    );
     ensureMessageIsInThread(
       requestedAssistantMessage,
       thread.id,
@@ -3277,9 +3488,16 @@ export class ContentService {
     );
 
     if (requestedUserMessage && requestedUserMessage.role !== "user") {
-      throw new ContentError(400, "INVALID_USER_MESSAGE", "Message is not a user message");
+      throw new ContentError(
+        400,
+        "INVALID_USER_MESSAGE",
+        "Message is not a user message",
+      );
     }
-    if (requestedAssistantMessage && requestedAssistantMessage.role !== "assistant") {
+    if (
+      requestedAssistantMessage &&
+      requestedAssistantMessage.role !== "assistant"
+    ) {
       throw new ContentError(
         400,
         "INVALID_ASSISTANT_MESSAGE",
@@ -3307,7 +3525,9 @@ export class ContentService {
     };
   }
 
-  private async prepareThreadTurn(input: StreamThreadEventInput): Promise<PreparedThreadTurn> {
+  private async prepareThreadTurn(
+    input: StreamThreadEventInput,
+  ): Promise<PreparedThreadTurn> {
     const messageContent =
       input.existingUserMessage?.content.trim() ?? input.content.trim();
     if (!messageContent) {
@@ -3446,7 +3666,8 @@ export class ContentService {
 
   private async finalizeThreadTurn(input: {
     prepared: PreparedThreadTurn;
-    retrieval: Awaited<ReturnType<typeof runRetrieval>>;
+    retrieval: Awaited<ReturnType<typeof runRetrieval>> | null;
+    citations: AgentCitation[];
     retrievalCalls: RetrievalCallTrace[];
     toolCalls: ToolCallTrace[];
     thinkingSteps: ThinkingStepTrace[];
@@ -3542,13 +3763,14 @@ export class ContentService {
           status: call.status,
           latencyMs: call.latencyMs,
           error: call.error,
+          sequence: call.sequence,
         })),
         thinkingSteps: input.thinkingSteps,
         retrieval: {
-          embeddingProfileId: retrieval.profile.id,
-          vectorStrategy: retrieval.planner.strategy,
-          annIndexUsed: retrieval.planner.annIndexUsed,
-          citations: retrieval.retrievalSummary,
+          embeddingProfileId: retrieval?.profile.id ?? null,
+          vectorStrategy: retrieval?.planner.strategy ?? null,
+          annIndexUsed: retrieval?.planner.annIndexUsed ?? null,
+          citations: input.citations,
         },
       },
     });
@@ -3558,14 +3780,14 @@ export class ContentService {
       workspaceId: prepared.workspace.id,
       threadId: prepared.thread.id,
       messageId: assistantMessage.id,
-      citations: retrieval.fusedCandidates.map((candidate, index) => ({
-        citationKey: retrieval.retrievalSummary[index]?.citation ?? `c${index + 1}`,
-        sourceId: candidate.sourceId,
-        documentId: candidate.documentId,
-        chunkId: candidate.chunkId,
-        quoteText: candidate.content.slice(0, 400),
+      citations: input.citations.map((citation, index) => ({
+        citationKey: citation.citation,
+        sourceId: citation.sourceId,
+        documentId: citation.documentId,
+        chunkId: citation.chunkId,
+        quoteText: citation.quoteText,
         rank: index + 1,
-        score: candidate.score,
+        score: citation.score,
       })),
     });
 
@@ -3580,24 +3802,57 @@ export class ContentService {
     llm?: LlmExecutionConfig;
   }): AsyncGenerator<DeepAgentTurnEvent> {
     const retrievalCallsById = new Map<string, RetrievalCallTrace>();
+    const retrievalsByToolCallId = new Map<
+      string,
+      Awaited<ReturnType<typeof runToolRetrieval>>
+    >();
     const retrievalCallOrder: string[] = [];
     const toolCallsById = new Map<string, ToolCallTrace>();
     const toolCallOrder: string[] = [];
     const toolStartedAtById = new Map<string, number>();
     const thinkingStepsById = new Map<string, ThinkingStepTrace>();
     const thinkingStepOrder: string[] = [];
-    let latestToolRetrieval: Awaited<ReturnType<typeof runToolRetrieval>> | null =
-      null;
+    const citationRegistry = new AgentCitationRegistry();
+    let latestToolRetrieval: Awaited<
+      ReturnType<typeof runToolRetrieval>
+    > | null = null;
     let assistantContent = "";
     let fallbackAssistantContent: string | null = null;
     let hasStartedSynthesis = false;
+    let hasStreamedText = false;
+    let emittedCitationCount = 0;
+    let eventSequence = 0;
+    let evidenceToolStarted = false;
+    const shouldBufferGroundedAnswer = input.prepared.sourceIds.length > 0;
 
-    const setThinkingStep = (step: ThinkingStepTrace) =>
-      upsertThinkingStep({
+    const nextSequence = () => {
+      eventSequence += 1;
+      return eventSequence;
+    };
+
+    const setThinkingStep = (step: Omit<ThinkingStepTrace, "sequence">) => {
+      const existing = thinkingStepsById.get(step.id);
+      return upsertThinkingStep({
         stepsById: thinkingStepsById,
         stepOrder: thinkingStepOrder,
-        step,
+        step: {
+          ...step,
+          sequence: existing?.sequence ?? nextSequence(),
+        },
       });
+    };
+
+    const emitNewCitations = function* (): Generator<DeepAgentTurnEvent> {
+      const citations = citationRegistry.list();
+      if (citations.length <= emittedCitationCount) {
+        return;
+      }
+      emittedCitationCount = citations.length;
+      yield {
+        type: "citations",
+        citations,
+      };
+    };
 
     yield {
       type: "thinking-step",
@@ -3612,13 +3867,6 @@ export class ContentService {
     const retrievalTool = createRetrievalTool({
       retrieve: async (query, runtime) => {
         const retrievalStartedAt = Date.now();
-        const searchStep = setThinkingStep({
-          id: "search",
-          title: "Searching selected sources",
-          status: "in_progress",
-          items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
-        });
-        void searchStep;
         const retrieval = await runToolRetrieval({
           prepared: input.prepared,
           query,
@@ -3644,42 +3892,18 @@ export class ContentService {
           latencyMs: Date.now() - retrievalStartedAt,
         };
         retrievalCallsById.set(callId, retrievalCall);
-
-        setThinkingStep({
-          id: "search",
-          title: "Searched selected sources",
-          status: "completed",
-          items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
-        });
-        setThinkingStep({
-          id: "review",
-          title: `Reviewed ${summarizeReviewedSources(retrieval).length} ${
-            summarizeReviewedSources(retrieval).length === 1 ? "file" : "files"
-          }`,
-          status: "completed",
-          items: summarizeReviewedSources(retrieval),
-        });
-
-        if (!toolCallsById.has(callId)) {
-          toolCallOrder.push(callId);
-          toolCallsById.set(callId, {
-            id: callId,
-            tool: "retrieve",
-            input: { query },
-            output: {
-              hitCount: retrievalCall.hitCount,
-            },
-            status: "completed",
-            latencyMs: retrievalCall.latencyMs,
-            error: null,
-          });
-        }
+        retrievalsByToolCallId.set(callId, retrieval);
 
         const citationByChunkId = new Map(
-          retrieval.retrievalSummary.map((item) => [item.chunkId, item]),
+          retrieval.fusedCandidates.map((candidate) => {
+            const citation = citationRegistry.addRetrievalCandidate(candidate);
+            return [candidate.chunkId, citation] as const;
+          }),
         );
         return retrieval.fusedCandidates.map((candidate, index) => ({
-          citation: citationByChunkId.get(candidate.chunkId)?.citation ?? `c${index + 1}`,
+          citation:
+            citationByChunkId.get(candidate.chunkId)?.citation ??
+            `c${index + 1}`,
           chunkId: candidate.chunkId,
           content: candidate.content,
           sourceTitle: citationByChunkId.get(candidate.chunkId)?.sourceTitle,
@@ -3687,10 +3911,18 @@ export class ContentService {
       },
     });
 
+    const databaseBackend = new DatabaseKnowledgeBackend({
+      teamId: input.prepared.workspace.organizationId,
+      workspaceId: input.prepared.workspace.id,
+      sourceIds: input.prepared.sourceIds,
+      citationRegistry,
+    });
+
     const agent = await createThreadAgent({
       modelAlias: input.prepared.modelAlias,
       gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
       tools: [retrievalTool],
+      backend: databaseBackend,
       execution: {
         executionMode: input.llm?.executionMode,
         providerHint: input.llm?.providerHint,
@@ -3745,6 +3977,9 @@ export class ContentService {
           if (!delta) {
             continue;
           }
+          if (shouldBufferGroundedAnswer && !evidenceToolStarted) {
+            continue;
+          }
           if (!hasStartedSynthesis) {
             hasStartedSynthesis = true;
             yield {
@@ -3758,6 +3993,7 @@ export class ContentService {
             };
           }
           assistantContent += delta;
+          hasStreamedText = true;
           yield {
             type: "text-delta",
             delta,
@@ -3767,7 +4003,8 @@ export class ContentService {
       }
 
       if (mode === "updates") {
-        const assistantFromUpdates = resolveAssistantContentFromUpdatesChunk(payload);
+        const assistantFromUpdates =
+          resolveAssistantContentFromUpdatesChunk(payload);
         if (assistantFromUpdates && assistantFromUpdates.trim().length > 0) {
           fallbackAssistantContent = assistantFromUpdates.trim();
         }
@@ -3783,14 +4020,17 @@ export class ContentService {
         continue;
       }
 
-      const event = typeof toolPayload.event === "string" ? toolPayload.event : "";
+      const event =
+        typeof toolPayload.event === "string" ? toolPayload.event : "";
       const toolName =
         typeof toolPayload.name === "string" && toolPayload.name.length > 0
           ? toolPayload.name
           : "tool";
       const toolCallId = resolveToolCallId({
         toolCallId:
-          typeof toolPayload.toolCallId === "string" ? toolPayload.toolCallId : undefined,
+          typeof toolPayload.toolCallId === "string"
+            ? toolPayload.toolCallId
+            : undefined,
         toolName,
         fallbackIndex: toolCallOrder.length + 1,
       });
@@ -3805,6 +4045,7 @@ export class ContentService {
           status: "running",
           latencyMs: null,
           error: null,
+          sequence: nextSequence(),
         });
       }
 
@@ -3816,19 +4057,7 @@ export class ContentService {
       if (event === "on_tool_start") {
         const normalizedInput = normalizeToolInput(toolPayload.input);
         toolStartedAtById.set(toolCallId, Date.now());
-        if (toolName === "retrieve") {
-          const query =
-            typeof normalizedInput.query === "string" ? normalizedInput.query.trim() : "";
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: "search",
-              title: "Searching selected sources",
-              status: "in_progress",
-              items: query.length > 0 ? [`Query: ${query}`] : [],
-            }),
-          };
-        }
+        evidenceToolStarted = true;
         const nextToolCall: ToolCallTrace = {
           ...currentToolCall,
           tool: toolName,
@@ -3844,6 +4073,21 @@ export class ContentService {
           input: normalizedInput,
           toolCall: nextToolCall,
         };
+        if (toolName === "retrieve") {
+          const query =
+            typeof normalizedInput.query === "string"
+              ? normalizedInput.query.trim()
+              : "";
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: "search",
+              title: "Searching selected sources",
+              status: "in_progress",
+              items: query.length > 0 ? [`Query: ${query}`] : [],
+            }),
+          };
+        }
         continue;
       }
 
@@ -3869,16 +4113,16 @@ export class ContentService {
 
       if (event === "on_tool_end") {
         const retrievalCall = retrievalCallsById.get(toolCallId);
+        const toolRetrieval = retrievalsByToolCallId.get(toolCallId) ?? null;
         const startedAt = toolStartedAtById.get(toolCallId);
         const measuredLatency =
           typeof startedAt === "number" ? Date.now() - startedAt : null;
         const latencyMs = retrievalCall?.latencyMs ?? measuredLatency;
-        const output =
-          retrievalCall
-            ? {
-                hitCount: retrievalCall.hitCount,
-              }
-            : toolPayload.output;
+        const output = retrievalCall
+          ? {
+              hitCount: retrievalCall.hitCount,
+            }
+          : toolPayload.output;
         const nextToolCall: ToolCallTrace = {
           ...currentToolCall,
           tool: toolName,
@@ -3888,31 +4132,6 @@ export class ContentService {
           error: null,
         };
         toolCallsById.set(toolCallId, nextToolCall);
-        if (toolName === "retrieve") {
-          const query = retrievalCall?.query ?? "";
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: "search",
-              title: "Searched selected sources",
-              status: "completed",
-              items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
-            }),
-          };
-
-          const reviewedSources = summarizeReviewedSources(latestToolRetrieval);
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: "review",
-              title: `Reviewed ${reviewedSources.length} ${
-                reviewedSources.length === 1 ? "file" : "files"
-              }`,
-              status: "completed",
-              items: reviewedSources,
-            }),
-          };
-        }
         yield {
           type: "tool-call-result",
           id: toolCallId,
@@ -3936,13 +4155,41 @@ export class ContentService {
           status: "completed",
           toolCall: nextToolCall,
         };
+        yield* emitNewCitations();
+        if (toolName === "retrieve") {
+          const query = retrievalCall?.query ?? "";
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: "search",
+              title: "Searched selected sources",
+              status: "completed",
+              items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
+            }),
+          };
+
+          const reviewedSources = summarizeReviewedSources(toolRetrieval);
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: "review",
+              title: `Reviewed ${reviewedSources.length} ${
+                reviewedSources.length === 1 ? "file" : "files"
+              }`,
+              status: "completed",
+              items: reviewedSources,
+            }),
+          };
+        }
         continue;
       }
 
       if (event === "on_tool_error") {
         const startedAt = toolStartedAtById.get(toolCallId);
         const latencyMs =
-          typeof startedAt === "number" ? Date.now() - startedAt : currentToolCall.latencyMs;
+          typeof startedAt === "number"
+            ? Date.now() - startedAt
+            : currentToolCall.latencyMs;
         const errorText = normalizeErrorText(toolPayload.error);
         const nextToolCall: ToolCallTrace = {
           ...currentToolCall,
@@ -3969,56 +4216,37 @@ export class ContentService {
           status: "error",
           toolCall: nextToolCall,
         };
+        yield* emitNewCitations();
       }
     }
 
-    const assistantText =
+    let assistantText =
       assistantContent.trim().length > 0
         ? assistantContent.trim()
         : fallbackAssistantContent && fallbackAssistantContent.trim().length > 0
           ? fallbackAssistantContent.trim()
           : "Model returned an empty response.";
 
-    const finalRetrieval =
-      latestToolRetrieval ??
-      (await runToolRetrieval({
-        prepared: input.prepared,
-        query: input.prepared.messageContent,
-        llm: input.llm,
-      }));
+    const finalRetrieval = latestToolRetrieval;
 
-    if (!latestToolRetrieval) {
-      const reviewedSources = summarizeReviewedSources(finalRetrieval);
-      yield {
-        type: "thinking-step",
-        step: setThinkingStep({
-          id: "search",
-          title: "Searched selected sources",
-          status: "completed",
-          items: [],
-        }),
-      };
-      yield {
-        type: "thinking-step",
-        step: setThinkingStep({
-          id: "review",
-          title: `Reviewed ${reviewedSources.length} ${
-            reviewedSources.length === 1 ? "file" : "files"
-          }`,
-          status: "completed",
-          items: reviewedSources,
-        }),
-      };
-      yield {
-        type: "citations",
-        citations: finalRetrieval.retrievalSummary,
-      };
+    yield {
+      type: "citations",
+      citations: citationRegistry.list(),
+    };
+
+    const citationValidation = validateAssistantCitations({
+      assistantText,
+      citations: citationRegistry.list(),
+    });
+    if (!citationValidation.valid) {
+      assistantText =
+        "I could not produce a grounded answer because the response referenced citation markers that were not returned by the workspace evidence tools. Please try again so I can gather citable evidence before answering.";
     }
 
-    if (latestToolRetrieval) {
+    if (!hasStreamedText) {
       yield {
-        type: "citations",
-        citations: finalRetrieval.retrievalSummary,
+        type: "text-delta",
+        delta: assistantText,
       };
     }
 
@@ -4049,7 +4277,8 @@ export class ContentService {
           ...call,
           status: "completed" as const,
           latencyMs:
-            call.latencyMs ?? (typeof startedAt === "number" ? Date.now() - startedAt : null),
+            call.latencyMs ??
+            (typeof startedAt === "number" ? Date.now() - startedAt : null),
         };
       });
 
@@ -4058,6 +4287,7 @@ export class ContentService {
       outcome: {
         assistantContent: assistantText,
         retrieval: finalRetrieval,
+        citations: citationRegistry.list(),
         retrievalCalls,
         toolCalls,
         thinkingSteps: listThinkingSteps({
@@ -4103,7 +4333,9 @@ export class ContentService {
       llm: input.llm,
       existingUserMessage: latestUserMessage,
       assistantMessageParentId: latestAssistantMessage.id,
-      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
+      agentAssistantMessageParentId: resolveAssistantContextParentId(
+        latestAssistantMessage,
+      ),
     });
   }
 
@@ -4142,7 +4374,9 @@ export class ContentService {
       llm: input.llm,
       existingUserMessage: latestUserMessage,
       assistantMessageParentId: latestAssistantMessage.id,
-      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
+      agentAssistantMessageParentId: resolveAssistantContextParentId(
+        latestAssistantMessage,
+      ),
     });
   }
 
@@ -4182,7 +4416,9 @@ export class ContentService {
       llm: input.llm,
       userMessageParentId: latestUserMessage.id,
       assistantMessageParentId: latestAssistantMessage?.id ?? null,
-      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
+      agentAssistantMessageParentId: resolveAssistantContextParentId(
+        latestAssistantMessage,
+      ),
     });
   }
 
@@ -4222,11 +4458,15 @@ export class ContentService {
       llm: input.llm,
       userMessageParentId: latestUserMessage.id,
       assistantMessageParentId: latestAssistantMessage?.id ?? null,
-      agentAssistantMessageParentId: resolveAssistantContextParentId(latestAssistantMessage),
+      agentAssistantMessageParentId: resolveAssistantContextParentId(
+        latestAssistantMessage,
+      ),
     });
   }
 
-  async *streamThreadEvents(input: StreamThreadEventInput): AsyncGenerator<string> {
+  async *streamThreadEvents(
+    input: StreamThreadEventInput,
+  ): AsyncGenerator<string> {
     const prepared = await this.prepareThreadTurn(input);
     const chatStartedAt = Date.now();
 
@@ -4244,7 +4484,11 @@ export class ContentService {
         llm: input.llm,
       })) {
         if (event.type === "text-delta") {
-          yield toSseData({ type: "text-delta", id: textId, delta: event.delta });
+          yield toSseData({
+            type: "text-delta",
+            id: textId,
+            delta: event.delta,
+          });
           continue;
         }
 
@@ -4340,12 +4584,17 @@ export class ContentService {
       }
 
       if (!outcome) {
-        throw new ContentError(502, "MODEL_EMPTY_RESPONSE", "Model returned no response");
+        throw new ContentError(
+          502,
+          "MODEL_EMPTY_RESPONSE",
+          "Model returned no response",
+        );
       }
 
       const { assistantMessage } = await this.finalizeThreadTurn({
         prepared,
         retrieval: outcome.retrieval,
+        citations: outcome.citations,
         retrievalCalls: outcome.retrievalCalls,
         toolCalls: outcome.toolCalls,
         thinkingSteps: outcome.thinkingSteps,
@@ -4356,7 +4605,10 @@ export class ContentService {
       });
 
       yield toSseData({ type: "text-end", id: textId });
-      yield toSseData({ type: "assistant-message", messageId: assistantMessage.id });
+      yield toSseData({
+        type: "assistant-message",
+        messageId: assistantMessage.id,
+      });
     } catch (error) {
       const contentError =
         error instanceof ContentError ? error : toContentServiceError(error);
@@ -4437,38 +4689,43 @@ export class ContentService {
       }
 
       if (!doneOutcome) {
-        throw new ContentError(502, "MODEL_EMPTY_RESPONSE", "Model returned no response");
+        throw new ContentError(
+          502,
+          "MODEL_EMPTY_RESPONSE",
+          "Model returned no response",
+        );
       }
 
       return doneOutcome;
     })().catch(async (error: unknown) => {
-        const contentError =
-          error instanceof ContentError ? error : toContentServiceError(error);
-        await recordGatewayOperationEvent({
-          teamId: prepared.workspace.organizationId,
-          workspaceId: prepared.workspace.id,
-          userId: prepared.userId,
-          threadId: prepared.thread.id,
-          messageId: prepared.userMessage.id,
-          feature: "chat",
-          operation: "chat.complete",
-          modelKind: "chat",
-          modelAlias: prepared.modelAlias,
-          llm: input.llm,
-          traceId: prepared.userMessage.id,
-          success: false,
-          errorCode: contentError.code,
-          errorMessage: contentError.message,
-          attributes: {
-            retrievalCalls: summarizeRetrievalCalls([]),
-          },
-        });
-        throw contentError;
+      const contentError =
+        error instanceof ContentError ? error : toContentServiceError(error);
+      await recordGatewayOperationEvent({
+        teamId: prepared.workspace.organizationId,
+        workspaceId: prepared.workspace.id,
+        userId: prepared.userId,
+        threadId: prepared.thread.id,
+        messageId: prepared.userMessage.id,
+        feature: "chat",
+        operation: "chat.complete",
+        modelKind: "chat",
+        modelAlias: prepared.modelAlias,
+        llm: input.llm,
+        traceId: prepared.userMessage.id,
+        success: false,
+        errorCode: contentError.code,
+        errorMessage: contentError.message,
+        attributes: {
+          retrievalCalls: summarizeRetrievalCalls([]),
+        },
       });
+      throw contentError;
+    });
 
     const { assistantMessage, billing } = await this.finalizeThreadTurn({
       prepared,
       retrieval: outcome.retrieval,
+      citations: outcome.citations,
       retrievalCalls: outcome.retrievalCalls,
       toolCalls: outcome.toolCalls,
       thinkingSteps: outcome.thinkingSteps,
@@ -4485,10 +4742,10 @@ export class ContentService {
       assistantMessage,
       billing,
       retrieval: {
-        embeddingProfileId: outcome.retrieval.profile.id,
-        vectorStrategy: outcome.retrieval.planner.strategy,
-        annIndexUsed: outcome.retrieval.planner.annIndexUsed,
-        citations: outcome.retrieval.retrievalSummary,
+        embeddingProfileId: outcome.retrieval?.profile.id ?? null,
+        vectorStrategy: outcome.retrieval?.planner.strategy ?? null,
+        annIndexUsed: outcome.retrieval?.planner.annIndexUsed ?? null,
+        citations: outcome.citations,
       },
     };
   }

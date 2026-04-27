@@ -13,6 +13,14 @@ function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function normalizePdf2MarkdownArtifacts(value: string) {
+  return value.replace(
+    /<!--\s*Meanless:\s*([\s\S]*?)\s*-->/gi,
+    (_match, content: string) =>
+      content.replace(/<br\s*\/?>/gi, "\n").trim(),
+  );
+}
+
 function extractPageContent(page: unknown) {
   const record = asRecord(page);
   if (!record) {
@@ -52,7 +60,9 @@ export function extractPdf2MarkdownResult(resultJson: unknown): {
   const pages = pagesValue
     .map((page, index) => {
       const record = asRecord(page);
-      const content = normalizeWhitespace(extractPageContent(page));
+      const content = normalizeWhitespace(
+        normalizePdf2MarkdownArtifacts(extractPageContent(page)),
+      );
       if (!content) {
         return null;
       }
@@ -68,7 +78,11 @@ export function extractPdf2MarkdownResult(resultJson: unknown): {
       return { pageNumber, content };
     })
     .filter((page): page is ParsedPage => page !== null);
-  const content = normalizeWhitespace(directMarkdown || pages.map((page) => page.content).join("\n\n"));
+  const content = normalizeWhitespace(
+    normalizePdf2MarkdownArtifacts(
+      directMarkdown || pages.map((page) => page.content).join("\n\n"),
+    ),
+  );
   const pageCount =
     typeof result?.page_count === "number"
       ? result.page_count

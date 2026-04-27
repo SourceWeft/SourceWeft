@@ -43,7 +43,7 @@ export function createRetrievalTool(input: {
     {
       name: "retrieve",
       description:
-        "Search the current workspace knowledge base for relevant chunks before answering.",
+        "Search indexed workspace knowledge for relevant citable chunks. When sources are selected for the current turn, search is already scoped to those sources. Use this directly for source-grounded Q&A, targeted extraction, local fact lookup, semantic lookup, and finding relevant passages across sources; do not call ls, glob, or grep first just to discover selected source paths or try keyword guesses. Do not use retrieve first for source-wide coverage tasks such as summarizing, reviewing, comparing, listing document contents, or analyzing full selected sources; use ls/read_file for those tasks.",
       schema: z.object({
         query: z.string().min(1),
       }),

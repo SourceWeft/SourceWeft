@@ -198,6 +198,54 @@ test("pdf2markdown result extractor handles documented page fields", () => {
   assert.equal(result.pages[0]?.content.includes("Total: $1234.56"), true);
   assert.equal(result.pageCount, 1);
 });
+test("pdf2markdown result extractor unwraps Meanless html comments", () => {
+  const result = extractPdf2MarkdownResult({
+    data: {
+      result: {
+        markdown: "<!-- Meanless: Powerful Features for Modern Web Crawling -->\n\nMain content",
+      },
+    },
+  });
+
+  assert.equal(result.content.includes("Powerful Features for Modern Web Crawling"), true);
+  assert.equal(result.content.includes("Main content"), true);
+  assert.equal(result.content.includes("Meanless:"), false);
+  assert.equal(result.content.includes("<!--"), false);
+  assert.equal(result.content.includes("-->"), false);
+});
+test("pdf2markdown result extractor converts Meanless line breaks", () => {
+  const result = extractPdf2MarkdownResult({
+    data: {
+      result: {
+        pages: [
+          {
+            page_idx: 0,
+            md: "<!-- Meanless: spaceship<br>SPACESHIP.COM<br />WG-202604011016536 -->",
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.content.includes("spaceship"), true);
+  assert.equal(result.content.includes("SPACESHIP.COM"), true);
+  assert.equal(result.content.includes("WG-202604011016536"), true);
+  assert.equal(result.content.includes("Meanless:"), false);
+  assert.equal(result.content.includes("<br"), false);
+  assert.equal(result.pages[0]?.content.includes("SPACESHIP.COM"), true);
+});
+test("pdf2markdown result extractor preserves non-Meanless html comments", () => {
+  const result = extractPdf2MarkdownResult({
+    data: {
+      result: {
+        markdown: "<!-- keep this internal note -->\n\nVisible text",
+      },
+    },
+  });
+
+  assert.equal(result.content.includes("<!-- keep this internal note -->"), true);
+  assert.equal(result.content.includes("Visible text"), true);
+});
 test("source storage key is namespaced by workspace and source", () => {
   const key = buildSourceStorageKey({
     workspaceId: "ws_123",

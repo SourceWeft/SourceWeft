@@ -1,9 +1,6 @@
 import type { Chunk } from "@chonkiejs/core";
 
-export type EmbeddingVectorStrategy =
-  | "ann_hnsw"
-  | "exact_vector"
-  | "bm25_only";
+export type EmbeddingVectorStrategy = "ann_hnsw" | "exact_vector" | "bm25_only";
 
 export type EmbeddingProfileRecord = {
   id: string;
@@ -144,7 +141,13 @@ export type SourceRecord = {
   id: string;
   teamId: string;
   workspaceId: string;
-  ingestKind: "connector" | "manual_upload" | "web_url" | "youtube" | "note" | "artifact";
+  ingestKind:
+    | "connector"
+    | "manual_upload"
+    | "web_url"
+    | "youtube"
+    | "note"
+    | "artifact";
   sourceType: SourceType;
   title: string;
   contentText: string;
@@ -170,6 +173,7 @@ export type SourceDocumentRecord = {
   id: string;
   title: string | null;
   language: string | null;
+  contentText: string;
   status: "pending" | "processing" | "ready" | "failed";
   tokenCount: number | null;
   charCount: number | null;

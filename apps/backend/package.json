@@ -8,7 +8,7 @@
     "dev:api": "tsx watch src/api/main.ts",
     "dev:worker": "tsx src/worker/main.ts",
     "dev:scheduler": "tsx src/scheduler/main.ts",
-    "test": "node --test --import tsx src/modules/content/parsers/parsers.test.ts",
+    "test": "node --test --import tsx src/modules/content/parsers/parsers.test.ts src/modules/content/chunker.test.ts",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "pnpm run migrate:auth && drizzle-kit migrate --config drizzle.config.ts",
     "migrate:auth": "better-auth migrate --yes --config src/modules/auth/auth.ts",
@@ -19,7 +19,8 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1029.0",
+    "@aws-sdk/client-s3": "^3.1037.0",
+    "@aws-sdk/s3-request-presigner": "^3.1037.0",
     "@better-auth/api-key": "^1.5.6",
     "@better-auth/oauth-provider": "^1.5.6",
     "@better-auth/passkey": "^1.5.6",

@@ -1,20 +1,36 @@
-import { RecursiveChunker } from "@chonkiejs/core";
+import { RecursiveChunker, RecursiveRules } from "@chonkiejs/core";
 import type { ParsingConfig } from "./types";
 
 let defaultChunkerPromise: Promise<RecursiveChunker> | null = null;
 
+const documentRules = new RecursiveRules({
+  levels: [
+    { delimiters: ["\n\n", "\r\n", "\n", "\r"] },
+    { delimiters: [". ", "! ", "? "] },
+    {},
+  ],
+});
+
+function getChunkSize(config?: Pick<ParsingConfig, "chunkSize"> | null) {
+  return config?.chunkSize ?? 512;
+}
+
 function getDefaultChunker(config?: Pick<ParsingConfig, "chunkSize"> | null) {
+  const chunkSize = getChunkSize(config);
+
   if (config?.chunkSize) {
     return RecursiveChunker.create({
-      chunkSize: config.chunkSize,
+      chunkSize,
       minCharactersPerChunk: 50,
+      rules: documentRules,
     });
   }
 
   if (!defaultChunkerPromise) {
     defaultChunkerPromise = RecursiveChunker.create({
-      chunkSize: 512,
+      chunkSize,
       minCharactersPerChunk: 50,
+      rules: documentRules,
     });
   }
 
@@ -31,6 +47,7 @@ export async function chunkSourceContent(
   }
 
   const chunker = await getDefaultChunker(config);
-  return chunker.chunk(normalized);
-}
+  const chunks = await chunker.chunk(normalized);
 
+  return chunks.filter((chunk) => chunk.text.trim().length > 0);
+}
