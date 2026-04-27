@@ -21,11 +21,12 @@ import {
 import {
   ChatCanvas,
   type CitationRecord,
+  type MessageVersion,
   type ThinkingStepRecord,
   type ToolCallRecord,
   type VersionedMessageGroup,
 } from "../_components/chat-canvas";
-import { SourcesHub } from "../_components/sources-hub";
+import { SourcesHub, type ThreadCitationRecord } from "../_components/sources-hub";
 import { SourcePreviewPanel } from "../_components/source-preview-panel";
 import type { SourceItem } from "../_components/mock-data";
 import { contentClient } from "../../../../lib/sdk";
@@ -183,6 +184,63 @@ function resolveUsedCitationsForText(input: {
   }
 
   return used;
+}
+
+function resolveActiveAssistantVersion(input: {
+  activeVersionByGroup: Record<string, number>;
+  group: VersionedMessageGroup;
+  groups: VersionedMessageGroup[];
+}): MessageVersion | null {
+  if (input.group.role !== "assistant") {
+    return null;
+  }
+
+  const userGroup = input.group.turnId
+    ? input.groups.find(
+        (candidate) =>
+          candidate.role === "user" && candidate.turnId === input.group.turnId,
+      )
+    : null;
+  const selectedUserVersionId = userGroup
+    ? (() => {
+        const latestUserVersionIndex = Math.max(
+          userGroup.versions.length - 1,
+          0,
+        );
+        const activeUserBranchIndex = Math.min(
+          Math.max(
+            input.activeVersionByGroup[userGroup.groupId] ??
+              latestUserVersionIndex,
+            0,
+          ),
+          latestUserVersionIndex,
+        );
+        return userGroup.versions[activeUserBranchIndex]?.id ?? null;
+      })()
+    : null;
+
+  const versionEntries = input.group.versions.map((version, originalIndex) => ({
+    version,
+    originalIndex,
+  }));
+  const scopedEntries = selectedUserVersionId
+    ? versionEntries.filter(
+        (entry) => entry.version.sourceUserMessageId === selectedUserVersionId,
+      )
+    : versionEntries;
+  const visibleEntries = scopedEntries.length > 0 ? scopedEntries : versionEntries;
+  const latestVisibleIndex = Math.max(visibleEntries.length - 1, 0);
+  const desiredOriginalIndex =
+    input.activeVersionByGroup[input.group.groupId] ??
+    visibleEntries[latestVisibleIndex]?.originalIndex ??
+    0;
+  const matchedVisibleIndex = visibleEntries.findIndex(
+    (entry) => entry.originalIndex === desiredOriginalIndex,
+  );
+  const activeVisibleIndex =
+    matchedVisibleIndex >= 0 ? matchedVisibleIndex : latestVisibleIndex;
+
+  return visibleEntries[activeVisibleIndex]?.version ?? null;
 }
 
 function resolveContextSourceIds(input: {
@@ -735,6 +793,7 @@ export default function DashboardChatThreadPage({
   const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(null);
   const [previewCitation, setPreviewCitation] = useState<CitationRecord | null>(null);
   const [displayedCitations, setDisplayedCitations] = useState<CitationRecord[]>([]);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const latestSignatureByGroupRef = useRef<Record<string, string>>({});
 
   // ── Sources state ──────────────────────────────────────────────────────────
@@ -848,54 +907,11 @@ export default function DashboardChatThreadPage({
         continue;
       }
 
-      const selectedUserVersionIdForAssistant = group.turnId
-        ? (() => {
-            const userGroup = messageGroups.find(
-              (candidate) =>
-                candidate.role === "user" &&
-                candidate.turnId === group.turnId,
-            );
-            if (!userGroup) {
-              return null;
-            }
-
-            const latestUserVersionIndex = Math.max(
-              userGroup.versions.length - 1,
-              0,
-            );
-            const activeUserBranchIndex = Math.min(
-              Math.max(
-                activeVersionByGroup[userGroup.groupId] ?? latestUserVersionIndex,
-                0,
-              ),
-              latestUserVersionIndex,
-            );
-            return userGroup.versions[activeUserBranchIndex]?.id ?? null;
-          })()
-        : null;
-
-      const versionEntries = group.versions.map((version, originalIndex) => ({
-        version,
-        originalIndex,
-      }));
-      const scopedEntries = selectedUserVersionIdForAssistant
-        ? versionEntries.filter(
-            (entry) =>
-              entry.version.sourceUserMessageId === selectedUserVersionIdForAssistant,
-          )
-        : versionEntries;
-      const visibleEntries = scopedEntries.length > 0 ? scopedEntries : versionEntries;
-      const latestVisibleIndex = Math.max(visibleEntries.length - 1, 0);
-      const desiredOriginalIndex =
-        activeVersionByGroup[group.groupId] ??
-        visibleEntries[latestVisibleIndex]?.originalIndex ??
-        0;
-      const matchedVisibleIndex = visibleEntries.findIndex(
-        (entry) => entry.originalIndex === desiredOriginalIndex,
-      );
-      const activeVisibleIndex =
-        matchedVisibleIndex >= 0 ? matchedVisibleIndex : latestVisibleIndex;
-      return visibleEntries[activeVisibleIndex]?.version ?? null;
+      return resolveActiveAssistantVersion({
+        activeVersionByGroup,
+        group,
+        groups: messageGroups,
+      });
     }
 
     return null;
@@ -913,6 +929,50 @@ export default function DashboardChatThreadPage({
     () => (activeCitations.length > 0 ? activeCitations : activeAssistantCitations),
     [activeAssistantCitations, activeCitations],
   );
+  const threadCitations = useMemo<ThreadCitationRecord[]>(() => {
+    const citationsByAnswer: ThreadCitationRecord[][] = [];
+    let answerIndex = 0;
+
+    for (const group of messageGroups) {
+      if (group.role !== "assistant") {
+        continue;
+      }
+
+      const version = resolveActiveAssistantVersion({
+        activeVersionByGroup,
+        group,
+        groups: messageGroups,
+      });
+      if (!version) {
+        continue;
+      }
+
+      answerIndex += 1;
+      const usedCitations = resolveUsedCitationsForText({
+        citations: version.citations,
+        text: version.content,
+      });
+      const answerCitations =
+        usedCitations.length > 0
+          ? usedCitations
+          : (version.citations ?? EMPTY_CITATIONS);
+
+      if (answerCitations.length === 0) {
+        continue;
+      }
+
+      citationsByAnswer.push(
+        answerCitations.map((citation, citationIndex) => ({
+          citation,
+          id: `${version.id}:${citation.chunkId}:${citationIndex}`,
+          messageId: version.id,
+          messageLabel: `Answer ${answerIndex}`,
+        })),
+      );
+    }
+
+    return citationsByAnswer.reverse().flat();
+  }, [activeVersionByGroup, messageGroups]);
 
   useEffect(() => {
     if (!isStreaming || visibleCitations.length > 0) {
@@ -940,6 +1000,34 @@ export default function DashboardChatThreadPage({
       }
     },
     [displayedCitations, sourcesVisible, toggleSourcesVisible],
+  );
+
+  const scrollToMessage = useCallback((messageId: string) => {
+    const selector = `[data-chat-message-id="${CSS.escape(messageId)}"]`;
+    setHighlightedMessageId(messageId);
+
+    const scroll = () => {
+      const target = document.querySelector(selector) as HTMLElement | null;
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+
+    window.requestAnimationFrame(scroll);
+    window.setTimeout(scroll, 120);
+    window.setTimeout(() => {
+      setHighlightedMessageId((current) =>
+        current === messageId ? null : current,
+      );
+    }, 1600);
+  }, []);
+
+  const handleSourceHubCitationOpen = useCallback(
+    (citation: CitationRecord, context?: { messageId?: string }) => {
+      setPreviewCitation(citation);
+      if (context?.messageId) {
+        scrollToMessage(context.messageId);
+      }
+    },
+    [scrollToMessage],
   );
 
   useEffect(() => {
@@ -1021,7 +1109,7 @@ export default function DashboardChatThreadPage({
       setMessages([]);
     }
     },
-    [messages, threadId, workspaceId],
+    [threadId, workspaceId],
   );
 
   const loadThreadModelState = useCallback(async () => {
@@ -1949,6 +2037,7 @@ export default function DashboardChatThreadPage({
           allSources={librarySources}
           composerInitialInput={composerInitialInput}
           composerResetKey={composerResetKey}
+          highlightedMessageId={highlightedMessageId}
           isEditing={Boolean(editingMessageId && editingGroupId)}
           isStreaming={isStreaming}
           showThinkingPlaceholder={showThinkingPlaceholder}
@@ -1974,11 +2063,14 @@ export default function DashboardChatThreadPage({
         <SourcesHub
           activeCitationIndex={activeCitationIndex}
           citations={displayedCitations}
+          currentCitationMessageId={activeAssistantVersion?.id ?? null}
           mode="thread"
-          onCitationOpen={setPreviewCitation}
+          onCitationLocate={scrollToMessage}
+          onCitationOpen={handleSourceHubCitationOpen}
           onSelectionChange={persistSelectedSourceIds}
           onSourceLoad={setLibrarySources}
           selectedIds={selectedSourceIds}
+          threadCitations={threadCitations}
           workspaceId={workspaceId}
         />
       ) : null}

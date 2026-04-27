@@ -892,6 +892,7 @@ export function ChatCanvas({
   activeVersionByGroup = {},
   composerInitialInput,
   composerResetKey,
+  highlightedMessageId = null,
   isEditing = false,
   isStreaming = false,
   showThinkingPlaceholder = false,
@@ -913,6 +914,7 @@ export function ChatCanvas({
   activeVersionByGroup?: Record<string, number>;
   composerInitialInput?: string;
   composerResetKey?: number;
+  highlightedMessageId?: string | null;
   isEditing?: boolean;
   isStreaming?: boolean;
   showThinkingPlaceholder?: boolean;
@@ -1153,9 +1155,14 @@ export function ChatCanvas({
                             .filter((source): source is SourceItem => Boolean(source))
                         : [];
 
-                      return (
+                        return (
                           <div
-                            className="flex w-full flex-col gap-1"
+                            className={cn(
+                              "flex w-full flex-col gap-1 rounded-2xl transition-colors duration-700",
+                              highlightedMessageId === version.id &&
+                                "bg-primary/10 ring-1 ring-primary/25",
+                            )}
+                            data-chat-message-id={version.id}
                             key={version.id}
                           >
                           {!isAssistant && referencedSources.length > 0 ? (

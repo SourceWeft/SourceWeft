@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -70,6 +77,23 @@ type AddTab = (typeof addTabs)[number];
 type SourceApiRecord = Awaited<
   ReturnType<typeof contentClient.listSources>
 >["items"][number];
+type CitationScope = "current" | "thread";
+
+type DisplayCitationItem = CitationItem & {
+  citationRecord: CitationRecord;
+  messageId?: string;
+};
+
+export type ThreadCitationRecord = {
+  citation: CitationRecord;
+  id: string;
+  messageId: string;
+  messageLabel: string;
+};
+
+type CitationOpenContext = {
+  messageId?: string;
+};
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof HttpClientError) {
@@ -113,12 +137,26 @@ function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
   }));
 }
 
-function mapCitationsToUi(citations: CitationRecord[]): CitationItem[] {
+function mapCitationsToUi(citations: CitationRecord[]): DisplayCitationItem[] {
   return citations.map((citation, index) => ({
     id: `citation-${citation.citation}-${citation.chunkId}`,
+    citationRecord: citation,
     sourceTitle: citation.sourceTitle?.trim() || "Untitled source",
     messageLabel: `Reference ${index + 1}`,
     excerpt: citation.excerpt,
+  }));
+}
+
+function mapThreadCitationsToUi(
+  citations: ThreadCitationRecord[],
+): DisplayCitationItem[] {
+  return citations.map((item) => ({
+    id: item.id,
+    citationRecord: item.citation,
+    messageId: item.messageId,
+    sourceTitle: item.citation.sourceTitle?.trim() || "Untitled source",
+    messageLabel: item.messageLabel,
+    excerpt: item.citation.excerpt,
   }));
 }
 
@@ -176,12 +214,27 @@ function SourceRow({
   onPreview: () => void;
   onReindex: () => void;
 }) {
+  function handleRowClick(event: MouseEvent<HTMLDivElement>) {
+    if (isBusy || isEditing) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    if (target.closest("button,input,textarea,select,a,[role='button']")) {
+      return;
+    }
+
+    onToggle(source.id);
+  }
+
   return (
     <div
       className={cn(
         "group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
+        !isBusy && !isEditing && "cursor-pointer",
         selected ? "bg-primary/5" : "hover:bg-accent/60",
       )}
+      onClick={handleRowClick}
     >
       <Checkbox
         checked={selected}
@@ -527,28 +580,47 @@ function LibraryTab({
 export function SourcesHub({
   activeCitationIndex = null,
   citations = [],
+  currentCitationMessageId = null,
   mode,
   onCitationOpen,
+  onCitationLocate,
   selectedIds,
   onSelectionChange,
+  threadCitations = [],
   workspaceId,
   onSourceLoad,
 }: {
   activeCitationIndex?: number | null;
   citations?: CitationRecord[];
+  currentCitationMessageId?: string | null;
   mode: "thread" | "new";
-  onCitationOpen?: (citation: CitationRecord) => void;
+  onCitationOpen?: (citation: CitationRecord, context?: CitationOpenContext) => void;
+  onCitationLocate?: (messageId: string) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  threadCitations?: ThreadCitationRecord[];
   workspaceId?: string | null;
   onSourceLoad?: (sources: SourceItem[]) => void;
 }) {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("Library");
+  const [citationScope, setCitationScope] = useState<CitationScope>("current");
   const [searchQuery, setSearchQuery] = useState("");
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
-  const citationItems = useMemo(() => mapCitationsToUi(citations), [citations]);
+  const currentCitationItems = useMemo(
+    () => mapCitationsToUi(citations),
+    [citations],
+  );
+  const threadCitationItems = useMemo(
+    () => mapThreadCitationsToUi(threadCitations),
+    [threadCitations],
+  );
+  const activeCitationItems =
+    citationScope === "thread" ? threadCitationItems : currentCitationItems;
+  const activeCitationChunkId = activeCitationIndex
+    ? citations[activeCitationIndex - 1]?.chunkId
+    : null;
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addTab, setAddTab] = useState<AddTab>("Text");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -569,6 +641,7 @@ export function SourcesHub({
 
   useEffect(() => {
     setActiveTab("Library");
+    setCitationScope("current");
   }, [mode]);
 
   useEffect(() => {
@@ -830,7 +903,7 @@ export function SourcesHub({
       const nextFiles = [...files];
       for (const file of incoming) {
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          toast.error(`\"${file.name}\" exceeds ${MAX_FILE_SIZE_MB}MB.`);
+          toast.error(`"${file.name}" exceeds ${MAX_FILE_SIZE_MB}MB.`);
           continue;
         }
         if (nextFiles.length >= MAX_FILES) {
@@ -1104,20 +1177,55 @@ export function SourcesHub({
                     Citations
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {citations.length} used
+                    {citationScope === "thread"
+                      ? `${threadCitationItems.length} in thread`
+                      : `${currentCitationItems.length} current`}
                   </span>
                 </div>
               </div>
-              {citationItems.length === 0 ? (
+
+              {mode === "thread" ? (
+                <div className="mb-2 grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
+                  {([
+                    ["current", `Current (${currentCitationItems.length})`],
+                    ["thread", `Thread (${threadCitationItems.length})`],
+                  ] as const).map(([scope, label]) => (
+                    <button
+                      className={cn(
+                        "rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                        citationScope === scope
+                          ? "bg-background text-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      key={scope}
+                      onClick={() => setCitationScope(scope)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {activeCitationItems.length === 0 ? (
                 <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
-                  No citations used in the selected answer.
+                  {citationScope === "thread"
+                    ? "No citations found in this thread."
+                    : "No citations used in the selected answer."}
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {citationItems.map((citation, index) => {
-                    const citationRecord = citations[index] ?? null;
+                  {activeCitationItems.map((citation, index) => {
+                    const citationRecord = citation.citationRecord;
                     const displayIndex = index + 1;
-                    const isActive = activeCitationIndex === displayIndex;
+                    const isActive =
+                      citationScope === "current"
+                        ? activeCitationIndex === displayIndex
+                        : activeCitationChunkId === citationRecord.chunkId;
+                    const locateMessageId =
+                      citation.messageId ??
+                      (citationScope === "current" ? currentCitationMessageId : null);
+                    const canLocate = Boolean(locateMessageId);
 
                     return (
                       <article
@@ -1125,8 +1233,14 @@ export function SourcesHub({
                           "rounded-xl border bg-background p-3 shadow-xs transition-colors",
                           isActive &&
                             "border-primary/45 bg-primary/5 shadow-sm",
+                          canLocate && "cursor-pointer hover:border-primary/30 hover:bg-primary/5",
                         )}
                         key={citation.id}
+                        onClick={() => {
+                          if (locateMessageId) {
+                            onCitationLocate?.(locateMessageId);
+                          }
+                        }}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex min-w-0 items-start gap-2.5">
@@ -1143,11 +1257,11 @@ export function SourcesHub({
                             </div>
                           </div>
                           <Button
-                            disabled={!citationRecord}
-                            onClick={() => {
-                              if (citationRecord) {
-                                onCitationOpen?.(citationRecord);
-                              }
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onCitationOpen?.(citationRecord, {
+                                messageId: locateMessageId ?? undefined,
+                              });
                             }}
                             size="xs"
                             type="button"

@@ -1220,6 +1220,22 @@ function toObjectRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function getMetadataString(
+  metadata: Record<string, unknown> | null,
+  key: string,
+) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function getMetadataNumber(
+  metadata: Record<string, unknown> | null,
+  key: string,
+) {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function resolveToolCallId(input: {
   toolCallId?: string;
   toolName: string;
@@ -3363,6 +3379,11 @@ export class ContentService {
       throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
     }
 
+    const snapshot = toObjectRecord(citation.metadataJson);
+    const sourceTitleSnapshot = getMetadataString(snapshot, "sourceTitle");
+    const chunkNoSnapshot = getMetadataNumber(snapshot, "chunkNo");
+    const excerptSnapshot = getMetadataString(snapshot, "excerpt");
+
     return {
       citation: {
         id: citation.id,
@@ -3370,11 +3391,12 @@ export class ContentService {
         rank: citation.rank,
         score: citation.score,
         sourceId: citation.sourceId,
-        sourceTitle: citation.sourceTitle,
+        sourceTitle: citation.sourceTitle ?? sourceTitleSnapshot,
         documentId: citation.documentId,
         chunkId: citation.chunkId,
-        excerpt: citation.quoteText ?? citation.chunkContent ?? "",
-        chunkContent: citation.chunkContent ?? "",
+        chunkNo: chunkNoSnapshot,
+        excerpt: citation.quoteText ?? citation.chunkContent ?? excerptSnapshot ?? "",
+        chunkContent: citation.chunkContent ?? excerptSnapshot ?? "",
       },
     };
   }
@@ -3783,8 +3805,11 @@ export class ContentService {
       citations: input.citations.map((citation, index) => ({
         citationKey: citation.citation,
         sourceId: citation.sourceId,
+        sourceTitle: citation.sourceTitle,
         documentId: citation.documentId,
         chunkId: citation.chunkId,
+        chunkNo: citation.chunkNo,
+        excerpt: citation.excerpt,
         quoteText: citation.quoteText,
         rank: index + 1,
         score: citation.score,

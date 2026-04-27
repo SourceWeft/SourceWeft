@@ -476,18 +476,70 @@ export async function deleteSourceRecord(input: {
   workspaceId: string;
   sourceId: string;
 }) {
-  const rows = await db
-    .delete(sources)
-    .where(
-      and(
-        eq(sources.id, input.sourceId),
-        eq(sources.teamId, input.teamId),
-        eq(sources.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning({ id: sources.id });
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      update ${citations} as citation
+      set
+        external_uri = coalesce(
+          citation.external_uri,
+          ${`sourceweft://deleted-source/${input.sourceId}`} || '/citation/' || citation.id
+        ),
+        metadata_json = citation.metadata_json || jsonb_strip_nulls(jsonb_build_object(
+          'sourceTitle', coalesce(
+            citation.metadata_json->>'sourceTitle',
+            (
+              select ${sources.title}
+              from ${sources}
+              where ${sources.id} = ${input.sourceId}
+                and ${sources.teamId} = ${input.teamId}
+                and ${sources.workspaceId} = ${input.workspaceId}
+              limit 1
+            )
+          ),
+          'chunkNo', (
+            select ${chunks.chunkNo}
+            from ${chunks}
+            where ${chunks.id} = citation.chunk_id
+            limit 1
+          ),
+          'excerpt', coalesce(
+            citation.metadata_json->>'excerpt',
+            citation.quote_text,
+            left((
+              select ${chunks.content}
+              from ${chunks}
+              where ${chunks.id} = citation.chunk_id
+              limit 1
+            ), 320)
+          )
+        ))
+      where citation.team_id = ${input.teamId}
+        and citation.workspace_id = ${input.workspaceId}
+        and (
+          citation.source_id = ${input.sourceId}
+          or citation.chunk_id in (
+            select ${chunks.id}
+            from ${chunks}
+            where ${chunks.teamId} = ${input.teamId}
+              and ${chunks.workspaceId} = ${input.workspaceId}
+              and ${chunks.sourceId} = ${input.sourceId}
+          )
+        )
+    `);
 
-  return rows.length > 0;
+    const rows = await tx
+      .delete(sources)
+      .where(
+        and(
+          eq(sources.id, input.sourceId),
+          eq(sources.teamId, input.teamId),
+          eq(sources.workspaceId, input.workspaceId),
+        ),
+      )
+      .returning({ id: sources.id });
+
+    return rows.length > 0;
+  });
 }
 
 export async function getSourceDetailRecord(input: {
@@ -1474,8 +1526,11 @@ export async function createCitationRecords(input: {
   citations: Array<{
     citationKey: string;
     sourceId: string;
+    sourceTitle?: string;
     documentId: string;
     chunkId: string;
+    chunkNo?: number;
+    excerpt?: string;
     quoteText: string;
     rank: number;
     score: number;
@@ -1499,7 +1554,11 @@ export async function createCitationRecords(input: {
       quoteText: citation.quoteText,
       rank: citation.rank,
       score: citation.score,
-      metadataJson: {},
+      metadataJson: {
+        sourceTitle: citation.sourceTitle,
+        chunkNo: citation.chunkNo,
+        excerpt: citation.excerpt,
+      },
       createdAt: new Date(),
     })),
   );
@@ -1521,6 +1580,7 @@ export async function findCitationByMessageRank(input: {
       quoteText: citations.quoteText,
       rank: citations.rank,
       score: citations.score,
+      metadataJson: citations.metadataJson,
       sourceTitle: sources.title,
       chunkContent: chunks.content,
     })

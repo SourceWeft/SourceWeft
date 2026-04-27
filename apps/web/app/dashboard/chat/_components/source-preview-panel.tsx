@@ -12,6 +12,7 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
 import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./mock-data";
@@ -35,6 +36,7 @@ export function SourcePreviewPanel({
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDeletedCitation, setIsDeletedCitation] = useState(false);
   const [isHistoricalCitation, setIsHistoricalCitation] = useState(false);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("chunks");
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
@@ -54,6 +56,7 @@ export function SourcePreviewPanel({
     setIsLoading(true);
     setError(null);
     setDetail(null);
+    setIsDeletedCitation(false);
     setIsHistoricalCitation(false);
 
     const request = citation
@@ -87,6 +90,15 @@ export function SourcePreviewPanel({
       .catch((loadError: unknown) => {
         if (!cancelled) {
           setDetail(null);
+          if (
+            citation &&
+            loadError instanceof HttpClientError &&
+            loadError.status === 404
+          ) {
+            setIsDeletedCitation(true);
+            return;
+          }
+
           setError(
             loadError instanceof Error
               ? loadError.message
@@ -184,6 +196,11 @@ export function SourcePreviewPanel({
                     Historical
                   </span>
                 ) : null}
+                {isDeletedCitation ? (
+                  <span className="inline-flex items-center rounded-full border border-slate-300/70 bg-slate-100/80 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:border-slate-500/30 dark:bg-slate-500/15 dark:text-slate-200">
+                    Source deleted
+                  </span>
+                ) : null}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -244,6 +261,48 @@ export function SourcePreviewPanel({
             <Loader2 className="mr-2 size-4 animate-spin" />
             Loading source preview...
           </div>
+        ) : isDeletedCitation && citation ? (
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
+              <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
+                <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
+                  <FileText className="size-4" />
+                  Source no longer available
+                </div>
+                The original source was deleted, so only the citation snapshot
+                saved with this answer can be shown.
+              </div>
+
+              <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
+                <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+                      <Hash className="size-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-foreground">
+                        {citation.sourceTitle?.trim() || "Deleted source"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {typeof citation.chunkNo === "number"
+                          ? `Chunk ${citation.chunkNo + 1}`
+                          : "Cited chunk"}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                    <Sparkles className="size-3.5" />
+                    Preserved citation
+                  </span>
+                </div>
+                <div className="px-4 py-4 lg:px-5">
+                  <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                    {citation.excerpt || "No citation excerpt was saved."}
+                  </MessageResponse>
+                </div>
+              </article>
+            </div>
+          </ScrollArea>
         ) : error ? (
           <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-destructive">
             {error}
