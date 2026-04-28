@@ -143,13 +143,13 @@ export default function DashboardChatPage() {
 
       const modelSettings: ModelAliasSettings = {};
       if (catalogKindEnabled.llm) {
-        modelSettings.llmProfileAlias = selectedModels.llm.id;
+        modelSettings.llmModelAlias = selectedModels.llm.id;
       }
       if (catalogKindEnabled.image) {
-        modelSettings.imageProfileAlias = selectedModels.image.id;
+        modelSettings.imageModelAlias = selectedModels.image.id;
       }
       if (catalogKindEnabled.vision) {
-        modelSettings.visionProfileAlias = selectedModels.vision.id;
+        modelSettings.visionModelAlias = selectedModels.vision.id;
       }
 
       const hasModelSettings = Object.keys(modelSettings).length > 0;

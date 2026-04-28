@@ -41,8 +41,7 @@ export const jobEventsResponseSchema = z.object({
 
 export const cancelJobResponseSchema = z.object({
   id: z.string(),
-  implemented: z.literal(false),
-  message: z.string(),
+  removed: z.literal(true),
 });
 
 export type JobStatus = z.infer<typeof jobStatusSchema>;

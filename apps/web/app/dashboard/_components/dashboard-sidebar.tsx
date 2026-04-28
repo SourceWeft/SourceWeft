@@ -287,7 +287,10 @@ export function DashboardSidebar() {
               isLoadingPrivateChats={isLoadingPrivateChats}
               privateChats={privateChats}
               sharedChats={sharedChats}
-              onWorkspaceChange={(nextId) => void switchWorkspace(nextId)}
+              onWorkspaceChange={(nextId) => {
+                void switchWorkspace(nextId);
+                router.push("/dashboard/chat");
+              }}
               workspaceId={workspaceId}
               workspaceName={workspaceName}
               workspaces={workspaces}

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../../shared/database";
+import { toPostgresTextArray } from "../sql";
 import { buildVirtualSource } from "./paths";
 import type {
   VirtualFsDocument,
@@ -7,12 +8,6 @@ import type {
   VirtualFsSource,
   VirtualFsChunk,
 } from "./types";
-
-function toPostgresTextArray(values: string[]) {
-  return `{${values
-    .map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
-    .join(",")}}`;
-}
 
 function sourceIdsClause(sourceIds: string[] | undefined) {
   if (!sourceIds || sourceIds.length === 0) {

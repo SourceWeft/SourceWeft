@@ -42,9 +42,9 @@ export type ModelItem = {
 };
 
 export type ModelAliasSettings = {
-  llmProfileAlias?: string | null;
-  imageProfileAlias?: string | null;
-  visionProfileAlias?: string | null;
+  llmModelAlias?: string | null;
+  imageModelAlias?: string | null;
+  visionModelAlias?: string | null;
 };
 
 type CatalogModelEntry = {
@@ -450,13 +450,13 @@ function resolveAliasForType(type: ModelType, aliases?: ModelAliasSettings) {
   }
 
   if (type === "llm") {
-    return aliases.llmProfileAlias ?? null;
+    return aliases.llmModelAlias ?? null;
   }
   if (type === "image") {
-    return aliases.imageProfileAlias ?? null;
+    return aliases.imageModelAlias ?? null;
   }
 
-  return aliases.visionProfileAlias ?? null;
+  return aliases.visionModelAlias ?? null;
 }
 
 function pickSelectedModelForType(input: {

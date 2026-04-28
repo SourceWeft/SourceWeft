@@ -13,9 +13,9 @@ import type { AnyBackendProtocol } from "deepagents";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
 import { createMiddleware } from "langchain";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
-import { CHAT_SYSTEM_PROMPT } from "./agent/prompts";
-import { getChatCheckpointer } from "../../shared/chat-checkpointer";
-import { createAgentChatModel } from "../../shared/model-gateway";
+import { CHAT_SYSTEM_PROMPT } from "./prompts";
+import { getChatCheckpointer } from "../../../shared/chat-checkpointer";
+import { createAgentChatModel } from "../../../shared/model-gateway/index";
 
 const KB_LS_TOOL_DESCRIPTION = `Lists files in a directory. In SourceWeft, /kb is the read-only workspace knowledge view. When the user has selected or referenced sources for the current turn, /kb is scoped to those selected/current sources, so ls('/kb') lists the selected/current source files. Use this for questions about selected file names/paths, source identity, file enumeration, and source-wide coverage tasks that need to inspect selected sources. Do not call ls before retrieve or grep just to discover selected sources; those tools are already scoped to the selected/current sources.`;
 

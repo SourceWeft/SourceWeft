@@ -6,6 +6,7 @@ export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
 
 export type SourceParseJobPayload = {
   sourceId: string;
+  sourceRevisionId: string;
   workspaceId: string;
   teamId: string;
   userId: string;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ObserveSink, ObserveSpan, UsageInfo } from "@sourceweft/model-gateway";
-import { db } from "./database";
-import { modelGatewayEvents } from "./db/schema";
+import { db } from "../database";
+import { modelGatewayEvents } from "../db/schema";
 
 const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
   "teamId",

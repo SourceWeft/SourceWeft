@@ -239,7 +239,9 @@ export function registerBillingRoutes(app: Hono) {
 
     const teamId = c.req.param("teamId");
     const userId = getSessionUserId(session);
-    await requireTeamMembership(teamId, userId);
+    await requireTeamMembership(teamId, userId, {
+      requireBillingManager: true,
+    });
 
     const body = ensureObjectBody(await c.req.json().catch(() => null));
     const parsed = meterConsumeRequestSchema.safeParse(body);
@@ -265,7 +267,9 @@ export function registerBillingRoutes(app: Hono) {
 
     const teamId = c.req.param("teamId");
     const userId = getSessionUserId(session);
-    await requireTeamMembership(teamId, userId);
+    await requireTeamMembership(teamId, userId, {
+      requireBillingManager: true,
+    });
 
     const body = ensureObjectBody(await c.req.json().catch(() => null));
     const parsed = meterIngestionRequestSchema.safeParse(body);

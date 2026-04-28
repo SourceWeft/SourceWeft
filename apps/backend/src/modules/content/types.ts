@@ -216,9 +216,9 @@ export type ThreadRecord = {
   workspaceId: string;
   title: string;
   modelSettings: {
-    llmProfileAlias: string | null;
-    imageProfileAlias: string | null;
-    visionProfileAlias: string | null;
+    llmModelAlias: string | null;
+    imageModelAlias: string | null;
+    visionModelAlias: string | null;
   };
   sourceCount: number;
   createdBy: string | null;

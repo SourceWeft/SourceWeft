@@ -151,18 +151,18 @@ Benefits:
 
 ## 8. Minimal API Contract (V1)
 
-- `GET /api/v1/health`
-- `POST /api/v1/jobs`
-- `GET /api/v1/jobs/:id`
-- `POST /api/v1/jobs/:id/cancel`
-- `GET /api/v1/jobs/:id/events`
+- `GET /v1/health`
+- `POST /v1/jobs`
+- `GET /v1/jobs/:id`
+- `POST /v1/jobs/:id/cancel`
+- `GET /v1/jobs/:id/events`
 
 All DTOs should be defined in `packages/contracts`.
 
 Skeleton note:
 
-- `POST /api/v1/jobs/:id/cancel` is intentionally a placeholder in this phase and returns `{ implemented: false }`.
-- `GET /api/v1/jobs/:id/events` currently returns an empty list placeholder.
+- `POST /v1/jobs/:id/cancel` is intentionally a placeholder in this phase and returns `{ implemented: false }`.
+- `GET /v1/jobs/:id/events` currently returns an empty list placeholder.
 
 ---
 

@@ -12,7 +12,7 @@ const retrievalVectorStrategySchema = z.enum([
 ]);
 
 const retrievalCitationSchema = z.object({
-  citation: z.number().int().positive(),
+  citation: z.string().min(1),
   sourceId: z.string(),
   sourceTitle: z.string().optional(),
   documentId: z.string(),
@@ -230,9 +230,9 @@ export const threadSchema = z.object({
   workspaceId: z.string(),
   title: z.string(),
   modelSettings: z.object({
-    llmProfileAlias: z.string().nullable(),
-    imageProfileAlias: z.string().nullable(),
-    visionProfileAlias: z.string().nullable(),
+    llmModelAlias: z.string().nullable(),
+    imageModelAlias: z.string().nullable(),
+    visionModelAlias: z.string().nullable(),
   }),
   sourceCount: z.number().int().nonnegative(),
   createdBy: z.string().nullable(),
@@ -240,15 +240,24 @@ export const threadSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const threadModelSettingsPatchSchema = z.object({
-  llmProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
-  imageProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
-  visionProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
+export const threadModelSettingsInputSchema = z.object({
+  llmModelAlias: z.string().trim().min(1).max(512).nullable().optional(),
+  imageModelAlias: z.string().trim().min(1).max(512).nullable().optional(),
+  visionModelAlias: z.string().trim().min(1).max(512).nullable().optional(),
 });
+
+export const threadModelSettingsPatchSchema =
+  threadModelSettingsInputSchema.refine(
+    (value) =>
+      value.llmModelAlias !== undefined ||
+      value.imageModelAlias !== undefined ||
+      value.visionModelAlias !== undefined,
+    { message: "At least one model alias must be provided" },
+  );
 
 export const createThreadRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
-  modelSettings: threadModelSettingsPatchSchema.optional(),
+  modelSettings: threadModelSettingsInputSchema.optional(),
 });
 
 export const createThreadResponseSchema = z.object({

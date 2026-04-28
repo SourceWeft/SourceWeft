@@ -13,11 +13,12 @@ import {
 import type {
   BillingAccountState,
   BillingLedgerRow,
+  BillingSubscriptionState,
   BillingWebhookEventState,
   BillingWebhookStatus,
-  BillingSubscriptionState,
   TeamSubscriptionSnapshot,
 } from "./types";
+import type { BillingStore } from "./store-port";
 
 type BillingAccountRow = typeof billingAccounts.$inferSelect;
 type BillingLedgerRowDb = typeof usageLedgers.$inferSelect;
@@ -153,7 +154,7 @@ function parseDateOrNull(value: string | null) {
   return new Date(value);
 }
 
-export class PostgresBillingStore {
+export class PostgresBillingStore implements BillingStore {
   async runInTransaction<T>(
     fn: (client: PoolClient) => Promise<T>,
   ): Promise<T> {
@@ -374,7 +375,7 @@ export class PostgresBillingStore {
   async insertWebhookEvent(
     input: {
       provider: BillingWebhookEventState["provider"];
-      providerEventId: string | null;
+      providerEventId: string;
       eventType: string;
       teamId: string | null;
       externalSubscriptionId: string | null;
@@ -405,10 +406,31 @@ export class PostgresBillingStore {
         createdAt: now,
         updatedAt: now,
       })
+      .onConflictDoNothing({
+        target: [
+          billingWebhookEvents.provider,
+          billingWebhookEvents.providerEventId,
+        ],
+      })
       .returning();
 
     if (!row) {
-      throw new Error("Failed to insert webhook event");
+      const [existing] = await pickDb(client)
+        .select()
+        .from(billingWebhookEvents)
+        .where(
+          and(
+            eq(billingWebhookEvents.provider, input.provider),
+            eq(billingWebhookEvents.providerEventId, input.providerEventId),
+          ),
+        )
+        .limit(1);
+
+      if (!existing) {
+        throw new Error("Failed to insert webhook event");
+      }
+
+      return mapWebhookEvent(existing);
     }
 
     return mapWebhookEvent(row);
@@ -438,20 +460,23 @@ export class PostgresBillingStore {
     const now = new Date();
     const nextStatus =
       existing.status === "processed" ? "processed" : "received";
+    const preserveAuditPayload = existing.status === "processed";
     const [row] = await pickDb(client)
       .update(billingWebhookEvents)
       .set({
-        eventType: input.eventType,
-        teamId: input.teamId,
-        externalSubscriptionId: input.externalSubscriptionId,
+        eventType: preserveAuditPayload ? existing.eventType : input.eventType,
+        teamId: preserveAuditPayload ? existing.teamId : input.teamId,
+        externalSubscriptionId: preserveAuditPayload
+          ? existing.externalSubscriptionId
+          : input.externalSubscriptionId,
         status: nextStatus,
         attemptCount: existing.attemptCount + 1,
         receivedAt: now,
         processedAt: nextStatus === "processed" ? existing.processedAt : null,
         errorCode: nextStatus === "processed" ? existing.errorCode : null,
         errorMessage: nextStatus === "processed" ? existing.errorMessage : null,
-        payload: input.payload,
-        metadata: input.metadata,
+        payload: preserveAuditPayload ? existing.payload : input.payload,
+        metadata: preserveAuditPayload ? existing.metadata : input.metadata,
         updatedAt: now,
       })
       .where(eq(billingWebhookEvents.id, webhookEventId))

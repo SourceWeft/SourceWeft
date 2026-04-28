@@ -13,6 +13,8 @@ export function mapBullMqStateToStatus(state: string): ApiJobStatus {
       return "succeeded";
     case "failed":
       return "failed";
+    case "removed":
+      return "cancelled";
     case "waiting":
     case "paused":
     case "delayed":

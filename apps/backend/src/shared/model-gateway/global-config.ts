@@ -6,6 +6,7 @@ export type GlobalGatewayEntry = {
   baseUrl: string;
   apiKey?: string;
   apiKeyEnv?: string;
+  defaultHeaders: Record<string, string>;
   providerName: string;
   providerKind:
     | "openai-compatible"
@@ -89,6 +90,7 @@ type RawGlobalGatewayEntry = {
   slug?: unknown;
   baseUrl?: unknown;
   apiKeyEnv?: unknown;
+  defaultHeaders?: unknown;
   providerName?: unknown;
   providerKind?: unknown;
   supports?: unknown;
@@ -195,6 +197,31 @@ function asStringArray(value: unknown, fieldName: string): string[] {
 
   return value.map((item, index) =>
     asNonEmptyString(item, `${fieldName}[${index}]`),
+  );
+}
+
+function asStringRecord(value: unknown, fieldName: string): Record<string, string> {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, headerValue]) => {
+      if (typeof headerValue !== "string") {
+        throw new Error(`Invalid global model gateway config field: ${fieldName}.${key}`);
+      }
+
+      const headerName = key.trim();
+      const normalizedValue = headerValue.trim();
+      if (!headerName || !normalizedValue) {
+        throw new Error(`Invalid global model gateway config field: ${fieldName}.${key}`);
+      }
+
+      return [headerName, normalizedValue] as const;
+    }),
   );
 }
 
@@ -350,6 +377,10 @@ function parseGatewayEntry(
     baseUrl: asNonEmptyString(entry.baseUrl, `gateways[${index}].baseUrl`),
     apiKey: apiKey || undefined,
     apiKeyEnv: apiKeyEnv || undefined,
+    defaultHeaders: asStringRecord(
+      entry.defaultHeaders,
+      `gateways[${index}].defaultHeaders`,
+    ),
     providerName:
       typeof entry.providerName === "string" && entry.providerName.trim().length > 0
         ? entry.providerName.trim()

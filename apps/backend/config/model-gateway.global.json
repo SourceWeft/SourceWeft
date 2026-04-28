@@ -8,7 +8,7 @@
       "apiKeyEnv": "OPENROUTER_API_KEY",
       "defaultHeaders": {
         "X-Title": "SourceWeft",
-        "HTTP-Referer": "https://SourceWeft.com"
+        "HTTP-Referer": "https://sourceweft.com"
       },
       "supports": [
         "chat",

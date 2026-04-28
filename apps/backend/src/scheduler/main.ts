@@ -1,6 +1,6 @@
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
-import { syncGlobalModelGatewayConfig } from "../shared/model-gateway";
+import { syncGlobalModelGatewayConfig } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
 import { scheduleExampleJob } from "./schedules/example-schedule";

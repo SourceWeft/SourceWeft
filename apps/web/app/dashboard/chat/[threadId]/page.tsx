@@ -1170,10 +1170,10 @@ export default function DashboardChatThreadPage({
 
       const patch: ModelAliasSettings =
         input.type === "llm"
-          ? { llmProfileAlias: input.model.id }
+          ? { llmModelAlias: input.model.id }
           : input.type === "image"
-            ? { imageProfileAlias: input.model.id }
-            : { visionProfileAlias: input.model.id };
+            ? { imageModelAlias: input.model.id }
+            : { visionModelAlias: input.model.id };
 
       try {
         await contentClient.updateThreadModelSettings(workspaceId, threadId, patch);

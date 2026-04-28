@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import {
   computeCreditsFromCost,
@@ -11,7 +11,6 @@ import {
 } from "@sourceweft/credits-core";
 import type {
   BillingSubscriptionResponse,
-  BillingSubscriptionStatus,
   BillingLedgerEntry,
   BillingLedgerResponse,
   BillingSummaryResponse,
@@ -36,13 +35,27 @@ import type {
   BillingAccountState,
   BillingProviderAdapter,
   BillingRuntimeConfig,
-  BillingSubscriptionState,
   BillingWebhookProcessInput,
   BillingWebhookProcessResult,
   TeamSubscriptionSnapshot,
   TeamPlanReconcileAnomaly,
   TeamPlanReconcileResult,
 } from "./types";
+import {
+  DEFAULT_CONSUME_FEATURE,
+  DEFAULT_INGESTION_FEATURE,
+  TEAM_STANDARD_PLAN,
+  createFallbackWebhookEventId,
+  ensureTeamBillingEnabled,
+  getAvailableCredits,
+  getTotalCreditsBalance,
+  normalizeTeamId,
+  resolvePlanFromSubscription,
+  spendCredits,
+  toSubscriptionSummary,
+  toSummary,
+  toWebhookError,
+} from "./service-helpers";
 
 type LedgerWriteInput = {
   eventType: LedgerEventType;
@@ -57,16 +70,6 @@ type LedgerWriteInput = {
   metadata?: Record<string, unknown>;
 };
 
-const DEFAULT_CONSUME_FEATURE = "chat";
-const DEFAULT_INGESTION_FEATURE = "ingestion";
-const TEAM_STANDARD_PLAN = "team_standard" as const;
-
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set<BillingSubscriptionStatus>([
-  "trialing",
-  "active",
-  "past_due",
-]);
-
 export class BillingService {
   constructor(
     private readonly store: PostgresBillingStore,
@@ -80,7 +83,7 @@ export class BillingService {
 
   async getSummary(teamId: string): Promise<BillingSummaryResponse> {
     return this.withLockedAccount(teamId, async ({ account }) =>
-      this.toSummary(account),
+      toSummary({ account, billingMode: this.runtimeConfig.mode }),
     );
   }
 
@@ -180,7 +183,11 @@ export class BillingService {
         client,
       );
 
-      return this.toSubscriptionSummary(account, subscription);
+      return toSubscriptionSummary({
+        account,
+        subscription,
+        provider: this.runtimeConfig.provider,
+      });
     });
   }
 
@@ -189,7 +196,7 @@ export class BillingService {
     input: CreateTeamSubscriptionCheckoutRequest,
     actor: { userId: string; email: string },
   ): Promise<CreateTeamSubscriptionCheckoutResponse> {
-    this.ensureTeamBillingEnabled();
+    ensureTeamBillingEnabled(this.runtimeConfig);
 
     if (input.planFamily !== TEAM_STANDARD_PLAN) {
       throw new BillingError(
@@ -221,7 +228,7 @@ export class BillingService {
     teamId: string,
     actorUserId: string,
   ): Promise<CreateTeamBillingPortalResponse> {
-    this.ensureTeamBillingEnabled();
+    ensureTeamBillingEnabled(this.runtimeConfig);
 
     return this.withLockedAccount(teamId, async ({ account, client }) => {
       const subscription = await this.store.getSubscriptionByTeam(
@@ -255,7 +262,7 @@ export class BillingService {
     teamId: string,
     actorUserId: string,
   ): Promise<CancelTeamSubscriptionResponse> {
-    this.ensureTeamBillingEnabled();
+    ensureTeamBillingEnabled(this.runtimeConfig);
 
     return this.withLockedAccount(teamId, async ({ account, client }) => {
       const existing = await this.store.getSubscriptionByTeam(
@@ -305,16 +312,20 @@ export class BillingService {
   }
 
   async syncSubscriptionSnapshot(snapshot: TeamSubscriptionSnapshot) {
-    this.ensureTeamBillingEnabled();
+    ensureTeamBillingEnabled(this.runtimeConfig);
 
     return this.withLockedAccount(
       snapshot.teamId,
       async ({ account, client }) => {
         await this.applySubscriptionSnapshotLocked(account, snapshot, client);
-        return this.toSubscriptionSummary(
+        return toSubscriptionSummary({
           account,
-          await this.store.getSubscriptionByTeam(account.teamId, client),
-        );
+          subscription: await this.store.getSubscriptionByTeam(
+            account.teamId,
+            client,
+          ),
+          provider: this.runtimeConfig.provider,
+        });
       },
     );
   }
@@ -323,7 +334,7 @@ export class BillingService {
     input: BillingWebhookProcessInput,
   ): Promise<BillingWebhookProcessResult> {
     const providerEventId =
-      input.providerEventId?.trim() || this.createFallbackWebhookEventId(input);
+      input.providerEventId?.trim() || createFallbackWebhookEventId(input);
     const payload = input.payload ?? {};
     const metadata = input.metadata ?? {};
 
@@ -419,7 +430,7 @@ export class BillingService {
         webhookEvent: processed,
       };
     } catch (error) {
-      const details = this.toWebhookError(error);
+      const details = toWebhookError(error);
       await this.store.updateWebhookEventState(webhookEvent.id, {
         status: "failed",
         teamId: input.snapshot.teamId,
@@ -449,9 +460,10 @@ export class BillingService {
     let realigned = 0;
 
     for (const state of states) {
-      const expectedFromState = this.resolvePlanFromSubscription(
-        state.subscriptionStatus ?? "inactive",
-      );
+      const expectedFromState = resolvePlanFromSubscription({
+        status: state.subscriptionStatus ?? "inactive",
+        defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
+      });
 
       if (state.accountPlanFamily === expectedFromState) {
         continue;
@@ -464,9 +476,10 @@ export class BillingService {
             account.teamId,
             client,
           );
-          const expectedPlan = this.resolvePlanFromSubscription(
-            latestSubscription?.status ?? "inactive",
-          );
+          const expectedPlan = resolvePlanFromSubscription({
+            status: latestSubscription?.status ?? "inactive",
+            defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
+          });
 
           if (account.planFamily === expectedPlan) {
             return;
@@ -565,7 +578,7 @@ export class BillingService {
         eventType: "grant",
         unitType: "credit",
         delta: creditsToAdd,
-        balanceAfter: this.getTotalCreditsBalance(account),
+        balanceAfter: getTotalCreditsBalance(account),
         feature: "topup",
         actorUserId,
         referenceId: `topup:${randomUUID()}`,
@@ -600,7 +613,7 @@ export class BillingService {
         return {
           teamId: account.teamId,
           consumedCredits: 0,
-          availableCredits: this.getAvailableCredits(account),
+          availableCredits: getAvailableCredits(account),
           consumedThisCycle: account.creditsConsumedThisCycle,
           idempotencyReplayed: false,
         };
@@ -622,7 +635,7 @@ export class BillingService {
           return {
             teamId: account.teamId,
             consumedCredits: Math.abs(existing.delta),
-            availableCredits: this.getAvailableCredits(account),
+            availableCredits: getAvailableCredits(account),
             consumedThisCycle: account.creditsConsumedThisCycle,
             idempotencyReplayed: true,
           };
@@ -654,7 +667,7 @@ export class BillingService {
         client,
       });
 
-      this.spendCredits(account, creditsToConsume);
+      spendCredits(account, creditsToConsume);
       account.creditsConsumedThisCycle += creditsToConsume;
       account.updatedAt = new Date().toISOString();
       await this.store.updateAccount(account, client);
@@ -663,7 +676,7 @@ export class BillingService {
         eventType: "consume",
         unitType: "credit",
         delta: -creditsToConsume,
-        balanceAfter: this.getTotalCreditsBalance(account),
+        balanceAfter: getTotalCreditsBalance(account),
         feature: input.feature ?? DEFAULT_CONSUME_FEATURE,
         actorUserId,
         workspaceId: input.workspaceId,
@@ -677,7 +690,7 @@ export class BillingService {
       return {
         teamId: account.teamId,
         consumedCredits: creditsToConsume,
-        availableCredits: this.getAvailableCredits(account),
+        availableCredits: getAvailableCredits(account),
         consumedThisCycle: account.creditsConsumedThisCycle,
         idempotencyReplayed: false,
       };
@@ -777,55 +790,6 @@ export class BillingService {
     });
   }
 
-  private ensureTeamBillingEnabled() {
-    if (!this.runtimeConfig.teamBillingEnabled) {
-      throw new BillingError(
-        "TEAM_BILLING_DISABLED",
-        409,
-        "Team billing is disabled",
-      );
-    }
-  }
-
-  private toWebhookError(error: unknown): { code: string; message: string } {
-    if (error instanceof BillingError) {
-      return {
-        code: error.code,
-        message: error.message,
-      };
-    }
-
-    if (error instanceof Error) {
-      return {
-        code: "INTERNAL_WEBHOOK_ERROR",
-        message: error.message,
-      };
-    }
-
-    return {
-      code: "INTERNAL_WEBHOOK_ERROR",
-      message: String(error),
-    };
-  }
-
-  private toSubscriptionSummary(
-    account: BillingAccountState,
-    subscription: BillingSubscriptionState | null,
-  ): BillingSubscriptionResponse {
-    return {
-      teamId: account.teamId,
-      provider: subscription?.provider ?? this.runtimeConfig.provider,
-      planFamily: subscription?.planFamily ?? account.planFamily,
-      status: subscription?.status ?? "inactive",
-      currentPeriodStart: subscription?.currentPeriodStart ?? null,
-      currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
-      cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
-      externalCustomerId: subscription?.externalCustomerId ?? null,
-      externalSubscriptionId: subscription?.externalSubscriptionId ?? null,
-      lastEventAt: subscription?.lastEventAt ?? null,
-    };
-  }
-
   private async applySubscriptionSnapshotLocked(
     account: BillingAccountState,
     snapshot: TeamSubscriptionSnapshot,
@@ -837,7 +801,10 @@ export class BillingService {
       account.seatCount = snapshot.seatCount;
     }
 
-    const targetPlan = this.resolvePlanFromSubscription(snapshot.status);
+    const targetPlan = resolvePlanFromSubscription({
+      status: snapshot.status,
+      defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
+    });
     if (account.planFamily !== targetPlan) {
       await this.applyPlanFamilyLocked(account, targetPlan, client, {
         source: "subscription",
@@ -845,14 +812,6 @@ export class BillingService {
         status: snapshot.status,
       });
     }
-  }
-
-  private resolvePlanFromSubscription(status: BillingSubscriptionStatus) {
-    if (ACTIVE_SUBSCRIPTION_STATUSES.has(status)) {
-      return TEAM_STANDARD_PLAN;
-    }
-
-    return this.runtimeConfig.defaultPlanFamily;
   }
 
   private async applyPlanFamilyLocked(
@@ -885,7 +844,7 @@ export class BillingService {
         eventType: "grant",
         unitType: "credit",
         delta: grantDelta,
-        balanceAfter: this.getTotalCreditsBalance(account),
+        balanceAfter: getTotalCreditsBalance(account),
         feature: "plan_upgrade_grant",
         metadata: {
           ...metadata,
@@ -917,15 +876,6 @@ export class BillingService {
     await this.store.updateAccount(account, client);
   }
 
-  private normalizeTeamId(teamId: string) {
-    const value = teamId.trim();
-    if (!value) {
-      throw new BillingError("INVALID_TEAM_ID", 400, "teamId is required");
-    }
-
-    return value;
-  }
-
   private async withLockedAccount<T>(
     teamId: string,
     callback: (input: {
@@ -933,7 +883,7 @@ export class BillingService {
       client: PoolClient;
     }) => Promise<T>,
   ) {
-    const normalizedTeamId = this.normalizeTeamId(teamId);
+    const normalizedTeamId = normalizeTeamId(teamId);
 
     return this.store.runInTransaction(async (client) => {
       const account = await this.getOrCreateAccountLocked(
@@ -991,7 +941,7 @@ export class BillingService {
         eventType: "grant",
         unitType: "credit",
         delta: quota.monthlyCreditsGrant,
-        balanceAfter: this.getTotalCreditsBalance(account),
+        balanceAfter: getTotalCreditsBalance(account),
         feature: "cycle_grant",
         idempotencyKey: `cycle-grant:${account.cycleStartAt}`,
       });
@@ -1031,7 +981,7 @@ export class BillingService {
           eventType: "expire",
           unitType: "credit",
           delta: -previousMonthlyBalance,
-          balanceAfter: this.getTotalCreditsBalance(account),
+          balanceAfter: getTotalCreditsBalance(account),
           feature: "cycle_expire",
           idempotencyKey: `cycle-expire:${account.cycleStartAt}`,
         });
@@ -1043,7 +993,7 @@ export class BillingService {
           eventType: "grant",
           unitType: "credit",
           delta: quota.monthlyCreditsGrant,
-          balanceAfter: this.getTotalCreditsBalance(account),
+          balanceAfter: getTotalCreditsBalance(account),
           feature: "cycle_grant",
           idempotencyKey: `cycle-grant:${account.cycleStartAt}`,
         });
@@ -1074,7 +1024,7 @@ export class BillingService {
     client: PoolClient;
   }) {
     const { account, creditsToConsume, feature, actorUserId, client } = input;
-    const available = this.getAvailableCredits(account);
+    const available = getAvailableCredits(account);
 
     if (
       this.runtimeConfig.mode !== "enforced" &&
@@ -1087,7 +1037,7 @@ export class BillingService {
         eventType: "grant",
         unitType: "credit",
         delta: missing,
-        balanceAfter: this.getTotalCreditsBalance(account),
+        balanceAfter: getTotalCreditsBalance(account),
         feature: "shadow_auto_grant",
         actorUserId,
         metadata: {
@@ -1184,119 +1134,6 @@ export class BillingService {
         originalFeature: feature ?? DEFAULT_INGESTION_FEATURE,
       },
     });
-  }
-
-  private spendCredits(account: BillingAccountState, creditsToConsume: number) {
-    let remaining = creditsToConsume;
-
-    if (account.monthlyCreditsBalance > 0) {
-      const fromMonthly = Math.min(account.monthlyCreditsBalance, remaining);
-      account.monthlyCreditsBalance -= fromMonthly;
-      remaining -= fromMonthly;
-    }
-
-    if (remaining > 0 && account.addOnCreditsBalance > 0) {
-      const fromAddOn = Math.min(account.addOnCreditsBalance, remaining);
-      account.addOnCreditsBalance -= fromAddOn;
-      remaining -= fromAddOn;
-    }
-
-    if (remaining > 0) {
-      throw new BillingError(
-        "INSUFFICIENT_CREDITS_INTERNAL",
-        500,
-        "Unable to allocate credit buckets for consumption",
-      );
-    }
-  }
-
-  private toSummary(account: BillingAccountState): BillingSummaryResponse {
-    const pagesRemaining = Math.max(account.pagesLimit - account.pagesUsed, 0);
-
-    return {
-      teamId: account.teamId,
-      planFamily: account.planFamily,
-      billingMode: this.runtimeConfig.mode,
-      cycleStartAt: account.cycleStartAt,
-      cycleEndAt: account.cycleEndAt,
-      pages: {
-        limit: account.pagesLimit,
-        used: account.pagesUsed,
-        remaining: pagesRemaining,
-      },
-      credits: {
-        monthlyGrant: account.monthlyCreditsGrant,
-        monthlyBalance: account.monthlyCreditsBalance,
-        addOnBalance: account.addOnCreditsBalance,
-        reserved: account.creditsReserved,
-        consumedThisCycle: account.creditsConsumedThisCycle,
-        available: this.getAvailableCredits(account),
-      },
-      spendLimits: {
-        softCapUsd: account.spendSoftCapUsd,
-        hardCapUsd: account.spendHardCapUsd,
-      },
-    };
-  }
-
-  private getTotalCreditsBalance(account: BillingAccountState) {
-    return account.monthlyCreditsBalance + account.addOnCreditsBalance;
-  }
-
-  private getAvailableCredits(account: BillingAccountState) {
-    const available =
-      this.getTotalCreditsBalance(account) - account.creditsReserved;
-    return Math.max(available, 0);
-  }
-
-  private createFallbackWebhookEventId(input: BillingWebhookProcessInput) {
-    const seed = {
-      provider: input.provider,
-      eventType: input.eventType,
-      teamId: input.teamId ?? null,
-      externalSubscriptionId: input.externalSubscriptionId ?? null,
-      snapshotStatus: input.snapshot?.status ?? null,
-      snapshotCurrentPeriodStart: input.snapshot?.currentPeriodStart ?? null,
-      snapshotCurrentPeriodEnd: input.snapshot?.currentPeriodEnd ?? null,
-      snapshotCancelAtPeriodEnd: input.snapshot?.cancelAtPeriodEnd ?? null,
-      payload: input.payload,
-    };
-
-    const digest = createHash("sha256")
-      .update(this.stableSerialize(seed))
-      .digest("hex")
-      .slice(0, 32);
-
-    return `fallback:${digest}`;
-  }
-
-  private stableSerialize(value: unknown): string {
-    if (value === null || value === undefined) {
-      return "null";
-    }
-
-    if (typeof value === "string") {
-      return JSON.stringify(value);
-    }
-
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-
-    if (Array.isArray(value)) {
-      return `[${value.map((item) => this.stableSerialize(item)).join(",")}]`;
-    }
-
-    if (typeof value === "object") {
-      const record = value as Record<string, unknown>;
-      const keys = Object.keys(record).sort();
-      const entries = keys.map(
-        (key) => `${JSON.stringify(key)}:${this.stableSerialize(record[key])}`,
-      );
-      return `{${entries.join(",")}}`;
-    }
-
-    return JSON.stringify(String(value));
   }
 
   private async appendLedger(

@@ -1,5 +1,8 @@
 import { ContentError } from "../errors";
-import { searchChunksByVectorAnn, searchChunksByVectorExact } from "../store";
+import {
+  searchChunksByVectorAnn,
+  searchChunksByVectorExact,
+} from "../retrieval/repository";
 import { MAX_VECTOR_DIMENSIONS, VECTOR_DISTANCE_OPS } from "./constants";
 import type {
   VectorAnnSearchInput,

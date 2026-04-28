@@ -14,9 +14,9 @@ import { contentClient, workspaceClient } from "../../../lib/sdk";
 import type { ChatItem } from "../chat/_components/mock-data";
 
 type ThreadModelSettingsInput = {
-  llmProfileAlias?: string | null;
-  imageProfileAlias?: string | null;
-  visionProfileAlias?: string | null;
+  llmModelAlias?: string | null;
+  imageModelAlias?: string | null;
+  visionModelAlias?: string | null;
 };
 
 type ViewMode = "thread" | "new";

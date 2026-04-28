@@ -1,7 +1,7 @@
 import { Worker, type Job } from "bullmq";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
-import { ensureModelConfigAvailable } from "../shared/model-gateway";
+import { ensureModelConfigAvailable } from "../shared/model-gateway/index";
 import { connectionOptions } from "../shared/redis-connection";
 import { processExampleJob } from "./processors/example-job";
 import {
