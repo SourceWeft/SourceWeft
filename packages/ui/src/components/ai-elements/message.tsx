@@ -152,6 +152,18 @@ export const MessageBranch = ({
   const [currentBranch, setCurrentBranch] = useState(defaultBranch);
   const [branches, setBranches] = useState<ReactElement[]>([]);
 
+  useEffect(() => {
+    setCurrentBranch(defaultBranch);
+  }, [defaultBranch]);
+
+  useEffect(() => {
+    if (branches.length === 0 || currentBranch < branches.length) {
+      return;
+    }
+
+    setCurrentBranch(Math.max(branches.length - 1, 0));
+  }, [branches.length, currentBranch]);
+
   const handleBranchChange = useCallback(
     (newBranch: number) => {
       setCurrentBranch(newBranch);
@@ -213,18 +225,21 @@ export const MessageBranchContent = ({
     }
   }, [childrenArray, branches, setBranches]);
 
-  return childrenArray.map((branch, index) => (
+  const branch = childrenArray[currentBranch] ?? childrenArray[0];
+
+  if (!branch) {
+    return null;
+  }
+
+  return (
     <div
-      className={cn(
-        "grid gap-2 overflow-hidden [&>div]:pb-0",
-        index === currentBranch ? "block" : "hidden"
-      )}
+      className="grid gap-2 overflow-hidden [&>div]:pb-0"
       key={branch.key}
       {...props}
     >
       {branch}
     </div>
-  ));
+  );
 };
 
 export type MessageBranchSelectorProps = ComponentProps<typeof ButtonGroup>;

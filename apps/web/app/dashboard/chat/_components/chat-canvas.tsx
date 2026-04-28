@@ -485,11 +485,7 @@ function ReasoningTrace({
 }) {
   const safeSteps = steps ?? [];
   const safeToolCalls = (toolCalls ?? []).filter((toolCall, index, calls) => {
-    const key = `${toolCall.tool}:${JSON.stringify(toolCall.input)}`;
-    return (
-      calls.findIndex((call) => `${call.tool}:${JSON.stringify(call.input)}` === key) ===
-      index
-    );
+    return calls.findIndex((call) => call.id === toolCall.id) === index;
   });
   const activeStep = safeSteps.find((step) => step.status === "in_progress");
   const hasRunningToolCall = safeToolCalls.some((toolCall) => toolCall.status === "running");

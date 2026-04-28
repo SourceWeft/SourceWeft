@@ -166,6 +166,8 @@ class ContentThreadStreamService {
       yield toSseData({
         type: "assistant-message",
         messageId: assistantMessage.id,
+        userMessageId: prepared.userMessage.id,
+        parentMessageId: assistantMessage.parentMessageId,
       });
       await titleTask;
       yield* emitTitleUpdates();

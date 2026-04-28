@@ -4,6 +4,7 @@ import {
 } from "../citation-registry";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import { createRetrievalTool } from "../tools/retrieval-tool";
+import { formatRetrievalContext } from "../tools/retrieval-tool";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
@@ -32,6 +33,7 @@ import {
   resolveToolCallId,
   type ToolCallStatus,
 } from "./tool-utils";
+import { shouldPreRetrieveForTurn } from "./retrieval-routing";
 
 function addUsage(
   current: DeepAgentTurnOutcome["usage"],
@@ -137,6 +139,48 @@ export async function* invokeDeepAgentTurn(input: {
     });
   };
 
+  const recordRetrieval = (input: {
+    callId: string;
+    query: string;
+    retrieval: Awaited<ReturnType<typeof runToolRetrieval>>;
+    latencyMs: number;
+  }) => {
+    latestToolRetrieval = input.retrieval;
+
+    if (!retrievalCallsById.has(input.callId)) {
+      retrievalCallOrder.push(input.callId);
+    }
+
+    const retrievalCall: RetrievalCallTrace = {
+      id: input.callId,
+      tool: "retrieve",
+      query: input.query,
+      hitCount: input.retrieval.fusedCandidates.length,
+      latencyMs: input.latencyMs,
+    };
+    retrievalCallsById.set(input.callId, retrievalCall);
+    retrievalsByToolCallId.set(input.callId, input.retrieval);
+
+    return new Map(
+      input.retrieval.fusedCandidates.map((candidate) => {
+        const citation = citationRegistry.addRetrievalCandidate(candidate);
+        return [candidate.chunkId, citation] as const;
+      }),
+    );
+  };
+
+  const buildRetrievalChunks = (input: {
+    retrieval: Awaited<ReturnType<typeof runToolRetrieval>>;
+    citationByChunkId: Map<string, ReturnType<AgentCitationRegistry["addRetrievalCandidate"]>>;
+  }) =>
+    input.retrieval.fusedCandidates.map((candidate, index) => ({
+      citation:
+        input.citationByChunkId.get(candidate.chunkId)?.citation ?? `c${index + 1}`,
+      chunkId: candidate.chunkId,
+      content: candidate.content,
+      sourceTitle: input.citationByChunkId.get(candidate.chunkId)?.sourceTitle,
+    }));
+
   yield {
     type: "thinking-step",
     step: setThinkingStep({
@@ -155,43 +199,45 @@ export async function* invokeDeepAgentTurn(input: {
         query,
         llm: input.llm,
       });
-      latestToolRetrieval = retrieval;
-
       const callId = resolveToolCallId({
         toolCallId: runtime?.toolCallId,
         toolName: "retrieve",
         fallbackIndex: retrievalCallOrder.length + 1,
       });
-
-      if (!retrievalCallsById.has(callId)) {
-        retrievalCallOrder.push(callId);
-      }
-
-      const retrievalCall: RetrievalCallTrace = {
-        id: callId,
-        tool: "retrieve",
+      const citationByChunkId = recordRetrieval({
+        callId,
         query,
-        hitCount: retrieval.fusedCandidates.length,
+        retrieval,
         latencyMs: Date.now() - retrievalStartedAt,
-      };
-      retrievalCallsById.set(callId, retrievalCall);
-      retrievalsByToolCallId.set(callId, retrieval);
-
-      const citationByChunkId = new Map(
-        retrieval.fusedCandidates.map((candidate) => {
-          const citation = citationRegistry.addRetrievalCandidate(candidate);
-          return [candidate.chunkId, citation] as const;
-        }),
-      );
-      return retrieval.fusedCandidates.map((candidate, index) => ({
-        citation:
-          citationByChunkId.get(candidate.chunkId)?.citation ?? `c${index + 1}`,
-        chunkId: candidate.chunkId,
-        content: candidate.content,
-        sourceTitle: citationByChunkId.get(candidate.chunkId)?.sourceTitle,
-      }));
+      });
+      return buildRetrievalChunks({ retrieval, citationByChunkId });
     },
   });
+
+  const preRetrievedContext = await (async () => {
+    if (!shouldPreRetrieveForTurn({
+      messageContent: input.prepared.messageContent,
+      sourceIds: input.prepared.sourceIds,
+    })) {
+      return null;
+    }
+
+    const query = input.prepared.messageContent;
+    const retrievalStartedAt = Date.now();
+    const retrieval = await runToolRetrieval({
+      prepared: input.prepared,
+      query,
+      llm: input.llm,
+    });
+    const citationByChunkId = recordRetrieval({
+      callId: "retrieve-prefetch",
+      query,
+      retrieval,
+      latencyMs: Date.now() - retrievalStartedAt,
+    });
+    const chunks = buildRetrievalChunks({ retrieval, citationByChunkId });
+    return formatRetrievalContext(chunks);
+  })();
 
   const databaseBackend = new DatabaseKnowledgeBackend({
     teamId: input.prepared.workspace.organizationId,
@@ -223,6 +269,14 @@ export async function* invokeDeepAgentTurn(input: {
   const stream = await agent.stream(
     {
       messages: [
+        ...(preRetrievedContext
+          ? [
+              {
+                role: "system" as const,
+                content: preRetrievedContext,
+              },
+            ]
+          : []),
         {
           role: "user",
           content: input.prepared.messageContent,

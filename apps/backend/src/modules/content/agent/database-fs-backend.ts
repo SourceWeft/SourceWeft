@@ -40,11 +40,44 @@ const MAX_GREP_RECALL_TERMS = 8;
 function simpleGlobToRegExp(pattern: string) {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*\//g, "::DOUBLE_STAR_SLASH::")
     .replace(/\*\*/g, "::DOUBLE_STAR::")
     .replace(/\*/g, "[^/]*")
-    .replace(/::DOUBLE_STAR::/g, ".*")
-    .replace(/\?/g, "[^/]");
+    .replace(/\?/g, "[^/]")
+    .replace(/::DOUBLE_STAR_SLASH::/g, "(?:.*/)?")
+    .replace(/::DOUBLE_STAR::/g, ".*");
   return new RegExp(`^${escaped}$`, "i");
+}
+
+export function normalizeGrepGlobPattern(glob: string | null | undefined, path: string | null | undefined) {
+  if (!glob || glob.trim().length === 0) {
+    return "**";
+  }
+
+  const trimmed = glob.trim();
+  if (trimmed.startsWith("/")) {
+    return trimmed.replace(/\/+$/g, "") || "/";
+  }
+
+  const base = normalizeVirtualPath(path || "/kb");
+  return `${base}/${trimmed}`.replace(/\/+/g, "/");
+}
+
+export function buildGrepGlobMatcher(glob: string | null | undefined, path: string | null | undefined) {
+  return simpleGlobToRegExp(normalizeGrepGlobPattern(glob, path));
+}
+
+export function matchesGrepGlob(input: {
+  glob: string | null | undefined;
+  globMatcher: RegExp;
+  sourceFilePath: string;
+  chunkPath: string;
+}) {
+  return (
+    !input.glob ||
+    input.globMatcher.test(input.chunkPath) ||
+    input.globMatcher.test(input.sourceFilePath)
+  );
 }
 
 function compileGrepRegex(pattern: string) {
@@ -117,7 +150,12 @@ function appendRegexMatches(input: {
   citationRegistry: AgentCitationRegistry;
 }) {
   const chunkPath = buildChunkFilePath(input.source, input.chunkNo);
-  if (input.glob && !input.globMatcher.test(chunkPath)) {
+  if (!matchesGrepGlob({
+    glob: input.glob,
+    globMatcher: input.globMatcher,
+    sourceFilePath: input.source.filePath,
+    chunkPath,
+  })) {
     return;
   }
 
@@ -371,8 +409,9 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         return { error: regex };
       }
 
-      const matcher = simpleGlobToRegExp(glob || "**");
+      const matcher = buildGrepGlobMatcher(glob, path || "/kb");
       const matches: GrepMatch[] = [];
+      let globMatchedChunkCount = 0;
 
       if (target.kind === "chunkFile") {
         const source = findVirtualSource(sources, target.sourceId);
@@ -390,6 +429,14 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             latencyMs: Date.now() - startedAt,
           });
           return { error: `ENOENT: no such chunk, grep '${path}'` };
+        }
+        if (matchesGrepGlob({
+          glob,
+          globMatcher: matcher,
+          sourceFilePath: source.filePath,
+          chunkPath: buildChunkFilePath(source, chunk.chunkNo),
+        })) {
+          globMatchedChunkCount += 1;
         }
         appendRegexMatches({
           matches,
@@ -409,6 +456,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           sourceId: target.sourceId,
           chunkNo: target.chunkNo,
           matchCount: matches.length,
+          globMatchedChunkCount,
           truncated: matches.length >= MAX_GREP_RESULTS,
           latencyMs: Date.now() - startedAt,
         });
@@ -434,6 +482,14 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             limit: source.chunkCount,
           });
           for (const chunk of chunks) {
+            if (matchesGrepGlob({
+              glob,
+              globMatcher: matcher,
+              sourceFilePath: source.filePath,
+              chunkPath: buildChunkFilePath(source, chunk.chunkNo),
+            })) {
+              globMatchedChunkCount += 1;
+            }
             appendRegexMatches({
               matches,
               regex,
@@ -460,6 +516,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           sourceCount: targetSources.length,
           fallbackChunkCount,
           matchCount: matches.length,
+          globMatchedChunkCount,
           truncated: matches.length >= MAX_GREP_RESULTS,
           latencyMs: Date.now() - startedAt,
         });
@@ -491,6 +548,14 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         const source = sources.find((item) => item.sourceId === candidate.sourceId);
         if (!source) {
           continue;
+        }
+        if (matchesGrepGlob({
+          glob,
+          globMatcher: matcher,
+          sourceFilePath: source.filePath,
+          chunkPath: buildChunkFilePath(source, candidate.chunkNo),
+        })) {
+          globMatchedChunkCount += 1;
         }
         appendRegexMatches({
           matches,
@@ -532,6 +597,14 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           if (!source) {
             continue;
           }
+          if (matchesGrepGlob({
+            glob,
+            globMatcher: matcher,
+            sourceFilePath: source.filePath,
+            chunkPath: buildChunkFilePath(source, candidate.chunkNo),
+          })) {
+            globMatchedChunkCount += 1;
+          }
           appendRegexMatches({
             matches,
             regex,
@@ -558,6 +631,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         recallTerms,
         recallCandidateCount: candidates.length,
         matchCount: matches.length,
+        globMatchedChunkCount,
         truncated: matches.length >= MAX_GREP_RESULTS,
         latencyMs: Date.now() - startedAt,
       });

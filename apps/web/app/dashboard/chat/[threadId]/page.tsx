@@ -1651,6 +1651,7 @@ export default function DashboardChatThreadPage({
               typeof data.messageId === "string"
             ) {
               persistedAssistantMessageId = data.messageId;
+              const userMessageId = data.userMessageId ?? persistedUserMessageId;
               const previousAssistantMessageId = streamingAssistantMessageId;
               streamingAssistantMessageId = data.messageId;
               flushSync(() => {
@@ -1661,10 +1662,16 @@ export default function DashboardChatThreadPage({
                           ...message,
                           id: data.messageId as string,
                           content: message.content,
+                          parentMessageId:
+                            data.parentMessageId === undefined
+                              ? message.parentMessageId
+                              : data.parentMessageId,
                           metadata: {
                             ...message.metadata,
                             isError: false,
                             excludeFromContext: false,
+                            userMessageId,
+                            sourceUserMessageId: userMessageId,
                           },
                         }
                       : message,
