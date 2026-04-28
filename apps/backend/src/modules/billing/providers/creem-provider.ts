@@ -3,7 +3,6 @@ import {
   createCheckout,
   createPortal,
 } from "@creem_io/better-auth/server";
-import type { BillingSubscriptionStatus } from "@sourceweft/contracts";
 import type { BillingRuntimeConfig } from "../types";
 import type {
   BillingProviderAdapter,
@@ -20,63 +19,6 @@ type CreemServerOptions = {
   apiKey: string;
   testMode?: boolean;
 };
-
-function pickString(value: unknown, keys: string[]) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  for (const key of keys) {
-    const candidate = record[key];
-    if (typeof candidate === "string" && candidate) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function pickBoolean(value: unknown, keys: string[]) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  for (const key of keys) {
-    const candidate = record[key];
-    if (typeof candidate === "boolean") {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function pickSubscriptionStatus(
-  value: unknown,
-): BillingSubscriptionStatus | null {
-  const status = pickString(value, ["status", "subscriptionStatus"]);
-  if (!status) {
-    return null;
-  }
-
-  const normalized = status.trim().toLowerCase();
-  const allowed = new Set<BillingSubscriptionStatus>([
-    "inactive",
-    "trialing",
-    "active",
-    "past_due",
-    "paused",
-    "unpaid",
-    "canceled",
-    "expired",
-  ]);
-
-  return allowed.has(normalized as BillingSubscriptionStatus)
-    ? (normalized as BillingSubscriptionStatus)
-    : null;
-}
 
 export class CreemBillingProvider implements BillingProviderAdapter {
   private readonly options: CreemServerOptions;
@@ -132,12 +74,7 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       } as any,
     );
 
-    const checkoutUrl = pickString(response, [
-      "url",
-      "checkoutUrl",
-      "checkout_url",
-    ]);
-    if (!checkoutUrl) {
+    if (!response.url) {
       throw new BillingError(
         "CREEM_CHECKOUT_URL_MISSING",
         502,
@@ -147,7 +84,7 @@ export class CreemBillingProvider implements BillingProviderAdapter {
 
     return {
       provider: "creem",
-      checkoutUrl,
+      checkoutUrl: response.url,
     };
   }
 
@@ -165,18 +102,16 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       } as any,
     );
 
-    const portalUrl = pickString(response, ["url", "portalUrl", "portal_url"]);
-
     return {
       provider: "creem",
-      portalUrl,
+      portalUrl: response.url,
     };
   }
 
   async cancelSubscription(
     input: BillingProviderCancelInput,
   ): Promise<BillingProviderCancelResult> {
-    const response = await cancelSubscription(
+    await cancelSubscription(
       this.options as any,
       {
         id: input.externalSubscriptionId,
@@ -187,15 +122,10 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       } as any,
     );
 
-    const status = pickSubscriptionStatus(response) || "canceled";
-    const cancelAtPeriodEnd =
-      pickBoolean(response, ["cancelAtPeriodEnd", "cancel_at_period_end"]) ??
-      true;
-
     return {
       provider: "creem",
-      status,
-      cancelAtPeriodEnd,
+      status: "canceled",
+      cancelAtPeriodEnd: true,
     };
   }
 }

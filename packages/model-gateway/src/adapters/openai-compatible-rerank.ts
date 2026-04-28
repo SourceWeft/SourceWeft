@@ -2,6 +2,15 @@ import { createHttpGatewayError } from "../errors";
 import { normalizeUsage } from "../normalize/usage";
 import type { RerankTransport } from "./types";
 
+function resolveRelevanceScore(
+  row: Record<string, unknown>,
+  providerKind: string,
+) {
+  const value =
+    providerKind === "openrouter" ? row.relevance_score : row.score;
+  return typeof value === "number" ? value : 0;
+}
+
 export class OpenAICompatibleRerankTransport implements RerankTransport {
   readonly kind = "openai-compatible" as const;
 
@@ -44,12 +53,7 @@ export class OpenAICompatibleRerankTransport implements RerankTransport {
       .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
       .map((row) => ({
         index: typeof row.index === "number" ? row.index : -1,
-        relevanceScore:
-          typeof row.relevance_score === "number"
-            ? row.relevance_score
-            : typeof row.score === "number"
-              ? row.score
-              : 0,
+        relevanceScore: resolveRelevanceScore(row, input.target.providerKind),
         document:
           typeof row.index === "number" && input.payload.returnDocuments
             ? (typeof input.payload.documents[row.index] === "string"

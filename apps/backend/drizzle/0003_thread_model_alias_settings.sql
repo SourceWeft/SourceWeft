@@ -1,9 +1,39 @@
 UPDATE "threads"
 SET "model_settings_json" = jsonb_strip_nulls(
   "model_settings_json" - 'llmProfileAlias' - 'imageProfileAlias' - 'visionProfileAlias' || jsonb_build_object(
-    'llmModelAlias', "model_settings_json"->>'llmProfileAlias',
-    'imageModelAlias', "model_settings_json"->>'imageProfileAlias',
-    'visionModelAlias', "model_settings_json"->>'visionProfileAlias'
+    'llmModelAlias', COALESCE(
+      "model_settings_json"->>'llmModelAlias',
+      (
+        SELECT "model_alias"
+        FROM "model_gateway_profiles"
+        WHERE "kind" = 'chat'
+          AND "profile_alias" = "threads"."model_settings_json"->>'llmProfileAlias'
+        LIMIT 1
+      ),
+      "model_settings_json"->>'llmProfileAlias'
+    ),
+    'imageModelAlias', COALESCE(
+      "model_settings_json"->>'imageModelAlias',
+      (
+        SELECT "model_alias"
+        FROM "model_gateway_profiles"
+        WHERE "kind" = 'image'
+          AND "profile_alias" = "threads"."model_settings_json"->>'imageProfileAlias'
+        LIMIT 1
+      ),
+      "model_settings_json"->>'imageProfileAlias'
+    ),
+    'visionModelAlias', COALESCE(
+      "model_settings_json"->>'visionModelAlias',
+      (
+        SELECT "model_alias"
+        FROM "model_gateway_profiles"
+        WHERE "kind" = 'vision'
+          AND "profile_alias" = "threads"."model_settings_json"->>'visionProfileAlias'
+        LIMIT 1
+      ),
+      "model_settings_json"->>'visionProfileAlias'
+    )
   )
 )
 WHERE "model_settings_json" ? 'llmProfileAlias'

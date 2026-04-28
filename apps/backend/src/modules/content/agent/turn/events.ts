@@ -1,3 +1,4 @@
+import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { AgentCitation } from "../citation-registry";
 import { buildCitationMetadata } from "../../retrieval/planner";
 import { contentRetrievalService } from "../../retrieval/service";
@@ -14,6 +15,9 @@ export type DeepAgentTurnOutcome = {
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
+  usage?: UsageInfo;
+  finishReason?: string;
+  providerFields?: Record<string, unknown>;
 };
 
 export type DeepAgentTurnEvent =

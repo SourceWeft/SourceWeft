@@ -62,6 +62,7 @@ export async function findCitationByMessageRank(input: {
       sourceId: citations.sourceId,
       documentId: citations.documentId,
       chunkId: citations.chunkId,
+      citationKey: citations.citationKey,
       quoteText: citations.quoteText,
       rank: citations.rank,
       score: citations.score,

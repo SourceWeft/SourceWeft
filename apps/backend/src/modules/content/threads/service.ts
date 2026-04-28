@@ -221,9 +221,7 @@ class ContentThreadService {
 
     return {
       citation: {
-        id: citation.id,
-        messageId: citation.messageId,
-        rank: citation.rank,
+        citation: citation.citationKey,
         score: citation.score,
         sourceId: citation.sourceId,
         sourceTitle: citation.sourceTitle ?? sourceTitleSnapshot,
@@ -231,7 +229,6 @@ class ContentThreadService {
         chunkId: citation.chunkId,
         chunkNo: chunkNoSnapshot,
         excerpt: citation.quoteText ?? citation.chunkContent ?? excerptSnapshot ?? "",
-        chunkContent: citation.chunkContent ?? excerptSnapshot ?? "",
       },
     };
   }

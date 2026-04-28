@@ -1,7 +1,6 @@
 import {
   createWorkspaceRecord,
   ensureWorkspaceMembership,
-  findFirstWorkspaceByOrganization,
   findOrganizationMembership,
   findWorkspaceByIdInOrganization,
   findWorkspaceByIdForMember,
@@ -81,19 +80,6 @@ export class WorkspaceService {
     organizationId: string;
     userId: string;
   }) {
-    const existing = await findFirstWorkspaceByOrganization({
-      organizationId: input.organizationId,
-    });
-
-    if (existing) {
-      await ensureWorkspaceMembership({
-        workspaceId: existing.id,
-        userId: input.userId,
-        role: "workspace_admin",
-      });
-      return existing;
-    }
-
     return this.createWorkspace({
       organizationId: input.organizationId,
       userId: input.userId,

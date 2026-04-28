@@ -18,11 +18,42 @@ function extractResponseMetadata(raw: { response_metadata?: unknown }) {
 }
 
 function extractFinishReason(responseMetadata: Record<string, unknown> | undefined) {
-  return typeof responseMetadata?.finish_reason === "string"
-    ? responseMetadata.finish_reason
-    : typeof responseMetadata?.finishReason === "string"
-      ? responseMetadata.finishReason
-      : undefined;
+  if (typeof responseMetadata?.finish_reason === "string") {
+    return responseMetadata.finish_reason;
+  }
+
+  if (typeof responseMetadata?.finishReason === "string") {
+    return responseMetadata.finishReason;
+  }
+
+  return undefined;
+}
+
+function extractUsage(input: {
+  usageMetadata?: unknown;
+  responseMetadata: Record<string, unknown> | undefined;
+}) {
+  if (input.usageMetadata) {
+    return input.usageMetadata;
+  }
+
+  const responseMetadata = input.responseMetadata;
+  if (!responseMetadata) {
+    return undefined;
+  }
+
+  if (responseMetadata.usage && typeof responseMetadata.usage === "object") {
+    return responseMetadata.usage;
+  }
+
+  if (
+    responseMetadata.tokenUsage &&
+    typeof responseMetadata.tokenUsage === "object"
+  ) {
+    return responseMetadata.tokenUsage;
+  }
+
+  return undefined;
 }
 
 function extractReasoning(responseMetadata: Record<string, unknown> | undefined) {
@@ -62,9 +93,10 @@ export async function runBridgeChatComplete(input: {
           ? responseMetadata.model
           : input.target.providerModel,
       usage: normalizeUsage(
-        rawMessage.usage_metadata ??
-          (responseMetadata?.tokenUsage as Record<string, unknown> | undefined) ??
-          (responseMetadata?.usage as Record<string, unknown> | undefined),
+        extractUsage({
+          usageMetadata: rawMessage.usage_metadata,
+          responseMetadata,
+        }),
       ),
       finishReason: extractFinishReason(responseMetadata),
       reasoning: extractReasoning(responseMetadata),
@@ -108,9 +140,10 @@ export async function* runBridgeChatStream(input: {
       const responseMetadata = extractResponseMetadata(chunk);
       usage =
         normalizeUsage(
-          chunk.usage_metadata ??
-            (responseMetadata?.tokenUsage as Record<string, unknown> | undefined) ??
-            (responseMetadata?.usage as Record<string, unknown> | undefined),
+          extractUsage({
+            usageMetadata: chunk.usage_metadata,
+            responseMetadata,
+          }),
         ) ?? usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
       reasoning = extractReasoning(responseMetadata) ?? reasoning;

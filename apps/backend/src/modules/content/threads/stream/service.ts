@@ -122,8 +122,6 @@ class ContentThreadStreamService {
       }
     };
 
-    let streamError: Error | undefined;
-
     try {
       let outcome: DeepAgentTurnOutcome | null = null;
 
@@ -158,6 +156,9 @@ class ContentThreadStreamService {
           llm: input.llm,
           operation: "chat.stream",
           assistantContent: outcome.assistantContent,
+          usage: outcome.usage,
+          finishReason: outcome.finishReason,
+          providerFields: outcome.providerFields,
           latencyMs: Date.now() - chatStartedAt,
         });
 
@@ -171,7 +172,6 @@ class ContentThreadStreamService {
     } catch (error) {
       const contentError =
         error instanceof ContentError ? error : toContentServiceError(error);
-      streamError = contentError;
 
       await recordThreadStreamFailure({
         prepared,
@@ -198,10 +198,6 @@ class ContentThreadStreamService {
     }
 
     yield toSseData({ type: "finish" });
-
-    if (streamError) {
-      throw streamError;
-    }
   }
 
   async streamThread(input: StreamThreadEventInput) {
@@ -251,6 +247,9 @@ class ContentThreadStreamService {
         llm: input.llm,
         operation: "chat.complete",
         assistantContent: outcome.assistantContent,
+        usage: outcome.usage,
+        finishReason: outcome.finishReason,
+        providerFields: outcome.providerFields,
         latencyMs: Date.now() - chatStartedAt,
         modelForMessage: prepared.modelAlias,
       });

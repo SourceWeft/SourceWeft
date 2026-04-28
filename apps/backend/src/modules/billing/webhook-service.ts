@@ -48,7 +48,7 @@ export class BillingWebhookService {
           metadata,
         });
 
-    if (existing?.status === "processed") {
+    if (webhookEvent.status === "processed") {
       return {
         outcome: "duplicate",
         webhookEvent,

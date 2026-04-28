@@ -23,8 +23,8 @@ const retrievalCitationSchema = z.object({
 });
 
 const retrievalResponseSchema = z.object({
-  embeddingProfileId: z.string(),
-  vectorStrategy: retrievalVectorStrategySchema,
+  embeddingProfileId: z.string().nullable(),
+  vectorStrategy: retrievalVectorStrategySchema.nullable(),
   annIndexUsed: z.string().nullable(),
   citations: z.array(retrievalCitationSchema),
 });
@@ -295,8 +295,7 @@ export const messageSchema = z.object({
 
 const byokConfigSchema = z.object({
   provider: z.string().trim().min(1).max(100),
-  apiKey: z.string().trim().min(1).max(4096).optional(),
-  apiKeyRef: z.string().trim().min(1).max(256).optional(),
+  apiKeyRef: z.string().trim().min(1).max(256),
 });
 
 const llmExecutionConfigSchema = z.object({
@@ -405,6 +404,10 @@ export const deleteByokKeyRefResponseSchema = z.object({
   keyRef: z.string(),
 });
 
+export const citationDetailResponseSchema = z.object({
+  citation: retrievalCitationSchema,
+});
+
 export const billingDashboardResponseSchema = z.object({
   summary: billingSummaryResponseSchema,
 });
@@ -471,3 +474,4 @@ export type CreateByokKeyRefResponse = z.infer<
 export type DeleteByokKeyRefResponse = z.infer<
   typeof deleteByokKeyRefResponseSchema
 >;
+export type CitationDetailResponse = z.infer<typeof citationDetailResponseSchema>;

@@ -1,10 +1,14 @@
 import type {
+  CitationDetailResponse,
   CreateSourceRequest,
   CreateSourceResponse,
+  CreateByokKeyRefRequest,
+  CreateByokKeyRefResponse,
   EditThreadRequest,
   EditThreadResponse,
   CreateThreadRequest,
   CreateThreadResponse,
+  DeleteByokKeyRefResponse,
   DeleteSourceResponse,
   GetThreadResponse,
   RefreshThreadRequest,
@@ -14,6 +18,7 @@ import type {
   IndexSourceRequest,
   IndexSourceResponse,
   ListThreadModelCatalogResponse,
+  ListByokKeyRefsResponse,
   ListThreadsRequest,
   ListSourcesResponse,
   SourceStatusResponse,
@@ -156,6 +161,31 @@ export class ContentClient {
     );
   }
 
+  listByokKeyRefs(workspaceId: string) {
+    return this.http.get<ListByokKeyRefsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-keys`,
+    );
+  }
+
+  createByokKeyRef(workspaceId: string, input: CreateByokKeyRefRequest) {
+    return this.http.post<CreateByokKeyRefResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-keys`,
+      input,
+    );
+  }
+
+  deleteByokKeyRef(workspaceId: string, providerName: string, keyRef: string) {
+    return this.http.delete<DeleteByokKeyRefResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-keys/${encode(providerName)}/${encode(keyRef)}`,
+    );
+  }
+
+  getCitationDetail(workspaceId: string, messageId: string, rank: number) {
+    return this.http.get<CitationDetailResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/messages/${encode(messageId)}/citations/${encode(String(rank))}`,
+    );
+  }
+
   streamThread(
     workspaceId: string,
     threadId: string,
@@ -163,7 +193,10 @@ export class ContentClient {
   ) {
     return this.http.post<StreamThreadResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
-      input,
+      {
+        ...input,
+        stream: false,
+      },
     );
   }
 
@@ -177,6 +210,7 @@ export class ContentClient {
       {
         ...input,
         mode: "refresh",
+        stream: false,
       },
     );
   }
@@ -187,6 +221,7 @@ export class ContentClient {
       {
         ...input,
         mode: "edit",
+        stream: false,
       },
     );
   }

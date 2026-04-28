@@ -30,6 +30,23 @@ type StaleIndexingResult = {
   };
 };
 
+function resolveBillingPages(input: {
+  parsedPages?: number;
+  estimatedPages?: number;
+  sourceEstimatedPages?: number | null;
+}) {
+  const pages = input.parsedPages ?? input.estimatedPages ?? input.sourceEstimatedPages;
+  if (!Number.isFinite(pages) || (pages ?? 0) <= 0) {
+    throw new ContentError(
+      400,
+      "INGESTION_PAGE_COUNT_MISSING",
+      "Parsed page count is required for source ingestion billing",
+    );
+  }
+
+  return Math.ceil(pages ?? 0);
+}
+
 async function requireDefaultEmbeddingProfile() {
   try {
     const profile = await requireDefaultModelGatewayProfile("embedding");
@@ -54,6 +71,7 @@ export class SourceIndexingService {
     sourceId: string;
     userId: string;
     estimatedPages?: number;
+    parsedPages?: number;
     parsedTokens?: number;
     idempotencyKey?: string;
     chunks?: ChunkSpec[];
@@ -67,6 +85,7 @@ export class SourceIndexingService {
     userId: string;
     sourceRevisionId: string;
     estimatedPages?: number;
+    parsedPages?: number;
     parsedTokens?: number;
     idempotencyKey?: string;
     chunks?: ChunkSpec[];
@@ -79,6 +98,7 @@ export class SourceIndexingService {
     sourceId: string;
     userId: string;
     estimatedPages?: number;
+    parsedPages?: number;
     parsedTokens?: number;
     idempotencyKey?: string;
     chunks?: ChunkSpec[];
@@ -209,6 +229,12 @@ export class SourceIndexingService {
         }
       }
 
+      const billingPages = resolveBillingPages({
+        parsedPages: input.parsedPages,
+        estimatedPages: input.estimatedPages,
+        sourceEstimatedPages: source.estimatedPages,
+      });
+
       const billing = await this.billing.meterIngestion(
         workspace.organizationId,
         {
@@ -216,8 +242,7 @@ export class SourceIndexingService {
           feature: "ingestion",
           referenceId: `source:${source.id}`,
           idempotencyKey: input.idempotencyKey || `source-index:${source.id}`,
-          pages: input.estimatedPages,
-          parsedTokens: input.parsedTokens,
+          pages: billingPages,
         },
         input.userId,
       );

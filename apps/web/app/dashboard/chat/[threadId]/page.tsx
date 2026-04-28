@@ -1535,9 +1535,7 @@ export default function DashboardChatThreadPage({
               }
             } else if (data.type === "citations") {
               const citations = normalizeCitationRecords(data.citations);
-              if (citations.length > 0) {
-                syncStreamingCitations(citations);
-              }
+              syncStreamingCitations(citations);
             } else if (
               data.type === "thread-title-update" &&
               typeof data.threadId === "string" &&

@@ -122,6 +122,7 @@ export class ContentService {
     sourceId: string;
     userId: string;
     estimatedPages?: number;
+    parsedPages?: number;
     parsedTokens?: number;
     idempotencyKey?: string;
     chunks?: ChunkSpec[];

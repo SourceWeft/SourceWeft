@@ -33,6 +33,8 @@ export function normalizeUsage(input: unknown): UsageInfo | undefined {
     outputTokens: completionTokens,
     totalTokens,
     cacheReadTokens: readDetailsValue(promptDetails, "cached_tokens"),
-    cacheWriteTokens: readDetailsValue(promptDetails, "cache_creation_tokens"),
+    cacheWriteTokens:
+      readDetailsValue(promptDetails, "cache_write_tokens") ??
+      readDetailsValue(promptDetails, "cache_creation_tokens"),
   };
 }

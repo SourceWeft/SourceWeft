@@ -1,5 +1,4 @@
 import type { BillingSubscriptionStatus } from "@sourceweft/contracts";
-import { createHash } from "node:crypto";
 import { config } from "../../../shared/config";
 import { logger } from "../../../shared/logger";
 import type { opsAlertService } from "../../ops";
@@ -19,126 +18,35 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function pickString(value: unknown, keys: string[]) {
-  const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  for (const key of keys) {
-    const candidate = record[key];
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate;
-    }
-  }
-
-  return null;
+function readString(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
-function pickBoolean(value: unknown, keys: string[]) {
-  const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
+function toDateIso(value: unknown) {
+  const parsed =
+    value instanceof Date
+      ? value
+      : typeof value === "number"
+        ? new Date(value < 1_000_000_000_000 ? value * 1000 : value)
+        : typeof value === "string" && value.trim()
+          ? new Date(value)
+          : null;
 
-  for (const key of keys) {
-    const candidate = record[key];
-    if (typeof candidate === "boolean") {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function pickDateIso(value: unknown, keys: string[]) {
-  const text = pickString(value, keys);
-  if (!text) {
-    return null;
-  }
-
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) {
+  if (!parsed || Number.isNaN(parsed.getTime())) {
     return null;
   }
 
   return parsed.toISOString();
 }
 
-function stableSerialize(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "null";
-  }
-
-  if (typeof value === "string") {
-    return JSON.stringify(value);
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
-  }
-
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const keys = Object.keys(record).sort();
-    const entries = keys.map(
-      (key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`,
-    );
-
-    return `{${entries.join(",")}}`;
-  }
-
-  return JSON.stringify(String(value));
-}
-
-function createFallbackWebhookEventId(input: {
-  eventType: string;
-  teamId: string | null;
-  externalSubscriptionId: string | null;
-  externalCustomerId: string | null;
-  externalProductId: string | null;
-  subscriptionStatus: BillingSubscriptionStatus | null;
-  currentPeriodStart: string | null;
-  currentPeriodEnd: string | null;
-  cancelAtPeriodEnd: boolean;
-  fallbackStatus: BillingSubscriptionStatus;
-}) {
-  const seed = {
-    provider: "creem",
-    eventType: input.eventType,
-    teamId: input.teamId,
-    externalSubscriptionId: input.externalSubscriptionId,
-    externalCustomerId: input.externalCustomerId,
-    externalProductId: input.externalProductId,
-    subscriptionStatus: input.subscriptionStatus,
-    currentPeriodStart: input.currentPeriodStart,
-    currentPeriodEnd: input.currentPeriodEnd,
-    cancelAtPeriodEnd: input.cancelAtPeriodEnd,
-    fallbackStatus: input.fallbackStatus,
-  };
-
-  const digest = createHash("sha256")
-    .update(stableSerialize(seed))
-    .digest("hex")
-    .slice(0, 32);
-
-  return `fallback:${digest}`;
-}
-
-function resolveTeamId(
-  metadata: Record<string, unknown> | null,
-  data: unknown,
-) {
+function resolveTeamId(metadata: Record<string, unknown> | null) {
   const fromMetadata = metadata?.teamId;
   if (typeof fromMetadata === "string" && fromMetadata.trim()) {
     return fromMetadata;
   }
 
-  return pickString(data, ["teamId"]);
+  return null;
 }
 
 function resolvePlanFamily(
@@ -150,9 +58,7 @@ function resolvePlanFamily(
   }
 
   const product = asRecord(asRecord(data)?.product ?? null);
-  const productId =
-    pickString(data, ["productId", "creemProductId", "product_id"]) ||
-    pickString(product, ["id", "productId"]);
+  const productId = readString(product, "id");
 
   if (productId && productId === config.billing.creem.teamStandardProductId) {
     return "team_standard";
@@ -185,7 +91,7 @@ function normalizeSubscriptionStatus(
     return normalized as BillingSubscriptionStatus;
   }
 
-  if (normalized === "paid") {
+  if (normalized === "paid" || normalized === "scheduled_cancel") {
     return "active";
   }
 
@@ -226,69 +132,37 @@ function resolveCreemSeatCount(
     return metaSeatCount;
   }
 
-  return 2;
+  throw new Error("Unable to resolve Creem subscription seat count");
 }
 
 function buildCreemSubscriptionSnapshot(
   data: unknown,
   fallbackStatus: BillingSubscriptionStatus,
 ): TeamSubscriptionSnapshot | null {
-  const metadata = asRecord(asRecord(data)?.metadata ?? null);
-  const teamId = resolveTeamId(metadata, data);
+  const record = asRecord(data);
+  const metadata = asRecord(record?.metadata ?? null);
+  const teamId = resolveTeamId(metadata);
   const planFamily = resolvePlanFamily(metadata, data);
 
   if (!teamId || !planFamily) {
     return null;
   }
 
-  const customer = asRecord(asRecord(data)?.customer ?? null);
-  const product = asRecord(asRecord(data)?.product ?? null);
-
-  const externalCustomerId =
-    pickString(data, ["creemCustomerId", "customerId", "customer_id"]) ||
-    pickString(customer, ["id", "customerId"]) ||
-    null;
-
-  const externalSubscriptionId =
-    pickString(data, [
-      "creemSubscriptionId",
-      "subscriptionId",
-      "subscription_id",
-    ]) || null;
-
-  const externalProductId =
-    pickString(data, ["productId", "creemProductId", "product_id"]) ||
-    pickString(product, ["id", "productId"]) ||
-    null;
-
-  const status = normalizeSubscriptionStatus(
-    pickString(data, ["status", "subscriptionStatus", "subscription_status"]),
-    fallbackStatus,
-  );
+  const customer = asRecord(record?.customer ?? null);
+  const product = asRecord(record?.product ?? null);
+  const rawStatus = readString(record, "status");
 
   return {
     teamId,
     provider: "creem",
     planFamily,
-    status,
-    currentPeriodStart: pickDateIso(data, [
-      "currentPeriodStart",
-      "current_period_start",
-      "periodStart",
-      "current_period_start_date",
-    ]),
-    currentPeriodEnd: pickDateIso(data, [
-      "currentPeriodEnd",
-      "current_period_end",
-      "periodEnd",
-      "current_period_end_date",
-      "next_billing_date",
-    ]),
-    externalCustomerId,
-    externalSubscriptionId,
-    externalProductId,
-    cancelAtPeriodEnd:
-      pickBoolean(data, ["cancelAtPeriodEnd", "cancel_at_period_end"]) ?? false,
+    status: normalizeSubscriptionStatus(rawStatus, fallbackStatus),
+    currentPeriodStart: toDateIso(record?.current_period_start_date),
+    currentPeriodEnd: toDateIso(record?.current_period_end_date),
+    externalCustomerId: readString(customer, "id"),
+    externalSubscriptionId: readString(record, "id"),
+    externalProductId: readString(product, "id"),
+    cancelAtPeriodEnd: rawStatus === "scheduled_cancel",
     metadata: metadata ?? {},
     seatCount: resolveCreemSeatCount(data, metadata),
   };
@@ -300,161 +174,116 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
     data: unknown,
     fallbackStatus: BillingSubscriptionStatus,
   ) {
-  const payload = asRecord(data) ?? {
-    raw: data,
-  };
-  const snapshot = buildCreemSubscriptionSnapshot(data, fallbackStatus);
+    const record = asRecord(data);
+    const payload = record ?? {
+      raw: data,
+    };
+    const snapshot = buildCreemSubscriptionSnapshot(data, fallbackStatus);
+    const providerEventId = readString(record, "webhookId");
+    const externalSubscriptionId =
+      snapshot?.externalSubscriptionId || readString(record, "id");
+    const teamId = snapshot?.teamId || resolveTeamId(asRecord(payload.metadata));
 
-  const rawProviderEventId = pickString(data, [
-    "eventId",
-    "event_id",
-    "webhookId",
-    "webhook_id",
-    "requestId",
-    "request_id",
-  ]);
-
-  const externalSubscriptionId =
-    snapshot?.externalSubscriptionId ||
-    pickString(data, [
-      "creemSubscriptionId",
-      "subscriptionId",
-      "subscription_id",
-    ]);
-
-  const teamId =
-    snapshot?.teamId || resolveTeamId(asRecord(payload.metadata), data);
-
-  const providerEventId =
-    rawProviderEventId ||
-    createFallbackWebhookEventId({
-      eventType,
-      teamId: teamId ?? null,
-      externalSubscriptionId: externalSubscriptionId ?? null,
-      externalCustomerId: snapshot?.externalCustomerId ?? null,
-      externalProductId: snapshot?.externalProductId ?? null,
-      subscriptionStatus: snapshot?.status ?? fallbackStatus,
-      currentPeriodStart: snapshot?.currentPeriodStart ?? null,
-      currentPeriodEnd: snapshot?.currentPeriodEnd ?? null,
-      cancelAtPeriodEnd: snapshot?.cancelAtPeriodEnd ?? false,
-      fallbackStatus,
-    });
-
-  async function triggerAlertSafely(
-    input: Parameters<typeof deps.alerts.trigger>[0],
-  ) {
-    try {
-      await deps.alerts.trigger(input);
-    } catch (alertError) {
-      logger.error("Failed to emit ops alert for billing webhook", {
-        eventType,
-        alertKey: input.alertKey,
-        error:
-          alertError instanceof Error ? alertError.message : String(alertError),
-      });
+    async function triggerAlertSafely(
+      input: Parameters<typeof deps.alerts.trigger>[0],
+    ) {
+      try {
+        await deps.alerts.trigger(input);
+      } catch (alertError) {
+        logger.error("Failed to emit ops alert for billing webhook", {
+          eventType,
+          alertKey: input.alertKey,
+          error:
+            alertError instanceof Error
+              ? alertError.message
+              : String(alertError),
+        });
+      }
     }
-  }
 
-  try {
-    if (!rawProviderEventId) {
+    try {
+      const result = await deps.billing.processSubscriptionWebhookEvent({
+        provider: "creem",
+        providerEventId,
+        eventType,
+        payload,
+        teamId: teamId ?? null,
+        externalSubscriptionId: externalSubscriptionId ?? null,
+        metadata: {
+          fallbackStatus,
+        },
+        snapshot,
+      });
+
+      if (result.outcome === "ignored") {
+        const ignoreReason = result.reason || "unknown";
+        const ignoreMessages: Record<string, string> = {
+          context_missing:
+            "Webhook ignored due to missing team/plan mapping in provider payload",
+          team_billing_disabled:
+            "Webhook recorded but business sync skipped because team billing is disabled",
+        };
+
+        await triggerAlertSafely({
+          alertKey: `billing:webhook:ignored:${eventType}:${teamId || "unknown"}`,
+          level: "warn",
+          source: "billing.webhook",
+          title: "Subscription webhook ignored",
+          message:
+            ignoreMessages[ignoreReason] ||
+            `Webhook ignored for event ${eventType} (${ignoreReason})`,
+          teamId: teamId ?? null,
+          metadata: {
+            fallbackStatus,
+            providerEventId,
+            reason: ignoreReason,
+          },
+        });
+        return;
+      }
+
+      if (result.outcome === "duplicate") {
+        logger.info("Ignored duplicate creem webhook event", {
+          eventType,
+          providerEventId,
+          teamId: teamId ?? null,
+        });
+        return;
+      }
+
+      await deps.alerts
+        .resolve(`billing:webhook:failed:${eventType}:${teamId || "unknown"}`)
+        .catch(() => null);
+      await deps.alerts
+        .resolve(`billing:webhook:ignored:${eventType}:${teamId || "unknown"}`)
+        .catch(() => null);
+    } catch (error) {
       await triggerAlertSafely({
-        alertKey: `billing:webhook:missing-event-id:${eventType}:${teamId || "unknown"}`,
-        level: "warn",
+        alertKey: `billing:webhook:failed:${eventType}:${teamId || "unknown"}`,
+        level: "error",
         source: "billing.webhook",
-        title: "Subscription webhook missing provider event id",
+        title: "Subscription webhook processing failed",
         message:
-          "Provider webhook did not include an event id; fallback dedupe key was generated",
+          error instanceof Error
+            ? error.message
+            : "Unknown webhook processing error",
         teamId: teamId ?? null,
         metadata: {
           eventType,
-          generatedProviderEventId: providerEventId,
-          fallbackStatus,
-        },
-      });
-    }
-
-    const result = await deps.billing.processSubscriptionWebhookEvent({
-      provider: "creem",
-      providerEventId,
-      eventType,
-      payload,
-      teamId: teamId ?? null,
-      externalSubscriptionId: externalSubscriptionId ?? null,
-      metadata: {
-        fallbackStatus,
-      },
-      snapshot,
-    });
-
-    if (result.outcome === "ignored") {
-      const ignoreReason = result.reason || "unknown";
-      const ignoreMessages: Record<string, string> = {
-        context_missing:
-          "Webhook ignored due to missing team/plan mapping in provider payload",
-        team_billing_disabled:
-          "Webhook recorded but business sync skipped because team billing is disabled",
-      };
-
-      await triggerAlertSafely({
-        alertKey: `billing:webhook:ignored:${eventType}:${teamId || "unknown"}`,
-        level: "warn",
-        source: "billing.webhook",
-        title: "Subscription webhook ignored",
-        message:
-          ignoreMessages[ignoreReason] ||
-          `Webhook ignored for event ${eventType} (${ignoreReason})`,
-        teamId: teamId ?? null,
-        metadata: {
-          fallbackStatus,
           providerEventId,
-          reason: ignoreReason,
+          fallbackStatus,
+          externalSubscriptionId,
         },
       });
-      return;
-    }
 
-    if (result.outcome === "duplicate") {
-      logger.info("Ignored duplicate creem webhook event", {
+      logger.error("Failed to sync creem subscription event", {
         eventType,
         providerEventId,
         teamId: teamId ?? null,
+        status: snapshot?.status,
+        error: error instanceof Error ? error.message : String(error),
       });
-      return;
+      throw error;
     }
-
-    await deps.alerts
-      .resolve(`billing:webhook:failed:${eventType}:${teamId || "unknown"}`)
-      .catch(() => null);
-    await deps.alerts
-      .resolve(`billing:webhook:ignored:${eventType}:${teamId || "unknown"}`)
-      .catch(() => null);
-  } catch (error) {
-    await triggerAlertSafely({
-      alertKey: `billing:webhook:failed:${eventType}:${teamId || "unknown"}`,
-      level: "error",
-      source: "billing.webhook",
-      title: "Subscription webhook processing failed",
-      message:
-        error instanceof Error
-          ? error.message
-          : "Unknown webhook processing error",
-      teamId: teamId ?? null,
-      metadata: {
-        eventType,
-        providerEventId,
-        fallbackStatus,
-        externalSubscriptionId,
-      },
-    });
-
-    logger.error("Failed to sync creem subscription event", {
-      eventType,
-      providerEventId,
-      teamId: teamId ?? null,
-      status: snapshot?.status,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
   };
 }

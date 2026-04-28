@@ -1,4 +1,5 @@
 import type { ContentBillingPort } from "../../billing-port";
+import type { MeterConsumeResponse } from "@sourceweft/contracts";
 import { createCitationRecords } from "../../citations";
 import {
   buildGatewayAuditMetadata,
@@ -9,6 +10,20 @@ import { computeProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
 import type { FinalizeThreadTurnInput } from "./types";
 
+async function zeroBillingResponse(input: {
+  billing: ContentBillingPort;
+  teamId: string;
+}): Promise<MeterConsumeResponse> {
+  const summary = await input.billing.getSummary(input.teamId);
+  return {
+    teamId: input.teamId,
+    consumedCredits: 0,
+    availableCredits: summary.credits.available,
+    consumedThisCycle: summary.credits.consumedThisCycle,
+    idempotencyReplayed: false,
+  };
+}
+
 export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   const { prepared, retrieval } = input;
   const providerCostUsd = await computeProviderCost({
@@ -18,6 +33,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     userContent: prepared.messageContent,
     assistantContent: input.assistantContent,
     usage: input.usage,
+    llm: input.llm,
   });
 
   await recordGatewayOperationEvent({
@@ -44,18 +60,23 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     },
   });
 
-  const billing = await input.billing.meterConsume(
-    prepared.workspace.organizationId,
-    {
-      workspaceId: prepared.workspace.id,
-      feature: "chat",
-      referenceId: `thread:${prepared.thread.id}:message:${prepared.userMessage.id}`,
-      idempotencyKey: prepared.llmIdempotencyKey,
-      providerCostUsd,
-      platformCostUsd: 0.00005,
-    },
-    prepared.userId,
-  );
+  const billing = providerCostUsd && providerCostUsd > 0
+    ? await input.billing.meterConsume(
+        prepared.workspace.organizationId,
+        {
+          workspaceId: prepared.workspace.id,
+          feature: "chat",
+          referenceId: `thread:${prepared.thread.id}:message:${prepared.userMessage.id}`,
+          idempotencyKey: prepared.llmIdempotencyKey,
+          providerCostUsd,
+          platformCostUsd: 0,
+        },
+        prepared.userId,
+      )
+    : await zeroBillingResponse({
+        billing: input.billing,
+        teamId: prepared.workspace.organizationId,
+      });
 
   const assistantMessage = await createMessageRecord({
     teamId: prepared.workspace.organizationId,
@@ -70,6 +91,13 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     metadata: {
       userMessageId: prepared.userMessage.id,
       providerCostUsd,
+      billingSkipped: !providerCostUsd || providerCostUsd <= 0,
+      billingSkipReason:
+        providerCostUsd === null
+          ? "missing_usage"
+          : providerCostUsd === 0
+            ? "zero_provider_cost"
+            : null,
       modelAlias: prepared.modelAlias,
       finishReason: input.finishReason,
       usage: input.usage,

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import {
   computeCreditsFromCost,
@@ -149,11 +148,11 @@ export class BillingUsageService {
   async createTopupCheckout(
     teamId: string,
     input: CreateTopupCheckoutRequest,
-    actorUserId?: string,
+    _actorUserId?: string,
   ): Promise<CreateTopupCheckoutResponse> {
     return this.accountService.withLockedAccount(
       teamId,
-      async ({ account, client }) => {
+      async ({ account }) => {
         const creditsToAdd = Math.floor(input.credits);
 
         if (creditsToAdd <= 0) {
@@ -164,38 +163,20 @@ export class BillingUsageService {
           );
         }
 
-        account.addOnCreditsBalance += creditsToAdd;
-        account.updatedAt = new Date().toISOString();
-        await this.store.updateAccount(account, client);
-
-        await appendBillingLedger({
-          store: this.store,
-          client,
-          account,
-          entry: {
-            eventType: "grant",
-            unitType: "credit",
-            delta: creditsToAdd,
-            balanceAfter: getTotalCreditsBalance(account),
-            feature: "topup",
-            actorUserId,
-            referenceId: `topup:${randomUUID()}`,
-            metadata: {
-              provider: this.runtimeConfig.provider,
-            },
+        throw new BillingError(
+          "TOPUP_CHECKOUT_NOT_CONFIGURED",
+          501,
+          "Top-up checkout is not available until payment provider support is configured",
+          {
+            teamId: account.teamId,
+            provider: this.runtimeConfig.provider,
+            credits: creditsToAdd,
+            amountUsd: toUsdFromCredits(
+              creditsToAdd,
+              this.runtimeConfig.creditUnitUsd,
+            ),
           },
-        });
-
-        return {
-          teamId: account.teamId,
-          provider: this.runtimeConfig.provider,
-          status: "completed",
-          credits: creditsToAdd,
-          amountUsd: toUsdFromCredits(
-            creditsToAdd,
-            this.runtimeConfig.creditUnitUsd,
-          ),
-        };
+        );
       },
     );
   }

@@ -6,11 +6,8 @@ import {
   modelGatewayProfiles,
 } from "../../../../shared/db/schema";
 import type { ModelPricing } from "../../../../shared/db/schema-types";
+import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { ModelProfileKind } from "../model-settings";
-
-function estimateTokens(text: string) {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
 
 export async function computeProviderCost(input: {
   gatewayConfigId: string;
@@ -19,7 +16,12 @@ export async function computeProviderCost(input: {
   userContent: string;
   assistantContent: string;
   usage?: UsageInfo;
+  llm?: LlmExecutionConfig;
 }) {
+  if (input.llm?.executionMode === "BYOK") {
+    return 0;
+  }
+
   const [gatewayRow] = await db
     .select({ isBYOK: modelGatewayConfigs.isBYOK })
     .from(modelGatewayConfigs)
@@ -48,9 +50,12 @@ export async function computeProviderCost(input: {
   }
 
   const usage = input.usage;
-  const inputTokens = usage?.inputTokens ?? estimateTokens(input.userContent);
-  const outputTokens =
-    usage?.outputTokens ?? estimateTokens(input.assistantContent);
+  const inputTokens = usage?.inputTokens;
+  const outputTokens = usage?.outputTokens;
+  if (inputTokens === undefined || outputTokens === undefined) {
+    return null;
+  }
+
   const cacheReadTokens = usage?.cacheReadTokens ?? 0;
   const cacheWriteTokens = usage?.cacheWriteTokens ?? 0;
 

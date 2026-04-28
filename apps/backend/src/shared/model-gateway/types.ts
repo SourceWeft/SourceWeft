@@ -41,6 +41,8 @@ export type RoutedGatewayConfig = {
       apiKey?: string;
       defaultHeaders: Record<string, string>;
       supports: string[];
+      timeoutMs: number;
+      maxRetries: number;
     }
   >;
   modelRoutes: Record<

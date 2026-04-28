@@ -14,12 +14,16 @@ import type {
 } from "../../threads";
 import {
   extractTextDeltasFromMessageChunk,
+  extractFinishReasonFromMessageChunk,
+  extractProviderFieldsFromMessageChunk,
+  extractUsageFromMessageChunk,
   resolveAssistantContentFromUpdatesChunk,
   sanitizeSseValue,
   toObjectRecord,
 } from "./content";
 import { validateAssistantCitations } from "./citations";
 import type { DeepAgentTurnEvent } from "./events";
+import type { DeepAgentTurnOutcome } from "./events";
 export type { DeepAgentTurnEvent, DeepAgentTurnOutcome } from "./events";
 import { listThinkingSteps, upsertThinkingStep } from "./thinking";
 import {
@@ -28,6 +32,28 @@ import {
   resolveToolCallId,
   type ToolCallStatus,
 } from "./tool-utils";
+
+function addUsage(
+  current: DeepAgentTurnOutcome["usage"],
+  next: DeepAgentTurnOutcome["usage"],
+): DeepAgentTurnOutcome["usage"] {
+  if (!next) {
+    return current;
+  }
+
+  const sum = (left?: number, right?: number) =>
+    left === undefined && right === undefined
+      ? undefined
+      : (left ?? 0) + (right ?? 0);
+
+  return {
+    inputTokens: sum(current?.inputTokens, next.inputTokens),
+    outputTokens: sum(current?.outputTokens, next.outputTokens),
+    totalTokens: sum(current?.totalTokens, next.totalTokens),
+    cacheReadTokens: sum(current?.cacheReadTokens, next.cacheReadTokens),
+    cacheWriteTokens: sum(current?.cacheWriteTokens, next.cacheWriteTokens),
+  };
+}
 
 async function runToolRetrieval(input: {
   prepared: PreparedThreadTurn;
@@ -87,9 +113,11 @@ export async function* invokeDeepAgentTurn(input: {
     null;
   let assistantContent = "";
   let fallbackAssistantContent: string | null = null;
+  let usage: DeepAgentTurnOutcome["usage"];
+  let finishReason: string | undefined;
+  let providerFields: Record<string, unknown> | undefined;
   let hasStartedSynthesis = false;
   let hasStreamedText = false;
-  let emittedCitationCount = 0;
   let eventSequence = 0;
   let evidenceToolStarted = false;
   const shouldBufferGroundedAnswer = input.prepared.sourceIds.length > 0;
@@ -109,18 +137,6 @@ export async function* invokeDeepAgentTurn(input: {
         sequence: existing?.sequence ?? nextSequence(),
       },
     });
-  };
-
-  const emitNewCitations = function* (): Generator<DeepAgentTurnEvent> {
-    const citations = citationRegistry.list();
-    if (citations.length <= emittedCitationCount) {
-      return;
-    }
-    emittedCitationCount = citations.length;
-    yield {
-      type: "citations",
-      citations,
-    };
   };
 
   yield {
@@ -240,6 +256,9 @@ export async function* invokeDeepAgentTurn(input: {
       }
 
       const messageChunk = payload[0];
+      usage = addUsage(usage, extractUsageFromMessageChunk(messageChunk));
+      finishReason = extractFinishReasonFromMessageChunk(messageChunk) ?? finishReason;
+      providerFields = extractProviderFieldsFromMessageChunk(messageChunk) ?? providerFields;
       const deltas = extractTextDeltasFromMessageChunk(messageChunk);
       for (const delta of deltas) {
         if (!delta) {
@@ -421,7 +440,6 @@ export async function* invokeDeepAgentTurn(input: {
         status: "completed",
         toolCall: nextToolCall,
       };
-      yield* emitNewCitations();
       if (toolName === "retrieve") {
         const query = retrievalCall?.query ?? "";
         yield {
@@ -482,7 +500,6 @@ export async function* invokeDeepAgentTurn(input: {
         status: "error",
         toolCall: nextToolCall,
       };
-      yield* emitNewCitations();
     }
   }
 
@@ -553,6 +570,9 @@ export async function* invokeDeepAgentTurn(input: {
     type: "done",
     outcome: {
       assistantContent: assistantText,
+      usage,
+      finishReason,
+      providerFields,
       retrieval: finalRetrieval,
       citations: citationValidation.valid ? finalCitations : [],
       retrievalCalls,

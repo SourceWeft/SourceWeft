@@ -1,4 +1,5 @@
 import type {
+  BillingSummaryResponse,
   MeterConsumeRequest,
   MeterConsumeResponse,
   MeterIngestionRequest,
@@ -6,6 +7,7 @@ import type {
 } from "@sourceweft/contracts";
 
 export type ContentBillingPort = {
+  getSummary(teamId: string): Promise<BillingSummaryResponse>;
   meterConsume(
     teamId: string,
     input: MeterConsumeRequest,

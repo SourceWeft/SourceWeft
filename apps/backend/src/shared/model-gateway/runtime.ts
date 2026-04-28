@@ -65,9 +65,9 @@ export function withOpenRouterAttributionHeaders(input: {
   }
 
   return {
+    ...headers,
     "X-Title": OPENROUTER_APP_TITLE,
     "HTTP-Referer": OPENROUTER_APP_REFERER,
-    ...headers,
   };
 }
 
@@ -207,6 +207,8 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
         ),
       }),
       supports,
+      timeoutMs: resolveModelGatewayTimeoutMs(gatewayRow?.timeoutMs),
+      maxRetries: resolveModelGatewayMaxRetries(gatewayRow?.maxRetries),
     };
   }
 
@@ -263,6 +265,16 @@ export function assertGatewayConfigAvailable(
 export function buildRoutedModelGatewayConfig(
   configInput: RoutedGatewayConfig,
 ): ModelGatewayConfig {
+  const providerSettings = Object.values(configInput.providers);
+  const timeoutMs =
+    providerSettings.length > 0
+      ? Math.max(...providerSettings.map((provider) => provider.timeoutMs))
+      : DEFAULT_TIMEOUT_MS;
+  const maxRetries =
+    providerSettings.length > 0
+      ? Math.max(...providerSettings.map((provider) => provider.maxRetries))
+      : DEFAULT_MAX_RETRIES;
+
   return {
     providers: Object.fromEntries(
       Object.entries(configInput.providers).map(([name, provider]) => [
@@ -277,8 +289,8 @@ export function buildRoutedModelGatewayConfig(
       ]),
     ),
     modelRoutes: configInput.modelRoutes,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    maxRetries: DEFAULT_MAX_RETRIES,
+    timeoutMs,
+    maxRetries,
     allowNonDefaultAliases: true,
     resolveApiKeyRef: resolveByokApiKeyRef,
     observeSink: createDatabaseObserveSink(),

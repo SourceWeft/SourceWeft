@@ -360,7 +360,7 @@ export const auth: any = betterAuth({
             },
             onSubscriptionUpdate: async (data) => {
               await syncCreemSubscriptionEvent(
-                "subscription.updated",
+                "subscription.update",
                 data,
                 "active",
               );

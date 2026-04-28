@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { db } from "../../../shared/database";
 import {
   chunkEmbeddings,
@@ -102,6 +102,7 @@ export async function listSourceRecords(input: {
       and(
         eq(sources.teamId, input.teamId),
         eq(sources.workspaceId, input.workspaceId),
+        ne(sources.status, "archived"),
       ),
     )
     .orderBy(desc(sources.updatedAt), desc(sources.createdAt));

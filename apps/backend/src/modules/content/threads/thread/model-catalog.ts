@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../../../../shared/database";
 import {
   modelGatewayConfigVersions,
+  modelGatewayConfigs,
   modelGatewayProviderConfigs,
   modelGatewayProfiles,
   modelGatewayRoutes,
@@ -113,6 +114,7 @@ export async function listThreadModelCatalog(input: {
       providerName: string;
       providerKind: string;
       targetModel: string;
+      hasGlobalApiKey: boolean;
     }
   >();
 
@@ -139,8 +141,13 @@ export async function listThreadModelCatalog(input: {
         .select({
           providerName: modelGatewayProviderConfigs.providerName,
           providerKind: modelGatewayProviderConfigs.providerKind,
+          apiKeyEncrypted: modelGatewayConfigs.apiKeyEncrypted,
         })
         .from(modelGatewayProviderConfigs)
+        .leftJoin(
+          modelGatewayConfigs,
+          eq(modelGatewayConfigs.id, modelGatewayProviderConfigs.gatewayConfigId),
+        )
         .where(
           and(
             eq(modelGatewayProviderConfigs.configVersionId, activeVersion.id),
@@ -151,6 +158,12 @@ export async function listThreadModelCatalog(input: {
 
     const providerKindByName = new Map(
       providerRows.map((row) => [row.providerName, row.providerKind]),
+    );
+    const providerHasGlobalApiKeyByName = new Map(
+      providerRows.map((row) => [
+        row.providerName,
+        typeof row.apiKeyEncrypted === "string" && row.apiKeyEncrypted.length > 0,
+      ]),
     );
 
     routeRows
@@ -171,6 +184,8 @@ export async function listThreadModelCatalog(input: {
           providerKind:
             providerKindByName.get(route.targetProviderName) ?? "unknown",
           targetModel: route.targetModel,
+          hasGlobalApiKey:
+            providerHasGlobalApiKeyByName.get(route.targetProviderName) ?? false,
         });
       });
   }
@@ -191,6 +206,9 @@ export async function listThreadModelCatalog(input: {
     const profileKind = row.kind as ModelProfileKind;
     const threadKind = THREAD_KIND_BY_MODEL_KIND[profileKind];
     const route = routeByKindAlias.get(`${profileKind}:${row.modelAlias}`);
+    if (!route?.hasGlobalApiKey) {
+      continue;
+    }
     const configJson =
       row.configJson && typeof row.configJson === "object"
         ? (row.configJson as Record<string, unknown>)

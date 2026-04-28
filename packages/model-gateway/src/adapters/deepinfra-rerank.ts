@@ -14,39 +14,12 @@ function toRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function resolveScores(raw: Record<string, unknown>): number[] {
-  const candidates = [raw.scores, raw.results, raw.data];
-
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) {
-      continue;
-    }
-
-    const rows = Array.isArray(candidate[0]) ? candidate[0] : candidate;
-    const scores = rows
-      .map((item) => {
-        if (typeof item === "number") {
-          return item;
-        }
-        const record = toRecord(item);
-        if (!record) {
-          return null;
-        }
-        if (typeof record.score === "number") {
-          return record.score;
-        }
-        if (typeof record.relevance_score === "number") {
-          return record.relevance_score;
-        }
-        return null;
-      })
-      .filter((score): score is number => typeof score === "number");
-
-    if (scores.length > 0) {
-      return scores;
-    }
+  if (!Array.isArray(raw.scores)) {
+    return [];
   }
 
-  return [];
+  const rows = Array.isArray(raw.scores[0]) ? raw.scores[0] : raw.scores;
+  return rows.filter((score): score is number => typeof score === "number");
 }
 
 export class DeepInfraRerankTransport implements RerankTransport {

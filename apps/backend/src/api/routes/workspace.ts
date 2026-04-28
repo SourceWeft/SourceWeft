@@ -38,15 +38,6 @@ export function registerWorkspaceRoutes(app: Hono) {
       userId,
     });
 
-    if (workspaces.length === 0) {
-      const created = await workspaceService.ensureDefaultWorkspace({
-        organizationId: teamId,
-        userId,
-      });
-
-      return ApiResponse.success(c, { items: [created] });
-    }
-
     return ApiResponse.success(c, { items: workspaces });
   });
 
@@ -105,10 +96,7 @@ export function registerWorkspaceRoutes(app: Hono) {
         return listed[0] ?? null;
       }
 
-      return workspaceService.ensureDefaultWorkspace({
-        organizationId: teamId,
-        userId,
-      });
+      return null;
     };
 
     const workspace = requestedWorkspaceId

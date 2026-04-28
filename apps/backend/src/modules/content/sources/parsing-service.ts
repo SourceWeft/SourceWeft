@@ -377,6 +377,7 @@ export class SourceParsingService {
 
     const contentHash = computeContentHash(input.parsed.content);
     const parsedTokens = estimateTokens(input.parsed.content);
+    const parsedPages = input.parsed.pages.length;
     const parsedSource = await updateSourceRecordForLatestRevision({
       teamId: input.input.teamId,
       workspaceId: input.input.workspaceId,
@@ -410,6 +411,7 @@ export class SourceParsingService {
       userId: input.input.userId,
       sourceRevisionId: input.input.sourceRevisionId,
       estimatedPages: input.parsed.metadata.pageCount,
+      parsedPages,
       parsedTokens,
       idempotencyKey: input.input.idempotencyKey,
       chunks: input.parsed.chunks,
