@@ -4,7 +4,11 @@ import { BillingError } from "./errors";
 import { appendBillingLedger } from "./ledger";
 import type { BillingStore } from "./store-port";
 import type { BillingAccountState, BillingRuntimeConfig } from "./types";
-import { getTotalCreditsBalance, normalizeTeamId } from "./service-helpers";
+import {
+  getPagesRemaining,
+  getTotalCreditsBalance,
+  normalizeTeamId,
+} from "./service-helpers";
 
 export class BillingAccountService {
   constructor(
@@ -122,6 +126,8 @@ export class BillingAccountService {
     }
 
     if (account.pagesLimit !== previousPagesLimit) {
+      const pagesLimitDelta = account.pagesLimit - previousPagesLimit;
+
       await appendBillingLedger({
         store: this.store,
         client,
@@ -129,8 +135,8 @@ export class BillingAccountService {
         entry: {
           eventType: "adjust",
           unitType: "page",
-          delta: 0,
-          balanceAfter: account.pagesUsed,
+          delta: pagesLimitDelta,
+          balanceAfter: getPagesRemaining(account),
           feature: "plan_change",
           metadata: {
             ...metadata,
@@ -138,6 +144,7 @@ export class BillingAccountService {
             toPlanFamily: nextPlanFamily,
             previousPagesLimit,
             nextPagesLimit: account.pagesLimit,
+            pagesUsed: account.pagesUsed,
           },
         },
       });
@@ -197,6 +204,8 @@ export class BillingAccountService {
     }
 
     if (account.pagesLimit !== previousPagesLimit) {
+      const pagesLimitDelta = account.pagesLimit - previousPagesLimit;
+
       await appendBillingLedger({
         store: this.store,
         client,
@@ -204,13 +213,14 @@ export class BillingAccountService {
         entry: {
           eventType: "adjust",
           unitType: "page",
-          delta: 0,
-          balanceAfter: account.pagesUsed,
+          delta: pagesLimitDelta,
+          balanceAfter: getPagesRemaining(account),
           feature: "seat_quota_change",
           metadata: {
             ...metadata,
             previousPagesLimit,
             nextPagesLimit: account.pagesLimit,
+            pagesUsed: account.pagesUsed,
           },
         },
       });
@@ -257,6 +267,26 @@ export class BillingAccountService {
 
     await this.store.insertAccount(account, client);
 
+    if (this.runtimeConfig.pagesEnabled && quota.monthlyPagesLimit > 0) {
+      await appendBillingLedger({
+        store: this.store,
+        client,
+        account,
+        entry: {
+          eventType: "grant",
+          unitType: "page",
+          delta: quota.monthlyPagesLimit,
+          balanceAfter: getPagesRemaining(account),
+          feature: "cycle_grant",
+          idempotencyKey: `cycle-pages-grant:${account.cycleStartAt}`,
+          metadata: {
+            pageLimit: account.pagesLimit,
+            pagesUsed: account.pagesUsed,
+          },
+        },
+      });
+    }
+
     if (this.runtimeConfig.creditsEnabled && quota.monthlyCreditsGrant > 0) {
       await appendBillingLedger({
         store: this.store,
@@ -291,6 +321,7 @@ export class BillingAccountService {
     const nextCycle = getMonthlyCycleWindow(now, account.cycleAnchorDay);
     const previousMonthlyBalance = account.monthlyCreditsBalance;
     const previousPagesUsed = account.pagesUsed;
+    const previousPagesRemaining = getPagesRemaining(account);
 
     account.cycleStartAt = nextCycle.startAt.toISOString();
     account.cycleEndAt = nextCycle.endAt.toISOString();
@@ -336,20 +367,46 @@ export class BillingAccountService {
       }
     }
 
-    if (previousPagesUsed > 0) {
-      await appendBillingLedger({
-        store: this.store,
-        client,
-        account,
-        entry: {
-          eventType: "adjust",
-          unitType: "page",
-          delta: -previousPagesUsed,
-          balanceAfter: 0,
-          feature: "cycle_reset",
-          idempotencyKey: `cycle-pages-reset:${account.cycleStartAt}`,
-        },
-      });
+    if (this.runtimeConfig.pagesEnabled) {
+      if (previousPagesRemaining > 0) {
+        await appendBillingLedger({
+          store: this.store,
+          client,
+          account,
+          entry: {
+            eventType: "expire",
+            unitType: "page",
+            delta: -previousPagesRemaining,
+            balanceAfter: 0,
+            feature: "cycle_expire",
+            idempotencyKey: `cycle-pages-expire:${account.cycleStartAt}`,
+            metadata: {
+              previousPagesUsed,
+              previousPagesRemaining,
+            },
+          },
+        });
+      }
+
+      if (account.pagesLimit > 0) {
+        await appendBillingLedger({
+          store: this.store,
+          client,
+          account,
+          entry: {
+            eventType: "grant",
+            unitType: "page",
+            delta: account.pagesLimit,
+            balanceAfter: getPagesRemaining(account),
+            feature: "cycle_grant",
+            idempotencyKey: `cycle-pages-grant:${account.cycleStartAt}`,
+            metadata: {
+              pageLimit: account.pagesLimit,
+              pagesUsed: account.pagesUsed,
+            },
+          },
+        });
+      }
     }
 
     account.updatedAt = now.toISOString();

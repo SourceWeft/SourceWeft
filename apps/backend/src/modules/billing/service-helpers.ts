@@ -120,6 +120,10 @@ export function getAvailableCredits(account: BillingAccountState) {
   return Math.max(available, 0);
 }
 
+export function getPagesRemaining(account: BillingAccountState) {
+  return Math.max(account.pagesLimit - account.pagesUsed, 0);
+}
+
 export function toSummary(input: {
   account: BillingAccountState;
   billingMode: BillingRuntimeConfig["mode"];

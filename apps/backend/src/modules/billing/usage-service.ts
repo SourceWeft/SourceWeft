@@ -25,6 +25,7 @@ import {
   DEFAULT_CONSUME_FEATURE,
   DEFAULT_INGESTION_FEATURE,
   getAvailableCredits,
+  getPagesRemaining,
   getTotalCreditsBalance,
   spendCredits,
   toSummary,
@@ -302,7 +303,7 @@ export class BillingUsageService {
             teamId: account.teamId,
             pagesConsumed: 0,
             pagesUsed: account.pagesUsed,
-            pagesRemaining: Math.max(account.pagesLimit - account.pagesUsed, 0),
+            pagesRemaining: getPagesRemaining(account),
             idempotencyReplayed: false,
           };
         }
@@ -324,7 +325,7 @@ export class BillingUsageService {
               teamId: account.teamId,
               pagesConsumed: Math.abs(existing.delta),
               pagesUsed: account.pagesUsed,
-              pagesRemaining: Math.max(account.pagesLimit - account.pagesUsed, 0),
+              pagesRemaining: getPagesRemaining(account),
               idempotencyReplayed: true,
             };
           }
@@ -363,8 +364,8 @@ export class BillingUsageService {
           entry: {
             eventType: "consume",
             unitType: "page",
-            delta: pagesToConsume,
-            balanceAfter: account.pagesUsed,
+            delta: -pagesToConsume,
+            balanceAfter: getPagesRemaining(account),
             feature: input.feature ?? DEFAULT_INGESTION_FEATURE,
             actorUserId,
             workspaceId: input.workspaceId,
@@ -372,6 +373,7 @@ export class BillingUsageService {
             idempotencyKey,
             metadata: {
               pageLimit: account.pagesLimit,
+              pagesUsed: account.pagesUsed,
             },
           },
         });
@@ -380,7 +382,7 @@ export class BillingUsageService {
           teamId: account.teamId,
           pagesConsumed: pagesToConsume,
           pagesUsed: account.pagesUsed,
-          pagesRemaining: Math.max(account.pagesLimit - account.pagesUsed, 0),
+          pagesRemaining: getPagesRemaining(account),
           idempotencyReplayed: false,
         };
       },
@@ -496,6 +498,7 @@ export class BillingUsageService {
 
     const previousLimit = account.pagesLimit;
     account.pagesLimit = projected;
+    const limitDelta = account.pagesLimit - previousLimit;
 
     await appendBillingLedger({
       store: this.store,
@@ -504,13 +507,14 @@ export class BillingUsageService {
       entry: {
         eventType: "adjust",
         unitType: "page",
-        delta: 0,
-        balanceAfter: account.pagesUsed,
+        delta: limitDelta,
+        balanceAfter: getPagesRemaining(account),
         feature: "shadow_limit_expand",
         actorUserId,
         metadata: {
           previousLimit,
           expandedLimit: projected,
+          pagesUsed: account.pagesUsed,
           originalFeature: feature ?? DEFAULT_INGESTION_FEATURE,
         },
       },
