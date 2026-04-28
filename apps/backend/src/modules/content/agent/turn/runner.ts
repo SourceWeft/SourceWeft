@@ -21,7 +21,7 @@ import {
   sanitizeSseValue,
   toObjectRecord,
 } from "./content";
-import { validateAssistantCitations } from "./citations";
+import { normalizeAssistantCitations } from "./citations";
 import type { DeepAgentTurnEvent } from "./events";
 import type { DeepAgentTurnOutcome } from "./events";
 export type { DeepAgentTurnEvent, DeepAgentTurnOutcome } from "./events";
@@ -119,8 +119,6 @@ export async function* invokeDeepAgentTurn(input: {
   let hasStartedSynthesis = false;
   let hasStreamedText = false;
   let eventSequence = 0;
-  let evidenceToolStarted = false;
-  const shouldBufferGroundedAnswer = input.prepared.sourceIds.length > 0;
 
   const nextSequence = () => {
     eventSequence += 1;
@@ -264,9 +262,6 @@ export async function* invokeDeepAgentTurn(input: {
         if (!delta) {
           continue;
         }
-        if (shouldBufferGroundedAnswer && !evidenceToolStarted) {
-          continue;
-        }
         if (!hasStartedSynthesis) {
           hasStartedSynthesis = true;
           yield {
@@ -342,7 +337,6 @@ export async function* invokeDeepAgentTurn(input: {
     if (event === "on_tool_start") {
       const normalizedInput = normalizeToolInput(toolPayload.input);
       toolStartedAtById.set(toolCallId, Date.now());
-      evidenceToolStarted = true;
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
         tool: toolName,
@@ -513,18 +507,16 @@ export async function* invokeDeepAgentTurn(input: {
   const finalRetrieval = latestToolRetrieval;
   const finalCitations = citationRegistry.list();
 
-  const citationValidation = validateAssistantCitations({
+  const citationNormalization = normalizeAssistantCitations({
     assistantText,
     citations: finalCitations,
   });
-  if (!citationValidation.valid) {
-    assistantText =
-      "I could not produce a grounded answer because the response referenced citation markers that were not returned by the workspace evidence tools. Please try again so I can gather citable evidence before answering.";
-  }
+  assistantText = citationNormalization.text;
+  const usedCitations = citationNormalization.citations;
 
   yield {
     type: "citations",
-    citations: citationValidation.valid ? finalCitations : [],
+    citations: usedCitations,
   };
 
   if (!hasStreamedText) {
@@ -574,7 +566,7 @@ export async function* invokeDeepAgentTurn(input: {
       finishReason,
       providerFields,
       retrieval: finalRetrieval,
-      citations: citationValidation.valid ? finalCitations : [],
+      citations: usedCitations,
       retrievalCalls,
       toolCalls,
       thinkingSteps: listThinkingSteps({
