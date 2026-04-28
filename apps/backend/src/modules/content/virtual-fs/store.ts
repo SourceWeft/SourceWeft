@@ -9,6 +9,9 @@ import type {
   VirtualFsChunk,
 } from "./types";
 
+const MAX_GREP_TERM_TOP_K = 120;
+const MIN_GREP_TERM_TOP_K = 50;
+
 function sourceIdsClause(sourceIds: string[] | undefined) {
   if (!sourceIds || sourceIds.length === 0) {
     return sql``;
@@ -352,5 +355,143 @@ export async function grepVirtualFsChunks(input: {
     headingPath: row.heading_path,
     language: row.language,
     score: Number(row.score),
+  }));
+}
+
+export function calculatePerTermGrepTopK(input: {
+  termCount: number;
+  totalTopK: number;
+}) {
+  if (input.termCount <= 0) {
+    return 0;
+  }
+
+  return Math.min(
+    MAX_GREP_TERM_TOP_K,
+    Math.max(MIN_GREP_TERM_TOP_K, Math.ceil(input.totalTopK / input.termCount)),
+  );
+}
+
+export function mergeVirtualFsGrepCandidates(
+  candidates: VirtualFsGrepCandidate[],
+  limit: number,
+) {
+  const byChunkId = new Map<string, VirtualFsGrepCandidate>();
+
+  for (const candidate of candidates) {
+    const existing = byChunkId.get(candidate.chunkId);
+    if (!existing || candidate.score > existing.score) {
+      byChunkId.set(candidate.chunkId, candidate);
+    }
+  }
+
+  return Array.from(byChunkId.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(0, limit));
+}
+
+export async function grepVirtualFsChunksByRecallTerms(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceIds?: string[];
+  terms: string[];
+  totalTopK: number;
+}): Promise<VirtualFsGrepCandidate[]> {
+  const terms = Array.from(
+    new Set(
+      input.terms
+        .map((term) => term.trim())
+        .filter((term) => term.length > 0),
+    ),
+  );
+  const perTermTopK = calculatePerTermGrepTopK({
+    termCount: terms.length,
+    totalTopK: input.totalTopK,
+  });
+
+  if (perTermTopK === 0) {
+    return [];
+  }
+
+  const candidateLists = await Promise.all(
+    terms.map((term) =>
+      grepVirtualFsChunks({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceIds: input.sourceIds,
+        queryText: term,
+        topK: perTermTopK,
+      }),
+    ),
+  );
+
+  return mergeVirtualFsGrepCandidates(candidateLists.flat(), input.totalTopK);
+}
+
+export async function grepVirtualFsChunksByRegex(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceIds?: string[];
+  pattern: string;
+  limit: number;
+}): Promise<VirtualFsGrepCandidate[]> {
+  const rows = await db.execute<{
+    source_id: string;
+    source_title: string;
+    source_file_name: string | null;
+    document_id: string;
+    chunk_id: string;
+    chunk_no: number;
+    content: string;
+    heading_path: string | null;
+    language: string | null;
+  }>(sql`
+    select
+      c.source_id,
+      s.title as source_title,
+      nullif(s.metadata_json->>'fileName', '') as source_file_name,
+      c.document_id,
+      c.id as chunk_id,
+      c.chunk_no,
+      c.content,
+      c.heading_path,
+      c.language
+    from chunks c
+    inner join sources s on s.id = c.source_id
+    inner join documents d on d.id = c.document_id
+    where c.team_id = ${input.teamId}
+      and c.workspace_id = ${input.workspaceId}
+      and s.status = 'indexed'
+      and c.content ~* ${input.pattern}
+      ${sourceIdsClause(input.sourceIds)}
+      and not exists (
+        select 1
+        from documents newer_documents
+        where newer_documents.team_id = d.team_id
+          and newer_documents.workspace_id = d.workspace_id
+          and newer_documents.source_id = d.source_id
+          and (
+            newer_documents.created_at > d.created_at
+            or (
+              newer_documents.created_at = d.created_at
+              and newer_documents.id > d.id
+            )
+          )
+      )
+    order by c.chunk_no asc
+    limit ${input.limit}
+  `);
+
+  return rows.rows.map((row) => ({
+    sourceId: row.source_id,
+    sourceTitle: row.source_title,
+    sourceFileName: row.source_file_name,
+    documentId: row.document_id,
+    chunkId: row.chunk_id,
+    chunkNo: Number(row.chunk_no),
+    content: row.content,
+    headingPath: row.heading_path,
+    language: row.language,
+    score: 0,
   }));
 }

@@ -15,7 +15,10 @@ import {
   normalizeThreadModelSettings,
 } from "../model-settings";
 import { normalizeChatTitle } from "../thread/title";
-import { resolveImplicitRefreshInput } from "./context";
+import {
+  resolveImplicitRefreshInput,
+  resolveSourceIdsFromMessage,
+} from "./context";
 import {
   resolveActiveChatProfileByAlias,
   resolveAgentThreadId,
@@ -80,8 +83,13 @@ export async function prepareThreadTurn(
 
   const requestedSourceIds = dedupeSourceIds(input.sourceIds);
   const selectedSourceIds = dedupeSourceIds(input.selectedSourceIds);
+  const existingMessageSourceIds = resolveSourceIdsFromMessage(input.existingUserMessage);
   const retrievalSourceIds =
-    requestedSourceIds.length > 0 ? requestedSourceIds : selectedSourceIds;
+    requestedSourceIds.length > 0
+      ? requestedSourceIds
+      : selectedSourceIds.length > 0
+        ? selectedSourceIds
+        : existingMessageSourceIds;
 
   const implicitRefresh = await resolveImplicitRefreshInput({
     teamId: workspace.organizationId,

@@ -2,6 +2,7 @@ import { ContentError } from "../../errors";
 import { dedupeSourceIds } from "../../source-ids";
 import {
   resolveAssistantContextParentId,
+  resolveSourceIdsFromMessage,
   resolveThreadTurnContext,
 } from "../turn/context";
 import type { StreamThreadEventInput } from "../turn/service";
@@ -21,13 +22,17 @@ export async function resolveRefreshThreadStreamInput(
     );
   }
 
+  const sourceIds = dedupeSourceIds(input.sourceIds);
+  const fallbackSourceIds = resolveSourceIdsFromMessage(latestUserMessage);
+  const selectedSourceIds = dedupeSourceIds(input.selectedSourceIds);
+
   return {
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     userId: input.userId,
     content: latestUserMessage.content,
-    sourceIds: dedupeSourceIds(input.sourceIds),
-    selectedSourceIds: input.selectedSourceIds,
+    sourceIds: sourceIds.length > 0 ? sourceIds : fallbackSourceIds,
+    selectedSourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : fallbackSourceIds,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
     existingUserMessage: latestUserMessage,
@@ -52,13 +57,29 @@ export async function resolveEditThreadStreamInput(
     );
   }
 
+  const hasExplicitSourceIds = Array.isArray(input.sourceIds);
+  const hasExplicitSelectedSourceIds = Array.isArray(input.selectedSourceIds);
+  const sourceIds = dedupeSourceIds(input.sourceIds);
+  const fallbackSourceIds = resolveSourceIdsFromMessage(latestUserMessage);
+  const selectedSourceIds = dedupeSourceIds(input.selectedSourceIds);
+  const resolvedSourceIds = hasExplicitSourceIds
+    ? sourceIds
+    : sourceIds.length > 0
+      ? sourceIds
+      : fallbackSourceIds;
+  const resolvedSelectedSourceIds = hasExplicitSelectedSourceIds
+    ? selectedSourceIds
+    : selectedSourceIds.length > 0
+      ? selectedSourceIds
+      : resolvedSourceIds;
+
   return {
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     userId: input.userId,
     content: input.content,
-    sourceIds: dedupeSourceIds(input.sourceIds),
-    selectedSourceIds: input.selectedSourceIds,
+    sourceIds: resolvedSourceIds,
+    selectedSourceIds: resolvedSelectedSourceIds,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
     userMessageParentId: latestUserMessage.id,

@@ -12,6 +12,7 @@ import type {
   WriteResult,
 } from "deepagents";
 import type { AgentCitationRegistry } from "./citation-registry";
+import { logger } from "../../../shared/logger";
 import {
   buildChunkFilePath,
   findVirtualSource,
@@ -20,7 +21,8 @@ import {
 } from "../virtual-fs/paths";
 import {
   getVirtualFsChunk,
-  grepVirtualFsChunks,
+  grepVirtualFsChunksByRecallTerms,
+  grepVirtualFsChunksByRegex,
   listVirtualFsChunks,
   listVirtualFsSources,
 } from "../virtual-fs/store";
@@ -31,6 +33,7 @@ const MAX_READ_CHUNK_LIMIT = 12;
 const MAX_GLOB_RESULTS = 200;
 const MAX_GREP_RESULTS = 50;
 const MAX_GREP_RECALL_TOP_K = 300;
+const MAX_GREP_REGEX_FALLBACK_CHUNKS = 300;
 const MAX_GREP_FALLBACK_CHUNKS = 120;
 const MAX_GREP_RECALL_TERMS = 8;
 
@@ -105,10 +108,13 @@ function appendRegexMatches(input: {
   matches: GrepMatch[];
   regex: RegExp;
   source: VirtualFsSource;
+  documentId: string;
+  chunkId: string;
   chunkNo: number;
   content: string;
   glob?: string | null;
   globMatcher: RegExp;
+  citationRegistry: AgentCitationRegistry;
 }) {
   const chunkPath = buildChunkFilePath(input.source, input.chunkNo);
   if (input.glob && !input.globMatcher.test(chunkPath)) {
@@ -121,7 +127,22 @@ function appendRegexMatches(input: {
       return;
     }
     if (input.regex.test(line)) {
-      input.matches.push({ path: chunkPath, line: index + 1, text: line.trim() });
+      const citation = input.citationRegistry.addChunk({
+        origin: "grep",
+        sourceId: input.source.sourceId,
+        sourceTitle: input.source.title,
+        documentId: input.documentId,
+        chunkId: input.chunkId,
+        chunkNo: input.chunkNo,
+        content: input.content,
+        score: 1,
+        path: chunkPath,
+      });
+      input.matches.push({
+        path: chunkPath,
+        line: index + 1,
+        text: `${line.trim()} [citation:${citation.citation}]`,
+      });
     }
   }
 }
@@ -327,11 +348,26 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
   }
 
   async grep(pattern: string, path: string | null = "/kb", glob?: string | null): Promise<GrepResult> {
+    const startedAt = Date.now();
+    const logContext = {
+      teamId: this.input.teamId,
+      workspaceId: this.input.workspaceId,
+      sourceIdsCount: this.input.sourceIds?.length ?? 0,
+      pattern,
+      path: path || "/kb",
+      glob: glob ?? null,
+    };
+
     try {
       const sources = await this.sources();
       const target = parseVirtualPath(path || "/kb", sources);
       const regex = compileGrepRegex(pattern);
       if (typeof regex === "string") {
+        logger.warn("Database knowledge grep rejected invalid pattern", {
+          ...logContext,
+          error: regex,
+          latencyMs: Date.now() - startedAt,
+        });
         return { error: regex };
       }
 
@@ -347,16 +383,34 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           chunkNo: target.chunkNo,
         });
         if (!chunk) {
+          logger.warn("Database knowledge grep chunk not found", {
+            ...logContext,
+            sourceId: target.sourceId,
+            chunkNo: target.chunkNo,
+            latencyMs: Date.now() - startedAt,
+          });
           return { error: `ENOENT: no such chunk, grep '${path}'` };
         }
         appendRegexMatches({
           matches,
           regex,
           source,
+          documentId: chunk.documentId,
+          chunkId: chunk.chunkId,
           chunkNo: chunk.chunkNo,
           content: chunk.content,
           glob,
           globMatcher: matcher,
+          citationRegistry: this.input.citationRegistry,
+        });
+        logger.debug("Database knowledge grep completed", {
+          ...logContext,
+          strategy: "chunk-file",
+          sourceId: target.sourceId,
+          chunkNo: target.chunkNo,
+          matchCount: matches.length,
+          truncated: matches.length >= MAX_GREP_RESULTS,
+          latencyMs: Date.now() - startedAt,
         });
         return { matches };
       }
@@ -384,10 +438,13 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
               matches,
               regex,
               source,
+              documentId: chunk.documentId,
+              chunkId: chunk.chunkId,
               chunkNo: chunk.chunkNo,
               content: chunk.content,
               glob,
               globMatcher: matcher,
+              citationRegistry: this.input.citationRegistry,
             });
             if (matches.length >= MAX_GREP_RESULTS) {
               break;
@@ -397,22 +454,37 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             break;
           }
         }
+        logger.debug("Database knowledge grep completed", {
+          ...logContext,
+          strategy: "small-scope-scan",
+          sourceCount: targetSources.length,
+          fallbackChunkCount,
+          matchCount: matches.length,
+          truncated: matches.length >= MAX_GREP_RESULTS,
+          latencyMs: Date.now() - startedAt,
+        });
         return { matches };
       }
 
       const recallTerms = extractSearchTermsForRegex(pattern);
       if (recallTerms.length === 0) {
+        logger.warn("Database knowledge grep rejected broad regex", {
+          ...logContext,
+          sourceCount: targetSources.length,
+          fallbackChunkCount,
+          latencyMs: Date.now() - startedAt,
+        });
         return {
           error: `Regex pattern '${pattern}' has no literal terms for indexed recall, and the current /kb scope has ${fallbackChunkCount} chunks. Narrow grep to a specific /kb source or chunk path, select fewer sources, or include a literal term in the pattern.`,
         };
       }
 
-      const candidates = await grepVirtualFsChunks({
+      const candidates = await grepVirtualFsChunksByRecallTerms({
         teamId: this.input.teamId,
         workspaceId: this.input.workspaceId,
         sourceIds,
-        queryText: recallTerms.join(" "),
-        topK: MAX_GREP_RECALL_TOP_K,
+        terms: recallTerms,
+        totalTopK: MAX_GREP_RECALL_TOP_K,
       });
 
       for (const candidate of candidates) {
@@ -424,17 +496,78 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           matches,
           regex,
           source,
+          documentId: candidate.documentId,
+          chunkId: candidate.chunkId,
           chunkNo: candidate.chunkNo,
           content: candidate.content,
           glob,
           globMatcher: matcher,
+          citationRegistry: this.input.citationRegistry,
         });
         if (matches.length >= MAX_GREP_RESULTS) {
           break;
         }
       }
+
+      if (matches.length === 0) {
+        const regexCandidates = await grepVirtualFsChunksByRegex({
+          teamId: this.input.teamId,
+          workspaceId: this.input.workspaceId,
+          sourceIds,
+          pattern,
+          limit: MAX_GREP_REGEX_FALLBACK_CHUNKS,
+        }).catch(() => []);
+
+        logger.info("Database knowledge grep using regex fallback", {
+          ...logContext,
+          sourceCount: targetSources.length,
+          fallbackChunkCount,
+          recallTerms,
+          recallCandidateCount: candidates.length,
+          regexCandidateCount: regexCandidates.length,
+        });
+
+        for (const candidate of regexCandidates) {
+          const source = sources.find((item) => item.sourceId === candidate.sourceId);
+          if (!source) {
+            continue;
+          }
+          appendRegexMatches({
+            matches,
+            regex,
+            source,
+            documentId: candidate.documentId,
+            chunkId: candidate.chunkId,
+            chunkNo: candidate.chunkNo,
+            content: candidate.content,
+            glob,
+            globMatcher: matcher,
+            citationRegistry: this.input.citationRegistry,
+          });
+          if (matches.length >= MAX_GREP_RESULTS) {
+            break;
+          }
+        }
+      }
+
+      logger.debug("Database knowledge grep completed", {
+        ...logContext,
+        strategy: "indexed-recall",
+        sourceCount: targetSources.length,
+        fallbackChunkCount,
+        recallTerms,
+        recallCandidateCount: candidates.length,
+        matchCount: matches.length,
+        truncated: matches.length >= MAX_GREP_RESULTS,
+        latencyMs: Date.now() - startedAt,
+      });
       return { matches };
     } catch (error) {
+      logger.error("Database knowledge grep failed", {
+        ...logContext,
+        error: error instanceof Error ? error.message : String(error),
+        latencyMs: Date.now() - startedAt,
+      });
       return { error: error instanceof Error ? error.message : String(error) };
     }
   }

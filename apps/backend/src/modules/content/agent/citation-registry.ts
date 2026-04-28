@@ -10,7 +10,7 @@ export type AgentCitation = {
   score: number;
   excerpt: string;
   quoteText: string;
-  origin: "retrieve" | "read_file";
+  origin: "retrieve" | "read_file" | "grep";
   path?: string;
 };
 
@@ -45,7 +45,7 @@ export class AgentCitationRegistry {
   private order: string[] = [];
 
   addChunk(input: {
-    origin: "retrieve" | "read_file";
+    origin: "retrieve" | "read_file" | "grep";
     sourceId: string;
     sourceTitle?: string | null;
     documentId: string;

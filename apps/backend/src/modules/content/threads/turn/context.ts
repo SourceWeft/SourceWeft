@@ -52,10 +52,15 @@ export function resolveAssistantContextParentId(
 export function resolveSourceIdsFromMessage(
   message: MessageRecord | null | undefined,
 ): string[] {
-  const sourceIds =
+  const metadata =
     message?.metadata && typeof message.metadata === "object"
-      ? (message.metadata as { sourceIds?: unknown }).sourceIds
+      ? (message.metadata as {
+          retrievalSourceIds?: unknown;
+          selectedSourceIds?: unknown;
+          sourceIds?: unknown;
+        })
       : undefined;
+  const sourceIds = metadata?.retrievalSourceIds ?? metadata?.selectedSourceIds ?? metadata?.sourceIds;
 
   if (!Array.isArray(sourceIds)) {
     return [];

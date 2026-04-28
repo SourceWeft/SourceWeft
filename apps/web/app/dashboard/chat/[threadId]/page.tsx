@@ -59,6 +59,11 @@ type ChatMessageItem = {
   createdAt: string;
 };
 
+type PendingLatestVersionSelection = {
+  userGroupId?: string;
+  assistantGroupId?: string;
+};
+
 function getDisplayErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Failed to send message.";
 }
@@ -262,6 +267,26 @@ function resolveContextSourceIds(input: {
     }
   }
   return sourceIds;
+}
+
+function resolveRefreshSourceIds(input: {
+  assistantMessageId: string;
+  groups: VersionedMessageGroup[];
+}) {
+  const assistantVersion = input.groups
+    .flatMap((group) => group.versions)
+    .find((version) => version.id === input.assistantMessageId);
+  const sourceUserMessageId = assistantVersion?.sourceUserMessageId;
+  if (!sourceUserMessageId) {
+    return [] as string[];
+  }
+
+  const userVersion = input.groups
+    .filter((group) => group.role === "user")
+    .flatMap((group) => group.versions)
+    .find((version) => version.id === sourceUserMessageId);
+
+  return userVersion?.sourceIds ?? [];
 }
 
 function normalizeToolCallStatus(
@@ -798,6 +823,8 @@ export default function DashboardChatThreadPage({
   const [displayedCitations, setDisplayedCitations] = useState<CitationRecord[]>([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const latestSignatureByGroupRef = useRef<Record<string, string>>({});
+  const pendingLatestVersionSelectionRef =
+    useRef<PendingLatestVersionSelection | null>(null);
 
   // ── Sources state ──────────────────────────────────────────────────────────
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
@@ -1042,11 +1069,22 @@ export default function DashboardChatThreadPage({
     setActiveVersionByGroup((previous) => {
       const next: Record<string, number> = {};
       const nextSignatures: Record<string, string> = {};
+      const pendingSelection = pendingLatestVersionSelectionRef.current;
+      const appliedPendingGroups = new Set<string>();
 
       for (const group of messageGroups) {
         const maxIndex = Math.max(group.versions.length - 1, 0);
         const signature = `${group.groupId}:${group.latestVersionId}`;
         nextSignatures[group.groupId] = signature;
+
+        if (
+          group.groupId === pendingSelection?.userGroupId ||
+          group.groupId === pendingSelection?.assistantGroupId
+        ) {
+          next[group.groupId] = maxIndex;
+          appliedPendingGroups.add(group.groupId);
+          continue;
+        }
 
         const hasNewVersion =
           latestSignatureByGroupRef.current[group.groupId] !== signature;
@@ -1063,6 +1101,16 @@ export default function DashboardChatThreadPage({
         }
 
         next[group.groupId] = Math.min(Math.max(previousIndex, 0), maxIndex);
+      }
+
+      if (
+        pendingSelection &&
+        (!pendingSelection.userGroupId ||
+          appliedPendingGroups.has(pendingSelection.userGroupId)) &&
+        (!pendingSelection.assistantGroupId ||
+          appliedPendingGroups.has(pendingSelection.assistantGroupId))
+      ) {
+        pendingLatestVersionSelectionRef.current = null;
       }
 
       latestSignatureByGroupRef.current = nextSignatures;
@@ -1492,16 +1540,23 @@ export default function DashboardChatThreadPage({
             }
 
             if (data.type === "start" && typeof data.messageId === "string") {
-              persistedUserMessageId = data.messageId;
+              const previousUserMessageId = tempUserId;
+              const serverUserMessageId = data.messageId;
+              persistedUserMessageId = serverUserMessageId;
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
-                    message.id === streamingAssistantMessageId
+                    previousUserMessageId && message.id === previousUserMessageId
+                      ? {
+                          ...message,
+                          id: serverUserMessageId,
+                        }
+                      : message.id === streamingAssistantMessageId
                       ? {
                           ...message,
                           metadata: {
                             ...message.metadata,
-                            userMessageId: persistedUserMessageId,
+                            userMessageId: serverUserMessageId,
                           },
                         }
                       : message,
@@ -1870,6 +1925,16 @@ export default function DashboardChatThreadPage({
       });
 
       if (editingMessageId) {
+        const editingAssistantGroup = editingAssistantMessageId
+          ? messageGroups.find(
+              (group) =>
+                group.role === "assistant" &&
+                group.versions.some(
+                  (version) => version.id === editingAssistantMessageId,
+                ),
+            )
+          : undefined;
+
         setActiveVersionByGroup((previous) => {
           const next = { ...previous };
 
@@ -1887,31 +1952,26 @@ export default function DashboardChatThreadPage({
             );
           }
 
-          if (editingAssistantMessageId) {
-            const assistantGroup = messageGroups.find(
-              (group) =>
-                group.role === "assistant" &&
-                group.versions.some(
-                  (version) => version.id === editingAssistantMessageId,
-                ),
+          if (editingAssistantGroup) {
+            const nextAssistantBranchIndex = editingAssistantGroup.versions.length;
+            next[editingAssistantGroup.groupId] = Math.max(
+              previous[editingAssistantGroup.groupId] ?? 0,
+              nextAssistantBranchIndex,
             );
-
-            if (assistantGroup) {
-              const nextAssistantBranchIndex = assistantGroup.versions.length;
-              next[assistantGroup.groupId] = Math.max(
-                previous[assistantGroup.groupId] ?? 0,
-                nextAssistantBranchIndex,
-              );
-            }
           }
 
           return next;
         });
 
+        pendingLatestVersionSelectionRef.current = {
+          userGroupId: editingGroupId ?? undefined,
+          assistantGroupId: editingAssistantGroup?.groupId,
+        };
+
         await streamThreadAction({
           mode: "edit",
           content: text,
-          sourceIds: contextSourceIds,
+          sourceIds: selectedSourceIds,
           selectedSourceIds,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
@@ -1959,16 +2019,19 @@ export default function DashboardChatThreadPage({
       ...previous,
       [input.groupId]: Math.max(previous[input.groupId] ?? 0, nextBranchIndex),
     }));
+    pendingLatestVersionSelectionRef.current = {
+      assistantGroupId: input.groupId,
+    };
 
-    const contextSourceIds = resolveContextSourceIds({
-      messages,
-      selectedSourceIds,
+    const refreshSourceIds = resolveRefreshSourceIds({
+      assistantMessageId: input.assistantMessageId,
+      groups: messageGroups,
     });
 
     await streamThreadAction({
       mode: "refresh",
-      sourceIds: contextSourceIds,
-      selectedSourceIds,
+      sourceIds: refreshSourceIds,
+      selectedSourceIds: refreshSourceIds,
       assistantMessageId: input.assistantMessageId,
     });
   }, [isStreaming, messageGroups, messages, selectedSourceIds, streamThreadAction]);
