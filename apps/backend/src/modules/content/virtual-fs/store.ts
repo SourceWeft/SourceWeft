@@ -14,7 +14,7 @@ const MIN_GREP_TERM_TOP_K = 50;
 
 function sourceIdsClause(sourceIds: string[] | undefined) {
   if (!sourceIds || sourceIds.length === 0) {
-    return sql``;
+    return sql`and false`;
   }
   return sql`and s.id = any(${toPostgresTextArray(sourceIds)}::text[])`;
 }
@@ -22,7 +22,7 @@ function sourceIdsClause(sourceIds: string[] | undefined) {
 export async function listVirtualFsSources(input: {
   teamId: string;
   workspaceId: string;
-  sourceIds?: string[];
+  sourceIds: string[];
   limit?: number;
 }): Promise<VirtualFsSource[]> {
   const rows = await db.execute<{
@@ -291,7 +291,7 @@ export async function getVirtualFsChunk(input: {
 export async function grepVirtualFsChunks(input: {
   teamId: string;
   workspaceId: string;
-  sourceIds?: string[];
+  sourceIds: string[];
   queryText: string;
   topK: number;
 }): Promise<VirtualFsGrepCandidate[]> {
@@ -393,7 +393,7 @@ export function mergeVirtualFsGrepCandidates(
 export async function grepVirtualFsChunksByRecallTerms(input: {
   teamId: string;
   workspaceId: string;
-  sourceIds?: string[];
+  sourceIds: string[];
   terms: string[];
   totalTopK: number;
 }): Promise<VirtualFsGrepCandidate[]> {
@@ -431,7 +431,7 @@ export async function grepVirtualFsChunksByRecallTerms(input: {
 export async function grepVirtualFsChunksByRegex(input: {
   teamId: string;
   workspaceId: string;
-  sourceIds?: string[];
+  sourceIds: string[];
   pattern: string;
   limit: number;
 }): Promise<VirtualFsGrepCandidate[]> {

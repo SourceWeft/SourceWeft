@@ -238,7 +238,6 @@ export class ContentService {
     threadId: string;
     userId: string;
     sourceIds?: string[];
-    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -252,7 +251,6 @@ export class ContentService {
     threadId: string;
     userId: string;
     sourceIds?: string[];
-    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -267,7 +265,6 @@ export class ContentService {
     userId: string;
     content: string;
     sourceIds?: string[];
-    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -282,7 +279,6 @@ export class ContentService {
     userId: string;
     content: string;
     sourceIds?: string[];
-    selectedSourceIds?: string[];
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;

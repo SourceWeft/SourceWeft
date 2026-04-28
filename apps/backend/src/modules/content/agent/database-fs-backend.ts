@@ -171,7 +171,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
     private readonly input: {
       teamId: string;
       workspaceId: string;
-      sourceIds?: string[];
+      sourceIds: string[];
       citationRegistry: AgentCitationRegistry;
     },
   ) {}

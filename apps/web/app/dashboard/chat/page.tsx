@@ -39,7 +39,7 @@ export default function DashboardChatPage() {
   } = useDashboardChatState();
 
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
-  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [selectedModels, setSelectedModels] = useState<
     Record<ModelType, ModelItem>
   >(() => resolveSelectedModels({ availableModels: allModels }));
@@ -105,30 +105,30 @@ export default function DashboardChatPage() {
 
   useEffect(() => {
     if (!workspaceId) {
-      setSelectedSourceIds([]);
+      setActiveSourceIds([]);
       return;
     }
 
     const raw = window.sessionStorage.getItem(`chat:sources:${workspaceId}:current`);
     if (!raw) {
-      setSelectedSourceIds([]);
+      setActiveSourceIds([]);
       return;
     }
 
     try {
       const parsed = JSON.parse(raw) as unknown;
-      setSelectedSourceIds(
+      setActiveSourceIds(
         Array.isArray(parsed)
           ? parsed.filter((item): item is string => typeof item === "string")
           : [],
       );
     } catch {
-      setSelectedSourceIds([]);
+      setActiveSourceIds([]);
     }
   }, [workspaceId]);
 
   const selectedSources = librarySources.filter((s) =>
-    selectedSourceIds.includes(s.id),
+    activeSourceIds.includes(s.id),
   );
 
   const handleSendMessage = useCallback(
@@ -166,7 +166,7 @@ export default function DashboardChatPage() {
       // session storage (consumed once on mount).
       sessionStorage.setItem(
         `chat:pending:${thread.id}`,
-        JSON.stringify({ content: text, sourceIds: selectedSourceIds }),
+        JSON.stringify({ content: text, sourceIds: activeSourceIds }),
       );
 
       router.push(`/dashboard/chat/${thread.id}`);
@@ -174,7 +174,7 @@ export default function DashboardChatPage() {
     [
       workspaceId,
       createChat,
-      selectedSourceIds,
+      activeSourceIds,
       router,
       catalogKindEnabled,
       selectedModels,
@@ -224,7 +224,7 @@ export default function DashboardChatPage() {
           isStreaming={false}
           mode="new"
           onRemoveSource={(id) =>
-            setSelectedSourceIds((prev) => prev.filter((x) => x !== id))
+            setActiveSourceIds((prev) => prev.filter((x) => x !== id))
           }
           onSendMessage={handleSendMessage}
           selectedSources={selectedSources}
@@ -235,11 +235,11 @@ export default function DashboardChatPage() {
       </div>
 
       {sourcesVisible ? (
-        <SourcesHub
-          mode="new"
-          onSelectionChange={setSelectedSourceIds}
+          <SourcesHub
+            mode="new"
+          onSelectionChange={setActiveSourceIds}
           onSourceLoad={setLibrarySources}
-          selectedIds={selectedSourceIds}
+          selectedIds={activeSourceIds}
           workspaceId={workspaceId}
         />
       ) : null}

@@ -55,12 +55,10 @@ export function resolveSourceIdsFromMessage(
   const metadata =
     message?.metadata && typeof message.metadata === "object"
       ? (message.metadata as {
-          retrievalSourceIds?: unknown;
-          selectedSourceIds?: unknown;
           sourceIds?: unknown;
         })
       : undefined;
-  const sourceIds = metadata?.retrievalSourceIds ?? metadata?.selectedSourceIds ?? metadata?.sourceIds;
+  const sourceIds = metadata?.sourceIds;
 
   if (!Array.isArray(sourceIds)) {
     return [];

@@ -14,7 +14,6 @@ export type StreamThreadEventInput = {
   userId: string;
   content: string;
   sourceIds?: string[];
-  selectedSourceIds?: string[];
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
   userMessageParentId?: string | null;
@@ -29,7 +28,6 @@ export type PreparedThreadTurn = {
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;
   messageContent: string;
   sourceIds: string[];
-  selectedSourceIds: string[];
   userMessage: MessageRecord;
   assistantMessageParentId: string | null;
   modelAlias: string;

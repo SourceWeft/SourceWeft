@@ -311,7 +311,6 @@ export const streamThreadRequestSchema = z.object({
   mode: streamThreadModeSchema.optional(),
   content: z.string().trim().min(1).max(20000).optional(),
   sourceIds: z.array(z.string()).max(100).optional(),
-  selectedSourceIds: z.array(z.string()).max(100).optional(),
   stream: z.boolean().optional(),
   userMessageId: z.string().trim().min(1).max(128).optional(),
   assistantMessageId: z.string().trim().min(1).max(128).optional(),

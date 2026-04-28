@@ -20,32 +20,20 @@ function message(metadata: Record<string, unknown>): MessageRecord {
   };
 }
 
-test("resolveSourceIdsFromMessage prefers retrieval source ids", () => {
+test("resolveSourceIdsFromMessage reads source ids", () => {
   assert.deepEqual(
     resolveSourceIdsFromMessage(
       message({
         sourceIds: ["source-from-message"],
-        selectedSourceIds: ["source-from-selection"],
-        retrievalSourceIds: ["source-from-retrieval"],
       }),
     ),
-    ["source-from-retrieval"],
+    ["source-from-message"],
   );
 });
 
-test("resolveSourceIdsFromMessage falls back to selected and source ids", () => {
+test("resolveSourceIdsFromMessage filters invalid values", () => {
   assert.deepEqual(
-    resolveSourceIdsFromMessage(
-      message({
-        sourceIds: ["source-from-message"],
-        selectedSourceIds: ["source-from-selection"],
-      }),
-    ),
-    ["source-from-selection"],
-  );
-
-  assert.deepEqual(
-    resolveSourceIdsFromMessage(message({ sourceIds: ["source-from-message"] })),
-    ["source-from-message"],
+    resolveSourceIdsFromMessage(message({ sourceIds: ["source-1", "", 1] })),
+    ["source-1"],
   );
 });

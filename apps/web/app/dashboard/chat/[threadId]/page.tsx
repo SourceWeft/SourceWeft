@@ -250,10 +250,10 @@ function resolveActiveAssistantVersion(input: {
 
 function resolveContextSourceIds(input: {
   messages: ChatMessageItem[];
-  selectedSourceIds: string[];
+  activeSourceIds: string[];
 }) {
-  if (input.selectedSourceIds.length > 0) {
-    return input.selectedSourceIds;
+  if (input.activeSourceIds.length > 0) {
+    return input.activeSourceIds;
   }
 
   const sourceIds: string[] = [];
@@ -828,7 +828,7 @@ export default function DashboardChatThreadPage({
 
   // ── Sources state ──────────────────────────────────────────────────────────
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
-  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
 
   // ── Composer state ─────────────────────────────────────────────────────────
@@ -875,34 +875,34 @@ export default function DashboardChatThreadPage({
   useEffect(() => {
     setSelectionLoaded(false);
     if (!selectionStorageKey) {
-      setSelectedSourceIds([]);
+      setActiveSourceIds([]);
       setSelectionLoaded(true);
       return;
     }
     const raw = window.sessionStorage.getItem(selectionStorageKey);
     if (!raw) {
-      setSelectedSourceIds([]);
+      setActiveSourceIds([]);
       setSelectionLoaded(true);
       return;
     }
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed)) {
-        setSelectedSourceIds(
+        setActiveSourceIds(
           parsed.filter((item): item is string => typeof item === "string"),
         );
       } else {
-        setSelectedSourceIds([]);
+        setActiveSourceIds([]);
       }
     } catch {
-      setSelectedSourceIds([]);
+      setActiveSourceIds([]);
     } finally {
       setSelectionLoaded(true);
     }
   }, [selectionStorageKey]);
 
-  const persistSelectedSourceIds = useCallback((sourceIds: string[]) => {
-    setSelectedSourceIds(sourceIds);
+  const persistActiveSourceIds = useCallback((sourceIds: string[]) => {
+    setActiveSourceIds(sourceIds);
     if (selectionStorageKey) {
       window.sessionStorage.setItem(selectionStorageKey, JSON.stringify(sourceIds));
     }
@@ -915,15 +915,15 @@ export default function DashboardChatThreadPage({
     if (!selectionLoaded || !selectionStorageKey) return;
     window.sessionStorage.setItem(
       selectionStorageKey,
-      JSON.stringify(selectedSourceIds),
+      JSON.stringify(activeSourceIds),
     );
     if (currentSelectionStorageKey) {
       window.sessionStorage.setItem(
         currentSelectionStorageKey,
-        JSON.stringify(selectedSourceIds),
+        JSON.stringify(activeSourceIds),
       );
     }
-  }, [currentSelectionStorageKey, selectedSourceIds, selectionLoaded, selectionStorageKey]);
+  }, [activeSourceIds, currentSelectionStorageKey, selectionLoaded, selectionStorageKey]);
 
   const messageGroups = useMemo(
     () => buildVersionedMessageGroups(messages),
@@ -1250,7 +1250,6 @@ export default function DashboardChatThreadPage({
       mode: "send" | "refresh" | "edit";
       content?: string;
       sourceIds: string[];
-      selectedSourceIds?: string[];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
     }) => {
@@ -1286,7 +1285,7 @@ export default function DashboardChatThreadPage({
             ? (input.userMessageId ?? latestUserMessage?.id ?? null)
             : null,
           metadata: {
-            sourceIds: input.selectedSourceIds ?? input.sourceIds,
+            sourceIds: input.sourceIds,
             versionOf: input.mode === "edit"
               ? (input.userMessageId ?? latestUserMessage?.id ?? null)
               : null,
@@ -1332,7 +1331,6 @@ export default function DashboardChatThreadPage({
         const requestBody: Record<string, unknown> = {
           mode: input.mode,
           sourceIds: input.sourceIds,
-          selectedSourceIds: input.selectedSourceIds ?? input.sourceIds,
         };
         const selectedLlmAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
@@ -1823,12 +1821,11 @@ export default function DashboardChatThreadPage({
           const pendingSourceIds = Array.isArray(sourceIds)
             ? sourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string")
             : [];
-          persistSelectedSourceIds(pendingSourceIds);
+          persistActiveSourceIds(pendingSourceIds);
           void streamThreadActionRef.current({
             mode: "send",
             content,
             sourceIds: pendingSourceIds,
-            selectedSourceIds: pendingSourceIds,
           });
         } catch {
           void loadThreadMessagesRef.current();
@@ -1842,7 +1839,7 @@ export default function DashboardChatThreadPage({
     return () => {
       window.clearTimeout(bootstrapTimer);
     };
-  }, [persistSelectedSourceIds, threadId, workspaceId]);
+  }, [persistActiveSourceIds, threadId, workspaceId]);
 
   // ── Public send handler (called by Composer) ──────────────────────────────
   const handleActiveVersionChange = useCallback(
@@ -1921,7 +1918,7 @@ export default function DashboardChatThreadPage({
 
       const contextSourceIds = resolveContextSourceIds({
         messages,
-        selectedSourceIds,
+        activeSourceIds,
       });
 
       if (editingMessageId) {
@@ -1971,8 +1968,7 @@ export default function DashboardChatThreadPage({
         await streamThreadAction({
           mode: "edit",
           content: text,
-          sourceIds: selectedSourceIds,
-          selectedSourceIds,
+          sourceIds: activeSourceIds,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
         });
@@ -1983,7 +1979,6 @@ export default function DashboardChatThreadPage({
         mode: "send",
         content: text,
         sourceIds: contextSourceIds,
-        selectedSourceIds,
       });
     },
     [
@@ -1994,7 +1989,7 @@ export default function DashboardChatThreadPage({
       isStreaming,
       messageGroups,
       messages,
-      selectedSourceIds,
+      activeSourceIds,
       streamThreadAction,
     ],
   );
@@ -2031,10 +2026,9 @@ export default function DashboardChatThreadPage({
     await streamThreadAction({
       mode: "refresh",
       sourceIds: refreshSourceIds,
-      selectedSourceIds: refreshSourceIds,
       assistantMessageId: input.assistantMessageId,
     });
-  }, [isStreaming, messageGroups, messages, selectedSourceIds, streamThreadAction]);
+  }, [isStreaming, messageGroups, messages, activeSourceIds, streamThreadAction]);
 
   const handleRestartFromMessage = useCallback(
     (input: {
@@ -2060,7 +2054,7 @@ export default function DashboardChatThreadPage({
   );
 
   const selectedSources = librarySources.filter((s) =>
-    selectedSourceIds.includes(s.id),
+    activeSourceIds.includes(s.id),
   );
 
   return (
@@ -2118,7 +2112,7 @@ export default function DashboardChatThreadPage({
           onCancelEditing={cancelEditing}
           onCitationClick={handleCitationClick}
           onRemoveSource={(id) =>
-            persistSelectedSourceIds(selectedSourceIds.filter((x) => x !== id))
+            persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
           }
           onRefreshLatest={handleRefreshLatest}
           onRestartFromMessage={handleRestartFromMessage}
@@ -2138,9 +2132,9 @@ export default function DashboardChatThreadPage({
           mode="thread"
           onCitationLocate={scrollToMessage}
           onCitationOpen={handleSourceHubCitationOpen}
-          onSelectionChange={persistSelectedSourceIds}
+          onSelectionChange={persistActiveSourceIds}
           onSourceLoad={setLibrarySources}
-          selectedIds={selectedSourceIds}
+          selectedIds={activeSourceIds}
           threadCitations={threadCitations}
           workspaceId={workspaceId}
         />

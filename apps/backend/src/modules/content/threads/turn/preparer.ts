@@ -15,10 +15,7 @@ import {
   normalizeThreadModelSettings,
 } from "../model-settings";
 import { normalizeChatTitle } from "../thread/title";
-import {
-  resolveImplicitRefreshInput,
-  resolveSourceIdsFromMessage,
-} from "./context";
+import { resolveImplicitRefreshInput } from "./context";
 import {
   resolveActiveChatProfileByAlias,
   resolveAgentThreadId,
@@ -82,29 +79,19 @@ export async function prepareThreadTurn(
   }
 
   const requestedSourceIds = dedupeSourceIds(input.sourceIds);
-  const selectedSourceIds = dedupeSourceIds(input.selectedSourceIds);
-  const existingMessageSourceIds = resolveSourceIdsFromMessage(input.existingUserMessage);
-  const retrievalSourceIds =
-    requestedSourceIds.length > 0
-      ? requestedSourceIds
-      : selectedSourceIds.length > 0
-        ? selectedSourceIds
-        : existingMessageSourceIds;
 
   const implicitRefresh = await resolveImplicitRefreshInput({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
     threadId: thread.id,
     messageContent,
-    sourceIds: retrievalSourceIds,
+    sourceIds: requestedSourceIds,
     existingUserMessage: input.existingUserMessage,
     userMessageParentId: input.userMessageParentId,
     assistantMessageParentId: input.assistantMessageParentId,
   });
 
   const sourceIds = dedupeSourceIds(implicitRefresh.sourceIds);
-  const persistedSelectedSourceIds =
-    selectedSourceIds.length > 0 ? selectedSourceIds : sourceIds;
   const existingUserMessage = implicitRefresh.existingUserMessage;
   const assistantMessageParentId = implicitRefresh.assistantMessageParentId;
 
@@ -126,9 +113,7 @@ export async function prepareThreadTurn(
       createdBy: input.userId,
       metadata: {
         source: "api",
-        sourceIds: persistedSelectedSourceIds,
-        selectedSourceIds: persistedSelectedSourceIds,
-        retrievalSourceIds: sourceIds,
+        sourceIds,
         versionOf: input.userMessageParentId ?? null,
       },
     }));
@@ -166,7 +151,6 @@ export async function prepareThreadTurn(
     thread,
     messageContent,
     sourceIds,
-    selectedSourceIds: persistedSelectedSourceIds,
     userMessage,
     assistantMessageParentId,
     modelAlias,
