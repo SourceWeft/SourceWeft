@@ -5,6 +5,8 @@ export * from "./stream/types";
 export * from "./turn/context";
 export * from "./turn/service";
 export type {
+  AgentCheckpointMetadata,
+  AgentCheckpointRef,
   FinalizeThreadTurnCommand,
   PreparedThreadTurn,
   RetrievalCallTrace,

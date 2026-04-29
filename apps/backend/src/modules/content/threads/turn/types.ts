@@ -18,8 +18,22 @@ export type StreamThreadEventInput = {
   llm?: LlmExecutionConfig;
   userMessageParentId?: string | null;
   assistantMessageParentId?: string | null;
-  agentAssistantMessageParentId?: string | null;
+  agentMode?: "continue" | "replay" | "fork";
+  agentBaseCheckpoint?: AgentCheckpointRef | null;
+  agentRunThreadId?: string;
   existingUserMessage?: MessageRecord;
+};
+
+export type AgentCheckpointRef = {
+  threadId: string;
+  checkpointId: string;
+  checkpointNs?: string;
+};
+
+export type AgentCheckpointMetadata = {
+  beforeInput: AgentCheckpointRef | null;
+  beforeAssistant: AgentCheckpointRef | null;
+  final: AgentCheckpointRef | null;
 };
 
 export type PreparedThreadTurn = {
@@ -33,7 +47,9 @@ export type PreparedThreadTurn = {
   modelAlias: string;
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
   llmIdempotencyKey: string;
-  deepAgentThreadId: string;
+  agentMode: "continue" | "replay" | "fork";
+  agentBaseCheckpoint: AgentCheckpointRef | null;
+  agentRunThreadId: string;
   isFirstAssistantResponse: boolean;
   initialTitle: string;
   firstMessageTitle: string;
@@ -91,6 +107,7 @@ export type FinalizeThreadTurnCommand = {
   providerModel?: string | null;
   latencyMs: number;
   modelForMessage?: string | null;
+  agentCheckpoint?: AgentCheckpointMetadata;
 };
 
 export type FinalizeThreadTurnInput = FinalizeThreadTurnCommand & {

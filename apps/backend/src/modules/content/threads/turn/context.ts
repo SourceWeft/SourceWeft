@@ -1,6 +1,7 @@
 import { ContentError } from "../../errors";
 import { requireContentWorkspace } from "../../content-support";
 import type { MessageRecord } from "../../types";
+import type { AgentCheckpointMetadata, AgentCheckpointRef } from "./types";
 import { findThreadRecord } from "../thread/repository";
 import { listMessageRecordsByThread } from "../message-repository";
 
@@ -28,27 +29,6 @@ export function isContextExcludedMessage(
   return metadata.excludeFromContext === true || metadata.isError === true;
 }
 
-export function resolveAssistantContextParentId(
-  message: MessageRecord | null | undefined,
-) {
-  if (!message) {
-    return null;
-  }
-
-  if (!isContextExcludedMessage(message)) {
-    return message.id;
-  }
-
-  const metadata = message.metadata as Record<string, unknown>;
-  if (typeof metadata.sourceAssistantMessageId === "string") {
-    return metadata.sourceAssistantMessageId;
-  }
-  if (typeof metadata.versionOf === "string") {
-    return metadata.versionOf;
-  }
-  return message.parentMessageId;
-}
-
 export function resolveSourceIdsFromMessage(
   message: MessageRecord | null | undefined,
 ): string[] {
@@ -69,12 +49,50 @@ export function resolveSourceIdsFromMessage(
   );
 }
 
-function normalizeVersionComparisonText(value: string) {
-  return value
-    .normalize("NFKC")
-    .replace(/\r\n/g, "\n")
-    .replace(/\s+/g, " ")
-    .trim();
+function toObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+export function normalizeAgentCheckpointRef(value: unknown): AgentCheckpointRef | null {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const threadId = typeof record.threadId === "string" ? record.threadId : null;
+  const checkpointId = typeof record.checkpointId === "string" ? record.checkpointId : null;
+  if (!threadId || !checkpointId) {
+    return null;
+  }
+
+  const checkpointNs = typeof record.checkpointNs === "string"
+    ? record.checkpointNs
+    : undefined;
+
+  return checkpointNs === undefined
+    ? { threadId, checkpointId }
+    : { threadId, checkpointId, checkpointNs };
+}
+
+export function resolveAgentCheckpointMetadata(
+  message: MessageRecord | null | undefined,
+): AgentCheckpointMetadata | null {
+  const metadata = toObjectRecord(message?.metadata);
+  const checkpoint = toObjectRecord(metadata?.agentCheckpoint);
+  if (!checkpoint) {
+    return null;
+  }
+
+  return {
+    beforeInput: normalizeAgentCheckpointRef(checkpoint.beforeInput),
+    beforeAssistant: normalizeAgentCheckpointRef(
+      checkpoint.beforeAssistant ?? checkpoint.parent,
+    ),
+    final: normalizeAgentCheckpointRef(checkpoint.final),
+  };
 }
 
 function resolveLatestThreadTurn(messages: MessageRecord[]) {
@@ -200,65 +218,6 @@ function ensureMessageIsInThread(
   if (message.threadId !== threadId) {
     throw new ContentError(400, code, "Message does not belong to the thread");
   }
-}
-
-export async function resolveImplicitRefreshInput(input: {
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-  messageContent: string;
-  sourceIds: string[];
-  existingUserMessage?: MessageRecord;
-  userMessageParentId?: string | null;
-  assistantMessageParentId?: string | null;
-}) {
-  if (
-    input.existingUserMessage ||
-    input.userMessageParentId ||
-    input.assistantMessageParentId
-  ) {
-    return {
-      sourceIds: input.sourceIds,
-      existingUserMessage: input.existingUserMessage,
-      assistantMessageParentId: input.assistantMessageParentId ?? null,
-    };
-  }
-
-  const messages = collapseSupersededMessages(
-    await listMessageRecordsByThread({
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      threadId: input.threadId,
-    }),
-  ).filter((message) => !isContextExcludedMessage(message));
-
-  const { latestUserMessage, latestAssistantMessage } =
-    resolveLatestThreadTurn(messages);
-
-  if (!latestUserMessage || !latestAssistantMessage) {
-    return {
-      sourceIds: input.sourceIds,
-      existingUserMessage: undefined,
-      assistantMessageParentId: null,
-    };
-  }
-
-  if (
-    normalizeVersionComparisonText(latestUserMessage.content) !==
-    normalizeVersionComparisonText(input.messageContent)
-  ) {
-    return {
-      sourceIds: input.sourceIds,
-      existingUserMessage: undefined,
-      assistantMessageParentId: null,
-    };
-  }
-
-  return {
-    sourceIds: input.sourceIds,
-    existingUserMessage: latestUserMessage,
-    assistantMessageParentId: latestAssistantMessage.id,
-  };
 }
 
 export async function resolveThreadTurnContext(input: {

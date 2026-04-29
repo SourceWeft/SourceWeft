@@ -211,6 +211,7 @@ class ContentThreadStreamService {
           usage: outcome.usage,
           finishReason: outcome.finishReason,
           providerFields: outcome.providerFields,
+          agentCheckpoint: outcome.agentCheckpoint,
           latencyMs: Date.now() - chatStartedAt,
         });
 
@@ -304,6 +305,7 @@ class ContentThreadStreamService {
         usage: outcome.usage,
         finishReason: outcome.finishReason,
         providerFields: outcome.providerFields,
+        agentCheckpoint: outcome.agentCheckpoint,
         latencyMs: Date.now() - chatStartedAt,
         modelForMessage: prepared.modelAlias,
       });

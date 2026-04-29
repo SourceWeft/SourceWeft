@@ -99,6 +99,12 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
             ? "zero_provider_cost"
             : null,
       modelAlias: prepared.modelAlias,
+      agentMode: prepared.agentMode,
+      agentCheckpoint: input.agentCheckpoint ?? {
+        beforeInput: null,
+        beforeAssistant: null,
+        final: null,
+      },
       finishReason: input.finishReason,
       usage: input.usage,
       reasoning: input.reasoning,

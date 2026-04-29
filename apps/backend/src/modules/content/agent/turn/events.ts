@@ -3,6 +3,7 @@ import type { AgentCitation } from "../citation-registry";
 import { buildCitationMetadata } from "../../retrieval/planner";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
+  AgentCheckpointMetadata,
   RetrievalCallTrace,
   ThinkingStepTrace,
   ToolCallTrace,
@@ -18,6 +19,7 @@ export type DeepAgentTurnOutcome = {
   usage?: UsageInfo;
   finishReason?: string;
   providerFields?: Record<string, unknown>;
+  agentCheckpoint: AgentCheckpointMetadata;
 };
 
 export type DeepAgentTurnEvent =

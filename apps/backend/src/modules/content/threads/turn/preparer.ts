@@ -15,10 +15,13 @@ import {
   normalizeThreadModelSettings,
 } from "../model-settings";
 import { normalizeChatTitle } from "../thread/title";
-import { resolveImplicitRefreshInput } from "./context";
+import {
+  collapseSupersededMessages,
+  isContextExcludedMessage,
+  resolveAgentCheckpointMetadata,
+} from "./context";
 import {
   resolveActiveChatProfileByAlias,
-  resolveAgentThreadId,
   resolveThreadChatModelAlias,
 } from "./model-resolution";
 import { assertSourcesExist } from "./source-validation";
@@ -80,20 +83,9 @@ export async function prepareThreadTurn(
 
   const requestedSourceIds = dedupeSourceIds(input.sourceIds);
 
-  const implicitRefresh = await resolveImplicitRefreshInput({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    threadId: thread.id,
-    messageContent,
-    sourceIds: requestedSourceIds,
-    existingUserMessage: input.existingUserMessage,
-    userMessageParentId: input.userMessageParentId,
-    assistantMessageParentId: input.assistantMessageParentId,
-  });
-
-  const sourceIds = dedupeSourceIds(implicitRefresh.sourceIds);
-  const existingUserMessage = implicitRefresh.existingUserMessage;
-  const assistantMessageParentId = implicitRefresh.assistantMessageParentId;
+  const sourceIds = requestedSourceIds;
+  const existingUserMessage = input.existingUserMessage;
+  const assistantMessageParentId = input.assistantMessageParentId ?? null;
 
   await assertSourcesExist({
     teamId: workspace.organizationId,
@@ -131,19 +123,19 @@ export async function prepareThreadTurn(
 
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(modelAlias);
+  const agentMode = input.agentMode ?? "continue";
+  const latestAssistantCheckpoint = agentMode === "continue"
+    ? resolveLatestAssistantFinalCheckpoint(messageRecords)
+    : null;
+  const agentBaseCheckpoint = input.agentBaseCheckpoint ?? latestAssistantCheckpoint;
 
   const llmIdempotencyKey =
     input.idempotencyKey ||
     (assistantMessageParentId
-      ? `thread-refresh:${userMessage.id}:${assistantMessageParentId}:${randomUUID()}`
-      : `thread-stream:${userMessage.id}:assistant`);
+        ? `thread-refresh:${userMessage.id}:${assistantMessageParentId}:${randomUUID()}`
+        : `thread-stream:${userMessage.id}:assistant`);
 
-  const deepAgentThreadId = resolveAgentThreadId({
-    threadId: thread.id,
-    userMessageParentId: input.userMessageParentId,
-    assistantMessageParentId:
-      input.agentAssistantMessageParentId ?? assistantMessageParentId,
-  });
+  const agentRunThreadId = input.agentRunThreadId ?? thread.id;
 
   return {
     userId: input.userId,
@@ -156,9 +148,30 @@ export async function prepareThreadTurn(
     modelAlias,
     chatProfile,
     llmIdempotencyKey,
-    deepAgentThreadId,
+    agentMode,
+    agentBaseCheckpoint,
+    agentRunThreadId,
     isFirstAssistantResponse,
     initialTitle,
     firstMessageTitle,
   };
+}
+
+function resolveLatestAssistantFinalCheckpoint(messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>) {
+  const messages = collapseSupersededMessages(messageRecords)
+    .filter((message) => !isContextExcludedMessage(message));
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") {
+      continue;
+    }
+
+    const checkpoint = resolveAgentCheckpointMetadata(message);
+    if (checkpoint?.final) {
+      return checkpoint.final;
+    }
+  }
+
+  return null;
 }

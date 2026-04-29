@@ -88,17 +88,3 @@ export async function resolveActiveChatProfileByAlias(modelAlias: string) {
 
   return row;
 }
-
-export function resolveAgentThreadId(input: {
-  threadId: string;
-  userMessageParentId?: string | null;
-  assistantMessageParentId?: string | null;
-}) {
-  if (input.assistantMessageParentId) {
-    return `${input.threadId}:assistant:${input.assistantMessageParentId}`;
-  }
-  if (input.userMessageParentId) {
-    return `${input.threadId}:user:${input.userMessageParentId}`;
-  }
-  return input.threadId;
-}

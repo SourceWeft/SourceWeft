@@ -8,6 +8,7 @@ import { formatRetrievalContext } from "../tools/retrieval-tool";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
+  AgentCheckpointRef,
   PreparedThreadTurn,
   RetrievalCallTrace,
   ThinkingStepTrace,
@@ -34,6 +35,64 @@ import {
   type ToolCallStatus,
 } from "./tool-utils";
 import { shouldPreRetrieveForTurn } from "./retrieval-routing";
+
+function checkpointRefToConfig(checkpoint: AgentCheckpointRef) {
+  return {
+    configurable: {
+      thread_id: checkpoint.threadId,
+      checkpoint_id: checkpoint.checkpointId,
+      checkpoint_ns: checkpoint.checkpointNs ?? "",
+    },
+  };
+}
+
+function checkpointRefFromConfig(value: unknown): AgentCheckpointRef | null {
+  const config = toObjectRecord(value);
+  const configurable = toObjectRecord(config?.configurable);
+  if (!configurable) {
+    return null;
+  }
+
+  const threadId = typeof configurable.thread_id === "string"
+    ? configurable.thread_id
+    : null;
+  const checkpointId = typeof configurable.checkpoint_id === "string"
+    ? configurable.checkpoint_id
+    : null;
+  if (!threadId || !checkpointId) {
+    return null;
+  }
+
+  const checkpointNs = typeof configurable.checkpoint_ns === "string"
+    ? configurable.checkpoint_ns
+    : undefined;
+
+  return checkpointNs === undefined
+    ? { threadId, checkpointId }
+    : { threadId, checkpointId, checkpointNs };
+}
+
+function checkpointHasPendingTasks(value: unknown) {
+  const record = toObjectRecord(value);
+  return Array.isArray(record?.next) && record.next.length > 0;
+}
+
+type AgentRunnableConfig = Awaited<ReturnType<typeof createThreadAgent>> extends {
+  stream: (input: unknown, config?: infer Config) => unknown;
+}
+  ? NonNullable<Config>
+  : Record<string, unknown>;
+
+async function getAgentStateOrNull(
+  agent: Awaited<ReturnType<typeof createThreadAgent>>,
+  config: AgentRunnableConfig,
+) {
+  try {
+    return await agent.getState(config);
+  } catch {
+    return null;
+  }
+}
 
 function addUsage(
   current: DeepAgentTurnOutcome["usage"],
@@ -450,33 +509,53 @@ export async function* invokeDeepAgentTurn(input: {
     },
   });
 
-  const stream = await agent.stream(
+  const agentMessages = [
+    ...(preRetrievedContext
+      ? [
+          {
+            role: "system" as const,
+            content: preRetrievedContext,
+          },
+        ]
+      : []),
     {
-      messages: [
-        ...(preRetrievedContext
-          ? [
-              {
-                role: "system" as const,
-                content: preRetrievedContext,
-              },
-            ]
-          : []),
-        {
-          role: "user",
-          content: input.prepared.messageContent,
-        },
-      ],
+      role: "user" as const,
+      content: input.prepared.messageContent,
     },
-    {
-      ...buildAgentConfig(input.prepared.deepAgentThreadId, {
-        team_id: input.prepared.workspace.organizationId,
-        workspace_id: input.prepared.workspace.id,
-        user_id: input.prepared.userId,
-        thread_id: input.prepared.thread.id,
-      }),
-      streamMode: ["messages", "tools", "updates"],
+  ];
+
+  const baseConfig = input.prepared.agentBaseCheckpoint
+    ? checkpointRefToConfig(input.prepared.agentBaseCheckpoint)
+    : buildAgentConfig(input.prepared.agentRunThreadId);
+  const beforeInputState = input.prepared.agentMode === "continue"
+    ? await getAgentStateOrNull(agent, baseConfig as AgentRunnableConfig)
+    : null;
+  const beforeInputCheckpoint = input.prepared.agentMode === "fork"
+    ? input.prepared.agentBaseCheckpoint
+    : checkpointRefFromConfig(
+        (beforeInputState as { config?: unknown } | null)?.config,
+      );
+  let beforeAssistantCheckpoint = input.prepared.agentMode === "replay"
+    ? input.prepared.agentBaseCheckpoint
+    : null;
+  let finalCheckpoint: AgentCheckpointRef | null = null;
+
+  const runConfig = {
+    ...baseConfig,
+    configurable: {
+      ...((baseConfig as { configurable?: Record<string, unknown> }).configurable ?? {}),
+      team_id: input.prepared.workspace.organizationId,
+      workspace_id: input.prepared.workspace.id,
+      user_id: input.prepared.userId,
+      sourceweft_thread_id: input.prepared.thread.id,
     },
-  );
+    streamMode: ["messages", "tools", "updates", "checkpoints"],
+  } satisfies AgentRunnableConfig;
+
+  const streamInput = input.prepared.agentMode === "replay"
+    ? null
+    : { messages: agentMessages };
+  const stream = await agent.stream(streamInput, runConfig as AgentRunnableConfig);
 
   for await (const streamChunk of stream as AsyncGenerator<unknown>) {
     if (!Array.isArray(streamChunk) || streamChunk.length < 2) {
@@ -485,6 +564,19 @@ export async function* invokeDeepAgentTurn(input: {
 
     const mode = streamChunk[0];
     const payload = streamChunk[1];
+
+    if (mode === "checkpoints") {
+      const checkpoint = checkpointRefFromConfig(
+        (toObjectRecord(payload) ?? {}).config,
+      );
+      if (checkpoint) {
+        if (!beforeAssistantCheckpoint && checkpointHasPendingTasks(payload)) {
+          beforeAssistantCheckpoint = checkpoint;
+        }
+        finalCheckpoint = checkpoint;
+      }
+      continue;
+    }
 
     if (mode === "messages") {
       if (!Array.isArray(payload) || payload.length < 1) {
@@ -896,6 +988,13 @@ export async function* invokeDeepAgentTurn(input: {
       };
     });
 
+  const finalState = finalCheckpoint
+    ? null
+    : await getAgentStateOrNull(agent, runConfig);
+  finalCheckpoint ??= checkpointRefFromConfig(
+    (finalState as { config?: unknown } | null)?.config,
+  );
+
   yield {
     type: "done",
     outcome: {
@@ -911,6 +1010,11 @@ export async function* invokeDeepAgentTurn(input: {
         stepsById: thinkingStepsById,
         stepOrder: thinkingStepOrder,
       }),
+      agentCheckpoint: {
+        beforeInput: beforeInputCheckpoint,
+        beforeAssistant: beforeAssistantCheckpoint,
+        final: finalCheckpoint,
+      },
     },
   };
 }

@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { ContentError } from "../../errors";
 import { dedupeSourceIds } from "../../source-ids";
 import {
-  resolveAssistantContextParentId,
+  resolveAgentCheckpointMetadata,
+  resolveSourceIdsFromMessage,
   resolveThreadTurnContext,
 } from "../turn/context";
 import type { StreamThreadEventInput } from "../turn/service";
@@ -21,7 +23,18 @@ export async function resolveRefreshThreadStreamInput(
     );
   }
 
-  const sourceIds = dedupeSourceIds(input.sourceIds);
+  const originalSourceIds = resolveSourceIdsFromMessage(latestUserMessage);
+  const sourceIds = originalSourceIds.length > 0
+    ? originalSourceIds
+    : dedupeSourceIds(input.sourceIds);
+  const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
+  if (!checkpoint?.beforeAssistant) {
+    throw new ContentError(
+      409,
+      "THREAD_CHECKPOINT_NOT_AVAILABLE",
+      "The assistant response is missing checkpoint metadata and cannot be refreshed",
+    );
+  }
 
   return {
     workspaceId: input.workspaceId,
@@ -33,9 +46,9 @@ export async function resolveRefreshThreadStreamInput(
     llm: input.llm,
     existingUserMessage: latestUserMessage,
     assistantMessageParentId: latestAssistantMessage.id,
-    agentAssistantMessageParentId: resolveAssistantContextParentId(
-      latestAssistantMessage,
-    ),
+    agentMode: "replay",
+    agentBaseCheckpoint: checkpoint.beforeAssistant,
+    agentRunThreadId: `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`,
   };
 }
 
@@ -53,7 +66,18 @@ export async function resolveEditThreadStreamInput(
     );
   }
 
-  const sourceIds = dedupeSourceIds(input.sourceIds);
+  const requestedSourceIds = dedupeSourceIds(input.sourceIds);
+  const sourceIds = requestedSourceIds.length > 0
+    ? requestedSourceIds
+    : resolveSourceIdsFromMessage(latestUserMessage);
+  const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
+  if (!checkpoint) {
+    throw new ContentError(
+      409,
+      "THREAD_CHECKPOINT_NOT_AVAILABLE",
+      "The assistant response is missing checkpoint metadata and cannot be edited",
+    );
+  }
 
   return {
     workspaceId: input.workspaceId,
@@ -65,8 +89,8 @@ export async function resolveEditThreadStreamInput(
     llm: input.llm,
     userMessageParentId: latestUserMessage.id,
     assistantMessageParentId: latestAssistantMessage?.id ?? null,
-    agentAssistantMessageParentId: resolveAssistantContextParentId(
-      latestAssistantMessage,
-    ),
+    agentMode: "fork",
+    agentBaseCheckpoint: checkpoint.beforeInput,
+    agentRunThreadId: `thread:${input.threadId}:edit:${latestUserMessage.id}:${input.idempotencyKey ?? randomUUID()}`,
   };
 }

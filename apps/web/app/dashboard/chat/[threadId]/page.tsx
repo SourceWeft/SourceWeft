@@ -268,6 +268,7 @@ function resolveContextSourceIds(input: {
 }
 
 function resolveRefreshSourceIds(input: {
+  activeSourceIds?: string[];
   assistantMessageId: string;
   groups: VersionedMessageGroup[];
 }) {
@@ -283,6 +284,28 @@ function resolveRefreshSourceIds(input: {
     .filter((group) => group.role === "user")
     .flatMap((group) => group.versions)
     .find((version) => version.id === sourceUserMessageId);
+
+  const sourceIds = userVersion?.sourceIds ?? [];
+  if (sourceIds.length > 0) {
+    return sourceIds;
+  }
+
+  return input.activeSourceIds ?? [];
+}
+
+function resolveEditSourceIds(input: {
+  activeSourceIds: string[];
+  editingMessageId: string;
+  groups: VersionedMessageGroup[];
+}) {
+  if (input.activeSourceIds.length > 0) {
+    return input.activeSourceIds;
+  }
+
+  const userVersion = input.groups
+    .filter((group) => group.role === "user")
+    .flatMap((group) => group.versions)
+    .find((version) => version.id === input.editingMessageId);
 
   return userVersion?.sourceIds ?? [];
 }
@@ -2080,10 +2103,16 @@ export default function DashboardChatThreadPage({
           assistantGroupId: editingAssistantGroup?.groupId,
         };
 
+        const editSourceIds = resolveEditSourceIds({
+          activeSourceIds,
+          editingMessageId,
+          groups: messageGroups,
+        });
+
         await streamThreadAction({
           mode: "edit",
           content: text,
-          sourceIds: activeSourceIds,
+          sourceIds: editSourceIds,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
         });
@@ -2134,6 +2163,7 @@ export default function DashboardChatThreadPage({
     };
 
     const refreshSourceIds = resolveRefreshSourceIds({
+      activeSourceIds,
       assistantMessageId: input.assistantMessageId,
       groups: messageGroups,
     });
@@ -2143,7 +2173,7 @@ export default function DashboardChatThreadPage({
       sourceIds: refreshSourceIds,
       assistantMessageId: input.assistantMessageId,
     });
-  }, [isStreaming, messageGroups, streamThreadAction]);
+  }, [activeSourceIds, isStreaming, messageGroups, streamThreadAction]);
 
   const handleRestartFromMessage = useCallback(
     (input: {
