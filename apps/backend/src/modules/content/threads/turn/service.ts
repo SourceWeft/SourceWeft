@@ -7,7 +7,6 @@ import {
 import type { ContentBillingPort } from "../../billing-port";
 import { updateThreadTitleIfMatches } from "../thread/repository";
 import {
-  buildAutomaticTitleCandidates,
   normalizeGeneratedChatTitle,
   resolveAssistantContent,
 } from "../thread/title";
@@ -107,10 +106,7 @@ class ContentThreadTurnService {
       threadId: input.prepared.thread.id,
       teamId: input.prepared.workspace.organizationId,
       workspaceId: input.prepared.workspace.id,
-      expectedTitles: buildAutomaticTitleCandidates({
-        currentTitle: input.expectedTitle,
-        firstMessageTitle: input.prepared.firstMessageTitle,
-      }),
+      expectedTitles: [input.expectedTitle],
       title,
     });
   }

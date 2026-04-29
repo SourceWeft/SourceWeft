@@ -30,15 +30,6 @@ export function isPlaceholderThreadTitle(title: string) {
   return title.trim() === "New chat";
 }
 
-export function buildAutomaticTitleCandidates(input: {
-  currentTitle: string;
-  firstMessageTitle: string;
-}) {
-  return [input.currentTitle, input.firstMessageTitle].filter(
-    (title, index, titles) => title && titles.indexOf(title) === index,
-  );
-}
-
 export function resolveAssistantContent(input: {
   raw: ChatCompleteResult["raw"];
 }) {

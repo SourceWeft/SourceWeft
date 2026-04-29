@@ -3,8 +3,10 @@ import {
   AgentCitationRegistry,
 } from "../citation-registry";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
-import { createRetrievalTool } from "../tools/retrieval-tool";
-import { formatRetrievalContext } from "../tools/retrieval-tool";
+import {
+  createRetrievalTool,
+  formatRetrievalContext,
+} from "../tools/retrieval-tool";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
@@ -34,7 +36,7 @@ import {
   resolveToolCallId,
   type ToolCallStatus,
 } from "./tool-utils";
-import { shouldPreRetrieveForTurn } from "./retrieval-routing";
+import { logger } from "../../../../shared/logger";
 
 function checkpointRefToConfig(checkpoint: AgentCheckpointRef) {
   return {
@@ -134,32 +136,31 @@ async function runToolRetrieval(input: {
   });
 }
 
-function summarizeReviewedSources(
-  retrieval: Awaited<ReturnType<typeof contentRetrievalService.runRetrieval>> | null,
-) {
-  if (!retrieval) {
-    return [] as string[];
-  }
-
-  const titles: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of retrieval.fusedCandidates) {
-    const key = candidate.sourceId;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    titles.push(candidate.sourceTitle || "Untitled source");
-  }
-  return titles;
-}
-
 function compactTraceText(value: string, maxLength = 96) {
   const compacted = value.replace(/\s+/g, " ").trim();
   if (compacted.length <= maxLength) {
     return compacted;
   }
   return `${compacted.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function shouldRunSourcePreSearch(input: PreparedThreadTurn) {
+  return input.agentMode !== "replay" && input.sourceIds.length > 0;
+}
+
+function withPreSearchedSourceContext(input: {
+  userMessage: string;
+  evidence: string;
+}) {
+  return `<source_search_context>
+search_sources has already searched the current turn's visible selected or referenced sources for the user's request. Use this evidence if it answers the request. Call additional tools only when the evidence is insufficient, ambiguous, conflicting, or surrounding context is needed.
+
+${input.evidence}
+</source_search_context>
+
+<user_request>
+${input.userMessage}
+</user_request>`;
 }
 
 function formatToolInputItems(input: Record<string, unknown>) {
@@ -380,7 +381,7 @@ export async function* invokeDeepAgentTurn(input: {
 
     const retrievalCall: RetrievalCallTrace = {
       id: input.callId,
-      tool: "retrieve",
+      tool: "search_sources",
       query: input.query,
       hitCount: input.retrieval.fusedCandidates.length,
       latencyMs: input.latencyMs,
@@ -408,8 +409,130 @@ export async function* invokeDeepAgentTurn(input: {
       sourceTitle: input.citationByChunkId.get(candidate.chunkId)?.sourceTitle,
     }));
 
+  let preSearchedMessageContent: string | null = null;
+
+  if (shouldRunSourcePreSearch(input.prepared)) {
+    const toolCallId = "search-sources-pre";
+    const query = input.prepared.messageContent;
+    const startedAt = Date.now();
+    const runningToolCall: ToolCallTrace = {
+      id: toolCallId,
+      tool: "search_sources",
+      input: { query },
+      output: null,
+      status: "running",
+      latencyMs: null,
+      error: null,
+      sequence: nextSequence(),
+    };
+    toolCallOrder.push(toolCallId);
+    toolCallsById.set(toolCallId, runningToolCall);
+    logger.info("Source pre-search started", {
+      threadId: input.prepared.thread.id,
+      userMessageId: input.prepared.userMessage.id,
+      sourceCount: input.prepared.sourceIds.length,
+    });
+    yield {
+      type: "tool-call-start",
+      id: toolCallId,
+      tool: "search_sources",
+      input: runningToolCall.input,
+      toolCall: runningToolCall,
+    };
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: `search-sources-${toolCallId}`,
+        kind: "state",
+        title: "Searching sources",
+        status: "in_progress",
+        items: [],
+        description: `Query: ${compactTraceText(query)}`,
+        metadata: {
+          query,
+          toolCallId,
+          tool: "search_sources",
+          preSearch: true,
+        },
+      }),
+    };
+    const retrieval = await runToolRetrieval({
+      prepared: input.prepared,
+      query,
+      llm: input.llm,
+    });
+    const latencyMs = Date.now() - startedAt;
+    const citationByChunkId = recordRetrieval({
+      callId: toolCallId,
+      query,
+      retrieval,
+      latencyMs,
+    });
+    const chunks = buildRetrievalChunks({ retrieval, citationByChunkId });
+    const output = {
+      query,
+      hitCount: retrieval.fusedCandidates.length,
+    };
+    const toolCall: ToolCallTrace = {
+      ...runningToolCall,
+      output,
+      status: "completed",
+      latencyMs,
+    };
+    toolCallsById.set(toolCallId, toolCall);
+    logger.info("Source pre-search completed", {
+      threadId: input.prepared.thread.id,
+      userMessageId: input.prepared.userMessage.id,
+      sourceCount: input.prepared.sourceIds.length,
+      hitCount: retrieval.fusedCandidates.length,
+      latencyMs,
+    });
+    yield {
+      type: "tool-call-result",
+      id: toolCallId,
+      tool: "search_sources",
+      input: toolCall.input,
+      output,
+      latencyMs,
+      toolCall,
+      query,
+      hitCount: retrieval.fusedCandidates.length,
+    };
+    yield {
+      type: "tool-call-end",
+      id: toolCallId,
+      tool: "search_sources",
+      latencyMs,
+      status: "completed",
+      toolCall,
+    };
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: `search-sources-${toolCallId}`,
+        kind: "state",
+        title: "Searching sources",
+        status: "completed",
+        items: [],
+        description: `Found ${retrieval.fusedCandidates.length} relevant chunks.`,
+        metadata: {
+          query,
+          hitCount: retrieval.fusedCandidates.length,
+          latencyMs,
+          toolCallId,
+          tool: "search_sources",
+          preSearch: true,
+        },
+      }),
+    };
+    preSearchedMessageContent = withPreSearchedSourceContext({
+      userMessage: input.prepared.messageContent,
+      evidence: formatRetrievalContext(chunks),
+    });
+  }
+
   const retrievalTool = createRetrievalTool({
-    retrieve: async (query, runtime) => {
+    searchSources: async (query, runtime) => {
       const retrievalStartedAt = Date.now();
       const retrieval = await runToolRetrieval({
         prepared: input.prepared,
@@ -418,7 +541,7 @@ export async function* invokeDeepAgentTurn(input: {
       });
       const callId = resolveToolCallId({
         toolCallId: runtime?.toolCallId,
-        toolName: "retrieve",
+        toolName: "search_sources",
         fallbackIndex: retrievalCallOrder.length + 1,
       });
       const citationByChunkId = recordRetrieval({
@@ -430,57 +553,6 @@ export async function* invokeDeepAgentTurn(input: {
       return buildRetrievalChunks({ retrieval, citationByChunkId });
     },
   });
-
-  let preRetrievedContext: string | null = null;
-  if (shouldPreRetrieveForTurn({
-    messageContent: input.prepared.messageContent,
-    sourceIds: input.prepared.sourceIds,
-  })) {
-    const query = input.prepared.messageContent;
-    const retrievalStartedAt = Date.now();
-    yield {
-      type: "thinking-step",
-      step: setThinkingStep({
-        id: "prefetch",
-        kind: "state",
-        title: "Prefetching evidence",
-        status: "in_progress",
-        items: [],
-        description: `Query: ${compactTraceText(query)}`,
-      }),
-    };
-    const retrieval = await runToolRetrieval({
-      prepared: input.prepared,
-      query,
-      llm: input.llm,
-    });
-    const latencyMs = Date.now() - retrievalStartedAt;
-    const citationByChunkId = recordRetrieval({
-      callId: "retrieve-prefetch",
-      query,
-      retrieval,
-      latencyMs,
-    });
-    const chunks = buildRetrievalChunks({ retrieval, citationByChunkId });
-    const reviewedSources = summarizeReviewedSources(retrieval);
-    yield {
-      type: "thinking-step",
-      step: setThinkingStep({
-        id: "prefetch",
-        kind: "state",
-        title: "Prefetching evidence",
-        status: "completed",
-        items: reviewedSources,
-        description: `Found ${retrieval.fusedCandidates.length} relevant chunks before generation.`,
-        metadata: {
-          hitCount: retrieval.fusedCandidates.length,
-          latencyMs,
-          sourceCount: reviewedSources.length,
-        },
-      }),
-    };
-    preRetrievedContext = formatRetrievalContext(chunks);
-  }
 
   const databaseBackend = new DatabaseKnowledgeBackend({
     teamId: input.prepared.workspace.organizationId,
@@ -510,17 +582,9 @@ export async function* invokeDeepAgentTurn(input: {
   });
 
   const agentMessages = [
-    ...(preRetrievedContext
-      ? [
-          {
-            role: "system" as const,
-            content: preRetrievedContext,
-          },
-        ]
-      : []),
     {
       role: "user" as const,
-      content: input.prepared.messageContent,
+      content: preSearchedMessageContent ?? input.prepared.messageContent,
     },
   ];
 
@@ -670,7 +734,7 @@ export async function* invokeDeepAgentTurn(input: {
         input: normalizedInput,
         toolCall: nextToolCall,
       };
-      if (toolName === "retrieve") {
+      if (toolName === "search_sources") {
         const query =
           typeof normalizedInput.query === "string"
             ? normalizedInput.query.trim()
@@ -678,7 +742,7 @@ export async function* invokeDeepAgentTurn(input: {
         yield {
           type: "thinking-step",
           step: setThinkingStep({
-            id: `retrieve:${toolCallId}`,
+            id: `search_sources:${toolCallId}`,
             kind: "state",
             title: "Searching sources",
             status: "in_progress",
@@ -777,12 +841,12 @@ export async function* invokeDeepAgentTurn(input: {
         status: "completed",
         toolCall: nextToolCall,
       };
-      if (toolName === "retrieve") {
+      if (toolName === "search_sources") {
         const query = retrievalCall?.query ?? "";
         yield {
           type: "thinking-step",
           step: setThinkingStep({
-            id: `retrieve:${toolCallId}`,
+            id: `search_sources:${toolCallId}`,
             kind: "state",
             title: "Searching sources",
             status: "completed",

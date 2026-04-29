@@ -71,13 +71,21 @@ export function matchesGrepGlob(input: {
   glob: string | null | undefined;
   globMatcher: RegExp;
   sourceFilePath: string;
+  sourceTitlePath?: string | null;
   chunkPath: string;
 }) {
   return (
     !input.glob ||
     input.globMatcher.test(input.chunkPath) ||
-    input.globMatcher.test(input.sourceFilePath)
+    input.globMatcher.test(input.sourceFilePath) ||
+    (typeof input.sourceTitlePath === "string" &&
+      input.globMatcher.test(input.sourceTitlePath))
   );
+}
+
+function buildSourceTitlePath(source: VirtualFsSource) {
+  const title = (source.fileName ?? source.title).trim().replace(/^\/+/, "");
+  return title.length > 0 ? `/kb/${title}`.replace(/\/+/g, "/") : null;
 }
 
 function compileGrepRegex(pattern: string) {
@@ -126,7 +134,11 @@ function buildCandidatePaths(sources: VirtualFsSource[], includeChunks: boolean)
   const paths: FileInfo[] = [];
   for (const source of sources) {
     const modifiedAt = formatTimestamp(source.updatedAt);
+    const sourceTitlePath = buildSourceTitlePath(source);
     paths.push({ path: source.filePath, is_dir: false, size: source.sizeBytes ?? undefined, modified_at: modifiedAt });
+    if (sourceTitlePath && sourceTitlePath !== source.filePath) {
+      paths.push({ path: sourceTitlePath, is_dir: false, size: source.sizeBytes ?? undefined, modified_at: modifiedAt });
+    }
     paths.push({ path: `${source.dirPath}/`, is_dir: true, modified_at: modifiedAt });
     if (includeChunks) {
       for (let chunkNo = 0; chunkNo < source.chunkCount; chunkNo += 1) {
@@ -154,6 +166,7 @@ function appendRegexMatches(input: {
     glob: input.glob,
     globMatcher: input.globMatcher,
     sourceFilePath: input.source.filePath,
+    sourceTitlePath: buildSourceTitlePath(input.source),
     chunkPath,
   })) {
     return;
@@ -434,6 +447,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           glob,
           globMatcher: matcher,
           sourceFilePath: source.filePath,
+          sourceTitlePath: buildSourceTitlePath(source),
           chunkPath: buildChunkFilePath(source, chunk.chunkNo),
         })) {
           globMatchedChunkCount += 1;
@@ -486,6 +500,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
               glob,
               globMatcher: matcher,
               sourceFilePath: source.filePath,
+              sourceTitlePath: buildSourceTitlePath(source),
               chunkPath: buildChunkFilePath(source, chunk.chunkNo),
             })) {
               globMatchedChunkCount += 1;
@@ -553,6 +568,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           glob,
           globMatcher: matcher,
           sourceFilePath: source.filePath,
+          sourceTitlePath: buildSourceTitlePath(source),
           chunkPath: buildChunkFilePath(source, candidate.chunkNo),
         })) {
           globMatchedChunkCount += 1;
@@ -601,6 +617,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             glob,
             globMatcher: matcher,
             sourceFilePath: source.filePath,
+            sourceTitlePath: buildSourceTitlePath(source),
             chunkPath: buildChunkFilePath(source, candidate.chunkNo),
           })) {
             globMatchedChunkCount += 1;

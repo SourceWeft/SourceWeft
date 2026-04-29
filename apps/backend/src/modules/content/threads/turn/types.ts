@@ -52,12 +52,11 @@ export type PreparedThreadTurn = {
   agentRunThreadId: string;
   isFirstAssistantResponse: boolean;
   initialTitle: string;
-  firstMessageTitle: string;
 };
 
 export type RetrievalCallTrace = {
   id: string;
-  tool: "retrieve";
+  tool: "search_sources";
   query: string;
   hitCount: number;
   latencyMs: number;

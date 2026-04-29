@@ -4,7 +4,6 @@ import { toContentServiceError } from "../../model-gateway-error";
 import { logger } from "../../../../shared/logger";
 import {
   type ContentThreadTurnService,
-  isPlaceholderThreadTitle,
   type StreamThreadEventInput,
 } from "../turn/service";
 import { mapDeepAgentEventToSse } from "./event-mapper";
@@ -21,6 +20,12 @@ import type { EditThreadInput, RefreshThreadInput } from "./types";
 
 const CHAT_TITLE_WAIT_MS = 5000;
 
+function shouldGenerateAutomaticThreadTitle(
+  prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
+) {
+  return prepared.isFirstAssistantResponse && !prepared.assistantMessageParentId;
+}
+
 async function generateAndApplyGeneratedThreadTitle(input: {
   turnService: ContentThreadTurnService;
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
@@ -29,10 +34,7 @@ async function generateAndApplyGeneratedThreadTitle(input: {
   yieldTitleUpdate?: (thread: { id: string; title: string }) => void;
 }) {
   try {
-    if (
-      !input.prepared.isFirstAssistantResponse ||
-      input.prepared.assistantMessageParentId
-    ) {
+    if (!shouldGenerateAutomaticThreadTitle(input.prepared)) {
       return;
     }
 
@@ -61,25 +63,6 @@ async function generateAndApplyGeneratedThreadTitle(input: {
     });
     return;
   }
-}
-
-async function applyFirstMessageThreadTitle(input: {
-  turnService: ContentThreadTurnService;
-  prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
-}) {
-  if (
-    !input.prepared.isFirstAssistantResponse ||
-    input.prepared.assistantMessageParentId ||
-    !isPlaceholderThreadTitle(input.prepared.initialTitle)
-  ) {
-    return null;
-  }
-
-  return input.turnService.applyAutomaticThreadTitle({
-    prepared: input.prepared,
-    title: input.prepared.firstMessageTitle,
-    expectedTitle: input.prepared.initialTitle,
-  });
 }
 
 class ContentThreadStreamService {
@@ -112,17 +95,14 @@ class ContentThreadStreamService {
     yield toSseData({ type: "text-start", id: textId });
 
     const titleUpdates: Array<{ id: string; title: string }> = [];
-    const generatedTitleTask = this.turnService.generateChatTitle({
-      prepared,
-      llm: input.llm,
-    });
-    const titleTask = generateAndApplyGeneratedThreadTitle({
-      prepared,
-      turnService: this.turnService,
-      llm: input.llm,
-      titleTask: generatedTitleTask,
-      yieldTitleUpdate: (thread) => titleUpdates.push(thread),
-    });
+    const titleTask = shouldGenerateAutomaticThreadTitle(prepared)
+      ? generateAndApplyGeneratedThreadTitle({
+          prepared,
+          turnService: this.turnService,
+          llm: input.llm,
+          yieldTitleUpdate: (thread) => titleUpdates.push(thread),
+        })
+      : null;
 
     const emitTitleUpdates = function* () {
       while (titleUpdates.length > 0) {
@@ -135,17 +115,6 @@ class ContentThreadStreamService {
       }
     };
 
-    const firstMessageTitleThread = await applyFirstMessageThreadTitle({
-      prepared,
-      turnService: this.turnService,
-    });
-    if (firstMessageTitleThread) {
-      titleUpdates.push({
-        id: firstMessageTitleThread.id,
-        title: firstMessageTitleThread.title,
-      });
-    }
-
     try {
       let outcome: DeepAgentTurnOutcome | null = null;
       const agentEvents = invokeDeepAgentTurn({
@@ -154,7 +123,9 @@ class ContentThreadStreamService {
       });
       let nextAgentEvent = agentEvents.next();
       let titleSettled = false;
-      let nextTitleEvent: Promise<"title"> | null = titleTask.then(() => "title" as const);
+      let nextTitleEvent: Promise<"title"> | null = titleTask
+        ? titleTask.then(() => "title" as const)
+        : null;
 
       while (true) {
         const result = await Promise.race([
@@ -222,8 +193,10 @@ class ContentThreadStreamService {
         userMessageId: prepared.userMessage.id,
         parentMessageId: assistantMessage.parentMessageId,
       });
-      await titleTask;
-      yield* emitTitleUpdates();
+      if (titleTask) {
+        await titleTask;
+        yield* emitTitleUpdates();
+      }
     } catch (error) {
       const contentError =
         error instanceof ContentError ? error : toContentServiceError(error);
@@ -310,20 +283,13 @@ class ContentThreadStreamService {
         modelForMessage: prepared.modelAlias,
       });
 
-    const generatedTitleTask = this.turnService.generateChatTitle({
-      prepared,
-      llm: input.llm,
-    });
-    await applyFirstMessageThreadTitle({
-      prepared,
-      turnService: this.turnService,
-    });
-    await generateAndApplyGeneratedThreadTitle({
-      prepared,
-      turnService: this.turnService,
-      llm: input.llm,
-      titleTask: generatedTitleTask,
-    });
+    if (shouldGenerateAutomaticThreadTitle(prepared)) {
+      await generateAndApplyGeneratedThreadTitle({
+        prepared,
+        turnService: this.turnService,
+        llm: input.llm,
+      });
+    }
 
     return {
       thread: prepared.thread,

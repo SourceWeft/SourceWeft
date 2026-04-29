@@ -10,12 +10,14 @@ export type RetrievalChunk = {
 
 export function formatRetrievalContext(chunks: RetrievalChunk[]) {
   if (chunks.length === 0) {
-    return "No relevant evidence was found.";
+    return "No relevant evidence was found. Try search_sources again only if a substantially different query could locate missing evidence; otherwise use grep only for explicit literal matching or read_file for surrounding context.";
   }
 
   return `Use these source chunks internally. Every factual claim from these chunks MUST cite the exact chunk id as [citation:cN]. cN is the id attribute from the chunk tag.
 
 Before finalizing your answer, verify every sentence or bullet that uses these chunks ends with one or more markers like [citation:c1]. Do not omit citation markers.
+
+If these chunks answer the user's targeted question, answer directly with citations. Do not call search_sources again with a similar query. Use read_file only when surrounding context is needed, or grep only for explicit literal matching or exact textual verification.
 
 ${chunks
     .map(
@@ -26,7 +28,7 @@ ${chunks
 }
 
 export function createRetrievalTool(input: {
-  retrieve: (
+  searchSources: (
     query: string,
     runtime?: {
       toolCallId?: string;
@@ -35,15 +37,15 @@ export function createRetrievalTool(input: {
 }) {
   return tool(
     async ({ query }: { query: string }, runtime: ToolRuntime) => {
-      const chunks = await input.retrieve(query, {
+      const chunks = await input.searchSources(query, {
         toolCallId: runtime.toolCallId,
       });
       return formatRetrievalContext(chunks);
     },
     {
-      name: "retrieve",
+      name: "search_sources",
       description:
-        "Search indexed workspace knowledge for relevant citable chunks. When sources are selected for the current turn, search is already scoped to those sources. Use this directly and first for source-grounded Q&A, targeted extraction, field-value extraction, local fact lookup, semantic lookup, and finding relevant passages across sources. Questions like 'what is the registered domain?', 'what is the invoice number?', 'when does it expire?', or 'how much is it?' should use retrieve before ls, glob, or grep. Do not call ls, glob, or grep first just to discover selected source paths or try keyword guesses. Do not use retrieve first for source-wide coverage tasks such as summarizing, reviewing, comparing, listing document contents, or analyzing full selected sources; use ls/read_file for those tasks.",
+        "Search the current turn's visible workspace sources for relevant citable chunks. This is the default first tool for targeted source-grounded Q&A, targeted extraction, field lookup, local fact lookup, semantic lookup, and finding relevant passages. Use search_sources before ls, glob, grep, or read_file when the user asks a targeted question about selected, referenced, uploaded, attached, current, or workspace-specific sources. If search_sources returns chunks that answer the targeted question, answer with citations instead of calling search_sources again with a similar query. Use read_file when surrounding context or source-wide coverage is needed. Use grep only when the user explicitly asks for literal text matching, occurrence/location search, or when exact textual verification is needed after search_sources. Search again only when the evidence is insufficient, ambiguous, conflicting, or missing a required field. Do not use search_sources first for source-wide coverage tasks such as summarizing, reviewing, comparing, listing document contents, or analyzing full selected sources; use ls/read_file for those tasks.",
       schema: z.object({
         query: z.string().min(1),
       }),

@@ -560,9 +560,10 @@ function resolveToolCallFromStreamEvent(input: {
       : input.event.type === "tool-call-result"
         ? (input.event.output !== undefined ? input.event.output : null)
         : null;
+  const normalizedToolOutput = normalizedToolCall?.output;
   const mergedOutput = (() => {
     const existingOutput = toObjectRecord(existing?.output);
-    const normalizedToolOutputRecord = toObjectRecord(normalizedToolCall?.output);
+    const normalizedToolOutputRecord = toObjectRecord(normalizedToolOutput);
     const eventOutputRecord = toObjectRecord(eventOutput);
     if (
       existingOutput ||
@@ -582,15 +583,11 @@ function resolveToolCallFromStreamEvent(input: {
       };
     }
 
-    return normalizedToolCall?.output ?? eventOutput ?? existing?.output ?? null;
+    return normalizedToolOutput ?? eventOutput ?? existing?.output ?? null;
   })();
   const normalizedOutput = normalizeToolOutput(mergedOutput);
 
   const normalizedStatus = (() => {
-    if (normalizedToolCall) {
-      return normalizedToolCall.status;
-    }
-
     if (input.event.type === "tool-call-error") {
       return "error" as const;
     }
@@ -604,6 +601,10 @@ function resolveToolCallFromStreamEvent(input: {
         input.event.status,
         existing?.status ?? "completed",
       );
+    }
+
+    if (normalizedToolCall) {
+      return normalizedToolCall.status;
     }
 
     return normalizeToolCallStatus(input.event.status, "running");

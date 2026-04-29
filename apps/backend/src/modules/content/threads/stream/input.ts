@@ -28,13 +28,7 @@ export async function resolveRefreshThreadStreamInput(
     ? originalSourceIds
     : dedupeSourceIds(input.sourceIds);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
-  if (!checkpoint?.beforeAssistant) {
-    throw new ContentError(
-      409,
-      "THREAD_CHECKPOINT_NOT_AVAILABLE",
-      "The assistant response is missing checkpoint metadata and cannot be refreshed",
-    );
-  }
+  const refreshRunThreadId = `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
 
   return {
     workspaceId: input.workspaceId,
@@ -46,9 +40,9 @@ export async function resolveRefreshThreadStreamInput(
     llm: input.llm,
     existingUserMessage: latestUserMessage,
     assistantMessageParentId: latestAssistantMessage.id,
-    agentMode: "replay",
-    agentBaseCheckpoint: checkpoint.beforeAssistant,
-    agentRunThreadId: `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`,
+    agentMode: checkpoint?.beforeInput ? "fork" : "continue",
+    agentBaseCheckpoint: checkpoint?.beforeInput ?? null,
+    agentRunThreadId: refreshRunThreadId,
   };
 }
 

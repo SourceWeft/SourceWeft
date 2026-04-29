@@ -14,11 +14,11 @@ import {
   mergeThreadModelSettings,
   normalizeThreadModelSettings,
 } from "../model-settings";
-import { normalizeChatTitle } from "../thread/title";
 import {
   collapseSupersededMessages,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
+  resolveSourceIdsFromMessage,
 } from "./context";
 import {
   resolveActiveChatProfileByAlias,
@@ -82,10 +82,18 @@ export async function prepareThreadTurn(
   }
 
   const requestedSourceIds = dedupeSourceIds(input.sourceIds);
-
-  const sourceIds = requestedSourceIds;
   const existingUserMessage = input.existingUserMessage;
   const assistantMessageParentId = input.assistantMessageParentId ?? null;
+  const messageRecords = await listMessageRecordsByThread({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    threadId: thread.id,
+  });
+
+  const fallbackSourceIds = resolveLatestSourceIds(messageRecords);
+  const sourceIds = requestedSourceIds.length > 0
+    ? requestedSourceIds
+    : fallbackSourceIds;
 
   await assertSourcesExist({
     teamId: workspace.organizationId,
@@ -110,16 +118,10 @@ export async function prepareThreadTurn(
       },
     }));
 
-  const messageRecords = await listMessageRecordsByThread({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    threadId: thread.id,
-  });
   const isFirstAssistantResponse = !messageRecords.some(
     (message) => message.role === "assistant",
   );
   const initialTitle = thread.title;
-  const firstMessageTitle = normalizeChatTitle(messageContent, "New Thread");
 
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(modelAlias);
@@ -153,8 +155,26 @@ export async function prepareThreadTurn(
     agentRunThreadId,
     isFirstAssistantResponse,
     initialTitle,
-    firstMessageTitle,
   };
+}
+
+function resolveLatestSourceIds(messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>) {
+  const messages = collapseSupersededMessages(messageRecords)
+    .filter((message) => !isContextExcludedMessage(message));
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") {
+      continue;
+    }
+
+    const sourceIds = resolveSourceIdsFromMessage(message);
+    if (sourceIds.length > 0) {
+      return sourceIds;
+    }
+  }
+
+  return [] as string[];
 }
 
 function resolveLatestAssistantFinalCheckpoint(messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>) {

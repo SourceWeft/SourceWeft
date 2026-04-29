@@ -14,7 +14,7 @@ function citation(key: string, chunkId = `chunk-${key}`): AgentCitation {
     score: 1,
     excerpt: "excerpt",
     quoteText: "excerpt",
-    origin: "retrieve",
+    origin: "search_sources",
   };
 }
 

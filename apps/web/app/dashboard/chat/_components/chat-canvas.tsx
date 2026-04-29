@@ -508,9 +508,9 @@ function formatToolName(toolName: string) {
 }
 
 function getToolDisplayLabel(toolCall: ToolCallRecord) {
-  if (toolCall.tool === "retrieve") {
+  if (toolCall.tool === "search_sources") {
     const query = getToolQuery(toolCall);
-    return query ? `Retrieve: ${compactText(query, 72)}` : "Retrieve sources";
+    return query ? `Search sources: ${compactText(query, 72)}` : "Search sources";
   }
 
   const inputPreview = Object.entries(toolCall.input)
@@ -603,16 +603,17 @@ function ToolCallDetails({
   toolStep?: ThinkingStepRecord;
 }) {
   const query = getToolQuery(toolCall, toolStep);
+  const shouldShowQuery = Boolean(query && toolCall.tool !== "search_sources");
   const outputSummary = summarizeToolOutput(toolCall.output);
   const shouldShowOutputSummary = Boolean(
-    outputSummary &&
-      toolCall.tool !== "retrieve" &&
+      outputSummary &&
+      toolCall.tool !== "search_sources" &&
       outputSummary !== "{}",
   );
 
   return (
     <div className="space-y-2 text-muted-foreground text-xs leading-5">
-      {query ? (
+      {shouldShowQuery ? (
         <p>
           <span className="font-medium text-foreground/80">Query:</span> {query}
         </p>
