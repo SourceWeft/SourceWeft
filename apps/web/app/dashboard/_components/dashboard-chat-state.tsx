@@ -48,7 +48,9 @@ type DashboardChatState = {
   updateChatSourceCount: (id: string, sourceCount: number) => void;
   openChat: (id: string, title: string) => void;
   archiveChat: (id: string) => void;
-  deleteChat: (id: string) => void;
+  deleteChat: (id: string) => Promise<void>;
+  clearPrivateChats: () => Promise<void>;
+  clearArchivedChats: () => Promise<void>;
 };
 
 const DashboardChatStateContext = createContext<DashboardChatState | null>(
@@ -103,8 +105,6 @@ export function DashboardChatStateProvider({
 
   const [activeChatId, setActiveChatId] = useState("");
   const [threadTitle, setThreadTitle] = useState("New chat");
-  const [chatCounter, setChatCounter] = useState(1);
-
   const toggleSourcesVisible = useCallback(() => {
     setSourcesVisible((value) => !value);
   }, []);
@@ -297,7 +297,7 @@ export function DashboardChatStateProvider({
     }): Promise<{ id: string; title: string } | null> => {
       if (!workspaceId) return null;
 
-      const safeTitle = input?.title?.trim() || `New conversation ${chatCounter}`;
+      const safeTitle = input?.title?.trim() || "New chat";
 
       try {
         const result = await contentClient.createThread(workspaceId, {
@@ -306,7 +306,6 @@ export function DashboardChatStateProvider({
         });
         const { id, title: newTitle } = result.thread;
 
-        setChatCounter((value) => value + 1);
         setPrivateChats((value) => [
           {
             id,
@@ -326,7 +325,7 @@ export function DashboardChatStateProvider({
         return null;
       }
     },
-    [workspaceId, chatCounter],
+    [workspaceId],
   );
 
   const archiveChat = useCallback(
@@ -349,7 +348,7 @@ export function DashboardChatStateProvider({
     [sharedChats, privateChats],
   );
 
-  const deleteChat = useCallback((id: string) => {
+  const removeChatFromState = useCallback((id: string) => {
     setSharedChats((value) => value.filter((item) => item.id !== id));
     setPrivateChats((value) => value.filter((item) => item.id !== id));
     setArchivedChats((value) => value.filter((item) => item.id !== id));
@@ -361,6 +360,80 @@ export function DashboardChatStateProvider({
       return "";
     });
   }, []);
+
+  const deleteChat = useCallback(
+    async (id: string) => {
+      if (!workspaceId) return;
+
+      await contentClient.deleteThread(workspaceId, id);
+      removeChatFromState(id);
+    },
+    [workspaceId, removeChatFromState],
+  );
+
+  const clearPrivateChats = useCallback(async () => {
+    const privateIds = new Set(privateChats.map((item) => item.id));
+
+    if (privateIds.size === 0) return;
+
+    if (!workspaceId) return;
+
+    await Promise.all(
+      privateChats.map((item) => contentClient.deleteThread(workspaceId, item.id)),
+    );
+
+    privateIds.forEach(removeChatFromState);
+
+    setActiveChatId((value) => {
+      if (!privateIds.has(value)) return value;
+      setMode("new");
+      setThreadTitle("New chat");
+      return "";
+    });
+
+    if (!workspaceId || !privateChatsCursor) {
+      setHasMorePrivateChats(false);
+      return;
+    }
+
+    setIsLoadingPrivateChats(true);
+
+    try {
+      const threads = await fetchPrivateChatsPage(workspaceId, privateChatsCursor);
+      setPrivateChats(threads.items);
+      setPrivateChatsCursor(threads.nextCursor);
+      setHasMorePrivateChats(Boolean(threads.nextCursor));
+    } finally {
+      setIsLoadingPrivateChats(false);
+    }
+  }, [
+    workspaceId,
+    privateChats,
+    privateChatsCursor,
+    fetchPrivateChatsPage,
+    removeChatFromState,
+  ]);
+
+  const clearArchivedChats = useCallback(async () => {
+    const archivedIds = new Set(archivedChats.map((item) => item.id));
+
+    if (archivedIds.size === 0) return;
+
+    if (!workspaceId) return;
+
+    await Promise.all(
+      archivedChats.map((item) => contentClient.deleteThread(workspaceId, item.id)),
+    );
+
+    archivedIds.forEach(removeChatFromState);
+
+    setActiveChatId((value) => {
+      if (!archivedIds.has(value)) return value;
+      setMode("new");
+      setThreadTitle("New chat");
+      return "";
+    });
+  }, [workspaceId, archivedChats, removeChatFromState]);
 
   const state = useMemo<DashboardChatState>(
     () => ({
@@ -387,6 +460,8 @@ export function DashboardChatStateProvider({
       openChat,
       archiveChat,
       deleteChat,
+      clearPrivateChats,
+      clearArchivedChats,
     }),
     [
       mode,
@@ -409,6 +484,8 @@ export function DashboardChatStateProvider({
       updateChatSourceCount,
       archiveChat,
       deleteChat,
+      clearPrivateChats,
+      clearArchivedChats,
       startNewChat,
       loadMorePrivateChats,
     ],

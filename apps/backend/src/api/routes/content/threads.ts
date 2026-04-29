@@ -78,6 +78,21 @@ export function registerThreadRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.delete("/threads/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.deleteThread({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
   app.patch("/threads/:id/model-settings", async (c) => {
     const session = await requireSession(c);
     if (!session) {

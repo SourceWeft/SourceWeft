@@ -1,6 +1,7 @@
 import { invokeDeepAgentTurn, type DeepAgentTurnOutcome } from "../../agent/turn/runner";
 import { ContentError } from "../../errors";
 import { toContentServiceError } from "../../model-gateway-error";
+import { logger } from "../../../../shared/logger";
 import {
   type ContentThreadTurnService,
   isPlaceholderThreadTitle,
@@ -18,12 +19,13 @@ import {
 } from "./input";
 import type { EditThreadInput, RefreshThreadInput } from "./types";
 
-const CHAT_TITLE_WAIT_MS = 500;
+const CHAT_TITLE_WAIT_MS = 5000;
 
-async function generateAndApplyThreadTitle(input: {
+async function generateAndApplyGeneratedThreadTitle(input: {
   turnService: ContentThreadTurnService;
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
   llm: StreamThreadEventInput["llm"];
+  titleTask?: Promise<string | null>;
   yieldTitleUpdate?: (thread: { id: string; title: string }) => void;
 }) {
   try {
@@ -34,28 +36,10 @@ async function generateAndApplyThreadTitle(input: {
       return;
     }
 
-    let expectedTitle = input.prepared.initialTitle;
-    const titleTask = input.turnService.generateChatTitle({
+    const titleTask = input.titleTask ?? input.turnService.generateChatTitle({
       prepared: input.prepared,
       llm: input.llm,
     });
-
-    if (isPlaceholderThreadTitle(input.prepared.initialTitle)) {
-      const firstMessageThread =
-        await input.turnService.applyAutomaticThreadTitle({
-          prepared: input.prepared,
-          title: input.prepared.firstMessageTitle,
-          expectedTitle,
-        });
-      if (firstMessageThread) {
-        expectedTitle = firstMessageThread.title;
-        input.yieldTitleUpdate?.({
-          id: firstMessageThread.id,
-          title: firstMessageThread.title,
-        });
-      }
-    }
-
     const generatedTitle = await withTimeout(titleTask, CHAT_TITLE_WAIT_MS);
     if (!generatedTitle) {
       return;
@@ -64,14 +48,38 @@ async function generateAndApplyThreadTitle(input: {
     const titleThread = await input.turnService.applyAutomaticThreadTitle({
       prepared: input.prepared,
       title: generatedTitle,
-      expectedTitle,
+      expectedTitle: input.prepared.initialTitle,
     });
     if (titleThread) {
       input.yieldTitleUpdate?.({ id: titleThread.id, title: titleThread.title });
     }
-  } catch {
+  } catch (error) {
+    logger.warn("Failed to generate automatic thread title", {
+      threadId: input.prepared.thread.id,
+      userMessageId: input.prepared.userMessage.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return;
   }
+}
+
+async function applyFirstMessageThreadTitle(input: {
+  turnService: ContentThreadTurnService;
+  prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
+}) {
+  if (
+    !input.prepared.isFirstAssistantResponse ||
+    input.prepared.assistantMessageParentId ||
+    !isPlaceholderThreadTitle(input.prepared.initialTitle)
+  ) {
+    return null;
+  }
+
+  return input.turnService.applyAutomaticThreadTitle({
+    prepared: input.prepared,
+    title: input.prepared.firstMessageTitle,
+    expectedTitle: input.prepared.initialTitle,
+  });
 }
 
 class ContentThreadStreamService {
@@ -104,10 +112,15 @@ class ContentThreadStreamService {
     yield toSseData({ type: "text-start", id: textId });
 
     const titleUpdates: Array<{ id: string; title: string }> = [];
-    const titleTask = generateAndApplyThreadTitle({
+    const generatedTitleTask = this.turnService.generateChatTitle({
+      prepared,
+      llm: input.llm,
+    });
+    const titleTask = generateAndApplyGeneratedThreadTitle({
       prepared,
       turnService: this.turnService,
       llm: input.llm,
+      titleTask: generatedTitleTask,
       yieldTitleUpdate: (thread) => titleUpdates.push(thread),
     });
 
@@ -122,19 +135,58 @@ class ContentThreadStreamService {
       }
     };
 
+    const firstMessageTitleThread = await applyFirstMessageThreadTitle({
+      prepared,
+      turnService: this.turnService,
+    });
+    if (firstMessageTitleThread) {
+      titleUpdates.push({
+        id: firstMessageTitleThread.id,
+        title: firstMessageTitleThread.title,
+      });
+    }
+
     try {
       let outcome: DeepAgentTurnOutcome | null = null;
-
-      for await (const event of invokeDeepAgentTurn({
+      const agentEvents = invokeDeepAgentTurn({
         prepared,
         llm: input.llm,
-      })) {
+      });
+      let nextAgentEvent = agentEvents.next();
+      let titleSettled = false;
+      let nextTitleEvent: Promise<"title"> | null = titleTask.then(() => "title" as const);
+
+      while (true) {
+        const result = await Promise.race([
+          nextAgentEvent.then((value) => ({ type: "agent" as const, value })),
+          ...(nextTitleEvent ? [nextTitleEvent.then(() => ({ type: "title" as const }))] : []),
+        ]);
+
+        if (result.type === "title") {
+          titleSettled = true;
+          nextTitleEvent = null;
+          yield* emitTitleUpdates();
+          continue;
+        }
+
+        const { value: event, done } = result.value;
+        if (done) {
+          break;
+        }
+
+        nextAgentEvent = agentEvents.next();
         if (event.type === "done") {
           outcome = event.outcome;
           continue;
         }
 
         yield mapDeepAgentEventToSse(event, textId);
+        yield* emitTitleUpdates();
+      }
+
+      if (!titleSettled) {
+        await titleTask;
+        yield* emitTitleUpdates();
       }
 
       if (!outcome) {
@@ -256,10 +308,19 @@ class ContentThreadStreamService {
         modelForMessage: prepared.modelAlias,
       });
 
-    await generateAndApplyThreadTitle({
+    const generatedTitleTask = this.turnService.generateChatTitle({
+      prepared,
+      llm: input.llm,
+    });
+    await applyFirstMessageThreadTitle({
+      prepared,
+      turnService: this.turnService,
+    });
+    await generateAndApplyGeneratedThreadTitle({
       prepared,
       turnService: this.turnService,
       llm: input.llm,
+      titleTask: generatedTitleTask,
     });
 
     return {

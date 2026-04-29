@@ -62,10 +62,14 @@ export type ToolCallTrace = {
 
 export type ThinkingStepTrace = {
   id: string;
+  kind?: "log" | "state" | "verification" | "reasoning_summary";
   title: string;
   status: "pending" | "in_progress" | "completed";
   items: string[];
   sequence: number;
+  description?: string | null;
+  detail?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type FinalizeThreadTurnCommand = {

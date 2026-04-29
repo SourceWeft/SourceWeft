@@ -100,6 +100,7 @@ export type MessageVersion = {
   content: string;
   citations?: CitationRecord[];
   isError?: boolean;
+  isTextPaused?: boolean;
   sourceIds?: string[];
   sourceAssistantMessageId?: string | null;
   sourceUserMessageId?: string | null;
@@ -131,10 +132,14 @@ export type ToolCallRecord = {
 
 export type ThinkingStepRecord = {
   id: string;
+  kind?: "log" | "state" | "verification" | "reasoning_summary";
   title: string;
   status: "pending" | "in_progress" | "completed";
   items: string[];
   sequence?: number;
+  description?: string | null;
+  detail?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type VersionedMessageGroup = {
@@ -304,10 +309,12 @@ function CitationAwareMessageResponse({
   citations,
   children,
   onCitationClick,
+  showLoading = false,
 }: {
   citations: CitationRecord[] | undefined;
   children: string;
   onCitationClick?: (citation: CitationRecord) => void;
+  showLoading?: boolean;
 }) {
   const citationByKey = new Map(
     (citations ?? []).map((citation) => [citation.citation, citation]),
@@ -383,6 +390,13 @@ function CitationAwareMessageResponse({
       >
         {children}
       </MessageResponse>
+      {showLoading ? (
+        <span className="mt-1 inline-flex items-center gap-1 text-muted-foreground" aria-label="Thinking">
+          <span className="size-1 animate-pulse rounded-full bg-current" />
+          <span className="size-1 animate-pulse rounded-full bg-current [animation-delay:120ms]" />
+          <span className="size-1 animate-pulse rounded-full bg-current [animation-delay:240ms]" />
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -445,6 +459,45 @@ function getToolOutputContent(output: unknown) {
   return String(output);
 }
 
+function getRecordValue(record: Record<string, unknown> | undefined, key: string) {
+  return record ? record[key] : undefined;
+}
+
+function getToolQuery(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
+  const inputQuery = getRecordValue(toolCall.input, "query");
+  if (typeof inputQuery === "string" && inputQuery.trim().length > 0) {
+    return inputQuery.trim();
+  }
+
+  const output = toolCall.output && typeof toolCall.output === "object"
+    ? (toolCall.output as Record<string, unknown>)
+    : undefined;
+  const outputQuery = getRecordValue(output, "query");
+  if (typeof outputQuery === "string" && outputQuery.trim().length > 0) {
+    return outputQuery.trim();
+  }
+
+  const metadataQuery = getRecordValue(toolStep?.metadata, "query");
+  return typeof metadataQuery === "string" && metadataQuery.trim().length > 0
+    ? metadataQuery.trim()
+    : null;
+}
+
+function getToolHitCount(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
+  const output = toolCall.output && typeof toolCall.output === "object"
+    ? (toolCall.output as Record<string, unknown>)
+    : undefined;
+  const outputHitCount = getRecordValue(output, "hitCount");
+  if (typeof outputHitCount === "number" && Number.isFinite(outputHitCount)) {
+    return outputHitCount;
+  }
+
+  const metadataHitCount = getRecordValue(toolStep?.metadata, "hitCount");
+  return typeof metadataHitCount === "number" && Number.isFinite(metadataHitCount)
+    ? metadataHitCount
+    : null;
+}
+
 function summarizeToolOutput(output: unknown) {
   const content = getToolOutputContent(output);
   return content ? compactText(content) : null;
@@ -455,6 +508,11 @@ function formatToolName(toolName: string) {
 }
 
 function getToolDisplayLabel(toolCall: ToolCallRecord) {
+  if (toolCall.tool === "retrieve") {
+    const query = getToolQuery(toolCall);
+    return query ? `Retrieve: ${compactText(query, 72)}` : "Retrieve sources";
+  }
+
   const inputPreview = Object.entries(toolCall.input)
     .map(([key, value]) =>
       typeof value === "string" && value.trim().length > 0
@@ -474,6 +532,107 @@ function getToolDisplayLabel(toolCall: ToolCallRecord) {
   return inputPreview ? `${prefix} ${toolName} (${inputPreview})` : `${prefix} ${toolName}`;
 }
 
+function formatThinkingMetadataValue(key: string, value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "boolean") {
+    if (!value) {
+      return null;
+    }
+    return value ? "yes" : "no";
+  }
+
+  if (typeof value === "number") {
+    if (key === "removedCitationCount" && value <= 0) {
+      return null;
+    }
+    return key === "latencyMs" ? `${Math.round(value)}ms` : String(value);
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    return compactText(value, 64);
+  }
+
+  return null;
+}
+
+function getThinkingMetadataParts(metadata: Record<string, unknown> | undefined) {
+  if (!metadata) {
+    return [] as string[];
+  }
+
+  const labels: Record<string, string> = {
+    availableCitationCount: "available citations",
+    chunkCount: "chunks",
+    hitCount: "hits",
+    latencyMs: "time",
+    matchCount: "matches",
+    removedCitationCount: "removed citations",
+    resultCount: "results",
+    sourceCount: "sources",
+    truncated: "truncated",
+    usedCitationCount: "used citations",
+  };
+
+  return Object.keys(labels)
+    .map((key) => {
+      const formatted = formatThinkingMetadataValue(key, metadata[key]);
+      return formatted ? `${labels[key]}: ${formatted}` : null;
+    })
+    .filter((item): item is string => item !== null);
+}
+
+function getToolCallDetailParts(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
+  const hitCount = getToolHitCount(toolCall, toolStep);
+  const latencyMs = toolCall.latencyMs ??
+    (typeof toolStep?.metadata?.latencyMs === "number" ? toolStep.metadata.latencyMs : null);
+  return [
+    `status: ${toolCall.status}`,
+    hitCount !== null ? `hits: ${hitCount}` : null,
+    typeof latencyMs === "number" ? `time: ${Math.round(latencyMs)}ms` : null,
+  ].filter((part): part is string => part !== null);
+}
+
+function ToolCallDetails({
+  toolCall,
+  toolStep,
+}: {
+  toolCall: ToolCallRecord;
+  toolStep?: ThinkingStepRecord;
+}) {
+  const query = getToolQuery(toolCall, toolStep);
+  const outputSummary = summarizeToolOutput(toolCall.output);
+  const shouldShowOutputSummary = Boolean(
+    outputSummary &&
+      toolCall.tool !== "retrieve" &&
+      outputSummary !== "{}",
+  );
+
+  return (
+    <div className="space-y-2 text-muted-foreground text-xs leading-5">
+      {query ? (
+        <p>
+          <span className="font-medium text-foreground/80">Query:</span> {query}
+        </p>
+      ) : null}
+      {toolStep?.detail ? <p>{toolStep.detail}</p> : null}
+      {toolStep?.items && toolStep.items.length > 0 ? (
+        <ChainOfThoughtSearchResults>
+          {toolStep.items.map((result) => (
+            <ChainOfThoughtSearchResult key={`${toolCall.id}:${result}`} title={result}>
+              <span className="max-w-[220px] truncate">{result}</span>
+            </ChainOfThoughtSearchResult>
+          ))}
+        </ChainOfThoughtSearchResults>
+      ) : null}
+      {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
+      {toolCall.error ? <p className="text-destructive">{toolCall.error}</p> : null}
+    </div>
+  );
+}
+
 function ReasoningTrace({
   isStreaming,
   steps,
@@ -487,6 +646,19 @@ function ReasoningTrace({
   const safeToolCalls = (toolCalls ?? []).filter((toolCall, index, calls) => {
     return calls.findIndex((call) => call.id === toolCall.id) === index;
   });
+  const stepByToolCallId = new Map(
+    safeSteps
+      .map((step) => {
+        const toolCallId = step.metadata?.toolCallId;
+        return typeof toolCallId === "string" ? ([toolCallId, step] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, ThinkingStepRecord] => entry !== null),
+  );
+  const toolCallIds = new Set(safeToolCalls.map((toolCall) => toolCall.id));
+  const displaySteps = safeSteps.filter((step) => {
+    const toolCallId = step.metadata?.toolCallId;
+    return !(typeof toolCallId === "string" && toolCallIds.has(toolCallId));
+  });
   const activeStep = safeSteps.find((step) => step.status === "in_progress");
   const hasRunningToolCall = safeToolCalls.some((toolCall) => toolCall.status === "running");
   const isThinking = isStreaming || Boolean(activeStep) || hasRunningToolCall;
@@ -496,19 +668,10 @@ function ReasoningTrace({
     !hasRunningToolCall &&
     !isStreaming;
   const [isOpen, setIsOpen] = useState(!allComplete);
-
-  useEffect(() => {
-    if (allComplete) {
-      setIsOpen(false);
-    }
-  }, [allComplete]);
-
-  if (safeSteps.length === 0 && safeToolCalls.length === 0) {
-    return null;
-  }
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   const timelineItems = [
-    ...safeSteps.map((step, index) => ({
+    ...displaySteps.map((step, index) => ({
       kind: "step" as const,
       key: `step:${step.id}`,
       sequence: step.sequence ?? index,
@@ -517,10 +680,39 @@ function ReasoningTrace({
     ...safeToolCalls.map((toolCall, index) => ({
       kind: "tool" as const,
       key: `tool:${toolCall.id}`,
-      sequence: toolCall.sequence ?? safeSteps.length + index,
+      sequence:
+        stepByToolCallId.get(toolCall.id)?.sequence ??
+        toolCall.sequence ??
+        safeSteps.length + index,
       toolCall,
+      toolStep: stepByToolCallId.get(toolCall.id),
     })),
   ].sort((left, right) => left.sequence - right.sequence);
+  const timelineSignature = timelineItems
+    .map((item) => {
+      if (item.kind === "step") {
+        return `${item.key}:${item.step.status}:${item.step.title}:${item.step.items.length}`;
+      }
+      return `${item.key}:${item.toolCall.status}:${item.toolCall.latencyMs ?? ""}`;
+    })
+    .join("|");
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const element = contentRef.current;
+    if (!element) {
+      return;
+    }
+
+    element.scrollTop = element.scrollHeight;
+  }, [isOpen, timelineSignature]);
+
+  if (safeSteps.length === 0 && safeToolCalls.length === 0) {
+    return null;
+  }
 
   return (
     <ChainOfThought
@@ -546,25 +738,36 @@ function ReasoningTrace({
         </span>
       </ChainOfThoughtHeader>
       {isOpen ? (
-        <ChainOfThoughtContent className="max-h-64 overflow-y-auto pr-1">
+        <ChainOfThoughtContent className="max-h-64 overflow-y-auto pr-1" ref={contentRef}>
           {timelineItems.map((item) => {
             if (item.kind === "step") {
               const { step } = item;
+              const metadataParts = getThinkingMetadataParts(step.metadata);
+              const stepDescription = [
+                step.description ?? null,
+                metadataParts.length > 0 ? metadataParts.join(" · ") : null,
+              ]
+                .filter((part): part is string => Boolean(part))
+                .join(" · ") || undefined;
+              const stepLabel = (
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span className="truncate">{step.title}</span>
+                  {stepDescription ? (
+                    <span className="min-w-0 text-muted-foreground text-xs leading-5">
+                      {stepDescription}
+                    </span>
+                  ) : null}
+                  {step.status === "in_progress" ? (
+                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
+                      Running
+                    </span>
+                  ) : null}
+                </span>
+              );
               return (
                 <ChainOfThoughtStep
                   key={item.key}
-                  label={
-                    step.status === "in_progress" ? (
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate">{step.title}</span>
-                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
-                          Running
-                        </span>
-                      </span>
-                    ) : (
-                      step.title
-                    )
-                  }
+                  label={stepLabel}
                   status={
                     step.status === "in_progress"
                       ? "active"
@@ -573,6 +776,11 @@ function ReasoningTrace({
                         : "complete"
                   }
                 >
+                  {step.detail ? (
+                    <p className="text-muted-foreground text-xs leading-5">
+                      {step.detail}
+                    </p>
+                  ) : null}
                   {step.items.length > 0 ? (
                     <ChainOfThoughtSearchResults>
                       {step.items.map((result) => (
@@ -586,8 +794,16 @@ function ReasoningTrace({
               );
             }
 
-            const { toolCall } = item;
-            const summary = summarizeToolOutput(toolCall.output);
+            const { toolCall, toolStep } = item;
+            const metadataParts = getThinkingMetadataParts(toolStep?.metadata);
+            const detailParts = getToolCallDetailParts(toolCall, toolStep);
+            const summary = [
+              toolStep?.description ?? null,
+              detailParts.length > 0 ? detailParts.join(" · ") : null,
+              metadataParts.length > 0 ? metadataParts.join(" · ") : null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(" · ") || undefined;
             return (
               <ChainOfThoughtStep
                 description={summary}
@@ -601,7 +817,9 @@ function ReasoningTrace({
                       ? "pending"
                       : "complete"
                 }
-              />
+              >
+                <ToolCallDetails toolCall={toolCall} toolStep={toolStep} />
+              </ChainOfThoughtStep>
             );
           })}
         </ChainOfThoughtContent>
@@ -1201,6 +1419,11 @@ export function ChatCanvas({
                                   <CitationAwareMessageResponse
                                     citations={version.citations}
                                     onCitationClick={onCitationClick}
+                                    showLoading={
+                                      isStreamingThisVersion &&
+                                      version.isTextPaused === true &&
+                                      messageText.length > 0
+                                    }
                                   >
                                     {messageText}
                                   </CitationAwareMessageResponse>

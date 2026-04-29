@@ -10,6 +10,16 @@ import {
 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@sourceweft/ui-web/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -113,7 +123,7 @@ function ChatListRow({
   canArchive?: boolean;
   item: ChatItem;
   onArchive: (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<void>;
   onOpen: (id: string, title: string) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -191,7 +201,7 @@ function ChatListRow({
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
-              onSelect={() => onDelete(item.id)}
+              onSelect={() => void onDelete(item.id)}
               variant="destructive"
             >
               <Trash2 className="size-4" />
@@ -212,6 +222,7 @@ function ChatSection({
   items,
   onLoadMore,
   onArchive,
+  onClear,
   onDelete,
   onOpen,
   title,
@@ -223,14 +234,71 @@ function ChatSection({
   items: ChatItem[];
   onLoadMore?: () => void;
   onArchive: (id: string) => void;
-  onDelete: (id: string) => void;
+  onClear?: () => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
   onOpen: (id: string, title: string) => void;
   title: string;
 }) {
+  const [isClearing, setIsClearing] = useState(false);
+
+  const handleClear = async () => {
+    if (!onClear || isClearing) return;
+
+    setIsClearing(true);
+    try {
+      await onClear();
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   return (
     <SidebarGroup className="px-0">
-      <SidebarGroupLabel className="h-6 px-3.5 text-[10px] uppercase tracking-[0.16em]">
-        {title}
+      <SidebarGroupLabel className="group/section-label flex h-6 items-center justify-between px-3.5 text-[10px] uppercase tracking-[0.16em]">
+        <span>{title}</span>
+        {onClear && items.length > 0 ? (
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button
+                className="invisible size-5 pointer-events-none text-destructive opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:visible focus-visible:pointer-events-auto focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/section-label:visible group-hover/section-label:pointer-events-auto group-hover/section-label:opacity-100 group-focus-within/section-label:visible group-focus-within/section-label:pointer-events-auto group-focus-within/section-label:opacity-100"
+                size="icon-xs"
+                title={`Clear all ${title.toLowerCase()}`}
+                type="button"
+                variant="destructive"
+              >
+                <Trash2 className="size-3" />
+                <span className="sr-only">Clear all {title.toLowerCase()}</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Clear all {title.toLowerCase()}?</DialogTitle>
+                <DialogDescription>
+                  This will remove {items.length}{" "}
+                  {items.length === 1 ? "chat" : "chats"}
+                  from this section. This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button type="button" variant="outline">
+                    Cancel
+                  </Button>
+                </DialogClose>
+                <DialogClose asChild>
+                  <Button
+                    disabled={isClearing}
+                    onClick={() => void handleClear()}
+                    type="button"
+                    variant="destructive"
+                  >
+                    {isClearing ? "Clearing..." : "Clear all"}
+                  </Button>
+                </DialogClose>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu className="gap-1 py-0.5">
@@ -269,6 +337,8 @@ export function DashboardSidebarChatPanel({
   archivedChats,
   activeChatId,
   onArchiveChat,
+  onClearArchivedChats,
+  onClearPrivateChats,
   onCreateChat,
   onDeleteChat,
   onLoadMoreChats,
@@ -285,8 +355,10 @@ export function DashboardSidebarChatPanel({
   archivedChats: ChatItem[];
   activeChatId: string;
   onArchiveChat: (id: string) => void;
+  onClearArchivedChats: () => Promise<void>;
+  onClearPrivateChats: () => Promise<void>;
   onCreateChat: () => void;
-  onDeleteChat: (id: string) => void;
+  onDeleteChat: (id: string) => Promise<void>;
   onLoadMoreChats: () => void;
   onOpenChat: (id: string, title: string) => void;
   hasMorePrivateChats: boolean;
@@ -365,6 +437,7 @@ export function DashboardSidebarChatPanel({
           items={privateChats}
           onLoadMore={onLoadMoreChats}
           onArchive={onArchiveChat}
+          onClear={onClearPrivateChats}
           onDelete={onDeleteChat}
           onOpen={onOpenChat}
           title="Private chats"
@@ -374,6 +447,7 @@ export function DashboardSidebarChatPanel({
           canArchive={false}
           items={archivedChats}
           onArchive={onArchiveChat}
+          onClear={onClearArchivedChats}
           onDelete={onDeleteChat}
           onOpen={onOpenChat}
           title="Archived"

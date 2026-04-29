@@ -11,6 +11,7 @@ import {
 } from "../metadata";
 import {
   createThreadRecord,
+  deleteThreadRecord,
   findThreadRecord,
   listThreadRecordsByWorkspace,
   updateThreadModelSettingsRecord,
@@ -86,6 +87,32 @@ class ContentThreadService {
     }
 
     return { thread };
+  }
+
+  async deleteThread(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const deleted = await deleteThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+
+    if (!deleted) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    return {
+      deleted: true as const,
+      threadId: input.threadId,
+    };
   }
 
   async updateThreadModelSettings(input: {

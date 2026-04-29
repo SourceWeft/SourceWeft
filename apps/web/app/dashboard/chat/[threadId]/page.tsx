@@ -42,10 +42,6 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
 };
 const EMPTY_CITATIONS: CitationRecord[] = [];
 
-const TOOLS_WITHOUT_UI = new Set([
-  "retrieve",
-]);
-
 type ThreadMessageItem = Awaited<
   ReturnType<typeof contentClient.listThreadMessages>
 >["items"][number];
@@ -58,6 +54,8 @@ type ChatMessageItem = {
   metadata: Record<string, unknown>;
   createdAt: string;
 };
+
+const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
 
 type PendingLatestVersionSelection = {
   userGroupId?: string;
@@ -388,10 +386,20 @@ function normalizeThinkingStepRecord(value: unknown): ThinkingStepRecord | null 
 
   return {
     id,
+    kind:
+      record.kind === "log" ||
+      record.kind === "state" ||
+      record.kind === "verification" ||
+      record.kind === "reasoning_summary"
+        ? record.kind
+        : undefined,
     title,
     status,
     items,
     sequence: toNullableNumber(record.sequence) ?? undefined,
+    description: toNullableString(record.description) ?? undefined,
+    detail: toNullableString(record.detail) ?? undefined,
+    metadata: toObjectRecord(record.metadata) ?? undefined,
   };
 }
 
@@ -405,8 +413,36 @@ function resolveThinkingStepsFromMetadata(metadata: Record<string, unknown>) {
     .filter((item): item is ThinkingStepRecord => item !== null);
 }
 
-function shouldRenderToolCall(toolCall: ToolCallRecord) {
-  return !TOOLS_WITHOUT_UI.has(toolCall.tool);
+function shouldRenderToolCall(
+  toolCall: ToolCallRecord,
+  thinkingSteps: ThinkingStepRecord[] = [],
+) {
+  void toolCall;
+  void thinkingSteps;
+  return true;
+}
+
+function mergeThinkingStepRecords(
+  stepsById: Map<string, ThinkingStepRecord>,
+  nextStep: ThinkingStepRecord,
+) {
+  const existing = stepsById.get(nextStep.id);
+  if (!existing || nextStep.kind !== "log") {
+    stepsById.set(nextStep.id, nextStep);
+    return;
+  }
+
+  stepsById.set(nextStep.id, {
+    ...existing,
+    status: nextStep.status,
+    description: nextStep.description ?? existing.description,
+    detail: nextStep.detail ?? existing.detail,
+    items: nextStep.items.length > 0 ? nextStep.items : existing.items,
+    metadata: {
+      ...(existing.metadata ?? {}),
+      ...(nextStep.metadata ?? {}),
+    },
+  });
 }
 
 type ToolCallEventType =
@@ -485,26 +521,47 @@ function resolveToolCallFromStreamEvent(input: {
       ? input.event.tool
       : existing?.tool ?? "tool");
 
-  const normalizedInput =
-    normalizedToolCall?.input ??
-    toObjectRecord(input.event.input) ??
-    (typeof input.event.query === "string"
+  const eventInput = toObjectRecord(input.event.input);
+  const normalizedInput = {
+    ...(existing?.input ?? {}),
+    ...(eventInput ?? {}),
+    ...(normalizedToolCall?.input ?? {}),
+    ...(typeof input.event.query === "string" && input.event.query.trim().length > 0
       ? { query: input.event.query }
-      : existing?.input ?? {});
+      : {}),
+  };
 
-  const normalizedOutput =
-    normalizeToolOutput(
-      normalizedToolCall?.output ??
-    (input.event.type === "tool-call-event"
-      ? (input.event.data ?? existing?.output ?? null)
+  const eventOutput =
+    input.event.type === "tool-call-event"
+      ? (input.event.data ?? null)
       : input.event.type === "tool-call-result"
-        ? (input.event.output !== undefined
-            ? input.event.output
-            : typeof input.event.hitCount === "number"
-              ? { hitCount: input.event.hitCount }
-              : (existing?.output ?? null))
-        : (existing?.output ?? null)),
-    );
+        ? (input.event.output !== undefined ? input.event.output : null)
+        : null;
+  const mergedOutput = (() => {
+    const existingOutput = toObjectRecord(existing?.output);
+    const normalizedToolOutputRecord = toObjectRecord(normalizedToolCall?.output);
+    const eventOutputRecord = toObjectRecord(eventOutput);
+    if (
+      existingOutput ||
+      normalizedToolOutputRecord ||
+      eventOutputRecord ||
+      typeof input.event.hitCount === "number" ||
+      typeof input.event.query === "string"
+    ) {
+      return {
+        ...(existingOutput ?? {}),
+        ...(eventOutputRecord ?? {}),
+        ...(normalizedToolOutputRecord ?? {}),
+        ...(typeof input.event.query === "string" && input.event.query.trim().length > 0
+          ? { query: input.event.query }
+          : {}),
+        ...(typeof input.event.hitCount === "number" ? { hitCount: input.event.hitCount } : {}),
+      };
+    }
+
+    return normalizedToolCall?.output ?? eventOutput ?? existing?.output ?? null;
+  })();
+  const normalizedOutput = normalizeToolOutput(mergedOutput);
 
   const normalizedStatus = (() => {
     if (normalizedToolCall) {
@@ -562,7 +619,7 @@ function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
   return metadata.toolCalls
     .map((item) => normalizeToolCallRecord(item))
     .filter((item): item is ToolCallRecord => item !== null)
-    .filter((item) => shouldRenderToolCall(item));
+    .filter((item) => shouldRenderToolCall(item, resolveThinkingStepsFromMetadata(metadata)));
 }
 
 function resolveAssistantSourceUserMessageId(
@@ -747,6 +804,7 @@ function buildVersionedMessageGroups(
             ? resolveCitationsFromMetadata(version.metadata)
             : undefined,
           isError: version.metadata.isError === true,
+          isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
           sourceIds: group.role === "user"
             ? resolveMessageSourceIds(version)
             : undefined,
@@ -1454,9 +1512,13 @@ export default function DashboardChatThreadPage({
         };
 
         const syncStreamingToolCalls = () => {
+          const thinkingSteps = [...streamThinkingStepsById.values()];
           const toolCalls = [...streamToolCallsById.values()].filter((toolCall) =>
-            shouldRenderToolCall(toolCall)
+            shouldRenderToolCall(toolCall, thinkingSteps)
           );
+          const shouldShowTextPause =
+            assistantText.length > 0 &&
+            toolCalls.some((toolCall) => toolCall.status === "running");
           flushSync(() => {
             setMessages((previous) =>
               previous.map((message) =>
@@ -1465,6 +1527,7 @@ export default function DashboardChatThreadPage({
                       ...message,
                       metadata: {
                         ...message.metadata,
+                        [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
                         toolCalls,
                       },
                     }
@@ -1476,18 +1539,27 @@ export default function DashboardChatThreadPage({
 
         const syncStreamingThinkingSteps = () => {
           const thinkingSteps = [...streamThinkingStepsById.values()];
+          const toolCalls = [...streamToolCallsById.values()].filter((toolCall) =>
+            shouldRenderToolCall(toolCall, thinkingSteps)
+          );
+          const shouldShowTextPause =
+            assistantText.length > 0 &&
+            (toolCalls.some((toolCall) => toolCall.status === "running") ||
+              thinkingSteps.some((step) => step.status === "in_progress"));
           flushSync(() => {
             setMessages((previous) =>
               previous.map((message) =>
                 message.id === streamingAssistantMessageId
                   ? {
                       ...message,
-                      metadata: {
-                        ...message.metadata,
-                        thinkingSteps,
-                      },
-                    }
-                  : message,
+                        metadata: {
+                          ...message.metadata,
+                          [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
+                          thinkingSteps,
+                          toolCalls,
+                        },
+                      }
+                    : message,
               ),
             );
           });
@@ -1562,6 +1634,23 @@ export default function DashboardChatThreadPage({
                 );
               });
             } else if (data.type === "text-delta" && typeof data.delta === "string") {
+              if (assistantText.length > 0) {
+                flushSync(() => {
+                  setMessages((previous) =>
+                    previous.map((message) =>
+                      message.id === streamingAssistantMessageId
+                        ? {
+                            ...message,
+                            metadata: {
+                              ...message.metadata,
+                              [STREAM_TEXT_PAUSED_KEY]: false,
+                            },
+                          }
+                        : message,
+                    ),
+                  );
+                });
+              }
               enqueueDelta(data.delta);
               startDeltaDrain();
             } else if (isToolCallEvent(data)) {
@@ -1583,7 +1672,7 @@ export default function DashboardChatThreadPage({
             } else if (data.type === "thinking-step") {
               const nextStep = normalizeThinkingStepRecord(data.step);
               if (nextStep) {
-                streamThinkingStepsById.set(nextStep.id, nextStep);
+                mergeThinkingStepRecords(streamThinkingStepsById, nextStep);
                 syncStreamingThinkingSteps();
               }
             } else if (data.type === "citations") {
@@ -1635,7 +1724,10 @@ export default function DashboardChatThreadPage({
                             errorCode: data.code ?? null,
                             userMessageId,
                             sourceUserMessageId: userMessageId,
-                            toolCalls: [...streamToolCallsById.values()].filter(shouldRenderToolCall),
+                            [STREAM_TEXT_PAUSED_KEY]: false,
+                            toolCalls: [...streamToolCallsById.values()].filter((toolCall) =>
+                              shouldRenderToolCall(toolCall, [...streamThinkingStepsById.values()])
+                            ),
                             thinkingSteps: [...streamThinkingStepsById.values()],
                           },
                         }
@@ -1672,6 +1764,7 @@ export default function DashboardChatThreadPage({
                             excludeFromContext: false,
                             userMessageId,
                             sourceUserMessageId: userMessageId,
+                            [STREAM_TEXT_PAUSED_KEY]: false,
                           },
                         }
                       : message,
@@ -1702,6 +1795,21 @@ export default function DashboardChatThreadPage({
                 syncStreamingThinkingSteps();
               }
               streamEnded = true;
+              flushSync(() => {
+                setMessages((previous) =>
+                  previous.map((message) =>
+                    message.id === streamingAssistantMessageId
+                      ? {
+                          ...message,
+                          metadata: {
+                            ...message.metadata,
+                            [STREAM_TEXT_PAUSED_KEY]: false,
+                          },
+                        }
+                      : message,
+                  ),
+                );
+              });
               break readLoop;
             }
           }
@@ -2035,7 +2143,7 @@ export default function DashboardChatThreadPage({
       sourceIds: refreshSourceIds,
       assistantMessageId: input.assistantMessageId,
     });
-  }, [isStreaming, messageGroups, messages, activeSourceIds, streamThreadAction]);
+  }, [isStreaming, messageGroups, streamThreadAction]);
 
   const handleRestartFromMessage = useCallback(
     (input: {

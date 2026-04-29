@@ -27,7 +27,7 @@ export function normalizeGeneratedChatTitle(value: string | undefined) {
 }
 
 export function isPlaceholderThreadTitle(title: string) {
-  return title === "New chat";
+  return title.trim() === "New chat";
 }
 
 export function buildAutomaticTitleCandidates(input: {

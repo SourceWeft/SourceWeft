@@ -1,7 +1,9 @@
 import type { AgentCitation } from "../citation-registry";
 
+const CITATION_MARKER_PATTERN = /\[citation:([^\]\s]+)\]/g;
+
 export function extractCitationKeys(text: string) {
-  return [...text.matchAll(/\[citation:(c\d+)\]/g)].map(
+  return [...text.matchAll(CITATION_MARKER_PATTERN)].map(
     (match) => match[1] ?? "",
   );
 }
@@ -15,7 +17,9 @@ export function validateAssistantCitations(input: {
     return { valid: true, invalidKeys: [] as string[] };
   }
 
-  const allowed = new Set(input.citations.map((citation) => citation.citation));
+  const allowed = new Set(
+    input.citations.flatMap((citation) => [citation.citation, citation.chunkId]),
+  );
   const invalidKeys = [
     ...new Set(referencedKeys.filter((key) => !allowed.has(key))),
   ];
@@ -32,18 +36,22 @@ export function normalizeAssistantCitations(input: {
   const allowed = new Map(
     input.citations.map((citation) => [citation.citation, citation]),
   );
+  const citationByChunkId = new Map(
+    input.citations.map((citation) => [citation.chunkId, citation]),
+  );
   const usedKeys = new Set<string>();
   const invalidKeys = new Set<string>();
 
   const text = input.assistantText
-    .replace(/\s*\[citation:(c\d+)\]/g, (match, key: string) => {
-      if (!allowed.has(key)) {
+    .replace(/\s*\[citation:([^\]\s]+)\]/g, (match, key: string) => {
+      const citation = allowed.get(key) ?? citationByChunkId.get(key);
+      if (!citation) {
         invalidKeys.add(key);
         return "";
       }
 
-      usedKeys.add(key);
-      return match;
+      usedKeys.add(citation.citation);
+      return match.replace(`[citation:${key}]`, `[citation:${citation.citation}]`);
     })
     .replace(/[ \t]+([,.;:!?])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")

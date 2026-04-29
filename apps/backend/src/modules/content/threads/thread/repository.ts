@@ -160,6 +160,25 @@ export async function findThreadRecord(input: {
   return mapThread(row, sourceCounts.get(row.id) ?? 0);
 }
 
+export async function deleteThreadRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+}) {
+  const rows = await db
+    .delete(threads)
+    .where(
+      and(
+        eq(threads.id, input.threadId),
+        eq(threads.teamId, input.teamId),
+        eq(threads.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning({ id: threads.id });
+
+  return rows.length > 0;
+}
+
 export async function updateThreadModelSettingsRecord(input: {
   threadId: string;
   teamId: string;

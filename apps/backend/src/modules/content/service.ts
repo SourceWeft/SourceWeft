@@ -188,6 +188,14 @@ export class ContentService {
     return contentThreadService.getThread(input);
   }
 
+  async deleteThread(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }) {
+    return contentThreadService.deleteThread(input);
+  }
+
   async updateThreadModelSettings(input: {
     workspaceId: string;
     threadId: string;

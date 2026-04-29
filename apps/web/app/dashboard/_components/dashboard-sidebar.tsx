@@ -225,6 +225,8 @@ export function DashboardSidebar() {
   const {
     archivedChats,
     archiveChat,
+    clearArchivedChats,
+    clearPrivateChats,
     deleteChat,
     privateChats,
     hasMorePrivateChats,
@@ -236,6 +238,34 @@ export function DashboardSidebar() {
     workspaceName,
     workspaces,
   } = useDashboardChatState();
+
+  const handleDeleteChat = async (id: string) => {
+    await deleteChat(id);
+
+    if (id === activeThreadId) {
+      router.push("/dashboard/chat");
+    }
+  };
+
+  const handleClearPrivateChats = async () => {
+    const shouldResetRoute = privateChats.some((item) => item.id === activeThreadId);
+
+    await clearPrivateChats();
+
+    if (shouldResetRoute) {
+      router.push("/dashboard/chat");
+    }
+  };
+
+  const handleClearArchivedChats = async () => {
+    const shouldResetRoute = archivedChats.some((item) => item.id === activeThreadId);
+
+    await clearArchivedChats();
+
+    if (shouldResetRoute) {
+      router.push("/dashboard/chat");
+    }
+  };
 
   return (
     <aside
@@ -279,8 +309,10 @@ export function DashboardSidebar() {
               archivedChats={archivedChats}
               activeChatId={activeThreadId}
               onArchiveChat={archiveChat}
+              onClearArchivedChats={handleClearArchivedChats}
+              onClearPrivateChats={handleClearPrivateChats}
               onCreateChat={() => router.push("/dashboard/chat")}
-              onDeleteChat={deleteChat}
+              onDeleteChat={handleDeleteChat}
               onLoadMoreChats={() => void loadMorePrivateChats()}
               onOpenChat={(id) => router.push(`/dashboard/chat/${id}`)}
               hasMorePrivateChats={hasMorePrivateChats}

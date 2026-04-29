@@ -154,7 +154,6 @@ export default function DashboardChatPage() {
 
       const hasModelSettings = Object.keys(modelSettings).length > 0;
       const thread = await createChat({
-        title: text.slice(0, 60),
         modelSettings: hasModelSettings ? modelSettings : undefined,
       });
       if (!thread) {

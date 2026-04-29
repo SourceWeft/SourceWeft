@@ -95,6 +95,175 @@ function summarizeReviewedSources(
   return titles;
 }
 
+function compactTraceText(value: string, maxLength = 96) {
+  const compacted = value.replace(/\s+/g, " ").trim();
+  if (compacted.length <= maxLength) {
+    return compacted;
+  }
+  return `${compacted.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function formatToolInputItems(input: Record<string, unknown>) {
+  const entries = ["query", "path", "pattern", "glob"]
+    .map((key) => {
+      const value = input[key];
+      return typeof value === "string" && value.trim().length > 0
+        ? `${key}: ${compactTraceText(value)}`
+        : null;
+    })
+    .filter((item): item is string => item !== null);
+
+  return entries.slice(0, 3);
+}
+
+function getFilesystemToolStartTitle(toolName: string) {
+  if (toolName === "ls") {
+    return "Listing selected sources";
+  }
+  if (toolName === "glob") {
+    return "Finding matching source paths";
+  }
+  if (toolName === "read_file") {
+    return "Reading source content";
+  }
+  if (toolName === "grep") {
+    return "Searching exact terms";
+  }
+  return null;
+}
+
+function getFilesystemToolEndTitle(toolName: string) {
+  if (toolName === "ls") {
+    return "Listed selected sources";
+  }
+  if (toolName === "glob") {
+    return "Found matching source paths";
+  }
+  if (toolName === "read_file") {
+    return "Read source content";
+  }
+  if (toolName === "grep") {
+    return "Searched exact terms";
+  }
+  return null;
+}
+
+function extractToolOutputText(output: unknown) {
+  if (typeof output === "string") {
+    return output;
+  }
+
+  const record = toObjectRecord(output);
+  if (!record) {
+    return null;
+  }
+
+  if (typeof record.content === "string") {
+    return record.content;
+  }
+
+  const kwargs = toObjectRecord(record.kwargs);
+  const content = kwargs?.content;
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        const itemRecord = toObjectRecord(item);
+        return typeof itemRecord?.text === "string" ? itemRecord.text : null;
+      })
+      .filter((item): item is string => item !== null)
+      .join("\n");
+  }
+
+  return null;
+}
+
+function getFilesystemToolMetadata(toolName: string, output: unknown) {
+  const record = toObjectRecord(output);
+  const metadata: Record<string, unknown> = {};
+
+  if (record && Array.isArray(record.files)) {
+    metadata.resultCount = record.files.length;
+  }
+  if (record && Array.isArray(record.matches)) {
+    metadata.matchCount = record.matches.length;
+  }
+  const outputText = extractToolOutputText(output);
+  if (outputText) {
+    const chunkMatches = outputText.match(/--- chunk |^Chunk:/gm);
+    if (chunkMatches && chunkMatches.length > 0) {
+      metadata.chunkCount = chunkMatches.length;
+    }
+    metadata.truncated = outputText.includes("Output truncated.");
+  }
+
+  if (toolName === "read_file" && metadata.chunkCount === undefined) {
+    metadata.chunkCount = 1;
+  }
+
+  return metadata;
+}
+
+function getFilesystemToolDescription(toolName: string, metadata: Record<string, unknown>) {
+  if (toolName === "ls" && typeof metadata.resultCount === "number") {
+    return `Listed ${metadata.resultCount} entries.`;
+  }
+  if (toolName === "glob" && typeof metadata.resultCount === "number") {
+    return `Found ${metadata.resultCount} matching paths.`;
+  }
+  if (toolName === "grep" && typeof metadata.matchCount === "number") {
+    return `Found ${metadata.matchCount} text matches.`;
+  }
+  if (toolName === "read_file" && typeof metadata.chunkCount === "number") {
+    return `Read ${metadata.chunkCount} source ${metadata.chunkCount === 1 ? "chunk" : "chunks"}.`;
+  }
+  return undefined;
+}
+
+function extractReasoningSummaryFromProviderFields(
+  providerFields: Record<string, unknown> | undefined,
+) {
+  if (!providerFields) {
+    return null;
+  }
+
+  const candidates = [
+    providerFields.reasoning_summary,
+    providerFields.reasoningSummary,
+    providerFields.reasoning,
+    providerFields.summary,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+
+    const record = toObjectRecord(candidate);
+    if (record) {
+      const text =
+        typeof record.summary === "string"
+          ? record.summary
+          : typeof record.text === "string"
+            ? record.text
+            : typeof record.content === "string"
+              ? record.content
+              : null;
+      if (text && text.trim().length > 0) {
+        return text.trim();
+      }
+    }
+  }
+
+  return null;
+}
+
 export async function* invokeDeepAgentTurn(input: {
   prepared: PreparedThreadTurn;
   llm?: LlmExecutionConfig;
@@ -118,7 +287,6 @@ export async function* invokeDeepAgentTurn(input: {
   let usage: DeepAgentTurnOutcome["usage"];
   let finishReason: string | undefined;
   let providerFields: Record<string, unknown> | undefined;
-  let hasStartedSynthesis = false;
   let hasStreamedText = false;
   let eventSequence = 0;
 
@@ -181,16 +349,6 @@ export async function* invokeDeepAgentTurn(input: {
       sourceTitle: input.citationByChunkId.get(candidate.chunkId)?.sourceTitle,
     }));
 
-  yield {
-    type: "thinking-step",
-    step: setThinkingStep({
-      id: "understand",
-      title: "Understanding the question",
-      status: "completed",
-      items: [],
-    }),
-  };
-
   const retrievalTool = createRetrievalTool({
     retrieve: async (query, runtime) => {
       const retrievalStartedAt = Date.now();
@@ -214,30 +372,56 @@ export async function* invokeDeepAgentTurn(input: {
     },
   });
 
-  const preRetrievedContext = await (async () => {
-    if (!shouldPreRetrieveForTurn({
-      messageContent: input.prepared.messageContent,
-      sourceIds: input.prepared.sourceIds,
-    })) {
-      return null;
-    }
-
+  let preRetrievedContext: string | null = null;
+  if (shouldPreRetrieveForTurn({
+    messageContent: input.prepared.messageContent,
+    sourceIds: input.prepared.sourceIds,
+  })) {
     const query = input.prepared.messageContent;
     const retrievalStartedAt = Date.now();
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: "prefetch",
+        kind: "state",
+        title: "Prefetching evidence",
+        status: "in_progress",
+        items: [],
+        description: `Query: ${compactTraceText(query)}`,
+      }),
+    };
     const retrieval = await runToolRetrieval({
       prepared: input.prepared,
       query,
       llm: input.llm,
     });
+    const latencyMs = Date.now() - retrievalStartedAt;
     const citationByChunkId = recordRetrieval({
       callId: "retrieve-prefetch",
       query,
       retrieval,
-      latencyMs: Date.now() - retrievalStartedAt,
+      latencyMs,
     });
     const chunks = buildRetrievalChunks({ retrieval, citationByChunkId });
-    return formatRetrievalContext(chunks);
-  })();
+    const reviewedSources = summarizeReviewedSources(retrieval);
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: "prefetch",
+        kind: "state",
+        title: "Prefetching evidence",
+        status: "completed",
+        items: reviewedSources,
+        description: `Found ${retrieval.fusedCandidates.length} relevant chunks before generation.`,
+        metadata: {
+          hitCount: retrieval.fusedCandidates.length,
+          latencyMs,
+          sourceCount: reviewedSources.length,
+        },
+      }),
+    };
+    preRetrievedContext = formatRetrievalContext(chunks);
+  }
 
   const databaseBackend = new DatabaseKnowledgeBackend({
     teamId: input.prepared.workspace.organizationId,
@@ -315,18 +499,6 @@ export async function* invokeDeepAgentTurn(input: {
       for (const delta of deltas) {
         if (!delta) {
           continue;
-        }
-        if (!hasStartedSynthesis) {
-          hasStartedSynthesis = true;
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: "synthesize",
-              title: "Synthesizing answer with citations",
-              status: "in_progress",
-              items: [],
-            }),
-          };
         }
         assistantContent += delta;
         hasStreamedText = true;
@@ -414,12 +586,36 @@ export async function* invokeDeepAgentTurn(input: {
         yield {
           type: "thinking-step",
           step: setThinkingStep({
-            id: "search",
-            title: "Searching selected sources",
+            id: `retrieve:${toolCallId}`,
+            kind: "state",
+            title: "Searching sources",
             status: "in_progress",
-            items: query.length > 0 ? [`Query: ${query}`] : [],
+            items: [],
+            description: query.length > 0 ? `Query: ${compactTraceText(query)}` : undefined,
+            metadata: {
+              toolCallId,
+              tool: toolName,
+            },
           }),
         };
+      } else {
+        const title = getFilesystemToolStartTitle(toolName);
+        if (title) {
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: `tool:${toolCallId}`,
+              kind: "state",
+              title,
+              status: "in_progress",
+              items: formatToolInputItems(normalizedInput),
+              metadata: {
+                toolCallId,
+                tool: toolName,
+              },
+            }),
+          };
+        }
       }
       continue;
     }
@@ -453,6 +649,7 @@ export async function* invokeDeepAgentTurn(input: {
       const latencyMs = retrievalCall?.latencyMs ?? measuredLatency;
       const output = retrievalCall
         ? {
+            query: retrievalCall.query,
             hitCount: retrievalCall.hitCount,
           }
         : toolPayload.output;
@@ -493,25 +690,47 @@ export async function* invokeDeepAgentTurn(input: {
         yield {
           type: "thinking-step",
           step: setThinkingStep({
-            id: "search",
-            title: "Searched selected sources",
+            id: `retrieve:${toolCallId}`,
+            kind: "state",
+            title: "Searching sources",
             status: "completed",
-            items: query.trim().length > 0 ? [`Query: ${query.trim()}`] : [],
+            items: [],
+            description:
+              typeof retrievalCall?.hitCount === "number"
+                ? `Found ${retrievalCall.hitCount} relevant chunks.`
+                : undefined,
+            metadata: {
+              query,
+              hitCount: retrievalCall?.hitCount,
+              latencyMs,
+              toolCallId,
+              tool: toolName,
+            },
           }),
         };
 
-        const reviewedSources = summarizeReviewedSources(toolRetrieval);
-        yield {
-          type: "thinking-step",
-          step: setThinkingStep({
-            id: "review",
-            title: `Reviewed ${reviewedSources.length} ${
-              reviewedSources.length === 1 ? "file" : "files"
-            }`,
-            status: "completed",
-            items: reviewedSources,
-          }),
-        };
+      } else {
+        const title = getFilesystemToolEndTitle(toolName);
+        if (title) {
+          const metadata = {
+            ...getFilesystemToolMetadata(toolName, output),
+            latencyMs,
+            toolCallId,
+            tool: toolName,
+          };
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: `tool:${toolCallId}`,
+              kind: "state",
+              title,
+              status: "completed",
+              items: formatToolInputItems(nextToolCall.input),
+              description: getFilesystemToolDescription(toolName, metadata),
+              metadata,
+            }),
+          };
+        }
       }
       continue;
     }
@@ -548,6 +767,25 @@ export async function* invokeDeepAgentTurn(input: {
         status: "error",
         toolCall: nextToolCall,
       };
+      const title = getFilesystemToolEndTitle(toolName);
+      if (title) {
+        yield {
+          type: "thinking-step",
+          step: setThinkingStep({
+            id: `tool:${toolCallId}`,
+            kind: "state",
+            title: `${title} failed`,
+            status: "completed",
+            items: formatToolInputItems(nextToolCall.input),
+            description: errorText,
+            metadata: {
+              latencyMs,
+              toolCallId,
+              tool: toolName,
+            },
+          }),
+        };
+      }
     }
   }
 
@@ -560,6 +798,33 @@ export async function* invokeDeepAgentTurn(input: {
 
   const finalRetrieval = latestToolRetrieval;
   const finalCitations = citationRegistry.list();
+  const reasoningSummary = extractReasoningSummaryFromProviderFields(providerFields);
+
+  if (reasoningSummary) {
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: "reasoning-summary",
+        kind: "reasoning_summary",
+        title: "Reasoning summary",
+        status: "completed",
+        items: [],
+        description: compactTraceText(reasoningSummary, 280),
+      }),
+    };
+  }
+
+  yield {
+    type: "thinking-step",
+    step: setThinkingStep({
+      id: "verify",
+      kind: "verification",
+      title: "Checking citations",
+      status: "in_progress",
+      items: [],
+      description: "Normalizing citation markers before saving the answer.",
+    }),
+  };
 
   const citationNormalization = normalizeAssistantCitations({
     assistantText,
@@ -567,6 +832,35 @@ export async function* invokeDeepAgentTurn(input: {
   });
   assistantText = citationNormalization.text;
   const usedCitations = citationNormalization.citations;
+  const availableCitationCount = finalCitations.length;
+  const usedCitationCount = usedCitations.length;
+  const removedCitationCount = citationNormalization.invalidKeys.length;
+
+  yield {
+    type: "thinking-step",
+    step: setThinkingStep({
+      id: "verify",
+      kind: "verification",
+      title: "Checking citations",
+      status: "completed",
+      items: [],
+      description: [
+        `Used ${usedCitationCount} of ${availableCitationCount} available citations`,
+        citationNormalization.removedInvalidCitations
+          ? `removed ${removedCitationCount} unsupported markers`
+          : null,
+      ]
+        .filter((part): part is string => part !== null)
+        .join(" · "),
+      metadata: {
+        availableCitationCount,
+        usedCitationCount,
+        ...(removedCitationCount > 0
+          ? { removedCitationCount }
+          : {}),
+      },
+    }),
+  };
 
   yield {
     type: "citations",
@@ -579,16 +873,6 @@ export async function* invokeDeepAgentTurn(input: {
       delta: sanitizeSseValue(assistantText),
     };
   }
-
-  yield {
-    type: "thinking-step",
-    step: setThinkingStep({
-      id: "synthesize",
-      title: "Synthesized answer with citations",
-      status: "completed",
-      items: [],
-    }),
-  };
 
   const retrievalCalls = retrievalCallOrder
     .map((callId) => retrievalCallsById.get(callId))

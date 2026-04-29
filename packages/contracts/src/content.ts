@@ -268,6 +268,11 @@ export const getThreadResponseSchema = z.object({
   thread: threadSchema,
 });
 
+export const deleteThreadResponseSchema = z.object({
+  deleted: z.literal(true),
+  threadId: z.string(),
+});
+
 export const listThreadsRequestSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().trim().min(1).max(1024).optional(),
@@ -436,6 +441,7 @@ export type ThreadModelSettingsPatch = z.infer<
 export type CreateThreadRequest = z.infer<typeof createThreadRequestSchema>;
 export type CreateThreadResponse = z.infer<typeof createThreadResponseSchema>;
 export type GetThreadResponse = z.infer<typeof getThreadResponseSchema>;
+export type DeleteThreadResponse = z.infer<typeof deleteThreadResponseSchema>;
 export type ListThreadsRequest = z.infer<typeof listThreadsRequestSchema>;
 export type ListThreadsResponse = z.infer<typeof listThreadsResponseSchema>;
 export type Message = z.infer<typeof messageSchema>;

@@ -10,6 +10,7 @@ import type {
   CreateThreadResponse,
   DeleteByokKeyRefResponse,
   DeleteSourceResponse,
+  DeleteThreadResponse,
   GetThreadResponse,
   RefreshThreadRequest,
   RefreshThreadResponse,
@@ -140,6 +141,12 @@ export class ContentClient {
 
   getThread(workspaceId: string, threadId: string) {
     return this.http.get<GetThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}`,
+    );
+  }
+
+  deleteThread(workspaceId: string, threadId: string) {
+    return this.http.delete<DeleteThreadResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}`,
     );
   }
