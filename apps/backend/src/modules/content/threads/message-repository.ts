@@ -97,3 +97,21 @@ export async function listMessageRecordsByThread(input: {
 
   return rows.map(mapMessage);
 }
+
+export async function deleteMessageRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  messageId: string;
+}) {
+  await db
+    .delete(messages)
+    .where(
+      and(
+        eq(messages.id, input.messageId),
+        eq(messages.teamId, input.teamId),
+        eq(messages.workspaceId, input.workspaceId),
+        eq(messages.threadId, input.threadId),
+      ),
+    );
+}

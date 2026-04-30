@@ -56,6 +56,7 @@ type ChatMessageItem = {
 };
 
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
+const STREAM_TEXT_INTERRUPTED_KEY = "isTextInterrupted";
 
 type PendingLatestVersionSelection = {
   userGroupId?: string;
@@ -829,6 +830,7 @@ function buildVersionedMessageGroups(
             : undefined,
           isError: version.metadata.isError === true,
           isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
+          isTextInterrupted: version.metadata[STREAM_TEXT_INTERRUPTED_KEY] === true,
           sourceIds: group.role === "user"
             ? resolveMessageSourceIds(version)
             : undefined,
@@ -1404,6 +1406,7 @@ export default function DashboardChatThreadPage({
 
       let thinkingTimer: number | null = null;
       let persistedUserMessageId = tempUserId ?? input.userMessageId ?? null;
+      let createdUserMessageId: string | null = tempUserId;
       let persistedAssistantMessageId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
@@ -1576,13 +1579,13 @@ export default function DashboardChatThreadPage({
                 message.id === streamingAssistantMessageId
                   ? {
                       ...message,
-                        metadata: {
-                          ...message.metadata,
-                          [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
-                          thinkingSteps,
-                          toolCalls,
-                        },
-                      }
+                      metadata: {
+                        ...message.metadata,
+                        [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
+                        thinkingSteps,
+                        toolCalls,
+                      },
+                    }
                     : message,
               ),
             );
@@ -1637,6 +1640,9 @@ export default function DashboardChatThreadPage({
               const previousUserMessageId = tempUserId;
               const serverUserMessageId = data.messageId;
               persistedUserMessageId = serverUserMessageId;
+              if (createdUserMessageId === tempUserId) {
+                createdUserMessageId = serverUserMessageId;
+              }
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
@@ -1677,6 +1683,23 @@ export default function DashboardChatThreadPage({
               }
               enqueueDelta(data.delta);
               startDeltaDrain();
+            } else if (data.type === "text-interrupted") {
+              flushSync(() => {
+                setMessages((previous) =>
+                  previous.map((message) =>
+                    message.id === streamingAssistantMessageId
+                      ? {
+                          ...message,
+                          metadata: {
+                            ...message.metadata,
+                            [STREAM_TEXT_INTERRUPTED_KEY]: true,
+                            [STREAM_TEXT_PAUSED_KEY]: true,
+                          },
+                        }
+                      : message,
+                  ),
+                );
+              });
             } else if (isToolCallEvent(data)) {
               const nextToolCall = resolveToolCallFromStreamEvent({
                 event: data,
@@ -1875,10 +1898,12 @@ export default function DashboardChatThreadPage({
         const errorMessage = getDisplayErrorMessage(error);
         if (!persistedAssistantMessageId) {
           setMessages((previous) => {
-            const withoutAssistant = previous.filter(
-              (message) => message.id !== streamingAssistantMessageId,
+            const withoutFailedTemporaryMessages = previous.filter(
+              (message) =>
+                message.id !== streamingAssistantMessageId &&
+                (!createdUserMessageId || message.id !== createdUserMessageId),
             );
-            return withoutAssistant;
+            return withoutFailedTemporaryMessages;
           });
         } else {
           window.setTimeout(() => {

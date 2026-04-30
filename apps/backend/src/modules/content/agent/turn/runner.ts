@@ -5,7 +5,6 @@ import {
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import {
   createRetrievalTool,
-  formatRetrievalContext,
 } from "../tools/retrieval-tool";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import { contentRetrievalService } from "../../retrieval/service";
@@ -144,25 +143,6 @@ function compactTraceText(value: string, maxLength = 96) {
   return `${compacted.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
-function shouldRunSourcePreSearch(input: PreparedThreadTurn) {
-  return input.agentMode !== "replay" && input.sourceIds.length > 0;
-}
-
-function withPreSearchedSourceContext(input: {
-  userMessage: string;
-  evidence: string;
-}) {
-  return `<source_search_context>
-search_sources has already searched the current turn's visible selected or referenced sources for the user's request. Use this evidence if it answers the request. Call additional tools only when the evidence is insufficient, ambiguous, conflicting, or surrounding context is needed.
-
-${input.evidence}
-</source_search_context>
-
-<user_request>
-${input.userMessage}
-</user_request>`;
-}
-
 function formatToolInputItems(input: Record<string, unknown>) {
   const entries = ["query", "path", "pattern", "glob"]
     .map((key) => {
@@ -181,7 +161,7 @@ function getFilesystemToolStartTitle(toolName: string) {
     return "Listing selected sources";
   }
   if (toolName === "glob") {
-    return "Finding matching source paths";
+    return "Finding matching sources";
   }
   if (toolName === "read_file") {
     return "Reading source content";
@@ -197,7 +177,7 @@ function getFilesystemToolEndTitle(toolName: string) {
     return "Listed selected sources";
   }
   if (toolName === "glob") {
-    return "Found matching source paths";
+    return "Found matching sources";
   }
   if (toolName === "read_file") {
     return "Read source content";
@@ -242,6 +222,29 @@ function extractToolOutputText(output: unknown) {
   }
 
   return null;
+}
+
+function extractToolPayloadInput(toolPayload: Record<string, unknown>) {
+  for (const candidate of [toolPayload.input, toolPayload.args]) {
+    const normalized = normalizeToolInput(candidate);
+    if (Object.keys(normalized).length > 0) {
+      return normalized;
+    }
+  }
+
+  const data = toObjectRecord(toolPayload.data);
+  if (!data) {
+    return {};
+  }
+
+  for (const candidate of [data.input, data.args]) {
+    const normalized = normalizeToolInput(candidate);
+    if (Object.keys(normalized).length > 0) {
+      return normalized;
+    }
+  }
+
+  return {};
 }
 
 function getFilesystemToolMetadata(toolName: string, output: unknown) {
@@ -348,6 +351,8 @@ export async function* invokeDeepAgentTurn(input: {
   let finishReason: string | undefined;
   let providerFields: Record<string, unknown> | undefined;
   let hasStreamedText = false;
+  let hasTextSinceLastToolBoundary = false;
+  let lastEmittedCitationCount = 0;
   let eventSequence = 0;
 
   const nextSequence = () => {
@@ -365,6 +370,16 @@ export async function* invokeDeepAgentTurn(input: {
         sequence: existing?.sequence ?? nextSequence(),
       },
     });
+  };
+
+  const getNewCitationSnapshot = () => {
+    const citations = citationRegistry.list();
+    if (citations.length <= lastEmittedCitationCount) {
+      return null;
+    }
+
+    lastEmittedCitationCount = citations.length;
+    return citations;
   };
 
   const recordRetrieval = (input: {
@@ -408,128 +423,6 @@ export async function* invokeDeepAgentTurn(input: {
       content: candidate.content,
       sourceTitle: input.citationByChunkId.get(candidate.chunkId)?.sourceTitle,
     }));
-
-  let preSearchedMessageContent: string | null = null;
-
-  if (shouldRunSourcePreSearch(input.prepared)) {
-    const toolCallId = "search-sources-pre";
-    const query = input.prepared.messageContent;
-    const startedAt = Date.now();
-    const runningToolCall: ToolCallTrace = {
-      id: toolCallId,
-      tool: "search_sources",
-      input: { query },
-      output: null,
-      status: "running",
-      latencyMs: null,
-      error: null,
-      sequence: nextSequence(),
-    };
-    toolCallOrder.push(toolCallId);
-    toolCallsById.set(toolCallId, runningToolCall);
-    logger.info("Source pre-search started", {
-      threadId: input.prepared.thread.id,
-      userMessageId: input.prepared.userMessage.id,
-      sourceCount: input.prepared.sourceIds.length,
-    });
-    yield {
-      type: "tool-call-start",
-      id: toolCallId,
-      tool: "search_sources",
-      input: runningToolCall.input,
-      toolCall: runningToolCall,
-    };
-    yield {
-      type: "thinking-step",
-      step: setThinkingStep({
-        id: `search-sources-${toolCallId}`,
-        kind: "state",
-        title: "Searching sources",
-        status: "in_progress",
-        items: [],
-        description: `Query: ${compactTraceText(query)}`,
-        metadata: {
-          query,
-          toolCallId,
-          tool: "search_sources",
-          preSearch: true,
-        },
-      }),
-    };
-    const retrieval = await runToolRetrieval({
-      prepared: input.prepared,
-      query,
-      llm: input.llm,
-    });
-    const latencyMs = Date.now() - startedAt;
-    const citationByChunkId = recordRetrieval({
-      callId: toolCallId,
-      query,
-      retrieval,
-      latencyMs,
-    });
-    const chunks = buildRetrievalChunks({ retrieval, citationByChunkId });
-    const output = {
-      query,
-      hitCount: retrieval.fusedCandidates.length,
-    };
-    const toolCall: ToolCallTrace = {
-      ...runningToolCall,
-      output,
-      status: "completed",
-      latencyMs,
-    };
-    toolCallsById.set(toolCallId, toolCall);
-    logger.info("Source pre-search completed", {
-      threadId: input.prepared.thread.id,
-      userMessageId: input.prepared.userMessage.id,
-      sourceCount: input.prepared.sourceIds.length,
-      hitCount: retrieval.fusedCandidates.length,
-      latencyMs,
-    });
-    yield {
-      type: "tool-call-result",
-      id: toolCallId,
-      tool: "search_sources",
-      input: toolCall.input,
-      output,
-      latencyMs,
-      toolCall,
-      query,
-      hitCount: retrieval.fusedCandidates.length,
-    };
-    yield {
-      type: "tool-call-end",
-      id: toolCallId,
-      tool: "search_sources",
-      latencyMs,
-      status: "completed",
-      toolCall,
-    };
-    yield {
-      type: "thinking-step",
-      step: setThinkingStep({
-        id: `search-sources-${toolCallId}`,
-        kind: "state",
-        title: "Searching sources",
-        status: "completed",
-        items: [],
-        description: `Found ${retrieval.fusedCandidates.length} relevant chunks.`,
-        metadata: {
-          query,
-          hitCount: retrieval.fusedCandidates.length,
-          latencyMs,
-          toolCallId,
-          tool: "search_sources",
-          preSearch: true,
-        },
-      }),
-    };
-    preSearchedMessageContent = withPreSearchedSourceContext({
-      userMessage: input.prepared.messageContent,
-      evidence: formatRetrievalContext(chunks),
-    });
-  }
 
   const retrievalTool = createRetrievalTool({
     searchSources: async (query, runtime) => {
@@ -584,7 +477,7 @@ export async function* invokeDeepAgentTurn(input: {
   const agentMessages = [
     {
       role: "user" as const,
-      content: preSearchedMessageContent ?? input.prepared.messageContent,
+      content: input.prepared.messageContent,
     },
   ];
 
@@ -658,6 +551,7 @@ export async function* invokeDeepAgentTurn(input: {
         }
         assistantContent += delta;
         hasStreamedText = true;
+        hasTextSinceLastToolBoundary = true;
         yield {
           type: "text-delta",
           delta,
@@ -717,7 +611,7 @@ export async function* invokeDeepAgentTurn(input: {
     }
 
     if (event === "on_tool_start") {
-      const normalizedInput = normalizeToolInput(toolPayload.input);
+      const normalizedInput = extractToolPayloadInput(toolPayload);
       toolStartedAtById.set(toolCallId, Date.now());
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
@@ -727,6 +621,20 @@ export async function* invokeDeepAgentTurn(input: {
         error: null,
       };
       toolCallsById.set(toolCallId, nextToolCall);
+      if (hasTextSinceLastToolBoundary) {
+        yield {
+          type: "text-interrupted",
+          reason: "tool-call",
+          toolCallId,
+          tool: toolName,
+        };
+        assistantContent += "\n";
+        yield {
+          type: "text-delta",
+          delta: "\n",
+        };
+        hasTextSinceLastToolBoundary = false;
+      }
       yield {
         type: "tool-call-start",
         id: toolCallId,
@@ -800,6 +708,7 @@ export async function* invokeDeepAgentTurn(input: {
       const retrievalCall = retrievalCallsById.get(toolCallId);
       const toolRetrieval = retrievalsByToolCallId.get(toolCallId) ?? null;
       const startedAt = toolStartedAtById.get(toolCallId);
+      const normalizedInput = extractToolPayloadInput(toolPayload);
       const measuredLatency =
         typeof startedAt === "number" ? Date.now() - startedAt : null;
       const latencyMs = retrievalCall?.latencyMs ?? measuredLatency;
@@ -812,6 +721,9 @@ export async function* invokeDeepAgentTurn(input: {
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
         tool: toolName,
+        input: Object.keys(currentToolCall.input).length > 0
+          ? currentToolCall.input
+          : normalizedInput,
         output,
         status: "completed",
         latencyMs,
@@ -888,6 +800,13 @@ export async function* invokeDeepAgentTurn(input: {
           };
         }
       }
+      const citationSnapshot = getNewCitationSnapshot();
+      if (citationSnapshot) {
+        yield {
+          type: "citations",
+          citations: citationSnapshot,
+        };
+      }
       continue;
     }
 
@@ -945,6 +864,7 @@ export async function* invokeDeepAgentTurn(input: {
     }
   }
 
+  const streamedAssistantText = assistantContent.trim();
   let assistantText =
     assistantContent.trim().length > 0
       ? assistantContent.trim()
@@ -991,6 +911,8 @@ export async function* invokeDeepAgentTurn(input: {
   const availableCitationCount = finalCitations.length;
   const usedCitationCount = usedCitations.length;
   const removedCitationCount = citationNormalization.invalidKeys.length;
+  const missingInlineCitationMarkers =
+    availableCitationCount > 0 && citationNormalization.markerCount === 0;
 
   yield {
     type: "thinking-step",
@@ -1002,6 +924,7 @@ export async function* invokeDeepAgentTurn(input: {
       items: [],
       description: [
         `Used ${usedCitationCount} of ${availableCitationCount} available citations`,
+        missingInlineCitationMarkers ? "no inline citation markers found" : null,
         citationNormalization.removedInvalidCitations
           ? `removed ${removedCitationCount} unsupported markers`
           : null,
@@ -1011,6 +934,9 @@ export async function* invokeDeepAgentTurn(input: {
       metadata: {
         availableCitationCount,
         usedCitationCount,
+        citationMarkerCount: citationNormalization.markerCount,
+        validCitationMarkerCount: citationNormalization.validMarkerCount,
+        ...(missingInlineCitationMarkers ? { missingInlineCitationMarkers: true } : {}),
         ...(removedCitationCount > 0
           ? { removedCitationCount }
           : {}),

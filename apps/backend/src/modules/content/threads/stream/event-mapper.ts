@@ -180,6 +180,16 @@ export function mapDeepAgentEventToSse(
     });
   }
 
+  if (event.type === "text-interrupted") {
+    return toSseData({
+      type: "text-interrupted",
+      id: textId,
+      reason: event.reason,
+      toolCallId: event.toolCallId,
+      tool: event.tool,
+    });
+  }
+
   if (event.type === "tool-call-start") {
     return toSseData({
       type: "tool-call-start",

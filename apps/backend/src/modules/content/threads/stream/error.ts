@@ -1,10 +1,9 @@
-import { createMessageRecord } from "../message-repository";
 import {
-  buildGatewayAuditMetadata,
   recordGatewayOperationEvent,
   type LlmExecutionConfig,
 } from "../../model-gateway-audit";
 import type { ContentError } from "../../errors";
+import { deleteMessageRecord } from "../message-repository";
 import { summarizeRetrievalCalls } from "../turn/service";
 import type { PreparedThreadTurn } from "../turn/service";
 
@@ -35,31 +34,17 @@ export async function recordThreadStreamFailure(input: {
   });
 }
 
-export async function createErrorAssistantMessage(input: {
+export async function rollbackCreatedUserMessage(input: {
   prepared: PreparedThreadTurn;
-  contentError: ContentError;
-  llm?: LlmExecutionConfig;
 }) {
-  return createMessageRecord({
+  if (!input.prepared.createdUserMessage) {
+    return;
+  }
+
+  await deleteMessageRecord({
     teamId: input.prepared.workspace.organizationId,
     workspaceId: input.prepared.workspace.id,
     threadId: input.prepared.thread.id,
-    parentMessageId: input.prepared.assistantMessageParentId,
-    role: "assistant",
-    content: input.contentError.message,
-    createdBy: null,
-    model: input.prepared.modelAlias,
-    metadata: {
-      status: "error",
-      isError: true,
-      excludeFromContext: true,
-      errorCode: input.contentError.code,
-      errorMessage: input.contentError.message,
-      userMessageId: input.prepared.userMessage.id,
-      sourceAssistantMessageId: input.prepared.assistantMessageParentId,
-      versionOf: input.prepared.assistantMessageParentId,
-      modelAlias: input.prepared.modelAlias,
-      gateway: buildGatewayAuditMetadata({ llm: input.llm }),
-    },
+    messageId: input.prepared.userMessage.id,
   });
 }

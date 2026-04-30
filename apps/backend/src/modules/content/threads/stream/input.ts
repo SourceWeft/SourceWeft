@@ -2,12 +2,51 @@ import { randomUUID } from "node:crypto";
 import { ContentError } from "../../errors";
 import { dedupeSourceIds } from "../../source-ids";
 import {
+  collapseSupersededMessages,
+  isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
   resolveSourceIdsFromMessage,
   resolveThreadTurnContext,
 } from "../turn/context";
+import { listMessageRecordsByThread } from "../message-repository";
 import type { StreamThreadEventInput } from "../turn/service";
+import type { AgentCheckpointRef } from "../turn/types";
 import type { EditThreadInput, RefreshThreadInput } from "./types";
+
+async function resolveFallbackEditBaseCheckpoint(input: {
+  workspace: Awaited<ReturnType<typeof resolveThreadTurnContext>>["workspace"];
+  thread: Awaited<ReturnType<typeof resolveThreadTurnContext>>["thread"];
+  latestUserMessageId: string;
+}): Promise<AgentCheckpointRef | null> {
+  const messages = collapseSupersededMessages(
+    await listMessageRecordsByThread({
+      teamId: input.workspace.organizationId,
+      workspaceId: input.workspace.id,
+      threadId: input.thread.id,
+    }),
+  ).filter((message) => !isContextExcludedMessage(message));
+
+  const userIndex = messages.findIndex(
+    (message) => message.id === input.latestUserMessageId,
+  );
+  if (userIndex < 0) {
+    return null;
+  }
+
+  for (let index = userIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") {
+      continue;
+    }
+
+    const checkpoint = resolveAgentCheckpointMetadata(message);
+    if (checkpoint?.final) {
+      return checkpoint.final;
+    }
+  }
+
+  return null;
+}
 
 export async function resolveRefreshThreadStreamInput(
   input: RefreshThreadInput,
@@ -49,7 +88,7 @@ export async function resolveRefreshThreadStreamInput(
 export async function resolveEditThreadStreamInput(
   input: EditThreadInput,
 ): Promise<StreamThreadEventInput> {
-  const { latestUserMessage, latestAssistantMessage } =
+  const { workspace, thread, latestUserMessage, latestAssistantMessage } =
     await resolveThreadTurnContext(input);
 
   if (!latestUserMessage) {
@@ -65,13 +104,12 @@ export async function resolveEditThreadStreamInput(
     ? requestedSourceIds
     : resolveSourceIdsFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
-  if (!checkpoint) {
-    throw new ContentError(
-      409,
-      "THREAD_CHECKPOINT_NOT_AVAILABLE",
-      "The assistant response is missing checkpoint metadata and cannot be edited",
-    );
-  }
+  const agentBaseCheckpoint = checkpoint?.beforeInput ??
+    await resolveFallbackEditBaseCheckpoint({
+      workspace,
+      thread,
+      latestUserMessageId: latestUserMessage.id,
+    });
 
   return {
     workspaceId: input.workspaceId,
@@ -84,7 +122,7 @@ export async function resolveEditThreadStreamInput(
     userMessageParentId: latestUserMessage.id,
     assistantMessageParentId: latestAssistantMessage?.id ?? null,
     agentMode: "fork",
-    agentBaseCheckpoint: checkpoint.beforeInput,
+    agentBaseCheckpoint,
     agentRunThreadId: `thread:${input.threadId}:edit:${latestUserMessage.id}:${input.idempotencyKey ?? randomUUID()}`,
   };
 }

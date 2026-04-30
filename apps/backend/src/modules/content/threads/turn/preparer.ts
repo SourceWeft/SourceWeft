@@ -117,6 +117,7 @@ export async function prepareThreadTurn(
         versionOf: input.userMessageParentId ?? null,
       },
     }));
+  const createdUserMessage = !existingUserMessage;
 
   const isFirstAssistantResponse = !messageRecords.some(
     (message) => message.role === "assistant",
@@ -129,7 +130,9 @@ export async function prepareThreadTurn(
   const latestAssistantCheckpoint = agentMode === "continue"
     ? resolveLatestAssistantFinalCheckpoint(messageRecords)
     : null;
-  const agentBaseCheckpoint = input.agentBaseCheckpoint ?? latestAssistantCheckpoint;
+  const agentBaseCheckpoint = input.agentBaseCheckpoint !== undefined
+    ? input.agentBaseCheckpoint
+    : latestAssistantCheckpoint;
 
   const llmIdempotencyKey =
     input.idempotencyKey ||
@@ -146,6 +149,7 @@ export async function prepareThreadTurn(
     messageContent,
     sourceIds,
     userMessage,
+    createdUserMessage,
     assistantMessageParentId,
     modelAlias,
     chatProfile,

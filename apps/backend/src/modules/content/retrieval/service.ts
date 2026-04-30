@@ -195,6 +195,10 @@ class ContentRetrievalService {
     }
 
     const startedAt = Date.now();
+    let embeddingLatencyMs = 0;
+    let bm25LatencyMs = 0;
+    let vectorLatencyMs = 0;
+    let rerankLatencyMs = 0;
     let queryEmbedding: number[] = [];
     let embeddingAuditMetadata: Record<string, unknown> | null = null;
     if (planner.strategy !== "bm25_only") {
@@ -238,6 +242,7 @@ class ContentRetrievalService {
           throw toContentServiceError(error);
         });
       queryEmbedding = embedResult.embedding;
+      embeddingLatencyMs = Date.now() - embedStartedAt;
       embeddingAuditMetadata = buildGatewayAuditMetadata({
         llm: input.llm,
         provider: embedResult.provider,
@@ -265,10 +270,11 @@ class ContentRetrievalService {
         usage: embedResult.usage,
         traceId: input.userMessageId,
         success: true,
-        latencyMs: Date.now() - embedStartedAt,
+        latencyMs: embeddingLatencyMs,
       });
     }
 
+    const bm25StartedAt = Date.now();
     const lexicalCandidates = await searchChunksByBm25({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
@@ -276,8 +282,10 @@ class ContentRetrievalService {
       topK: DEFAULT_BM25_TOP_K,
       sourceIds,
     });
+    bm25LatencyMs = Date.now() - bm25StartedAt;
 
     let vectorCandidates: RetrievalCandidate[] = [];
+    const vectorStartedAt = Date.now();
     if (planner.strategy === "ann_hnsw" && planner.requestedDimensions) {
       vectorCandidates = await vectorSearchProvider.searchAnn({
         teamId: input.teamId,
@@ -298,6 +306,7 @@ class ContentRetrievalService {
         sourceIds,
       });
     }
+    vectorLatencyMs = Date.now() - vectorStartedAt;
 
     const fusedCandidates = reciprocalRankFusion({
       vectorCandidates,
@@ -305,6 +314,7 @@ class ContentRetrievalService {
       limit: 8,
       rrfK: DEFAULT_RRF_K,
     });
+    const rerankStartedAt = Date.now();
     const rerank = await rerankCandidates({
       queryText: input.queryText,
       candidates: fusedCandidates,
@@ -314,9 +324,11 @@ class ContentRetrievalService {
       userId: input.userId,
       llm: input.llm,
     });
+    rerankLatencyMs = Date.now() - rerankStartedAt;
     const rerankedCandidates = rerank.candidates;
     const finalCandidates =
       rerankedCandidates.length > 0 ? rerankedCandidates : fusedCandidates;
+    const retrievalLatencyMs = Date.now() - startedAt;
 
     const retrievalRunId = await createRetrievalRun({
       teamId: input.teamId,
@@ -335,9 +347,16 @@ class ContentRetrievalService {
       prefilterCount: null,
       candidateCount: Math.max(lexicalCandidates.length, vectorCandidates.length),
       finalResultCount: finalCandidates.length,
-      latencyMs: Date.now() - startedAt,
+      latencyMs: retrievalLatencyMs,
       metadataJson: {
         requestedSourceIds: sourceIds,
+        timings: {
+          embeddingLatencyMs,
+          bm25LatencyMs,
+          vectorLatencyMs,
+          rerankLatencyMs,
+          retrievalLatencyMs,
+        },
         gateway: {
           embedding: embeddingAuditMetadata,
           rerank: rerank.gateway,

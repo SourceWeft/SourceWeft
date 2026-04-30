@@ -88,3 +88,47 @@ test("mapDeepAgentEventToSse sends displayable tool result output", () => {
     { content: "/kb/invoice.md (83466 bytes)" },
   );
 });
+
+test("mapDeepAgentEventToSse preserves tool input parameters", () => {
+  const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
+    type: "tool-call-start",
+    id: "grep-1",
+    tool: "grep",
+    input: { pattern: "DESCRIPTION", path: "/kb" },
+    toolCall: {
+      id: "grep-1",
+      tool: "grep",
+      input: { pattern: "DESCRIPTION", path: "/kb" },
+      output: null,
+      status: "running",
+      latencyMs: null,
+      error: null,
+      sequence: 1,
+    },
+  };
+
+  const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
+
+  assert.deepEqual(data.input, { pattern: "DESCRIPTION", path: "/kb" });
+  assert.deepEqual(
+    (data.toolCall as { input: unknown }).input,
+    { pattern: "DESCRIPTION", path: "/kb" },
+  );
+});
+
+test("mapDeepAgentEventToSse maps text interruption events", () => {
+  const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
+    type: "text-interrupted",
+    reason: "tool-call",
+    toolCallId: "tool-1",
+    tool: "search_sources",
+  };
+
+  const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
+
+  assert.equal(data.type, "text-interrupted");
+  assert.equal(data.id, "text-1");
+  assert.equal(data.reason, "tool-call");
+  assert.equal(data.toolCallId, "tool-1");
+  assert.equal(data.tool, "search_sources");
+});

@@ -1,4 +1,5 @@
 import { getModelGatewayClient } from "../../../../shared/model-gateway/index";
+import { logger } from "../../../../shared/logger";
 import { buildChatTitlePrompt } from "../../agent/prompts";
 import {
   buildGatewayRequestMetadata,
@@ -82,8 +83,22 @@ class ContentThreadTurnService {
         },
       );
 
-      return normalizeGeneratedChatTitle(resolveAssistantContent({ raw: completion.raw }));
-    } catch {
+      const title = normalizeGeneratedChatTitle(resolveAssistantContent({ raw: completion.raw }));
+      logger.debug("Generated automatic thread title candidate", {
+        threadId: input.prepared.thread.id,
+        userMessageId: input.prepared.userMessage.id,
+        modelAlias: input.prepared.modelAlias,
+        hasGeneratedTitle: Boolean(title),
+      });
+      return title;
+    } catch (error) {
+      logger.debug("Automatic thread title generation failed", {
+        threadId: input.prepared.thread.id,
+        userMessageId: input.prepared.userMessage.id,
+        modelAlias: input.prepared.modelAlias,
+        gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

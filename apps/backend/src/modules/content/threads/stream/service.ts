@@ -8,17 +8,15 @@ import {
 } from "../turn/service";
 import { mapDeepAgentEventToSse } from "./event-mapper";
 import {
-  createErrorAssistantMessage,
   recordThreadStreamFailure,
+  rollbackCreatedUserMessage,
 } from "./error";
-import { toSseData, withTimeout } from "./helpers";
+import { toSseData } from "./helpers";
 import {
   resolveEditThreadStreamInput,
   resolveRefreshThreadStreamInput,
 } from "./input";
 import type { EditThreadInput, RefreshThreadInput } from "./types";
-
-const CHAT_TITLE_WAIT_MS = 5000;
 
 function shouldGenerateAutomaticThreadTitle(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
@@ -35,15 +33,33 @@ async function generateAndApplyGeneratedThreadTitle(input: {
 }) {
   try {
     if (!shouldGenerateAutomaticThreadTitle(input.prepared)) {
+      logger.debug("Skipped automatic thread title generation", {
+        threadId: input.prepared.thread.id,
+        userMessageId: input.prepared.userMessage.id,
+        isFirstAssistantResponse: input.prepared.isFirstAssistantResponse,
+        assistantMessageParentId: input.prepared.assistantMessageParentId,
+        initialTitle: input.prepared.initialTitle,
+      });
       return;
     }
+
+    logger.debug("Generating automatic thread title", {
+      threadId: input.prepared.thread.id,
+      userMessageId: input.prepared.userMessage.id,
+      modelAlias: input.prepared.modelAlias,
+      initialTitle: input.prepared.initialTitle,
+    });
 
     const titleTask = input.titleTask ?? input.turnService.generateChatTitle({
       prepared: input.prepared,
       llm: input.llm,
     });
-    const generatedTitle = await withTimeout(titleTask, CHAT_TITLE_WAIT_MS);
+    const generatedTitle = await titleTask;
     if (!generatedTitle) {
+      logger.debug("Automatic thread title generation returned empty title", {
+        threadId: input.prepared.thread.id,
+        userMessageId: input.prepared.userMessage.id,
+      });
       return;
     }
 
@@ -52,9 +68,22 @@ async function generateAndApplyGeneratedThreadTitle(input: {
       title: generatedTitle,
       expectedTitle: input.prepared.initialTitle,
     });
-    if (titleThread) {
-      input.yieldTitleUpdate?.({ id: titleThread.id, title: titleThread.title });
+    if (!titleThread) {
+      logger.debug("Automatic thread title was not applied", {
+        threadId: input.prepared.thread.id,
+        userMessageId: input.prepared.userMessage.id,
+        generatedTitle,
+        expectedTitle: input.prepared.initialTitle,
+      });
+      return;
     }
+
+    logger.debug("Applied automatic thread title", {
+      threadId: titleThread.id,
+      userMessageId: input.prepared.userMessage.id,
+      title: titleThread.title,
+    });
+    input.yieldTitleUpdate?.({ id: titleThread.id, title: titleThread.title });
   } catch (error) {
     logger.warn("Failed to generate automatic thread title", {
       threadId: input.prepared.thread.id,
@@ -66,7 +95,10 @@ async function generateAndApplyGeneratedThreadTitle(input: {
 }
 
 class ContentThreadStreamService {
-  constructor(private readonly turnService: ContentThreadTurnService) {}
+  constructor(
+    private readonly turnService: ContentThreadTurnService,
+    private readonly invokeAgentTurn = invokeDeepAgentTurn,
+  ) {}
 
   async refreshThread(input: RefreshThreadInput) {
     return this.streamThread(await resolveRefreshThreadStreamInput(input));
@@ -117,15 +149,19 @@ class ContentThreadStreamService {
 
     try {
       let outcome: DeepAgentTurnOutcome | null = null;
-      const agentEvents = invokeDeepAgentTurn({
+      const agentEvents = this.invokeAgentTurn({
         prepared,
         llm: input.llm,
       });
       let nextAgentEvent = agentEvents.next();
       let titleSettled = false;
-      let nextTitleEvent: Promise<"title"> | null = titleTask
-        ? titleTask.then(() => "title" as const)
+      const titleCompletion: Promise<"title"> | null = titleTask
+        ? titleTask.then(() => {
+            titleSettled = true;
+            return "title" as const;
+          })
         : null;
+      let nextTitleEvent: Promise<"title"> | null = titleCompletion;
 
       while (true) {
         const result = await Promise.race([
@@ -134,7 +170,6 @@ class ContentThreadStreamService {
         ]);
 
         if (result.type === "title") {
-          titleSettled = true;
           nextTitleEvent = null;
           yield* emitTitleUpdates();
           continue;
@@ -152,11 +187,6 @@ class ContentThreadStreamService {
         }
 
         yield mapDeepAgentEventToSse(event, textId);
-        yield* emitTitleUpdates();
-      }
-
-      if (!titleSettled) {
-        await titleTask;
         yield* emitTitleUpdates();
       }
 
@@ -193,10 +223,10 @@ class ContentThreadStreamService {
         userMessageId: prepared.userMessage.id,
         parentMessageId: assistantMessage.parentMessageId,
       });
-      if (titleTask) {
+      if (titleTask && !titleSettled) {
         await titleTask;
-        yield* emitTitleUpdates();
       }
+      yield* emitTitleUpdates();
     } catch (error) {
       const contentError =
         error instanceof ContentError ? error : toContentServiceError(error);
@@ -207,11 +237,7 @@ class ContentThreadStreamService {
         operation: "chat.stream",
         llm: input.llm,
       });
-      const errorAssistantMessage = await createErrorAssistantMessage({
-        prepared,
-        contentError,
-        llm: input.llm,
-      });
+      await rollbackCreatedUserMessage({ prepared });
 
       yield toSseData({ type: "text-end", id: textId });
 
@@ -219,9 +245,7 @@ class ContentThreadStreamService {
         type: "error",
         code: contentError.code,
         error: contentError.message,
-        messageId: errorAssistantMessage.id,
         userMessageId: prepared.userMessage.id,
-        parentMessageId: errorAssistantMessage.parentMessageId,
       });
     }
 
@@ -234,7 +258,7 @@ class ContentThreadStreamService {
 
     const outcome = await (async () => {
       let doneOutcome: DeepAgentTurnOutcome | null = null;
-      for await (const event of invokeDeepAgentTurn({
+      for await (const event of this.invokeAgentTurn({
         prepared,
         llm: input.llm,
       })) {
@@ -261,6 +285,7 @@ class ContentThreadStreamService {
         operation: "chat.complete",
         llm: input.llm,
       });
+      await rollbackCreatedUserMessage({ prepared });
       throw contentError;
     });
 

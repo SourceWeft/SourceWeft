@@ -41,19 +41,24 @@ export function normalizeAssistantCitations(input: {
   );
   const usedKeys = new Set<string>();
   const invalidKeys = new Set<string>();
+  let markerCount = 0;
+  let validMarkerCount = 0;
 
   const text = input.assistantText
     .replace(/\s*\[citation:([^\]\s]+)\]/g, (match, key: string) => {
+      markerCount += 1;
       const citation = allowed.get(key) ?? citationByChunkId.get(key);
       if (!citation) {
         invalidKeys.add(key);
         return "";
       }
 
+      validMarkerCount += 1;
       usedKeys.add(citation.citation);
       return match.replace(`[citation:${key}]`, `[citation:${citation.citation}]`);
     })
     .replace(/[ \t]+([,.;:!?])/g, "$1")
+    .replace(/[ \t]+([，。；：！？])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
@@ -66,5 +71,7 @@ export function normalizeAssistantCitations(input: {
     citations,
     invalidKeys: [...invalidKeys],
     removedInvalidCitations: invalidKeys.size > 0,
+    markerCount,
+    validMarkerCount,
   };
 }

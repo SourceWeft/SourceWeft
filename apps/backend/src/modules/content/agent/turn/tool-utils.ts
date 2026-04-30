@@ -12,6 +12,14 @@ export function resolveToolCallId(input: {
 }
 
 export function normalizeToolInput(value: unknown): Record<string, unknown> {
+  if (typeof value === "string" && value.trim().length > 0) {
+    try {
+      return normalizeToolInput(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }

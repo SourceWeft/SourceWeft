@@ -83,11 +83,6 @@ export function matchesGrepGlob(input: {
   );
 }
 
-function buildSourceTitlePath(source: VirtualFsSource) {
-  const title = (source.fileName ?? source.title).trim().replace(/^\/+/, "");
-  return title.length > 0 ? `/kb/${title}`.replace(/\/+/g, "/") : null;
-}
-
 function compileGrepRegex(pattern: string) {
   const normalized = pattern.trim().replace(/^\(\?i\)/, "");
   if (normalized.length === 0) {
@@ -130,15 +125,21 @@ function lineNumberContent(content: string) {
     .join("\n");
 }
 
+function buildSourceHeader(source: VirtualFsSource) {
+  const originalFile = source.fileName?.trim() || source.title;
+  return [
+    `Source: ${source.title}`,
+    originalFile ? `Original file: ${originalFile}` : null,
+    source.mimeType ? `Original MIME: ${source.mimeType}` : null,
+    "Virtual MIME: text/markdown",
+  ].filter((line): line is string => line !== null);
+}
+
 function buildCandidatePaths(sources: VirtualFsSource[], includeChunks: boolean) {
   const paths: FileInfo[] = [];
   for (const source of sources) {
     const modifiedAt = formatTimestamp(source.updatedAt);
-    const sourceTitlePath = buildSourceTitlePath(source);
-    paths.push({ path: source.filePath, is_dir: false, size: source.sizeBytes ?? undefined, modified_at: modifiedAt });
-    if (sourceTitlePath && sourceTitlePath !== source.filePath) {
-      paths.push({ path: sourceTitlePath, is_dir: false, size: source.sizeBytes ?? undefined, modified_at: modifiedAt });
-    }
+    paths.push({ path: source.filePath, is_dir: false, modified_at: modifiedAt });
     paths.push({ path: `${source.dirPath}/`, is_dir: true, modified_at: modifiedAt });
     if (includeChunks) {
       for (let chunkNo = 0; chunkNo < source.chunkCount; chunkNo += 1) {
@@ -166,7 +167,6 @@ function appendRegexMatches(input: {
     glob: input.glob,
     globMatcher: input.globMatcher,
     sourceFilePath: input.source.filePath,
-    sourceTitlePath: buildSourceTitlePath(input.source),
     chunkPath,
   })) {
     return;
@@ -312,7 +312,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           mimeType: "text/markdown",
           content: [
             `Path: ${buildChunkFilePath(source, chunk.chunkNo)}`,
-            `Source: ${chunk.sourceTitle}`,
+            ...buildSourceHeader(source),
             `Chunk: ${chunk.chunkNo}`,
             chunk.headingPath ? `Heading: ${chunk.headingPath}` : null,
             `Citation: [citation:${citation.citation}]`,
@@ -368,8 +368,8 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           mimeType: "text/markdown",
           content: [
             `Path: ${source.filePath}`,
-            `Source: ${source.title}`,
-            "This virtual file is assembled from indexed chunks. Cite facts using the citation shown for the relevant chunk.",
+            ...buildSourceHeader(source),
+            "This virtual file is assembled from indexed chunks. Every final-answer claim that uses this content MUST cite the relevant chunk marker shown below using the exact [citation:id] format. In markdown tables, put the marker inside the relevant source-grounded value cell.",
             "",
             sections.join("\n\n"),
             more,
@@ -447,7 +447,6 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           glob,
           globMatcher: matcher,
           sourceFilePath: source.filePath,
-          sourceTitlePath: buildSourceTitlePath(source),
           chunkPath: buildChunkFilePath(source, chunk.chunkNo),
         })) {
           globMatchedChunkCount += 1;
@@ -500,7 +499,6 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
               glob,
               globMatcher: matcher,
               sourceFilePath: source.filePath,
-              sourceTitlePath: buildSourceTitlePath(source),
               chunkPath: buildChunkFilePath(source, chunk.chunkNo),
             })) {
               globMatchedChunkCount += 1;
@@ -568,7 +566,6 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           glob,
           globMatcher: matcher,
           sourceFilePath: source.filePath,
-          sourceTitlePath: buildSourceTitlePath(source),
           chunkPath: buildChunkFilePath(source, candidate.chunkNo),
         })) {
           globMatchedChunkCount += 1;
@@ -617,7 +614,6 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             glob,
             globMatcher: matcher,
             sourceFilePath: source.filePath,
-            sourceTitlePath: buildSourceTitlePath(source),
             chunkPath: buildChunkFilePath(source, candidate.chunkNo),
           })) {
             globMatchedChunkCount += 1;

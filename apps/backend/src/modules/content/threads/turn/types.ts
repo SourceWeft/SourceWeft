@@ -43,6 +43,7 @@ export type PreparedThreadTurn = {
   messageContent: string;
   sourceIds: string[];
   userMessage: MessageRecord;
+  createdUserMessage: boolean;
   assistantMessageParentId: string | null;
   modelAlias: string;
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;

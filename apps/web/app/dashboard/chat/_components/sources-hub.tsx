@@ -232,7 +232,7 @@ function SourceRow({
       className={cn(
         "group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
         !isBusy && !isEditing && "cursor-pointer",
-        selected ? "bg-primary/5" : "hover:bg-accent/60",
+        selected ? "hover:bg-primary/5" : "hover:bg-accent/60",
       )}
       onClick={handleRowClick}
     >
@@ -643,12 +643,6 @@ export function SourcesHub({
     setActiveTab("Library");
     setCitationScope("current");
   }, [mode]);
-
-  useEffect(() => {
-    if (activeCitationIndex !== null) {
-      setActiveTab("Citations");
-    }
-  }, [activeCitationIndex]);
 
   const refreshSources = useCallback(async () => {
     if (!workspaceId) {

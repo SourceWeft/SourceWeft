@@ -101,6 +101,7 @@ export type MessageVersion = {
   citations?: CitationRecord[];
   isError?: boolean;
   isTextPaused?: boolean;
+  isTextInterrupted?: boolean;
   sourceIds?: string[];
   sourceAssistantMessageId?: string | null;
   sourceUserMessageId?: string | null;
@@ -584,6 +585,15 @@ function getThinkingMetadataParts(metadata: Record<string, unknown> | undefined)
     .filter((item): item is string => item !== null);
 }
 
+function getToolStepMetadataParts(metadata: Record<string, unknown> | undefined) {
+  if (!metadata) {
+    return [] as string[];
+  }
+
+  const { hitCount: _hitCount, latencyMs: _latencyMs, ...rest } = metadata;
+  return getThinkingMetadataParts(rest);
+}
+
 function getToolCallDetailParts(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
   const hitCount = getToolHitCount(toolCall, toolStep);
   const latencyMs = toolCall.latencyMs ??
@@ -619,15 +629,6 @@ function ToolCallDetails({
         </p>
       ) : null}
       {toolStep?.detail ? <p>{toolStep.detail}</p> : null}
-      {toolStep?.items && toolStep.items.length > 0 ? (
-        <ChainOfThoughtSearchResults>
-          {toolStep.items.map((result) => (
-            <ChainOfThoughtSearchResult key={`${toolCall.id}:${result}`} title={result}>
-              <span className="max-w-[220px] truncate">{result}</span>
-            </ChainOfThoughtSearchResult>
-          ))}
-        </ChainOfThoughtSearchResults>
-      ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
       {toolCall.error ? <p className="text-destructive">{toolCall.error}</p> : null}
     </div>
@@ -721,9 +722,11 @@ function ReasoningTrace({
       onOpenChange={setIsOpen}
       open={isOpen}
     >
-      <ChainOfThoughtHeader className="py-0">
+      <ChainOfThoughtHeader
+        className="py-0"
+        icon={isThinking ? <Loader2 className="size-4 animate-spin" /> : undefined}
+      >
         <span className="flex min-w-0 items-center gap-2">
-          {isThinking ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : null}
           <span className="truncate">
             {activeStep ? `Thinking · ${activeStep.title}` : "Thinking"}
           </span>
@@ -796,7 +799,7 @@ function ReasoningTrace({
             }
 
             const { toolCall, toolStep } = item;
-            const metadataParts = getThinkingMetadataParts(toolStep?.metadata);
+            const metadataParts = getToolStepMetadataParts(toolStep?.metadata);
             const detailParts = getToolCallDetailParts(toolCall, toolStep);
             const summary = [
               toolStep?.description ?? null,

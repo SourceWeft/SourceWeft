@@ -28,6 +28,12 @@ export type DeepAgentTurnEvent =
       delta: string;
     }
   | {
+      type: "text-interrupted";
+      reason: "tool-call";
+      toolCallId: string;
+      tool: string;
+    }
+  | {
       type: "tool-call-start";
       id: string;
       tool: string;
