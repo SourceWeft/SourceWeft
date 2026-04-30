@@ -132,6 +132,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
         vectorStrategy: retrieval?.planner.strategy ?? null,
         annIndexUsed: retrieval?.planner.annIndexUsed ?? null,
         citations: input.citations,
+        availableCitations: input.availableCitations ?? input.citations,
       },
     },
   });

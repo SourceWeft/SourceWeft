@@ -257,5 +257,6 @@ export function mapDeepAgentEventToSse(
   return toSseData({
     type: "citations",
     citations: event.citations,
+    ...(event.availableCitations ? { availableCitations: event.availableCitations } : {}),
   });
 }

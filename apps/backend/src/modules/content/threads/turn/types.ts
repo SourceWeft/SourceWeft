@@ -92,6 +92,7 @@ export type FinalizeThreadTurnCommand = {
   prepared: PreparedThreadTurn;
   retrieval: Awaited<ReturnType<typeof contentRetrievalService.runRetrieval>> | null;
   citations: AgentCitation[];
+  availableCitations?: AgentCitation[];
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];

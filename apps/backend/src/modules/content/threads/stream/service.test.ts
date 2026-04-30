@@ -13,6 +13,7 @@ const outcome: DeepAgentTurnOutcome = {
   assistantContent: "Answer",
   retrieval: null,
   citations: [],
+  availableCitations: [],
   retrievalCalls: [],
   toolCalls: [],
   thinkingSteps: [],
@@ -207,6 +208,60 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
   assert.equal(citationIndex < textIndex, true);
   assert.deepEqual(
     (events[citationIndex]?.citations as Array<Record<string, unknown>> | undefined)?.map(
+      (item) => item.sourceTitle,
+    ),
+    ["invoice.pdf"],
+  );
+});
+
+test("streamThreadEvents sends available citations when final text uses none", async () => {
+  const citation = {
+    citation: "c1",
+    sourceId: "source-1",
+    sourceTitle: "invoice.pdf",
+    documentId: "document-1",
+    chunkId: "chunk-1",
+    chunkNo: 0,
+    score: 1,
+    excerpt: "Invoice total is 50.",
+    quoteText: "Invoice total is 50.",
+    origin: "read_file" as const,
+  };
+  const turnService = createTurnService({ title: null });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "citations",
+        citations: [],
+        availableCitations: [citation],
+      };
+      yield { type: "text-delta", delta: "Total is ¥50.00" };
+      yield {
+        type: "done",
+        outcome: { ...outcome, citations: [], availableCitations: [citation] },
+      };
+    },
+    async () => {},
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  const citationEvent = events.find((event) => event.type === "citations");
+
+  assert.ok(citationEvent);
+  assert.deepEqual(citationEvent.citations, []);
+  assert.deepEqual(
+    (citationEvent.availableCitations as Array<Record<string, unknown>> | undefined)?.map(
       (item) => item.sourceTitle,
     ),
     ["invoice.pdf"],

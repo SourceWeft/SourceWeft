@@ -237,6 +237,7 @@ class ContentThreadStreamService {
           prepared,
           retrieval: outcome.retrieval,
           citations: outcome.citations,
+          availableCitations: outcome.availableCitations,
           retrievalCalls: outcome.retrievalCalls,
           toolCalls: outcome.toolCalls,
           thinkingSteps: outcome.thinkingSteps,
@@ -334,6 +335,7 @@ class ContentThreadStreamService {
         prepared,
         retrieval: outcome.retrieval,
         citations: outcome.citations,
+        availableCitations: outcome.availableCitations,
         retrievalCalls: outcome.retrievalCalls,
         toolCalls: outcome.toolCalls,
         thinkingSteps: outcome.thinkingSteps,
@@ -367,6 +369,7 @@ class ContentThreadStreamService {
         vectorStrategy: outcome.retrieval?.planner.strategy ?? null,
         annIndexUsed: outcome.retrieval?.planner.annIndexUsed ?? null,
         citations: outcome.citations,
+        availableCitations: outcome.availableCitations,
       },
     };
   }

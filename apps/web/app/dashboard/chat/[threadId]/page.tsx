@@ -86,7 +86,10 @@ function toNullableString(value: unknown): string | null {
 
 function resolveCitationsFromMetadata(metadata: Record<string, unknown>): CitationRecord[] {
   const retrieval = toObjectRecord(metadata.retrieval);
-  return normalizeCitationRecords(retrieval?.citations);
+  const citations = normalizeCitationRecords(retrieval?.citations);
+  return citations.length > 0
+    ? citations
+    : normalizeCitationRecords(retrieval?.availableCitations);
 }
 
 function normalizeCitationRecords(value: unknown): CitationRecord[] {
@@ -498,6 +501,7 @@ type StreamEventPayload = {
   toolCall?: unknown;
   step?: unknown;
   citations?: unknown;
+  availableCitations?: unknown;
   threadId?: string;
   title?: string;
 };
@@ -1610,7 +1614,10 @@ export default function DashboardChatThreadPage({
           });
         };
 
-        const syncStreamingCitations = (citations: CitationRecord[]) => {
+        const syncStreamingCitations = (input: {
+          citations: CitationRecord[];
+          availableCitations?: CitationRecord[];
+        }) => {
           flushSync(() => {
             setMessages((previous) =>
               previous.map((message) =>
@@ -1621,7 +1628,9 @@ export default function DashboardChatThreadPage({
                         ...message.metadata,
                         retrieval: {
                           ...(toObjectRecord(message.metadata.retrieval) ?? {}),
-                          citations,
+                          citations: input.citations,
+                          availableCitations:
+                            input.availableCitations ?? input.citations,
                         },
                       },
                     }
@@ -1742,7 +1751,13 @@ export default function DashboardChatThreadPage({
               }
             } else if (data.type === "citations") {
               const citations = normalizeCitationRecords(data.citations);
-              syncStreamingCitations(citations);
+              const availableCitations = normalizeCitationRecords(data.availableCitations);
+              syncStreamingCitations({
+                citations,
+                availableCitations: availableCitations.length > 0
+                  ? availableCitations
+                  : citations,
+              });
             } else if (
               data.type === "thread-title-update" &&
               typeof data.threadId === "string" &&

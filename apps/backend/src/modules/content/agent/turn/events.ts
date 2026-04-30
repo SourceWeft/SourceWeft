@@ -13,6 +13,7 @@ export type DeepAgentTurnOutcome = {
   assistantContent: string;
   retrieval: Awaited<ReturnType<typeof contentRetrievalService.runRetrieval>> | null;
   citations: AgentCitation[];
+  availableCitations: AgentCitation[];
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
@@ -82,6 +83,7 @@ export type DeepAgentTurnEvent =
   | {
       type: "citations";
       citations: ReturnType<typeof buildCitationMetadata>;
+      availableCitations?: ReturnType<typeof buildCitationMetadata>;
     }
   | {
       type: "done";

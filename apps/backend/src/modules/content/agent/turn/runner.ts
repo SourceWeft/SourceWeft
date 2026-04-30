@@ -947,6 +947,7 @@ export async function* invokeDeepAgentTurn(input: {
   yield {
     type: "citations",
     citations: usedCitations,
+    availableCitations: finalCitations,
   };
 
   if (!hasStreamedText) {
@@ -994,6 +995,7 @@ export async function* invokeDeepAgentTurn(input: {
       providerFields,
       retrieval: finalRetrieval,
       citations: usedCitations,
+      availableCitations: finalCitations,
       retrievalCalls,
       toolCalls,
       thinkingSteps: listThinkingSteps({

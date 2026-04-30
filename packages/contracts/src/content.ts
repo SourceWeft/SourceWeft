@@ -27,6 +27,7 @@ const retrievalResponseSchema = z.object({
   vectorStrategy: retrievalVectorStrategySchema.nullable(),
   annIndexUsed: z.string().nullable(),
   citations: z.array(retrievalCitationSchema),
+  availableCitations: z.array(retrievalCitationSchema).optional(),
 });
 
 const sourceDocumentSchema = z.object({
