@@ -1705,7 +1705,19 @@ export default function DashboardChatThreadPage({
                 );
               });
             } else if (data.type === "text-delta" && typeof data.delta === "string") {
-              if (assistantText.length > 0) {
+              const hasVisibleDelta = data.delta.trim().length > 0;
+              const hasRunningTool = [...streamToolCallsById.values()].some(
+                (toolCall) => toolCall.status === "running",
+              );
+              const hasRunningStep = [...streamThinkingStepsById.values()].some(
+                (step) => step.status === "in_progress",
+              );
+              if (
+                assistantText.length > 0 &&
+                hasVisibleDelta &&
+                !hasRunningTool &&
+                !hasRunningStep
+              ) {
                 flushSync(() => {
                   setMessages((previous) =>
                     previous.map((message) =>
