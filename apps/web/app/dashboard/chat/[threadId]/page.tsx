@@ -84,12 +84,12 @@ function toNullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function resolveCitationsFromMetadata(metadata: Record<string, unknown>): CitationRecord[] {
+function resolveCitationMetadata(metadata: Record<string, unknown>) {
   const retrieval = toObjectRecord(metadata.retrieval);
-  const citations = normalizeCitationRecords(retrieval?.citations);
-  return citations.length > 0
-    ? citations
-    : normalizeCitationRecords(retrieval?.availableCitations);
+  return {
+    citations: normalizeCitationRecords(retrieval?.citations),
+    availableCitations: normalizeCitationRecords(retrieval?.availableCitations),
+  };
 }
 
 function normalizeCitationRecords(value: unknown): CitationRecord[] {
@@ -828,29 +828,34 @@ function buildVersionedMessageGroups(
         turnId: group.turnId,
         latestVersionId: latestVersion?.id ?? groupId,
         role: group.role,
-        versions: sortedVersions.map((version) => ({
-          id: version.id,
-          content: version.content,
-          citations: group.role === "assistant"
-            ? resolveCitationsFromMetadata(version.metadata)
-            : undefined,
-          isError: version.metadata.isError === true,
-          isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
-          isTextInterrupted: version.metadata[STREAM_TEXT_INTERRUPTED_KEY] === true,
-          sourceIds: group.role === "user"
-            ? resolveMessageSourceIds(version)
-            : undefined,
-          sourceAssistantMessageId: group.role === "assistant"
-            ? (toNullableString(version.metadata.sourceAssistantMessageId) ?? null)
-            : undefined,
-          sourceUserMessageId: group.role === "assistant"
-            ? (assistantSourceUserById.get(version.id) ?? null)
-            : undefined,
-          toolCalls: resolveToolCallsFromMetadata(version.metadata),
-          thinkingSteps: group.role === "assistant"
-            ? resolveThinkingStepsFromMetadata(version.metadata)
-            : undefined,
-        })),
+        versions: sortedVersions.map((version) => {
+          const citationMetadata = group.role === "assistant"
+            ? resolveCitationMetadata(version.metadata)
+            : null;
+
+          return {
+            id: version.id,
+            content: version.content,
+            citations: citationMetadata?.citations,
+            availableCitations: citationMetadata?.availableCitations,
+            isError: version.metadata.isError === true,
+            isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
+            isTextInterrupted: version.metadata[STREAM_TEXT_INTERRUPTED_KEY] === true,
+            sourceIds: group.role === "user"
+              ? resolveMessageSourceIds(version)
+              : undefined,
+            sourceAssistantMessageId: group.role === "assistant"
+              ? (toNullableString(version.metadata.sourceAssistantMessageId) ?? null)
+              : undefined,
+            sourceUserMessageId: group.role === "assistant"
+              ? (assistantSourceUserById.get(version.id) ?? null)
+              : undefined,
+            toolCalls: resolveToolCallsFromMetadata(version.metadata),
+            thinkingSteps: group.role === "assistant"
+              ? resolveThinkingStepsFromMetadata(version.metadata)
+              : undefined,
+          };
+        }),
       } satisfies VersionedMessageGroup;
     })
     .sort((left, right) => {
@@ -1046,9 +1051,18 @@ export default function DashboardChatThreadPage({
     [activeAssistantVersion],
   );
   const activeAssistantCitations = activeAssistantVersion?.citations ?? EMPTY_CITATIONS;
+  const activeAvailableCitations = activeAssistantVersion?.availableCitations ?? EMPTY_CITATIONS;
   const visibleCitations = useMemo(
-    () => (activeCitations.length > 0 ? activeCitations : activeAssistantCitations),
-    [activeAssistantCitations, activeCitations],
+    () => {
+      if (activeCitations.length > 0) {
+        return activeCitations;
+      }
+      if (activeAssistantCitations.length > 0) {
+        return activeAssistantCitations;
+      }
+      return activeAvailableCitations;
+    },
+    [activeAssistantCitations, activeAvailableCitations, activeCitations],
   );
   const threadCitations = useMemo<ThreadCitationRecord[]>(() => {
     const citationsByAnswer: ThreadCitationRecord[][] = [];
@@ -1073,10 +1087,10 @@ export default function DashboardChatThreadPage({
         citations: version.citations,
         text: version.content,
       });
-      const answerCitations =
-        usedCitations.length > 0
-          ? usedCitations
-          : (version.citations ?? EMPTY_CITATIONS);
+      const answerCitations = usedCitations.length > 0
+        ? usedCitations
+        : (version.citations?.length ? version.citations : version.availableCitations) ??
+          EMPTY_CITATIONS;
 
       if (answerCitations.length === 0) {
         continue;

@@ -99,6 +99,7 @@ export type MessageVersion = {
   id: string;
   content: string;
   citations?: CitationRecord[];
+  availableCitations?: CitationRecord[];
   isError?: boolean;
   isTextPaused?: boolean;
   isTextInterrupted?: boolean;
@@ -307,11 +308,13 @@ function processCitationChildren(input: {
 }
 
 function CitationAwareMessageResponse({
+  availableCitations,
   citations,
   children,
   onCitationClick,
   showLoading = false,
 }: {
+  availableCitations?: CitationRecord[];
   citations: CitationRecord[] | undefined;
   children: string;
   onCitationClick?: (citation: CitationRecord) => void;
@@ -323,6 +326,14 @@ function CitationAwareMessageResponse({
   const citationByChunkId = new Map(
     (citations ?? []).map((citation) => [citation.chunkId, citation]),
   );
+  const hasInlineCitationMarkers = (() => {
+    CITATION_PATTERN.lastIndex = 0;
+    return CITATION_PATTERN.test(children);
+  })();
+  const possibleEvidence = !hasInlineCitationMarkers &&
+    (citations?.length ?? 0) === 0
+    ? (availableCitations ?? [])
+    : [];
   const textComponent = ({ children: nodeChildren }: { children?: ReactNode }) => (
     <>
       {processCitationChildren({
@@ -398,6 +409,61 @@ function CitationAwareMessageResponse({
           <span className="size-1 animate-pulse rounded-full bg-current [animation-delay:240ms]" />
         </span>
       ) : null}
+      <PossibleEvidenceStrip
+        evidence={possibleEvidence}
+        onCitationClick={onCitationClick}
+      />
+    </div>
+  );
+}
+
+function PossibleEvidenceStrip({
+  evidence,
+  onCitationClick,
+}: {
+  evidence: CitationRecord[];
+  onCitationClick?: (citation: CitationRecord) => void;
+}) {
+  if (evidence.length === 0) {
+    return null;
+  }
+
+  const visibleEvidence = evidence.slice(0, 4);
+  const hiddenCount = evidence.length - visibleEvidence.length;
+
+  return (
+    <div className="mt-3 rounded-2xl border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+      <div className="mb-2 flex items-center gap-1.5 font-medium text-foreground/80">
+        <FileText className="size-3.5" />
+        <span>Possible evidence</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {visibleEvidence.map((citation, index) => (
+          <button
+            className="inline-flex max-w-[240px] items-center gap-1.5 rounded-full border border-input bg-background/80 px-2 py-1 text-left text-xs text-foreground shadow-xs transition-colors hover:border-primary/35 hover:bg-primary/5"
+            key={`${citation.citation}-${citation.chunkId}`}
+            onClick={() => onCitationClick?.(citation)}
+            title={citation.excerpt}
+            type="button"
+          >
+            <span className="text-[10px] font-semibold text-primary">
+              {index + 1}
+            </span>
+            <span className="truncate">
+              {citation.sourceTitle?.trim() || "Untitled source"}
+            </span>
+          </button>
+        ))}
+        {hiddenCount > 0 ? (
+          <span className="inline-flex items-center rounded-full border border-input bg-background/80 px-2 py-1 text-xs shadow-xs">
+            +{hiddenCount} more
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 leading-5">
+        The answer did not include inline citation markers; these sources were
+        read or retrieved during generation.
+      </p>
     </div>
   );
 }
@@ -1423,6 +1489,7 @@ export function ChatCanvas({
                                     toolCalls={version.toolCalls}
                                   />
                                   <CitationAwareMessageResponse
+                                    availableCitations={version.availableCitations}
                                     citations={version.citations}
                                     onCitationClick={onCitationClick}
                                     showLoading={

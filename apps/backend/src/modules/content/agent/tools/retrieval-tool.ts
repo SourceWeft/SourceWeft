@@ -13,9 +13,9 @@ export function formatRetrievalContext(chunks: RetrievalChunk[]) {
     return "No relevant evidence was found. Try search_sources again only if a substantially different query could locate missing evidence; otherwise use grep only for explicit literal matching or read_file for surrounding context.";
   }
 
-  return `Use these source chunks internally. Every factual claim from these chunks MUST cite the exact citation id in the form [citation:cN]. cN is the id attribute from the chunk tag.
+  return `Use these source chunks internally. Every factual claim from these chunks MUST cite the exact citation id in the form [citation:cN]. cN is the id attribute from the chunk tag. If your final answer uses these chunks and contains zero exact [citation:id] markers, the answer is invalid.
 
-Before finalizing your answer, verify every sentence, bullet, or source-grounded markdown table value cell that uses these chunks ends with one or more exact [citation:id] markers. In tables, cite the value cell that contains the supported fact; do not place all table citations only before or after the table. Do not omit citation markers. Never shorten citations to [id], never use numeric references, footnotes, markdown links, or a references section.
+Before finalizing your answer, verify every sentence, bullet, or source-grounded markdown table value cell that uses these chunks ends with one or more exact [citation:id] markers. If any source-grounded sentence or bullet has no marker, rewrite it before finalizing. In tables, cite the value cell that contains the supported fact; do not place all table citations only before or after the table. Do not omit citation markers. Never shorten citations to [id], never use numeric references, footnotes, markdown links, or a references section.
 
 If these chunks answer the user's targeted question, answer directly with citations. Do not call search_sources again with a similar query. Use read_file only when surrounding context is needed, or grep only for explicit literal matching or exact textual verification.
 
