@@ -46,6 +46,7 @@ type DashboardChatState = {
   }) => Promise<{ id: string; title: string } | null>;
   updateChatTitle: (id: string, title: string) => void;
   updateChatSourceCount: (id: string, sourceCount: number) => void;
+  refreshChatThread: (id: string) => Promise<{ title: string } | null>;
   openChat: (id: string, title: string) => void;
   archiveChat: (id: string) => void;
   deleteChat: (id: string) => Promise<void>;
@@ -290,6 +291,27 @@ export function DashboardChatStateProvider({
     setThreadTitle((value) => (activeChatId === id ? safeTitle : value));
   }, [activeChatId]);
 
+  const refreshChatThread = useCallback(
+    async (id: string) => {
+      if (!workspaceId) {
+        return null;
+      }
+
+      const result = await contentClient.getThread(workspaceId, id);
+      const nextItem = mapThreadToChatItem(result.thread);
+      const updateItem = (item: ChatItem) =>
+        item.id === id ? { ...item, ...nextItem } : item;
+
+      setPrivateChats((value) => value.map(updateItem));
+      setSharedChats((value) => value.map(updateItem));
+      setArchivedChats((value) => value.map(updateItem));
+      setThreadTitle((value) => (activeChatId === id ? nextItem.title : value));
+
+      return { title: nextItem.title };
+    },
+    [activeChatId, workspaceId],
+  );
+
   const createChat = useCallback(
     async (input?: {
       title?: string;
@@ -457,6 +479,7 @@ export function DashboardChatStateProvider({
       createChat,
       updateChatTitle,
       updateChatSourceCount,
+      refreshChatThread,
       openChat,
       archiveChat,
       deleteChat,
@@ -482,6 +505,7 @@ export function DashboardChatStateProvider({
       createChat,
       updateChatTitle,
       updateChatSourceCount,
+      refreshChatThread,
       archiveChat,
       deleteChat,
       clearPrivateChats,

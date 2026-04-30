@@ -57,6 +57,8 @@ type ChatMessageItem = {
 
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
 const STREAM_TEXT_INTERRUPTED_KEY = "isTextInterrupted";
+const TITLE_POLL_INTERVAL_MS = 1000;
+const TITLE_POLL_TIMEOUT_MS = 60000;
 
 type PendingLatestVersionSelection = {
   userGroupId?: string;
@@ -879,6 +881,7 @@ export default function DashboardChatThreadPage({
     sourcesVisible,
     toggleSourcesVisible,
     updateChatTitle,
+    refreshChatThread,
     updateChatSourceCount,
     workspaceId,
   } = useDashboardChatState();
@@ -1408,6 +1411,7 @@ export default function DashboardChatThreadPage({
       let persistedUserMessageId = tempUserId ?? input.userMessageId ?? null;
       let createdUserMessageId: string | null = tempUserId;
       let persistedAssistantMessageId: string | null = null;
+      let shouldPollThreadTitle = false;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
       let streamingAssistantMessageId = tempAssistantId;
@@ -1465,6 +1469,20 @@ export default function DashboardChatThreadPage({
         const deltaQueue: string[] = [];
         let streamEnded = false;
         let drainPromise: Promise<void> | null = null;
+
+        const pollThreadTitle = async () => {
+          const startedAt = Date.now();
+          while (Date.now() - startedAt < TITLE_POLL_TIMEOUT_MS) {
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, TITLE_POLL_INTERVAL_MS),
+            );
+            const refreshed = await refreshChatThread(threadId).catch(() => null);
+            const title = refreshed?.title?.trim();
+            if (title && title !== "New chat") {
+              return;
+            }
+          }
+        };
 
         if (!isFirstThreadMessage) {
           thinkingTimer = window.setTimeout(() => {
@@ -1640,7 +1658,7 @@ export default function DashboardChatThreadPage({
               const previousUserMessageId = tempUserId;
               const serverUserMessageId = data.messageId;
               persistedUserMessageId = serverUserMessageId;
-              if (createdUserMessageId === tempUserId) {
+              if (tempUserId && createdUserMessageId === tempUserId) {
                 createdUserMessageId = serverUserMessageId;
               }
               flushSync(() => {
@@ -1731,6 +1749,12 @@ export default function DashboardChatThreadPage({
               typeof data.title === "string"
             ) {
               updateChatTitle(data.threadId, data.title);
+              shouldPollThreadTitle = false;
+            } else if (
+              data.type === "thread-title-pending" &&
+              typeof data.threadId === "string"
+            ) {
+              shouldPollThreadTitle = data.threadId === threadId;
             } else if (data.type === "error") {
               if (streamToolCallsById.size > 0) {
                 for (const [toolId, toolCall] of streamToolCallsById.entries()) {
@@ -1747,6 +1771,11 @@ export default function DashboardChatThreadPage({
               const errorMessage = data.error ?? "Model error";
               persistedAssistantMessageId =
                 typeof data.messageId === "string" ? data.messageId : null;
+              if (!persistedAssistantMessageId) {
+                streamError = new Error(errorMessage);
+                streamEnded = true;
+                break readLoop;
+              }
               const messageId = persistedAssistantMessageId ?? tempAssistantId;
               const userMessageId = data.userMessageId ?? persistedUserMessageId;
               const previousAssistantMessageId = streamingAssistantMessageId;
@@ -1888,6 +1917,9 @@ export default function DashboardChatThreadPage({
         window.setTimeout(() => {
           void loadThreadMessages();
         }, 0);
+        if (shouldPollThreadTitle) {
+          void pollThreadTitle();
+        }
       } catch (error) {
         if (thinkingTimer) {
           window.clearTimeout(thinkingTimer);
@@ -1925,6 +1957,7 @@ export default function DashboardChatThreadPage({
       clearEditingState,
       loadThreadMessages,
       messages,
+      refreshChatThread,
       selectedModels,
       streamWithSelectedLlm,
       threadId,

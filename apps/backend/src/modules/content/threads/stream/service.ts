@@ -17,6 +17,9 @@ import {
   resolveRefreshThreadStreamInput,
 } from "./input";
 import type { EditThreadInput, RefreshThreadInput } from "./types";
+import { withTimeout } from "./helpers";
+
+const CHAT_TITLE_STREAM_WAIT_MS = 3000;
 
 function shouldGenerateAutomaticThreadTitle(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
@@ -94,10 +97,38 @@ async function generateAndApplyGeneratedThreadTitle(input: {
   }
 }
 
+async function enqueueAutomaticThreadTitleJob(input: {
+  prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
+}) {
+  if (!shouldGenerateAutomaticThreadTitle(input.prepared)) {
+    return;
+  }
+
+  const { enqueueThreadTitleGenerateJob } = await import("../../queue");
+  await enqueueThreadTitleGenerateJob({
+    teamId: input.prepared.workspace.organizationId,
+    workspaceId: input.prepared.workspace.id,
+    threadId: input.prepared.thread.id,
+    userId: input.prepared.userId,
+    userMessageId: input.prepared.userMessage.id,
+    messageContent: input.prepared.messageContent,
+    modelAlias: input.prepared.modelAlias,
+    gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
+    expectedTitle: input.prepared.initialTitle,
+  }).catch((error: unknown) => {
+    logger.warn("Failed to enqueue automatic thread title job", {
+      threadId: input.prepared.thread.id,
+      userMessageId: input.prepared.userMessage.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
 class ContentThreadStreamService {
   constructor(
     private readonly turnService: ContentThreadTurnService,
     private readonly invokeAgentTurn = invokeDeepAgentTurn,
+    private readonly enqueueTitleJob = enqueueAutomaticThreadTitleJob,
   ) {}
 
   async refreshThread(input: RefreshThreadInput) {
@@ -127,6 +158,8 @@ class ContentThreadStreamService {
     yield toSseData({ type: "text-start", id: textId });
 
     const titleUpdates: Array<{ id: string; title: string }> = [];
+    let titleUpdateEmitted = false;
+    void this.enqueueTitleJob({ prepared });
     const titleTask = shouldGenerateAutomaticThreadTitle(prepared)
       ? generateAndApplyGeneratedThreadTitle({
           prepared,
@@ -139,6 +172,7 @@ class ContentThreadStreamService {
     const emitTitleUpdates = function* () {
       while (titleUpdates.length > 0) {
         const update = titleUpdates.shift()!;
+        titleUpdateEmitted = true;
         yield toSseData({
           type: "thread-title-update",
           threadId: update.id,
@@ -224,9 +258,15 @@ class ContentThreadStreamService {
         parentMessageId: assistantMessage.parentMessageId,
       });
       if (titleTask && !titleSettled) {
-        await titleTask;
+        await withTimeout(titleTask, CHAT_TITLE_STREAM_WAIT_MS);
       }
       yield* emitTitleUpdates();
+      if (titleTask && !titleUpdateEmitted) {
+        yield toSseData({
+          type: "thread-title-pending",
+          threadId: prepared.thread.id,
+        });
+      }
     } catch (error) {
       const contentError =
         error instanceof ContentError ? error : toContentServiceError(error);
@@ -309,6 +349,7 @@ class ContentThreadStreamService {
       });
 
     if (shouldGenerateAutomaticThreadTitle(prepared)) {
+      void this.enqueueTitleJob({ prepared });
       await generateAndApplyGeneratedThreadTitle({
         prepared,
         turnService: this.turnService,

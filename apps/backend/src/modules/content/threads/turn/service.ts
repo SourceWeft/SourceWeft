@@ -1,15 +1,12 @@
-import { getModelGatewayClient } from "../../../../shared/model-gateway/index";
 import { logger } from "../../../../shared/logger";
-import { buildChatTitlePrompt } from "../../agent/prompts";
-import {
-  buildGatewayRequestMetadata,
-  type LlmExecutionConfig,
-} from "../../model-gateway-audit";
+import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { ContentBillingPort } from "../../billing-port";
-import { updateThreadTitleIfMatches } from "../thread/repository";
+import {
+  applyGeneratedThreadTitle,
+  generateThreadTitle,
+} from "../thread/title-generation";
 import {
   normalizeGeneratedChatTitle,
-  resolveAssistantContent,
 } from "../thread/title";
 import { finalizeThreadTurn } from "./finalizer";
 import { prepareThreadTurn } from "./preparer";
@@ -45,52 +42,17 @@ class ContentThreadTurnService {
     llm?: LlmExecutionConfig;
   }) {
     try {
-      const gateway = await getModelGatewayClient(input.prepared.chatProfile.gatewayConfigId);
-      const completion = await gateway.chat.complete(
-        {
-          model: input.prepared.modelAlias,
-          messages: [
-            {
-              role: "user",
-              content: buildChatTitlePrompt(input.prepared.messageContent),
-            },
-          ],
-          metadata: {
-            team_id: input.prepared.workspace.organizationId,
-            workspace_id: input.prepared.workspace.id,
-            user_id: input.prepared.userId,
-            thread_id: input.prepared.thread.id,
-            feature: "chat",
-          },
-          executionMode: input.llm?.executionMode,
-          providerHint: input.llm?.providerHint,
-          byok: input.llm?.byok,
-        },
-        {
-          idempotencyKey: `thread-title:${input.prepared.userMessage.id}`,
-          traceId: input.prepared.userMessage.id,
-          metadata: buildGatewayRequestMetadata({
-            teamId: input.prepared.workspace.organizationId,
-            workspaceId: input.prepared.workspace.id,
-            userId: input.prepared.userId,
-            threadId: input.prepared.thread.id,
-            messageId: input.prepared.userMessage.id,
-            feature: "chat",
-            operation: "chat.title",
-            modelAlias: input.prepared.modelAlias,
-            llm: input.llm,
-          }),
-        },
-      );
-
-      const title = normalizeGeneratedChatTitle(resolveAssistantContent({ raw: completion.raw }));
-      logger.debug("Generated automatic thread title candidate", {
+      return await generateThreadTitle({
+        teamId: input.prepared.workspace.organizationId,
+        workspaceId: input.prepared.workspace.id,
         threadId: input.prepared.thread.id,
+        userId: input.prepared.userId,
         userMessageId: input.prepared.userMessage.id,
+        messageContent: input.prepared.messageContent,
         modelAlias: input.prepared.modelAlias,
-        hasGeneratedTitle: Boolean(title),
+        gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
+        llm: input.llm,
       });
-      return title;
     } catch (error) {
       logger.debug("Automatic thread title generation failed", {
         threadId: input.prepared.thread.id,
@@ -117,11 +79,16 @@ class ContentThreadTurnService {
       return null;
     }
 
-    return updateThreadTitleIfMatches({
-      threadId: input.prepared.thread.id,
+    return applyGeneratedThreadTitle({
       teamId: input.prepared.workspace.organizationId,
       workspaceId: input.prepared.workspace.id,
-      expectedTitles: [input.expectedTitle],
+      threadId: input.prepared.thread.id,
+      userId: input.prepared.userId,
+      userMessageId: input.prepared.userMessage.id,
+      messageContent: input.prepared.messageContent,
+      modelAlias: input.prepared.modelAlias,
+      gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
+      expectedTitle: input.expectedTitle,
       title,
     });
   }

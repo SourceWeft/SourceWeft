@@ -9,6 +9,7 @@ import {
   processSourceParsePollJob,
 } from "./processors/source-parse";
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
+import { processThreadTitleGenerateJob } from "./processors/thread-title";
 
 await ensureModelConfigAvailable();
 
@@ -19,6 +20,7 @@ const processors: Record<string, (job: Job<JobPayload>) => Promise<void>> = {
   "source-parse": processSourceParseJob,
   "source-parse-poll": processSourceParsePollJob,
   "sync-model-pricing": processSyncModelPricingJob,
+  "thread-title-generate": processThreadTitleGenerateJob,
 };
 
 const defaultProcessor: (job: Job<JobPayload>) => Promise<void> =

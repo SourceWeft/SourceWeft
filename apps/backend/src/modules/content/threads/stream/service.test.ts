@@ -74,12 +74,13 @@ const prepared: PreparedThreadTurn = {
 
 function createTurnService(input?: {
   title?: string | null;
+  titleDelayMs?: number;
   finalize?: (value: unknown) => Promise<unknown>;
 }) {
   return {
     prepareThreadTurn: async () => prepared,
     generateChatTitle: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, input?.titleDelayMs ?? 0));
       return input?.title ?? "Invoice Review";
     },
     applyAutomaticThreadTitle: async () => ({
@@ -104,6 +105,7 @@ test("streamThreadEvents waits for delayed title update before finish", async ()
       yield { type: "text-delta", delta: "Answer" };
       yield { type: "done", outcome };
     },
+    async () => {},
   );
 
   const events: Record<string, unknown>[] = [];
@@ -124,6 +126,39 @@ test("streamThreadEvents waits for delayed title update before finish", async ()
   assert.equal(events[titleIndex]?.threadId, "thread-1");
   assert.equal(events[titleIndex]?.title, "Invoice Review");
   assert.equal(titleIndex < finishIndex, true);
+});
+
+test("streamThreadEvents emits pending when title is still generating", async () => {
+  const turnService = createTurnService({ titleDelayMs: 3500 });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "Answer" };
+      yield { type: "done", outcome };
+    },
+    async () => {},
+  );
+
+  const startedAt = Date.now();
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  const pendingIndex = events.findIndex((event) => event.type === "thread-title-pending");
+  const finishIndex = events.findIndex((event) => event.type === "finish");
+
+  assert.notEqual(pendingIndex, -1);
+  assert.notEqual(finishIndex, -1);
+  assert.equal(events[pendingIndex]?.threadId, "thread-1");
+  assert.equal(pendingIndex < finishIndex, true);
+  assert.equal(Date.now() - startedAt < 3400, true);
 });
 
 test("streamThreadEvents forwards citation snapshots before assistant message", async () => {
@@ -148,6 +183,7 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
       yield { type: "text-delta", delta: "Total is ¥50.00 [citation:c1]" };
       yield { type: "done", outcome: { ...outcome, citations: [citation] } };
     },
+    async () => {},
   );
 
   const events: Record<string, unknown>[] = [];

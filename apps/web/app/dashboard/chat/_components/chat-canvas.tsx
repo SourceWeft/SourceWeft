@@ -590,7 +590,9 @@ function getToolStepMetadataParts(metadata: Record<string, unknown> | undefined)
     return [] as string[];
   }
 
-  const { hitCount: _hitCount, latencyMs: _latencyMs, ...rest } = metadata;
+  const rest = { ...metadata };
+  delete rest.hitCount;
+  delete rest.latencyMs;
   return getThinkingMetadataParts(rest);
 }
 
