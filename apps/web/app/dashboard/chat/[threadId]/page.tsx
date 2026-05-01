@@ -20,8 +20,11 @@ import {
 } from "../_components/header-model-selector";
 import {
   ChatCanvas,
+  DEFAULT_PROMPT_THINKING_SETTINGS,
   type CitationRecord,
   type MessageVersion,
+  type ModelReasoningSegmentRecord,
+  type PromptThinkingSettings,
   type ThinkingStepRecord,
   type ToolCallRecord,
   type VersionedMessageGroup,
@@ -64,6 +67,119 @@ type PendingLatestVersionSelection = {
   userGroupId?: string;
   assistantGroupId?: string;
 };
+
+type RequestThinkingConfig = {
+  mode: "auto" | "off" | "effort";
+  enabled?: boolean;
+  effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  includeReasoning?: boolean;
+};
+
+function parseStoredThinkingSettings(value: string | null): PromptThinkingSettings | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<PromptThinkingSettings>;
+    const mode = parsed.mode;
+    const effort = parsed.effort;
+    if (mode !== "auto" && mode !== "off" && mode !== "effort") {
+      return null;
+    }
+    if (
+      effort !== "minimal" &&
+      effort !== "low" &&
+      effort !== "medium" &&
+      effort !== "high" &&
+      effort !== "xhigh"
+    ) {
+      return null;
+    }
+    return { mode, effort };
+  } catch {
+    return null;
+  }
+}
+
+function buildRequestThinking(input: {
+  capabilities: ModelItem["capabilities"] | undefined;
+  settings: PromptThinkingSettings;
+}): RequestThinkingConfig | undefined {
+  if (input.capabilities?.supportsThinking !== true) {
+    return undefined;
+  }
+
+  if (input.settings.mode === "off") {
+    return {
+      mode: "off",
+      enabled: false,
+      includeReasoning: false,
+    };
+  }
+
+  if (input.settings.mode === "effort") {
+    if (!(input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+      return {
+        mode: "auto",
+      };
+    }
+
+    return {
+      mode: "effort",
+      enabled: true,
+      effort: input.settings.effort,
+      includeReasoning: true,
+    };
+  }
+
+  return {
+    mode: "auto",
+  };
+}
+
+function appendReasoningChunk(current: string | undefined, next: string) {
+  if (!current) {
+    return next;
+  }
+  if (next === current) {
+    return current;
+  }
+  if (next.startsWith(current)) {
+    return next;
+  }
+  return `${current}${next}`;
+}
+
+function normalizeThinkingSettingsForModel(input: {
+  capabilities: ModelItem["capabilities"] | undefined;
+  hasSavedPreference?: boolean;
+  settings: PromptThinkingSettings;
+}): PromptThinkingSettings {
+  if (
+    input.capabilities?.supportsThinking === true &&
+    input.settings.mode === "off" &&
+    input.hasSavedPreference !== true
+  ) {
+    return {
+      ...input.settings,
+      mode: "auto",
+    };
+  }
+
+  if (input.settings.mode !== "effort") {
+    return input.settings;
+  }
+
+  if ((input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+    return input.settings;
+  }
+
+  return {
+    ...input.settings,
+    mode: "auto",
+  };
+}
 
 function getDisplayErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Failed to send message.";
@@ -442,6 +558,47 @@ function resolveThinkingStepsFromMetadata(metadata: Record<string, unknown>) {
     .filter((item): item is ThinkingStepRecord => item !== null);
 }
 
+function resolveModelReasoningFromMetadata(metadata: Record<string, unknown>) {
+  const direct = toNullableString(metadata.reasoning);
+  if (direct?.trim()) {
+    return direct.trim();
+  }
+
+  return undefined;
+}
+
+function normalizeModelReasoningSegmentRecord(
+  value: unknown,
+  fallbackIndex = 0,
+): ModelReasoningSegmentRecord | null {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const text = toNullableString(record.text)?.trim();
+  if (!text) {
+    return null;
+  }
+
+  return {
+    id: toNullableString(record.id) ?? `model-reasoning-${fallbackIndex + 1}`,
+    text,
+    sequence: toNullableNumber(record.sequence) ?? undefined,
+    durationMs: toNullableNumber(record.durationMs) ?? undefined,
+  };
+}
+
+function resolveModelReasoningSegmentsFromMetadata(metadata: Record<string, unknown>) {
+  if (!Array.isArray(metadata.reasoningSegments)) {
+    return [] as ModelReasoningSegmentRecord[];
+  }
+
+  return metadata.reasoningSegments
+    .map((item, index) => normalizeModelReasoningSegmentRecord(item, index))
+    .filter((item): item is ModelReasoningSegmentRecord => item !== null);
+}
+
 function shouldRenderToolCall(
   toolCall: ToolCallRecord,
   thinkingSteps: ThinkingStepRecord[] = [],
@@ -498,6 +655,8 @@ type StreamEventPayload = {
   data?: unknown;
   input?: unknown;
   output?: unknown;
+  reasoning?: string;
+  segment?: unknown;
   toolCall?: unknown;
   step?: unknown;
   citations?: unknown;
@@ -854,6 +1013,12 @@ function buildVersionedMessageGroups(
             thinkingSteps: group.role === "assistant"
               ? resolveThinkingStepsFromMetadata(version.metadata)
               : undefined,
+            modelReasoning: group.role === "assistant"
+              ? resolveModelReasoningFromMetadata(version.metadata)
+              : undefined,
+            modelReasoningSegments: group.role === "assistant"
+              ? resolveModelReasoningSegmentsFromMetadata(version.metadata)
+              : undefined,
           };
         }),
       } satisfies VersionedMessageGroup;
@@ -902,7 +1067,6 @@ export default function DashboardChatThreadPage({
   // ── Messaging state ────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [showThinkingPlaceholder, setShowThinkingPlaceholder] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingAssistantMessageId, setEditingAssistantMessageId] = useState<
     string | null
@@ -940,6 +1104,11 @@ export default function DashboardChatThreadPage({
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
   const [streamWithSelectedLlm, setStreamWithSelectedLlm] = useState(false);
+  const [thinkingSettings, setThinkingSettings] = useState<PromptThinkingSettings>(
+    DEFAULT_PROMPT_THINKING_SETTINGS,
+  );
+  const [hasSavedThinkingPreference, setHasSavedThinkingPreference] = useState(false);
+  const [searchEnabled, setSearchEnabled] = useState(false);
 
   const clearEditingState = useCallback(() => {
     setEditingMessageId(null);
@@ -954,6 +1123,16 @@ export default function DashboardChatThreadPage({
     setComposerResetKey((value) => value + 1);
   }, [clearEditingState]);
 
+  useEffect(() => {
+    setThinkingSettings((current) =>
+      normalizeThinkingSettingsForModel({
+        capabilities: selectedModels.llm.capabilities,
+        hasSavedPreference: hasSavedThinkingPreference,
+        settings: current,
+      }),
+    );
+  }, [hasSavedThinkingPreference, selectedModels.llm]);
+
   // Tracks whether initial bootstrap was already processed for this thread key.
   const bootstrappedThreadKeyRef = useRef<string | null>(null);
 
@@ -965,6 +1144,14 @@ export default function DashboardChatThreadPage({
   );
   const currentSelectionStorageKey = useMemo(
     () => (workspaceId ? `chat:sources:${workspaceId}:current` : null),
+    [workspaceId],
+  );
+  const currentThinkingStorageKey = useMemo(
+    () => (workspaceId ? `chat:thinking:${workspaceId}:current` : null),
+    [workspaceId],
+  );
+  const currentSearchStorageKey = useMemo(
+    () => (workspaceId ? `chat:search:${workspaceId}:current` : null),
     [workspaceId],
   );
 
@@ -1020,6 +1207,53 @@ export default function DashboardChatThreadPage({
       );
     }
   }, [activeSourceIds, currentSelectionStorageKey, selectionLoaded, selectionStorageKey]);
+
+  useEffect(() => {
+    if (!currentThinkingStorageKey) {
+      setThinkingSettings(DEFAULT_PROMPT_THINKING_SETTINGS);
+      return;
+    }
+
+    const storedThinking = parseStoredThinkingSettings(
+      window.sessionStorage.getItem(currentThinkingStorageKey),
+    );
+    setHasSavedThinkingPreference(Boolean(storedThinking));
+    setThinkingSettings(storedThinking ?? DEFAULT_PROMPT_THINKING_SETTINGS);
+  }, [currentThinkingStorageKey]);
+
+  const handleThinkingSettingsChange = useCallback((settings: PromptThinkingSettings) => {
+    setHasSavedThinkingPreference(true);
+    setThinkingSettings(settings);
+  }, []);
+
+  useEffect(() => {
+    if (!currentSearchStorageKey) {
+      setSearchEnabled(false);
+      return;
+    }
+
+    setSearchEnabled(window.sessionStorage.getItem(currentSearchStorageKey) === "true");
+  }, [currentSearchStorageKey]);
+
+  useEffect(() => {
+    if (!currentThinkingStorageKey) {
+      return;
+    }
+    window.sessionStorage.setItem(
+      currentThinkingStorageKey,
+      JSON.stringify(thinkingSettings),
+    );
+  }, [currentThinkingStorageKey, thinkingSettings]);
+
+  useEffect(() => {
+    if (!currentSearchStorageKey) {
+      return;
+    }
+    window.sessionStorage.setItem(
+      currentSearchStorageKey,
+      searchEnabled ? "true" : "false",
+    );
+  }, [currentSearchStorageKey, searchEnabled]);
 
   const messageGroups = useMemo(
     () => buildVersionedMessageGroups(messages),
@@ -1323,14 +1557,21 @@ export default function DashboardChatThreadPage({
 
       const patch: ModelAliasSettings =
         input.type === "llm"
-          ? { llmModelAlias: input.model.id }
+          ? { llmProfileAlias: input.model.id }
           : input.type === "image"
-            ? { imageModelAlias: input.model.id }
-            : { visionModelAlias: input.model.id };
+            ? { imageProfileAlias: input.model.id }
+            : { visionProfileAlias: input.model.id };
 
       try {
         await contentClient.updateThreadModelSettings(workspaceId, threadId, patch);
         if (input.type === "llm") {
+          setThinkingSettings((current) =>
+            normalizeThinkingSettingsForModel({
+              capabilities: input.model.capabilities,
+              hasSavedPreference: hasSavedThinkingPreference,
+              settings: current,
+            }),
+          );
           setStreamWithSelectedLlm(true);
         }
       } catch (error) {
@@ -1347,7 +1588,7 @@ export default function DashboardChatThreadPage({
         await loadThreadModelState();
       }
     },
-    [catalogKindEnabled, loadThreadModelState, threadId, workspaceId],
+    [catalogKindEnabled, hasSavedThinkingPreference, loadThreadModelState, threadId, workspaceId],
   );
 
   const streamThreadAction = useCallback(
@@ -1357,16 +1598,13 @@ export default function DashboardChatThreadPage({
       sourceIds: string[];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
+      thinking?: RequestThinkingConfig;
     }) => {
       if (!workspaceId) {
         return;
       }
 
-      const isFirstThreadMessage =
-        messages.filter((message) => message.role === "user").length === 0;
-
       setIsStreaming(true);
-      setShowThinkingPlaceholder(isFirstThreadMessage);
       clearEditingState();
 
       const now = Date.now();
@@ -1425,7 +1663,6 @@ export default function DashboardChatThreadPage({
         setComposerResetKey((value) => value + 1);
       }
 
-      let thinkingTimer: number | null = null;
       let persistedUserMessageId = tempUserId ?? input.userMessageId ?? null;
       let createdUserMessageId: string | null = tempUserId;
       let persistedAssistantMessageId: string | null = null;
@@ -1439,13 +1676,22 @@ export default function DashboardChatThreadPage({
           mode: input.mode,
           sourceIds: input.sourceIds,
         };
-        const selectedLlmAlias =
+        const selectedLlmProfileAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
             ? selectedModels.llm?.id
             : undefined;
-        if (typeof selectedLlmAlias === "string" && selectedLlmAlias.length > 0) {
+        const requestThinking = input.thinking ?? buildRequestThinking({
+          capabilities: selectedModels.llm?.capabilities,
+          settings: thinkingSettings,
+        });
+        if (typeof selectedLlmProfileAlias === "string" && selectedLlmProfileAlias.length > 0) {
           requestBody.llm = {
-            modelAlias: selectedLlmAlias,
+            profileAlias: selectedLlmProfileAlias,
+            ...(requestThinking ? { thinking: requestThinking } : {}),
+          };
+        } else if (requestThinking) {
+          requestBody.llm = {
+            thinking: requestThinking,
           };
         }
         if (input.mode === "send" || input.mode === "edit") {
@@ -1502,14 +1748,6 @@ export default function DashboardChatThreadPage({
           }
         };
 
-        if (!isFirstThreadMessage) {
-          thinkingTimer = window.setTimeout(() => {
-            if (!hasRenderedDelta) {
-              setShowThinkingPlaceholder(true);
-            }
-          }, 120);
-        }
-
         const waitForAnimationFrame = () =>
           new Promise<void>((resolve) => {
             window.requestAnimationFrame(() => resolve());
@@ -1543,13 +1781,8 @@ export default function DashboardChatThreadPage({
                 );
               });
 
-              if (!hasRenderedDelta && assistantText.length > 0) {
-                hasRenderedDelta = true;
-                if (thinkingTimer) {
-                  window.clearTimeout(thinkingTimer);
-                  thinkingTimer = null;
-                }
-                setShowThinkingPlaceholder(false);
+                if (!hasRenderedDelta && assistantText.length > 0) {
+                  hasRenderedDelta = true;
               }
 
               await waitForAnimationFrame();
@@ -1775,6 +2008,48 @@ export default function DashboardChatThreadPage({
                 mergeThinkingStepRecords(streamThinkingStepsById, nextStep);
                 syncStreamingThinkingSteps();
               }
+            } else if (data.type === "reasoning" && typeof data.reasoning === "string") {
+              const reasoning = data.reasoning;
+              if (reasoning.length > 0) {
+                const nextSegment = normalizeModelReasoningSegmentRecord(data.segment);
+                flushSync(() => {
+                  setMessages((previous) =>
+                    previous.map((message) => {
+                        if (message.id !== streamingAssistantMessageId) {
+                          return message;
+                        }
+
+                        const currentReasoning = appendReasoningChunk(
+                          toNullableString(message.metadata.reasoning) ?? undefined,
+                          reasoning,
+                        );
+                        const currentSegments = Array.isArray(message.metadata.reasoningSegments)
+                          ? message.metadata.reasoningSegments
+                              .map((item, index) => normalizeModelReasoningSegmentRecord(item, index))
+                              .filter((item): item is ModelReasoningSegmentRecord => item !== null)
+                          : [];
+                        const reasoningSegments = nextSegment
+                          ? [
+                              ...currentSegments.filter((segment) => segment.id !== nextSegment.id),
+                              nextSegment,
+                            ].sort((left, right) =>
+                              (left.sequence ?? Number.MAX_SAFE_INTEGER) -
+                              (right.sequence ?? Number.MAX_SAFE_INTEGER)
+                            )
+                          : currentSegments;
+
+                        return {
+                          ...message,
+                          metadata: {
+                            ...message.metadata,
+                            reasoning: currentReasoning,
+                            reasoningSegments,
+                          },
+                        };
+                      }),
+                  );
+                });
+              }
             } else if (data.type === "citations") {
               const citations = normalizeCitationRecords(data.citations);
               const availableCitations = normalizeCitationRecords(data.availableCitations);
@@ -1937,12 +2212,6 @@ export default function DashboardChatThreadPage({
           await drainPromise;
         }
 
-        if (thinkingTimer) {
-          window.clearTimeout(thinkingTimer);
-          thinkingTimer = null;
-        }
-        setShowThinkingPlaceholder(false);
-
         if (streamError) {
           throw streamError;
         }
@@ -1962,12 +2231,6 @@ export default function DashboardChatThreadPage({
           void pollThreadTitle();
         }
       } catch (error) {
-        if (thinkingTimer) {
-          window.clearTimeout(thinkingTimer);
-          thinkingTimer = null;
-        }
-        setShowThinkingPlaceholder(false);
-
         const errorMessage = getDisplayErrorMessage(error);
         if (!persistedAssistantMessageId) {
           setMessages((previous) => {
@@ -1986,10 +2249,6 @@ export default function DashboardChatThreadPage({
 
         toast.error(errorMessage);
       } finally {
-        if (thinkingTimer) {
-          window.clearTimeout(thinkingTimer);
-        }
-        setShowThinkingPlaceholder(false);
         setIsStreaming(false);
       }
     },
@@ -2002,6 +2261,7 @@ export default function DashboardChatThreadPage({
       selectedModels,
       streamWithSelectedLlm,
       threadId,
+      thinkingSettings,
       updateChatTitle,
       updateChatSourceCount,
       workspaceId,
@@ -2020,7 +2280,6 @@ export default function DashboardChatThreadPage({
   }, [loadThreadMessages]);
 
   useEffect(() => {
-    setShowThinkingPlaceholder(false);
     clearEditingState();
     setActiveVersionByGroup({});
     setDisplayedCitations([]);
@@ -2052,18 +2311,29 @@ export default function DashboardChatThreadPage({
       if (raw) {
         sessionStorage.removeItem(pendingKey);
         try {
-          const { content, sourceIds } = JSON.parse(raw) as {
+          const { content, sourceIds, thinking, thinkingSettings: pendingThinkingSettings, searchEnabled: pendingSearchEnabled } = JSON.parse(raw) as {
             content: string;
             sourceIds: string[];
+            thinking?: RequestThinkingConfig;
+            thinkingSettings?: PromptThinkingSettings;
+            searchEnabled?: boolean;
           };
           const pendingSourceIds = Array.isArray(sourceIds)
             ? sourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string")
             : [];
           persistActiveSourceIds(pendingSourceIds);
+          if (pendingThinkingSettings) {
+            setHasSavedThinkingPreference(true);
+            setThinkingSettings(pendingThinkingSettings);
+          }
+          if (typeof pendingSearchEnabled === "boolean") {
+            setSearchEnabled(pendingSearchEnabled);
+          }
           void streamThreadActionRef.current({
             mode: "send",
             content,
             sourceIds: pendingSourceIds,
+            thinking,
           });
         } catch {
           void loadThreadMessagesRef.current();
@@ -2350,7 +2620,6 @@ export default function DashboardChatThreadPage({
           highlightedMessageId={highlightedMessageId}
           isEditing={Boolean(editingMessageId && editingGroupId)}
           isStreaming={isStreaming}
-          showThinkingPlaceholder={showThinkingPlaceholder}
           messageGroups={messageGroups}
           mode="thread"
           onActiveVersionChange={handleActiveVersionChange}
@@ -2362,8 +2631,13 @@ export default function DashboardChatThreadPage({
           onRefreshLatest={handleRefreshLatest}
           onRestartFromMessage={handleRestartFromMessage}
           onSendMessage={handleSendMessage}
+          searchEnabled={searchEnabled}
+          onSearchEnabledChange={setSearchEnabled}
           selectedSources={selectedSources}
           sourcesVisible={sourcesVisible}
+          thinkingCapabilities={selectedModels.llm.capabilities}
+          thinkingSettings={thinkingSettings}
+          onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle={threadTitle}
           workspaceId={workspaceId}
         />

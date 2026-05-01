@@ -34,6 +34,7 @@ export type ThreadTitleGenerateJobPayload = {
   userId: string;
   userMessageId: string;
   messageContent: string;
+  profileAlias: string;
   modelAlias: string;
   gatewayConfigId: string;
   expectedTitle: string;

@@ -1,4 +1,6 @@
 import { logger } from "../logger";
+import type { GlobalProfilePricingEntry } from "./global-config";
+import type { ReasoningEffort } from "./types";
 
 const OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models";
 const DYNAMIC_OPENROUTER_PROFILE_PREFIX = "global-openrouter";
@@ -6,9 +8,16 @@ const OPENROUTER_APP_TITLE = "SourceWeft";
 const OPENROUTER_APP_REFERER = "https://sourceweft.com";
 
 export type DynamicOpenRouterProfileEntry = {
+  architecture: Record<string, unknown>;
+  contextLength?: number | null;
+  defaultParameters?: Record<string, unknown> | null;
   displayName: string;
+  maxCompletionTokens?: number | null;
+  pricing?: GlobalProfilePricingEntry | null;
   profileAlias: string;
   targetModel: string;
+  supportedParameters: string[];
+  supportedEfforts: ReasoningEffort[];
 };
 
 export type DynamicOpenRouterProfilesByKind = {
@@ -36,6 +45,59 @@ function toStringArray(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim().toLowerCase())
     .filter((item) => item.length > 0);
+}
+
+function toObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toPriceNumber(value: unknown): number | null {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return Number(parsed.toPrecision(15));
+}
+
+function parseOpenRouterPricing(
+  value: unknown,
+): GlobalProfilePricingEntry | null {
+  const pricing = toObjectRecord(value);
+  if (!pricing) {
+    return null;
+  }
+
+  const parsed: GlobalProfilePricingEntry = {
+    source: "openrouter",
+    inputCostPerToken: toPriceNumber(pricing.prompt),
+    outputCostPerToken: toPriceNumber(pricing.completion),
+    cacheReadInputTokenCost: toPriceNumber(pricing.input_cache_read),
+  };
+
+  return parsed.inputCostPerToken !== null ||
+      parsed.outputCostPerToken !== null ||
+      parsed.cacheReadInputTokenCost !== null
+    ? parsed
+    : null;
+}
+
+function resolveSupportedEfforts(supportedParameters: string[]): ReasoningEffort[] {
+  return supportedParameters.includes("reasoning") ||
+    supportedParameters.includes("reasoning_effort")
+    ? ["minimal", "low", "medium", "high", "xhigh"]
+    : [];
 }
 
 export async function fetchDynamicOpenRouterProfiles(): Promise<DynamicOpenRouterProfilesByKind> {
@@ -90,8 +152,13 @@ export async function fetchDynamicOpenRouterProfiles(): Promise<DynamicOpenRoute
         model.architecture && typeof model.architecture === "object"
           ? (model.architecture as Record<string, unknown>)
           : {};
+      const topProvider = toObjectRecord(model.top_provider);
       const inputModalities = toStringArray(architecture.input_modalities);
       const outputModalities = toStringArray(architecture.output_modalities);
+      const supportedParameters = toStringArray(model.supported_parameters);
+      const supportedEfforts = resolveSupportedEfforts(supportedParameters);
+      const defaultParameters = toObjectRecord(model.default_parameters);
+      const pricing = parseOpenRouterPricing(model.pricing);
 
       const hasImageInput = inputModalities.includes("image");
       const hasTextOutput = outputModalities.includes("text");
@@ -100,9 +167,16 @@ export async function fetchDynamicOpenRouterProfiles(): Promise<DynamicOpenRoute
       const slug = normalizeCatalogSlug(modelId);
       const encodedModelId = encodeURIComponent(modelId);
       const asEntry = (kind: "chat" | "image" | "vision") => ({
+        architecture,
+        contextLength: toFiniteNumber(model.context_length),
+        defaultParameters,
         displayName: name,
+        maxCompletionTokens: toFiniteNumber(topProvider?.max_completion_tokens),
+        pricing,
         // Keep profileAlias internal for sync identity, expose modelAlias as real model id.
         profileAlias: `${DYNAMIC_OPENROUTER_PROFILE_PREFIX}-${kind}-${slug}-${encodedModelId}`,
+        supportedEfforts,
+        supportedParameters,
         targetModel: modelId,
       });
 

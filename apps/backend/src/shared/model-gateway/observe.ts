@@ -14,7 +14,6 @@ const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
   "executionMode",
   "keySource",
   "provider",
-  "providerModel",
   "modelAlias",
   "routeStrategy",
   "latencyMs",
@@ -34,7 +33,6 @@ export type GatewayEventInput = {
   executionMode?: string | null;
   keySource?: string | null;
   provider?: string | null;
-  providerModel?: string | null;
   modelAlias?: string | null;
   routeStrategy?: string | null;
   success: boolean;
@@ -77,7 +75,7 @@ export async function createModelGatewayEvent(input: GatewayEventInput) {
     executionMode: input.executionMode ?? null,
     keySource: input.keySource ?? null,
     provider: input.provider ?? null,
-    providerModel: input.providerModel ?? null,
+    providerModel: null,
     modelAlias: input.modelAlias ?? null,
     routeStrategy: input.routeStrategy ?? null,
     success: input.success,
@@ -132,10 +130,6 @@ export function createDatabaseObserveSink(): ObserveSink {
           typeof attributes.keySource === "string" ? attributes.keySource : null,
         provider:
           typeof attributes.provider === "string" ? attributes.provider : null,
-        providerModel:
-          typeof attributes.providerModel === "string"
-            ? attributes.providerModel
-            : null,
         modelAlias:
           typeof attributes.modelAlias === "string" ? attributes.modelAlias : null,
         routeStrategy:

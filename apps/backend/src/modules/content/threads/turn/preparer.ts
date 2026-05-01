@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import { ContentError } from "../../errors";
 import { dedupeSourceIds } from "../../source-ids";
 import { requireContentWorkspace } from "../../content-support";
@@ -11,7 +12,7 @@ import {
   listMessageRecordsByThread,
 } from "../message-repository";
 import {
-  mergeThreadModelSettings,
+  applyResolvedThreadModelSettings,
   normalizeThreadModelSettings,
 } from "../model-settings";
 import {
@@ -22,10 +23,65 @@ import {
 } from "./context";
 import {
   resolveActiveChatProfileByAlias,
-  resolveThreadChatModelAlias,
+  resolveThreadChatProfile,
 } from "./model-resolution";
 import { assertSourcesExist } from "./source-validation";
 import type { PreparedThreadTurn, StreamThreadEventInput } from "./types";
+
+function normalizeSupportedParameters(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item.length > 0);
+}
+
+const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+
+function normalizeSupportedEfforts(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as Array<(typeof REASONING_EFFORTS)[number]>;
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().toLowerCase())
+        .filter((item): item is (typeof REASONING_EFFORTS)[number] =>
+          REASONING_EFFORTS.includes(item as (typeof REASONING_EFFORTS)[number])
+        ),
+    ),
+  );
+}
+
+function resolvePreparedLlmConfig(input: {
+  chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
+  llm?: LlmExecutionConfig;
+}): LlmExecutionConfig | undefined {
+  if (!input.llm?.thinking) {
+    return input.llm;
+  }
+
+  const configJson = input.chatProfile.configJson &&
+      typeof input.chatProfile.configJson === "object"
+    ? input.chatProfile.configJson as Record<string, unknown>
+    : {};
+  const supportedParameters = normalizeSupportedParameters(configJson.supportedParameters);
+  const supportedEfforts = normalizeSupportedEfforts(configJson.supportedEfforts);
+
+  return {
+    ...input.llm,
+    thinking: {
+      ...input.llm.thinking,
+      supportedParameters,
+      supportedEfforts,
+    },
+  };
+}
 
 export async function prepareThreadTurn(
   input: StreamThreadEventInput,
@@ -55,31 +111,13 @@ export async function prepareThreadTurn(
     throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
   }
 
-  const requestedModelAlias =
-    typeof input.llm?.modelAlias === "string" ? input.llm.modelAlias.trim() : "";
+  const requestedProfileAlias =
+    typeof input.llm?.profileAlias === "string" ? input.llm.profileAlias.trim() : "";
 
-  const resolvedChatModel = await resolveThreadChatModelAlias({
+  const resolvedChatModel = await resolveThreadChatProfile({
     threadModelSettings: normalizeThreadModelSettings(thread.modelSettings),
-    requestedModelAlias: requestedModelAlias || undefined,
+    requestedProfileAlias: requestedProfileAlias || undefined,
   });
-
-  if (
-    requestedModelAlias.length > 0 &&
-    thread.modelSettings.llmModelAlias !== requestedModelAlias
-  ) {
-    const updatedThread = await updateThreadModelSettingsRecord({
-      threadId: thread.id,
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      modelSettings: mergeThreadModelSettings(
-        normalizeThreadModelSettings(thread.modelSettings),
-        { llmModelAlias: requestedModelAlias },
-      ),
-    });
-    if (updatedThread) {
-      thread = updatedThread;
-    }
-  }
 
   const requestedSourceIds = dedupeSourceIds(input.sourceIds);
   const existingUserMessage = input.existingUserMessage;
@@ -124,8 +162,27 @@ export async function prepareThreadTurn(
   );
   const initialTitle = thread.title;
 
+  const profileAlias = resolvedChatModel.profileAlias;
   const modelAlias = resolvedChatModel.modelAlias;
-  const chatProfile = await resolveActiveChatProfileByAlias(modelAlias);
+  const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);
+  const llm = resolvePreparedLlmConfig({ chatProfile, llm: input.llm });
+  const normalizedThreadSettings = normalizeThreadModelSettings(thread.modelSettings);
+  if (
+    normalizedThreadSettings.llmProfileAlias !== profileAlias ||
+    normalizedThreadSettings.llmModelAlias !== modelAlias
+  ) {
+    const updatedThread = await updateThreadModelSettingsRecord({
+      threadId: thread.id,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      modelSettings: applyResolvedThreadModelSettings(normalizedThreadSettings, {
+        llm: { profileAlias, modelAlias },
+      }),
+    });
+    if (updatedThread) {
+      thread = updatedThread;
+    }
+  }
   const agentMode = input.agentMode ?? "continue";
   const latestAssistantCheckpoint = agentMode === "continue"
     ? resolveLatestAssistantFinalCheckpoint(messageRecords)
@@ -151,8 +208,10 @@ export async function prepareThreadTurn(
     userMessage,
     createdUserMessage,
     assistantMessageParentId,
+    profileAlias,
     modelAlias,
     chatProfile,
+    llm,
     llmIdempotencyKey,
     agentMode,
     agentBaseCheckpoint,

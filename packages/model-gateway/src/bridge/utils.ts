@@ -102,7 +102,7 @@ export function createEmbeddingsModel(input: {
 
 export type LangChainModelExecutionConfig = Pick<
   ChatCompleteInput,
-  "executionMode" | "providerHint" | "byok" | "metadata"
+  "executionMode" | "providerHint" | "byok" | "metadata" | "thinking"
 >;
 
 /**
@@ -125,6 +125,7 @@ export async function createLangChainChatModel(input: {
     providerHint: input.execution?.providerHint,
     byok: input.execution?.byok,
     metadata: input.execution?.metadata,
+    thinking: input.execution?.thinking,
   };
 
   const target = await resolveRequestTarget(resolvedConfig, payload);

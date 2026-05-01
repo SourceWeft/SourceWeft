@@ -7,6 +7,9 @@ export type ThreadModelKind = "llm" | "image" | "vision";
 export type ModelProfileKind = "chat" | "image" | "vision";
 
 export type ThreadModelSettings = {
+  llmProfileAlias: string | null;
+  imageProfileAlias: string | null;
+  visionProfileAlias: string | null;
   llmModelAlias: string | null;
   imageModelAlias: string | null;
   visionModelAlias: string | null;
@@ -40,6 +43,9 @@ export function normalizeThreadModelSettings(
   input:
     | Partial<ThreadModelSettings>
     | {
+        llmProfileAlias?: string | null;
+        imageProfileAlias?: string | null;
+        visionProfileAlias?: string | null;
         llmModelAlias?: string | null;
         imageModelAlias?: string | null;
         visionModelAlias?: string | null;
@@ -66,6 +72,9 @@ export function normalizeThreadModelSettings(
   };
 
   return {
+    llmProfileAlias: normalizeAlias(input?.llmProfileAlias),
+    imageProfileAlias: normalizeAlias(input?.imageProfileAlias),
+    visionProfileAlias: normalizeAlias(input?.visionProfileAlias),
     llmModelAlias: normalizeAlias(input?.llmModelAlias),
     imageModelAlias: normalizeAlias(input?.imageModelAlias),
     visionModelAlias: normalizeAlias(input?.visionModelAlias),
@@ -77,9 +86,12 @@ export function normalizePersistedThreadModelSettings(
 ): ThreadModelSettings {
   try {
     return normalizeThreadModelSettings({
-      llmModelAlias: input?.llmModelAlias ?? input?.llmProfileAlias,
-      imageModelAlias: input?.imageModelAlias ?? input?.imageProfileAlias,
-      visionModelAlias: input?.visionModelAlias ?? input?.visionProfileAlias,
+      llmProfileAlias: input?.llmProfileAlias,
+      imageProfileAlias: input?.imageProfileAlias,
+      visionProfileAlias: input?.visionProfileAlias,
+      llmModelAlias: input?.llmModelAlias,
+      imageModelAlias: input?.imageModelAlias,
+      visionModelAlias: input?.visionModelAlias,
     });
   } catch (error) {
     if (
@@ -87,6 +99,9 @@ export function normalizePersistedThreadModelSettings(
       error.code === "MODEL_ALIAS_INVALID"
     ) {
       return {
+        llmProfileAlias: null,
+        imageProfileAlias: null,
+        visionProfileAlias: null,
         llmModelAlias: null,
         imageModelAlias: null,
         visionModelAlias: null,
@@ -99,12 +114,30 @@ export function normalizePersistedThreadModelSettings(
 export function mergeThreadModelSettings(
   current: ThreadModelSettings,
   patch: {
+    llmProfileAlias?: string | null;
+    imageProfileAlias?: string | null;
+    visionProfileAlias?: string | null;
     llmModelAlias?: string | null;
     imageModelAlias?: string | null;
     visionModelAlias?: string | null;
   },
 ): ThreadModelSettings {
   const next = { ...current };
+  if (patch.llmProfileAlias !== undefined) {
+    next.llmProfileAlias = normalizeThreadModelSettings({
+      llmProfileAlias: patch.llmProfileAlias,
+    }).llmProfileAlias;
+  }
+  if (patch.imageProfileAlias !== undefined) {
+    next.imageProfileAlias = normalizeThreadModelSettings({
+      imageProfileAlias: patch.imageProfileAlias,
+    }).imageProfileAlias;
+  }
+  if (patch.visionProfileAlias !== undefined) {
+    next.visionProfileAlias = normalizeThreadModelSettings({
+      visionProfileAlias: patch.visionProfileAlias,
+    }).visionProfileAlias;
+  }
   if (patch.llmModelAlias !== undefined) {
     next.llmModelAlias = normalizeThreadModelSettings({
       llmModelAlias: patch.llmModelAlias,
@@ -120,6 +153,153 @@ export function mergeThreadModelSettings(
       visionModelAlias: patch.visionModelAlias,
     }).visionModelAlias;
   }
+
+  if (patch.llmProfileAlias !== undefined && patch.llmModelAlias === undefined) {
+    next.llmModelAlias = null;
+  } else if (patch.llmModelAlias !== undefined && patch.llmProfileAlias === undefined) {
+    next.llmProfileAlias = null;
+  }
+  if (patch.imageProfileAlias !== undefined && patch.imageModelAlias === undefined) {
+    next.imageModelAlias = null;
+  } else if (patch.imageModelAlias !== undefined && patch.imageProfileAlias === undefined) {
+    next.imageProfileAlias = null;
+  }
+  if (patch.visionProfileAlias !== undefined && patch.visionModelAlias === undefined) {
+    next.visionModelAlias = null;
+  } else if (patch.visionModelAlias !== undefined && patch.visionProfileAlias === undefined) {
+    next.visionProfileAlias = null;
+  }
+
+  return next;
+}
+
+export function applyResolvedThreadModelSettings(
+  current: ThreadModelSettings,
+  patch: {
+    llm?: { profileAlias: string | null; modelAlias: string | null };
+    image?: { profileAlias: string | null; modelAlias: string | null };
+    vision?: { profileAlias: string | null; modelAlias: string | null };
+  },
+): ThreadModelSettings {
+  return {
+    ...current,
+    ...(patch.llm
+      ? {
+          llmProfileAlias: normalizeThreadModelSettings({
+            llmProfileAlias: patch.llm.profileAlias,
+          }).llmProfileAlias,
+          llmModelAlias: normalizeThreadModelSettings({
+            llmModelAlias: patch.llm.modelAlias,
+          }).llmModelAlias,
+        }
+      : {}),
+    ...(patch.image
+      ? {
+          imageProfileAlias: normalizeThreadModelSettings({
+            imageProfileAlias: patch.image.profileAlias,
+          }).imageProfileAlias,
+          imageModelAlias: normalizeThreadModelSettings({
+            imageModelAlias: patch.image.modelAlias,
+          }).imageModelAlias,
+        }
+      : {}),
+    ...(patch.vision
+      ? {
+          visionProfileAlias: normalizeThreadModelSettings({
+            visionProfileAlias: patch.vision.profileAlias,
+          }).visionProfileAlias,
+          visionModelAlias: normalizeThreadModelSettings({
+            visionModelAlias: patch.vision.modelAlias,
+          }).visionModelAlias,
+        }
+      : {}),
+  };
+}
+
+export async function ensureProfileAliasExists(input: {
+  profileKind: ModelProfileKind;
+  profileAlias: string;
+}) {
+  const [row] = await db
+    .select({ id: modelGatewayProfiles.id })
+    .from(modelGatewayProfiles)
+    .where(
+      and(
+        eq(modelGatewayProfiles.kind, input.profileKind),
+        eq(modelGatewayProfiles.profileAlias, input.profileAlias),
+        eq(modelGatewayProfiles.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw new ContentError(
+      400,
+      "MODEL_PROFILE_ALIAS_INVALID",
+      `Model profile alias '${input.profileAlias}' is not available for ${input.profileKind}`,
+    );
+  }
+}
+
+async function resolveActiveProfileModelAlias(input: {
+  profileKind: ModelProfileKind;
+  profileAlias: string;
+}) {
+  const [row] = await db
+    .select({ modelAlias: modelGatewayProfiles.modelAlias })
+    .from(modelGatewayProfiles)
+    .where(
+      and(
+        eq(modelGatewayProfiles.kind, input.profileKind),
+        eq(modelGatewayProfiles.profileAlias, input.profileAlias),
+        eq(modelGatewayProfiles.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw new ContentError(
+      400,
+      "MODEL_PROFILE_ALIAS_INVALID",
+      `Model profile alias '${input.profileAlias}' is not available for ${input.profileKind}`,
+    );
+  }
+
+  return row.modelAlias;
+}
+
+export async function resolveThreadModelSettingsSnapshots(
+  settings: ThreadModelSettings,
+): Promise<ThreadModelSettings> {
+  const next = { ...settings };
+
+  if (next.llmProfileAlias) {
+    next.llmModelAlias = await resolveActiveProfileModelAlias({
+      profileKind: "chat",
+      profileAlias: next.llmProfileAlias,
+    });
+  } else {
+    next.llmModelAlias = null;
+  }
+
+  if (next.imageProfileAlias) {
+    next.imageModelAlias = await resolveActiveProfileModelAlias({
+      profileKind: "image",
+      profileAlias: next.imageProfileAlias,
+    });
+  } else {
+    next.imageModelAlias = null;
+  }
+
+  if (next.visionProfileAlias) {
+    next.visionModelAlias = await resolveActiveProfileModelAlias({
+      profileKind: "vision",
+      profileAlias: next.visionProfileAlias,
+    });
+  } else {
+    next.visionModelAlias = null;
+  }
+
   return next;
 }
 
@@ -148,6 +328,25 @@ export async function ensureModelAliasExists(input: {
   }
 }
 
+export async function hasActiveProfileAlias(input: {
+  profileKind: ModelProfileKind;
+  profileAlias: string;
+}) {
+  const [row] = await db
+    .select({ id: modelGatewayProfiles.id })
+    .from(modelGatewayProfiles)
+    .where(
+      and(
+        eq(modelGatewayProfiles.kind, input.profileKind),
+        eq(modelGatewayProfiles.profileAlias, input.profileAlias),
+        eq(modelGatewayProfiles.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(row);
+}
+
 export async function hasActiveModelAlias(input: {
   profileKind: ModelProfileKind;
   modelAlias: string;
@@ -170,39 +369,42 @@ export async function hasActiveModelAlias(input: {
 export async function pruneUnavailableThreadModelAliases(
   settings: ThreadModelSettings,
   patch: {
-    llmModelAlias?: string | null;
-    imageModelAlias?: string | null;
-    visionModelAlias?: string | null;
+    llmProfileAlias?: string | null;
+    imageProfileAlias?: string | null;
+    visionProfileAlias?: string | null;
   },
 ): Promise<ThreadModelSettings> {
   const next = { ...settings };
 
-  if (patch.llmModelAlias === undefined && next.llmModelAlias) {
-    const valid = await hasActiveModelAlias({
+  if (patch.llmProfileAlias === undefined && next.llmProfileAlias) {
+    const valid = await hasActiveProfileAlias({
       profileKind: "chat",
-      modelAlias: next.llmModelAlias,
+      profileAlias: next.llmProfileAlias,
     });
     if (!valid) {
+      next.llmProfileAlias = null;
       next.llmModelAlias = null;
     }
   }
 
-  if (patch.imageModelAlias === undefined && next.imageModelAlias) {
-    const valid = await hasActiveModelAlias({
+  if (patch.imageProfileAlias === undefined && next.imageProfileAlias) {
+    const valid = await hasActiveProfileAlias({
       profileKind: "image",
-      modelAlias: next.imageModelAlias,
+      profileAlias: next.imageProfileAlias,
     });
     if (!valid) {
+      next.imageProfileAlias = null;
       next.imageModelAlias = null;
     }
   }
 
-  if (patch.visionModelAlias === undefined && next.visionModelAlias) {
-    const valid = await hasActiveModelAlias({
+  if (patch.visionProfileAlias === undefined && next.visionProfileAlias) {
+    const valid = await hasActiveProfileAlias({
       profileKind: "vision",
-      modelAlias: next.visionModelAlias,
+      profileAlias: next.visionProfileAlias,
     });
     if (!valid) {
+      next.visionProfileAlias = null;
       next.visionModelAlias = null;
     }
   }
@@ -218,18 +420,15 @@ export async function validateThreadModelSettings(
   ) as Array<[ThreadModelKind, ModelProfileKind]>) {
     const alias =
       threadKind === "llm"
-        ? settings.llmModelAlias
+        ? settings.llmProfileAlias
         : threadKind === "image"
-          ? settings.imageModelAlias
-          : settings.visionModelAlias;
+          ? settings.imageProfileAlias
+          : settings.visionProfileAlias;
 
     if (!alias) {
       continue;
     }
 
-    await ensureModelAliasExists({
-      profileKind,
-      modelAlias: alias,
-    });
+    await ensureProfileAliasExists({ profileKind, profileAlias: alias });
   }
 }

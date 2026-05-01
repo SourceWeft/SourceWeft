@@ -67,6 +67,9 @@ type ModelGatewayRouteKind =
   | "image"
   | "video";
 type ThreadModelSettings = {
+  llmProfileAlias?: string | null;
+  imageProfileAlias?: string | null;
+  visionProfileAlias?: string | null;
   llmModelAlias?: string | null;
   imageModelAlias?: string | null;
   visionModelAlias?: string | null;
@@ -901,9 +904,6 @@ export const modelGatewayProfiles = pgTable(
   },
   (table) => [
     uniqueIndex("model_gateway_profiles_alias_uq").on(table.profileAlias),
-    uniqueIndex("model_gateway_profiles_active_kind_model_alias_uq")
-      .on(table.kind, table.modelAlias)
-      .where(sql`${table.isActive} = true`),
     uniqueIndex("model_gateway_profiles_default_kind_uq")
       .on(table.kind)
       .where(sql`${table.isDefault} = true`),

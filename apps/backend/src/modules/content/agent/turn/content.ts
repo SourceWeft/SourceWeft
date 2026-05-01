@@ -132,6 +132,186 @@ export function extractProviderFieldsFromMessageChunk(chunk: unknown) {
   return toObjectRecord(record?.response_metadata) ?? undefined;
 }
 
+export function extractReasoningFromProviderFields(
+  providerFields: Record<string, unknown> | undefined,
+) {
+  if (!providerFields) {
+    return undefined;
+  }
+
+  const candidates = [
+    providerFields.reasoning_content,
+    providerFields.reasoningContent,
+    providerFields.reasoning,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+
+    const record = toObjectRecord(candidate);
+    if (!record) {
+      continue;
+    }
+
+    const content =
+      typeof record.content === "string"
+        ? record.content
+        : typeof record.text === "string"
+          ? record.text
+          : null;
+    if (content && content.trim().length > 0) {
+      return content;
+    }
+  }
+
+  return undefined;
+}
+
+function extractReasoningFromOpenRouterDetail(detail: unknown): string | null {
+  const record = toObjectRecord(detail);
+  if (!record) {
+    return null;
+  }
+
+  const type = typeof record.type === "string" ? record.type : "";
+  if (type === "reasoning.text" && typeof record.text === "string") {
+    return record.text.trim().length > 0 ? record.text : null;
+  }
+  if (type === "reasoning.summary" && typeof record.summary === "string") {
+    return record.summary.trim().length > 0 ? record.summary : null;
+  }
+  if (typeof record.text === "string" && record.text.trim().length > 0) {
+    return record.text;
+  }
+  if (typeof record.summary === "string" && record.summary.trim().length > 0) {
+    return record.summary;
+  }
+  return null;
+}
+
+function extractReasoningFromOpenRouterDetails(value: unknown): string | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const reasoning = value
+    .map(extractReasoningFromOpenRouterDetail)
+    .filter((item): item is string => item !== null)
+    .join("\n\n")
+    .trim();
+
+  return reasoning.length > 0 ? reasoning : undefined;
+}
+
+function extractReasoningFromContentBlock(block: unknown): string | null {
+  const blockRecord = toObjectRecord(block);
+  if (!blockRecord) {
+    return null;
+  }
+
+  const blockType = typeof blockRecord.type === "string"
+    ? blockRecord.type.toLowerCase()
+    : "";
+  if (!blockType.includes("reasoning") && !blockType.includes("thinking")) {
+    return null;
+  }
+
+  const text =
+    typeof blockRecord.reasoning === "string"
+      ? blockRecord.reasoning
+      : typeof blockRecord.text === "string"
+        ? blockRecord.text
+        : typeof blockRecord.content === "string"
+          ? blockRecord.content
+          : null;
+  return text && text.trim().length > 0 ? text : null;
+}
+
+function extractReasoningFromContentBlocks(value: unknown): string | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const reasoning = value
+    .map(extractReasoningFromContentBlock)
+    .filter((item): item is string => item !== null)
+    .join("\n\n")
+    .trim();
+
+  return reasoning.length > 0 ? reasoning : undefined;
+}
+
+function extractReasoningDeep(value: unknown, depth = 0): string | undefined {
+  if (depth > 8) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const directBlocks = extractReasoningFromContentBlocks(value);
+    if (directBlocks) {
+      return directBlocks;
+    }
+
+    for (const item of value) {
+      const nested = extractReasoningDeep(item, depth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
+    return undefined;
+  }
+
+  const record = toObjectRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const direct = extractReasoningFromProviderFields(record);
+  if (direct) {
+    return direct;
+  }
+
+  const details = extractReasoningFromOpenRouterDetails(record.reasoning_details);
+  if (details) {
+    return details;
+  }
+
+  const directBlock = extractReasoningFromContentBlock(record);
+  if (directBlock) {
+    return directBlock;
+  }
+
+  const prioritizedKeys = [
+    "contentBlocks",
+    "content_blocks",
+    "__raw_response",
+    "choices",
+    "delta",
+    "chunk",
+    "message",
+    "metadata",
+    "ls_provider",
+    "additional_kwargs",
+    "kwargs",
+    "response_metadata",
+    "content",
+  ];
+  for (const key of prioritizedKeys) {
+    const nested = extractReasoningDeep(record[key], depth + 1);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return undefined;
+}
+
+export function extractReasoningFromMessageChunk(chunk: unknown) {
+  return extractReasoningDeep(chunk);
+}
+
 export function extractTextDeltasFromMessageChunk(chunk: unknown): string[] {
   const record = toObjectRecord(chunk);
   if (!record) {
@@ -179,6 +359,10 @@ export function extractTextDeltasFromMessageChunk(chunk: unknown): string[] {
           return [] as string[];
         }
         const part = block as Record<string, unknown>;
+        const partType = typeof part.type === "string" ? part.type.toLowerCase() : "";
+        if (partType.includes("reasoning") || partType.includes("thinking")) {
+          return [] as string[];
+        }
         if (typeof part.text === "string") {
           return [part.text];
         }

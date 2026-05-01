@@ -8,6 +8,8 @@ export type ModelGatewayProfileKind =
   | "image"
   | "video";
 
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export type RuntimeModelGatewayProfile = {
   id: string;
   kind: ModelGatewayProfileKind;

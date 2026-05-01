@@ -30,30 +30,42 @@ import {
 
 export type ModelType = "llm" | "image" | "vision";
 
+export type ModelThinkingCapabilities = {
+  supportsThinking: boolean;
+  supportedParameters?: string[];
+  supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+  reasoning?: boolean;
+  reasoningEffort?: boolean;
+  includeReasoning?: boolean;
+  supportSources?: string[];
+};
+
 export type ModelItem = {
   chef: string;
   chefSlug: string;
   id: string;
+  modelAlias: string;
   name: string;
   logoSrc?: string;
   provider: string;
   subtitle: string;
   badges?: string[];
+  capabilities?: ModelThinkingCapabilities;
 };
 
 export type ModelAliasSettings = {
-  llmModelAlias?: string | null;
-  imageModelAlias?: string | null;
-  visionModelAlias?: string | null;
+  llmProfileAlias?: string | null;
+  imageProfileAlias?: string | null;
+  visionProfileAlias?: string | null;
 };
 
 type CatalogModelEntry = {
+  profileAlias: string;
   modelAlias: string;
-  providerName: string;
-  providerKind: string;
   displayName: string;
   subtitle: string;
   badges: string[];
+  capabilities?: ModelThinkingCapabilities;
 };
 
 type CatalogModelKinds = {
@@ -67,6 +79,7 @@ const llmModels = [
     chef: "Anthropic",
     chefSlug: "anthropic",
     id: "claude-sonnet-4-20250514",
+    modelAlias: "claude-sonnet-4-20250514",
     name: "Claude Sonnet 4",
     provider: "anthropic" as const,
     subtitle: "claude-sonnet-4-20250514",
@@ -76,6 +89,7 @@ const llmModels = [
     chef: "Anthropic",
     chefSlug: "anthropic",
     id: "claude-opus-4-20250514",
+    modelAlias: "claude-opus-4-20250514",
     name: "Claude Opus 4",
     provider: "anthropic" as const,
     subtitle: "claude-opus-4-20250514",
@@ -85,6 +99,7 @@ const llmModels = [
     chef: "Anthropic",
     chefSlug: "anthropic",
     id: "claude-3.5-haiku",
+    modelAlias: "claude-3.5-haiku",
     name: "Claude 3.5 Haiku",
     provider: "anthropic" as const,
     subtitle: "claude-3.5-haiku",
@@ -93,6 +108,7 @@ const llmModels = [
     chef: "OpenAI",
     chefSlug: "openai",
     id: "gpt-4o",
+    modelAlias: "gpt-4o",
     name: "GPT-4o",
     provider: "openai" as const,
     subtitle: "gpt-4o",
@@ -102,6 +118,7 @@ const llmModels = [
     chef: "OpenAI",
     chefSlug: "openai",
     id: "gpt-4.1",
+    modelAlias: "gpt-4.1",
     name: "GPT-4.1",
     provider: "openai" as const,
     subtitle: "gpt-4.1",
@@ -111,6 +128,7 @@ const llmModels = [
     chef: "OpenAI",
     chefSlug: "openai",
     id: "o1-mini",
+    modelAlias: "o1-mini",
     name: "o1 Mini",
     provider: "openai" as const,
     subtitle: "o1-mini",
@@ -119,6 +137,7 @@ const llmModels = [
     chef: "Google",
     chefSlug: "google",
     id: "gemini-2.5-pro",
+    modelAlias: "gemini-2.5-pro",
     name: "Gemini 2.5 Pro",
     provider: "google" as const,
     subtitle: "gemini-2.5-pro",
@@ -128,6 +147,7 @@ const llmModels = [
     chef: "Google",
     chefSlug: "google",
     id: "gemini-2.5-flash",
+    modelAlias: "gemini-2.5-flash",
     name: "Gemini 2.5 Flash",
     provider: "google" as const,
     subtitle: "gemini-2.5-flash",
@@ -137,6 +157,7 @@ const llmModels = [
     chef: "Google",
     chefSlug: "google",
     id: "gemini-1.5-pro",
+    modelAlias: "gemini-1.5-pro",
     name: "Gemini 1.5 Pro",
     provider: "google" as const,
     subtitle: "gemini-1.5-pro",
@@ -145,6 +166,7 @@ const llmModels = [
     chef: "DeepSeek",
     chefSlug: "deepseek",
     id: "deepseek-chat",
+    modelAlias: "deepseek-chat",
     name: "DeepSeek Chat",
     provider: "deepseek" as const,
     subtitle: "deepseek-chat",
@@ -153,6 +175,7 @@ const llmModels = [
     chef: "DeepSeek",
     chefSlug: "deepseek",
     id: "deepseek-r1",
+    modelAlias: "deepseek-r1",
     name: "DeepSeek R1",
     provider: "deepseek" as const,
     subtitle: "deepseek-r1",
@@ -162,6 +185,7 @@ const llmModels = [
     chef: "DeepSeek",
     chefSlug: "deepseek",
     id: "deepseek-v3",
+    modelAlias: "deepseek-v3",
     name: "DeepSeek V3",
     provider: "deepseek" as const,
     subtitle: "deepseek-v3",
@@ -173,6 +197,7 @@ const imageModels = [
     chef: "OpenAI",
     chefSlug: "openai",
     id: "dall-e-3",
+    modelAlias: "dall-e-3",
     name: "DALL-E 3",
     provider: "openai" as const,
     subtitle: "dall-e-3",
@@ -181,6 +206,7 @@ const imageModels = [
     chef: "OpenAI",
     chefSlug: "openai",
     id: "gpt-image-1",
+    modelAlias: "gpt-image-1",
     name: "GPT Image 1",
     provider: "openai" as const,
     subtitle: "gpt-image-1",
@@ -189,6 +215,7 @@ const imageModels = [
     chef: "Google",
     chefSlug: "google",
     id: "imagen-3",
+    modelAlias: "imagen-3",
     name: "Imagen 3",
     provider: "google" as const,
     subtitle: "imagen-3",
@@ -197,6 +224,7 @@ const imageModels = [
     chef: "Google",
     chefSlug: "google",
     id: "imagen-2",
+    modelAlias: "imagen-2",
     name: "Imagen 2",
     provider: "google" as const,
     subtitle: "imagen-2",
@@ -205,6 +233,7 @@ const imageModels = [
     chef: "xAI",
     chefSlug: "xai",
     id: "grok-2-image",
+    modelAlias: "grok-2-image",
     name: "Grok 2 Image",
     provider: "xai" as const,
     subtitle: "grok-2-image",
@@ -213,6 +242,7 @@ const imageModels = [
     chef: "xAI",
     chefSlug: "xai",
     id: "grok-vision-image",
+    modelAlias: "grok-vision-image",
     name: "Grok Vision Image",
     provider: "xai" as const,
     subtitle: "grok-vision-image",
@@ -221,6 +251,7 @@ const imageModels = [
     chef: "Stability",
     chefSlug: "deepinfra",
     id: "stable-diffusion-3",
+    modelAlias: "stable-diffusion-3",
     name: "Stable Diffusion 3",
     provider: "deepinfra" as const,
     subtitle: "stable-diffusion-3",
@@ -229,6 +260,7 @@ const imageModels = [
     chef: "Stability",
     chefSlug: "deepinfra",
     id: "flux-1-pro",
+    modelAlias: "flux-1-pro",
     name: "FLUX.1 Pro",
     provider: "deepinfra" as const,
     subtitle: "flux-1-pro",
@@ -240,6 +272,7 @@ const visionModels = [
     chef: "OpenAI",
     chefSlug: "openai",
     id: "gpt-4.1-vision",
+    modelAlias: "gpt-4.1-vision",
     name: "GPT-4.1 Vision",
     provider: "openai" as const,
     subtitle: "gpt-4.1-vision",
@@ -249,6 +282,7 @@ const visionModels = [
     chef: "OpenAI",
     chefSlug: "openai",
     id: "gpt-4o-vision",
+    modelAlias: "gpt-4o-vision",
     name: "GPT-4o Vision",
     provider: "openai" as const,
     subtitle: "gpt-4o-vision",
@@ -257,6 +291,7 @@ const visionModels = [
     chef: "Anthropic",
     chefSlug: "anthropic",
     id: "claude-3.7-sonnet-vision",
+    modelAlias: "claude-3.7-sonnet-vision",
     name: "Claude 3.7 Vision",
     provider: "anthropic" as const,
     subtitle: "claude-3.7-sonnet-vision",
@@ -265,6 +300,7 @@ const visionModels = [
     chef: "Anthropic",
     chefSlug: "anthropic",
     id: "claude-sonnet-4-vision",
+    modelAlias: "claude-sonnet-4-vision",
     name: "Claude Sonnet 4 Vision",
     provider: "anthropic" as const,
     subtitle: "claude-sonnet-4-vision",
@@ -273,6 +309,7 @@ const visionModels = [
     chef: "Google",
     chefSlug: "google",
     id: "gemini-2.5-flash-vision",
+    modelAlias: "gemini-2.5-flash-vision",
     name: "Gemini 2.5 Flash Vision",
     provider: "google" as const,
     subtitle: "gemini-2.5-flash-vision",
@@ -281,6 +318,7 @@ const visionModels = [
     chef: "Google",
     chefSlug: "google",
     id: "gemini-1.5-pro-vision",
+    modelAlias: "gemini-1.5-pro-vision",
     name: "Gemini 1.5 Pro Vision",
     provider: "google" as const,
     subtitle: "gemini-1.5-pro-vision",
@@ -289,6 +327,7 @@ const visionModels = [
     chef: "Meta",
     chefSlug: "llama",
     id: "llama-4-maverick-vision",
+    modelAlias: "llama-4-maverick-vision",
     name: "Llama 4 Maverick Vision",
     provider: "llama" as const,
     subtitle: "llama-4-maverick-vision",
@@ -297,6 +336,7 @@ const visionModels = [
     chef: "Meta",
     chefSlug: "llama",
     id: "llama-3.2-vision",
+    modelAlias: "llama-3.2-vision",
     name: "Llama 3.2 Vision",
     provider: "llama" as const,
     subtitle: "llama-3.2-vision",
@@ -341,18 +381,12 @@ function deriveDisplayNameFromAlias(alias: string) {
 }
 
 function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
-  const providerName = entry.providerName.trim();
-  const providerKind = entry.providerKind.trim();
-  const provider = providerName || providerKind || "unknown";
-  const isGlobalAutoModel = GLOBAL_AUTO_MODEL_ALIASES.has(entry.modelAlias);
-  const isOpenrouterModel =
-    providerName.toLowerCase() === "openrouter" ||
-    providerKind.toLowerCase() === "openrouter";
+  const isGlobalAutoModel = GLOBAL_AUTO_MODEL_ALIASES.has(entry.profileAlias);
   const displayName = entry.displayName.trim() || entry.modelAlias;
   const subtitle = entry.subtitle.trim() || entry.modelAlias;
-  const chef = isGlobalAutoModel || isOpenrouterModel
+  const chef = isGlobalAutoModel
     ? "Global models"
-    : providerName || providerKind || "Model";
+    : "OpenRouter";
   const name = isGlobalAutoModel
     ? "Auto (Default)"
     : displayName === entry.modelAlias && isInternalOpenRouterAlias(entry.modelAlias)
@@ -364,83 +398,35 @@ function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
     ? "Global models"
     : subtitle;
 
+  const badges = entry.capabilities?.supportsThinking
+    ? Array.from(new Set([...(entry.badges ?? []), "Thinking"]))
+    : entry.badges;
+
   return {
     chef,
     chefSlug: normalizeProviderSlug(
       isGlobalAutoModel
         ? "sourceweft"
-        : isOpenrouterModel
-          ? "openrouter"
-          : providerName || providerKind || "model",
+        : "openrouter",
     ),
-    id: entry.modelAlias,
+    id: entry.profileAlias,
+    modelAlias: entry.modelAlias,
     name,
     logoSrc: isGlobalAutoModel ? SOURCEWEFT_LOGO_SRC : undefined,
-    provider: isOpenrouterModel ? "openrouter" : provider,
+    provider: isGlobalAutoModel ? "sourceweft" : "openrouter",
     subtitle: itemSubtitle,
-    badges: entry.badges,
+    badges,
+    capabilities: entry.capabilities,
   };
-}
-
-function scoreModelDisplayQuality(model: ModelItem) {
-  let score = 0;
-  if (!isInternalOpenRouterAlias(model.id)) {
-    score += 2;
-  }
-  if (model.name !== model.subtitle) {
-    score += 1;
-  }
-  if (model.name !== model.id) {
-    score += 1;
-  }
-  return score;
-}
-
-function dedupeCatalogModelItems(items: ModelItem[]) {
-  const output: ModelItem[] = [];
-  const openrouterIndexByTarget = new Map<string, number>();
-
-  for (const model of items) {
-    if (GLOBAL_AUTO_MODEL_ALIASES.has(model.id)) {
-      output.push(model);
-      continue;
-    }
-
-    const isOpenrouter = model.provider === "openrouter";
-    if (!isOpenrouter) {
-      output.push(model);
-      continue;
-    }
-
-    const dedupeTarget = model.subtitle.trim().toLowerCase();
-    if (!dedupeTarget) {
-      output.push(model);
-      continue;
-    }
-
-    const existingIndex = openrouterIndexByTarget.get(dedupeTarget);
-    if (existingIndex === undefined) {
-      openrouterIndexByTarget.set(dedupeTarget, output.length);
-      output.push(model);
-      continue;
-    }
-
-    const existing = output[existingIndex]!;
-    if (scoreModelDisplayQuality(model) > scoreModelDisplayQuality(existing)) {
-      output[existingIndex] = model;
-    }
-  }
-
-  return output;
 }
 
 export function mapCatalogKindsToModelItems(
   kinds: CatalogModelKinds,
 ): Record<ModelType, ModelItem[]> {
   return {
-    llm: dedupeCatalogModelItems(kinds.llm.map(mapCatalogEntryToModelItem)),
-    image: dedupeCatalogModelItems(kinds.image.map(mapCatalogEntryToModelItem)),
-    vision: dedupeCatalogModelItems(kinds.vision.map(mapCatalogEntryToModelItem)),
+    llm: kinds.llm.map(mapCatalogEntryToModelItem),
+    image: kinds.image.map(mapCatalogEntryToModelItem),
+    vision: kinds.vision.map(mapCatalogEntryToModelItem),
   };
 }
 
@@ -450,13 +436,13 @@ function resolveAliasForType(type: ModelType, aliases?: ModelAliasSettings) {
   }
 
   if (type === "llm") {
-    return aliases.llmModelAlias ?? null;
+    return aliases.llmProfileAlias ?? null;
   }
   if (type === "image") {
-    return aliases.imageModelAlias ?? null;
+    return aliases.imageProfileAlias ?? null;
   }
 
-  return aliases.visionModelAlias ?? null;
+  return aliases.visionProfileAlias ?? null;
 }
 
 function pickSelectedModelForType(input: {
@@ -610,7 +596,7 @@ function SelectorPanel({
                             });
                             setOpen(false);
                           }}
-                          value={`${model.name} ${model.subtitle} ${model.provider} ${model.chef}`}
+                          value={`${model.id} ${model.name} ${model.subtitle} ${model.provider} ${model.chef}`}
                         >
                           <ModelSelectorLogo
                             provider={model.chefSlug}

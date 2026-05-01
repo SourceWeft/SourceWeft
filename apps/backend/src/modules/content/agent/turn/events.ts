@@ -5,6 +5,7 @@ import { contentRetrievalService } from "../../retrieval/service";
 import type {
   AgentCheckpointMetadata,
   RetrievalCallTrace,
+  ModelReasoningSegmentTrace,
   ThinkingStepTrace,
   ToolCallTrace,
 } from "../../threads";
@@ -17,9 +18,10 @@ export type DeepAgentTurnOutcome = {
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
+  reasoningSegments: ModelReasoningSegmentTrace[];
   usage?: UsageInfo;
   finishReason?: string;
-  providerFields?: Record<string, unknown>;
+  reasoning?: string;
   agentCheckpoint: AgentCheckpointMetadata;
 };
 
@@ -84,6 +86,11 @@ export type DeepAgentTurnEvent =
       type: "citations";
       citations: ReturnType<typeof buildCitationMetadata>;
       availableCitations?: ReturnType<typeof buildCitationMetadata>;
+    }
+  | {
+      type: "reasoning";
+      reasoning: string;
+      segment: ModelReasoningSegmentTrace;
     }
   | {
       type: "done";

@@ -62,19 +62,32 @@
   ],
   "chatProfiles": [
     {
+      "profileAlias": "chat-default",
       "modelAlias": "chat-default",
       "gatewaySlug": "openrouter-default",
       "providerName": "openrouter",
-      "targetModel": "minimax/minimax-m2.5",
+      "targetModel": "minimax/minimax-m2.7",
       "routingStrategy": "priority",
       "priority": 1,
       "weight": 100,
       "isDefault": true,
-      "isActive": true
+      "isActive": true,
+      "supportedParameters": [
+        "reasoning",
+        "include_reasoning"
+      ],
+      "supportedEfforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
     }
   ],
   "imageProfiles": [
     {
+      "profileAlias": "image-default",
       "modelAlias": "image-default",
       "gatewaySlug": "openrouter-default",
       "providerName": "openrouter",
@@ -88,6 +101,7 @@
   ],
   "visionProfiles": [
     {
+      "profileAlias": "vision-default",
       "modelAlias": "vision-default",
       "gatewaySlug": "openrouter-default",
       "providerName": "openrouter",
@@ -101,6 +115,7 @@
   ],
   "rerankProfiles": [
     {
+      "profileAlias": "rerank-default",
       "modelAlias": "rerank-default",
       "gatewaySlug": "deepinfra-default",
       "providerName": "deepinfra",

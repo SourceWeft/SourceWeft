@@ -16,7 +16,10 @@ import {
   type GlobalProfilePricingEntry,
   loadGlobalModelGatewayConfig,
 } from "./global-config";
-import { fetchDynamicOpenRouterProfiles } from "./openrouter-catalog";
+import {
+  type DynamicOpenRouterProfileEntry,
+  fetchDynamicOpenRouterProfiles,
+} from "./openrouter-catalog";
 import { buildProfilePricingConfigJson } from "./profiles";
 import {
   resolveModelGatewayMaxRetries,
@@ -32,6 +35,99 @@ const GLOBAL_MODEL_GATEWAY_CONFIG_RELATIVE_PATH = "../../../config/model-gateway
 let modelConfigSyncPromise: Promise<void> | null = null;
 
 const MODEL_GATEWAY_CONFIG_SYNC_LOCK_ID = 7_344_001;
+
+function assertUniqueProfiles(
+  kind: ModelGatewayProfileKind,
+  entries: Array<{ modelAlias: string; profileAlias: string }>,
+) {
+  const profileAliases = new Set<string>();
+
+  for (const entry of entries) {
+    if (profileAliases.has(entry.profileAlias)) {
+      throw new Error(
+        `Global model gateway config resolved duplicate ${kind} profileAlias '${entry.profileAlias}'`,
+      );
+    }
+    profileAliases.add(entry.profileAlias);
+  }
+}
+
+function assertUniqueRoutes(
+  kind: ModelGatewayProfileKind,
+  entries: Array<{ profileAlias: string }>,
+) {
+  const aliases = new Set<string>();
+  for (const entry of entries) {
+    const alias = entry.profileAlias.trim().toLowerCase();
+    if (aliases.has(alias)) {
+      throw new Error(
+        `Global model gateway config resolved duplicate ${kind} route alias '${entry.profileAlias}'`,
+      );
+    }
+    aliases.add(alias);
+  }
+}
+
+function buildProfileAliasSet(entries: Array<{ profileAlias: string }>) {
+  return new Set(
+    entries.map((entry) => entry.profileAlias.trim().toLowerCase()),
+  );
+}
+
+function hasProfileAlias(entries: Set<string>, profileAlias: string) {
+  return entries.has(profileAlias.trim().toLowerCase());
+}
+
+function buildOpenRouterProfileIndex(entries: DynamicOpenRouterProfileEntry[]) {
+  return new Map(entries.map((entry) => [entry.targetModel, entry]));
+}
+
+function applyOpenRouterFacts<T extends {
+  architecture?: Record<string, unknown>;
+  contextLength?: number | null;
+  defaultParameters?: Record<string, unknown> | null;
+  displayName?: string;
+  gatewaySlug: string;
+  maxCompletionTokens?: number | null;
+  pricing?: GlobalProfilePricingEntry | null;
+  providerCatalogSource?: string;
+  supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+  supportedParameters?: string[];
+  targetModel: string;
+  profileAlias: string;
+}>(
+  entry: T,
+  input: {
+    openrouterGatewaySlug?: string;
+    openrouterProfilesByTarget: Map<string, DynamicOpenRouterProfileEntry>;
+  },
+): T {
+  if (!input.openrouterGatewaySlug || entry.gatewaySlug !== input.openrouterGatewaySlug) {
+    return entry;
+  }
+
+  const facts = input.openrouterProfilesByTarget.get(entry.targetModel);
+  if (!facts) {
+    return entry;
+  }
+
+  return {
+    ...entry,
+    architecture: entry.architecture ?? facts.architecture,
+    contextLength: entry.contextLength ?? facts.contextLength,
+    defaultParameters: entry.defaultParameters ?? facts.defaultParameters,
+    displayName: entry.displayName ?? facts.displayName,
+    maxCompletionTokens: entry.maxCompletionTokens ?? facts.maxCompletionTokens,
+    pricing: entry.pricing ?? facts.pricing,
+    providerCatalogSource: entry.providerCatalogSource ?? "openrouter-models",
+    supportedEfforts: entry.supportedEfforts && entry.supportedEfforts.length > 0
+      ? entry.supportedEfforts
+      : facts.supportedEfforts,
+    supportedParameters: entry.supportedParameters && entry.supportedParameters.length > 0
+      ? entry.supportedParameters
+      : facts.supportedParameters,
+  };
+}
 
 export function resolveGlobalModelGatewayConfigPath() {
   const configuredPath = config.modelGatewayGlobalConfigPath?.trim();
@@ -55,9 +151,16 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     requestedDimensions?: number | null;
     vectorStrategy?: "auto" | "exact" | "disabled";
     pricing?: GlobalProfilePricingEntry | null;
+    providerCatalogSource?: string;
+    architecture?: Record<string, unknown>;
+    contextLength?: number | null;
+    defaultParameters?: Record<string, unknown> | null;
     displayName?: string;
+    maxCompletionTokens?: number | null;
     subtitle?: string;
     badges?: string[];
+    supportedParameters?: string[];
+    supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
   },
   gatewayConfigId: string,
   now: Date,
@@ -87,6 +190,21 @@ async function upsertModelGatewayProfileFromGlobalConfig(
       ...(entry.displayName ? { displayName: entry.displayName } : {}),
       ...(entry.subtitle ? { subtitle: entry.subtitle } : {}),
       ...(entry.badges && entry.badges.length > 0 ? { badges: entry.badges } : {}),
+      ...(entry.providerCatalogSource
+        ? { providerCatalogSource: entry.providerCatalogSource }
+        : {}),
+      ...(entry.architecture ? { architecture: entry.architecture } : {}),
+      ...(entry.contextLength ? { contextLength: entry.contextLength } : {}),
+      ...(entry.defaultParameters ? { defaultParameters: entry.defaultParameters } : {}),
+      ...(entry.maxCompletionTokens
+        ? { maxCompletionTokens: entry.maxCompletionTokens }
+        : {}),
+      ...(entry.supportedParameters && entry.supportedParameters.length > 0
+        ? { supportedParameters: entry.supportedParameters }
+        : {}),
+      ...(entry.supportedEfforts && entry.supportedEfforts.length > 0
+        ? { supportedEfforts: entry.supportedEfforts }
+        : {}),
     },
     updatedAt: now,
   };
@@ -122,61 +240,120 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
         image: [],
         vision: [],
       };
+  const openrouterProfilesByKind = {
+    chat: buildOpenRouterProfileIndex(dynamicOpenRouterProfiles.chat),
+    image: buildOpenRouterProfileIndex(dynamicOpenRouterProfiles.image),
+    vision: buildOpenRouterProfileIndex(dynamicOpenRouterProfiles.vision),
+  };
+  const openrouterGatewaySlug = openrouterGateway?.slug;
+  const openrouterProviderName = openrouterGateway?.providerName ?? "openrouter";
+  const configuredChatProfileAliases = buildProfileAliasSet(loaded.chatProfiles);
+  const configuredImageProfileAliases = buildProfileAliasSet(loaded.imageProfiles);
+  const configuredVisionProfileAliases = buildProfileAliasSet(loaded.visionProfiles);
 
   const chatProfilesToSync = [
-    ...loaded.chatProfiles,
-    ...dynamicOpenRouterProfiles.chat.map((entry) => ({
+    ...loaded.chatProfiles.map((entry) =>
+      applyOpenRouterFacts(entry, {
+        openrouterGatewaySlug,
+        openrouterProfilesByTarget: openrouterProfilesByKind.chat,
+      })
+    ),
+    ...dynamicOpenRouterProfiles.chat.filter((entry) =>
+      !hasProfileAlias(configuredChatProfileAliases, entry.profileAlias)
+    ).map((entry) => ({
       profileAlias: entry.profileAlias,
       modelAlias: entry.targetModel,
       gatewaySlug: openrouterGateway?.slug ?? "",
-      providerName: openrouterGateway?.providerName ?? "openrouter",
+      providerName: openrouterProviderName,
       targetModel: entry.targetModel,
       routingStrategy: "priority" as const,
       priority: 100,
       weight: 100,
       isDefault: false,
       isActive: true,
-      pricing: null,
+      pricing: entry.pricing,
+      supportedParameters: entry.supportedParameters,
+      supportedEfforts: entry.supportedEfforts,
+      providerCatalogSource: "openrouter-models",
+      architecture: entry.architecture,
+      contextLength: entry.contextLength,
+      defaultParameters: entry.defaultParameters,
       displayName: entry.displayName,
+      maxCompletionTokens: entry.maxCompletionTokens,
       subtitle: entry.targetModel,
     })),
   ];
   const imageProfilesToSync = [
-    ...loaded.imageProfiles,
-    ...dynamicOpenRouterProfiles.image.map((entry) => ({
+    ...loaded.imageProfiles.map((entry) =>
+      applyOpenRouterFacts(entry, {
+        openrouterGatewaySlug,
+        openrouterProfilesByTarget: openrouterProfilesByKind.image,
+      })
+    ),
+    ...dynamicOpenRouterProfiles.image.filter((entry) =>
+      !hasProfileAlias(configuredImageProfileAliases, entry.profileAlias)
+    ).map((entry) => ({
       profileAlias: entry.profileAlias,
       modelAlias: entry.targetModel,
       gatewaySlug: openrouterGateway?.slug ?? "",
-      providerName: openrouterGateway?.providerName ?? "openrouter",
+      providerName: openrouterProviderName,
       targetModel: entry.targetModel,
       routingStrategy: "priority" as const,
       priority: 100,
       weight: 100,
       isDefault: false,
       isActive: true,
-      pricing: null,
+      pricing: entry.pricing,
+      supportedParameters: entry.supportedParameters,
+      supportedEfforts: entry.supportedEfforts,
+      providerCatalogSource: "openrouter-models",
+      architecture: entry.architecture,
+      contextLength: entry.contextLength,
+      defaultParameters: entry.defaultParameters,
       displayName: entry.displayName,
+      maxCompletionTokens: entry.maxCompletionTokens,
       subtitle: entry.targetModel,
     })),
   ];
   const visionProfilesToSync = [
-    ...loaded.visionProfiles,
-    ...dynamicOpenRouterProfiles.vision.map((entry) => ({
+    ...loaded.visionProfiles.map((entry) =>
+      applyOpenRouterFacts(entry, {
+        openrouterGatewaySlug,
+        openrouterProfilesByTarget: openrouterProfilesByKind.vision,
+      })
+    ),
+    ...dynamicOpenRouterProfiles.vision.filter((entry) =>
+      !hasProfileAlias(configuredVisionProfileAliases, entry.profileAlias)
+    ).map((entry) => ({
       profileAlias: entry.profileAlias,
       modelAlias: entry.targetModel,
       gatewaySlug: openrouterGateway?.slug ?? "",
-      providerName: openrouterGateway?.providerName ?? "openrouter",
+      providerName: openrouterProviderName,
       targetModel: entry.targetModel,
       routingStrategy: "priority" as const,
       priority: 100,
       weight: 100,
       isDefault: false,
       isActive: true,
-      pricing: null,
+      pricing: entry.pricing,
+      supportedParameters: entry.supportedParameters,
+      supportedEfforts: entry.supportedEfforts,
+      providerCatalogSource: "openrouter-models",
+      architecture: entry.architecture,
+      contextLength: entry.contextLength,
+      defaultParameters: entry.defaultParameters,
       displayName: entry.displayName,
+      maxCompletionTokens: entry.maxCompletionTokens,
       subtitle: entry.targetModel,
     })),
   ];
+
+  assertUniqueProfiles("chat", chatProfilesToSync);
+  assertUniqueProfiles("image", imageProfilesToSync);
+  assertUniqueProfiles("vision", visionProfilesToSync);
+  assertUniqueRoutes("chat", chatProfilesToSync);
+  assertUniqueRoutes("image", imageProfilesToSync);
+  assertUniqueRoutes("vision", visionProfilesToSync);
 
   const now = new Date();
   await db.transaction(async (tx) => {
@@ -338,7 +515,7 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
       await tx.insert(modelGatewayRoutes).values({
         id: randomUUID(),
         configVersionId,
-        alias: entry.modelAlias,
+        alias: entry.profileAlias,
         routeKind: "chat",
         strategy: entry.routingStrategy,
         targetProviderName: entry.providerName,
@@ -375,7 +552,7 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
       await tx.insert(modelGatewayRoutes).values({
         id: randomUUID(),
         configVersionId,
-        alias: entry.modelAlias,
+        alias: entry.profileAlias,
         routeKind: "image",
         strategy: entry.routingStrategy,
         targetProviderName: entry.providerName,
@@ -412,7 +589,7 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
       await tx.insert(modelGatewayRoutes).values({
         id: randomUUID(),
         configVersionId,
-        alias: entry.modelAlias,
+        alias: entry.profileAlias,
         routeKind: "vision",
         strategy: entry.routingStrategy,
         targetProviderName: entry.providerName,
@@ -449,7 +626,7 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
       await tx.insert(modelGatewayRoutes).values({
         id: randomUUID(),
         configVersionId,
-        alias: entry.modelAlias,
+        alias: entry.profileAlias,
         routeKind: "rerank",
         strategy: entry.routingStrategy,
         targetProviderName: entry.providerName,
@@ -486,7 +663,7 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
       await tx.insert(modelGatewayRoutes).values({
         id: randomUUID(),
         configVersionId,
-        alias: entry.modelAlias,
+        alias: entry.profileAlias,
         routeKind: "embedding",
         strategy: entry.routingStrategy,
         targetProviderName: entry.providerName,

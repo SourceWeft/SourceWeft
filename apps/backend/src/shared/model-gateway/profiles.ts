@@ -20,7 +20,7 @@ export function buildProfilePricingConfigJson(
       cache_read_input_token_cost: pricing?.cacheReadInputTokenCost ?? null,
       cache_creation_input_token_cost: pricing?.cacheCreationInputTokenCost ?? null,
       output_cost_per_reasoning_token: pricing?.outputCostPerReasoningToken ?? null,
-      price_source: "manual",
+      price_source: pricing?.source ?? "manual",
       litellm_key: pricing?.litellmKey ?? null,
       price_updated_at: now.toISOString(),
     };

@@ -1,45 +1,47 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../../../../shared/database";
-import { modelGatewayProfiles } from "../../../../shared/db/schema";
+import {
+  modelGatewayProfiles,
+  modelGatewayProviderConfigs,
+} from "../../../../shared/db/schema";
 import { requireDefaultModelGatewayProfile } from "../../../../shared/model-gateway/index";
 import { ContentError } from "../../errors";
 import {
-  ensureModelAliasExists,
   type ThreadModelSettings,
 } from "../model-settings";
 
 const DEFAULT_MODEL_ALIAS = "chat-default";
 
-export async function resolveThreadChatModelAlias(input: {
+export async function resolveThreadChatProfile(input: {
   threadModelSettings: ThreadModelSettings;
-  requestedModelAlias?: string | null;
+  requestedProfileAlias?: string | null;
 }) {
-  const requestedAlias =
-    typeof input.requestedModelAlias === "string"
-      ? input.requestedModelAlias.trim()
+  const requestedProfileAlias =
+    typeof input.requestedProfileAlias === "string"
+      ? input.requestedProfileAlias.trim()
       : "";
-
-  if (requestedAlias.length > 0) {
-    await ensureModelAliasExists({
-      profileKind: "chat",
-      modelAlias: requestedAlias,
-    });
-
+  if (requestedProfileAlias.length > 0) {
+    const profile = await resolveActiveChatProfileByAlias(requestedProfileAlias);
     return {
-      modelAlias: requestedAlias,
-      persistedAlias: requestedAlias,
+      profileAlias: profile.profileAlias,
+      modelAlias: profile.modelAlias,
+      persistedProfileAlias: profile.profileAlias,
+      persistedModelAlias: profile.modelAlias,
     };
   }
 
-  const threadModelAlias = input.threadModelSettings.llmModelAlias;
-  if (threadModelAlias) {
+  const threadProfileAlias = input.threadModelSettings.llmProfileAlias;
+  if (threadProfileAlias) {
     const [row] = await db
-      .select({ id: modelGatewayProfiles.id })
+      .select({
+        profileAlias: modelGatewayProfiles.profileAlias,
+        modelAlias: modelGatewayProfiles.modelAlias,
+      })
       .from(modelGatewayProfiles)
       .where(
         and(
           eq(modelGatewayProfiles.kind, "chat"),
-          eq(modelGatewayProfiles.modelAlias, threadModelAlias),
+          eq(modelGatewayProfiles.profileAlias, threadProfileAlias),
           eq(modelGatewayProfiles.isActive, true),
         ),
       )
@@ -47,32 +49,44 @@ export async function resolveThreadChatModelAlias(input: {
 
     if (row) {
       return {
-        modelAlias: threadModelAlias,
-        persistedAlias: threadModelAlias,
+        profileAlias: row.profileAlias,
+        modelAlias: row.modelAlias,
+        persistedProfileAlias: row.profileAlias,
+        persistedModelAlias: row.modelAlias,
       };
     }
   }
 
   const defaultChatProfile = await requireDefaultModelGatewayProfile("chat");
-  const fallbackAlias = defaultChatProfile.modelAlias || DEFAULT_MODEL_ALIAS;
+  const fallbackProfileAlias = defaultChatProfile.profileAlias || DEFAULT_MODEL_ALIAS;
+  const fallbackModelAlias = defaultChatProfile.modelAlias || DEFAULT_MODEL_ALIAS;
 
   return {
-    modelAlias: fallbackAlias,
-    persistedAlias: input.threadModelSettings.llmModelAlias,
+    profileAlias: fallbackProfileAlias,
+    modelAlias: fallbackModelAlias,
+    persistedProfileAlias: fallbackProfileAlias,
+    persistedModelAlias: fallbackModelAlias,
   };
 }
 
-export async function resolveActiveChatProfileByAlias(modelAlias: string) {
+export async function resolveActiveChatProfileByAlias(profileAlias: string) {
   const [row] = await db
     .select({
+      configJson: modelGatewayProfiles.configJson,
       gatewayConfigId: modelGatewayProfiles.gatewayConfigId,
       modelAlias: modelGatewayProfiles.modelAlias,
+      profileAlias: modelGatewayProfiles.profileAlias,
+      providerKind: modelGatewayProviderConfigs.providerKind,
     })
     .from(modelGatewayProfiles)
+    .leftJoin(
+      modelGatewayProviderConfigs,
+      eq(modelGatewayProviderConfigs.gatewayConfigId, modelGatewayProfiles.gatewayConfigId),
+    )
     .where(
       and(
         eq(modelGatewayProfiles.kind, "chat"),
-        eq(modelGatewayProfiles.modelAlias, modelAlias),
+        eq(modelGatewayProfiles.profileAlias, profileAlias),
         eq(modelGatewayProfiles.isActive, true),
       ),
     )
@@ -81,8 +95,8 @@ export async function resolveActiveChatProfileByAlias(modelAlias: string) {
   if (!row) {
     throw new ContentError(
       400,
-      "MODEL_ALIAS_INVALID",
-      `Model alias '${modelAlias}' is not available for chat`,
+      "MODEL_PROFILE_ALIAS_INVALID",
+      `Model profile alias '${profileAlias}' is not available for chat`,
     );
   }
 

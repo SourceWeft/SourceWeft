@@ -23,6 +23,7 @@ export async function recordThreadStreamFailure(input: {
     operation: input.operation,
     modelKind: "chat",
     modelAlias: input.prepared.modelAlias,
+    profileAlias: input.prepared.profileAlias,
     llm: input.llm,
     traceId: input.prepared.userMessage.id,
     success: false,

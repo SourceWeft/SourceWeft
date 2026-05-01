@@ -18,61 +18,96 @@ type ThreadModelCatalogEntry = {
   kind: "llm" | "image" | "vision";
   profileAlias: string;
   modelAlias: string;
-  providerName: string;
-  providerKind: string;
-  targetModel: string | null;
   isDefault: boolean;
   isActive: boolean;
   displayName: string;
   subtitle: string;
   badges: string[];
   pricing: Record<string, unknown> | null;
+  capabilities?: {
+    supportsThinking: boolean;
+    supportedParameters: string[];
+    supportedEfforts: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+    reasoning: boolean;
+    reasoningEffort: boolean;
+    includeReasoning: boolean;
+    supportSources: string[];
+  };
 };
 
-function dedupeByTarget<T extends {
-  isDefault: boolean;
-  providerName: string;
-  targetModel: string | null;
-  modelAlias: string;
-  displayName: string;
-}>(items: T[]) {
-  const indexByTargetKey = new Map<string, number>();
-  const deduped: T[] = [];
+type ThreadModelCapabilities = NonNullable<ThreadModelCatalogEntry["capabilities"]>;
 
-  for (const item of items) {
-    if (item.isDefault) {
-      deduped.push(item);
-      continue;
-    }
+type CatalogPricing = NonNullable<ThreadModelCatalogEntry["pricing"]>;
 
-    const provider = item.providerName.trim().toLowerCase();
-    const target = (item.targetModel ?? item.modelAlias).trim().toLowerCase();
-    if (!provider || !target) {
-      deduped.push(item);
-      continue;
-    }
+const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
-    const dedupeKey = `${provider}:${target}`;
-    const existingIndex = indexByTargetKey.get(dedupeKey);
-    if (existingIndex === undefined) {
-      indexByTargetKey.set(dedupeKey, deduped.length);
-      deduped.push(item);
-      continue;
-    }
-
-    const existing = deduped[existingIndex]!;
-    const existingHasReadableName =
-      existing.displayName.trim().toLowerCase() !==
-      existing.modelAlias.trim().toLowerCase();
-    const currentHasReadableName =
-      item.displayName.trim().toLowerCase() !==
-      item.modelAlias.trim().toLowerCase();
-    if (!existingHasReadableName && currentHasReadableName) {
-      deduped[existingIndex] = item;
-    }
+function normalizeSupportedEfforts(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as Array<(typeof REASONING_EFFORTS)[number]>;
   }
 
-  return deduped;
+  return Array.from(
+    new Set(
+      value
+        .filter((effort): effort is string => typeof effort === "string")
+        .map((effort) => effort.trim().toLowerCase())
+        .filter((effort): effort is (typeof REASONING_EFFORTS)[number] =>
+          REASONING_EFFORTS.includes(effort as (typeof REASONING_EFFORTS)[number])
+        ),
+    ),
+  );
+}
+
+function resolveReasoningCapabilities(input: {
+  configJson: Record<string, unknown>;
+}): ThreadModelCapabilities {
+  const { configJson } = input;
+  const supportedParameters = Array.isArray(configJson.supportedParameters)
+    ? configJson.supportedParameters
+        .filter((parameter): parameter is string => typeof parameter === "string")
+        .map((parameter) => parameter.trim().toLowerCase())
+        .filter((parameter) => parameter.length > 0)
+    : [];
+
+  const reasoning = supportedParameters.includes("reasoning");
+  const reasoningEffort = supportedParameters.includes("reasoning_effort");
+  const includeReasoning = supportedParameters.includes("include_reasoning");
+  const supportedEfforts = normalizeSupportedEfforts(configJson.supportedEfforts);
+  const providerCatalogSource =
+    typeof configJson.providerCatalogSource === "string"
+      ? configJson.providerCatalogSource
+      : null;
+  const supportSources = [
+    ...(supportedParameters.length > 0 ? [providerCatalogSource ?? "config"] : []),
+  ];
+  return {
+    supportsThinking: reasoning || reasoningEffort || includeReasoning,
+    supportedParameters,
+    supportedEfforts,
+    reasoning,
+    reasoningEffort,
+    includeReasoning,
+    supportSources: Array.from(new Set(supportSources)),
+  };
+}
+
+function resolveCatalogPricing(configJson: Record<string, unknown>): CatalogPricing | null {
+  const priceSource = configJson.price_source;
+  if (typeof priceSource !== "string") {
+    return null;
+  }
+
+  return {
+    input_cost_per_token: configJson.input_cost_per_token ?? null,
+    output_cost_per_token: configJson.output_cost_per_token ?? null,
+    cache_read_input_token_cost: configJson.cache_read_input_token_cost ?? null,
+    cache_creation_input_token_cost:
+      configJson.cache_creation_input_token_cost ?? null,
+    output_cost_per_reasoning_token:
+      configJson.output_cost_per_reasoning_token ?? null,
+    price_source: priceSource,
+    price_updated_at: configJson.price_updated_at ?? null,
+  };
 }
 
 export async function listThreadModelCatalog(input: {
@@ -191,6 +226,9 @@ export async function listThreadModelCatalog(input: {
   }
 
   const defaults: ThreadModelSettings = {
+    llmProfileAlias: null,
+    imageProfileAlias: null,
+    visionProfileAlias: null,
     llmModelAlias: null,
     imageModelAlias: null,
     visionModelAlias: null,
@@ -205,7 +243,7 @@ export async function listThreadModelCatalog(input: {
   for (const row of profileRows) {
     const profileKind = row.kind as ModelProfileKind;
     const threadKind = THREAD_KIND_BY_MODEL_KIND[profileKind];
-    const route = routeByKindAlias.get(`${profileKind}:${row.modelAlias}`);
+    const route = routeByKindAlias.get(`${profileKind}:${row.profileAlias}`);
     if (!route?.hasGlobalApiKey) {
       continue;
     }
@@ -228,47 +266,46 @@ export async function listThreadModelCatalog(input: {
       : typeof configJson.subtitle === "string" &&
           configJson.subtitle.trim().length > 0
         ? configJson.subtitle.trim()
-        : (route?.targetModel ?? row.modelAlias);
+        : row.modelAlias;
     const badges = Array.isArray(configJson.badges)
       ? configJson.badges.filter(
           (badge): badge is string =>
             typeof badge === "string" && badge.trim().length > 0,
         )
       : [];
-    const pricing =
-      typeof configJson.price_source === "string" ? configJson : null;
+    const pricing = resolveCatalogPricing(configJson);
+    const directCapabilities = resolveReasoningCapabilities({
+      configJson,
+    });
 
     kinds[threadKind].push({
       kind: threadKind,
       profileAlias: row.profileAlias,
       modelAlias: row.modelAlias,
-      providerName: route?.providerName ?? "unknown",
-      providerKind: route?.providerKind ?? "unknown",
-      targetModel: route?.targetModel ?? null,
       isDefault: row.isDefault,
       isActive: row.isActive,
       displayName,
       subtitle,
       badges,
       pricing,
+      capabilities: directCapabilities,
     });
 
     if (row.isDefault) {
       if (threadKind === "llm") {
+        defaults.llmProfileAlias = row.profileAlias;
         defaults.llmModelAlias = row.modelAlias;
       }
       if (threadKind === "image") {
+        defaults.imageProfileAlias = row.profileAlias;
         defaults.imageModelAlias = row.modelAlias;
       }
       if (threadKind === "vision") {
+        defaults.visionProfileAlias = row.profileAlias;
         defaults.visionModelAlias = row.modelAlias;
       }
     }
   }
-
-  kinds.llm = dedupeByTarget(kinds.llm);
-  kinds.image = dedupeByTarget(kinds.image);
-  kinds.vision = dedupeByTarget(kinds.vision);
 
   const sorter = (
     left: { isDefault: boolean; displayName: string },

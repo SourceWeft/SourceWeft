@@ -200,9 +200,9 @@ export class ContentService {
     workspaceId: string;
     threadId: string;
     userId: string;
-    llmModelAlias?: string | null;
-    imageModelAlias?: string | null;
-    visionModelAlias?: string | null;
+    llmProfileAlias?: string | null;
+    imageProfileAlias?: string | null;
+    visionProfileAlias?: string | null;
   }) {
     return contentThreadService.updateThreadModelSettings(input);
   }
@@ -216,9 +216,9 @@ export class ContentService {
     userId: string;
     title?: string;
     modelSettings?: {
-      llmModelAlias?: string | null;
-      imageModelAlias?: string | null;
-      visionModelAlias?: string | null;
+      llmProfileAlias?: string | null;
+      imageProfileAlias?: string | null;
+      visionProfileAlias?: string | null;
     };
   }) {
     return contentThreadService.createThread(input);

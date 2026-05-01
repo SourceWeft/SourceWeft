@@ -111,9 +111,9 @@ export function registerThreadRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
-      llmModelAlias: parsed.data.llmModelAlias,
-      imageModelAlias: parsed.data.imageModelAlias,
-      visionModelAlias: parsed.data.visionModelAlias,
+      llmProfileAlias: parsed.data.llmProfileAlias,
+      imageProfileAlias: parsed.data.imageProfileAlias,
+      visionProfileAlias: parsed.data.visionProfileAlias,
     });
 
     return ApiResponse.success(c, result);

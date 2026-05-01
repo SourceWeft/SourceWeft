@@ -18,6 +18,7 @@ export {
 
 export { createLangChainChatModel } from "./bridge/utils";
 export type { LangChainModelExecutionConfig } from "./bridge/utils";
+export { resolveThinkingMode } from "./thinking";
 
 export { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 export { createDeepInfraProvider } from "./providers/deepinfra";

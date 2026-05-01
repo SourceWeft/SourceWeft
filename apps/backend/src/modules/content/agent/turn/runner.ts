@@ -19,6 +19,7 @@ import {
   extractTextDeltasFromMessageChunk,
   extractFinishReasonFromMessageChunk,
   extractProviderFieldsFromMessageChunk,
+  extractReasoningFromMessageChunk,
   extractUsageFromMessageChunk,
   resolveAssistantContentFromUpdatesChunk,
   sanitizeSseValue,
@@ -115,6 +116,19 @@ function addUsage(
     cacheReadTokens: sum(current?.cacheReadTokens, next.cacheReadTokens),
     cacheWriteTokens: sum(current?.cacheWriteTokens, next.cacheWriteTokens),
   };
+}
+
+function appendReasoningChunk(current: string | undefined, next: string) {
+  if (!current) {
+    return next;
+  }
+  if (next === current) {
+    return current;
+  }
+  if (next.startsWith(current)) {
+    return next;
+  }
+  return `${current}${next}`;
 }
 
 async function runToolRetrieval(input: {
@@ -342,6 +356,8 @@ export async function* invokeDeepAgentTurn(input: {
   const toolStartedAtById = new Map<string, number>();
   const thinkingStepsById = new Map<string, ThinkingStepTrace>();
   const thinkingStepOrder: string[] = [];
+  const reasoningSegments: DeepAgentTurnOutcome["reasoningSegments"] = [];
+  const runStartedAt = Date.now();
   const citationRegistry = new AgentCitationRegistry();
   let latestToolRetrieval: Awaited<ReturnType<typeof runToolRetrieval>> | null =
     null;
@@ -349,11 +365,13 @@ export async function* invokeDeepAgentTurn(input: {
   let fallbackAssistantContent: string | null = null;
   let usage: DeepAgentTurnOutcome["usage"];
   let finishReason: string | undefined;
+  let modelReasoning: string | undefined;
   let providerFields: Record<string, unknown> | undefined;
   let hasStreamedText = false;
   let hasTextSinceLastToolBoundary = false;
   let lastEmittedCitationCount = 0;
   let eventSequence = 0;
+  let currentReasoningSegment: DeepAgentTurnOutcome["reasoningSegments"][number] | null = null;
 
   const nextSequence = () => {
     eventSequence += 1;
@@ -370,6 +388,26 @@ export async function* invokeDeepAgentTurn(input: {
         sequence: existing?.sequence ?? nextSequence(),
       },
     });
+  };
+
+  const appendReasoningSegment = (text: string) => {
+    if (!currentReasoningSegment) {
+      currentReasoningSegment = {
+        id: `model-reasoning-${reasoningSegments.length + 1}`,
+        text: "",
+        sequence: nextSequence(),
+        durationMs: 0,
+      };
+      reasoningSegments.push(currentReasoningSegment);
+    }
+
+    currentReasoningSegment.durationMs = Date.now() - runStartedAt;
+    currentReasoningSegment.text = appendReasoningChunk(
+      currentReasoningSegment.text,
+      text,
+    ) ?? currentReasoningSegment.text;
+
+    return currentReasoningSegment;
   };
 
   const getNewCitationSnapshot = () => {
@@ -455,7 +493,7 @@ export async function* invokeDeepAgentTurn(input: {
   });
 
   const agent = await createThreadAgent({
-    modelAlias: input.prepared.modelAlias,
+    modelAlias: input.prepared.profileAlias,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     tools: [retrievalTool],
     backend: databaseBackend,
@@ -463,6 +501,7 @@ export async function* invokeDeepAgentTurn(input: {
       executionMode: input.llm?.executionMode,
       providerHint: input.llm?.providerHint,
       byok: input.llm?.byok,
+      thinking: input.llm?.thinking,
       metadata: {
         team_id: input.prepared.workspace.organizationId,
         workspace_id: input.prepared.workspace.id,
@@ -513,6 +552,7 @@ export async function* invokeDeepAgentTurn(input: {
     ? null
     : { messages: agentMessages };
   const stream = await agent.stream(streamInput, runConfig as AgentRunnableConfig);
+  const suppressModelReasoning = input.llm?.thinking?.mode === "off";
 
   for await (const streamChunk of stream as AsyncGenerator<unknown>) {
     if (!Array.isArray(streamChunk) || streamChunk.length < 2) {
@@ -541,9 +581,23 @@ export async function* invokeDeepAgentTurn(input: {
       }
 
       const messageChunk = payload[0];
+      const messageMetadata = payload[1];
       usage = addUsage(usage, extractUsageFromMessageChunk(messageChunk));
       finishReason = extractFinishReasonFromMessageChunk(messageChunk) ?? finishReason;
       providerFields = extractProviderFieldsFromMessageChunk(messageChunk) ?? providerFields;
+      const nextReasoning =
+        extractReasoningFromMessageChunk(messageChunk) ??
+        extractReasoningFromMessageChunk(messageMetadata) ??
+        extractReasoningFromMessageChunk(payload);
+      if (nextReasoning && !suppressModelReasoning) {
+        modelReasoning = appendReasoningChunk(modelReasoning, nextReasoning);
+        const segment = appendReasoningSegment(nextReasoning);
+        yield {
+          type: "reasoning",
+          reasoning: nextReasoning,
+          segment,
+        };
+      }
       const deltas = extractTextDeltasFromMessageChunk(messageChunk);
       for (const delta of deltas) {
         if (!delta) {
@@ -611,6 +665,7 @@ export async function* invokeDeepAgentTurn(input: {
     }
 
     if (event === "on_tool_start") {
+      currentReasoningSegment = null;
       const normalizedInput = extractToolPayloadInput(toolPayload);
       toolStartedAtById.set(toolCallId, Date.now());
       const nextToolCall: ToolCallTrace = {
@@ -992,7 +1047,7 @@ export async function* invokeDeepAgentTurn(input: {
       assistantContent: assistantText,
       usage,
       finishReason,
-      providerFields,
+      reasoning: modelReasoning,
       retrieval: finalRetrieval,
       citations: usedCitations,
       availableCitations: finalCitations,
@@ -1002,6 +1057,7 @@ export async function* invokeDeepAgentTurn(input: {
         stepsById: thinkingStepsById,
         stepOrder: thinkingStepOrder,
       }),
+      reasoningSegments,
       agentCheckpoint: {
         beforeInput: beforeInputCheckpoint,
         beforeAssistant: beforeAssistantCheckpoint,

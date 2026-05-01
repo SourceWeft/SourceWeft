@@ -26,12 +26,10 @@ async function zeroBillingResponse(input: {
 
 export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   const { prepared, retrieval } = input;
-  const providerCostUsd = await computeProviderCost({
+  const { providerCostUsd, pricingSnapshot } = await computeProviderCost({
     gatewayConfigId: prepared.chatProfile.gatewayConfigId,
     modelKind: "chat",
-    modelAlias: prepared.modelAlias,
-    userContent: prepared.messageContent,
-    assistantContent: input.assistantContent,
+    profileAlias: prepared.profileAlias,
     usage: input.usage,
     llm: input.llm,
   });
@@ -46,9 +44,9 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     operation: input.operation,
     modelKind: "chat",
     modelAlias: prepared.modelAlias,
+    profileAlias: prepared.profileAlias,
     llm: input.llm,
     provider: input.provider ?? null,
-    providerModel: input.providerModel ?? null,
     routeDecision: input.routeDecision,
     usage: input.usage,
     providerCostUsd,
@@ -56,6 +54,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     success: true,
     latencyMs: input.latencyMs,
     attributes: {
+      pricingSnapshot,
       retrievalCalls: summarizeRetrievalCalls(input.retrievalCalls),
     },
   });
@@ -99,6 +98,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
             ? "zero_provider_cost"
             : null,
       modelAlias: prepared.modelAlias,
+      profileAlias: prepared.profileAlias,
       agentMode: prepared.agentMode,
       agentCheckpoint: input.agentCheckpoint ?? {
         beforeInput: null,
@@ -108,12 +108,11 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       finishReason: input.finishReason,
       usage: input.usage,
       reasoning: input.reasoning,
-      providerFields: input.providerFields,
+      reasoningSegments: input.reasoningSegments,
       versionOf: prepared.assistantMessageParentId,
       gateway: buildGatewayAuditMetadata({
         llm: input.llm,
         provider: input.provider ?? undefined,
-        providerModel: input.providerModel ?? undefined,
         routeDecision: input.routeDecision,
       }),
       toolCalls: input.toolCalls.map((call) => ({

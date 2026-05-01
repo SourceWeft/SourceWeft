@@ -87,7 +87,6 @@ const timer = setInterval(() => {
   void tick();
 }, config.schedulerIntervalMs);
 
-void scheduleModelPricingSyncTick();
 const modelPricingSyncTimer = setInterval(() => {
   void scheduleModelPricingSyncTick();
 }, MODEL_PRICING_SYNC_INTERVAL_MS);

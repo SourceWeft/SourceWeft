@@ -17,6 +17,7 @@ const outcome: DeepAgentTurnOutcome = {
   retrievalCalls: [],
   toolCalls: [],
   thinkingSteps: [],
+  reasoningSegments: [],
   agentCheckpoint: {
     beforeInput: null,
     beforeAssistant: null,
@@ -36,6 +37,9 @@ const prepared: PreparedThreadTurn = {
     workspaceId: "workspace-1",
     title: "New chat",
     modelSettings: {
+      llmProfileAlias: null,
+      imageProfileAlias: null,
+      visionProfileAlias: null,
       llmModelAlias: null,
       imageModelAlias: null,
       visionModelAlias: null,
@@ -63,8 +67,10 @@ const prepared: PreparedThreadTurn = {
   },
   createdUserMessage: true,
   assistantMessageParentId: null,
+  profileAlias: "test-profile",
   modelAlias: "test-model",
   chatProfile: { gatewayConfigId: "gateway-1" } as PreparedThreadTurn["chatProfile"],
+  llm: undefined,
   llmIdempotencyKey: "thread-stream:user-message-1:assistant",
   agentMode: "continue",
   agentBaseCheckpoint: null,

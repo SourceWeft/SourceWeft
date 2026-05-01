@@ -254,6 +254,14 @@ export function mapDeepAgentEventToSse(
     });
   }
 
+  if (event.type === "reasoning") {
+    return toSseData({
+      type: "reasoning",
+      reasoning: event.reasoning,
+      segment: event.segment,
+    });
+  }
+
   return toSseData({
     type: "citations",
     citations: event.citations,

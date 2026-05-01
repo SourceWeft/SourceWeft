@@ -231,6 +231,9 @@ export const threadSchema = z.object({
   workspaceId: z.string(),
   title: z.string(),
   modelSettings: z.object({
+    llmProfileAlias: z.string().nullable().optional(),
+    imageProfileAlias: z.string().nullable().optional(),
+    visionProfileAlias: z.string().nullable().optional(),
     llmModelAlias: z.string().nullable(),
     imageModelAlias: z.string().nullable(),
     visionModelAlias: z.string().nullable(),
@@ -242,18 +245,18 @@ export const threadSchema = z.object({
 });
 
 export const threadModelSettingsInputSchema = z.object({
-  llmModelAlias: z.string().trim().min(1).max(512).nullable().optional(),
-  imageModelAlias: z.string().trim().min(1).max(512).nullable().optional(),
-  visionModelAlias: z.string().trim().min(1).max(512).nullable().optional(),
-});
+  llmProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
+  imageProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
+  visionProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
+}).strict();
 
 export const threadModelSettingsPatchSchema =
   threadModelSettingsInputSchema.refine(
     (value) =>
-      value.llmModelAlias !== undefined ||
-      value.imageModelAlias !== undefined ||
-      value.visionModelAlias !== undefined,
-    { message: "At least one model alias must be provided" },
+      value.llmProfileAlias !== undefined ||
+      value.imageProfileAlias !== undefined ||
+      value.visionProfileAlias !== undefined,
+    { message: "At least one model profile alias must be provided" },
   );
 
 export const createThreadRequestSchema = z.object({
@@ -304,12 +307,22 @@ const byokConfigSchema = z.object({
   apiKeyRef: z.string().trim().min(1).max(256),
 });
 
+const thinkingConfigSchema = z.object({
+  mode: z.enum(["auto", "off", "effort"]).optional(),
+  enabled: z.boolean().optional(),
+  effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+  includeReasoning: z.boolean().optional(),
+});
+
+const reasoningEffortSchema = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
+
 const llmExecutionConfigSchema = z.object({
-  modelAlias: z.string().trim().min(1).max(512).optional(),
+  profileAlias: z.string().trim().min(1).max(512).optional(),
   executionMode: z.enum(["GLOBAL", "BYOK"]).optional(),
   providerHint: z.string().trim().min(1).max(100).optional(),
   byok: byokConfigSchema.optional(),
-});
+  thinking: thinkingConfigSchema.optional(),
+}).strict();
 
 export const streamThreadModeSchema = z.enum(["send", "refresh", "edit"]);
 
@@ -356,15 +369,21 @@ export const modelCatalogItemSchema = z.object({
   kind: modelCatalogKindSchema,
   profileAlias: z.string(),
   modelAlias: z.string(),
-  providerName: z.string(),
-  providerKind: z.string(),
-  targetModel: z.string().nullable(),
   isDefault: z.boolean(),
   isActive: z.boolean(),
   displayName: z.string(),
   subtitle: z.string(),
   badges: z.array(z.string()),
   pricing: z.record(z.string(), z.unknown()).nullable(),
+  capabilities: z.object({
+    supportsThinking: z.boolean(),
+    supportedParameters: z.array(z.string()),
+    supportedEfforts: z.array(reasoningEffortSchema),
+    reasoning: z.boolean(),
+    reasoningEffort: z.boolean(),
+    includeReasoning: z.boolean(),
+    supportSources: z.array(z.string()),
+  }).optional(),
 });
 
 export const listThreadModelCatalogResponseSchema = z.object({

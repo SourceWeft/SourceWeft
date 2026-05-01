@@ -21,6 +21,7 @@ import {
   mergeThreadModelSettings,
   normalizeThreadModelSettings,
   pruneUnavailableThreadModelAliases,
+  resolveThreadModelSettingsSnapshots,
   validateThreadModelSettings,
 } from "./model-settings";
 import { decodeThreadsCursor, encodeThreadsCursor } from "./thread/cursor";
@@ -119,9 +120,9 @@ class ContentThreadService {
     workspaceId: string;
     threadId: string;
     userId: string;
-    llmModelAlias?: string | null;
-    imageModelAlias?: string | null;
-    visionModelAlias?: string | null;
+    llmProfileAlias?: string | null;
+    imageProfileAlias?: string | null;
+    visionProfileAlias?: string | null;
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
@@ -139,14 +140,14 @@ class ContentThreadService {
     }
 
     const patch = {
-      llmModelAlias: input.llmModelAlias,
-      imageModelAlias: input.imageModelAlias,
-      visionModelAlias: input.visionModelAlias,
+      llmProfileAlias: input.llmProfileAlias,
+      imageProfileAlias: input.imageProfileAlias,
+      visionProfileAlias: input.visionProfileAlias,
     };
     if (
-      patch.llmModelAlias === undefined &&
-      patch.imageModelAlias === undefined &&
-      patch.visionModelAlias === undefined
+      patch.llmProfileAlias === undefined &&
+      patch.imageProfileAlias === undefined &&
+      patch.visionProfileAlias === undefined
     ) {
       throw new ContentError(
         400,
@@ -167,12 +168,13 @@ class ContentThreadService {
     );
 
     await validateThreadModelSettings(nextSettings);
+    const resolvedNextSettings = await resolveThreadModelSettingsSnapshots(nextSettings);
 
     const updated = await updateThreadModelSettingsRecord({
       threadId: thread.id,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
-      modelSettings: nextSettings,
+      modelSettings: resolvedNextSettings,
     });
 
     if (!updated) {
@@ -195,9 +197,9 @@ class ContentThreadService {
     userId: string;
     title?: string;
     modelSettings?: {
-      llmModelAlias?: string | null;
-      imageModelAlias?: string | null;
-      visionModelAlias?: string | null;
+      llmProfileAlias?: string | null;
+      imageProfileAlias?: string | null;
+      visionProfileAlias?: string | null;
     };
   }) {
     const workspace = await requireContentWorkspace({
@@ -207,13 +209,14 @@ class ContentThreadService {
 
     const modelSettings = normalizeThreadModelSettings(input.modelSettings);
     await validateThreadModelSettings(modelSettings);
+    const resolvedModelSettings = await resolveThreadModelSettingsSnapshots(modelSettings);
 
     const thread = await createThreadRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       title: normalizeContentTitle(input.title, "New Thread"),
       createdBy: input.userId,
-      modelSettings,
+      modelSettings: resolvedModelSettings,
     });
 
     return { thread };

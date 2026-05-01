@@ -16,8 +16,9 @@ import {
   Globe,
   Loader2,
   Pencil,
+  Brain,
   RotateCcw,
-  Settings2,
+  SlidersHorizontal,
   WrenchIcon,
   X,
 } from "lucide-react";
@@ -67,6 +68,19 @@ import {
 } from "@sourceweft/ui-web/components/ai-elements/suggestion";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@sourceweft/ui-web/components/ui/dropdown-menu";
+import {
   ChainOfThought,
   ChainOfThoughtContent,
   ChainOfThoughtHeader,
@@ -108,6 +122,39 @@ export type MessageVersion = {
   sourceUserMessageId?: string | null;
   toolCalls?: ToolCallRecord[];
   thinkingSteps?: ThinkingStepRecord[];
+  modelReasoning?: string;
+  modelReasoningSegments?: ModelReasoningSegmentRecord[];
+};
+
+export type ThinkingEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingMode = "auto" | "off" | "effort";
+
+export type PromptThinkingSettings = {
+  mode: ThinkingMode;
+  effort: ThinkingEffort;
+};
+
+export type PromptThinkingCapabilities = {
+  supportsThinking: boolean;
+  supportedParameters?: string[];
+  supportedEfforts?: ThinkingEffort[];
+  reasoning?: boolean;
+  reasoningEffort?: boolean;
+  includeReasoning?: boolean;
+  supportSources?: string[];
+};
+
+const thinkingEffortOptions: Array<{ value: ThinkingEffort; label: string }> = [
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Standard" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "XHigh" },
+];
+
+export const DEFAULT_PROMPT_THINKING_SETTINGS: PromptThinkingSettings = {
+  mode: "auto",
+  effort: "medium",
 };
 
 export type CitationRecord = {
@@ -142,6 +189,13 @@ export type ThinkingStepRecord = {
   description?: string | null;
   detail?: string | null;
   metadata?: Record<string, unknown>;
+};
+
+export type ModelReasoningSegmentRecord = {
+  id: string;
+  text: string;
+  sequence?: number;
+  durationMs?: number;
 };
 
 export type VersionedMessageGroup = {
@@ -703,15 +757,52 @@ function ToolCallDetails({
   );
 }
 
+function formatThoughtDuration(durationMs: number | undefined) {
+  if (durationMs === undefined) {
+    return "Thought for a few seconds";
+  }
+
+  const duration = Math.max(1, Math.ceil(durationMs / 1000));
+  return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
+}
+
 function ReasoningTrace({
   isStreaming,
+  modelReasoning,
+  modelReasoningSegments,
   steps,
   toolCalls,
 }: {
   isStreaming: boolean;
+  modelReasoning?: string;
+  modelReasoningSegments?: ModelReasoningSegmentRecord[];
   steps: ThinkingStepRecord[] | undefined;
   toolCalls: ToolCallRecord[] | undefined;
 }) {
+  const safeReasoningSegments = (modelReasoningSegments ?? [])
+    .map((segment, index) => ({
+      ...segment,
+      id: segment.id || `model-reasoning-${index + 1}`,
+      text: segment.text.trim(),
+      sequence: segment.sequence ?? index,
+    }))
+    .filter((segment) => segment.text.length > 0);
+  const modelReasoningText = modelReasoning?.trim();
+  const fallbackReasoningSegments =
+    safeReasoningSegments.length === 0 && modelReasoningText
+      ? [
+          {
+            id: "model-reasoning",
+            text: modelReasoningText,
+            sequence: -1,
+            durationMs: undefined,
+          },
+        ]
+      : [];
+  const displayReasoningSegments = safeReasoningSegments.length > 0
+    ? safeReasoningSegments
+    : fallbackReasoningSegments;
+  const hasModelReasoning = displayReasoningSegments.length > 0;
   const safeSteps = steps ?? [];
   const safeToolCalls = (toolCalls ?? []).filter((toolCall, index, calls) => {
     return calls.findIndex((call) => call.id === toolCall.id) === index;
@@ -732,15 +823,24 @@ function ReasoningTrace({
   const activeStep = safeSteps.find((step) => step.status === "in_progress");
   const hasRunningToolCall = safeToolCalls.some((toolCall) => toolCall.status === "running");
   const isThinking = isStreaming || Boolean(activeStep) || hasRunningToolCall;
+  const hasTraceItems = safeSteps.length + safeToolCalls.length + (hasModelReasoning ? 1 : 0) > 0;
   const allComplete =
-    safeSteps.length + safeToolCalls.length > 0 &&
+    hasTraceItems &&
     safeSteps.every((step) => step.status === "completed") &&
     !hasRunningToolCall &&
     !isStreaming;
   const [isOpen, setIsOpen] = useState(!allComplete);
+  const [duration, setDuration] = useState<number | undefined>(undefined);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const startTimeRef = useRef<number | null>(null);
 
   const timelineItems = [
+    ...displayReasoningSegments.map((segment) => ({
+      kind: "model-reasoning" as const,
+      key: `model-reasoning:${segment.id}`,
+      sequence: segment.sequence ?? -1,
+      text: segment.text,
+    })),
     ...displaySteps.map((step, index) => ({
       kind: "step" as const,
       key: `step:${step.id}`,
@@ -760,12 +860,25 @@ function ReasoningTrace({
   ].sort((left, right) => left.sequence - right.sequence);
   const timelineSignature = timelineItems
     .map((item) => {
+      if (item.kind === "model-reasoning") {
+        return `${item.key}:${item.text.length}`;
+      }
       if (item.kind === "step") {
         return `${item.key}:${item.step.status}:${item.step.title}:${item.step.items.length}`;
       }
       return `${item.key}:${item.toolCall.status}:${item.toolCall.latencyMs ?? ""}`;
     })
     .join("|");
+  const reasoningDurationMs = displayReasoningSegments.reduce<number | undefined>(
+    (longest, segment) => {
+      if (typeof segment.durationMs !== "number") {
+        return longest;
+      }
+
+      return Math.max(longest ?? 0, segment.durationMs);
+    },
+    undefined,
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -780,13 +893,33 @@ function ReasoningTrace({
     element.scrollTop = element.scrollHeight;
   }, [isOpen, timelineSignature]);
 
-  if (safeSteps.length === 0 && safeToolCalls.length === 0) {
+  useEffect(() => {
+    if (isStreaming) {
+      if (startTimeRef.current === null) {
+        startTimeRef.current = Date.now();
+      }
+      return;
+    }
+
+    if (startTimeRef.current !== null) {
+      setDuration(Date.now() - startTimeRef.current);
+      startTimeRef.current = null;
+    }
+  }, [isStreaming]);
+
+  if (!hasTraceItems && !isStreaming) {
     return null;
   }
 
+  const title = activeStep
+    ? `Thinking · ${activeStep.title}`
+    : hasModelReasoning && !isStreaming
+      ? formatThoughtDuration(reasoningDurationMs ?? duration)
+      : "Thinking...";
+
   return (
     <ChainOfThought
-      className="space-y-0 rounded-xl border border-border/60 bg-muted/10 px-3 py-2"
+      className="space-y-0 py-1"
       onOpenChange={setIsOpen}
       open={isOpen}
     >
@@ -796,22 +929,36 @@ function ReasoningTrace({
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate">
-            {activeStep ? `Thinking · ${activeStep.title}` : "Thinking"}
+            {isThinking ? (
+              <Shimmer duration={1}>{title}</Shimmer>
+            ) : (
+              title
+            )}
           </span>
           {isThinking ? (
             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
               Running
             </span>
-          ) : allComplete ? (
-            <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-[11px] text-emerald-600 dark:text-emerald-400">
-              Completed
-            </span>
           ) : null}
         </span>
       </ChainOfThoughtHeader>
-      {isOpen ? (
+      {isOpen && timelineItems.length > 0 ? (
         <ChainOfThoughtContent className="max-h-64 overflow-y-auto pr-1" ref={contentRef}>
           {timelineItems.map((item) => {
+            if (item.kind === "model-reasoning") {
+              return (
+                <ChainOfThoughtStep
+                  key={item.key}
+                  label="Model reasoning"
+                  status={isStreaming ? "active" : "complete"}
+                >
+                  <div className="whitespace-pre-wrap break-words text-muted-foreground text-xs leading-5">
+                    {item.text}
+                  </div>
+                </ChainOfThoughtStep>
+              );
+            }
+
             if (item.kind === "step") {
               const { step } = item;
               const metadataParts = getThinkingMetadataParts(step.metadata);
@@ -911,6 +1058,11 @@ function Composer({
   selectedSources = [],
   onRemoveSource,
   disabled,
+  searchEnabled = false,
+  onSearchEnabledChange,
+  thinkingCapabilities,
+  thinkingSettings = DEFAULT_PROMPT_THINKING_SETTINGS,
+  onThinkingSettingsChange,
 }: {
   isEditing?: boolean;
   placeholder?: string;
@@ -922,12 +1074,47 @@ function Composer({
   selectedSources?: SourceItem[];
   onRemoveSource?: (id: string) => void;
   disabled?: boolean;
+  searchEnabled?: boolean;
+  onSearchEnabledChange?: (enabled: boolean) => void;
+  thinkingCapabilities?: PromptThinkingCapabilities;
+  thinkingSettings?: PromptThinkingSettings;
+  onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
 }) {
-  const [searchEnabled, setSearchEnabled] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const showSourceCountOnly = selectedSources.length > 2;
   const visible = showSourceCountOnly ? [] : selectedSources;
   const hasSelectedSources = selectedSources.length > 0;
+  const supportsThinking = thinkingCapabilities?.supportsThinking === true;
+  const activeThinkingSettings = supportsThinking
+    ? thinkingSettings
+    : DEFAULT_PROMPT_THINKING_SETTINGS;
+  const thinkingEnabled = activeThinkingSettings.mode !== "off";
+  const supportedThinkingEfforts = thinkingEffortOptions.filter((option) =>
+    (thinkingCapabilities?.supportedEfforts ?? []).includes(option.value)
+  );
+  const selectedThinkingValue = activeThinkingSettings.mode === "off"
+    ? "off"
+    : activeThinkingSettings.mode === "effort"
+      ? activeThinkingSettings.effort
+      : "auto";
+
+  function updateThinkingSettings(next: PromptThinkingSettings) {
+    if (!supportsThinking) {
+      return;
+    }
+    onThinkingSettingsChange?.(next);
+  }
+
+  function toggleThinking() {
+    if (!activeThinkingSettings) {
+      return;
+    }
+
+    updateThinkingSettings({
+      ...activeThinkingSettings,
+      mode: activeThinkingSettings.mode === "off" ? "auto" : "off",
+    });
+  }
 
   useEffect(() => {
     if (!isEditing || disabled) {
@@ -1030,16 +1217,93 @@ function Composer({
           <PromptInputFooter className="border-t-0">
             <PromptInputTools className="w-full flex-wrap gap-3">
               <div className="flex min-w-0 items-center gap-1.5">
-                <PromptInputButton
-                  className="rounded-xl text-muted-foreground hover:text-foreground"
-                  size="icon-sm"
-                  tooltip="Settings"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Settings2 className="size-4" />
-                  <span className="sr-only">Open settings</span>
-                </PromptInputButton>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <PromptInputButton
+                      className="size-8 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                      size="icon-sm"
+                      tooltip="Options"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <SlidersHorizontal className="size-3.5" />
+                      <span className="sr-only">Options</span>
+                    </PromptInputButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-44 p-1">
+                    <DropdownMenuLabel className="px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/80">
+                      Options
+                    </DropdownMenuLabel>
+                    {supportsThinking && supportedThinkingEfforts.length > 0 ? (
+                      <>
+                        <DropdownMenuSeparator className="my-1" />
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger className="h-8 rounded-lg px-2 text-xs">
+                            <Brain className="size-3.5 text-muted-foreground" />
+                            Thinking
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className="w-36 p-1">
+                            <DropdownMenuRadioGroup
+                              onValueChange={(value) => {
+                                if (value === "off") {
+                                  updateThinkingSettings({
+                                    ...(activeThinkingSettings ?? DEFAULT_PROMPT_THINKING_SETTINGS),
+                                    mode: "off",
+                                  });
+                                  return;
+                                }
+
+                                if (value === "auto") {
+                                  updateThinkingSettings({
+                                    ...(activeThinkingSettings ?? DEFAULT_PROMPT_THINKING_SETTINGS),
+                                    mode: "auto",
+                                  });
+                                  return;
+                                }
+
+                                updateThinkingSettings({
+                                  mode: "effort",
+                                  effort: value as ThinkingEffort,
+                                });
+                              }}
+                              value={selectedThinkingValue}
+                            >
+                              <DropdownMenuRadioItem
+                                className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
+                                value="off"
+                              >
+                                Off
+                              </DropdownMenuRadioItem>
+                              <DropdownMenuRadioItem
+                                className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
+                                value="auto"
+                              >
+                                Auto
+                              </DropdownMenuRadioItem>
+                              {supportedThinkingEfforts.map((option) => (
+                                <DropdownMenuRadioItem
+                                  className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </DropdownMenuRadioItem>
+                              ))}
+                            </DropdownMenuRadioGroup>
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      </>
+                    ) : supportsThinking ? (
+                      <DropdownMenuItem className="h-8 rounded-lg px-2 text-xs" disabled>
+                        Thinking effort unavailable
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem className="h-8 rounded-lg px-2 text-xs" disabled>
+                        No options available
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <PromptInputButton
                   aria-pressed={searchEnabled}
@@ -1048,7 +1312,7 @@ function Composer({
                       ? "rounded-xl bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
                       : "rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
                   }
-                  onClick={() => setSearchEnabled((value) => !value)}
+                  onClick={() => onSearchEnabledChange?.(!searchEnabled)}
                   size="icon-sm"
                   tooltip={{ content: "Search sources", shortcut: "S" }}
                   type="button"
@@ -1057,6 +1321,37 @@ function Composer({
                   <Globe className="size-4" />
                   <span className="sr-only">Search</span>
                 </PromptInputButton>
+
+                {supportsThinking ? (
+                  <button
+                    aria-label={thinkingEnabled ? "Disable Thinking" : "Enable Thinking"}
+                    aria-pressed={thinkingEnabled}
+                    className={cn(
+                      "ml-1 inline-flex h-8 items-center justify-center overflow-hidden rounded-full text-xs font-medium select-none transition-all duration-200 ease-out",
+                      thinkingEnabled
+                        ? "gap-1.5 bg-foreground px-2.5 text-background shadow-sm hover:bg-foreground/90"
+                        : "w-8 border border-transparent bg-transparent px-0 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                    onClick={toggleThinking}
+                    title={thinkingEnabled ? "Disable Thinking" : "Enable Thinking"}
+                    type="button"
+                  >
+                    <Brain
+                      className={cn(
+                        "size-4 shrink-0 transition-transform duration-300 ease-out",
+                        thinkingEnabled ? "rotate-180 scale-110" : "rotate-0 scale-100",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "overflow-hidden whitespace-nowrap transition-all duration-200 ease-out",
+                        thinkingEnabled ? "max-w-20 opacity-100" : "max-w-0 opacity-0",
+                      )}
+                    >
+                      Thinking
+                    </span>
+                  </button>
+                ) : null}
               </div>
 
               <div className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap">
@@ -1113,12 +1408,22 @@ function EmptyState({
   composerResetKey,
   selectedSources,
   onRemoveSource,
+  searchEnabled,
+  onSearchEnabledChange,
+  thinkingCapabilities,
+  thinkingSettings,
+  onThinkingSettingsChange,
 }: {
   onSendMessage: (content: string) => void;
   composerInitialInput?: string;
   composerResetKey?: number;
   selectedSources: SourceItem[];
   onRemoveSource: (id: string) => void;
+  searchEnabled?: boolean;
+  onSearchEnabledChange?: (enabled: boolean) => void;
+  thinkingCapabilities?: PromptThinkingCapabilities;
+  thinkingSettings?: PromptThinkingSettings;
+  onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
 }) {
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -1165,8 +1470,13 @@ function EmptyState({
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
             onSubmit={(message) => onSendMessage(message.text.trim())}
+            onSearchEnabledChange={onSearchEnabledChange}
+            onThinkingSettingsChange={onThinkingSettingsChange}
             placeholder="Message your documents, links, or connected tools..."
+            searchEnabled={searchEnabled}
             selectedSources={selectedSources}
+            thinkingCapabilities={thinkingCapabilities}
+            thinkingSettings={thinkingSettings}
           />
         </div>
       </div>
@@ -1181,7 +1491,6 @@ export function ChatCanvas({
   highlightedMessageId = null,
   isEditing = false,
   isStreaming = false,
-  showThinkingPlaceholder = false,
   messageGroups = [],
   mode,
   sourcesVisible,
@@ -1195,7 +1504,12 @@ export function ChatCanvas({
   allSources = [],
   selectedSources = [],
   onRemoveSource,
+  searchEnabled,
+  onSearchEnabledChange,
   workspaceId,
+  thinkingCapabilities,
+  thinkingSettings,
+  onThinkingSettingsChange,
 }: {
   activeVersionByGroup?: Record<string, number>;
   composerInitialInput?: string;
@@ -1203,7 +1517,6 @@ export function ChatCanvas({
   highlightedMessageId?: string | null;
   isEditing?: boolean;
   isStreaming?: boolean;
-  showThinkingPlaceholder?: boolean;
   messageGroups?: VersionedMessageGroup[];
   mode: "thread" | "new";
   sourcesVisible: boolean;
@@ -1227,7 +1540,12 @@ export function ChatCanvas({
   allSources?: SourceItem[];
   selectedSources?: SourceItem[];
   onRemoveSource?: (id: string) => void;
+  searchEnabled?: boolean;
+  onSearchEnabledChange?: (enabled: boolean) => void;
   workspaceId?: string | null;
+  thinkingCapabilities?: PromptThinkingCapabilities;
+  thinkingSettings?: PromptThinkingSettings;
+  onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
 }) {
   void sourcesVisible;
 
@@ -1245,8 +1563,13 @@ export function ChatCanvas({
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
         onRemoveSource={onRemoveSource ?? (() => undefined)}
+        onSearchEnabledChange={onSearchEnabledChange}
         onSendMessage={handleSendMessage}
+        onThinkingSettingsChange={onThinkingSettingsChange}
+        searchEnabled={searchEnabled}
         selectedSources={selectedSources}
+        thinkingCapabilities={thinkingCapabilities}
+        thinkingSettings={thinkingSettings}
       />
     );
   }
@@ -1432,9 +1755,6 @@ export function ChatCanvas({
                         isAssistant &&
                         isLatestAssistantGroup &&
                         versionIndex === activeVisibleBranchIndex;
-                      const hasAssistantActivity =
-                        (version.toolCalls?.length ?? 0) > 0 ||
-                        (version.thinkingSteps?.length ?? 0) > 0;
                       const referencedSources = !isAssistant
                         ? (version.sourceIds ?? [])
                             .map((sourceId) => sourceById.get(sourceId))
@@ -1462,15 +1782,7 @@ export function ChatCanvas({
                                   : "w-fit max-w-full rounded-3xl bg-secondary px-4 py-3 text-foreground shadow-sm"
                               }
                             >
-                              {isStreamingThisVersion && !messageText && !hasAssistantActivity ? (
-                                showThinkingPlaceholder ? (
-                                  <Shimmer className="text-muted-foreground">
-                                    Thinking...
-                                  </Shimmer>
-                                ) : (
-                                  <span className="block h-5" />
-                                )
-                              ) : !isAssistant ? (
+                              {!isAssistant ? (
                                 <div className="whitespace-pre-wrap break-words leading-6">
                                   {messageText}
                                 </div>
@@ -1485,6 +1797,8 @@ export function ChatCanvas({
                                 <div className="space-y-3">
                                   <ReasoningTrace
                                     isStreaming={isStreamingThisVersion}
+                                    modelReasoning={version.modelReasoning}
+                                    modelReasoningSegments={version.modelReasoningSegments}
                                     steps={version.thinkingSteps}
                                     toolCalls={version.toolCalls}
                                   />
@@ -1605,10 +1919,15 @@ export function ChatCanvas({
             inputKey={`${threadTitle}-${composerResetKey ?? 0}`}
             onCancelEditing={onCancelEditing}
             onRemoveSource={onRemoveSource}
+            onSearchEnabledChange={onSearchEnabledChange}
             onSubmit={(message) =>
               handleSendMessage(message.text.trim())
             }
+            onThinkingSettingsChange={onThinkingSettingsChange}
+            searchEnabled={searchEnabled}
             selectedSources={selectedSources}
+            thinkingCapabilities={thinkingCapabilities}
+            thinkingSettings={thinkingSettings}
           />
         </div>
       </div>

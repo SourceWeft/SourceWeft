@@ -18,7 +18,11 @@ import {
   type ModelItem,
   type ModelType,
 } from "./_components/header-model-selector";
-import { ChatCanvas } from "./_components/chat-canvas";
+import {
+  ChatCanvas,
+  DEFAULT_PROMPT_THINKING_SETTINGS,
+  type PromptThinkingSettings,
+} from "./_components/chat-canvas";
 import { SourcesHub } from "./_components/sources-hub";
 import type { SourceItem } from "./_components/mock-data";
 import { contentClient } from "../../../lib/sdk";
@@ -28,6 +32,99 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   image: false,
   vision: false,
 };
+
+function parseStoredThinkingSettings(value: string | null): PromptThinkingSettings | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<PromptThinkingSettings>;
+    const mode = parsed.mode;
+    const effort = parsed.effort;
+    if (mode !== "auto" && mode !== "off" && mode !== "effort") {
+      return null;
+    }
+    if (
+      effort !== "minimal" &&
+      effort !== "low" &&
+      effort !== "medium" &&
+      effort !== "high" &&
+      effort !== "xhigh"
+    ) {
+      return null;
+    }
+    return { mode, effort };
+  } catch {
+    return null;
+  }
+}
+
+function buildPendingThinking(input: {
+  capabilities: ModelItem["capabilities"] | undefined;
+  settings: PromptThinkingSettings;
+}) {
+  if (input.capabilities?.supportsThinking !== true) {
+    return undefined;
+  }
+
+  if (input.settings.mode === "off") {
+    return {
+      mode: "off",
+      enabled: false,
+      includeReasoning: false,
+    };
+  }
+
+  if (input.settings.mode === "effort") {
+    if (!(input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+      return {
+        mode: "auto",
+      };
+    }
+
+    return {
+      mode: "effort",
+      enabled: true,
+      effort: input.settings.effort,
+      includeReasoning: true,
+    };
+  }
+
+  return {
+    mode: "auto",
+  };
+}
+
+function normalizeThinkingSettingsForModel(input: {
+  capabilities: ModelItem["capabilities"] | undefined;
+  hasSavedPreference?: boolean;
+  settings: PromptThinkingSettings;
+}): PromptThinkingSettings {
+  if (
+    input.capabilities?.supportsThinking === true &&
+    input.settings.mode === "off" &&
+    input.hasSavedPreference !== true
+  ) {
+    return {
+      ...input.settings,
+      mode: "auto",
+    };
+  }
+
+  if (input.settings.mode !== "effort") {
+    return input.settings;
+  }
+
+  if ((input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+    return input.settings;
+  }
+
+  return {
+    ...input.settings,
+    mode: "auto",
+  };
+}
 
 export default function DashboardChatPage() {
   const router = useRouter();
@@ -49,6 +146,11 @@ export default function DashboardChatPage() {
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
+  const [thinkingSettings, setThinkingSettings] = useState<PromptThinkingSettings>(
+    DEFAULT_PROMPT_THINKING_SETTINGS,
+  );
+  const [hasSavedThinkingPreference, setHasSavedThinkingPreference] = useState(false);
+  const [searchEnabled, setSearchEnabled] = useState(false);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -127,6 +229,58 @@ export default function DashboardChatPage() {
     }
   }, [workspaceId]);
 
+  useEffect(() => {
+    if (!workspaceId) {
+      setThinkingSettings(DEFAULT_PROMPT_THINKING_SETTINGS);
+      setSearchEnabled(false);
+      return;
+    }
+
+    const storedThinking = parseStoredThinkingSettings(
+      window.sessionStorage.getItem(`chat:thinking:${workspaceId}:current`),
+    );
+    setHasSavedThinkingPreference(Boolean(storedThinking));
+    setThinkingSettings(storedThinking ?? DEFAULT_PROMPT_THINKING_SETTINGS);
+    setSearchEnabled(
+      window.sessionStorage.getItem(`chat:search:${workspaceId}:current`) === "true",
+    );
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    window.sessionStorage.setItem(
+      `chat:thinking:${workspaceId}:current`,
+      JSON.stringify(thinkingSettings),
+    );
+  }, [thinkingSettings, workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    window.sessionStorage.setItem(
+      `chat:search:${workspaceId}:current`,
+      searchEnabled ? "true" : "false",
+    );
+  }, [searchEnabled, workspaceId]);
+
+  useEffect(() => {
+    setThinkingSettings((current) =>
+      normalizeThinkingSettingsForModel({
+        capabilities: selectedModels.llm.capabilities,
+        hasSavedPreference: hasSavedThinkingPreference,
+        settings: current,
+      }),
+    );
+  }, [hasSavedThinkingPreference, selectedModels.llm]);
+
+  const handleThinkingSettingsChange = useCallback((settings: PromptThinkingSettings) => {
+    setHasSavedThinkingPreference(true);
+    setThinkingSettings(settings);
+  }, []);
+
   const selectedSources = librarySources.filter((s) =>
     activeSourceIds.includes(s.id),
   );
@@ -143,13 +297,13 @@ export default function DashboardChatPage() {
 
       const modelSettings: ModelAliasSettings = {};
       if (catalogKindEnabled.llm) {
-        modelSettings.llmModelAlias = selectedModels.llm.id;
+        modelSettings.llmProfileAlias = selectedModels.llm.id;
       }
       if (catalogKindEnabled.image) {
-        modelSettings.imageModelAlias = selectedModels.image.id;
+        modelSettings.imageProfileAlias = selectedModels.image.id;
       }
       if (catalogKindEnabled.vision) {
-        modelSettings.visionModelAlias = selectedModels.vision.id;
+        modelSettings.visionProfileAlias = selectedModels.vision.id;
       }
 
       const hasModelSettings = Object.keys(modelSettings).length > 0;
@@ -165,7 +319,16 @@ export default function DashboardChatPage() {
       // session storage (consumed once on mount).
       sessionStorage.setItem(
         `chat:pending:${thread.id}`,
-        JSON.stringify({ content: text, sourceIds: activeSourceIds }),
+        JSON.stringify({
+          content: text,
+          sourceIds: activeSourceIds,
+          thinking: buildPendingThinking({
+            capabilities: selectedModels.llm.capabilities,
+            settings: thinkingSettings,
+          }),
+          thinkingSettings,
+          searchEnabled,
+        }),
       );
 
       router.push(`/dashboard/chat/${thread.id}`);
@@ -177,6 +340,8 @@ export default function DashboardChatPage() {
       router,
       catalogKindEnabled,
       selectedModels,
+      thinkingSettings,
+      searchEnabled,
     ],
   );
 
@@ -193,6 +358,17 @@ export default function DashboardChatPage() {
               </div>
               <HeaderModelSelector
                 availableModels={availableModels}
+                onModelSelect={(input) => {
+                  if (input.type === "llm") {
+                    setThinkingSettings((current) =>
+                      normalizeThinkingSettingsForModel({
+                        capabilities: input.model.capabilities,
+                        hasSavedPreference: hasSavedThinkingPreference,
+                        settings: current,
+                      }),
+                    );
+                  }
+                }}
                 selectedModels={selectedModels}
                 setSelectedModels={setSelectedModels}
               />
@@ -226,8 +402,13 @@ export default function DashboardChatPage() {
             setActiveSourceIds((prev) => prev.filter((x) => x !== id))
           }
           onSendMessage={handleSendMessage}
+          searchEnabled={searchEnabled}
+          onSearchEnabledChange={setSearchEnabled}
           selectedSources={selectedSources}
           sourcesVisible={sourcesVisible}
+          thinkingCapabilities={selectedModels.llm.capabilities}
+          thinkingSettings={thinkingSettings}
+          onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle="New chat"
           workspaceId={workspaceId}
         />

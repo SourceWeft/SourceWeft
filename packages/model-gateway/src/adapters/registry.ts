@@ -11,9 +11,11 @@ import { GeminiChatAdapter } from "./gemini-chat";
 import { OpenAICompatibleEmbeddingsAdapter } from "./openai-compatible-embeddings";
 import { OpenAICompatibleChatAdapter } from "./openai-compatible-chat";
 import { OpenAICompatibleRerankTransport } from "./openai-compatible-rerank";
+import { OpenRouterChatAdapter } from "./openrouter-chat";
 import type { ChatAdapter, EmbeddingsAdapter, RerankTransport } from "./types";
 
 const openAICompatibleChat = new OpenAICompatibleChatAdapter();
+const openRouterChat = new OpenRouterChatAdapter();
 const openAICompatibleEmbeddings = new OpenAICompatibleEmbeddingsAdapter();
 const openAICompatibleRerank = new OpenAICompatibleRerankTransport();
 const deepInfraChat = new DeepInfraChatAdapter();
@@ -22,7 +24,7 @@ const deepInfraRerank = new DeepInfraRerankTransport();
 
 const chatAdapters = new Map<ProviderKind, ChatAdapter>([
   ["openai-compatible", openAICompatibleChat],
-  ["openrouter", openAICompatibleChat],
+  ["openrouter", openRouterChat],
   ["deepinfra", deepInfraChat],
   ["openai", openAICompatibleChat],
   ["azure-openai", new AzureChatAdapter()],

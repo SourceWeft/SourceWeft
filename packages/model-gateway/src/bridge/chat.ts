@@ -17,6 +17,12 @@ function extractResponseMetadata(raw: { response_metadata?: unknown }) {
     : undefined;
 }
 
+function extractObjectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function extractFinishReason(responseMetadata: Record<string, unknown> | undefined) {
   if (typeof responseMetadata?.finish_reason === "string") {
     return responseMetadata.finish_reason;
@@ -56,12 +62,19 @@ function extractUsage(input: {
   return undefined;
 }
 
-function extractReasoning(responseMetadata: Record<string, unknown> | undefined) {
+function extractReasoningFromRecord(responseMetadata: Record<string, unknown> | undefined) {
   if (typeof responseMetadata?.reasoning_content === "string") {
     return responseMetadata.reasoning_content;
   }
 
+  if (typeof responseMetadata?.reasoningContent === "string") {
+    return responseMetadata.reasoningContent;
+  }
+
   const reasoning = responseMetadata?.reasoning;
+  if (typeof reasoning === "string") {
+    return reasoning;
+  }
   if (
     reasoning &&
     typeof reasoning === "object" &&
@@ -71,6 +84,55 @@ function extractReasoning(responseMetadata: Record<string, unknown> | undefined)
   }
 
   return undefined;
+}
+
+function extractReasoning(raw: {
+  additional_kwargs?: unknown;
+  content?: unknown;
+  contentBlocks?: unknown;
+  content_blocks?: unknown;
+  kwargs?: unknown;
+  response_metadata?: unknown;
+}) {
+  const contentBlocks = Array.isArray(raw.contentBlocks)
+    ? raw.contentBlocks
+    : Array.isArray(raw.content_blocks)
+      ? raw.content_blocks
+      : null;
+  if (contentBlocks) {
+    const blockReasoning = contentBlocks
+      .flatMap((block) => {
+        const record = extractObjectRecord(block);
+        if (!record) {
+          return [] as string[];
+        }
+        const type = typeof record.type === "string" ? record.type.toLowerCase() : "";
+        if (!type.includes("reasoning") && !type.includes("thinking")) {
+          return [] as string[];
+        }
+        const text =
+          typeof record.text === "string"
+            ? record.text
+            : typeof record.content === "string"
+              ? record.content
+              : typeof record.reasoning === "string"
+                ? record.reasoning
+                : null;
+        return text && text.trim().length > 0 ? [text.trim()] : [];
+      })
+      .join("\n\n")
+      .trim();
+    if (blockReasoning.length > 0) {
+      return blockReasoning;
+    }
+  }
+
+  return (
+    extractReasoningFromRecord(raw as Record<string, unknown>) ??
+    extractReasoningFromRecord(extractObjectRecord(raw.response_metadata)) ??
+    extractReasoningFromRecord(extractObjectRecord(raw.additional_kwargs)) ??
+    extractReasoningFromRecord(extractObjectRecord(raw.kwargs))
+  );
 }
 
 export async function runBridgeChatComplete(input: {
@@ -99,7 +161,7 @@ export async function runBridgeChatComplete(input: {
         }),
       ),
       finishReason: extractFinishReason(responseMetadata),
-      reasoning: extractReasoning(responseMetadata),
+      reasoning: extractReasoning(rawMessage),
       providerFields: responseMetadata,
       provider: input.target.provider,
       providerModel: input.target.providerModel,
@@ -146,7 +208,7 @@ export async function* runBridgeChatStream(input: {
           }),
         ) ?? usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
-      reasoning = extractReasoning(responseMetadata) ?? reasoning;
+      reasoning = extractReasoning(chunk) ?? reasoning;
       providerFields = responseMetadata ?? providerFields;
 
       yield { type: "chunk", chunk };

@@ -291,7 +291,7 @@ export function buildRoutedModelGatewayConfig(
     modelRoutes: configInput.modelRoutes,
     timeoutMs,
     maxRetries,
-    allowNonDefaultAliases: true,
+    allowNonDefaultAliases: false,
     resolveApiKeyRef: resolveByokApiKeyRef,
     observeSink: createDatabaseObserveSink(),
   };

@@ -285,7 +285,8 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
     const existingPricing = existingConfigJson as Partial<ModelPricing>;
 
     if (
-      existingPricing?.price_source === "manual" &&
+      (existingPricing?.price_source === "manual" ||
+        existingPricing?.price_source === "openrouter") &&
       (hasManualPriceConfigured(existingPricing) || hasAnyManualPriceValue(existingPricing))
     ) {
       manualSkipped++;

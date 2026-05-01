@@ -74,7 +74,6 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
       embeddingAuditMetadata = buildGatewayAuditMetadata({
         llm: input.llm,
         provider: embedResult.provider,
-        providerModel: embedResult.providerModel,
         routeDecision: embedResult.routeDecision as
           | Record<string, unknown>
           | undefined,
@@ -91,7 +90,6 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
         modelAlias: profile.modelAlias,
         llm: input.llm,
         provider: embedResult.provider,
-        providerModel: embedResult.providerModel,
         routeDecision: embedResult.routeDecision as
           | Record<string, unknown>
           | undefined,

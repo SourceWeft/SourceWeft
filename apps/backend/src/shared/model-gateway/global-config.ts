@@ -25,6 +25,7 @@ export type GlobalGatewayEntry = {
 };
 
 export type GlobalProfilePricingEntry = {
+  source?: "manual" | "openrouter";
   litellmKey?: string | null;
   inputCostPerToken?: number | null;
   outputCostPerToken?: number | null;
@@ -51,6 +52,8 @@ export type GlobalModelProfileEntry = {
   isDefault: boolean;
   isActive: boolean;
   pricing?: GlobalProfilePricingEntry | null;
+  supportedParameters?: string[];
+  supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
 };
 
 export type GlobalEmbeddingProfileEntry = {
@@ -103,6 +106,7 @@ type RawGlobalGatewayEntry = {
 
 type RawGlobalModelProfileEntry = {
   profileId?: unknown;
+  profileAlias?: unknown;
   modelAlias?: unknown;
   gatewaySlug?: unknown;
   providerName?: unknown;
@@ -113,7 +117,35 @@ type RawGlobalModelProfileEntry = {
   isDefault?: unknown;
   isActive?: unknown;
   pricing?: unknown;
+  supportedParameters?: unknown;
+  supportedEfforts?: unknown;
 };
+
+const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+
+function asReasoningEffortArray(value: unknown, field: string) {
+  if (value === undefined || value === null) {
+    return [] as Array<(typeof REASONING_EFFORTS)[number]>;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${field}`);
+  }
+
+  return Array.from(
+    new Set(
+      value.map((item, index) => {
+        if (typeof item !== "string") {
+          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+        }
+        const normalized = item.trim().toLowerCase();
+        if (!REASONING_EFFORTS.includes(normalized as (typeof REASONING_EFFORTS)[number])) {
+          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+        }
+        return normalized as (typeof REASONING_EFFORTS)[number];
+      }),
+    ),
+  );
+}
 
 type RawGlobalEmbeddingProfileEntry = {
   profileId?: unknown;
@@ -419,7 +451,10 @@ function parseModelProfileEntry(
       typeof entry.profileId === "string" && entry.profileId.trim().length > 0
         ? entry.profileId.trim()
         : undefined,
-    profileAlias: modelAlias,
+    profileAlias:
+      typeof entry.profileAlias === "string" && entry.profileAlias.trim().length > 0
+        ? entry.profileAlias.trim()
+        : modelAlias,
     modelAlias,
     gatewaySlug: asNonEmptyString(
       entry.gatewaySlug,
@@ -448,6 +483,14 @@ function parseModelProfileEntry(
     isDefault: asBoolean(entry.isDefault, false),
     isActive: asBoolean(entry.isActive, true),
     pricing: parsePricingEntry(entry.pricing, `${field}[${index}].pricing`) ?? null,
+    supportedParameters: asStringArray(
+      entry.supportedParameters,
+      `${field}[${index}].supportedParameters`,
+    ),
+    supportedEfforts: asReasoningEffortArray(
+      entry.supportedEfforts,
+      `${field}[${index}].supportedEfforts`,
+    ),
   };
 }
 
@@ -630,21 +673,6 @@ function parseGlobalModelGatewayConfig(
   const embeddingProfiles = raw.embeddingProfiles.map((entry, index) =>
     parseEmbeddingProfileEntry(entry as RawGlobalEmbeddingProfileEntry, index),
   );
-
-  const modelAliasSet = new Set<string>();
-  for (const profile of [
-    ...chatProfiles,
-    ...imageProfiles,
-    ...visionProfiles,
-    ...rerankProfiles,
-  ]) {
-    if (modelAliasSet.has(profile.modelAlias)) {
-      throw new Error(
-        `Global model gateway config has duplicate modelAlias '${profile.modelAlias}' across model profiles`,
-      );
-    }
-    modelAliasSet.add(profile.modelAlias);
-  }
 
   const profileAliasSet = new Set<string>();
   for (const profile of [

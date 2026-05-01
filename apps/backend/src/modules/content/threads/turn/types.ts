@@ -45,8 +45,10 @@ export type PreparedThreadTurn = {
   userMessage: MessageRecord;
   createdUserMessage: boolean;
   assistantMessageParentId: string | null;
+  profileAlias: string;
   modelAlias: string;
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
+  llm: LlmExecutionConfig | undefined;
   llmIdempotencyKey: string;
   agentMode: "continue" | "replay" | "fork";
   agentBaseCheckpoint: AgentCheckpointRef | null;
@@ -88,6 +90,13 @@ export type ThinkingStepTrace = {
   metadata?: Record<string, unknown>;
 };
 
+export type ModelReasoningSegmentTrace = {
+  id: string;
+  text: string;
+  sequence: number;
+  durationMs?: number;
+};
+
 export type FinalizeThreadTurnCommand = {
   prepared: PreparedThreadTurn;
   retrieval: Awaited<ReturnType<typeof contentRetrievalService.runRetrieval>> | null;
@@ -96,16 +105,15 @@ export type FinalizeThreadTurnCommand = {
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
+  reasoningSegments?: ModelReasoningSegmentTrace[];
   llm?: LlmExecutionConfig;
   operation: "chat.stream" | "chat.complete";
   assistantContent: string;
   usage?: UsageInfo;
   finishReason?: string;
   reasoning?: string;
-  providerFields?: Record<string, unknown>;
   routeDecision?: Record<string, unknown>;
   provider?: string | null;
-  providerModel?: string | null;
   latencyMs: number;
   modelForMessage?: string | null;
   agentCheckpoint?: AgentCheckpointMetadata;

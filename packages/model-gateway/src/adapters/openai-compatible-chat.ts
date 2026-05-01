@@ -15,6 +15,9 @@ export class OpenAICompatibleChatAdapter implements ChatAdapter {
         baseURL: target.baseUrl,
         defaultHeaders: target.defaultHeaders,
       },
+      modelKwargs: {
+        ...(input.extraBody ?? {}),
+      },
       maxTokens: input.maxTokens,
       streaming: input.stream ?? false,
     });

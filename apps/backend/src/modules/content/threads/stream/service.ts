@@ -112,6 +112,7 @@ async function enqueueAutomaticThreadTitleJob(input: {
     userId: input.prepared.userId,
     userMessageId: input.prepared.userMessage.id,
     messageContent: input.prepared.messageContent,
+    profileAlias: input.prepared.profileAlias,
     modelAlias: input.prepared.modelAlias,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     expectedTitle: input.prepared.initialTitle,
@@ -164,7 +165,7 @@ class ContentThreadStreamService {
       ? generateAndApplyGeneratedThreadTitle({
           prepared,
           turnService: this.turnService,
-          llm: input.llm,
+          llm: prepared.llm,
           yieldTitleUpdate: (thread) => titleUpdates.push(thread),
         })
       : null;
@@ -185,7 +186,7 @@ class ContentThreadStreamService {
       let outcome: DeepAgentTurnOutcome | null = null;
       const agentEvents = this.invokeAgentTurn({
         prepared,
-        llm: input.llm,
+        llm: prepared.llm,
       });
       let nextAgentEvent = agentEvents.next();
       let titleSettled = false;
@@ -241,12 +242,13 @@ class ContentThreadStreamService {
           retrievalCalls: outcome.retrievalCalls,
           toolCalls: outcome.toolCalls,
           thinkingSteps: outcome.thinkingSteps,
-          llm: input.llm,
+          reasoningSegments: outcome.reasoningSegments,
+          llm: prepared.llm,
           operation: "chat.stream",
           assistantContent: outcome.assistantContent,
           usage: outcome.usage,
           finishReason: outcome.finishReason,
-          providerFields: outcome.providerFields,
+          reasoning: outcome.reasoning,
           agentCheckpoint: outcome.agentCheckpoint,
           latencyMs: Date.now() - chatStartedAt,
         });
@@ -276,7 +278,7 @@ class ContentThreadStreamService {
         prepared,
         contentError,
         operation: "chat.stream",
-        llm: input.llm,
+        llm: prepared.llm,
       });
       await rollbackCreatedUserMessage({ prepared });
 
@@ -301,7 +303,7 @@ class ContentThreadStreamService {
       let doneOutcome: DeepAgentTurnOutcome | null = null;
       for await (const event of this.invokeAgentTurn({
         prepared,
-        llm: input.llm,
+        llm: prepared.llm,
       })) {
         if (event.type === "done") {
           doneOutcome = event.outcome;
@@ -324,7 +326,7 @@ class ContentThreadStreamService {
         prepared,
         contentError,
         operation: "chat.complete",
-        llm: input.llm,
+        llm: prepared.llm,
       });
       await rollbackCreatedUserMessage({ prepared });
       throw contentError;
@@ -339,12 +341,13 @@ class ContentThreadStreamService {
         retrievalCalls: outcome.retrievalCalls,
         toolCalls: outcome.toolCalls,
         thinkingSteps: outcome.thinkingSteps,
-        llm: input.llm,
+        reasoningSegments: outcome.reasoningSegments,
+        llm: prepared.llm,
         operation: "chat.complete",
         assistantContent: outcome.assistantContent,
         usage: outcome.usage,
         finishReason: outcome.finishReason,
-        providerFields: outcome.providerFields,
+        reasoning: outcome.reasoning,
         agentCheckpoint: outcome.agentCheckpoint,
         latencyMs: Date.now() - chatStartedAt,
         modelForMessage: prepared.modelAlias,
@@ -355,7 +358,7 @@ class ContentThreadStreamService {
       await generateAndApplyGeneratedThreadTitle({
         prepared,
         turnService: this.turnService,
-        llm: input.llm,
+        llm: prepared.llm,
       });
     }
 

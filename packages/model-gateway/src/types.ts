@@ -29,6 +29,18 @@ export interface GatewayErrorData {
 
 export type GatewayExecutionMode = "GLOBAL" | "BYOK";
 
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingMode = "auto" | "off" | "effort";
+
+export interface ThinkingConfig {
+  mode?: ThinkingMode;
+  enabled?: boolean;
+  effort?: ReasoningEffort;
+  includeReasoning?: boolean;
+  supportedParameters?: string[];
+  supportedEfforts?: ReasoningEffort[];
+}
+
 export type ProviderKind =
   | "openai-compatible"
   | "openrouter"
@@ -258,6 +270,7 @@ export interface ChatCompleteInput extends GatewayExecutionInput {
   responseFormat?: ResponseFormat;
   structuredOutput?: StructuredOutputConfig;
   metadata?: GatewayRequestMetadata;
+  thinking?: ThinkingConfig;
   extraBody?: Record<string, unknown>;
 }
 
