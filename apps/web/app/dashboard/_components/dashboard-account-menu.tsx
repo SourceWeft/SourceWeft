@@ -105,6 +105,7 @@ export function DashboardAccountMenu() {
                 type="button"
               >
                 {userImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     alt={userName ?? "User"}
                     className="h-8 w-8 rounded-lg object-cover"

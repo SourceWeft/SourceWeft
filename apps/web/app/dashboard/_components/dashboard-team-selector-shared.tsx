@@ -19,6 +19,8 @@ export type DashboardTeamItem = {
   isPersonal?: boolean;
 };
 
+type DashboardTeamOrganization = { id: string; name: string; slug?: string };
+
 type DashboardTeamUser = {
   email?: string;
   image?: string | null;
@@ -45,6 +47,16 @@ export function getTeamInitials(name: string) {
     .join("");
 }
 
+export function isAutoPersonalOrganization(org: { name: string; slug?: string }) {
+  return org.name === "Personal" && org.slug?.startsWith("personal-");
+}
+
+export function getVisibleTeamOrganizations<T extends DashboardTeamOrganization>(
+  orgs: T[],
+) {
+  return orgs.filter((org) => !isAutoPersonalOrganization(org));
+}
+
 export function useDashboardTeamSelector() {
   const authState = useAuthenticate();
   const sessionState = authState.data as
@@ -56,7 +68,9 @@ export function useDashboardTeamSelector() {
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
 
-  const orgList = (orgs ?? []) as Array<{ id: string; name: string; slug?: string }>;
+  const orgList = getVisibleTeamOrganizations(
+    (orgs ?? []) as Array<{ id: string; name: string; slug?: string }>,
+  );
   const user: DashboardTeamUser = {
     email: sessionState?.user?.email,
     image: sessionState?.user?.image,

@@ -18,6 +18,7 @@ import {
   DashboardModalShell,
   DashboardSection,
 } from "./dashboard-modal-shell";
+import { getVisibleTeamOrganizations } from "./dashboard-team-selector-shared";
 import { DashboardPricingModal } from "./dashboard-pricing-modal";
 
 const invoices = [
@@ -55,7 +56,9 @@ function OrgSwitcher({
   const { data: activeOrg } = authClient.useActiveOrganization();
   const [open, setOpen] = React.useState(false);
 
-  const orgList = (orgs ?? []) as Array<{ id: string; name: string; slug: string }>;
+  const orgList = getVisibleTeamOrganizations(
+    (orgs ?? []) as Array<{ id: string; name: string; slug: string }>,
+  );
   const isPersonalActive = !activeOrg;
 
   async function handleSwitch(orgId: string | null) {

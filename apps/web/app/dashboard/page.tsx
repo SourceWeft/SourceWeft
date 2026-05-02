@@ -7,7 +7,6 @@ import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
-  FileText,
   Folder,
   FolderKanban,
   Loader2,
@@ -46,7 +45,6 @@ type Source = {
 type WorkspaceWithPreview = Workspace & {
   sources: Source[];
   sourceCount: number;
-  isMock?: boolean;
 };
 
 type ActivityItem = {
@@ -56,229 +54,6 @@ type ActivityItem = {
   status: string;
   updatedAt: string;
 };
-
-function isoHoursAgo(hoursAgo: number) {
-  return new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString();
-}
-
-const MOCK_WORKSPACES: WorkspaceWithPreview[] = [
-  {
-    id: "mock-market-intel",
-    organizationId: "mock-personal",
-    name: "Market Intel",
-    slug: "market-intel",
-    createdBy: null,
-    createdAt: isoHoursAgo(3),
-    sourceCount: 14,
-    isMock: true,
-    sources: [
-      {
-        id: "mock-source-1",
-        title: "AI infra pricing benchmark Q2",
-        contentText:
-          "Model pricing has stabilized across the top vendors, but latency-linked markups continue to widen for enterprise plans. The clearest pattern is that teams now trade compute cost for predictability rather than raw throughput.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(1),
-      },
-      {
-        id: "mock-source-2",
-        title: "Competitor launch notes",
-        contentText:
-          "The launch message centers on trust, citations, and team memory. Positioning overlaps most directly with source-grounded chat rather than generic copilots.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(2),
-      },
-      {
-        id: "mock-source-3",
-        title: "Customer calls synthesis",
-        contentText:
-          "Customers consistently ask for one place where files, notes, and chat context stay together without requiring extra setup each time they start a session.",
-        status: "processing",
-        updatedAt: isoHoursAgo(3),
-      },
-    ],
-  },
-  {
-    id: "mock-product-positioning",
-    organizationId: "mock-personal",
-    name: "Product Positioning",
-    slug: "product-positioning",
-    createdBy: null,
-    createdAt: isoHoursAgo(10),
-    sourceCount: 8,
-    isMock: true,
-    sources: [
-      {
-        id: "mock-source-4",
-        title: "Homepage messaging draft v4",
-        contentText:
-          "SourceWeft keeps research, uploads, and grounded chat in the same workspace so teams can move from reading to synthesis without losing provenance.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(4),
-      },
-      {
-        id: "mock-source-5",
-        title: "Persona pain points map",
-        contentText:
-          "Knowledge workers describe the current workflow as fragmented: one place for notes, another for files, another for AI, and no reliable bridge between them.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(6),
-      },
-      {
-        id: "mock-source-6",
-        title: "Positioning teardown notes",
-        contentText:
-          "The strongest contrast is not intelligence level, but how quickly a product returns users to relevant context after time away.",
-        status: "created",
-        updatedAt: isoHoursAgo(8),
-      },
-    ],
-  },
-  {
-    id: "mock-customer-calls",
-    organizationId: "mock-personal",
-    name: "Customer Calls",
-    slug: "customer-calls",
-    createdBy: null,
-    createdAt: isoHoursAgo(18),
-    sourceCount: 11,
-    isMock: true,
-    sources: [
-      {
-        id: "mock-source-7",
-        title: "Onboarding friction interview notes",
-        contentText:
-          "Users want to know which workspace they should open, what changed since last time, and whether the latest materials are already indexed.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(12),
-      },
-      {
-        id: "mock-source-8",
-        title: "Usage objections synthesis",
-        contentText:
-          "The most common objection is not feature depth but uncertainty around where to begin when a team returns after a few days away.",
-        status: "processing",
-        updatedAt: isoHoursAgo(14),
-      },
-      {
-        id: "mock-source-9",
-        title: "Enterprise buyer transcript",
-        contentText:
-          "Decision makers respond well to concise overviews that show active workspaces, recent source activity, and a direct path back into chat.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(16),
-      },
-    ],
-  },
-  {
-    id: "mock-design-system",
-    organizationId: "mock-personal",
-    name: "Design System",
-    slug: "design-system",
-    createdBy: null,
-    createdAt: isoHoursAgo(28),
-    sourceCount: 5,
-    isMock: true,
-    sources: [
-      {
-        id: "mock-source-10",
-        title: "UI token audit",
-        contentText:
-          "Typography should feel quieter and more deliberate. Large card titles need stronger hierarchy against section headings, otherwise the page reads as noisy and unfinished.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(16),
-      },
-      {
-        id: "mock-source-11",
-        title: "Dashboard redesign notes",
-        contentText:
-          "A good home page should suggest momentum: what changed, where to resume, and which workspace deserves attention first.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(20),
-      },
-      {
-        id: "mock-source-12",
-        title: "Responsive layout checklist",
-        contentText:
-          "Cards should simplify as the viewport narrows. Decorative blocks are fine for exploration, but they should never compete with title and recency as the primary scan points.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(24),
-      },
-    ],
-  },
-  {
-    id: "mock-launch-notes",
-    organizationId: "mock-personal",
-    name: "Launch Notes",
-    slug: "launch-notes",
-    createdBy: null,
-    createdAt: isoHoursAgo(40),
-    sourceCount: 6,
-    isMock: true,
-    sources: [
-      {
-        id: "mock-source-13",
-        title: "Release narrative draft",
-        contentText:
-          "This release focuses on reducing startup friction inside the dashboard by making workspaces legible, comparable, and easy to re-enter.",
-        status: "created",
-        updatedAt: isoHoursAgo(30),
-      },
-      {
-        id: "mock-source-14",
-        title: "Change log review",
-        contentText:
-          "The dashboard now favors recent work, trims auxiliary navigation noise, and emphasizes workspace-level context over generic product messaging.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(34),
-      },
-      {
-        id: "mock-source-15",
-        title: "Launch FAQ v2",
-        contentText:
-          "What happens when there is no content yet? The answer should be a strong empty path, not a visually disruptive placeholder explanation.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(38),
-      },
-    ],
-  },
-  {
-    id: "mock-research-lab",
-    organizationId: "mock-personal",
-    name: "Research Lab",
-    slug: "research-lab",
-    createdBy: null,
-    createdAt: isoHoursAgo(56),
-    sourceCount: 9,
-    isMock: true,
-    sources: [
-      {
-        id: "mock-source-16",
-        title: "Loneliness study summary",
-        contentText:
-          "People cope better with complex information when the interface shows a stable home, a visible sense of progress, and clear pathways back to recent work.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(48),
-      },
-      {
-        id: "mock-source-17",
-        title: "Interview snippets repository",
-        contentText:
-          "One repeated request: let the homepage feel like a library table, not a settings page or marketing surface.",
-        status: "indexed",
-        updatedAt: isoHoursAgo(52),
-      },
-      {
-        id: "mock-source-18",
-        title: "Open questions backlog",
-        contentText:
-          "How much preview is enough? Usually a title, one meaningful excerpt, and a time marker are sufficient for a first scan.",
-        status: "created",
-        updatedAt: isoHoursAgo(54),
-      },
-    ],
-  },
-];
 
 function formatRelative(value: string) {
   const time = new Date(value).getTime();
@@ -301,70 +76,67 @@ function getWorkspaceLastActivity(workspace: WorkspaceWithPreview) {
   );
 }
 
-function getPreviewText(workspace: WorkspaceWithPreview) {
-  const source =
-    workspace.sources.find((item) => Boolean(item.contentText?.trim())) ??
-    workspace.sources[0];
-
-  if (!source) {
-    return {
-      eyebrow: "No files yet",
-      excerpt: "",
-      hasPreview: false,
-      mode: "empty" as const,
-    };
-  }
-
-  const raw = source.contentText?.replace(/\s+/g, " ").trim() ?? "";
-  const hasPreview = raw.length > 0;
-
-  return {
-    eyebrow: source.title,
-    excerpt: hasPreview
-      ? raw.length > 180
-        ? `${raw.slice(0, 180).trim()}...`
-        : raw
-      : "",
-    hasPreview,
-    mode: hasPreview ? ("preview" as const) : ("noText" as const),
-  };
-}
-
 function WorkspaceCover({ workspace }: { workspace: WorkspaceWithPreview }) {
-  const preview = getPreviewText(workspace);
-  const emptyMode = preview.mode !== "preview";
+  const visibleSources = workspace.sources.slice(0, 4);
+  const extraCount = Math.max(0, workspace.sourceCount - visibleSources.length);
+  const cardWidth = visibleSources.length <= 2 ? 116 : 100;
+  const overlapStep = visibleSources.length <= 2 ? 50 : 32;
+  const stackWidth =
+    cardWidth + Math.max(0, visibleSources.length - 1) * overlapStep;
 
   return (
-    <div className="relative h-40 overflow-hidden rounded-[18px] border border-border/70 bg-linear-to-b from-muted/45 via-background to-background p-3">
-      <div className="absolute inset-x-0 top-0 h-12 bg-linear-to-b from-white/35 to-transparent dark:from-white/5" />
-      <div
-        className={cn(
-          "relative flex h-full flex-col rounded-[13px] border border-border/60 bg-background/92 p-3.5 dark:bg-background/85",
-          emptyMode && "items-center justify-center",
-        )}
-      >
-        <div className="truncate text-[11px] font-medium text-muted-foreground">
-          {preview.eyebrow}
-        </div>
-
-        {preview.mode === "preview" ? (
-          <p className="mt-2.5 line-clamp-5 text-[13px] leading-6 text-muted-foreground/95">
-            {preview.excerpt}
-          </p>
-        ) : (
-          <div className="relative mt-2 flex h-full w-full items-center justify-center">
-            <div className="absolute inset-0 rounded-[10px] border border-dashed border-border/70 bg-muted/25" />
-            <div className="absolute h-14 w-14 rounded-2xl bg-linear-to-b from-muted/80 to-muted/45 blur-[1px]" />
-            <div className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border/80 bg-background text-muted-foreground shadow-sm dark:shadow-none">
-              {preview.mode === "noText" ? (
-                <FileText className="h-4.5 w-4.5" />
-              ) : (
-                <Folder className="h-4.5 w-4.5" />
-              )}
-            </div>
+    <div className="relative h-40 w-full min-w-0 overflow-hidden rounded-[18px] bg-linear-to-b from-muted/20 to-muted/35 p-3">
+      {visibleSources.length === 0 ? (
+        <div className="flex h-full flex-col items-center justify-center rounded-[14px] bg-background/65 text-center">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+            <Folder className="h-4.5 w-4.5" />
           </div>
-        )}
-      </div>
+          <div className="mt-2.5 text-sm font-medium text-foreground">No files yet</div>
+          <div className="mt-1 max-w-36 text-xs leading-5 text-muted-foreground/85">
+            Add sources to start building context.
+          </div>
+        </div>
+      ) : (
+        <div className="relative h-full min-w-0 overflow-hidden rounded-[14px]">
+          <div className="pointer-events-none absolute inset-x-8 bottom-2 h-8 rounded-full bg-foreground/[0.035] blur-md" />
+          {visibleSources.map((source, index) => {
+            const left = `calc(50% - ${stackWidth / 2}px + ${
+              index * overlapStep
+            }px)`;
+            const zIndex = visibleSources.length + index;
+
+            return (
+              <div
+                className={cn(
+                  "group/source absolute bottom-2 top-1 flex min-w-0 origin-bottom-left flex-col overflow-hidden rounded-[11px] border border-border/70 bg-background px-2.5 py-2.5 shadow-[4px_8px_16px_-14px_rgba(15,23,42,0.38)] transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-[6px_10px_18px_-14px_rgba(15,23,42,0.46)]",
+                )}
+                key={source.id}
+                style={{ left, width: `${cardWidth}px`, zIndex }}
+                title={source.title}
+              >
+                <div className="pointer-events-none absolute inset-y-0 right-0 w-3 bg-linear-to-l from-muted/25 to-transparent" />
+                <div className="mb-2.5 h-1.5 w-8 rounded-full bg-muted" />
+                <div className="min-h-0 min-w-0 flex-1">
+                  <div className="line-clamp-4 break-words text-[10.5px] font-semibold leading-3.5 text-foreground">
+                    {source.title}
+                  </div>
+                  <div className="mt-2.5 space-y-1.5">
+                    <div className="h-1 rounded-full bg-muted/70" />
+                    <div className="h-1 w-3/4 rounded-full bg-muted/50" />
+                    <div className="h-1 w-1/2 rounded-full bg-muted/40" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {extraCount > 0 ? (
+            <div className="absolute right-3 top-3 rounded-full bg-background/90 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm ring-1 ring-border/60">
+              +{extraCount} files
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -557,18 +329,18 @@ function CreateWorkspaceCard({
 }) {
   return (
     <button
-      className="min-h-[246px] overflow-hidden rounded-[18px] border border-border/80 bg-card p-3.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-[0_12px_28px_-24px_rgba(15,23,42,0.24)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 dark:hover:shadow-none"
+      className="min-h-[246px] w-full overflow-hidden rounded-[20px] border border-border/80 bg-card p-3 text-left transition-all duration-200 hover:border-foreground/20 hover:shadow-[0_10px_28px_-22px_rgba(15,23,42,0.26)] disabled:cursor-not-allowed disabled:opacity-60 dark:hover:shadow-none"
       disabled={disabled}
       onClick={onCreate}
       type="button"
     >
-      <div className="flex h-40 items-center justify-center rounded-[14px] border border-border/70 bg-linear-to-b from-muted/45 via-background to-background">
+      <div className="flex h-40 items-center justify-center rounded-[18px] bg-muted/35">
         <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground">
           <Plus className="h-6 w-6" />
         </div>
       </div>
 
-      <div className="px-1 pb-1 pt-3.5">
+      <div className="px-1.5 pb-1 pt-3.5">
         <div className="text-base font-semibold tracking-tight text-foreground">
           Create workspace
         </div>
@@ -589,18 +361,23 @@ function WorkspaceCard({
 }) {
   return (
     <button
-      className="min-h-[246px] overflow-hidden rounded-[18px] border border-border/80 bg-card p-3.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-[0_12px_28px_-24px_rgba(15,23,42,0.24)] dark:hover:shadow-none"
+      className="min-h-[246px] w-full overflow-hidden rounded-[20px] border border-border/80 bg-card p-3 text-left transition-all duration-200 hover:border-foreground/20 hover:shadow-[0_10px_28px_-22px_rgba(15,23,42,0.26)] dark:hover:shadow-none"
       onClick={() => onOpen(workspace.id)}
       type="button"
     >
       <WorkspaceCover workspace={workspace} />
 
-      <div className="px-1 pb-1 pt-3.5">
-        <div className="line-clamp-1 text-base font-semibold leading-6 tracking-tight text-foreground">
-          {workspace.name}
+        <div className="flex items-start justify-between gap-3 px-1.5 pb-1 pt-3.5">
+        <div className="min-w-0">
+          <div className="line-clamp-1 text-base font-semibold leading-6 tracking-tight text-foreground">
+            {workspace.name}
+          </div>
+          <div className="mt-1 text-[12.5px] text-muted-foreground">
+            Updated {formatRelative(getWorkspaceLastActivity(workspace))}
+          </div>
         </div>
-        <div className="mt-1 text-[12.5px] text-muted-foreground">
-          {formatRelative(getWorkspaceLastActivity(workspace))}
+        <div className="shrink-0 rounded-full bg-muted/70 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+          {workspace.sourceCount} files
         </div>
       </div>
     </button>
@@ -665,7 +442,7 @@ export default function DashboardPage() {
               return {
                 ...workspace,
                 sourceCount: sourceResponse.items?.length ?? 0,
-                sources: sources.slice(0, 3),
+                sources: sources.slice(0, 4),
               };
             } catch {
               return {
@@ -691,7 +468,7 @@ export default function DashboardPage() {
   }, [hasSession, sessionActiveOrganizationId]);
 
   const canCreateWorkspace = Boolean(sessionActiveOrganizationId);
-  const workspaceCollection = workspaces.length > 0 ? workspaces : MOCK_WORKSPACES;
+  const workspaceCollection = workspaces;
   const recentWorkspaces = useMemo(
     () => sortWorkspacesByRecent(workspaceCollection),
     [workspaceCollection],
@@ -787,18 +564,6 @@ export default function DashboardPage() {
   }
 
   async function handleOpenWorkspace(workspaceId: string) {
-    const targetWorkspace = workspaceCollection.find(
-      (workspace) => workspace.id === workspaceId,
-    );
-
-    if (targetWorkspace?.isMock) {
-      toast.message("Create a workspace first", {
-        description:
-          "Use New workspace to create a real workspace, then open it in chat.",
-      });
-      return;
-    }
-
     try {
       await workspaceClient.setWorkspaceContext(workspaceId);
     } catch {
@@ -928,9 +693,9 @@ export default function DashboardPage() {
             ) : (
               <div onWheel={handleRecentWheel} ref={recentScrollRef}>
                 <ScrollArea className="w-full">
-                <div className="flex w-max items-stretch gap-3 pb-3 pr-1">
+                <div className="flex min-w-0 items-stretch gap-3 pb-3 pr-1">
                   {!search ? (
-                    <div className="w-[292px] min-w-[292px] shrink-0">
+                    <div className="w-[292px] shrink-0">
                       <CreateWorkspaceCard
                         disabled={!canCreateWorkspace || createLoading}
                         onCreate={() => void handleCreateWorkspace()}
@@ -939,7 +704,7 @@ export default function DashboardPage() {
                   ) : null}
 
                   {filteredWorkspaces.map((workspace) => (
-                    <div className="w-[292px] min-w-[292px] shrink-0" key={workspace.id}>
+                    <div className="w-[292px] shrink-0" key={workspace.id}>
                       <WorkspaceCard
                         onOpen={(workspaceId) => void handleOpenWorkspace(workspaceId)}
                         workspace={workspace}

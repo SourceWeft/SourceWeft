@@ -26,11 +26,11 @@ import {
   PopoverTrigger,
 } from "@sourceweft/ui-web/components/ui/popover";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
-import { Tabs, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
 import { useTheme } from "next-themes";
+import { getVisibleTeamOrganizations } from "./dashboard-team-selector-shared";
 
 export type SettingsCenterTab = "account" | "team" | "usage" | "billing";
 type BillingScope = "personal" | "team";
@@ -57,7 +57,9 @@ function OrgSwitcher({
   const { data: activeOrg } = authClient.useActiveOrganization();
   const [open, setOpen] = React.useState(false);
 
-  const orgList = (orgs ?? []) as Array<{ id: string; name: string; slug: string }>;
+  const orgList = getVisibleTeamOrganizations(
+    (orgs ?? []) as Array<{ id: string; name: string; slug: string }>,
+  );
   const isPersonalActive = !activeOrg;
 
   async function handleSwitch(orgId: string | null) {
@@ -462,7 +464,9 @@ function TeamPanel({
     }
   }
 
-  const orgList = (orgs ?? []) as Array<{ id: string; name: string; slug: string }>;
+  const orgList = getVisibleTeamOrganizations(
+    (orgs ?? []) as Array<{ id: string; name: string; slug: string }>,
+  );
   const activeOrgFull = activeOrg as
     | {
         id: string;
