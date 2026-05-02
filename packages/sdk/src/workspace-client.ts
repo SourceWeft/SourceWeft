@@ -3,6 +3,7 @@ import type {
   CurrentContextResponse,
   ListWorkspacesResponse,
   SetWorkspaceContextResponse,
+  UpdateWorkspaceRequest,
   Workspace,
 } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
@@ -23,6 +24,13 @@ export class WorkspaceClient {
   createWorkspace(teamId: string, input: CreateWorkspaceRequest) {
     return this.http.post<Workspace>(
       `/v1/teams/${encode(teamId)}/workspaces`,
+      input,
+    );
+  }
+
+  updateWorkspace(workspaceId: string, input: UpdateWorkspaceRequest) {
+    return this.http.patch<Workspace>(
+      `/v1/workspaces/${encode(workspaceId)}`,
       input,
     );
   }

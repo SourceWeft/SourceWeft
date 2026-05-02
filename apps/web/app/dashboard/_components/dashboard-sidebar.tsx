@@ -96,11 +96,13 @@ export function DashboardSidebar() {
     archiveChat,
     clearArchivedChats,
     clearPrivateChats,
+    createWorkspace,
     deleteChat,
     privateChats,
     hasMorePrivateChats,
     isLoadingPrivateChats,
     loadMorePrivateChats,
+    renameWorkspace,
     switchWorkspace,
     sharedChats,
     workspaceId,
@@ -133,6 +135,22 @@ export function DashboardSidebar() {
 
     if (shouldResetRoute) {
       router.push("/dashboard/chat");
+    }
+  };
+
+  const handleCreateWorkspace = async (name: string) => {
+    const workspace = await createWorkspace(name);
+    if (!workspace) {
+      throw new Error("Failed to create workspace");
+    }
+
+    router.push("/dashboard/chat");
+  };
+
+  const handleRenameWorkspace = async (workspaceId: string, name: string) => {
+    const workspace = await renameWorkspace(workspaceId, name);
+    if (!workspace) {
+      throw new Error("Failed to rename workspace");
     }
   };
 
@@ -180,9 +198,11 @@ export function DashboardSidebar() {
             onClearArchivedChats={handleClearArchivedChats}
             onClearPrivateChats={handleClearPrivateChats}
             onCreateChat={() => router.push("/dashboard/chat")}
+            onCreateWorkspace={handleCreateWorkspace}
             onDeleteChat={handleDeleteChat}
             onLoadMoreChats={() => void loadMorePrivateChats()}
             onOpenChat={(id) => router.push(`/dashboard/chat/${id}`)}
+            onRenameWorkspace={handleRenameWorkspace}
             hasMorePrivateChats={hasMorePrivateChats}
             isLoadingPrivateChats={isLoadingPrivateChats}
             privateChats={privateChats}

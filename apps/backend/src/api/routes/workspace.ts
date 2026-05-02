@@ -74,6 +74,37 @@ export function registerWorkspaceRoutes(app: Hono) {
     return ApiResponse.success(c, workspace, 201);
   });
 
+  app.patch("/v1/workspaces/:workspaceId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const workspaceId = c.req.param("workspaceId");
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const rawName = typeof body.name === "string" ? body.name : "";
+
+    if (!rawName.trim()) {
+      throw new ApiError(400, "VALIDATION_ERROR", "name is required");
+    }
+
+    const result = await workspaceService.updateWorkspaceName({
+      workspaceId,
+      userId: getSessionUserId(session),
+      name: rawName,
+    });
+
+    if (!result) {
+      throw new ApiError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
+    }
+
+    if (result === "forbidden") {
+      throw ApiError.forbidden();
+    }
+
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/v1/context/current", async (c) => {
     const session = await requireSession(c);
     if (!session) {

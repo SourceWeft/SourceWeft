@@ -62,6 +62,26 @@ export async function createWorkspaceRecord(input: {
   return mapWorkspaceRow(row);
 }
 
+export async function updateWorkspaceNameRecord(input: {
+  workspaceId: string;
+  name: string;
+}) {
+  const [row] = await db
+    .update(workspaces)
+    .set({
+      name: input.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(workspaces.id, input.workspaceId))
+    .returning();
+
+  if (!row) {
+    return null;
+  }
+
+  return mapWorkspaceRow(row);
+}
+
 export async function ensureWorkspaceMembership(input: {
   workspaceId: string;
   userId: string;
@@ -145,6 +165,24 @@ export async function findWorkspaceByIdForMember(input: {
     .limit(1);
 
   return row ? mapWorkspaceRow(row) : null;
+}
+
+export async function findWorkspaceMembership(input: {
+  workspaceId: string;
+  userId: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(workspaceMemberships)
+    .where(
+      and(
+        eq(workspaceMemberships.workspaceId, input.workspaceId),
+        eq(workspaceMemberships.userId, input.userId),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapMembershipRow(row) : null;
 }
 
 export async function findWorkspaceByIdInOrganization(input: {

@@ -37,6 +37,11 @@ type DashboardChatState = {
   isLoadingPrivateChats: boolean;
   toggleSourcesVisible: () => void;
   setWorkspaceName: (workspaceName: string) => void;
+  createWorkspace: (name?: string) => Promise<{ id: string; name: string } | null>;
+  renameWorkspace: (
+    workspaceId: string,
+    name: string,
+  ) => Promise<{ id: string; name: string } | null>;
   switchWorkspace: (workspaceId: string) => Promise<void>;
   loadMorePrivateChats: () => Promise<void>;
   startNewChat: () => void;
@@ -93,6 +98,7 @@ export function DashboardChatStateProvider({
   const [sourcesVisible, setSourcesVisible] = useState(true);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState("Workspace");
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>(
     [],
   );
@@ -131,7 +137,7 @@ export function DashboardChatStateProvider({
     const resolvedItems =
       listed.items.length > 0
         ? listed.items
-        : [await workspaceClient.createWorkspace(organizationId, { name: "General" })];
+        : [await workspaceClient.createWorkspace(organizationId, { name: "My Workspace" })];
     const active = first ?? resolvedItems[0]!;
 
     setWorkspaces(resolvedItems.map((item) => ({ id: item.id, name: item.name })));
@@ -173,6 +179,10 @@ export function DashboardChatStateProvider({
           return;
         }
 
+        if (!cancelled) {
+          setOrganizationId(organizationId);
+        }
+
         if (!activeOrg?.id) {
           try {
             await authClient.organization.setActive({ organizationId });
@@ -195,6 +205,65 @@ export function DashboardChatStateProvider({
       cancelled = true;
     };
   }, [activeOrg?.id, hydrateWorkspace, orgs]);
+
+  const createWorkspace = useCallback(
+    async (name?: string) => {
+      if (!organizationId) {
+        return null;
+      }
+
+      const safeName = name?.trim() || `Workspace ${workspaces.length + 1}`;
+      const workspace = await workspaceClient.createWorkspace(organizationId, {
+        name: safeName,
+      });
+      const nextWorkspace = { id: workspace.id, name: workspace.name };
+
+      setWorkspaces((value) => [...value, nextWorkspace]);
+      setWorkspaceId(nextWorkspace.id);
+      setWorkspaceName(nextWorkspace.name);
+      setPrivateChats([]);
+      setPrivateChatsCursor(null);
+      setHasMorePrivateChats(false);
+      setMode("new");
+      setActiveChatId("");
+      setThreadTitle("New chat");
+
+      try {
+        await workspaceClient.setWorkspaceContext(nextWorkspace.id);
+      } catch {
+        // context persistence is best-effort for now
+      }
+
+      return nextWorkspace;
+    },
+    [organizationId, workspaces.length],
+  );
+
+  const renameWorkspace = useCallback(
+    async (targetWorkspaceId: string, name: string) => {
+      const safeName = name.trim();
+      if (!safeName) {
+        return null;
+      }
+
+      const workspace = await workspaceClient.updateWorkspace(targetWorkspaceId, {
+        name: safeName,
+      });
+      const renamedWorkspace = { id: workspace.id, name: workspace.name };
+
+      setWorkspaces((value) =>
+        value.map((item) =>
+          item.id === renamedWorkspace.id ? renamedWorkspace : item,
+        ),
+      );
+      setWorkspaceName((value) =>
+        workspaceId === renamedWorkspace.id ? renamedWorkspace.name : value,
+      );
+
+      return renamedWorkspace;
+    },
+    [workspaceId],
+  );
 
   const switchWorkspace = useCallback(
     async (nextWorkspaceId: string) => {
@@ -473,6 +542,8 @@ export function DashboardChatStateProvider({
       isLoadingPrivateChats,
       toggleSourcesVisible,
       setWorkspaceName,
+      createWorkspace,
+      renameWorkspace,
       switchWorkspace,
       loadMorePrivateChats,
       startNewChat,
@@ -500,6 +571,8 @@ export function DashboardChatStateProvider({
       hasMorePrivateChats,
       isLoadingPrivateChats,
       toggleSourcesVisible,
+      createWorkspace,
+      renameWorkspace,
       switchWorkspace,
       openChat,
       createChat,

@@ -13,6 +13,10 @@ export const createWorkspaceRequestSchema = z.object({
   name: z.string().min(1),
 });
 
+export const updateWorkspaceRequestSchema = z.object({
+  name: z.string().min(1),
+});
+
 export const listWorkspacesResponseSchema = z.object({
   items: z.array(workspaceSchema),
 });
@@ -35,6 +39,9 @@ export const currentContextResponseSchema = z.object({
 export type Workspace = z.infer<typeof workspaceSchema>;
 export type CreateWorkspaceRequest = z.infer<
   typeof createWorkspaceRequestSchema
+>;
+export type UpdateWorkspaceRequest = z.infer<
+  typeof updateWorkspaceRequestSchema
 >;
 export type ListWorkspacesResponse = z.infer<
   typeof listWorkspacesResponseSchema

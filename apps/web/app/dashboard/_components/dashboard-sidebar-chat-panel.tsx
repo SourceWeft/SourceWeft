@@ -4,10 +4,12 @@ import {
   ChevronDown,
   Clock3,
   MoreHorizontal,
+  PanelsTopLeft,
   PenSquare,
   Share2,
   Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -38,6 +40,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
 } from "@sourceweft/ui-web/components/ui/sidebar";
+import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
 import { workspaceSummary, type ChatItem } from "../chat/_components/mock-data";
@@ -48,51 +51,184 @@ function WorkspaceSwitcher({
   workspaceId,
   activeWorkspace,
   workspaces,
+  onCreateWorkspace,
+  onRenameWorkspace,
   onWorkspaceChange,
 }: {
   workspaceId: string | null;
   activeWorkspace: string;
   workspaces: Array<{ id: string; name: string }>;
+  onCreateWorkspace: (name: string) => Promise<void>;
+  onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>;
   onWorkspaceChange: (workspaceId: string) => void;
 }) {
+  const [createOpen, setCreateOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [workspaceNameInput, setWorkspaceNameInput] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const activeWorkspaceRecord =
+    workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+
+  const handleCreateWorkspace = async () => {
+    const name = workspaceNameInput.trim();
+    if (!name || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      await onCreateWorkspace(name);
+      setWorkspaceNameInput("");
+      setCreateOpen(false);
+    } catch {
+      toast.error("Failed to create workspace.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRenameWorkspace = async () => {
+    const name = workspaceNameInput.trim();
+    if (!workspaceId || !name || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      await onRenameWorkspace(workspaceId, name);
+      setWorkspaceNameInput("");
+      setRenameOpen(false);
+    } catch {
+      toast.error("Failed to rename workspace.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="flex w-full min-w-36 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent aria-expanded:bg-sidebar-accent"
-          type="button"
-        >
-          <span className="flex-1 truncate font-medium text-left">{activeWorkspace}</span>
-          <ChevronDown className="size-3.5 text-muted-foreground" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        className="w-64 rounded-lg"
-        align="start"
-        side="bottom"
-        sideOffset={4}
-      >
-        <DropdownMenuLabel className="text-xs text-muted-foreground">
-          Workspaces
-        </DropdownMenuLabel>
-        {workspaces.map((workspace, index) => (
-          <DropdownMenuItem
-            key={workspace.id}
-            onClick={() => onWorkspaceChange(workspace.id)}
-            className={cn("gap-2 p-2", workspace.id === workspaceId && "bg-accent/60")}
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="flex w-full min-w-36 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent aria-expanded:bg-sidebar-accent"
+            type="button"
           >
-            <span className="flex-1 truncate text-left">{workspace.name}</span>
-            <span className="text-xs text-muted-foreground">⌘{index + 1}</span>
+            <PanelsTopLeft className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate font-medium text-left">{activeWorkspace}</span>
+            <ChevronDown className="size-3.5 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          className="w-64 rounded-lg"
+          align="start"
+          side="bottom"
+          sideOffset={4}
+        >
+          <DropdownMenuLabel className="text-xs text-muted-foreground">
+            Workspaces
+          </DropdownMenuLabel>
+          {workspaces.map((workspace, index) => (
+            <DropdownMenuItem
+              key={workspace.id}
+              onClick={() => onWorkspaceChange(workspace.id)}
+              className={cn("gap-2 p-2", workspace.id === workspaceId && "bg-accent/60")}
+            >
+              <span className="flex-1 truncate text-left">{workspace.name}</span>
+              <span className="text-xs text-muted-foreground">⌘{index + 1}</span>
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="gap-2 p-2"
+            disabled={!activeWorkspaceRecord}
+            onSelect={() => {
+              setWorkspaceNameInput(activeWorkspaceRecord?.name ?? activeWorkspace);
+              setRenameOpen(true);
+            }}
+          >
+            <span className="flex-1 truncate font-medium text-left">
+              Rename workspace
+            </span>
           </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="gap-2 p-2">
-          <span className="flex-1 truncate font-medium text-muted-foreground text-left">
-            Add workspace
-          </span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <DropdownMenuItem
+            className="gap-2 p-2"
+            onSelect={() => {
+              setWorkspaceNameInput(`Workspace ${workspaces.length + 1}`);
+              setCreateOpen(true);
+            }}
+          >
+            <span className="flex-1 truncate font-medium text-left">
+              Add workspace
+            </span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add workspace</DialogTitle>
+            <DialogDescription>
+              Create a workspace to keep sources and chats in a separate context.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            onChange={(event) => setWorkspaceNameInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void handleCreateWorkspace();
+              }
+            }}
+            placeholder="Workspace name"
+            value={workspaceNameInput}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!workspaceNameInput.trim() || isSaving}
+              onClick={() => void handleCreateWorkspace()}
+              type="button"
+            >
+              {isSaving ? "Creating..." : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename workspace</DialogTitle>
+            <DialogDescription>
+              Update the display name for this workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            onChange={(event) => setWorkspaceNameInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void handleRenameWorkspace();
+              }
+            }}
+            placeholder="Workspace name"
+            value={workspaceNameInput}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setRenameOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!workspaceNameInput.trim() || isSaving}
+              onClick={() => void handleRenameWorkspace()}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -343,6 +479,8 @@ export function DashboardSidebarChatPanel({
   onDeleteChat,
   onLoadMoreChats,
   onOpenChat,
+  onCreateWorkspace,
+  onRenameWorkspace,
   hasMorePrivateChats,
   isLoadingPrivateChats,
   privateChats,
@@ -361,6 +499,8 @@ export function DashboardSidebarChatPanel({
   onDeleteChat: (id: string) => Promise<void>;
   onLoadMoreChats: () => void;
   onOpenChat: (id: string, title: string) => void;
+  onCreateWorkspace: (name: string) => Promise<void>;
+  onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>;
   hasMorePrivateChats: boolean;
   isLoadingPrivateChats: boolean;
   privateChats: ChatItem[];
@@ -401,6 +541,8 @@ export function DashboardSidebarChatPanel({
           activeWorkspace={workspaceName}
           workspaceId={workspaceId}
           workspaces={workspaces}
+          onCreateWorkspace={onCreateWorkspace}
+          onRenameWorkspace={onRenameWorkspace}
           onWorkspaceChange={onWorkspaceChange}
         />
         <SidebarInput className="h-7 text-xs" placeholder="Search threads..." />

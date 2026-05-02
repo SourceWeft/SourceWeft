@@ -4,9 +4,11 @@ import {
   findOrganizationMembership,
   findWorkspaceByIdInOrganization,
   findWorkspaceByIdForMember,
+  findWorkspaceMembership,
   findMembershipByUser,
   isOrganizationMember,
   listWorkspacesForMember,
+  updateWorkspaceNameRecord,
 } from "./store";
 import type { Workspace } from "./types";
 
@@ -83,12 +85,45 @@ export class WorkspaceService {
     return this.createWorkspace({
       organizationId: input.organizationId,
       userId: input.userId,
-      name: "General",
+      name: "My Workspace",
+    });
+  }
+
+  async updateWorkspaceName(input: {
+    workspaceId: string;
+    name: string;
+    userId: string;
+  }) {
+    const name = input.name.trim();
+    if (!name) {
+      throw new Error("Workspace name is required");
+    }
+
+    const membership = await findWorkspaceMembership({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    if (!membership) {
+      return null;
+    }
+
+    if (membership.role !== "workspace_admin") {
+      return "forbidden" as const;
+    }
+
+    return updateWorkspaceNameRecord({
+      workspaceId: input.workspaceId,
+      name,
     });
   }
 
   async resolveWorkspace(input: { workspaceId: string; userId: string }) {
     return findWorkspaceByIdForMember(input);
+  }
+
+  async getWorkspaceMembership(input: { workspaceId: string; userId: string }) {
+    return findWorkspaceMembership(input);
   }
 
   async findWorkspaceInOrganization(input: {
