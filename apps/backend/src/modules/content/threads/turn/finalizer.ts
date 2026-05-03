@@ -50,7 +50,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     routeDecision: input.routeDecision,
     usage: input.usage,
     providerCostUsd,
-    traceId: prepared.userMessage.id,
+    traceId: prepared.traceContext?.traceId ?? prepared.userMessage.id,
     success: true,
     latencyMs: input.latencyMs,
     attributes: {
@@ -89,6 +89,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     creditsConsumed: billing.consumedCredits,
     metadata: {
       userMessageId: prepared.userMessage.id,
+      traceId: prepared.traceContext?.traceId ?? prepared.userMessage.id,
       providerCostUsd,
       billingSkipped: !providerCostUsd || providerCostUsd <= 0,
       billingSkipReason:

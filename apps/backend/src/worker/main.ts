@@ -15,7 +15,7 @@ await ensureModelConfigAvailable();
 
 type JobPayload = Record<string, unknown>;
 
-const processors: Record<string, (job: Job<JobPayload>) => Promise<void>> = {
+const processors: Record<string, (job: Job<JobPayload>) => Promise<unknown>> = {
   example: processExampleJob,
   "source-parse": processSourceParseJob,
   "source-parse-poll": processSourceParsePollJob,
@@ -23,14 +23,14 @@ const processors: Record<string, (job: Job<JobPayload>) => Promise<void>> = {
   "thread-title-generate": processThreadTitleGenerateJob,
 };
 
-const defaultProcessor: (job: Job<JobPayload>) => Promise<void> =
+const defaultProcessor: (job: Job<JobPayload>) => Promise<unknown> =
   processExampleJob;
 
 const worker = new Worker<JobPayload>(
   config.queueName,
   async (job: Job<JobPayload>) => {
     const processor = processors[job.name] ?? defaultProcessor;
-    await processor(job);
+    return processor(job);
   },
   {
     connection: connectionOptions,

@@ -1,8 +1,21 @@
 import { randomUUID } from "node:crypto";
-import type { ObserveSink, ObserveSpan, UsageInfo } from "@sourceweft/model-gateway";
+import type {
+  ObserveGenerationEnd,
+  ObserveGenerationError,
+  ObserveGenerationStart,
+  ObserveSink,
+  ObserveSpan,
+  UsageInfo,
+} from "@sourceweft/model-gateway";
 import { db } from "../database";
 import { modelGatewayEvents } from "../db/schema";
+import {
+  endGeneration,
+  recordGenerationError,
+  startGeneration,
+} from "../llm-observability";
 
+// Adapter from model-gateway observation events to backend llm-observability persistence.
 const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
   "teamId",
   "workspaceId",
@@ -11,6 +24,8 @@ const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
   "messageId",
   "feature",
   "operation",
+  "environment",
+  "env",
   "executionMode",
   "keySource",
   "provider",
@@ -59,6 +74,30 @@ function buildEventAttributes(
   );
 }
 
+function readString(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function extractGenerationContext(
+  generation: ObserveGenerationStart | ObserveGenerationEnd | ObserveGenerationError,
+) {
+  const attributes = generation.attributes ?? {};
+  return {
+    teamId: readString(attributes.teamId),
+    workspaceId: readString(attributes.workspaceId),
+    userId: readString(attributes.userId),
+    threadId: readString(attributes.threadId),
+    messageId: readString(attributes.messageId),
+    feature: readString(attributes.feature),
+  };
+}
+
 export async function createModelGatewayEvent(input: GatewayEventInput) {
   await db.insert(modelGatewayEvents).values({
     id: randomUUID(),
@@ -91,8 +130,81 @@ export async function createModelGatewayEvent(input: GatewayEventInput) {
   });
 }
 
-export function createDatabaseObserveSink(): ObserveSink {
+export function createLlmObservabilitySink(): ObserveSink {
   return {
+    async onGenerationStart(generation: ObserveGenerationStart) {
+      const context = extractGenerationContext(generation);
+      if (!generation.traceId || !context.teamId || !context.workspaceId) {
+        return;
+      }
+
+      await startGeneration({
+        traceId: generation.traceId,
+        spanId: generation.spanId,
+        parentSpanId: generation.parentSpanId,
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
+        userId: context.userId,
+        threadId: context.threadId,
+        messageId: context.messageId,
+        feature: context.feature,
+        operation: generation.operation,
+        modelAlias: generation.modelAlias,
+        provider: generation.provider,
+        providerModel: generation.providerModel,
+        executionMode: generation.executionMode,
+        routeStrategy: generation.routeDecision?.strategy,
+        routeDecision: generation.routeDecision,
+        modelParameters: generation.modelParameters,
+        input: generation.input,
+        rawCaptureMode: generation.rawCaptureMode,
+        metadata: {
+          ...(generation.name ? { observationName: generation.name } : {}),
+          ...buildEventAttributes(generation.attributes ?? {}),
+        },
+        startedAt: new Date(generation.startedAt),
+      });
+    },
+    async onGenerationEnd(generation: ObserveGenerationEnd) {
+      if (!generation.traceId) {
+        return;
+      }
+      await endGeneration({
+        traceId: generation.traceId,
+        spanId: generation.spanId,
+        output: generation.output,
+        outputText: generation.outputText,
+        finishReason: generation.finishReason,
+        reasoningText: generation.reasoningText,
+        providerFields: generation.providerFields,
+        usage: generation.usage,
+        providerResponse: generation.providerResponse,
+        providerStatusCode: generation.providerStatusCode,
+        providerRequestId: generation.providerRequestId,
+        rawCaptureError: generation.rawCaptureError,
+        latencyMs: generation.latencyMs,
+        metadata: buildEventAttributes(generation.attributes ?? {}),
+        endedAt: new Date(generation.endedAt),
+      });
+    },
+    async onGenerationError(generation: ObserveGenerationError) {
+      if (!generation.traceId) {
+        return;
+      }
+      await recordGenerationError({
+        traceId: generation.traceId,
+        spanId: generation.spanId,
+        errorCode: generation.errorCode,
+        errorMessage: generation.errorMessage,
+        providerResponse: readRecord(generation.providerResponse),
+        providerStatusCode: generation.providerStatusCode,
+        providerRequestId: generation.providerRequestId,
+        rawCaptureError: generation.rawCaptureError,
+        latencyMs: generation.latencyMs,
+        metadata: buildEventAttributes(generation.attributes ?? {}),
+        endedAt: new Date(generation.endedAt),
+      });
+    },
     async onSpan(span: ObserveSpan) {
       const attributes = span.attributes ?? {};
       const teamId =

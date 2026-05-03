@@ -16,6 +16,7 @@ export type GenerateThreadTitleInput = {
   teamId: string;
   workspaceId: string;
   threadId: string;
+  traceId?: string;
   userId: string;
   userMessageId: string;
   messageContent: string;
@@ -23,6 +24,7 @@ export type GenerateThreadTitleInput = {
   modelAlias: string;
   gatewayConfigId: string;
   llm?: LlmExecutionConfig;
+  parentSpanId?: string | null;
 };
 
 export type ApplyGeneratedThreadTitleInput = GenerateThreadTitleInput & {
@@ -63,7 +65,7 @@ export async function generateThreadTitle(input: GenerateThreadTitleInput) {
     },
     {
       idempotencyKey: `thread-title:${input.userMessageId}`,
-      traceId: input.userMessageId,
+      traceId: input.traceId ?? input.userMessageId,
       metadata: buildGatewayRequestMetadata({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
@@ -75,6 +77,7 @@ export async function generateThreadTitle(input: GenerateThreadTitleInput) {
         modelAlias: input.modelAlias,
         profileAlias: input.profileAlias,
         llm: input.llm,
+        parentSpanId: input.parentSpanId,
       }),
     },
   );

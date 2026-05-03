@@ -1,4 +1,4 @@
-import { Queue } from "bullmq";
+import { Queue, QueueEvents } from "bullmq";
 import { config } from "./config";
 import { connectionOptions } from "./redis-connection";
 
@@ -11,6 +11,19 @@ export const jobsQueue = new Queue<QueueJobPayload, unknown, string>(
   },
 );
 
+let jobsQueueEvents: QueueEvents | null = null;
+
+export function getJobsQueueEvents() {
+  jobsQueueEvents ??= new QueueEvents(config.queueName, {
+    connection: connectionOptions,
+  });
+  return jobsQueueEvents;
+}
+
 export async function closeQueue() {
-  await jobsQueue.close();
+  await Promise.all([
+    jobsQueue.close(),
+    jobsQueueEvents?.close() ?? Promise.resolve(),
+  ]);
+  jobsQueueEvents = null;
 }

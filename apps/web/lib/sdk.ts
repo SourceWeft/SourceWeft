@@ -3,6 +3,7 @@ import {
   ContentClient,
   HttpClient,
   JobsClient,
+  LlmObservabilityClient,
   WorkspaceClient,
 } from "@sourceweft/sdk";
 
@@ -20,3 +21,4 @@ export const jobsClient = new JobsClient(httpClient);
 export const billingClient = new BillingClient(httpClient);
 export const contentClient = new ContentClient(httpClient);
 export const workspaceClient = new WorkspaceClient(httpClient);
+export const llmObservabilityClient = new LlmObservabilityClient(httpClient);

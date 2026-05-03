@@ -24,3 +24,26 @@ export function mapBullMqStateToStatus(state: string): ApiJobStatus {
       return "queued";
   }
 }
+
+export function presentJobState(input: {
+  id: string;
+  type: string;
+  state: string;
+  createdAtMs: number;
+  processedAtMs?: number;
+  finishedAtMs?: number;
+  returnvalue?: unknown;
+  failedReason?: string;
+}) {
+  const updatedAtMs = input.finishedAtMs ?? input.processedAtMs ?? input.createdAtMs;
+
+  return {
+    id: input.id,
+    type: input.type,
+    status: mapBullMqStateToStatus(input.state),
+    createdAt: new Date(input.createdAtMs).toISOString(),
+    updatedAt: new Date(updatedAtMs).toISOString(),
+    result: input.returnvalue ?? null,
+    error: input.failedReason ?? null,
+  };
+}

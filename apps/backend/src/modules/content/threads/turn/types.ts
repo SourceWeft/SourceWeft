@@ -2,6 +2,7 @@ import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { AgentCitation } from "../../agent/citation-registry";
 import type { ContentBillingPort } from "../../billing-port";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
+import type { TraceContext } from "../../../../shared/llm-observability";
 import { contentRetrievalService } from "../../retrieval/service";
 import type { MessageRecord } from "../../types";
 import type { requireContentWorkspace } from "../../content-support";
@@ -22,6 +23,7 @@ export type StreamThreadEventInput = {
   agentBaseCheckpoint?: AgentCheckpointRef | null;
   agentRunThreadId?: string;
   existingUserMessage?: MessageRecord;
+  failurePersistence?: "persist-error-turn" | "transient";
 };
 
 export type AgentCheckpointRef = {
@@ -43,6 +45,7 @@ export type PreparedThreadTurn = {
   messageContent: string;
   sourceIds: string[];
   userMessage: MessageRecord;
+  runTraceId: string;
   createdUserMessage: boolean;
   assistantMessageParentId: string | null;
   profileAlias: string;
@@ -55,6 +58,8 @@ export type PreparedThreadTurn = {
   agentRunThreadId: string;
   isFirstAssistantResponse: boolean;
   initialTitle: string;
+  traceContext?: TraceContext;
+  failurePersistence: "persist-error-turn" | "transient";
 };
 
 export type RetrievalCallTrace = {

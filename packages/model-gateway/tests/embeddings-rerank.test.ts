@@ -76,6 +76,59 @@ test("embeddings.embedBatch normalizes LangChain embeddings output", async () =>
   assert.equal(result.provider, "gemini");
 });
 
+test("embeddings.embed emits generation observation events", async () => {
+  const events: Array<{ type: string; event: Record<string, unknown> }> = [];
+  const gateway = createModelGateway({
+    allowedModelAliases: ["embed-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "embed-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "text-embedding-3-small", priority: 1 }],
+      },
+    },
+    observeSink: {
+      onGenerationStart(event) {
+        events.push({ type: "start", event: event as unknown as Record<string, unknown> });
+      },
+      onGenerationEnd(event) {
+        events.push({ type: "end", event: event as unknown as Record<string, unknown> });
+      },
+    },
+    langchainFactories: {
+      createEmbeddingsModel: () => ({
+        async embedQuery() {
+          return [0.1, 0.2, 0.3];
+        },
+        async embedDocuments() {
+          return [];
+        },
+      }),
+    },
+  });
+
+  await gateway.embeddings.embed(
+    {
+      model: "embed-default",
+      text: "hello",
+      metadata: { teamId: "team-1", workspaceId: "workspace-1" },
+    },
+    { traceId: "trace-embed" },
+  );
+
+  assert.equal(events.length, 2);
+  assert.equal(events[0]?.event.operation, "embeddings.embed");
+  assert.equal(events[0]?.event.provider, "openai");
+  assert.equal(events[1]?.event.spanId, events[0]?.event.spanId);
+  assert.deepEqual((events[1]?.event.output as Record<string, unknown>).dimensions, 3);
+});
+
 test("rerank.rank supports siliconflow via openai-compatible provider", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
 
@@ -111,6 +164,53 @@ test("rerank.rank supports siliconflow via openai-compatible provider", async ()
   assert.equal(requests[0]?.url, "https://api.siliconflow.cn/v1/rerank");
   assert.equal(result.results[0]?.relevanceScore, 0.77);
   assert.equal(result.provider, "siliconflow");
+});
+
+test("rerank.rank emits provider-wire generation observation events", async () => {
+  const events: Array<{ type: string; event: Record<string, unknown> }> = [];
+  const gateway = createModelGateway({
+    fetch: async () =>
+      createJsonResponse({
+        model: "BAAI/bge-reranker-v2-m3",
+        results: [{ index: 0, score: 0.77 }],
+      }),
+    providers: {
+      siliconflow: {
+        kind: "openai-compatible",
+        baseUrl: "https://api.siliconflow.cn/v1",
+        apiKey: "sf-key",
+      },
+    },
+    modelRoutes: {
+      "rerank-default": {
+        strategy: "priority",
+        targets: [{ provider: "siliconflow", model: "BAAI/bge-reranker-v2-m3", priority: 1 }],
+      },
+    },
+    observeSink: {
+      onGenerationStart(event) {
+        events.push({ type: "start", event: event as unknown as Record<string, unknown> });
+      },
+      onGenerationEnd(event) {
+        events.push({ type: "end", event: event as unknown as Record<string, unknown> });
+      },
+    },
+  });
+
+  await gateway.rerank.rank(
+    {
+      model: "rerank-default",
+      query: "search docs",
+      documents: ["first doc"],
+      metadata: { teamId: "team-1", workspaceId: "workspace-1" },
+    },
+    { traceId: "trace-rerank" },
+  );
+
+  assert.equal(events.length, 2);
+  assert.equal(events[0]?.event.operation, "rerank.rank");
+  assert.equal(events[1]?.event.rawCaptureMode, "provider_wire");
+  assert.equal((events[1]?.event.output as Record<string, unknown>).resultCount, 1);
 });
 
 test("rerank.rank supports DeepInfra inference endpoint", async () => {

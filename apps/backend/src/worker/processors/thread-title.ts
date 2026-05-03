@@ -1,6 +1,9 @@
 import type { Job } from "bullmq";
 import { logger } from "../../shared/logger";
-import type { ThreadTitleGenerateJobPayload } from "../../modules/content/queue";
+import type {
+  ThreadTitleGenerateJobPayload,
+  ThreadTitleGenerateJobResult,
+} from "../../modules/content/queue";
 import {
   applyGeneratedThreadTitle,
   buildFallbackThreadTitle,
@@ -10,7 +13,7 @@ import { findThreadRecord } from "../../modules/content/threads/thread/repositor
 
 export async function processThreadTitleGenerateJob(
   job: Job<Record<string, unknown>>,
-) {
+): Promise<ThreadTitleGenerateJobResult> {
   const payload = job.data as ThreadTitleGenerateJobPayload;
   const thread = await findThreadRecord({
     threadId: payload.threadId,
@@ -23,7 +26,11 @@ export async function processThreadTitleGenerateJob(
       threadId: payload.threadId,
       userMessageId: payload.userMessageId,
     });
-    return;
+    return {
+      status: "skipped",
+      threadId: payload.threadId,
+      reason: "missing-thread",
+    };
   }
 
   if (thread.title !== payload.expectedTitle) {
@@ -33,7 +40,11 @@ export async function processThreadTitleGenerateJob(
       currentTitle: thread.title,
       expectedTitle: payload.expectedTitle,
     });
-    return;
+    return {
+      status: "skipped",
+      threadId: payload.threadId,
+      reason: "renamed-thread",
+    };
   }
 
   const isLastAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
@@ -65,5 +76,16 @@ export async function processThreadTitleGenerateJob(
       userMessageId: payload.userMessageId,
       title: updated.title,
     });
+    return {
+      status: "applied",
+      threadId: payload.threadId,
+      title: updated.title,
+    };
   }
+
+  return {
+    status: "skipped",
+    threadId: payload.threadId,
+    reason: "empty-title",
+  };
 }

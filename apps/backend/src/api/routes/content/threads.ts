@@ -6,9 +6,26 @@ import {
   updateThreadModelSettingsRequestSchema,
 } from "@sourceweft/contracts";
 import { contentService } from "../../../modules/content";
+import { THREAD_TITLE_GENERATE_JOB } from "../../../modules/content/queue";
+import { presentJobState } from "../../../shared/job-status";
+import { jobsQueue } from "../../../shared/queue";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { createSseResponse, ensureObjectBody, requireRouteParam } from "./helpers";
+
+function assertJobStringField(
+  data: unknown,
+  field: string,
+  expected: string,
+) {
+  const actual =
+    data && typeof data === "object"
+      ? (data as Record<string, unknown>)[field]
+      : undefined;
+  if (actual !== expected) {
+    throw new ApiError(404, "JOB_NOT_FOUND", "Job not found");
+  }
+}
 
 export function registerThreadRoutes(app: Hono) {
   app.get("/threads", async (c) => {
@@ -157,6 +174,36 @@ export function registerThreadRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result);
+  });
+
+  app.get("/threads/:id/title-job/:jobId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const threadId = requireRouteParam(c, "id");
+    const userId = getSessionUserId(session);
+    const job = await jobsQueue.getJob(requireRouteParam(c, "jobId"));
+    if (!job || job.name !== THREAD_TITLE_GENERATE_JOB) {
+      throw new ApiError(404, "JOB_NOT_FOUND", "Job not found");
+    }
+
+    assertJobStringField(job.data, "workspaceId", workspaceId);
+    assertJobStringField(job.data, "threadId", threadId);
+    assertJobStringField(job.data, "userId", userId);
+
+    return ApiResponse.success(c, presentJobState({
+      id: String(job.id),
+      type: job.name,
+      state: await job.getState(),
+      createdAtMs: job.timestamp,
+      processedAtMs: job.processedOn,
+      finishedAtMs: job.finishedOn,
+      returnvalue: job.returnvalue,
+      failedReason: job.failedReason,
+    }));
   });
 
   app.post("/threads/:id/stream", async (c) => {

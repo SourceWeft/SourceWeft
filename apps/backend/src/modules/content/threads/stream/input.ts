@@ -82,6 +82,7 @@ export async function resolveRefreshThreadStreamInput(
     agentMode: checkpoint?.beforeInput ? "fork" : "continue",
     agentBaseCheckpoint: checkpoint?.beforeInput ?? null,
     agentRunThreadId: refreshRunThreadId,
+    failurePersistence: "transient",
   };
 }
 
@@ -124,5 +125,6 @@ export async function resolveEditThreadStreamInput(
     agentMode: "fork",
     agentBaseCheckpoint,
     agentRunThreadId: `thread:${input.threadId}:edit:${latestUserMessage.id}:${input.idempotencyKey ?? randomUUID()}`,
+    failurePersistence: "transient",
   };
 }

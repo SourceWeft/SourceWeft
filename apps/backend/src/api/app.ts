@@ -14,6 +14,7 @@ import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
+import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
 import { registerWorkspaceRoutes } from "./routes/workspace";
 
 export function createApp() {
@@ -74,6 +75,7 @@ export function createApp() {
   registerBillingRoutes(app);
   registerContentRoutes(app);
   registerJobRoutes(app);
+  registerTeamLlmObservabilityRoutes(app);
 
   app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
 

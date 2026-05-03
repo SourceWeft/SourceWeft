@@ -1,4 +1,5 @@
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
+import type { TraceContext } from "../../../../shared/llm-observability";
 import type { EmbeddingProfileRecord } from "../../types";
 import type {
   RetrievalCandidate,
@@ -15,6 +16,7 @@ export type RetrievalInput = {
   sourceIds: string[];
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
+  traceContext?: TraceContext;
 };
 
 export type RetrievalPipelineState = {

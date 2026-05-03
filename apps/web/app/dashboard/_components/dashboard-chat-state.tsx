@@ -25,6 +25,7 @@ const THREADS_PAGE_SIZE = 20;
 type DashboardChatState = {
   mode: ViewMode;
   sourcesVisible: boolean;
+  organizationId: string | null;
   workspaceId: string | null;
   workspaceName: string;
   workspaces: Array<{ id: string; name: string }>;
@@ -530,6 +531,7 @@ export function DashboardChatStateProvider({
     () => ({
       mode,
       sourcesVisible,
+      organizationId,
       workspaceId,
       workspaceName,
       workspaces,
@@ -560,6 +562,7 @@ export function DashboardChatStateProvider({
     [
       mode,
       sourcesVisible,
+      organizationId,
       workspaceId,
       workspaceName,
       workspaces,

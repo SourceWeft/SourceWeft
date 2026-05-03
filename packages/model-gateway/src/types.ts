@@ -79,6 +79,7 @@ export interface RequestOptions {
   metadata?: Record<string, unknown>;
   idempotencyKey?: string;
   signal?: AbortSignal;
+  suppressLangChainObservation?: boolean;
 }
 
 export interface UsageInfo {
@@ -102,8 +103,70 @@ export interface ObserveSpan {
   errorMessage?: string;
 }
 
+export type ObserveRawCaptureMode =
+  | "none"
+  | "normalized"
+  | "sdk_metadata"
+  | "reconstructed"
+  | "provider_wire";
+
+export interface ObserveGenerationStart {
+  traceId?: string;
+  spanId: string;
+  parentSpanId?: string;
+  operation: GatewayOperation;
+  name?: string;
+  startedAt: string;
+  modelAlias: string;
+  provider: string;
+  providerModel: string;
+  executionMode?: GatewayExecutionMode;
+  routeDecision?: RouteDecision;
+  modelParameters?: Record<string, unknown>;
+  input?: Record<string, unknown>;
+  rawCaptureMode?: ObserveRawCaptureMode;
+  attributes?: Record<string, unknown>;
+}
+
+export interface ObserveGenerationEnd {
+  traceId?: string;
+  spanId: string;
+  endedAt: string;
+  latencyMs?: number;
+  output?: Record<string, unknown>;
+  outputText?: string;
+  finishReason?: string;
+  reasoningText?: string;
+  providerFields?: Record<string, unknown>;
+  usage?: UsageInfo;
+  rawCaptureMode?: ObserveRawCaptureMode;
+  providerResponse?: Record<string, unknown>;
+  providerStatusCode?: number;
+  providerRequestId?: string;
+  rawCaptureError?: string;
+  attributes?: Record<string, unknown>;
+}
+
+export interface ObserveGenerationError {
+  traceId?: string;
+  spanId: string;
+  endedAt: string;
+  latencyMs?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  providerResponse?: Record<string, unknown>;
+  providerStatusCode?: number;
+  providerRequestId?: string;
+  rawCaptureError?: string;
+  attributes?: Record<string, unknown>;
+}
+
+// Optional sink implemented by host apps; the gateway emits events but does not own persistence.
 export interface ObserveSink {
   onSpan?(span: ObserveSpan): void | Promise<void>;
+  onGenerationStart?(generation: ObserveGenerationStart): void | Promise<void>;
+  onGenerationEnd?(generation: ObserveGenerationEnd): void | Promise<void>;
+  onGenerationError?(generation: ObserveGenerationError): void | Promise<void>;
 }
 
 export interface GatewayLogger {
@@ -211,6 +274,7 @@ export interface RouteDecision {
 export type GatewayOperation = "chat.complete" | "chat.stream" | "embeddings.embed" | "embeddings.embedBatch" | "rerank.rank";
 
 export interface LangChainChatModelLike {
+  getName?(): string;
   bindTools?(
     tools: unknown[],
     kwargs?: Record<string, unknown>,

@@ -13,7 +13,7 @@ import {
   modelGatewayProviderConfigs,
   modelGatewayRoutes,
 } from "../db/schema";
-import { createDatabaseObserveSink } from "./observe";
+import { createLlmObservabilitySink } from "./llm-observability-sink";
 import { decryptSecret } from "../secrets";
 import type { RoutedGatewayConfig } from "./types";
 
@@ -293,7 +293,7 @@ export function buildRoutedModelGatewayConfig(
     maxRetries,
     allowNonDefaultAliases: false,
     resolveApiKeyRef: resolveByokApiKeyRef,
-    observeSink: createDatabaseObserveSink(),
+    observeSink: createLlmObservabilitySink(),
   };
 }
 

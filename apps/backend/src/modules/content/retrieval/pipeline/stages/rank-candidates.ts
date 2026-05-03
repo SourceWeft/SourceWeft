@@ -30,6 +30,7 @@ export const rankCandidatesStage: RetrievalPipelineStage = {
       threadId: input.threadId,
       userId: input.userId,
       llm: input.llm,
+      traceContext: input.traceContext,
     });
     const rerankLatencyMs = Date.now() - rerankStartedAt;
     const finalCandidates =

@@ -11,7 +11,7 @@ import type {
   RequestOptions,
 } from "../types";
 
-function extractResponseMetadata(raw: { response_metadata?: unknown }) {
+export function extractResponseMetadata(raw: { response_metadata?: unknown }) {
   return raw.response_metadata && typeof raw.response_metadata === "object"
     ? (raw.response_metadata as Record<string, unknown>)
     : undefined;
@@ -23,7 +23,7 @@ function extractObjectRecord(value: unknown): Record<string, unknown> | undefine
     : undefined;
 }
 
-function extractFinishReason(responseMetadata: Record<string, unknown> | undefined) {
+export function extractFinishReason(responseMetadata: Record<string, unknown> | undefined) {
   if (typeof responseMetadata?.finish_reason === "string") {
     return responseMetadata.finish_reason;
   }
@@ -35,7 +35,7 @@ function extractFinishReason(responseMetadata: Record<string, unknown> | undefin
   return undefined;
 }
 
-function extractUsage(input: {
+export function extractUsage(input: {
   usageMetadata?: unknown;
   responseMetadata: Record<string, unknown> | undefined;
 }) {
@@ -86,7 +86,7 @@ function extractReasoningFromRecord(responseMetadata: Record<string, unknown> | 
   return undefined;
 }
 
-function extractReasoning(raw: {
+export function extractReasoning(raw: {
   additional_kwargs?: unknown;
   content?: unknown;
   contentBlocks?: unknown;

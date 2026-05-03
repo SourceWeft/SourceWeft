@@ -7,6 +7,8 @@ import {
   createRetrievalTool,
 } from "../tools/retrieval-tool";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
+import type { TraceContext } from "../../../../shared/llm-observability";
+import { endSpan, startSpan } from "../../../../shared/llm-observability";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
   AgentCheckpointRef,
@@ -135,6 +137,7 @@ async function runToolRetrieval(input: {
   prepared: PreparedThreadTurn;
   query: string;
   llm?: LlmExecutionConfig;
+  traceContext?: TraceContext;
 }) {
   return contentRetrievalService.runRetrieval({
     workspaceId: input.prepared.workspace.id,
@@ -146,6 +149,7 @@ async function runToolRetrieval(input: {
     sourceIds: input.prepared.sourceIds,
     idempotencyKey: input.prepared.llmIdempotencyKey,
     llm: input.llm,
+    traceContext: input.traceContext,
   });
 }
 
@@ -216,7 +220,7 @@ function extractToolOutputText(output: unknown) {
     return record.content;
   }
 
-  const kwargs = toObjectRecord(record.kwargs);
+  const kwargs = toObjectRecord(record.kwargs) ?? toObjectRecord(record.lc_kwargs);
   const content = kwargs?.content;
   if (typeof content === "string") {
     return content;
@@ -236,6 +240,24 @@ function extractToolOutputText(output: unknown) {
   }
 
   return null;
+}
+
+export function normalizeToolOutputForObservability(toolName: string, output: unknown) {
+  if (toolName !== "read_file") {
+    return output;
+  }
+
+  const outputText = extractToolOutputText(output);
+  if (outputText) {
+    return { content: outputText };
+  }
+
+  const record = toObjectRecord(output);
+  if (typeof record?.error === "string") {
+    return { error: record.error };
+  }
+
+  return output;
 }
 
 function extractToolPayloadInput(toolPayload: Record<string, unknown>) {
@@ -344,6 +366,7 @@ function extractReasoningSummaryFromProviderFields(
 export async function* invokeDeepAgentTurn(input: {
   prepared: PreparedThreadTurn;
   llm?: LlmExecutionConfig;
+  traceContext?: TraceContext;
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const retrievalCallsById = new Map<string, RetrievalCallTrace>();
   const retrievalsByToolCallId = new Map<
@@ -469,6 +492,16 @@ export async function* invokeDeepAgentTurn(input: {
         prepared: input.prepared,
         query,
         llm: input.llm,
+        traceContext: runtime?.toolCallId && input.traceContext
+          ? {
+              ...input.traceContext,
+              parentSpanId: resolveToolCallId({
+                toolCallId: runtime.toolCallId,
+                toolName: "search_sources",
+                fallbackIndex: retrievalCallOrder.length + 1,
+              }),
+            }
+          : input.traceContext,
       });
       const callId = resolveToolCallId({
         toolCallId: runtime?.toolCallId,
@@ -493,22 +526,32 @@ export async function* invokeDeepAgentTurn(input: {
   });
 
   const agent = await createThreadAgent({
-    modelAlias: input.prepared.profileAlias,
+    modelAlias: input.prepared.modelAlias,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     tools: [retrievalTool],
     backend: databaseBackend,
-    execution: {
+      execution: {
       executionMode: input.llm?.executionMode,
       providerHint: input.llm?.providerHint,
       byok: input.llm?.byok,
       thinking: input.llm?.thinking,
       metadata: {
+        traceId: input.traceContext?.traceId,
+        parentSpanId: input.traceContext?.parentSpanId,
+        profileAlias: input.prepared.profileAlias,
+        modelAlias: input.prepared.modelAlias,
+        teamId: input.prepared.workspace.organizationId,
+        workspaceId: input.prepared.workspace.id,
+        userId: input.prepared.userId,
+        threadId: input.prepared.thread.id,
+        messageId: input.prepared.userMessage.id,
+        observationName: "agent_generation",
+        feature: "chat",
         team_id: input.prepared.workspace.organizationId,
         workspace_id: input.prepared.workspace.id,
         user_id: input.prepared.userId,
         thread_id: input.prepared.thread.id,
         message_id: input.prepared.userMessage.id,
-        feature: "chat",
       },
     },
   });
@@ -668,6 +711,21 @@ export async function* invokeDeepAgentTurn(input: {
       currentReasoningSegment = null;
       const normalizedInput = extractToolPayloadInput(toolPayload);
       toolStartedAtById.set(toolCallId, Date.now());
+      if (input.traceContext) {
+        await startSpan({
+          ...input.traceContext,
+          spanId: toolCallId,
+          parentSpanId: input.traceContext.parentSpanId,
+          name: `tool:${toolName}`,
+          kind: "tool",
+          operation: "tool.call",
+          input: normalizedInput,
+          metadata: {
+            toolName,
+            sequence: currentToolCall.sequence,
+          },
+        });
+      }
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
         tool: toolName,
@@ -772,7 +830,7 @@ export async function* invokeDeepAgentTurn(input: {
             query: retrievalCall.query,
             hitCount: retrievalCall.hitCount,
           }
-        : toolPayload.output;
+        : normalizeToolOutputForObservability(toolName, toolPayload.output);
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
         tool: toolName,
@@ -785,6 +843,21 @@ export async function* invokeDeepAgentTurn(input: {
         error: null,
       };
       toolCallsById.set(toolCallId, nextToolCall);
+      if (input.traceContext) {
+        await endSpan({
+          traceId: input.traceContext.traceId,
+          spanId: toolCallId,
+          status: "ok",
+          latencyMs,
+          output,
+          metadata: {
+            toolName,
+            ...(retrievalCall
+              ? { query: retrievalCall.query, hitCount: retrievalCall.hitCount }
+              : {}),
+          },
+        });
+      }
       yield {
         type: "tool-call-result",
         id: toolCallId,
@@ -880,6 +953,18 @@ export async function* invokeDeepAgentTurn(input: {
         error: errorText,
       };
       toolCallsById.set(toolCallId, nextToolCall);
+      if (input.traceContext) {
+        await endSpan({
+          traceId: input.traceContext.traceId,
+          spanId: toolCallId,
+          status: "error",
+          latencyMs,
+          errorMessage: errorText,
+          metadata: {
+            toolName,
+          },
+        });
+      }
       yield {
         type: "tool-call-error",
         id: toolCallId,

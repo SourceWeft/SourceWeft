@@ -98,6 +98,29 @@ export async function listMessageRecordsByThread(input: {
   return rows.map(mapMessage);
 }
 
+export async function updateMessageMetadataRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  messageId: string;
+  metadata: Record<string, unknown>;
+}) {
+  const [row] = await db
+    .update(messages)
+    .set({ metadata: input.metadata })
+    .where(
+      and(
+        eq(messages.id, input.messageId),
+        eq(messages.teamId, input.teamId),
+        eq(messages.workspaceId, input.workspaceId),
+        eq(messages.threadId, input.threadId),
+      ),
+    )
+    .returning();
+
+  return row ? mapMessage(row) : null;
+}
+
 export async function deleteMessageRecord(input: {
   teamId: string;
   workspaceId: string;

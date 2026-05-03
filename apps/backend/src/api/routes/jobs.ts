@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { mapBullMqStateToStatus } from "../../shared/job-status";
+import { presentJobState } from "../../shared/job-status";
 import { jobsQueue } from "../../shared/queue";
 import { requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
@@ -71,17 +71,16 @@ export function registerJobRoutes(app: Hono) {
 
     assertJobOwnedBySession(job, session.user.id);
 
-    const state = await job.getState();
-    const status = mapBullMqStateToStatus(state);
-    const updatedAtMs = job.finishedOn ?? job.processedOn ?? job.timestamp;
-
-    return ApiResponse.success(c, {
+    return ApiResponse.success(c, presentJobState({
       id: String(job.id),
       type: job.name,
-      status,
-      createdAt: new Date(job.timestamp).toISOString(),
-      updatedAt: new Date(updatedAtMs).toISOString(),
-    });
+      state: await job.getState(),
+      createdAtMs: job.timestamp,
+      processedAtMs: job.processedOn,
+      finishedAtMs: job.finishedOn,
+      returnvalue: job.returnvalue,
+      failedReason: job.failedReason,
+    }));
   });
 
   app.post("/v1/jobs/:id/cancel", async (c) => {

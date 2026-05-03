@@ -20,6 +20,21 @@ import type {
   RequestOptions,
 } from "../types";
 import { resolveModelGatewayConfig, resolveRequestTarget } from "../config";
+import {
+  buildGenerationErrorEvent,
+  createGenerationObservation,
+  emitGenerationEnd,
+  emitGenerationError,
+  emitGenerationStart,
+  toProviderResponse,
+} from "../observe/generation";
+import {
+  extractFinishReason,
+  extractReasoning,
+  extractResponseMetadata,
+  extractUsage,
+} from "./chat";
+import { normalizeUsage } from "../normalize/usage";
 
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
   return messages.map((message) => {
@@ -67,16 +82,209 @@ export function createChatModel(input: {
       input.options,
     );
 
-  if (!input.payload.tools?.length || !model.bindTools) {
-    return model;
-  }
-
-  return model.bindTools(
+  const boundModel = !input.payload.tools?.length || !model.bindTools
+    ? model
+    : model.bindTools(
     input.payload.tools,
     input.payload.toolChoice
       ? { tool_choice: input.payload.toolChoice }
       : undefined,
   ) as LangChainChatModelLike;
+
+  return createObservedLangChainChatModel({
+    ...input,
+    model: boundModel,
+  });
+}
+
+function createObservedLangChainChatModel(input: {
+  config: ResolvedModelGatewayConfig;
+  target: ResolvedRequestTarget;
+  payload: ChatCompleteInput;
+  options?: RequestOptions;
+  model: LangChainChatModelLike;
+}): LangChainChatModelLike {
+  if (!input.config.observeSink || input.options?.suppressLangChainObservation) {
+    return input.model;
+  }
+
+  const observed = Object.create(input.model) as LangChainChatModelLike;
+
+  observed.getName = () => input.model.getName?.() ?? input.target.providerModel;
+  observed.bindTools = (tools, kwargs) => createObservedLangChainChatModel({
+      ...input,
+      model: input.model.bindTools
+        ? input.model.bindTools(tools, kwargs)
+        : input.model,
+    });
+  observed.invoke = async (messages) => {
+      const generation = createGenerationObservation({
+        operation: "chat.complete",
+        payload: { ...input.payload, messages: normalizeObservedMessages(messages) },
+        options: input.options,
+        target: input.target,
+      });
+      await emitGenerationStart(input.config, generation.start);
+      try {
+        const result = await input.model.invoke(messages);
+        const responseMetadata = extractResponseMetadata(result as { response_metadata?: unknown });
+        const reasoning = extractReasoning(result as Parameters<typeof extractReasoning>[0]);
+        await emitGenerationEnd(input.config, {
+          traceId: generation.start.traceId,
+          spanId: generation.spanId,
+          endedAt: new Date().toISOString(),
+          latencyMs: Date.now() - generation.startedAtMs,
+          output: {
+            finishReason: extractFinishReason(responseMetadata),
+            reasoning,
+            routeDecision: input.target.routeDecision,
+          },
+          outputText: typeof (result as { content?: unknown }).content === "string"
+            ? (result as { content: string }).content
+            : undefined,
+          finishReason: extractFinishReason(responseMetadata),
+          reasoningText: reasoning,
+          providerFields: responseMetadata,
+          usage: normalizeUsage(extractUsage({
+            usageMetadata: (result as { usage_metadata?: unknown }).usage_metadata,
+            responseMetadata,
+          })),
+          rawCaptureMode: "sdk_metadata",
+          providerResponse: toProviderResponse(responseMetadata),
+          attributes: generation.start.attributes,
+        });
+        return result;
+      } catch (error) {
+        await emitGenerationError(input.config, buildGenerationErrorEvent({
+          traceId: generation.start.traceId,
+          spanId: generation.spanId,
+          startedAtMs: generation.startedAtMs,
+          error,
+          attributes: generation.start.attributes,
+        }));
+        throw error;
+      }
+    };
+  observed.stream = async (messages) => {
+      const generation = createGenerationObservation({
+        operation: "chat.stream",
+        payload: { ...input.payload, messages: normalizeObservedMessages(messages), stream: true },
+        options: input.options,
+        target: input.target,
+      });
+      await emitGenerationStart(input.config, generation.start);
+      const stream = await input.model.stream(messages);
+      return observeStream({
+        config: input.config,
+        generation,
+        routeDecision: input.target.routeDecision,
+        stream,
+      });
+    };
+
+  return observed;
+}
+
+async function* observeStream(input: {
+  config: ResolvedModelGatewayConfig;
+  generation: ReturnType<typeof createGenerationObservation>;
+  routeDecision: unknown;
+  stream: AsyncIterable<unknown>;
+}) {
+  let completed = false;
+  let usage = undefined;
+  let finishReason: string | undefined;
+  let reasoning: string | undefined;
+  let providerFields: Record<string, unknown> | undefined;
+  let outputText = "";
+
+  try {
+    for await (const chunk of input.stream) {
+      const responseMetadata = extractResponseMetadata(chunk as { response_metadata?: unknown });
+      usage = normalizeUsage(extractUsage({
+        usageMetadata: (chunk as { usage_metadata?: unknown }).usage_metadata,
+        responseMetadata,
+      })) ?? usage;
+      finishReason = extractFinishReason(responseMetadata) ?? finishReason;
+      reasoning = extractReasoning(chunk as Parameters<typeof extractReasoning>[0]) ?? reasoning;
+      providerFields = responseMetadata ?? providerFields;
+      const content = (chunk as { content?: unknown }).content;
+      if (typeof content === "string") outputText += content;
+      yield chunk;
+    }
+    completed = true;
+    await emitGenerationEnd(input.config, {
+      traceId: input.generation.start.traceId,
+      spanId: input.generation.spanId,
+      endedAt: new Date().toISOString(),
+      latencyMs: Date.now() - input.generation.startedAtMs,
+      output: {
+        finishReason,
+        reasoning,
+        routeDecision: input.routeDecision,
+      },
+      outputText: outputText || undefined,
+      finishReason,
+      reasoningText: reasoning,
+      providerFields,
+      usage,
+      rawCaptureMode: "sdk_metadata",
+      providerResponse: toProviderResponse(providerFields),
+      attributes: input.generation.start.attributes,
+    });
+  } catch (error) {
+    if (!completed) {
+      await emitGenerationError(input.config, buildGenerationErrorEvent({
+        traceId: input.generation.start.traceId,
+        spanId: input.generation.spanId,
+        startedAtMs: input.generation.startedAtMs,
+        error,
+        attributes: input.generation.start.attributes,
+      }));
+    }
+    throw error;
+  }
+}
+
+function normalizeObservedMessages(value: unknown): GatewayMessage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((message) => {
+    const record = message && typeof message === "object" ? message as Record<string, unknown> : {};
+    const type = typeof record.type === "string" ? record.type : typeof record._getType === "string" ? record._getType : undefined;
+    const role = type?.includes("system")
+      ? "system"
+      : type?.includes("ai") || type?.includes("assistant")
+        ? "assistant"
+        : type?.includes("tool")
+          ? "tool"
+          : "user";
+    const content = normalizeObservedContent(record.content ?? toRecord(record.kwargs)?.content ?? toRecord(record.lc_kwargs)?.content);
+    return {
+      role,
+      content,
+      toolCallId: typeof record.tool_call_id === "string" ? record.tool_call_id : typeof record.toolCallId === "string" ? record.toolCallId : undefined,
+    } satisfies GatewayMessage;
+  });
+}
+
+function toRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function normalizeObservedContent(value: unknown) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      const record = toRecord(item);
+      return typeof record?.text === "string" ? record.text : typeof item === "string" ? item : JSON.stringify(item);
+    }).join("\n");
+  }
+  if (value === null || value === undefined) return "";
+  return JSON.stringify(value);
 }
 
 export function createEmbeddingsModel(input: {

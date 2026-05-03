@@ -46,6 +46,7 @@ class ContentThreadTurnService {
         teamId: input.prepared.workspace.organizationId,
         workspaceId: input.prepared.workspace.id,
         threadId: input.prepared.thread.id,
+        traceId: input.prepared.traceContext?.traceId,
         userId: input.prepared.userId,
         userMessageId: input.prepared.userMessage.id,
         messageContent: input.prepared.messageContent,
@@ -53,6 +54,7 @@ class ContentThreadTurnService {
         modelAlias: input.prepared.modelAlias,
         gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
         llm: input.llm,
+        parentSpanId: input.prepared.traceContext?.parentSpanId,
       });
     } catch (error) {
       logger.debug("Automatic thread title generation failed", {

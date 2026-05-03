@@ -10,6 +10,7 @@ import {
 import {
   createMessageRecord,
   listMessageRecordsByThread,
+  updateMessageMetadataRecord,
 } from "../message-repository";
 import {
   applyResolvedThreadModelSettings,
@@ -158,7 +159,7 @@ export async function prepareThreadTurn(
   const createdUserMessage = !existingUserMessage;
 
   const isFirstAssistantResponse = !messageRecords.some(
-    (message) => message.role === "assistant",
+    (message) => message.role === "assistant" && !isContextExcludedMessage(message),
   );
   const initialTitle = thread.title;
 
@@ -198,6 +199,21 @@ export async function prepareThreadTurn(
         : `thread-stream:${userMessage.id}:assistant`);
 
   const agentRunThreadId = input.agentRunThreadId ?? thread.id;
+  const runTraceId = existingUserMessage
+    ? `thread-run:${randomUUID()}`
+    : userMessage.id;
+  const userMessageWithTraceId = existingUserMessage
+    ? userMessage
+    : await updateMessageMetadataRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: thread.id,
+      messageId: userMessage.id,
+      metadata: {
+        ...userMessage.metadata,
+        traceId: runTraceId,
+      },
+    }) ?? { ...userMessage, metadata: { ...userMessage.metadata, traceId: runTraceId } };
 
   return {
     userId: input.userId,
@@ -205,7 +221,8 @@ export async function prepareThreadTurn(
     thread,
     messageContent,
     sourceIds,
-    userMessage,
+    userMessage: userMessageWithTraceId,
+    runTraceId,
     createdUserMessage,
     assistantMessageParentId,
     profileAlias,
@@ -218,6 +235,7 @@ export async function prepareThreadTurn(
     agentRunThreadId,
     isFirstAssistantResponse,
     initialTitle,
+    failurePersistence: input.failurePersistence ?? "persist-error-turn",
   };
 }
 

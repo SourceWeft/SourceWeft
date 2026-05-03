@@ -8,6 +8,7 @@ import {
   recordGatewayOperationEvent,
   type LlmExecutionConfig,
 } from "../model-gateway-audit";
+import type { TraceContext } from "../../../shared/llm-observability";
 import { toContentServiceError } from "../model-gateway-error";
 import type { RetrievalCandidate } from "./planner";
 import { DEFAULT_RERANK_TOP_N } from "./pipeline/constants";
@@ -20,6 +21,7 @@ export async function rerankCandidates(input: {
   threadId: string;
   userId: string;
   llm?: LlmExecutionConfig;
+  traceContext?: TraceContext;
 }) {
   if (input.candidates.length <= 1) {
     return {
@@ -51,17 +53,21 @@ export async function rerankCandidates(input: {
         byok: input.llm?.byok,
       },
       {
-        metadata: buildGatewayRequestMetadata({
-          teamId: input.teamId,
-          workspaceId: input.workspaceId,
-          userId: input.userId,
-          threadId: input.threadId,
-          feature: "retrieval_rerank",
-          operation: "rerank.rank",
-          modelKind: "rerank",
-          modelAlias: rerankProfile.modelAlias,
-          llm: input.llm,
-        }),
+        traceId: input.traceContext?.traceId,
+        metadata: {
+          ...buildGatewayRequestMetadata({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            userId: input.userId,
+            threadId: input.threadId,
+            feature: "retrieval_rerank",
+            operation: "rerank.rank",
+            modelKind: "rerank",
+            modelAlias: rerankProfile.modelAlias,
+            llm: input.llm,
+            parentSpanId: input.traceContext?.parentSpanId,
+          }),
+        },
       },
     )
     .catch(async (error: unknown) => {
@@ -77,6 +83,7 @@ export async function rerankCandidates(input: {
         modelKind: "rerank",
         modelAlias: rerankProfile.modelAlias,
         llm: input.llm,
+        traceId: input.traceContext?.traceId,
         success: false,
         errorCode: contentError.code,
         errorMessage: contentError.message,

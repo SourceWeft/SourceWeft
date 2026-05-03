@@ -1,5 +1,5 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
-import { createModelGatewayEvent } from "../../shared/model-gateway/observe";
+import { createModelGatewayEvent } from "../../shared/model-gateway/llm-observability-sink";
 
 export type LlmThinkingConfig = {
   mode?: "auto" | "off" | "effort";
@@ -147,6 +147,7 @@ export function buildGatewayRequestMetadata(input: {
   modelAlias?: string | null;
   profileAlias?: string | null;
   llm?: LlmExecutionConfig;
+  parentSpanId?: string | null;
 }) {
   const audit = buildGatewayAuditMetadata({ llm: input.llm });
 
@@ -158,8 +159,11 @@ export function buildGatewayRequestMetadata(input: {
     messageId: input.messageId ?? null,
     feature: input.feature,
     operation: input.operation,
+    observationName: input.operation,
+    observationOperation: input.operation,
     modelAlias: input.modelAlias ?? null,
     profileAlias: input.profileAlias ?? null,
+    parentSpanId: input.parentSpanId ?? null,
     executionMode:
       typeof audit.executionMode === "string" ? audit.executionMode : null,
     keySource: typeof audit.keySource === "string" ? audit.keySource : null,

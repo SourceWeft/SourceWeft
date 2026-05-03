@@ -36,6 +36,20 @@
       "when": 1777766400000,
       "tag": "0004_profile_alias_model_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777766675000,
+      "tag": "0005_llm_observability",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777767000000,
+      "tag": "0006_llm_trace_io",
+      "breakpoints": true
     }
   ]
 }

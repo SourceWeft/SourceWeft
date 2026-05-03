@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
   resolveSourceIdsFromMessage,
 } from "./context";
@@ -41,6 +42,23 @@ test("resolveSourceIdsFromMessage filters invalid values", () => {
   assert.deepEqual(
     resolveSourceIdsFromMessage(message({ sourceIds: ["source-1", "", 1] })),
     ["source-1"],
+  );
+});
+
+test("isContextExcludedMessage excludes persisted assistant errors", () => {
+  assert.equal(
+    isContextExcludedMessage(message({ isError: true }, { role: "assistant" })),
+    true,
+  );
+  assert.equal(
+    isContextExcludedMessage(
+      message({ excludeFromContext: true }, { role: "assistant" }),
+    ),
+    true,
+  );
+  assert.equal(
+    isContextExcludedMessage(message({}, { role: "assistant" })),
+    false,
   );
 });
 

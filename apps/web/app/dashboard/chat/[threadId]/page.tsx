@@ -663,7 +663,26 @@ type StreamEventPayload = {
   availableCitations?: unknown;
   threadId?: string;
   title?: string;
+  jobId?: string;
 };
+
+type JobStatusResponse = {
+  data?: {
+    status?: string;
+    result?: unknown;
+  };
+};
+
+function getTitleFromJobResult(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const result = value as Record<string, unknown>;
+  return result.status === "applied" && typeof result.title === "string"
+    ? result.title.trim()
+    : null;
+}
 
 function isToolCallEventType(value: string): value is ToolCallEventType {
   return (
@@ -1055,7 +1074,6 @@ export default function DashboardChatThreadPage({
     sourcesVisible,
     toggleSourcesVisible,
     updateChatTitle,
-    refreshChatThread,
     updateChatSourceCount,
     workspaceId,
   } = useDashboardChatState();
@@ -1667,6 +1685,7 @@ export default function DashboardChatThreadPage({
       let createdUserMessageId: string | null = tempUserId;
       let persistedAssistantMessageId: string | null = null;
       let shouldPollThreadTitle = false;
+      let pendingTitleJobId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
       let streamingAssistantMessageId = tempAssistantId;
@@ -1734,15 +1753,28 @@ export default function DashboardChatThreadPage({
         let streamEnded = false;
         let drainPromise: Promise<void> | null = null;
 
-        const pollThreadTitle = async () => {
+        const pollThreadTitleJob = async (jobId: string) => {
           const startedAt = Date.now();
           while (Date.now() - startedAt < TITLE_POLL_TIMEOUT_MS) {
             await new Promise((resolve) =>
               window.setTimeout(resolve, TITLE_POLL_INTERVAL_MS),
             );
-            const refreshed = await refreshChatThread(threadId).catch(() => null);
-            const title = refreshed?.title?.trim();
-            if (title && title !== "New chat") {
+            const response = await fetch(
+              `${apiBaseUrl}/v1/workspaces/${workspaceId}/threads/${threadId}/title-job/${encodeURIComponent(jobId)}`,
+              { credentials: "include" },
+            ).catch(() => null);
+            if (!response?.ok) {
+              continue;
+            }
+
+            const payload = await response.json().catch(() => null) as JobStatusResponse | null;
+            const status = payload?.data?.status;
+            const title = getTitleFromJobResult(payload?.data?.result);
+            if (title) {
+              updateChatTitle(threadId, title);
+              return;
+            }
+            if (status === "failed" || status === "cancelled") {
               return;
             }
           }
@@ -2071,6 +2103,7 @@ export default function DashboardChatThreadPage({
               typeof data.threadId === "string"
             ) {
               shouldPollThreadTitle = data.threadId === threadId;
+              pendingTitleJobId = typeof data.jobId === "string" ? data.jobId : null;
             } else if (data.type === "error") {
               if (streamToolCallsById.size > 0) {
                 for (const [toolId, toolCall] of streamToolCallsById.entries()) {
@@ -2087,11 +2120,6 @@ export default function DashboardChatThreadPage({
               const errorMessage = data.error ?? "Model error";
               persistedAssistantMessageId =
                 typeof data.messageId === "string" ? data.messageId : null;
-              if (!persistedAssistantMessageId) {
-                streamError = new Error(errorMessage);
-                streamEnded = true;
-                break readLoop;
-              }
               const messageId = persistedAssistantMessageId ?? tempAssistantId;
               const userMessageId = data.userMessageId ?? persistedUserMessageId;
               const previousAssistantMessageId = streamingAssistantMessageId;
@@ -2227,8 +2255,8 @@ export default function DashboardChatThreadPage({
         window.setTimeout(() => {
           void loadThreadMessages();
         }, 0);
-        if (shouldPollThreadTitle) {
-          void pollThreadTitle();
+        if (shouldPollThreadTitle && pendingTitleJobId) {
+          void pollThreadTitleJob(pendingTitleJobId);
         }
       } catch (error) {
         const errorMessage = getDisplayErrorMessage(error);
@@ -2257,7 +2285,6 @@ export default function DashboardChatThreadPage({
       clearEditingState,
       loadThreadMessages,
       messages,
-      refreshChatThread,
       selectedModels,
       streamWithSelectedLlm,
       threadId,
