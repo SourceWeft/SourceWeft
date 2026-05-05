@@ -6,11 +6,9 @@ import {
   Boxes,
   ChevronDown,
   ChevronRight,
-  Columns3,
   Cpu,
   DatabaseZap,
   GitBranch,
-  MessageSquare,
   Loader2,
   RefreshCw,
   Search,
@@ -43,6 +41,7 @@ import { llmObservabilityClient } from "../../../lib/sdk";
 import { useDashboardChatState } from "../_components/dashboard-chat-state";
 import type {
   LlmGenerationDetail,
+  LlmObservationStatus,
   LlmSpanDetail,
   LlmTraceDetailResponse,
   LlmTraceSummary,
@@ -71,23 +70,9 @@ type TreeRow = {
   latencyMs?: number | null;
   startedAt?: string | null;
   icon: React.ComponentType<{ className?: string }>;
-};
-
-type NodeViewData = {
-  kind: string;
-  title: string;
-  status: string;
-  errorMessage?: string | null;
-  statusMessage?: string | null;
-  latencyMs: number | null | undefined;
-  startedAt: string | null | undefined;
-  input: unknown;
-  reasoning?: unknown;
-  output: unknown;
-  metrics?: Record<string, unknown>;
-  parameters?: Record<string, unknown>;
-  metadata: Record<string, unknown>;
-  raw: unknown;
+  parentId?: string | null;
+  hasChildren?: boolean;
+  defaultCollapsed?: boolean;
 };
 
 type SelectedNode =
@@ -96,6 +81,7 @@ type SelectedNode =
   | { kind: "generation"; id: string };
 
 const statusFilters = ["all", "ok", "running", "error", "cancelled"] as const;
+type StatusFilter = "all" | LlmObservationStatus;
 
 function formatLatency(value: number | null | undefined) {
   if (value === null || value === undefined) {
@@ -158,6 +144,8 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
       latencyMs: detail.trace.latencyMs,
       startedAt: detail.trace.startedAt,
       icon: GitBranch,
+      parentId: null,
+      hasChildren: true,
     },
   ];
   const spansByParent = new Map<string | null, LlmSpanDetail[]>();
@@ -172,7 +160,17 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
     generationsByParent.set(key, [...(generationsByParent.get(key) ?? []), generation]);
   }
 
-  const pushGeneration = (generation: LlmGenerationDetail, depth: number) => {
+  const hasChildren = (spanId: string | null) =>
+    Boolean(
+      (spansByParent.get(spanId)?.length ?? 0) +
+        (generationsByParent.get(spanId)?.length ?? 0),
+    );
+
+  const pushGeneration = (
+    generation: LlmGenerationDetail,
+    depth: number,
+    parentId: string | null,
+  ) => {
     const usage = generation.totalTokens
       ? `${generation.inputTokens ?? 0} -> ${generation.outputTokens ?? 0} tokens`
       : generation.operation;
@@ -180,12 +178,13 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
       depth,
       id: generation.id,
       node: { kind: "generation", id: generation.id },
-      label: generation.name ?? generation.model ?? generation.modelAlias ?? generation.providerModel ?? generation.operation,
+      label: generation.name ?? generation.model ?? generation.operation,
       kind: usage,
       status: generation.status,
       latencyMs: generation.latencyMs,
       startedAt: generation.startedAt,
       icon: Cpu,
+      parentId,
     });
   };
 
@@ -203,10 +202,11 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
 
     for (const child of children) {
       if (child.kind === "generation") {
-        pushGeneration(child.generation, depth);
+        pushGeneration(child.generation, depth, parentSpanId ?? detail.trace.traceId);
         continue;
       }
       const span = child.span;
+      const spanHasChildren = hasChildren(span.spanId);
       rows.push({
         depth,
         id: span.spanId,
@@ -217,6 +217,9 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
         latencyMs: span.latencyMs,
         startedAt: span.startedAt,
         icon: span.kind === "tool" ? Boxes : span.kind === "retrieval" ? DatabaseZap : Activity,
+        parentId: parentSpanId ?? detail.trace.traceId,
+        hasChildren: spanHasChildren,
+        defaultCollapsed: span.kind === "retrieval",
       });
       pushChildren(span.spanId, depth + 1);
     }
@@ -224,14 +227,6 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
 
   pushChildren(null, 1);
   return rows;
-}
-
-function traceMatchesFilters(trace: LlmTraceSummary, filters: { traceName: string; traceId: string }) {
-  const traceName = filters.traceName.trim().toLowerCase();
-  const traceId = filters.traceId.trim().toLowerCase();
-  if (traceName && !trace.name.toLowerCase().includes(traceName)) return false;
-  if (traceId && !trace.traceId.toLowerCase().includes(traceId)) return false;
-  return true;
 }
 
 function traceMatchesNameFilter(trace: LlmTraceSummary, selectedNames: string[]) {
@@ -245,6 +240,10 @@ function workspaceLabel(workspaces: Array<{ id: string; name: string }>, workspa
 
 function sessionLabel(trace: Pick<LlmTraceSummary, "sessionId" | "threadId">) {
   return trace.sessionId ?? trace.threadId ?? "--";
+}
+
+function traceSelectionKey(traceId: string, workspaceId?: string | null) {
+  return `${workspaceId ?? ""}:${traceId}`;
 }
 
 function unwrapPayload(value: unknown) {
@@ -261,7 +260,25 @@ function unwrapPayload(value: unknown) {
   if (record.mode === "preview" && "preview" in record) {
     return record.preview;
   }
+  if (typeof record.preview === "string") {
+    return record.preview;
+  }
   return value;
+}
+
+function parsePolicyPayload(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return value;
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return value;
+  }
 }
 
 function payloadPreview(value: unknown) {
@@ -331,14 +348,59 @@ function isMessageLike(value: unknown) {
 }
 
 function isMessagesContainer(value: unknown) {
-  const record = toRecord(unwrapPayload(value));
+  const record = toRecord(unwrapDeepPayload(value));
   return Boolean(record && Array.isArray(record.messages) && record.messages.some(isMessageLike));
+}
+
+function extractMessageEnvelope(value: unknown) {
+  const parsed = unwrapDeepPayload(value);
+  if (Array.isArray(parsed) && parsed.some(isMessageLike)) {
+    return {
+      messages: parsed,
+      metadata: {} as Record<string, unknown>,
+    };
+  }
+  const record = toRecord(parsed);
+  if (!record) return null;
+  if (Array.isArray(record.messages) && record.messages.some(isMessageLike)) {
+    return {
+      messages: record.messages,
+      metadata: Object.fromEntries(
+        Object.entries(record).filter(([key, entryValue]) => key !== "messages" && !isEmptyPayload(entryValue)),
+      ),
+    };
+  }
+  if (Array.isArray(record.input) && record.input.some(isMessageLike)) {
+    return {
+      messages: record.input,
+      metadata: Object.fromEntries(
+        Object.entries(record).filter(([key, entryValue]) => key !== "input" && !isEmptyPayload(entryValue)),
+      ),
+    };
+  }
+  if (Array.isArray(record.output) && record.output.some(isMessageLike)) {
+    return {
+      messages: record.output,
+      metadata: Object.fromEntries(
+        Object.entries(record).filter(([key, entryValue]) => key !== "output" && !isEmptyPayload(entryValue)),
+      ),
+    };
+  }
+  return null;
 }
 
 function extractToolCalls(value: unknown) {
   const record = toRecord(unwrapDeepPayload(value));
   if (!record) return [];
   for (const key of ["toolCalls", "tool_calls", "tools"]) {
+    if (Array.isArray(record[key])) return record[key];
+  }
+  return [];
+}
+
+function extractMessageToolCalls(record: Record<string, unknown> | null) {
+  if (!record) return [];
+  for (const key of ["toolCalls", "tool_calls"]) {
     if (Array.isArray(record[key])) return record[key];
   }
   return [];
@@ -353,6 +415,14 @@ function extractReasoning(value: unknown) {
   const record = toRecord(unwrapDeepPayload(value));
   if (!record) return null;
   return record.reasoning ?? record.reasoningText ?? record.reasoningSummary ?? null;
+}
+
+function extractReasoningSegments(value: unknown) {
+  const record = toRecord(unwrapDeepPayload(value));
+  if (!record || !Array.isArray(record.reasoningSegments)) {
+    return [];
+  }
+  return record.reasoningSegments;
 }
 
 function omitRecordKeys(value: unknown, keys: string[]) {
@@ -437,7 +507,7 @@ function partialStructuredStringView(value: unknown) {
 function unwrapDeepPayload(value: unknown): unknown {
   let current = value;
   for (let index = 0; index < 4; index += 1) {
-    const next = parseMaybeJson(unwrapPayload(current));
+    const next = parseMaybeJson(unwrapPayload(parsePolicyPayload(current)));
     if (next === current) return next;
     current = next;
   }
@@ -480,6 +550,84 @@ function normalizeMessageContent(message: unknown): unknown {
     if (Object.keys(usefulEntries).length > 0) return usefulEntries;
   }
   return payloadPreview(unwrapped);
+}
+
+function messageRoleClassName(role: string) {
+  const normalized = role.toLowerCase();
+  if (normalized === "system") {
+    return "text-slate-600 dark:text-slate-300";
+  }
+  if (normalized === "assistant") {
+    return "text-sky-700 dark:text-sky-300";
+  }
+  if (normalized === "tool") {
+    return "text-amber-700 dark:text-amber-300";
+  }
+  return "text-emerald-700 dark:text-emerald-300";
+}
+
+function messageRoleLabel(role: string) {
+  const normalized = role.toLowerCase();
+  if (normalized === "system") return "System";
+  if (normalized === "assistant") return "Assistant";
+  if (normalized === "tool") return "Tool";
+  if (normalized === "user") return "User";
+  return role;
+}
+
+function MessageEnvelopeSummary({ metadata }: { metadata: Record<string, unknown> }) {
+  const entries = Object.entries(metadata).filter(([, value]) => !isEmptyPayload(value));
+  if (entries.length === 0) return null;
+  const preferred = ["messageCount", "toolCount", "stream", "operation", "model"];
+  const orderedEntries = [
+    ...preferred
+      .filter((key) => Object.prototype.hasOwnProperty.call(metadata, key) && !isEmptyPayload(metadata[key]))
+      .map((key) => [key, metadata[key]] as [string, unknown]),
+    ...entries.filter(([key]) => !preferred.includes(key)),
+  ];
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-xs text-muted-foreground">
+      {orderedEntries.map(([key, value], index) => {
+        const label = compactPayloadPreview(value, 72);
+        return (
+          <span
+            className="inline-flex min-w-0 max-w-full items-center gap-1.5"
+            key={key}
+            title={`${key}: ${label}`}
+          >
+            {index > 0 ? <span className="text-border">/</span> : null}
+            <span>{key}</span>
+            <span className="min-w-0 truncate font-mono">{label}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function MessageToolCallSummary({ calls }: { calls: unknown[] }) {
+  if (calls.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+      <span>Tool calls:</span>
+      {calls.map((call, index) => {
+        const record = toRecord(call) ?? {};
+        const fn = toRecord(record.function);
+        const name = record.name ?? record.tool ?? record.toolName ?? fn?.name ?? `tool_${index + 1}`;
+        const id = record.id ?? record.toolCallId ?? record.tool_call_id;
+        return (
+          <span
+            className="inline-flex max-w-full items-center gap-1 font-mono"
+            key={`${index}:${String(id ?? name)}`}
+          >
+            <Wrench className="h-3 w-3 shrink-0" />
+            <span className="truncate">{String(name)}</span>
+            {id ? <span className="truncate opacity-70">{String(id)}</span> : null}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function normalizeToolArgs(value: unknown) {
@@ -543,7 +691,7 @@ function MarkdownValue({ value }: { value: string }) {
   if (!isLong) {
     return (
       <div className="max-w-none text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3">
-        <MessageResponse children={value} />
+        <MessageResponse>{value}</MessageResponse>
       </div>
     );
   }
@@ -557,7 +705,7 @@ function MarkdownValue({ value }: { value: string }) {
         </div>
       </summary>
       <div className="max-h-[680px] overflow-auto p-4 text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3">
-        <MessageResponse children={value} />
+        <MessageResponse>{value}</MessageResponse>
       </div>
     </details>
   );
@@ -568,6 +716,46 @@ function DisplayValue({ value, markdown = false }: { value: unknown; markdown?: 
   if (parsed === null || parsed === undefined || parsed === "") return <DashValue />;
   if (parsed && typeof parsed === "object") return <JsonValueTable value={parsed} />;
   if (typeof parsed === "string" && markdown) return <MarkdownValue value={parsed} />;
+  return <PrimitiveValue value={parsed} />;
+}
+
+function MessageTextValue({ value }: { value: string }) {
+  const isLong = value.length > 900 || value.split("\n").length > 14;
+  if (!isLong) {
+    return (
+      <div className="max-w-none whitespace-pre-wrap break-words text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-auto [&_pre]:rounded-sm [&_pre]:bg-muted/40 [&_pre]:p-2">
+        <MessageResponse>{value}</MessageResponse>
+      </div>
+    );
+  }
+  const preview = value.replace(/\s+/g, " ").trim().slice(0, 320);
+  return (
+    <details className="group">
+      <summary className="cursor-pointer list-none text-xs leading-5 text-muted-foreground hover:text-foreground">
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0 truncate">{preview}{value.length > 320 ? "..." : ""}</span>
+          <span className="shrink-0 font-medium text-foreground group-open:hidden">Show full text</span>
+          <span className="hidden shrink-0 font-medium text-foreground group-open:inline">Hide full text</span>
+        </div>
+      </summary>
+      <div className="mt-2 max-h-[520px] overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-foreground [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-auto [&_pre]:rounded-sm [&_pre]:bg-muted/40 [&_pre]:p-2">
+        <MessageResponse>{value}</MessageResponse>
+      </div>
+    </details>
+  );
+}
+
+function MessageContentValue({ value }: { value: unknown }) {
+  const parsed = unwrapDeepPayload(value);
+  if (parsed === null || parsed === undefined || parsed === "") return <DashValue />;
+  if (typeof parsed === "string") return <MessageTextValue value={parsed} />;
+  if (parsed && typeof parsed === "object") {
+    return (
+      <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-sm bg-muted/20 px-2 py-1.5 font-mono text-xs leading-5 text-foreground">
+        {JSON.stringify(parsed, null, 2)}
+      </pre>
+    );
+  }
   return <PrimitiveValue value={parsed} />;
 }
 
@@ -586,12 +774,44 @@ function PrimitiveValue({ value }: { value: unknown }) {
   return <TextValue value={String(value)} />;
 }
 
+function isCompactArrayValue(value: unknown) {
+  return value === null || ["string", "number", "boolean", "bigint"].includes(typeof value);
+}
+
+function compactArrayLabel(value: unknown) {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+function CompactArrayValue({ values }: { values: unknown[] }) {
+  return (
+    <div className="flex max-h-40 min-w-0 flex-wrap gap-1.5 overflow-y-auto py-0.5">
+      {values.map((item, index) => {
+        const label = compactArrayLabel(item);
+        return (
+          <span
+            className="min-w-0 max-w-full rounded border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-[11px] leading-5 text-foreground"
+            key={`${index}:${label}`}
+            title={label}
+          >
+            <span className="break-all">{label}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function JsonValueTable({ value, depth = 0, keepEmpty = false }: { value: unknown; depth?: number; keepEmpty?: boolean }) {
   const parsed = unwrapDeepPayload(value);
   const redacted = isRedactedPayload(parsed);
   if (redacted) return <RedactionNotice value={parsed} />;
   if (Array.isArray(parsed)) {
     if (parsed.length === 0) return <DashValue />;
+    if (parsed.every(isCompactArrayValue)) {
+      return <CompactArrayValue values={parsed} />;
+    }
     const entries = parsed
       .map((entryValue, index) => ({ entryValue, index }))
       .filter(({ entryValue }) => keepEmpty || !isEmptyPayload(entryValue));
@@ -725,6 +945,61 @@ function ToolCallList({ value }: { value: unknown }) {
   );
 }
 
+function ReasoningView({
+  reasoning,
+  segments,
+}: {
+  reasoning: unknown;
+  segments?: unknown[];
+}) {
+  if (segments?.length) {
+    return (
+      <div className="space-y-2">
+        {segments.map((segment, index) => {
+          const record = toRecord(segment);
+          const text = record?.text ?? segment;
+          const phase = typeof record?.phase === "string" ? record.phase : "initial";
+          const tool = record?.tool ?? record?.toolName;
+          const toolCallId = record?.toolCallId ?? record?.tool_call_id;
+          const durationMs =
+            typeof record?.durationMs === "number" ? record.durationMs : null;
+          return (
+            <article className="overflow-hidden rounded-lg border border-border bg-background" key={String(record?.id ?? index)}>
+              <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+                <Badge variant="secondary">#{index + 1}</Badge>
+                <span className="font-medium text-foreground">
+                  {phase === "after_tool" ? "After tool" : "Before tool"}
+                </span>
+                {tool ? (
+                  <span className="inline-flex min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]">
+                    <Wrench className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{String(tool)}</span>
+                  </span>
+                ) : null}
+                {toolCallId ? (
+                  <span className="max-w-full truncate font-mono text-[11px] opacity-70">
+                    {String(toolCallId)}
+                  </span>
+                ) : null}
+                {durationMs !== null ? (
+                  <span className="ml-auto shrink-0 font-mono text-[11px]">
+                    {formatLatency(durationMs)}
+                  </span>
+                ) : null}
+              </div>
+              <div className="p-3 text-sm leading-6 text-foreground">
+                <DisplayValue value={text} />
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return <StructuredValue value={reasoning} />;
+}
+
 function normalizeToolMessage(value: unknown) {
   const unwrapped = unwrapDeepPayload(value);
   const record = toRecord(unwrapped);
@@ -807,48 +1082,65 @@ function StructuredValue({
 }
 
 function MessageList({ value, fallbackRole = "user" }: { value: unknown; fallbackRole?: string }) {
-  const messages = extractMessages(value);
+  const envelope = extractMessageEnvelope(value);
+  const messages = envelope?.messages ?? extractMessages(value);
   if (messages.length === 0) {
     const parsed = parseMaybeJson(unwrapPayload(value));
     if (isEmptyPayload(parsed)) return <DashValue />;
     return <div className="text-sm leading-6 text-foreground"><DisplayValue markdown value={parsed} /></div>;
   }
   return (
-    <div className="space-y-3">
-      {messages.map((message, index) => {
-        const record = toRecord(message);
-        const role = normalizeMessageRole(record, fallbackRole);
-        const content = normalizeMessageContent(message);
-        const toolCalls = extractToolCalls(record);
-        const parsedContent = parseMaybeJson(content);
-        return (
-          <article className="overflow-hidden rounded-md hover:bg-muted/30" key={index}>
-            <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground">
-              <MessageSquare className="h-3.5 w-3.5" />
-              {role}
-            </div>
-            <div className="px-2 pb-3 text-sm leading-6 text-foreground">
-              <DisplayValue markdown value={parsedContent} />
-            </div>
-            {toolCalls.length > 0 ? <div className="px-2 pb-3"><ToolCallList value={toolCalls} /></div> : null}
-          </article>
-        );
-      })}
+    <div className="space-y-1">
+      {envelope ? <MessageEnvelopeSummary metadata={envelope.metadata} /> : null}
+      <div className="divide-y divide-border/50">
+        {messages.map((message, index) => {
+          const record = toRecord(message);
+          const role = normalizeMessageRole(record, fallbackRole);
+          const content = normalizeMessageContent(message);
+          const toolCalls = extractMessageToolCalls(record);
+          const parsedContent = parseMaybeJson(content);
+          const toolCallId = record?.toolCallId ?? record?.tool_call_id;
+          const contentLength =
+            typeof content === "string"
+              ? content.length
+                : typeof toRecord(content)?.length === "number"
+                  ? Number(toRecord(content)?.length)
+                  : null;
+          return (
+            <article className="grid grid-cols-[86px_minmax(0,1fr)] gap-4 py-3 max-sm:grid-cols-1 max-sm:gap-1" key={index}>
+              <div className="min-w-0 px-1 text-[11px] leading-5 text-muted-foreground">
+                <div className={cn("truncate font-semibold", messageRoleClassName(role))}>
+                  {messageRoleLabel(role)}
+                </div>
+                <div className="font-mono">#{index + 1}</div>
+              </div>
+              <div className="min-w-0">
+                <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  {toolCallId ? (
+                    <span className="min-w-0 truncate font-mono">
+                      toolCallId: {String(toolCallId)}
+                    </span>
+                  ) : null}
+                  {toolCalls.length > 0 ? (
+                    <span>
+                      {toolCalls.length} tool call{toolCalls.length === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+                  {contentLength !== null ? (
+                    <span className="ml-auto shrink-0 font-mono max-sm:ml-0">
+                      {contentLength.toLocaleString()} chars
+                    </span>
+                  ) : null}
+                </div>
+                <MessageContentValue value={parsedContent} />
+                <MessageToolCallSummary calls={toolCalls} />
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
-}
-
-function traceTablePreview(value: unknown) {
-  const toolMessage = normalizeToolMessage(value);
-  if (toolMessage) return compactPayloadPreview(toolMessage.content);
-  const messages = extractMessages(value);
-  if (messages.length > 0) {
-    const first = messages[0];
-    const content = normalizeMessageContent(first);
-    return compactPayloadPreview(content);
-  }
-  const preview = compactPayloadPreview(value);
-  return preview === "--" ? "--" : preview;
 }
 
 function JsonBlock({ value }: { value: unknown }) {
@@ -880,6 +1172,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
       startedAt: detail.trace.startedAt,
       input: detail.trace.input,
       reasoning: extractReasoning(detail.trace.output),
+      reasoningSegments: extractReasoningSegments(detail.trace.output),
       output: isEmptyPayload(detail.trace.output) ? fallbackOutput : detail.trace.output,
       metrics: {
         durationMs: detail.trace.durationMs ?? detail.trace.latencyMs,
@@ -904,6 +1197,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
       startedAt: span.startedAt,
       input: span.input,
       reasoning: extractReasoning(span.output),
+      reasoningSegments: extractReasoningSegments(span.output),
       output: span.output,
       metrics: {
         durationMs: span.durationMs ?? span.latencyMs,
@@ -917,7 +1211,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
   if (!generation) return null;
   return {
     kind: generation.operation,
-    title: generation.name ?? generation.modelAlias ?? generation.model ?? generation.providerModel ?? generation.operation,
+    title: generation.name ?? generation.model ?? generation.operation,
     status: generation.status,
     errorMessage: generation.errorMessage,
     statusMessage: generation.statusMessage,
@@ -925,6 +1219,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
     startedAt: generation.startedAt,
     input: generation.input,
     reasoning: generation.reasoningText ?? extractReasoning(generation.output),
+    reasoningSegments: extractReasoningSegments(generation.output),
     output: generation.outputText ?? generation.output,
     metrics: {
       durationMs: generation.durationMs ?? generation.latencyMs,
@@ -937,9 +1232,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
     metadata: {
       provider: generation.provider,
       model: generation.model,
-      providerModel: generation.providerModel,
       usage: generation.usage,
-      modelAlias: generation.modelAlias,
       finishReason: generation.finishReason,
       rawCaptureMode: generation.rawCaptureMode,
       providerRequestId: generation.providerRequestId,
@@ -1102,8 +1395,8 @@ function FilterPanel({
   workspaceName: string | null;
   workspaces: Array<{ id: string; name: string }>;
   onWorkspaceChange: (workspaceId: string) => void;
-  status: string;
-  onStatusChange: (status: string) => void;
+  status: StatusFilter;
+  onStatusChange: (status: StatusFilter) => void;
   traceNameOptions: string[];
   selectedTraceNames: string[];
   onSelectedTraceNamesChange: (names: string[]) => void;
@@ -1145,11 +1438,11 @@ function FilterPanel({
             selectedNames={selectedTraceNames}
           />
 
-          <FilterFacet label="Trace ID" summary={traceId ? `contains ${traceId}` : undefined}>
+          <FilterFacet label="Trace ID" summary={traceId ? `= ${traceId}` : undefined}>
             <Input
               className="h-7 text-xs"
               onChange={(event) => onTraceIdChange(event.target.value)}
-              placeholder="269f051c..."
+              placeholder="Exact trace ID"
               value={traceId}
             />
           </FilterFacet>
@@ -1218,7 +1511,7 @@ function TraceSummaryBar({ detail }: { detail: LlmTraceDetailResponse | null }) 
         <span>User: <span className="font-medium text-foreground">{detail.trace.userDisplayName ?? detail.trace.userId ?? "--"}</span></span>
         <span>Env: <span className="font-medium text-foreground">{detail.trace.environment ?? "--"}</span></span>
         <span>Observations: <span className="font-medium text-foreground">{detail.trace.observationCount ?? detail.spans.length + detail.generations.length}</span></span>
-        <span>Model: <span className="font-medium text-foreground">{detail.trace.model ?? rootGeneration?.modelAlias ?? rootGeneration?.model ?? rootGeneration?.providerModel ?? "--"}</span></span>
+        <span>Model: <span className="font-medium text-foreground">{detail.trace.model ?? rootGeneration?.model ?? "--"}</span></span>
         <span>Tokens: <span className="font-medium text-foreground">{totalTokens > 0 ? totalTokens : "--"}</span></span>
       </div>
       {reason ? (
@@ -1242,6 +1535,50 @@ function TraceTree({
   onSelect: (node: SelectedNode) => void;
 }) {
   const rows = React.useMemo(() => buildTree(detail), [detail]);
+  const defaultCollapsedIds = React.useMemo(
+    () => new Set(rows.filter((row) => row.defaultCollapsed).map((row) => row.id)),
+    [rows],
+  );
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    setExpandedIds(new Set());
+  }, [detail?.trace.traceId]);
+
+  const visibleRows = React.useMemo(() => {
+    const hiddenDepths: number[] = [];
+    return rows.filter((row) => {
+      while (
+        hiddenDepths.length > 0 &&
+        row.depth <= hiddenDepths[hiddenDepths.length - 1]!
+      ) {
+        hiddenDepths.pop();
+      }
+      if (hiddenDepths.length > 0) {
+        return false;
+      }
+      const collapsed =
+        row.hasChildren &&
+        defaultCollapsedIds.has(row.id) &&
+        !expandedIds.has(row.id);
+      if (collapsed) {
+        hiddenDepths.push(row.depth);
+      }
+      return true;
+    });
+  }, [defaultCollapsedIds, expandedIds, rows]);
+
+  const toggleExpanded = React.useCallback((id: string) => {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   if (loading) {
     return (
@@ -1263,8 +1600,12 @@ function TraceTree({
   return (
     <ScrollArea className="h-full">
       <div className="space-y-0.5 pr-2">
-        {rows.map((row) => {
+        {visibleRows.map((row) => {
           const Icon = row.icon;
+          const collapsed =
+            row.hasChildren &&
+            defaultCollapsedIds.has(row.id) &&
+            !expandedIds.has(row.id);
           return (
             <button
               className={cn(
@@ -1276,6 +1617,22 @@ function TraceTree({
               style={{ paddingLeft: `${12 + row.depth * 24}px` }}
               type="button"
             >
+              {row.hasChildren && row.defaultCollapsed ? (
+                <span
+                  className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleExpanded(row.id);
+                  }}
+                  role="button"
+                  tabIndex={-1}
+                  title={collapsed ? "Show child observations" : "Hide child observations"}
+                >
+                  <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", !collapsed && "rotate-90")} />
+                </span>
+              ) : (
+                <span className="h-3.5 w-3.5 shrink-0" />
+              )}
               <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -1392,8 +1749,10 @@ function NodeDetail({
   const outputTokens = metrics?.completionTokens ?? raw?.completionTokens ?? raw?.outputTokens ?? usage?.outputTokens ?? usage?.output_tokens;
   const totalTokens = metrics?.totalTokens ?? raw?.totalTokens ?? usage?.totalTokens ?? usage?.total_tokens;
   const outputToolCalls = extractToolCalls(node.output);
-  const outputWithoutReasoning = node.reasoning
-    ? omitRecordKeys(node.output, ["reasoning", "reasoningText", "reasoningSummary"])
+  const hasReasoning =
+    !isEmptyPayload(node.reasoning) || Boolean(node.reasoningSegments?.length);
+  const outputWithoutReasoning = hasReasoning
+    ? omitRecordKeys(node.output, ["reasoning", "reasoningText", "reasoningSummary", "reasoningSegments"])
     : node.output;
   const selectedObservationTitle = detail && selected?.kind === "trace"
     ? detail.trace.name
@@ -1439,9 +1798,9 @@ function NodeDetail({
           <PreviewSection title="Input">
             <StructuredValue value={node.input} />
           </PreviewSection>
-          {node.reasoning ? (
+          {hasReasoning ? (
             <PreviewSection title="Reasoning">
-              <StructuredValue value={node.reasoning} />
+              <ReasoningView reasoning={node.reasoning} segments={node.reasoningSegments} />
             </PreviewSection>
           ) : null}
           <PreviewSection title="Output">
@@ -1473,7 +1832,7 @@ function NodeDetail({
         </TabsContent>
         <TabsContent className="mt-3 max-h-[calc(100vh-280px)] space-y-4 overflow-auto pr-2" value="formatted">
           <Section title="Input"><StructuredValue value={node.input} /></Section>
-          {node.reasoning ? <Section title="Reasoning"><StructuredValue value={node.reasoning} /></Section> : null}
+          {hasReasoning ? <Section title="Reasoning"><ReasoningView reasoning={node.reasoning} segments={node.reasoningSegments} /></Section> : null}
           <Section title="Output"><StructuredValue fallbackRole="assistant" unwrapToolOutput={node.kind === "tool"} value={outputWithoutReasoning} /></Section>
           {hasUsefulPayload(node.parameters) ? <Section title="Model parameters"><KeyValueTable value={node.parameters} /></Section> : null}
           {hasUsefulPayload(node.metrics) ? <Section title="Metrics"><KeyValueTable value={node.metrics} /></Section> : null}
@@ -1491,29 +1850,45 @@ export default function ObservabilityPage() {
   const { organizationId, switchWorkspace, workspaceId, workspaceName, workspaces } = useDashboardChatState();
   const [traces, setTraces] = React.useState<LlmTraceSummary[]>([]);
   const [detail, setDetail] = React.useState<LlmTraceDetailResponse | null>(null);
-  const [selectedTraceId, setSelectedTraceId] = React.useState<string | null>(null);
+  const [selectedTraceKey, setSelectedTraceKey] = React.useState<string | null>(null);
   const [selectedNode, setSelectedNode] = React.useState<SelectedNode | null>(null);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [loadingList, setLoadingList] = React.useState(false);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [status, setStatus] = React.useState<string>("all");
+  const [status, setStatus] = React.useState<StatusFilter>("all");
   const [selectedTraceNames, setSelectedTraceNames] = React.useState<string[]>([]);
   const [traceId, setTraceId] = React.useState("");
   const [threadId, setThreadId] = React.useState("");
   const [userId, setUserId] = React.useState("");
   const [filtersVisible, setFiltersVisible] = React.useState(true);
-  const [selectedWorkspaceScope, setSelectedWorkspaceScope] = React.useState<string>(ALL_WORKSPACES);
+  const [selectedWorkspaceScope, setSelectedWorkspaceScope] = React.useState<string | null>(
+    workspaceId ?? (organizationId ? ALL_WORKSPACES : null),
+  );
+  const listRequestIdRef = React.useRef(0);
+  const detailRequestIdRef = React.useRef(0);
   const allWorkspacesSelected = selectedWorkspaceScope === ALL_WORKSPACES;
+  const selectedWorkspaceId = allWorkspacesSelected ? null : selectedWorkspaceScope;
+
+  React.useEffect(() => {
+    if (!selectedWorkspaceScope) {
+      setSelectedWorkspaceScope(workspaceId ?? (organizationId ? ALL_WORKSPACES : null));
+    }
+  }, [organizationId, selectedWorkspaceScope, workspaceId]);
 
   const loadTraces = React.useCallback(async (cursor?: string | null) => {
+    if (!selectedWorkspaceScope) {
+      return;
+    }
     if (allWorkspacesSelected && !organizationId) {
       return;
     }
-    if (!allWorkspacesSelected && !workspaceId) {
+    if (!allWorkspacesSelected && !selectedWorkspaceId) {
       return;
     }
+    const requestId = listRequestIdRef.current + 1;
+    listRequestIdRef.current = requestId;
     setLoadingList(true);
     setError(null);
     try {
@@ -1521,20 +1896,29 @@ export default function ObservabilityPage() {
         limit: LIST_LIMIT,
         cursor: cursor ?? undefined,
         status: status === "all" ? undefined : status,
+        traceId: traceId.trim() || undefined,
         threadId: threadId.trim() || undefined,
         userId: userId.trim() || undefined,
       };
       const page = allWorkspacesSelected
         ? await llmObservabilityClient.listTeamTraces(organizationId!, query)
-        : await llmObservabilityClient.listWorkspaceTraces(workspaceId!, query);
+        : await llmObservabilityClient.listWorkspaceTraces(selectedWorkspaceId!, query);
+      if (requestId !== listRequestIdRef.current) {
+        return;
+      }
       setTraces((current) => (cursor ? [...current, ...page.items] : page.items));
       setNextCursor(page.nextCursor);
     } catch (err) {
+      if (requestId !== listRequestIdRef.current) {
+        return;
+      }
       setError(err instanceof Error ? err.message : "Failed to load traces");
     } finally {
-      setLoadingList(false);
+      if (requestId === listRequestIdRef.current) {
+        setLoadingList(false);
+      }
     }
-  }, [allWorkspacesSelected, organizationId, status, threadId, userId, workspaceId]);
+  }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope, status, threadId, traceId, userId]);
 
   const traceNameOptions = React.useMemo(
     () => Array.from(new Set(traces.map((trace) => trace.name))).sort((a, b) => a.localeCompare(b)),
@@ -1542,44 +1926,65 @@ export default function ObservabilityPage() {
   );
 
   const visibleTraces = React.useMemo(
-    () => traces.filter((trace) => traceMatchesNameFilter(trace, selectedTraceNames) && traceMatchesFilters(trace, { traceId, traceName: "" })),
-    [selectedTraceNames, traceId, traces],
+    () => traces.filter((trace) => traceMatchesNameFilter(trace, selectedTraceNames)),
+    [selectedTraceNames, traces],
   );
+  const hasTraceNameFilter = selectedTraceNames.length > 0;
 
   React.useEffect(() => {
+    listRequestIdRef.current += 1;
+    detailRequestIdRef.current += 1;
     setTraces([]);
     setDetail(null);
-    setSelectedTraceId(null);
+    setSelectedTraceKey(null);
     setSelectedNode(null);
     setDrawerOpen(false);
     setNextCursor(null);
     void loadTraces(null);
   }, [loadTraces]);
 
-  const openTrace = React.useCallback(async (traceId: string) => {
+  const openTrace = React.useCallback(async (traceId: string, traceWorkspaceId?: string | null) => {
+    if (!selectedWorkspaceScope) {
+      return;
+    }
     if (allWorkspacesSelected && !organizationId) {
       return;
     }
-    if (!allWorkspacesSelected && !workspaceId) {
+    if (!allWorkspacesSelected && !selectedWorkspaceId) {
       return;
     }
-    setSelectedTraceId(traceId);
+    const detailWorkspaceId = allWorkspacesSelected ? traceWorkspaceId : selectedWorkspaceId;
+    if (!detailWorkspaceId) {
+      setError("Trace workspace is required to load team trace detail");
+      return;
+    }
+    setSelectedTraceKey(traceSelectionKey(traceId, detailWorkspaceId));
     setDrawerOpen(true);
     setLoadingDetail(true);
     setError(null);
+    const requestId = detailRequestIdRef.current + 1;
+    detailRequestIdRef.current = requestId;
     try {
       const nextDetail = allWorkspacesSelected
-        ? await llmObservabilityClient.getTeamTrace(organizationId!, traceId)
-        : await llmObservabilityClient.getWorkspaceTrace(workspaceId!, traceId);
+        ? await llmObservabilityClient.getTeamTrace(organizationId!, traceId, { workspaceId: detailWorkspaceId })
+        : await llmObservabilityClient.getWorkspaceTrace(detailWorkspaceId, traceId);
+      if (requestId !== detailRequestIdRef.current) {
+        return;
+      }
       setDetail(nextDetail);
       setSelectedNode({ kind: "trace", id: nextDetail.trace.traceId });
     } catch (err) {
+      if (requestId !== detailRequestIdRef.current) {
+        return;
+      }
       setError(err instanceof Error ? err.message : "Failed to load trace detail");
       setDetail(null);
     } finally {
-      setLoadingDetail(false);
+      if (requestId === detailRequestIdRef.current) {
+        setLoadingDetail(false);
+      }
     }
-  }, [allWorkspacesSelected, organizationId, workspaceId]);
+  }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope]);
 
   const handleWorkspaceChange = React.useCallback((nextWorkspaceId: string) => {
     setSelectedWorkspaceScope(nextWorkspaceId);
@@ -1599,7 +2004,7 @@ export default function ObservabilityPage() {
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-          <FilterPanel
+        <FilterPanel
           visible={filtersVisible}
           onApply={() => void loadTraces(null)}
           onClear={clearFilters}
@@ -1609,7 +2014,7 @@ export default function ObservabilityPage() {
           onThreadIdChange={setThreadId}
           onUserIdChange={setUserId}
           onWorkspaceChange={handleWorkspaceChange}
-          selectedWorkspaceScope={selectedWorkspaceScope}
+          selectedWorkspaceScope={selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES}
           status={status}
           selectedTraceNames={selectedTraceNames}
           traceId={traceId}
@@ -1629,9 +2034,12 @@ export default function ObservabilityPage() {
                   <SlidersHorizontal className="h-4 w-4" />
                   {filtersVisible ? "Hide filters" : "Show filters"}
                 </Button>
-                <Badge className="h-6 px-2 text-[11px]" variant="secondary">Past 1 day</Badge>
-                <Badge className="h-6 gap-1 px-2 text-[11px]" variant="secondary"><Columns3 className="h-3 w-3" /> 7/39</Badge>
-                <Badge className="h-6 px-2 text-[11px]" variant="outline">{visibleTraces.length} traces</Badge>
+                <Badge className="h-6 px-2 text-[11px]" variant="secondary">All time</Badge>
+                <Badge className="h-6 px-2 text-[11px]" variant="outline">{traces.length} loaded</Badge>
+                {hasTraceNameFilter ? (
+                  <Badge className="h-6 px-2 text-[11px]" variant="outline">{visibleTraces.length} shown</Badge>
+                ) : null}
+                <Badge className="h-6 px-2 text-[11px]" variant="secondary">Page size {LIST_LIMIT}</Badge>
                 {allWorkspacesSelected ? <Badge className="h-6 px-2 text-[11px]" variant="outline">All workspaces</Badge> : null}
               </div>
               <Button className="h-8 px-2 text-xs" onClick={() => void loadTraces(null)} size="sm" type="button" variant="outline">
@@ -1664,10 +2072,10 @@ export default function ObservabilityPage() {
                   <tr
                     className={cn(
                       "cursor-pointer border-b border-border transition-colors hover:bg-accent/40",
-                      selectedTraceId === trace.traceId && "bg-accent/60",
+                      selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId) && "bg-accent/60",
                     )}
                     key={trace.id}
-                    onClick={() => void openTrace(trace.traceId)}
+                    onClick={() => void openTrace(trace.traceId, trace.workspaceId)}
                   >
                     <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatTime(trace.startedAt)}</td>
                     <td className="px-3 py-1.5">
@@ -1723,7 +2131,7 @@ export default function ObservabilityPage() {
               {detail ? `${detail.trace.name}: ${detail.trace.traceId}` : "Trace"}
             </SheetTitle>
             <SheetDescription className="truncate">
-              {detail ? `Session ID: ${detail.trace.sessionId ?? detail.trace.threadId ?? "--"}` : selectedTraceId ?? "Trace detail"}
+              {detail ? `Session ID: ${detail.trace.sessionId ?? detail.trace.threadId ?? "--"}` : selectedTraceKey ?? "Trace detail"}
             </SheetDescription>
           </SheetHeader>
           <TraceSummaryBar detail={detail} />

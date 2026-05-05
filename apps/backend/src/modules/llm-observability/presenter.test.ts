@@ -82,12 +82,21 @@ test("presentGenerationSummary omits payload fields", () => {
   assert.equal(summary.usageDetails.totalTokens, 3);
 });
 
-test("presentGeneration prefers model alias over provider model", () => {
+test("presentGeneration exposes explicit model routing fields", () => {
   const presented = presentGeneration(
     {
       id: "generation-1",
       modelAlias: "chat-default",
       providerModel: "minimax/minimax-m2.7",
+      routeDecisionJson: { provider: "openrouter", alias: "chat-default" },
+      keySource: "rawApiKey",
+      metadataJson: {
+        modelAlias: "chat-default",
+        providerModel: "minimax/minimax-m2.7",
+        routeDecision: { provider: "openrouter" },
+        providerHint: "openrouter",
+        observationName: "chat.answer",
+      },
       startedAt: new Date(0),
       endedAt: null,
     },
@@ -95,7 +104,17 @@ test("presentGeneration prefers model alias over provider model", () => {
   );
 
   assert.equal(presented.model, "chat-default");
+  assert.equal(presented.modelAlias, "chat-default");
   assert.equal(presented.providerModel, null);
+  assert.equal(presented.keySource, "rawApiKey");
+  assert.deepEqual(presented.routeDecision, { provider: "openrouter", alias: "chat-default" });
+  assert.deepEqual(presented.metadata, {
+    modelAlias: "chat-default",
+    providerModel: "minimax/minimax-m2.7",
+    routeDecision: { provider: "openrouter" },
+    providerHint: "openrouter",
+    observationName: "chat.answer",
+  });
 });
 
 test("presentGeneration uses observation operation for semantic display", () => {
@@ -155,7 +174,7 @@ test("presentGeneration hides payloads after full payload retention", () => {
   const presented = presentGeneration(
     {
       inputJson: { mode: "full", value: { prompt: "expired" } },
-      outputJson: { mode: "full", value: { answer: "expired" } },
+      outputJson: { mode: "preview", preview: "still visible" },
       startedAt: oldDate,
       endedAt: null,
     },
@@ -166,10 +185,7 @@ test("presentGeneration hides payloads after full payload retention", () => {
     redacted: true,
     reason: "retention_expired",
   });
-  assert.deepEqual(presented.output, {
-    redacted: true,
-    reason: "retention_expired",
-  });
+  assert.deepEqual(presented.output, { mode: "preview", preview: "still visible" });
 });
 
 test("presentSpan redacts tool payload fields without payload access", () => {

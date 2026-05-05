@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
+import type {
+  EndSpanInput,
+  EndTraceInput,
+  StartSpanInput,
+  StartTraceInput,
+} from "../../../../shared/llm-observability";
 import { closeQueue } from "../../../../shared/queue";
-import { buildAgentRunSpanMetadata, buildAgentRunSpanOutput, ContentThreadStreamService } from "./service";
-import type { DeepAgentTurnEvent, DeepAgentTurnOutcome } from "../../agent/turn/runner";
+import {
+  buildAgentRunSpanMetadata,
+  buildAgentRunSpanOutput,
+  ContentThreadStreamService,
+  threadStreamObservability,
+} from "./service";
+import type {
+  DeepAgentTurnEvent,
+  DeepAgentTurnOutcome,
+} from "../../agent/turn/runner";
 import type { PreparedThreadTurn } from "../turn/types";
 
 after(async () => {
@@ -11,7 +25,10 @@ after(async () => {
 
 function parseSseData(value: string) {
   assert.equal(value.startsWith("data: "), true);
-  return JSON.parse(value.slice("data: ".length).trim()) as Record<string, unknown>;
+  return JSON.parse(value.slice("data: ".length).trim()) as Record<
+    string,
+    unknown
+  >;
 }
 
 const outcome: DeepAgentTurnOutcome = {
@@ -28,6 +45,19 @@ const outcome: DeepAgentTurnOutcome = {
     beforeAssistant: null,
     final: null,
   },
+};
+
+const citation = {
+  citation: "c1",
+  sourceId: "source-1",
+  sourceTitle: "invoice.pdf",
+  documentId: "document-1",
+  chunkId: "chunk-1",
+  chunkNo: 0,
+  score: 0.95,
+  excerpt: "Invoice total is 50.",
+  quoteText: "Invoice total is 50.",
+  origin: "search_sources" as const,
 };
 
 test("buildAgentRunSpanOutput includes reasoning and usage", () => {
@@ -71,14 +101,89 @@ test("buildAgentRunSpanOutput includes reasoning and usage", () => {
         cacheReadTokens: 3,
       },
       reasoning: "Used the invoice total from the retrieved source.",
+      reasoningSegments: [
+        {
+          id: "model-reasoning-1",
+          index: 0,
+          sequence: 0,
+          phase: "initial",
+          text: {
+            preview: "Used the invoice total from the retrieved source.",
+            length: 49,
+            truncated: false,
+          },
+        },
+      ],
       toolCallCount: 0,
       retrievalCallCount: 0,
       citationCount: 0,
       availableCitationCount: 0,
+      citations: [],
+      availableCitations: [],
       thinkingStepCount: 1,
       reasoningSegmentCount: 1,
     },
   );
+});
+
+test("buildAgentRunSpanOutput includes citation evidence summaries", () => {
+  const output = buildAgentRunSpanOutput({
+    ...outcome,
+    citations: [citation],
+    availableCitations: [
+      citation,
+      {
+        ...citation,
+        citation: "c2",
+        chunkId: "chunk-2",
+        chunkNo: 1,
+        origin: "read_file",
+        path: "/kb/invoice.md",
+        excerpt: "x".repeat(500),
+        quoteText: "y".repeat(500),
+      },
+    ],
+  });
+
+  assert.equal(output.citationCount, 1);
+  assert.equal(output.availableCitationCount, 2);
+  assert.deepEqual(output.citations, [
+    {
+      citation: "c1",
+      rank: 1,
+      sourceId: "source-1",
+      sourceTitle: "invoice.pdf",
+      documentId: "document-1",
+      chunkId: "chunk-1",
+      chunkNo: 0,
+      origin: "search_sources",
+      score: 0.95,
+      excerpt: {
+        preview: "Invoice total is 50.",
+        length: 20,
+        truncated: false,
+      },
+      quoteText: {
+        preview: "Invoice total is 50.",
+        length: 20,
+        truncated: false,
+      },
+    },
+  ]);
+
+  const available = output.availableCitations as Array<Record<string, unknown>>;
+  assert.equal(available.length, 2);
+  assert.equal(available[1]?.path, "/kb/invoice.md");
+  assert.deepEqual(available[1]?.excerpt, {
+    preview: "x".repeat(320),
+    length: 500,
+    truncated: true,
+  });
+  assert.deepEqual(available[1]?.quoteText, {
+    preview: "y".repeat(400),
+    length: 500,
+    truncated: true,
+  });
 });
 
 test("buildAgentRunSpanMetadata includes thinking settings", () => {
@@ -160,7 +265,9 @@ const prepared: PreparedThreadTurn = {
   assistantMessageParentId: null,
   profileAlias: "test-profile",
   modelAlias: "test-model",
-  chatProfile: { gatewayConfigId: "gateway-1" } as PreparedThreadTurn["chatProfile"],
+  chatProfile: {
+    gatewayConfigId: "gateway-1",
+  } as PreparedThreadTurn["chatProfile"],
   llm: undefined,
   llmIdempotencyKey: "thread-stream:user-message-1:assistant",
   agentMode: "continue",
@@ -179,12 +286,14 @@ function createTurnService(input?: {
 }) {
   return {
     prepareThreadTurn: async () => input?.prepared ?? prepared,
-    finalizeThreadTurn: input?.finalize ?? (async () => ({
-      assistantMessage: {
-        id: "assistant-message-1",
-        parentMessageId: null,
-      },
-    })),
+    finalizeThreadTurn:
+      input?.finalize ??
+      (async () => ({
+        assistantMessage: {
+          id: "assistant-message-1",
+          parentMessageId: null,
+        },
+      })),
   };
 }
 
@@ -201,7 +310,11 @@ function createTitleJob(input: { resolve?: boolean; title?: string }) {
         title: input.title ?? "Invoice Review",
       };
     },
-  } as unknown as Awaited<ReturnType<NonNullable<ConstructorParameters<typeof ContentThreadStreamService>[2]>>>;
+  } as unknown as Awaited<
+    ReturnType<
+      NonNullable<ConstructorParameters<typeof ContentThreadStreamService>[2]>
+    >
+  >;
 }
 
 function createPrepared(input: Partial<PreparedThreadTurn>) {
@@ -230,7 +343,9 @@ test("streamThreadEvents waits for delayed title update before finish", async ()
   };
 
   const observedService = new ContentThreadStreamService(
-    observedTurnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    observedTurnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (input): AsyncGenerator<DeepAgentTurnEvent> {
       agentTraceContext = input.traceContext;
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -250,7 +365,9 @@ test("streamThreadEvents waits for delayed title update before finish", async ()
     events.push(parseSseData(event));
   }
 
-  const titleIndex = events.findIndex((event) => event.type === "thread-title-update");
+  const titleIndex = events.findIndex(
+    (event) => event.type === "thread-title-update",
+  );
   const finishIndex = events.findIndex((event) => event.type === "finish");
 
   assert.notEqual(titleIndex, -1);
@@ -299,7 +416,9 @@ test("streamThreadEvents uses run trace id without changing session or message i
   });
 
   const service = new ContentThreadStreamService(
-    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (input): AsyncGenerator<DeepAgentTurnEvent> {
       agentTraceContext = input.traceContext;
       yield { type: "done", outcome };
@@ -338,7 +457,9 @@ test("streamThreadEvents emits pending when title is still generating", async ()
   const turnService = createTurnService();
 
   const service = new ContentThreadStreamService(
-    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       yield { type: "text-delta", delta: "Answer" };
       yield { type: "done", outcome };
@@ -357,13 +478,18 @@ test("streamThreadEvents emits pending when title is still generating", async ()
     events.push(parseSseData(event));
   }
 
-  const pendingIndex = events.findIndex((event) => event.type === "thread-title-pending");
+  const pendingIndex = events.findIndex(
+    (event) => event.type === "thread-title-pending",
+  );
   const finishIndex = events.findIndex((event) => event.type === "finish");
 
   assert.notEqual(pendingIndex, -1);
   assert.notEqual(finishIndex, -1);
   assert.equal(events[pendingIndex]?.threadId, "thread-1");
-  assert.equal(events[pendingIndex]?.jobId, "thread-title:thread-1:user-message-1");
+  assert.equal(
+    events[pendingIndex]?.jobId,
+    "thread-title:thread-1:user-message-1",
+  );
   assert.equal(pendingIndex < finishIndex, true);
   assert.equal(Date.now() - startedAt < 3400, true);
 });
@@ -384,7 +510,9 @@ test("streamThreadEvents generates title when retrying after first failed assist
   });
 
   const service = new ContentThreadStreamService(
-    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       yield { type: "text-delta", delta: "Answer" };
       yield { type: "done", outcome };
@@ -402,13 +530,20 @@ test("streamThreadEvents generates title when retrying after first failed assist
     events.push(parseSseData(event));
   }
 
-  const titleIndex = events.findIndex((event) => event.type === "thread-title-update");
-  const assistantMessageIndex = events.findIndex((event) => event.type === "assistant-message");
+  const titleIndex = events.findIndex(
+    (event) => event.type === "thread-title-update",
+  );
+  const assistantMessageIndex = events.findIndex(
+    (event) => event.type === "assistant-message",
+  );
 
   assert.notEqual(titleIndex, -1);
   assert.notEqual(assistantMessageIndex, -1);
   assert.equal(events[titleIndex]?.title, "Invoice Review");
-  assert.equal(events[assistantMessageIndex]?.parentMessageId, "assistant-error-1");
+  assert.equal(
+    events[assistantMessageIndex]?.parentMessageId,
+    "assistant-error-1",
+  );
 });
 
 test("streamThreadEvents forwards citation snapshots before assistant message", async () => {
@@ -427,7 +562,9 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
   const turnService = createTurnService({ title: null });
 
   const service = new ContentThreadStreamService(
-    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       yield { type: "citations", citations: [citation] };
       yield { type: "text-delta", delta: "Total is ¥50.00 [citation:c1]" };
@@ -448,7 +585,9 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
 
   const citationIndex = events.findIndex((event) => event.type === "citations");
   const textIndex = events.findIndex((event) => event.type === "text-delta");
-  const assistantMessageIndex = events.findIndex((event) => event.type === "assistant-message");
+  const assistantMessageIndex = events.findIndex(
+    (event) => event.type === "assistant-message",
+  );
 
   assert.notEqual(citationIndex, -1);
   assert.notEqual(textIndex, -1);
@@ -456,9 +595,11 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
   assert.equal(citationIndex < assistantMessageIndex, true);
   assert.equal(citationIndex < textIndex, true);
   assert.deepEqual(
-    (events[citationIndex]?.citations as Array<Record<string, unknown>> | undefined)?.map(
-      (item) => item.sourceTitle,
-    ),
+    (
+      events[citationIndex]?.citations as
+        | Array<Record<string, unknown>>
+        | undefined
+    )?.map((item) => item.sourceTitle),
     ["invoice.pdf"],
   );
 });
@@ -479,7 +620,9 @@ test("streamThreadEvents sends available citations when final text uses none", a
   const turnService = createTurnService({ title: null });
 
   const service = new ContentThreadStreamService(
-    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       yield {
         type: "citations",
@@ -510,9 +653,11 @@ test("streamThreadEvents sends available citations when final text uses none", a
   assert.ok(citationEvent);
   assert.deepEqual(citationEvent.citations, []);
   assert.deepEqual(
-    (citationEvent.availableCitations as Array<Record<string, unknown>> | undefined)?.map(
-      (item) => item.sourceTitle,
-    ),
+    (
+      citationEvent.availableCitations as
+        | Array<Record<string, unknown>>
+        | undefined
+    )?.map((item) => item.sourceTitle),
     ["invoice.pdf"],
   );
 });
@@ -535,7 +680,9 @@ test("streamThreadEvents persists send errors as assistant error messages", asyn
   const turnService = createTurnService();
 
   const service = new ContentThreadStreamService(
-    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       throw new Error("provider exploded");
     },
@@ -570,7 +717,9 @@ test("streamThreadEvents treats refresh/edit errors as transient", async () => {
   const turnService = createTurnService({ prepared: transientPrepared });
 
   const service = new ContentThreadStreamService(
-    turnService as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       throw new Error("provider exploded");
     },
@@ -595,4 +744,77 @@ test("streamThreadEvents treats refresh/edit errors as transient", async () => {
   assert.ok(errorEvent);
   assert.equal(errorEvent.messageId, undefined);
   assert.equal(createErrorMessageCalled, true);
+});
+
+test("streamThreadEvents closes trace as cancelled when stream is abandoned", async (t) => {
+  const startedSpans: StartSpanInput[] = [];
+  const endedSpans: EndSpanInput[] = [];
+  const endedTraces: EndTraceInput[] = [];
+  t.mock.method(
+    threadStreamObservability,
+    "startTrace",
+    async (input: StartTraceInput) => ({
+      id: "trace-row",
+      traceId: input.traceId ?? "trace",
+    }),
+  );
+  t.mock.method(
+    threadStreamObservability,
+    "startSpan",
+    async (input: StartSpanInput) => {
+      startedSpans.push(input);
+      return { id: "span-row", spanId: input.spanId ?? "span" };
+    },
+  );
+  t.mock.method(
+    threadStreamObservability,
+    "endSpan",
+    async (input: EndSpanInput) => {
+      endedSpans.push(input);
+    },
+  );
+  t.mock.method(
+    threadStreamObservability,
+    "endTrace",
+    async (input: EndTraceInput) => {
+      endedTraces.push(input);
+    },
+  );
+
+  const service = new ContentThreadStreamService(
+    createTurnService() as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "partial" };
+    },
+    async () => null,
+  );
+
+  const iterator = service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  });
+
+  assert.equal(parseSseData((await iterator.next()).value).type, "start");
+  assert.equal(parseSseData((await iterator.next()).value).type, "text-start");
+  assert.equal(parseSseData((await iterator.next()).value).type, "text-delta");
+  await iterator.return(undefined);
+
+  assert.equal(
+    startedSpans.some((span) => span.spanId === "agent_run"),
+    true,
+  );
+  const cancelledAgentSpan = endedSpans.find(
+    (span) => span.spanId === "agent_run" && span.status === "cancelled",
+  );
+  assert.ok(cancelledAgentSpan);
+  const cancelledTrace = endedTraces.find(
+    (trace) => trace.status === "cancelled",
+  );
+  assert.ok(cancelledTrace);
+  assert.equal(cancelledTrace.traceId, "user-message-1");
+  assert.equal(cancelledTrace.errorCode, "CLIENT_CANCELLED");
 });

@@ -66,6 +66,21 @@ function metadataString(record: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function parsePolicyPayload(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return value;
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return value;
+  }
+}
+
 function generationName(generation: Record<string, unknown>) {
   return metadataString(generation, ["observationName", "generationName", "name"])
     ?? generation.operation;
@@ -102,24 +117,30 @@ function payload(
   if (!access.payloadAccess) {
     return hiddenPermissionPayload;
   }
-  if (fullPayloadRetentionExpired(startedAt)) {
+  const parsed = parsePolicyPayload(value);
+  const payloadValue = parsed ?? value;
+  if (fullPayloadRetentionExpired(payloadValue, startedAt)) {
     return hiddenRetentionPayload;
   }
-  if (payloadPolicyBlocksFullPayload(value)) {
+  if (payloadPolicyBlocksFullPayload(payloadValue)) {
     return hiddenPolicyPayload;
   }
-  return value;
+  return payloadValue;
 }
 
 function payloadPolicyBlocksFullPayload(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  const parsed = parsePolicyPayload(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return false;
   }
-  const mode = (value as Record<string, unknown>).mode;
+  const mode = (parsed as Record<string, unknown>).mode;
   return mode === "metadata_only";
 }
 
-function fullPayloadRetentionExpired(startedAt: Date | string | number | null | undefined) {
+function fullPayloadRetentionExpired(
+  value: unknown,
+  startedAt: Date | string | number | null | undefined,
+) {
   if (!startedAt) {
     return false;
   }
@@ -128,7 +149,17 @@ function fullPayloadRetentionExpired(startedAt: Date | string | number | null | 
     return false;
   }
   const fullPayloadRetentionDays = 30;
-  return Date.now() - startedAtDate.getTime() > fullPayloadRetentionDays * 24 * 60 * 60 * 1000;
+  if (Date.now() - startedAtDate.getTime() <= fullPayloadRetentionDays * 24 * 60 * 60 * 1000) {
+    return false;
+  }
+  const parsed = parsePolicyPayload(value);
+  if (typeof parsed === "string") {
+    return true;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return false;
+  }
+  return (parsed as Record<string, unknown>).mode === "full";
 }
 
 export function presentTraceSummary(trace: Record<string, unknown>) {

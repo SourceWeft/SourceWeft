@@ -196,10 +196,16 @@ export interface GatewayMessage {
 }
 
 export interface GatewayRequestMetadata {
+  teamId?: string;
   team_id?: string;
+  workspaceId?: string;
   workspace_id?: string;
+  userId?: string;
   user_id?: string;
+  threadId?: string;
   thread_id?: string;
+  messageId?: string;
+  message_id?: string;
   feature?: string;
   [key: string]: unknown;
 }
@@ -268,7 +274,6 @@ export interface RouteDecision {
   strategy: RoutingStrategy;
   provider: string;
   providerKind: ProviderKind;
-  providerModel: string;
 }
 
 export type GatewayOperation = "chat.complete" | "chat.stream" | "embeddings.embed" | "embeddings.embedBatch" | "rerank.rank";

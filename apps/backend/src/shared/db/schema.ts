@@ -1791,13 +1791,25 @@ export const llmTraces = pgTable(
       "llm_traces_latency_check",
       sql`${table.latencyMs} is null or ${table.latencyMs} >= 0`,
     ),
+    uniqueIndex("llm_traces_scope_trace_uq").on(
+      table.teamId,
+      table.workspaceId,
+      table.traceId,
+    ),
     index("llm_traces_trace_idx").on(table.traceId),
     index("llm_traces_team_workspace_started_idx").on(
       table.teamId,
       table.workspaceId,
       table.startedAt,
     ),
+    index("llm_traces_team_workspace_started_id_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.startedAt,
+      table.id,
+    ),
     index("llm_traces_team_started_idx").on(table.teamId, table.startedAt),
+    index("llm_traces_team_started_id_idx").on(table.teamId, table.startedAt, table.id),
     index("llm_traces_thread_started_idx").on(
       table.threadId,
       table.startedAt,
@@ -1869,9 +1881,27 @@ export const llmSpans = pgTable(
       "llm_spans_latency_check",
       sql`${table.latencyMs} is null or ${table.latencyMs} >= 0`,
     ),
-    uniqueIndex("llm_spans_trace_span_uq").on(table.traceId, table.spanId),
+    uniqueIndex("llm_spans_scope_trace_span_uq").on(
+      table.teamId,
+      table.workspaceId,
+      table.traceId,
+      table.spanId,
+    ),
     index("llm_spans_trace_idx").on(table.traceId, table.startedAt),
+    index("llm_spans_scope_trace_started_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.traceId,
+      table.startedAt,
+    ),
     index("llm_spans_parent_idx").on(
+      table.traceId,
+      table.parentSpanId,
+      table.startedAt,
+    ),
+    index("llm_spans_scope_parent_started_idx").on(
+      table.teamId,
+      table.workspaceId,
       table.traceId,
       table.parentSpanId,
       table.startedAt,
@@ -1996,12 +2026,27 @@ export const llmGenerations = pgTable(
       "llm_generations_provider_status_check",
       sql`${table.providerStatusCode} is null or ${table.providerStatusCode} between 100 and 599`,
     ),
-    uniqueIndex("llm_generations_trace_span_uq").on(
+    uniqueIndex("llm_generations_scope_trace_span_uq").on(
+      table.teamId,
+      table.workspaceId,
       table.traceId,
       table.spanId,
     ),
     index("llm_generations_trace_idx").on(table.traceId, table.startedAt),
+    index("llm_generations_scope_trace_started_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.traceId,
+      table.startedAt,
+    ),
     index("llm_generations_parent_idx").on(
+      table.traceId,
+      table.parentSpanId,
+      table.startedAt,
+    ),
+    index("llm_generations_scope_parent_started_idx").on(
+      table.teamId,
+      table.workspaceId,
       table.traceId,
       table.parentSpanId,
       table.startedAt,
@@ -2010,6 +2055,12 @@ export const llmGenerations = pgTable(
       table.teamId,
       table.workspaceId,
       table.startedAt,
+    ),
+    index("llm_generations_team_workspace_started_id_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.startedAt,
+      table.id,
     ),
     index("llm_generations_operation_started_idx").on(
       table.operation,

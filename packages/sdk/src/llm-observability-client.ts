@@ -22,15 +22,17 @@ export type LlmObservabilityListInput = {
   threadId?: string;
   messageId?: string;
   feature?: string;
-  status?: string;
+  status?: LlmObservationStatus;
+  traceId?: string;
   cursor?: string;
   limit?: number;
 };
 
-export type LlmGenerationListInput = LlmObservabilityListInput & {
+export type LlmObservationStatus = "running" | "ok" | "error" | "cancelled";
+
+export type LlmGenerationListInput = Omit<LlmObservabilityListInput, "feature"> & {
   operation?: string;
   provider?: string;
-  modelAlias?: string;
 };
 
 export type LlmTraceSummary = {
@@ -74,6 +76,11 @@ export type LlmSpanDetail = {
   traceId: string;
   spanId: string;
   parentSpanId: string | null;
+  teamId: string;
+  workspaceId: string;
+  userId: string | null;
+  threadId: string | null;
+  messageId: string | null;
   name: string;
   kind: string;
   operation: string;
@@ -98,13 +105,19 @@ export type LlmGenerationSummary = {
   traceId: string;
   spanId: string;
   parentSpanId: string | null;
+  teamId: string;
+  workspaceId: string;
+  userId: string | null;
+  threadId: string | null;
+  messageId: string | null;
   operation: string;
+  gatewayOperation: string;
   name: string;
   type: string;
   model: string | null;
-  modelAlias: string | null;
   provider: string | null;
-  providerModel: string | null;
+  executionMode: string | null;
+  routeStrategy: string | null;
   status: string;
   level: string;
   statusMessage: string | null;
@@ -128,7 +141,6 @@ export type LlmGenerationSummary = {
 };
 
 export type LlmGenerationDetail = LlmGenerationSummary & {
-  routeDecision: unknown;
   modelParameters: Record<string, unknown>;
   input: unknown;
   output: unknown;
@@ -177,9 +189,9 @@ export class LlmObservabilityClient {
     );
   }
 
-  getTeamTrace(teamId: string, traceId: string) {
+  getTeamTrace(teamId: string, traceId: string, input: { workspaceId: string }) {
     return this.http.get<LlmTraceDetailResponse>(
-      `/v1/teams/${encode(teamId)}/llm/traces/${encode(traceId)}`,
+      withQuery(`/v1/teams/${encode(teamId)}/llm/traces/${encode(traceId)}`, input),
     );
   }
 
@@ -189,15 +201,33 @@ export class LlmObservabilityClient {
     );
   }
 
+  listTeamGenerations(teamId: string, input: LlmGenerationListInput = {}) {
+    return this.http.get<LlmListResponse<LlmGenerationSummary>>(
+      withQuery(`/v1/teams/${encode(teamId)}/llm/generations`, input),
+    );
+  }
+
   getWorkspaceGeneration(workspaceId: string, generationId: string) {
     return this.http.get<LlmGenerationDetail>(
       `/v1/workspaces/${encode(workspaceId)}/llm/generations/${encode(generationId)}`,
     );
   }
 
-  getWorkspaceSpan(workspaceId: string, spanId: string) {
+  getTeamGeneration(teamId: string, generationId: string, input: { workspaceId: string }) {
+    return this.http.get<LlmGenerationDetail>(
+      withQuery(`/v1/teams/${encode(teamId)}/llm/generations/${encode(generationId)}`, input),
+    );
+  }
+
+  getWorkspaceSpan(workspaceId: string, spanId: string, input: { traceId: string }) {
     return this.http.get<LlmSpanDetail>(
-      `/v1/workspaces/${encode(workspaceId)}/llm/spans/${encode(spanId)}`,
+      withQuery(`/v1/workspaces/${encode(workspaceId)}/llm/spans/${encode(spanId)}`, input),
+    );
+  }
+
+  getTeamSpan(teamId: string, spanId: string, input: { workspaceId: string; traceId: string }) {
+    return this.http.get<LlmSpanDetail>(
+      withQuery(`/v1/teams/${encode(teamId)}/llm/spans/${encode(spanId)}`, input),
     );
   }
 

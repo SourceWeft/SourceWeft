@@ -44,6 +44,8 @@ class ContentRetrievalService {
       if (input.traceContext) {
         await endSpan({
           traceId: input.traceContext.traceId,
+          teamId: input.traceContext.teamId,
+          workspaceId: input.traceContext.workspaceId,
           spanId,
           status: "ok",
           latencyMs: Date.now() - startedAt,
@@ -67,6 +69,8 @@ class ContentRetrievalService {
       if (input.traceContext) {
         await endSpan({
           traceId: input.traceContext.traceId,
+          teamId: input.traceContext.teamId,
+          workspaceId: input.traceContext.workspaceId,
           spanId,
           status: "error",
           latencyMs: Date.now() - startedAt,

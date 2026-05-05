@@ -3,7 +3,7 @@ import { redactValue } from "./redaction";
 import { toJsonSafe } from "./serializers";
 import type { AuditPayloadMode } from "./types";
 
-export const DEFAULT_AUDIT_PAYLOAD_MODE: AuditPayloadMode = "full";
+export const DEFAULT_AUDIT_PAYLOAD_MODE: AuditPayloadMode = "preview";
 export const DEFAULT_MAX_JSON_BYTES = 64 * 1024;
 export const DEFAULT_PREVIEW_CHARS = 4000;
 export const DEFAULT_FULL_PAYLOAD_RETENTION_DAYS = 30;
@@ -89,6 +89,17 @@ export function applyPayloadPolicy(input: {
       length,
       sha256: digest,
       truncated: serialized.length > preview.length,
+    };
+  }
+
+  const trimmed = trimJsonString(serialized, maxJsonBytes);
+  if (trimmed.truncated) {
+    return {
+      mode,
+      preview: trimmed.json,
+      length,
+      sha256: digest,
+      truncated: true,
     };
   }
 

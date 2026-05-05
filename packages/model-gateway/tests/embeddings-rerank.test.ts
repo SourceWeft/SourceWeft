@@ -129,6 +129,63 @@ test("embeddings.embed emits generation observation events", async () => {
   assert.deepEqual((events[1]?.event.output as Record<string, unknown>).dimensions, 3);
 });
 
+test("embeddings.embed ignores generation observation failures", async () => {
+  const warnings: Array<Record<string, unknown> | undefined> = [];
+  const gateway = createModelGateway({
+    allowedModelAliases: ["embed-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "embed-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "text-embedding-3-small", priority: 1 }],
+      },
+    },
+    logger: {
+      warn(_message, data) {
+        warnings.push(data);
+      },
+    },
+    observeSink: {
+      onGenerationStart() {
+        throw new Error("start observer down");
+      },
+      onGenerationEnd() {
+        throw new Error("end observer down");
+      },
+    },
+    langchainFactories: {
+      createEmbeddingsModel: () => ({
+        async embedQuery() {
+          return [0.1, 0.2, 0.3];
+        },
+        async embedDocuments() {
+          return [];
+        },
+      }),
+    },
+  });
+
+  const result = await gateway.embeddings.embed(
+    {
+      model: "embed-default",
+      text: "hello",
+      metadata: { teamId: "team-1", workspaceId: "workspace-1" },
+    },
+    { traceId: "trace-embed-observe-failure" },
+  );
+
+  assert.deepEqual(result.embedding, [0.1, 0.2, 0.3]);
+  assert.equal(warnings.length, 2);
+  assert.equal(warnings[0]?.error, "start observer down");
+  assert.equal(warnings[1]?.error, "end observer down");
+});
+
 test("rerank.rank supports siliconflow via openai-compatible provider", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
 

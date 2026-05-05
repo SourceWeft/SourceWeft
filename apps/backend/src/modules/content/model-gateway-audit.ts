@@ -1,5 +1,6 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import { createModelGatewayEvent } from "../../shared/model-gateway/llm-observability-sink";
+import { logger } from "../../shared/logger";
 
 export type LlmThinkingConfig = {
   mode?: "auto" | "off" | "effort";
@@ -33,6 +34,24 @@ function resolveByokKeySource(input: LlmExecutionConfig | undefined) {
     return "rawApiKey";
   }
   return "byok";
+}
+
+function safeErrorSummary(error: unknown) {
+  if (error instanceof Error) {
+    const maybeCode = (error as { code?: unknown }).code;
+    const rawMessage = error.message.split("\n", 1)[0] ?? "";
+    const message = rawMessage.startsWith("Failed query:")
+      ? "Database write failed"
+      : rawMessage.slice(0, 240) || error.name;
+    return {
+      name: error.name,
+      code: typeof maybeCode === "string" ? maybeCode : undefined,
+      message,
+    };
+  }
+  return {
+    message: String(error).split("\n", 1)[0]?.slice(0, 240) ?? "Unknown error",
+  };
 }
 
 export function buildGatewayAuditMetadata(input: {
@@ -93,39 +112,49 @@ export async function recordGatewayOperationEvent(input: {
     routeDecision: input.routeDecision ?? undefined,
   });
 
-  await createModelGatewayEvent({
-    traceId: input.traceId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    userId: input.userId,
-    threadId: input.threadId,
-    messageId: input.messageId,
-    feature: input.feature,
-    operation: input.operation,
-    executionMode:
-      typeof gateway.executionMode === "string" ? gateway.executionMode : null,
-    keySource: typeof gateway.keySource === "string" ? gateway.keySource : null,
-    provider: typeof gateway.provider === "string" ? gateway.provider : null,
-    modelAlias: input.modelAlias ?? null,
-    routeStrategy: gateway.routeStrategy,
-    success: input.success,
-    errorCode: input.errorCode ?? null,
-    errorMessage: input.errorMessage ?? null,
-    latencyMs: input.latencyMs ?? null,
-    usage: input.usage,
-    providerCostUsd: input.providerCostUsd ?? null,
-    attributes: {
-      providerHint: gateway.providerHint,
-      byokProvider: gateway.byokProvider,
-      profileAlias: input.profileAlias ?? null,
-      thinkingEnabled: gateway.thinkingEnabled,
-      thinkingEffort: gateway.thinkingEffort,
+  try {
+    await createModelGatewayEvent({
+      traceId: input.traceId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      threadId: input.threadId,
+      messageId: input.messageId,
+      feature: input.feature,
+      operation: input.operation,
+      executionMode:
+        typeof gateway.executionMode === "string"
+          ? gateway.executionMode
+          : null,
+      keySource:
+        typeof gateway.keySource === "string" ? gateway.keySource : null,
+      provider: typeof gateway.provider === "string" ? gateway.provider : null,
+      modelAlias: input.modelAlias ?? null,
       routeStrategy: gateway.routeStrategy,
-      modelKind: input.modelKind ?? null,
-      billable: input.modelKind === "chat",
-      ...(input.attributes ?? {}),
-    },
-  });
+      success: input.success,
+      errorCode: input.errorCode ?? null,
+      errorMessage: input.errorMessage ?? null,
+      latencyMs: input.latencyMs ?? null,
+      usage: input.usage,
+      providerCostUsd: input.providerCostUsd ?? null,
+      attributes: {
+        thinkingEnabled: gateway.thinkingEnabled,
+        thinkingEffort: gateway.thinkingEffort,
+        modelKind: input.modelKind ?? null,
+        billable: input.modelKind === "chat",
+        ...(input.attributes ?? {}),
+      },
+    });
+  } catch (error) {
+    logger.warn("Failed to record model gateway event", {
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      traceId: input.traceId,
+      operation: input.operation,
+      success: input.success,
+      error: safeErrorSummary(error),
+    });
+  }
 }
 
 export function buildGatewayRequestMetadata(input: {

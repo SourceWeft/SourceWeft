@@ -16,9 +16,13 @@ test("metadata_only stores only metadata and hash", () => {
 });
 
 test("preview stores redacted preview and stable hash", () => {
-  const value = { prompt: "hello world", token: "secret" };
+  const value = { prompt: "hello world", apiKey: "secret" };
   const left = applyPayloadPolicy({ mode: "preview", value, previewChars: 80 });
-  const right = applyPayloadPolicy({ mode: "preview", value, previewChars: 80 });
+  const right = applyPayloadPolicy({
+    mode: "preview",
+    value,
+    previewChars: 80,
+  });
 
   assert.equal(left?.mode, "preview");
   assert.equal(left?.sha256, right?.sha256);
@@ -27,17 +31,18 @@ test("preview stores redacted preview and stable hash", () => {
   assert.equal(String(left?.preview).includes("[REDACTED]"), true);
 });
 
-test("default mode stores full redacted payloads", () => {
+test("default mode stores redacted previews", () => {
   const output = applyPayloadPolicy({
     value: { text: "hello", password: "secret" },
   });
 
-  assert.equal(output?.mode, "full");
-  assert.deepEqual(output?.value, { text: "hello", password: "[REDACTED]" });
+  assert.equal(output?.mode, "preview");
+  assert.equal(String(output?.preview).includes("hello"), true);
+  assert.equal(String(output?.preview).includes("secret"), false);
   assert.equal(output?.truncated, false);
 });
 
-test("full mode redacts without truncating oversized payloads", () => {
+test("full mode truncates oversized payloads to preview", () => {
   const output = applyPayloadPolicy({
     mode: "full",
     maxJsonBytes: 32,
@@ -45,7 +50,8 @@ test("full mode redacts without truncating oversized payloads", () => {
   });
 
   assert.equal(output?.mode, "full");
-  assert.equal(output?.truncated, false);
+  assert.equal(output?.truncated, true);
   assert.equal(JSON.stringify(output).includes("secret"), false);
-  assert.equal((output?.value as { text?: string }).text?.length, 200);
+  assert.equal(typeof output?.preview, "string");
+  assert.equal("value" in (output ?? {}), false);
 });

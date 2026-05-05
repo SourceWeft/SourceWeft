@@ -350,7 +350,6 @@ export async function resolveRequestTarget(
         strategy: "priority",
         provider: provider.name,
         providerKind: provider.kind,
-        providerModel: execution.model,
       },
       requestMetadata: config.requestMetadata,
     };
@@ -380,7 +379,6 @@ export async function resolveRequestTarget(
         strategy: "priority",
         provider: provider.name,
         providerKind: provider.kind,
-        providerModel: execution.model,
       },
       requestMetadata: config.requestMetadata,
     };
@@ -431,7 +429,6 @@ export async function resolveRequestTarget(
       strategy: route.strategy,
       provider: provider.name,
       providerKind: provider.kind,
-      providerModel: selected.model,
     },
     requestMetadata: config.requestMetadata,
   };

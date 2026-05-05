@@ -19,6 +19,7 @@ import {
   resolveWorkspaceObservabilityAccess,
   type LlmObservabilityAccess,
 } from "../../modules/llm-observability/permissions";
+import { workspaceService } from "../../modules/workspace";
 import { getSessionUserId, requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 
@@ -31,6 +32,34 @@ function parseDateQuery(value: string | undefined) {
     throw new ApiError(400, "INVALID_DATE", "date query parameter is invalid");
   }
   return date;
+}
+
+function parseCursor(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  const [datePart, idPart] = value.split("|", 2);
+  if (!idPart) {
+    throw new ApiError(400, "INVALID_CURSOR", "cursor must include both startedAt and id");
+  }
+  const date = parseDateQuery(datePart);
+  if (!date) {
+    return undefined;
+  }
+  return {
+    startedAt: date,
+    id: idPart,
+  };
+}
+
+function parseStatus(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  if (!["running", "ok", "error", "cancelled"].includes(value)) {
+    throw new ApiError(400, "INVALID_STATUS", "status must be one of running, ok, error, cancelled");
+  }
+  return value;
 }
 
 function parseLimit(value: string | undefined) {
@@ -57,15 +86,20 @@ function commonTraceQuery(c: Context) {
     threadId: c.req.query("threadId"),
     messageId: c.req.query("messageId"),
     feature: c.req.query("feature"),
-    status: c.req.query("status"),
-    cursor: parseDateQuery(c.req.query("cursor")),
+    status: parseStatus(c.req.query("status")),
+    traceId: c.req.query("traceId"),
+    cursor: parseCursor(c.req.query("cursor")),
     limit: parseLimit(c.req.query("limit")),
   };
 }
 
 function generationQuery(c: Context) {
+  if (c.req.query("feature")) {
+    throw new ApiError(400, "UNSUPPORTED_FILTER", "feature filter is not supported for generation lists");
+  }
   return {
     ...commonTraceQuery(c),
+    feature: undefined,
     operation: c.req.query("operation"),
     provider: c.req.query("provider"),
     modelAlias: c.req.query("modelAlias"),
@@ -80,23 +114,28 @@ function requireDataAccess(access: LlmObservabilityAccess) {
 
 async function auditPayloadView(input: {
   access: LlmObservabilityAccess;
+  workspaceId?: string | null;
   targetType: string;
   targetId: string;
   action: string;
+  metadata?: Record<string, unknown>;
 }) {
-  if (!input.access.payloadAccess || !input.access.workspaceId) {
+  const workspaceId = input.workspaceId ?? input.access.workspaceId;
+  if (!input.access.payloadAccess || !workspaceId) {
     return;
   }
 
   await recordAuditAccess({
     teamId: input.access.teamId,
-    workspaceId: input.access.workspaceId,
+    workspaceId,
     actorUserId: input.access.actorUserId,
     targetType: input.targetType,
     targetId: input.targetId,
     action: input.action,
+    strict: true,
     metadata: {
       role: input.access.role,
+      ...(input.metadata ?? {}),
     },
   });
 }
@@ -133,16 +172,57 @@ async function requireTeamAccess(c: Context) {
   return access;
 }
 
+async function requireTeamWorkspaceScope(c: Context, access: LlmObservabilityAccess, required = true) {
+  const workspaceId = c.req.query("workspaceId");
+  if (!workspaceId) {
+    if (!required) {
+      return undefined;
+    }
+    throw new ApiError(400, "VALIDATION_ERROR", "workspaceId query parameter is required for team observability detail");
+  }
+
+  const workspace = await workspaceService.findWorkspaceInOrganization({
+    workspaceId,
+    organizationId: access.teamId,
+  });
+  if (!workspace) {
+    throw ApiError.notFound("Workspace not found");
+  }
+  return workspace.id;
+}
+
+function requireTraceIdQuery(c: Context) {
+  const traceId = c.req.query("traceId");
+  if (!traceId) {
+    throw new ApiError(400, "VALIDATION_ERROR", "traceId query parameter is required for span detail");
+  }
+  return traceId;
+}
+
+type RouteKind = "list" | "traceDetail" | "generationDetail" | "spanDetail";
+type BaseInput = { teamId: string; workspaceId?: string };
+
+function requireScopedBase(input: BaseInput): { teamId: string; workspaceId: string } {
+  if (!input.workspaceId) {
+    throw new ApiError(400, "VALIDATION_ERROR", "workspaceId query parameter is required for observability detail");
+  }
+  return { teamId: input.teamId, workspaceId: input.workspaceId };
+}
+
 function registerRoutes(input: {
   app: Hono;
   resolveAccess: (c: Context) => Promise<LlmObservabilityAccess>;
-  baseInput: (access: LlmObservabilityAccess) => { teamId: string; workspaceId?: string };
+  baseInput: (
+    access: LlmObservabilityAccess,
+    c: Context,
+    route: RouteKind,
+  ) => Promise<BaseInput> | BaseInput;
 }) {
   input.app.get("/llm/traces", async (c) => {
     const access = await input.resolveAccess(c);
     requireDataAccess(access);
     const result = await listLlmTraces({
-      ...input.baseInput(access),
+      ...await input.baseInput(access, c, "list"),
       ...commonTraceQuery(c),
     });
     return ApiResponse.success(c, {
@@ -154,8 +234,9 @@ function registerRoutes(input: {
   input.app.get("/llm/traces/:traceId", async (c) => {
     const access = await input.resolveAccess(c);
     requireDataAccess(access);
+    const base = requireScopedBase(await input.baseInput(access, c, "traceDetail"));
     const result = await getLlmTrace({
-      ...input.baseInput(access),
+      ...base,
       traceId: requireParam(c, "traceId"),
     });
     if (!result) {
@@ -163,9 +244,13 @@ function registerRoutes(input: {
     }
     await auditPayloadView({
       access,
+      workspaceId: result.trace.workspaceId,
       targetType: "llm_trace",
-      targetId: result.trace.traceId,
+      targetId: result.trace.id,
       action: "llm_trace.payload.viewed",
+      metadata: {
+        traceId: result.trace.traceId,
+      },
     });
     return ApiResponse.success(c, {
       trace: presentTrace(result.trace, access),
@@ -178,7 +263,7 @@ function registerRoutes(input: {
     const access = await input.resolveAccess(c);
     requireDataAccess(access);
     const result = await listLlmGenerations({
-      ...input.baseInput(access),
+      ...await input.baseInput(access, c, "list"),
       ...generationQuery(c),
     });
     return ApiResponse.success(c, {
@@ -190,8 +275,9 @@ function registerRoutes(input: {
   input.app.get("/llm/generations/:generationId", async (c) => {
     const access = await input.resolveAccess(c);
     requireDataAccess(access);
+    const base = requireScopedBase(await input.baseInput(access, c, "generationDetail"));
     const generation = await getLlmGeneration({
-      ...input.baseInput(access),
+      ...base,
       generationId: requireParam(c, "generationId"),
     });
     if (!generation) {
@@ -199,6 +285,7 @@ function registerRoutes(input: {
     }
     await auditPayloadView({
       access,
+      workspaceId: generation.workspaceId,
       targetType: "llm_generation",
       targetId: generation.id,
       action: "llm_generation.payload.viewed",
@@ -209,8 +296,10 @@ function registerRoutes(input: {
   input.app.get("/llm/spans/:spanId", async (c) => {
     const access = await input.resolveAccess(c);
     requireDataAccess(access);
+    const base = requireScopedBase(await input.baseInput(access, c, "spanDetail"));
     const span = await getLlmSpan({
-      ...input.baseInput(access),
+      ...base,
+      traceId: requireTraceIdQuery(c),
       spanId: requireParam(c, "spanId"),
     });
     if (!span) {
@@ -218,9 +307,14 @@ function registerRoutes(input: {
     }
     await auditPayloadView({
       access,
+      workspaceId: span.workspaceId,
       targetType: "llm_span",
-      targetId: span.spanId,
+      targetId: span.id,
       action: "llm_span.payload.viewed",
+      metadata: {
+        traceId: span.traceId,
+        spanId: span.spanId,
+      },
     });
     return ApiResponse.success(c, presentSpan(span, access));
   });
@@ -242,8 +336,11 @@ export function registerTeamLlmObservabilityRoutes(app: Hono) {
   registerRoutes({
     app: routes,
     resolveAccess: requireTeamAccess,
-    baseInput: (access) => ({
+    baseInput: async (access, c, route) => ({
       teamId: access.teamId,
+      workspaceId: route === "traceDetail" || route === "generationDetail" || route === "spanDetail"
+        ? await requireTeamWorkspaceScope(c, access)
+        : await requireTeamWorkspaceScope(c, access, false),
     }),
   });
   app.route("/v1/teams/:teamId", routes);

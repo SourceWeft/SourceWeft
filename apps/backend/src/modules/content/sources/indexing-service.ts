@@ -2,6 +2,7 @@ import type { ChunkSpec } from "../types";
 import type { ContentBillingPort } from "../billing-port";
 import { ContentError } from "../errors";
 import { toContentServiceError } from "../model-gateway-error";
+import { buildGatewayRequestMetadata, recordGatewayOperationEvent } from "../model-gateway-audit";
 import { requireContentSource } from "../content-support";
 import {
   ensureModelConfigAvailable,
@@ -165,6 +166,7 @@ export class SourceIndexingService {
     let embeddings: number[][] = [];
     try {
       if (chunkSpecs.length > 0 && profile.vectorStrategy !== "disabled") {
+        const embedStartedAt = Date.now();
         const result = await embeddingGateway.embeddings
           .embedBatch(
             {
@@ -183,11 +185,60 @@ export class SourceIndexingService {
               idempotencyKey:
                 input.idempotencyKey || `source-index:${source.id}:embeddings`,
               traceId: source.id,
+              metadata: buildGatewayRequestMetadata({
+                teamId: workspace.organizationId,
+                workspaceId: workspace.id,
+                userId: input.userId,
+                feature: "ingestion",
+                operation: "embeddings.embedBatch",
+                modelKind: "embedding",
+                modelAlias: profile.modelAlias,
+              }),
             },
           )
-          .catch((error: unknown) => {
-            throw toContentServiceError(error);
+          .catch(async (error: unknown) => {
+            const contentError = toContentServiceError(error);
+            await recordGatewayOperationEvent({
+              teamId: workspace.organizationId,
+              workspaceId: workspace.id,
+              userId: input.userId,
+              feature: "ingestion",
+              operation: "embeddings.embedBatch",
+              modelKind: "embedding",
+              modelAlias: profile.modelAlias,
+              traceId: source.id,
+              success: false,
+              errorCode: contentError.code,
+              errorMessage: contentError.message,
+              latencyMs: Date.now() - embedStartedAt,
+              attributes: {
+                sourceId: source.id,
+                chunkCount: chunkSpecs.length,
+              },
+            });
+            throw contentError;
           });
+
+        await recordGatewayOperationEvent({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          userId: input.userId,
+          feature: "ingestion",
+          operation: "embeddings.embedBatch",
+          modelKind: "embedding",
+          modelAlias: profile.modelAlias,
+          provider: result.provider,
+          routeDecision: result.routeDecision as unknown as Record<string, unknown> | null,
+          usage: result.usage,
+          traceId: source.id,
+          success: true,
+          latencyMs: Date.now() - embedStartedAt,
+          attributes: {
+            sourceId: source.id,
+            chunkCount: chunkSpecs.length,
+            embeddingCount: result.embeddings.length,
+          },
+        });
 
         embeddings = result.embeddings;
       }

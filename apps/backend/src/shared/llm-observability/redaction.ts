@@ -1,44 +1,34 @@
 import { toJsonSafe } from "./serializers";
 
-const SENSITIVE_KEY_PATTERNS = [
+const SENSITIVE_KEYS = new Set([
   "authorization",
+  "proxy-authorization",
   "cookie",
   "set-cookie",
   "password",
   "secret",
-  "token",
+  "api-key",
   "api_key",
   "apikey",
+  "api-key-encrypted",
+  "api_key_encrypted",
+  "apikeyencrypted",
   "access_token",
+  "accesstoken",
   "refreshtoken",
   "refresh_token",
-  "session",
+  "session-token",
+  "session_token",
+  "sessiontoken",
   "credential",
   "credentials",
-  "byok",
-];
-
-const SAFE_TOKEN_COUNTER_KEYS = new Set([
-  "cachedtokenstotal",
-  "cachereadtokens",
-  "cachewritetokens",
-  "inputtokens",
-  "outputtokens",
-  "totaltokens",
+  "x-api-key",
 ]);
 
 export const REDACTED_VALUE = "[REDACTED]";
 
-function normalizeKey(key: string) {
-  return key.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
-}
-
 export function isSensitiveKey(key: string) {
-  const normalized = normalizeKey(key);
-  if (SAFE_TOKEN_COUNTER_KEYS.has(normalized.replace(/_/g, ""))) {
-    return false;
-  }
-  return SENSITIVE_KEY_PATTERNS.some((pattern) => normalized.includes(pattern));
+  return SENSITIVE_KEYS.has(key.trim().toLowerCase());
 }
 
 function redactInternal(value: unknown, parentKey?: string): unknown {

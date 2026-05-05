@@ -79,7 +79,7 @@ test(
     assert.equal(result.providerModel, OPENROUTER_CHAT_MODEL);
     assert.equal(result.routeDecision?.alias, CHAT_ALIAS);
     assert.equal(result.routeDecision?.strategy, "priority");
-    assert.equal(result.routeDecision?.providerModel, OPENROUTER_CHAT_MODEL);
+    assert.equal("providerModel" in result.routeDecision, false);
     if (!hasChatContent(result.raw)) {
       // Surface the real provider payload shape so we can fix passthrough handling instead of guessing.
       console.error(
@@ -195,7 +195,7 @@ test(
     }
 
     assert.equal(metadataEvent.metadata.routeDecision?.alias, CHAT_ALIAS);
-    assert.equal(metadataEvent.metadata.routeDecision?.providerModel, OPENROUTER_CHAT_MODEL);
+    assert.equal("providerModel" in (metadataEvent.metadata.routeDecision as unknown as Record<string, unknown>), false);
     assert.ok(
       tokenText.length > 0 ||
         metadataEvent.metadata.finishReason === "length" ||

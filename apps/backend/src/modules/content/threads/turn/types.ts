@@ -100,6 +100,9 @@ export type ModelReasoningSegmentTrace = {
   text: string;
   sequence: number;
   durationMs?: number;
+  phase?: "initial" | "after_tool";
+  toolCallId?: string;
+  tool?: string;
 };
 
 export type FinalizeThreadTurnCommand = {

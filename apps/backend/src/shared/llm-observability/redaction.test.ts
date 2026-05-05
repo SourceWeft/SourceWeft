@@ -42,6 +42,8 @@ test("does not redact token usage counters", () => {
     inputTokens: 30,
     outputTokens: 40,
     totalTokens: 70,
+    sessionId: "thread-1",
+    byokProvider: "openai",
     accessToken: "secret-token",
   }) as Record<string, unknown>;
 
@@ -51,5 +53,7 @@ test("does not redact token usage counters", () => {
   assert.equal(output.inputTokens, 30);
   assert.equal(output.outputTokens, 40);
   assert.equal(output.totalTokens, 70);
+  assert.equal(output.sessionId, "thread-1");
+  assert.equal(output.byokProvider, "openai");
   assert.equal(output.accessToken, REDACTED_VALUE);
 });

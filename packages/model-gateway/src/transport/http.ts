@@ -45,6 +45,45 @@ function buildRetryDelay(attempt: number): number {
   return exp + jitter;
 }
 
+function observeScopeAttributes(options: RequestOptions | undefined) {
+  const metadata = options?.metadata ?? {};
+  return {
+    ...(typeof metadata.teamId === "string" ? { teamId: metadata.teamId } : {}),
+    ...(typeof metadata.team_id === "string" ? { team_id: metadata.team_id } : {}),
+    ...(typeof metadata.workspaceId === "string" ? { workspaceId: metadata.workspaceId } : {}),
+    ...(typeof metadata.workspace_id === "string" ? { workspace_id: metadata.workspace_id } : {}),
+    ...(typeof metadata.userId === "string" ? { userId: metadata.userId } : {}),
+    ...(typeof metadata.user_id === "string" ? { user_id: metadata.user_id } : {}),
+    ...(typeof metadata.threadId === "string" ? { threadId: metadata.threadId } : {}),
+    ...(typeof metadata.thread_id === "string" ? { thread_id: metadata.thread_id } : {}),
+    ...(typeof metadata.messageId === "string" ? { messageId: metadata.messageId } : {}),
+    ...(typeof metadata.message_id === "string" ? { message_id: metadata.message_id } : {}),
+    ...(typeof metadata.feature === "string" ? { feature: metadata.feature } : {}),
+    ...(typeof metadata.operation === "string" ? { operation: metadata.operation } : {}),
+    ...(typeof metadata.executionMode === "string" ? { executionMode: metadata.executionMode } : {}),
+    ...(typeof metadata.keySource === "string" ? { keySource: metadata.keySource } : {}),
+    ...(typeof metadata.provider === "string" ? { provider: metadata.provider } : {}),
+    ...(typeof metadata.routeStrategy === "string" ? { routeStrategy: metadata.routeStrategy } : {}),
+  };
+}
+
+function observeParentSpanId(options: RequestOptions | undefined) {
+  const metadata = options?.metadata ?? {};
+  return typeof metadata.parentSpanId === "string"
+    ? metadata.parentSpanId
+    : typeof metadata.parent_span_id === "string"
+      ? metadata.parent_span_id
+      : undefined;
+}
+
+function loggableError(input: { code: string; statusCode?: number; requestId?: string }) {
+  return {
+    code: input.code,
+    statusCode: input.statusCode,
+    requestId: input.requestId,
+  };
+}
+
 function mergeSignals(
   signalA: AbortSignal | undefined,
   signalB: AbortSignal,
@@ -114,21 +153,31 @@ async function emitObserveSpan(input: {
   }
 
   const ids = createSpanIds(input.options);
-  await sink.onSpan({
-    traceId: ids.traceId,
-    spanId: ids.spanId,
-    name: input.name,
-    startedAt: new Date(input.startedAtMs).toISOString(),
-    endedAt: new Date().toISOString(),
-    status: input.status,
-    attributes: {
-      attempt: input.attempt,
-      latencyMs: Date.now() - input.startedAtMs,
-      ...(input.attributes ?? {}),
-    },
-    errorCode: input.errorCode,
-    errorMessage: input.errorMessage,
-  });
+  try {
+    await sink.onSpan({
+      traceId: ids.traceId,
+      spanId: ids.spanId,
+      parentSpanId: observeParentSpanId(input.options),
+      name: input.name,
+      startedAt: new Date(input.startedAtMs).toISOString(),
+      endedAt: new Date().toISOString(),
+      status: input.status,
+      attributes: {
+        ...observeScopeAttributes(input.options),
+        attempt: input.attempt,
+        latencyMs: Date.now() - input.startedAtMs,
+        ...(input.attributes ?? {}),
+      },
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+    });
+  } catch (error) {
+    input.config.logger.warn?.("model-gateway.observe.span.failed", {
+      name: input.name,
+      status: input.status,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function requestJson<T>(
@@ -151,7 +200,6 @@ export async function requestJson<T>(
     };
 
     logRequestStart(config.logger, "model-gateway.request.start", {
-      url,
       method: input.method ?? "POST",
       attempt,
     });
@@ -190,19 +238,18 @@ export async function requestJson<T>(
       }
 
       logRequestSuccess(config.logger, "model-gateway.request.success", {
-        url,
+        method: input.method ?? "POST",
         attempt,
       });
 
       await emitObserveSpan({
         config,
         options,
-        name: `http:${input.path}`,
+        name: "http.request",
         startedAtMs,
         status: "ok",
         attempt,
         attributes: {
-          url,
           method: input.method ?? "POST",
         },
       });
@@ -214,22 +261,19 @@ export async function requestJson<T>(
 
       if (!isRetryableError(normalized) || attempt >= maxRetries) {
         logRequestFailure(config.logger, "model-gateway.request.failure", {
-          url,
+          method: input.method ?? "POST",
           attempt,
-          code: normalized.code,
-          message: normalized.message,
-          statusCode: normalized.statusCode,
+          ...loggableError(normalized),
         });
 
         await emitObserveSpan({
           config,
           options,
-          name: `http:${input.path}`,
+          name: "http.request",
           startedAtMs,
           status: "error",
           attempt,
           attributes: {
-            url,
             method: input.method ?? "POST",
             statusCode: normalized.statusCode,
           },
@@ -242,7 +286,7 @@ export async function requestJson<T>(
 
       const delayMs = buildRetryDelay(attempt);
       logRequestRetry(config.logger, "model-gateway.request.retry", {
-        url,
+        method: input.method ?? "POST",
         attempt,
         delayMs,
         code: normalized.code,
@@ -276,7 +320,7 @@ export async function requestStream(
     };
 
     logRequestStart(config.logger, "model-gateway.stream.start", {
-      url,
+      method: input.method ?? "POST",
       attempt,
     });
 
@@ -303,19 +347,18 @@ export async function requestStream(
       }
 
       logRequestSuccess(config.logger, "model-gateway.stream.success", {
-        url,
+        method: input.method ?? "POST",
         attempt,
       });
 
       await emitObserveSpan({
         config,
         options,
-        name: `stream:${input.path}`,
+        name: "http.stream",
         startedAtMs,
         status: "ok",
         attempt,
         attributes: {
-          url,
           method: input.method ?? "POST",
         },
       });
@@ -327,21 +370,19 @@ export async function requestStream(
 
       if (!isRetryableError(normalized) || attempt >= maxRetries) {
         logRequestFailure(config.logger, "model-gateway.stream.failure", {
-          url,
+          method: input.method ?? "POST",
           attempt,
-          code: normalized.code,
-          message: normalized.message,
+          ...loggableError(normalized),
         });
 
         await emitObserveSpan({
           config,
           options,
-          name: `stream:${input.path}`,
+          name: "http.stream",
           startedAtMs,
           status: "error",
           attempt,
           attributes: {
-            url,
             method: input.method ?? "POST",
             statusCode: normalized.statusCode,
           },
@@ -354,7 +395,7 @@ export async function requestStream(
 
       const delayMs = buildRetryDelay(attempt);
       logRequestRetry(config.logger, "model-gateway.stream.retry", {
-        url,
+        method: input.method ?? "POST",
         attempt,
         delayMs,
       });

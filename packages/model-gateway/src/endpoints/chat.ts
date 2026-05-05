@@ -92,63 +92,69 @@ export class ModelGatewayChatEndpoint {
     });
     await emitGenerationStart(this.config, generation.start);
     let completed = false;
+    let yielded = false;
 
-    for await (const event of runBridgeChatStream({
-      config: this.config,
-      target,
-      payload: input,
-      options: { ...options, suppressLangChainObservation: true },
-    })) {
-      if (event.type === "metadata") {
-        completed = true;
-        await emitGenerationEnd(this.config, {
-          traceId: generation.start.traceId,
-          spanId: generation.spanId,
-          endedAt: new Date().toISOString(),
-          latencyMs: Date.now() - generation.startedAtMs,
-          output: {
+    try {
+      for await (const event of runBridgeChatStream({
+        config: this.config,
+        target,
+        payload: input,
+        options: { ...options, suppressLangChainObservation: true },
+      })) {
+        if (event.type === "metadata") {
+          completed = true;
+          await emitGenerationEnd(this.config, {
+            traceId: generation.start.traceId,
+            spanId: generation.spanId,
+            endedAt: new Date().toISOString(),
+            latencyMs: Date.now() - generation.startedAtMs,
+            output: {
+              finishReason: event.metadata.finishReason,
+              reasoning: event.metadata.reasoning,
+              routeDecision: event.metadata.routeDecision,
+            },
             finishReason: event.metadata.finishReason,
-            reasoning: event.metadata.reasoning,
-            routeDecision: event.metadata.routeDecision,
-          },
-          finishReason: event.metadata.finishReason,
-          reasoningText: event.metadata.reasoning,
-          providerFields: event.metadata.providerFields,
-          usage: event.metadata.usage,
-          rawCaptureMode: "sdk_metadata",
-          providerResponse: toProviderResponse(event.metadata.providerFields),
-          attributes: generation.start.attributes,
-        });
-      }
+            reasoningText: event.metadata.reasoning,
+            providerFields: event.metadata.providerFields,
+            usage: event.metadata.usage,
+            rawCaptureMode: "sdk_metadata",
+            providerResponse: toProviderResponse(event.metadata.providerFields),
+            attributes: generation.start.attributes,
+          });
+        }
 
-      if (event.type === "error") {
-        completed = true;
+        if (event.type === "error") {
+          completed = true;
+          await emitGenerationError(this.config, {
+            traceId: generation.start.traceId,
+            spanId: generation.spanId,
+            endedAt: new Date().toISOString(),
+            latencyMs: Date.now() - generation.startedAtMs,
+            errorCode: event.error.code,
+            errorMessage: event.error.message,
+            providerStatusCode: event.error.statusCode,
+            providerRequestId: event.error.requestId,
+            attributes: generation.start.attributes,
+          });
+        }
+
+        yielded = true;
+        yield event;
+      }
+    } finally {
+      if (!completed) {
         await emitGenerationError(this.config, {
           traceId: generation.start.traceId,
           spanId: generation.spanId,
           endedAt: new Date().toISOString(),
           latencyMs: Date.now() - generation.startedAtMs,
-          errorCode: event.error.code,
-          errorMessage: event.error.message,
-          providerStatusCode: event.error.statusCode,
-          providerRequestId: event.error.requestId,
+          errorCode: yielded ? "CANCELLED" : "UNKNOWN",
+          errorMessage: yielded
+            ? "Chat stream cancelled before completion"
+            : "Chat stream ended without metadata",
           attributes: generation.start.attributes,
         });
       }
-
-      yield event;
-    }
-
-    if (!completed) {
-      await emitGenerationError(this.config, {
-        traceId: generation.start.traceId,
-        spanId: generation.spanId,
-        endedAt: new Date().toISOString(),
-        latencyMs: Date.now() - generation.startedAtMs,
-        errorCode: "UNKNOWN",
-        errorMessage: "Chat stream ended without metadata",
-        attributes: generation.start.attributes,
-      });
     }
   }
 }

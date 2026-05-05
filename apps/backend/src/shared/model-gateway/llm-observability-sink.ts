@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import type {
   ObserveGenerationEnd,
   ObserveGenerationError,
@@ -8,20 +9,28 @@ import type {
   UsageInfo,
 } from "@sourceweft/model-gateway";
 import { db } from "../database";
-import { modelGatewayEvents } from "../db/schema";
+import { llmGenerations, modelGatewayEvents } from "../db/schema";
 import {
   endGeneration,
   recordGenerationError,
   startGeneration,
 } from "../llm-observability";
+import { redactRecord } from "../llm-observability/redaction";
+import { logger } from "../logger";
+import { workspaceService } from "../../modules/workspace";
 
 // Adapter from model-gateway observation events to backend llm-observability persistence.
 const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
   "teamId",
+  "team_id",
   "workspaceId",
+  "workspace_id",
   "userId",
+  "user_id",
   "threadId",
+  "thread_id",
   "messageId",
+  "message_id",
   "feature",
   "operation",
   "environment",
@@ -70,12 +79,27 @@ function buildEventAttributes(
   attributes: Record<string, unknown>,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(attributes).filter(([key]) => !RESERVED_EVENT_ATTRIBUTE_KEYS.has(key)),
+    Object.entries(attributes).filter(
+      ([key]) => !RESERVED_EVENT_ATTRIBUTE_KEYS.has(key),
+    ),
   );
 }
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+function readAttributeString(
+  attributes: Record<string, unknown>,
+  ...keys: string[]
+) {
+  for (const key of keys) {
+    const value = readString(attributes[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function readRecord(value: unknown) {
@@ -85,17 +109,98 @@ function readRecord(value: unknown) {
 }
 
 function extractGenerationContext(
-  generation: ObserveGenerationStart | ObserveGenerationEnd | ObserveGenerationError,
+  generation:
+    | ObserveGenerationStart
+    | ObserveGenerationEnd
+    | ObserveGenerationError,
 ) {
   const attributes = generation.attributes ?? {};
   return {
-    teamId: readString(attributes.teamId),
-    workspaceId: readString(attributes.workspaceId),
-    userId: readString(attributes.userId),
-    threadId: readString(attributes.threadId),
-    messageId: readString(attributes.messageId),
-    feature: readString(attributes.feature),
+    teamId: readAttributeString(attributes, "teamId", "team_id"),
+    workspaceId: readAttributeString(attributes, "workspaceId", "workspace_id"),
+    userId: readAttributeString(attributes, "userId", "user_id"),
+    threadId: readAttributeString(attributes, "threadId", "thread_id"),
+    messageId: readAttributeString(attributes, "messageId", "message_id"),
+    feature: readAttributeString(attributes, "feature"),
   };
+}
+
+function hasGenerationScope(
+  context: ReturnType<typeof extractGenerationContext>,
+): context is ReturnType<typeof extractGenerationContext> & {
+  teamId: string;
+  workspaceId: string;
+} {
+  return Boolean(context.teamId && context.workspaceId);
+}
+
+async function validateObservationScope(scope: {
+  teamId: string;
+  workspaceId: string;
+}) {
+  const workspace = await workspaceService.findWorkspaceInOrganization({
+    workspaceId: scope.workspaceId,
+    organizationId: scope.teamId,
+  });
+  return workspace ? scope : null;
+}
+
+async function resolveGenerationScope(
+  generation: ObserveGenerationEnd | ObserveGenerationError,
+) {
+  const context = extractGenerationContext(generation);
+  if (hasGenerationScope(context)) {
+    const scope = await validateObservationScope(context);
+    return scope
+      ? {
+          teamId: scope.teamId,
+          workspaceId: scope.workspaceId,
+          userId: context.userId,
+          threadId: context.threadId,
+          messageId: context.messageId,
+          feature: context.feature,
+        }
+      : null;
+  }
+  if (generation.traceId) {
+    const [startedGeneration] = await db
+      .select({
+        teamId: llmGenerations.teamId,
+        workspaceId: llmGenerations.workspaceId,
+        userId: llmGenerations.userId,
+        threadId: llmGenerations.threadId,
+        messageId: llmGenerations.messageId,
+        metadataJson: llmGenerations.metadataJson,
+      })
+      .from(llmGenerations)
+      .where(
+        and(
+          eq(llmGenerations.traceId, generation.traceId),
+          eq(llmGenerations.spanId, generation.spanId),
+        ),
+      )
+      .limit(1);
+    if (startedGeneration) {
+      const metadata =
+        startedGeneration.metadataJson &&
+        typeof startedGeneration.metadataJson === "object"
+          ? startedGeneration.metadataJson
+          : {};
+      return {
+        teamId: startedGeneration.teamId,
+        workspaceId: startedGeneration.workspaceId,
+        userId: startedGeneration.userId,
+        threadId: startedGeneration.threadId,
+        messageId: startedGeneration.messageId,
+        feature: readAttributeString(metadata, "feature"),
+      };
+    }
+  }
+  logger.warn("LLM generation observation missing scope", {
+    traceId: generation.traceId,
+    spanId: generation.spanId,
+  });
+  return null;
 }
 
 export async function createModelGatewayEvent(input: GatewayEventInput) {
@@ -125,7 +230,7 @@ export async function createModelGatewayEvent(input: GatewayEventInput) {
     outputTokens: input.usage?.outputTokens ?? null,
     totalTokens: input.usage?.totalTokens ?? null,
     providerCostUsd: toNumeric(input.providerCostUsd),
-    attributesJson: input.attributes ?? {},
+    attributesJson: redactRecord(input.attributes) ?? {},
     createdAt: new Date(),
   });
 }
@@ -137,13 +242,26 @@ export function createLlmObservabilitySink(): ObserveSink {
       if (!generation.traceId || !context.teamId || !context.workspaceId) {
         return;
       }
+      const scope = await validateObservationScope({
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
+      });
+      if (!scope) {
+        logger.warn("LLM generation observation has invalid scope", {
+          traceId: generation.traceId,
+          spanId: generation.spanId,
+          teamId: context.teamId,
+          workspaceId: context.workspaceId,
+        });
+        return;
+      }
 
       await startGeneration({
         traceId: generation.traceId,
         spanId: generation.spanId,
         parentSpanId: generation.parentSpanId,
-        teamId: context.teamId,
-        workspaceId: context.workspaceId,
+        teamId: scope.teamId,
+        workspaceId: scope.workspaceId,
         userId: context.userId,
         threadId: context.threadId,
         messageId: context.messageId,
@@ -166,11 +284,14 @@ export function createLlmObservabilitySink(): ObserveSink {
       });
     },
     async onGenerationEnd(generation: ObserveGenerationEnd) {
-      if (!generation.traceId) {
+      const scope = await resolveGenerationScope(generation);
+      if (!generation.traceId || !scope) {
         return;
       }
       await endGeneration({
         traceId: generation.traceId,
+        teamId: scope.teamId,
+        workspaceId: scope.workspaceId,
         spanId: generation.spanId,
         output: generation.output,
         outputText: generation.outputText,
@@ -188,11 +309,14 @@ export function createLlmObservabilitySink(): ObserveSink {
       });
     },
     async onGenerationError(generation: ObserveGenerationError) {
-      if (!generation.traceId) {
+      const scope = await resolveGenerationScope(generation);
+      if (!generation.traceId || !scope) {
         return;
       }
       await recordGenerationError({
         traceId: generation.traceId,
+        teamId: scope.teamId,
+        workspaceId: scope.workspaceId,
         spanId: generation.spanId,
         errorCode: generation.errorCode,
         errorMessage: generation.errorMessage,
@@ -208,13 +332,22 @@ export function createLlmObservabilitySink(): ObserveSink {
     async onSpan(span: ObserveSpan) {
       const attributes = span.attributes ?? {};
       const teamId =
-        typeof attributes.teamId === "string" ? attributes.teamId : undefined;
+        readAttributeString(attributes, "teamId", "team_id") ?? undefined;
       const workspaceId =
-        typeof attributes.workspaceId === "string"
-          ? attributes.workspaceId
-          : undefined;
+        readAttributeString(attributes, "workspaceId", "workspace_id") ??
+        undefined;
 
       if (!teamId || !workspaceId) {
+        return;
+      }
+      const scope = await validateObservationScope({ teamId, workspaceId });
+      if (!scope) {
+        logger.warn("LLM span observation has invalid scope", {
+          traceId: span.traceId,
+          spanId: span.spanId,
+          teamId,
+          workspaceId,
+        });
         return;
       }
 
@@ -222,14 +355,12 @@ export function createLlmObservabilitySink(): ObserveSink {
         traceId: span.traceId,
         spanId: span.spanId,
         parentSpanId: span.parentSpanId,
-        teamId,
-        workspaceId,
-        userId: typeof attributes.userId === "string" ? attributes.userId : null,
-        threadId:
-          typeof attributes.threadId === "string" ? attributes.threadId : null,
-        messageId:
-          typeof attributes.messageId === "string" ? attributes.messageId : null,
-        feature: typeof attributes.feature === "string" ? attributes.feature : null,
+        teamId: scope.teamId,
+        workspaceId: scope.workspaceId,
+        userId: readAttributeString(attributes, "userId", "user_id"),
+        threadId: readAttributeString(attributes, "threadId", "thread_id"),
+        messageId: readAttributeString(attributes, "messageId", "message_id"),
+        feature: readAttributeString(attributes, "feature"),
         operation:
           typeof attributes.operation === "string"
             ? attributes.operation
@@ -239,11 +370,15 @@ export function createLlmObservabilitySink(): ObserveSink {
             ? attributes.executionMode
             : null,
         keySource:
-          typeof attributes.keySource === "string" ? attributes.keySource : null,
+          typeof attributes.keySource === "string"
+            ? attributes.keySource
+            : null,
         provider:
           typeof attributes.provider === "string" ? attributes.provider : null,
         modelAlias:
-          typeof attributes.modelAlias === "string" ? attributes.modelAlias : null,
+          typeof attributes.modelAlias === "string"
+            ? attributes.modelAlias
+            : null,
         routeStrategy:
           typeof attributes.routeStrategy === "string"
             ? attributes.routeStrategy
@@ -252,7 +387,9 @@ export function createLlmObservabilitySink(): ObserveSink {
         errorCode: span.errorCode,
         errorMessage: span.errorMessage,
         latencyMs:
-          typeof attributes.latencyMs === "number" ? attributes.latencyMs : null,
+          typeof attributes.latencyMs === "number"
+            ? attributes.latencyMs
+            : null,
         attributes: buildEventAttributes(attributes),
       });
     },

@@ -15,6 +15,7 @@ import type {
 } from "../types";
 
 const DEFAULT_RAW_CAPTURE_MODE = "normalized" as const;
+const OBSERVE_TEXT_PREVIEW_CHARS = 500;
 
 function randomId(length: number): string {
   const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -41,9 +42,95 @@ function extractRequestMetadata(
   };
 }
 
-function resolveTraceId(options?: RequestOptions) {
-  const metadataTraceId = options?.metadata?.traceId;
-  return options?.traceId ?? (typeof metadataTraceId === "string" ? metadataTraceId : undefined);
+function compactRecord(
+  value: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const output = Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  );
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function readMetadataValue(
+  metadata: Record<string, unknown>,
+  ...keys: string[]
+) {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function buildObserveAttributes(metadata: Record<string, unknown>) {
+  return (
+    compactRecord({
+      teamId: readMetadataValue(metadata, "teamId", "team_id"),
+      workspaceId: readMetadataValue(metadata, "workspaceId", "workspace_id"),
+      userId: readMetadataValue(metadata, "userId", "user_id"),
+      threadId: readMetadataValue(metadata, "threadId", "thread_id"),
+      messageId: readMetadataValue(metadata, "messageId", "message_id"),
+      feature: readMetadataValue(metadata, "feature"),
+      operation: readMetadataValue(metadata, "operation"),
+      observationName: readMetadataValue(metadata, "observationName"),
+      observationOperation: readMetadataValue(metadata, "observationOperation"),
+      environment: readMetadataValue(metadata, "environment", "env"),
+      executionMode: readMetadataValue(metadata, "executionMode"),
+      keySource: readMetadataValue(metadata, "keySource"),
+      provider: readMetadataValue(metadata, "provider"),
+      modelAlias: readMetadataValue(metadata, "modelAlias"),
+      routeStrategy: readMetadataValue(metadata, "routeStrategy"),
+    }) ?? {}
+  );
+}
+
+function buildChatLifecycleAttributes(messages: ChatCompleteInput["messages"]) {
+  const lastMessageRole = messages.at(-1)?.role;
+  const toolMessageCount = messages.filter(
+    (message) => message.role === "tool",
+  ).length;
+  const assistantToolCallCount = messages.reduce(
+    (count, message) => count + (message.toolCalls?.length ?? 0),
+    0,
+  );
+  const generationPhase =
+    lastMessageRole === "tool"
+      ? "tool_result_response"
+      : toolMessageCount > 0
+        ? "post_tool_context"
+        : "initial_response";
+
+  return compactRecord({
+    generationPhase,
+    messageCount: messages.length,
+    lastMessageRole,
+    toolMessageCount: toolMessageCount > 0 ? toolMessageCount : undefined,
+    assistantToolCallCount:
+      assistantToolCallCount > 0 ? assistantToolCallCount : undefined,
+  }) ?? {};
+}
+
+function buildLifecycleAttributes(
+  operation: GatewayOperation,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput,
+) {
+  if (operation !== "chat.complete" && operation !== "chat.stream") {
+    return {};
+  }
+  return buildChatLifecycleAttributes((payload as ChatCompleteInput).messages);
+}
+
+function resolveTraceId(
+  metadata: Record<string, unknown>,
+  options?: RequestOptions,
+) {
+  const metadataTraceId = metadata.traceId ?? metadata.trace_id;
+  return (
+    options?.traceId ??
+    (typeof metadataTraceId === "string" ? metadataTraceId : undefined)
+  );
 }
 
 function resolveParentSpanId(metadata: Record<string, unknown>) {
@@ -64,16 +151,65 @@ function readMetadataString(metadata: Record<string, unknown>, keys: string[]) {
   return undefined;
 }
 
-function resolveModelParameters(payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput) {
+function textSummary(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
   return {
+    length: value.length,
+    preview: value.slice(0, OBSERVE_TEXT_PREVIEW_CHARS),
+    truncated: value.length > OBSERVE_TEXT_PREVIEW_CHARS,
+  };
+}
+
+function textArraySummary(values: unknown[]) {
+  return {
+    count: values.length,
+    totalLength: values.reduce<number>(
+      (sum, value) => sum + (typeof value === "string" ? value.length : 0),
+      0,
+    ),
+    previews: values
+      .slice(0, 5)
+      .map((value) =>
+        typeof value === "string"
+          ? textSummary(value)
+          : { type: Array.isArray(value) ? "array" : typeof value },
+      ),
+    truncated: values.length > 5,
+  };
+}
+
+function summarizeToolCalls(
+  toolCalls: { id?: string; name: string }[] | undefined,
+) {
+  if (!toolCalls?.length) {
+    return undefined;
+  }
+  return toolCalls.map((toolCall) =>
+    compactRecord({
+      id: toolCall.id,
+      name: toolCall.name,
+    }),
+  );
+}
+
+function resolveModelParameters(
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput,
+) {
+  return compactRecord({
     ...("temperature" in payload && payload.temperature !== undefined
       ? { temperature: payload.temperature }
       : {}),
-    ...("topP" in payload && payload.topP !== undefined ? { topP: payload.topP } : {}),
+    ...("topP" in payload && payload.topP !== undefined
+      ? { topP: payload.topP }
+      : {}),
     ...("maxTokens" in payload && payload.maxTokens !== undefined
       ? { maxTokens: payload.maxTokens }
       : {}),
-    ...("stop" in payload && payload.stop !== undefined ? { stop: payload.stop } : {}),
+    ...("stop" in payload && payload.stop !== undefined
+      ? { stop: payload.stop }
+      : {}),
     ...("toolChoice" in payload && payload.toolChoice !== undefined
       ? { toolChoice: payload.toolChoice }
       : {}),
@@ -95,61 +231,66 @@ function resolveModelParameters(payload: ChatCompleteInput | EmbedInput | EmbedB
     ...("inputType" in payload && payload.inputType !== undefined
       ? { inputType: payload.inputType }
       : {}),
-    ...("topN" in payload && payload.topN !== undefined ? { topN: payload.topN } : {}),
+    ...("topN" in payload && payload.topN !== undefined
+      ? { topN: payload.topN }
+      : {}),
     ...("returnDocuments" in payload && payload.returnDocuments !== undefined
       ? { returnDocuments: payload.returnDocuments }
       : {}),
-    ...(payload.extraBody ? { extraBody: payload.extraBody } : {}),
-  };
+  });
 }
 
-function buildInput(operation: GatewayOperation, payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput) {
+function buildInput(
+  operation: GatewayOperation,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput,
+) {
   if (operation === "chat.complete" || operation === "chat.stream") {
     const chat = payload as ChatCompleteInput;
-    return {
-      model: chat.model,
-      messages: chat.messages,
-      tools: chat.tools,
+    return compactRecord({
+      messageCount: chat.messages.length,
+      messages: chat.messages.map((message) =>
+        compactRecord({
+          role: message.role,
+          content: textSummary(message.content),
+          toolCallId: message.toolCallId,
+          toolCallCount: message.toolCalls?.length ?? 0,
+          toolCalls: summarizeToolCalls(message.toolCalls),
+        }),
+      ),
+      toolCount: chat.tools?.length ?? 0,
       toolChoice: chat.toolChoice,
       stream: operation === "chat.stream" ? true : chat.stream,
-      metadata: chat.metadata,
-    };
+    }) ?? {};
   }
 
   if (operation === "embeddings.embed") {
     const embed = payload as EmbedInput;
     return {
-      model: embed.model,
-      text: embed.text,
+      text: textSummary(embed.text),
       inputType: embed.inputType,
       dimensions: embed.dimensions,
       encodingFormat: embed.encodingFormat,
-      metadata: embed.metadata,
     };
   }
 
   if (operation === "embeddings.embedBatch") {
     const batch = payload as EmbedBatchInput;
     return {
-      model: batch.model,
-      texts: batch.texts,
+      texts: textArraySummary(batch.texts),
       inputCount: batch.texts.length,
       inputType: batch.inputType,
       dimensions: batch.dimensions,
       encodingFormat: batch.encodingFormat,
-      metadata: batch.metadata,
     };
   }
 
   const rerank = payload as RerankInput;
   return {
-    model: rerank.model,
-    query: rerank.query,
-    documents: rerank.documents,
+    query: textSummary(rerank.query),
+    documents: textArraySummary(rerank.documents),
     documentCount: rerank.documents.length,
     topN: rerank.topN,
     returnDocuments: rerank.returnDocuments,
-    metadata: rerank.metadata,
   };
 }
 
@@ -160,14 +301,22 @@ export function createGenerationObservation(input: {
   target: ResolvedRequestTarget;
 }) {
   const metadata = extractRequestMetadata(input.payload, input.options);
+  const attributes = {
+    ...buildObserveAttributes(metadata),
+    ...buildLifecycleAttributes(input.operation, input.payload),
+  };
   const spanId = `gen_${randomId(16)}`;
   const startedAtMs = Date.now();
   const start: ObserveGenerationStart = {
-    traceId: resolveTraceId(input.options),
+    traceId: resolveTraceId(metadata, input.options),
     spanId,
     parentSpanId: resolveParentSpanId(metadata),
     operation: input.operation,
-    name: readMetadataString(metadata, ["observationName", "generationName", "name"]),
+    name: readMetadataString(metadata, [
+      "observationName",
+      "generationName",
+      "name",
+    ]),
     startedAt: new Date(startedAtMs).toISOString(),
     modelAlias: input.payload.model,
     provider: input.target.provider,
@@ -177,7 +326,7 @@ export function createGenerationObservation(input: {
     modelParameters: resolveModelParameters(input.payload),
     input: buildInput(input.operation, input.payload),
     rawCaptureMode: DEFAULT_RAW_CAPTURE_MODE,
-    attributes: metadata,
+    attributes,
   };
 
   return {
@@ -191,21 +340,46 @@ export async function emitGenerationStart(
   config: ResolvedModelGatewayConfig,
   event: ObserveGenerationStart,
 ) {
-  await config.observeSink?.onGenerationStart?.(event);
+  try {
+    await config.observeSink?.onGenerationStart?.(event);
+  } catch (error) {
+    config.logger.warn?.("model-gateway.observe.generation_start.failed", {
+      operation: event.operation,
+      traceId: event.traceId,
+      spanId: event.spanId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function emitGenerationEnd(
   config: ResolvedModelGatewayConfig,
   event: ObserveGenerationEnd,
 ) {
-  await config.observeSink?.onGenerationEnd?.(event);
+  try {
+    await config.observeSink?.onGenerationEnd?.(event);
+  } catch (error) {
+    config.logger.warn?.("model-gateway.observe.generation_end.failed", {
+      traceId: event.traceId,
+      spanId: event.spanId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function emitGenerationError(
   config: ResolvedModelGatewayConfig,
   event: ObserveGenerationError,
 ) {
-  await config.observeSink?.onGenerationError?.(event);
+  try {
+    await config.observeSink?.onGenerationError?.(event);
+  } catch (error) {
+    config.logger.warn?.("model-gateway.observe.generation_error.failed", {
+      traceId: event.traceId,
+      spanId: event.spanId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export function buildGenerationErrorEvent(input: {
@@ -243,6 +417,8 @@ export function buildUsageOutput(input: {
   };
 }
 
-export function toProviderResponse(raw: unknown): Record<string, unknown> | undefined {
+export function toProviderResponse(
+  raw: unknown,
+): Record<string, unknown> | undefined {
   return toRecord(raw);
 }

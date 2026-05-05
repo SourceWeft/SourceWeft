@@ -1,7 +1,13 @@
+import { randomUUID } from "node:crypto";
 import type { Job } from "bullmq";
 import { getJobsQueueEvents } from "../../../../shared/queue";
-import { invokeDeepAgentTurn, type DeepAgentTurnOutcome } from "../../agent/turn/runner";
+import {
+  invokeDeepAgentTurn,
+  type DeepAgentTurnOutcome,
+} from "../../agent/turn/runner";
+import type { AgentCitation } from "../../agent/citation-registry";
 import { ContentError } from "../../errors";
+import { requireContentWorkspace } from "../../content-support";
 import { toContentServiceError } from "../../model-gateway-error";
 import { logger } from "../../../../shared/logger";
 import { buildGatewayAuditMetadata } from "../../model-gateway-audit";
@@ -40,6 +46,16 @@ type ThreadTitleJobCompletion = {
   result: ThreadTitleGenerateJobResult | null;
 };
 
+const OBSERVE_CITATION_EXCERPT_CHARS = 320;
+const OBSERVE_CITATION_QUOTE_CHARS = 400;
+
+export const threadStreamObservability = {
+  startTrace,
+  endTrace,
+  startSpan,
+  endSpan,
+};
+
 function buildThreadTraceContext(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
 ): TraceContext {
@@ -68,6 +84,10 @@ function buildTraceMetadata(input: {
   };
 }
 
+function toObservationError(error: unknown) {
+  return error instanceof ContentError ? error : toContentServiceError(error);
+}
+
 export function buildAgentRunSpanMetadata(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
 ) {
@@ -92,15 +112,75 @@ function buildTraceInput(
   };
 }
 
+function compactObservationText(value: string, maxChars: number) {
+  return {
+    preview: value.slice(0, maxChars),
+    length: value.length,
+    truncated: value.length > maxChars,
+  };
+}
+
+function buildCitationObservation(citation: AgentCitation, index: number) {
+  return {
+    citation: citation.citation,
+    rank: index + 1,
+    sourceId: citation.sourceId,
+    sourceTitle: citation.sourceTitle,
+    documentId: citation.documentId,
+    chunkId: citation.chunkId,
+    chunkNo: citation.chunkNo,
+    origin: citation.origin,
+    score: citation.score,
+    ...(citation.path ? { path: citation.path } : {}),
+    excerpt: compactObservationText(
+      citation.excerpt,
+      OBSERVE_CITATION_EXCERPT_CHARS,
+    ),
+    quoteText: compactObservationText(
+      citation.quoteText,
+      OBSERVE_CITATION_QUOTE_CHARS,
+    ),
+  };
+}
+
+function buildCitationObservations(citations: AgentCitation[]) {
+  return citations.map((citation, index) =>
+    buildCitationObservation(citation, index),
+  );
+}
+
+function buildReasoningSegmentObservations(
+  segments: DeepAgentTurnOutcome["reasoningSegments"],
+) {
+  return segments.map((segment, index) => ({
+    id: segment.id,
+    index,
+    sequence: segment.sequence,
+    phase: segment.phase ?? "initial",
+    ...(segment.toolCallId ? { toolCallId: segment.toolCallId } : {}),
+    ...(segment.tool ? { tool: segment.tool } : {}),
+    ...(typeof segment.durationMs === "number"
+      ? { durationMs: segment.durationMs }
+      : {}),
+    text: compactObservationText(segment.text, OBSERVE_CITATION_QUOTE_CHARS),
+  }));
+}
+
 function buildTraceOutput(outcome: DeepAgentTurnOutcome) {
   return {
     content: outcome.assistantContent,
     finishReason: outcome.finishReason,
     usage: outcome.usage,
     reasoning: outcome.reasoning,
+    reasoningSegments: buildReasoningSegmentObservations(
+      outcome.reasoningSegments,
+    ),
     toolCalls: outcome.toolCalls,
     retrievalCalls: outcome.retrievalCalls,
     citationCount: outcome.citations.length,
+    availableCitationCount: outcome.availableCitations.length,
+    citations: buildCitationObservations(outcome.citations),
+    availableCitations: buildCitationObservations(outcome.availableCitations),
   };
 }
 
@@ -110,10 +190,15 @@ export function buildAgentRunSpanOutput(outcome: DeepAgentTurnOutcome) {
     finishReason: outcome.finishReason,
     usage: outcome.usage,
     reasoning: outcome.reasoning,
+    reasoningSegments: buildReasoningSegmentObservations(
+      outcome.reasoningSegments,
+    ),
     toolCallCount: outcome.toolCalls.length,
     retrievalCallCount: outcome.retrievalCalls.length,
     citationCount: outcome.citations.length,
     availableCitationCount: outcome.availableCitations.length,
+    citations: buildCitationObservations(outcome.citations),
+    availableCitations: buildCitationObservations(outcome.availableCitations),
     thinkingStepCount: outcome.thinkingSteps.length,
     reasoningSegmentCount: outcome.reasoningSegments.length,
   };
@@ -159,8 +244,15 @@ function buildFinalizeSpanInput(input: {
     usage: input.outcome.usage,
     finishReason: input.outcome.finishReason,
     reasoning: input.outcome.reasoning,
+    reasoningSegments: buildReasoningSegmentObservations(
+      input.outcome.reasoningSegments,
+    ),
     citationCount: input.outcome.citations.length,
     availableCitationCount: input.outcome.availableCitations.length,
+    citations: buildCitationObservations(input.outcome.citations),
+    availableCitations: buildCitationObservations(
+      input.outcome.availableCitations,
+    ),
     toolCallCount: input.outcome.toolCalls.length,
     retrievalCallCount: input.outcome.retrievalCalls.length,
     thinkingStepCount: input.outcome.thinkingSteps.length,
@@ -174,7 +266,7 @@ async function startThreadTrace(input: {
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
   operation: "chat.stream" | "chat.complete";
 }) {
-  await startTrace({
+  await threadStreamObservability.startTrace({
     ...input.trace,
     name: "thread.stream",
     feature: "chat",
@@ -182,6 +274,121 @@ async function startThreadTrace(input: {
     input: buildTraceInput(input.prepared),
     metadata: buildTraceMetadata(input),
   });
+}
+
+async function observePrepareFailure(input: {
+  request: StreamThreadEventInput;
+  operation: "chat.stream" | "chat.complete";
+  startedAt: Date;
+  error: unknown;
+}) {
+  const contentError = toObservationError(input.error);
+  try {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.request.workspaceId,
+      userId: input.request.userId,
+    });
+    const traceId = `thread-run:${randomUUID()}`;
+    await threadStreamObservability.startTrace({
+      traceId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.request.userId,
+      threadId: input.request.threadId,
+      sessionId: input.request.threadId,
+      name: "thread.stream",
+      feature: "chat",
+      input: {
+        message: input.request.content,
+        sourceIds: input.request.sourceIds ?? [],
+        threadId: input.request.threadId,
+      },
+      metadata: {
+        operation: input.operation,
+        stage: "thread.prepare",
+      },
+      startedAt: input.startedAt,
+    });
+    await threadStreamObservability.endTrace({
+      traceId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      status: "error",
+      latencyMs: Date.now() - input.startedAt.getTime(),
+      errorCode: contentError.code,
+      errorMessage: contentError.message,
+      metadata: {
+        operation: input.operation,
+        stage: "thread.prepare",
+      },
+    });
+  } catch (observeError) {
+    logger.debug("Failed to observe thread prepare failure", {
+      workspaceId: input.request.workspaceId,
+      threadId: input.request.threadId,
+      error:
+        observeError instanceof Error
+          ? observeError.message
+          : String(observeError),
+    });
+  }
+}
+
+async function endAgentRunSpanIfOpen(input: {
+  prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
+  started: boolean;
+  completed: boolean;
+  status: "error" | "cancelled";
+  latencyMs: number;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+}) {
+  if (!input.started || input.completed) {
+    return;
+  }
+  await threadStreamObservability.endSpan({
+    traceId: input.prepared.traceContext!.traceId,
+    teamId: input.prepared.traceContext!.teamId,
+    workspaceId: input.prepared.traceContext!.workspaceId,
+    spanId: "agent_run",
+    status: input.status,
+    latencyMs: input.latencyMs,
+    errorCode: input.errorCode,
+    errorMessage: input.errorMessage,
+  });
+}
+
+async function endThreadTraceIfOpen(input: {
+  prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
+  ended: boolean;
+  operation: "chat.stream" | "chat.complete";
+  status: "ok" | "error" | "cancelled";
+  latencyMs: number;
+  outcome?: DeepAgentTurnOutcome | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+}) {
+  if (input.ended) {
+    return false;
+  }
+  await threadStreamObservability.endTrace({
+    traceId: input.prepared.traceContext!.traceId,
+    teamId: input.prepared.traceContext!.teamId,
+    workspaceId: input.prepared.traceContext!.workspaceId,
+    status: input.status,
+    latencyMs: input.latencyMs,
+    errorCode: input.errorCode,
+    errorMessage: input.errorMessage,
+    output:
+      input.status === "ok" && input.outcome
+        ? buildTraceOutput(input.outcome)
+        : undefined,
+    metadata: buildTraceMetadata({
+      prepared: input.prepared,
+      operation: input.operation,
+    }),
+  });
+  return true;
 }
 
 async function withObservedSpan<T>(input: {
@@ -197,7 +404,7 @@ async function withObservedSpan<T>(input: {
   execute: () => Promise<T>;
 }) {
   const startedAt = Date.now();
-  await startSpan({
+  await threadStreamObservability.startSpan({
     ...input.trace,
     spanId: input.spanId,
     parentSpanId: input.parentSpanId,
@@ -209,8 +416,10 @@ async function withObservedSpan<T>(input: {
   });
   try {
     const output = await input.execute();
-    await endSpan({
+    await threadStreamObservability.endSpan({
       traceId: input.trace.traceId,
+      teamId: input.trace.teamId,
+      workspaceId: input.trace.workspaceId,
       spanId: input.spanId,
       status: "ok",
       latencyMs: Date.now() - startedAt,
@@ -218,8 +427,10 @@ async function withObservedSpan<T>(input: {
     });
     return output;
   } catch (error) {
-    await endSpan({
+    await threadStreamObservability.endSpan({
       traceId: input.trace.traceId,
+      teamId: input.trace.teamId,
+      workspaceId: input.trace.workspaceId,
       spanId: input.spanId,
       status: "error",
       latencyMs: Date.now() - startedAt,
@@ -244,9 +455,9 @@ function isThreadTitleGenerateJobResult(
 
   const result = value as Record<string, unknown>;
   return (
-    result.status === "applied" ||
-    result.status === "skipped"
-  ) && typeof result.threadId === "string";
+    (result.status === "applied" || result.status === "skipped") &&
+    typeof result.threadId === "string"
+  );
 }
 
 function titleCompletionToUpdate(completion: ThreadTitleJobCompletion) {
@@ -264,7 +475,13 @@ async function waitForThreadTitleJob(input: {
 }): Promise<ThreadTitleJobCompletion> {
   const jobId = String(input.job.id);
   try {
-    const result = await input.job.waitUntilFinished(getJobsQueueEvents());
+    const waitUntilFinished = input.job.waitUntilFinished.bind(input.job) as (
+      queueEvents?: ReturnType<typeof getJobsQueueEvents>,
+    ) => Promise<unknown>;
+    const result =
+      waitUntilFinished.length === 0
+        ? await waitUntilFinished()
+        : await waitUntilFinished(getJobsQueueEvents());
     return {
       jobId,
       result: isThreadTitleGenerateJobResult(result) ? result : null,
@@ -324,8 +541,12 @@ class ContentThreadStreamService {
     return this.streamThread(await resolveRefreshThreadStreamInput(input));
   }
 
-  async *refreshThreadEvents(input: RefreshThreadInput): AsyncGenerator<string> {
-    yield* this.streamThreadEvents(await resolveRefreshThreadStreamInput(input));
+  async *refreshThreadEvents(
+    input: RefreshThreadInput,
+  ): AsyncGenerator<string> {
+    yield* this.streamThreadEvents(
+      await resolveRefreshThreadStreamInput(input),
+    );
   }
 
   async editThread(input: EditThreadInput) {
@@ -340,7 +561,17 @@ class ContentThreadStreamService {
     input: StreamThreadEventInput,
   ): AsyncGenerator<string> {
     const prepareStartedAt = new Date();
-    const prepared = await this.turnService.prepareThreadTurn(input);
+    const prepared = await this.turnService
+      .prepareThreadTurn(input)
+      .catch(async (error: unknown) => {
+        await observePrepareFailure({
+          request: input,
+          operation: "chat.stream",
+          startedAt: prepareStartedAt,
+          error,
+        });
+        throw error;
+      });
     const prepareEndedAt = new Date();
     prepared.traceContext = buildThreadTraceContext(prepared);
     await startThreadTrace({
@@ -349,7 +580,7 @@ class ContentThreadStreamService {
       operation: "chat.stream",
     });
     const chatStartedAt = Date.now();
-    await startSpan({
+    await threadStreamObservability.startSpan({
       ...prepared.traceContext,
       spanId: "prepare_thread_turn",
       name: "prepare_thread_turn",
@@ -363,8 +594,10 @@ class ContentThreadStreamService {
         profileAlias: prepared.profileAlias,
       },
     });
-    await endSpan({
+    await threadStreamObservability.endSpan({
       traceId: prepared.traceContext.traceId,
+      teamId: prepared.traceContext.teamId,
+      workspaceId: prepared.traceContext.workspaceId,
       spanId: "prepare_thread_turn",
       status: "ok",
       endedAt: prepareEndedAt,
@@ -373,118 +606,133 @@ class ContentThreadStreamService {
     });
 
     const textId = `text-${prepared.userMessage.id}`;
-    yield toSseData({ type: "start", messageId: prepared.userMessage.id });
-    yield toSseData({ type: "text-start", id: textId });
-
-    const titleUpdates: Array<{ id: string; title: string }> = [];
-    let titleUpdateEmitted = false;
-    const titleJob = await this.enqueueTitleJob({ prepared });
-    const titleJobId = titleJob?.id ? String(titleJob.id) : undefined;
-
-    const emitTitleUpdates = function* () {
-      while (titleUpdates.length > 0) {
-        const update = titleUpdates.shift()!;
-        titleUpdateEmitted = true;
-        yield toSseData({
-          type: "thread-title-update",
-          threadId: update.id,
-          title: update.title,
-        });
-      }
-    };
-
     let traceEnded = false;
+    let agentSpanStarted = false;
     let agentSpanCompleted = false;
     let outcome: DeepAgentTurnOutcome | null = null;
     try {
-      const agentEvents = this.invokeAgentTurn({
-        prepared,
-        llm: prepared.llm,
-        traceContext: {
+      yield toSseData({ type: "start", messageId: prepared.userMessage.id });
+      yield toSseData({ type: "text-start", id: textId });
+
+      const titleUpdates: Array<{ id: string; title: string }> = [];
+      let titleUpdateEmitted = false;
+      const titleJob = await this.enqueueTitleJob({ prepared });
+      const titleJobId = titleJob?.id ? String(titleJob.id) : undefined;
+
+      const emitTitleUpdates = function* () {
+        while (titleUpdates.length > 0) {
+          const update = titleUpdates.shift()!;
+          titleUpdateEmitted = true;
+          yield toSseData({
+            type: "thread-title-update",
+            threadId: update.id,
+            title: update.title,
+          });
+        }
+      };
+
+      try {
+        const agentEvents = this.invokeAgentTurn({
+          prepared,
+          llm: prepared.llm,
+          traceContext: {
+            ...prepared.traceContext,
+            parentSpanId: "agent_run",
+          },
+        });
+        await threadStreamObservability.startSpan({
           ...prepared.traceContext,
-          parentSpanId: "agent_run",
-        },
-      });
-      await startSpan({
-        ...prepared.traceContext,
-        spanId: "agent_run",
-        name: "agent_run",
-        kind: "agent",
-        operation: "agent.run",
-        input: {
-          message: prepared.messageContent,
-          modelAlias: prepared.modelAlias,
-          profileAlias: prepared.profileAlias,
-          sourceCount: prepared.sourceIds.length,
-        },
-        metadata: {
-          ...buildAgentRunSpanMetadata(prepared),
-        },
-      });
-      let nextAgentEvent = agentEvents.next();
-      let titleSettled = false;
-      let titleResolvedCompletion: ThreadTitleJobCompletion | null = null;
-      const titleCompletion: Promise<ThreadTitleJobCompletion> | null = titleJob
-        ? waitForThreadTitleJob({ job: titleJob, prepared }).then((completion) => {
-            titleSettled = true;
-            titleResolvedCompletion = completion;
-            return completion;
-          })
-        : null;
-      let nextTitleEvent: Promise<ThreadTitleJobCompletion> | null = titleCompletion;
+          spanId: "agent_run",
+          name: "agent_run",
+          kind: "agent",
+          operation: "agent.run",
+          input: {
+            message: prepared.messageContent,
+            modelAlias: prepared.modelAlias,
+            profileAlias: prepared.profileAlias,
+            sourceCount: prepared.sourceIds.length,
+          },
+          metadata: {
+            ...buildAgentRunSpanMetadata(prepared),
+          },
+        });
+        agentSpanStarted = true;
+        let nextAgentEvent = agentEvents.next();
+        let titleSettled = false;
+        let titleResolvedCompletion: ThreadTitleJobCompletion | null = null;
+        const titleCompletion: Promise<ThreadTitleJobCompletion> | null =
+          titleJob
+            ? waitForThreadTitleJob({ job: titleJob, prepared }).then(
+                (completion) => {
+                  titleSettled = true;
+                  titleResolvedCompletion = completion;
+                  return completion;
+                },
+              )
+            : null;
+        let nextTitleEvent: Promise<ThreadTitleJobCompletion> | null =
+          titleCompletion;
 
-      while (true) {
-        const result = await Promise.race([
-          nextAgentEvent.then((value) => ({ type: "agent" as const, value })),
-          ...(nextTitleEvent ? [nextTitleEvent.then((value) => ({ type: "title" as const, value }))] : []),
-        ]);
+        while (true) {
+          const result = await Promise.race([
+            nextAgentEvent.then((value) => ({ type: "agent" as const, value })),
+            ...(nextTitleEvent
+              ? [
+                  nextTitleEvent.then((value) => ({
+                    type: "title" as const,
+                    value,
+                  })),
+                ]
+              : []),
+          ]);
 
-        if (result.type === "title") {
-          nextTitleEvent = null;
-          const update = titleCompletionToUpdate(result.value);
-          if (update) {
-            titleUpdates.push(update);
+          if (result.type === "title") {
+            nextTitleEvent = null;
+            const update = titleCompletionToUpdate(result.value);
+            if (update) {
+              titleUpdates.push(update);
+            }
+            titleResolvedCompletion = null;
+            yield* emitTitleUpdates();
+            continue;
           }
-          titleResolvedCompletion = null;
+
+          const { value: event, done } = result.value;
+          if (done) {
+            break;
+          }
+
+          nextAgentEvent = agentEvents.next();
+          if (event.type === "done") {
+            outcome = event.outcome;
+            continue;
+          }
+
+          yield mapDeepAgentEventToSse(event, textId);
           yield* emitTitleUpdates();
-          continue;
         }
 
-        const { value: event, done } = result.value;
-        if (done) {
-          break;
+        if (!outcome) {
+          throw new ContentError(
+            502,
+            "MODEL_EMPTY_RESPONSE",
+            "Model returned no response",
+          );
         }
+        const completedOutcome = outcome;
 
-        nextAgentEvent = agentEvents.next();
-        if (event.type === "done") {
-          outcome = event.outcome;
-          continue;
-        }
+        await threadStreamObservability.endSpan({
+          traceId: prepared.traceContext.traceId,
+          teamId: prepared.traceContext.teamId,
+          workspaceId: prepared.traceContext.workspaceId,
+          spanId: "agent_run",
+          status: "ok",
+          latencyMs: Date.now() - chatStartedAt,
+          output: buildAgentRunSpanOutput(completedOutcome),
+        });
+        agentSpanCompleted = true;
 
-        yield mapDeepAgentEventToSse(event, textId);
-        yield* emitTitleUpdates();
-      }
-
-      if (!outcome) {
-        throw new ContentError(
-          502,
-          "MODEL_EMPTY_RESPONSE",
-          "Model returned no response",
-        );
-      }
-      const completedOutcome = outcome;
-
-      await endSpan({
-        traceId: prepared.traceContext.traceId,
-        spanId: "agent_run",
-        status: "ok",
-        latencyMs: Date.now() - chatStartedAt,
-        output: buildAgentRunSpanOutput(completedOutcome),
-      });
-      agentSpanCompleted = true;
-
-      const { assistantMessage } =
-        await withObservedSpan({
+        const { assistantMessage } = await withObservedSpan({
           trace: prepared.traceContext,
           spanId: "finalize_thread_turn",
           name: "finalize_thread_turn",
@@ -506,119 +754,152 @@ class ContentThreadStreamService {
             retrievalCallCount: completedOutcome.retrievalCalls.length,
             saved: true,
           }),
-          execute: () => this.turnService.finalizeThreadTurn({
-            prepared,
-            retrieval: completedOutcome.retrieval,
-            citations: completedOutcome.citations,
-            availableCitations: completedOutcome.availableCitations,
-            retrievalCalls: completedOutcome.retrievalCalls,
-            toolCalls: completedOutcome.toolCalls,
-            thinkingSteps: completedOutcome.thinkingSteps,
-            reasoningSegments: completedOutcome.reasoningSegments,
-            llm: prepared.llm,
-            operation: "chat.stream",
-            assistantContent: completedOutcome.assistantContent,
-            usage: completedOutcome.usage,
-            finishReason: completedOutcome.finishReason,
-            reasoning: completedOutcome.reasoning,
-            agentCheckpoint: completedOutcome.agentCheckpoint,
-            latencyMs: Date.now() - chatStartedAt,
-          }),
+          execute: () =>
+            this.turnService.finalizeThreadTurn({
+              prepared,
+              retrieval: completedOutcome.retrieval,
+              citations: completedOutcome.citations,
+              availableCitations: completedOutcome.availableCitations,
+              retrievalCalls: completedOutcome.retrievalCalls,
+              toolCalls: completedOutcome.toolCalls,
+              thinkingSteps: completedOutcome.thinkingSteps,
+              reasoningSegments: completedOutcome.reasoningSegments,
+              llm: prepared.llm,
+              operation: "chat.stream",
+              assistantContent: completedOutcome.assistantContent,
+              usage: completedOutcome.usage,
+              finishReason: completedOutcome.finishReason,
+              reasoning: completedOutcome.reasoning,
+              agentCheckpoint: completedOutcome.agentCheckpoint,
+              latencyMs: Date.now() - chatStartedAt,
+            }),
         });
 
-      yield toSseData({ type: "text-end", id: textId });
-      yield toSseData({
-        type: "assistant-message",
-        messageId: assistantMessage.id,
-        userMessageId: prepared.userMessage.id,
-        parentMessageId: assistantMessage.parentMessageId,
-      });
-      if (titleResolvedCompletion) {
-        const update = titleCompletionToUpdate(titleResolvedCompletion);
-        if (update) {
-          titleUpdates.push(update);
-        }
-        titleResolvedCompletion = null;
-      }
-      yield* emitTitleUpdates();
-      if (titleJob && !titleSettled && !titleUpdateEmitted) {
+        yield toSseData({ type: "text-end", id: textId });
         yield toSseData({
-          type: "thread-title-pending",
-          threadId: prepared.thread.id,
-          jobId: titleJobId,
+          type: "assistant-message",
+          messageId: assistantMessage.id,
+          userMessageId: prepared.userMessage.id,
+          parentMessageId: assistantMessage.parentMessageId,
         });
-      }
-    } catch (error) {
-      const contentError =
-        error instanceof ContentError ? error : toContentServiceError(error);
+        if (titleResolvedCompletion) {
+          const update = titleCompletionToUpdate(titleResolvedCompletion);
+          if (update) {
+            titleUpdates.push(update);
+          }
+          titleResolvedCompletion = null;
+        }
+        yield* emitTitleUpdates();
+        if (titleJob && !titleSettled && !titleUpdateEmitted) {
+          yield toSseData({
+            type: "thread-title-pending",
+            threadId: prepared.thread.id,
+            jobId: titleJobId,
+          });
+        }
+      } catch (error) {
+        const contentError = toObservationError(error);
 
-      await recordThreadStreamFailure({
-        prepared,
-        contentError,
-        operation: "chat.stream",
-        llm: prepared.llm,
-      });
-      const errorMessage = await this.createErrorMessage({
-        prepared,
-        contentError,
-      });
-      if (!errorMessage) {
-        await rollbackCreatedUserMessage({ prepared });
-      }
-      if (!agentSpanCompleted) {
-        await endSpan({
-          traceId: prepared.traceContext.traceId,
-          spanId: "agent_run",
+        await recordThreadStreamFailure({
+          prepared,
+          contentError,
+          operation: "chat.stream",
+          llm: prepared.llm,
+        });
+        const errorMessage = await this.createErrorMessage({
+          prepared,
+          contentError,
+        });
+        if (
+          !errorMessage &&
+          prepared.failurePersistence === "persist-error-turn"
+        ) {
+          await rollbackCreatedUserMessage({ prepared });
+        }
+        await endAgentRunSpanIfOpen({
+          prepared,
+          started: agentSpanStarted,
+          completed: agentSpanCompleted,
           status: "error",
           latencyMs: Date.now() - chatStartedAt,
           errorCode: contentError.code,
           errorMessage: contentError.message,
         });
+        agentSpanCompleted = agentSpanCompleted || agentSpanStarted;
+        traceEnded =
+          (await endThreadTraceIfOpen({
+            prepared,
+            ended: traceEnded,
+            operation: "chat.stream",
+            status: "error",
+            latencyMs: Date.now() - chatStartedAt,
+            errorCode: contentError.code,
+            errorMessage: contentError.message,
+          })) || traceEnded;
+
+        yield toSseData({ type: "text-end", id: textId });
+
+        yield toSseData({
+          type: "error",
+          code: contentError.code,
+          error: contentError.message,
+          userMessageId: prepared.userMessage.id,
+          messageId: errorMessage?.id,
+          parentMessageId: errorMessage?.parentMessageId,
+        });
       }
-      await endTrace({
-        traceId: prepared.traceContext.traceId,
-        status: "error",
-        latencyMs: Date.now() - chatStartedAt,
-        errorCode: contentError.code,
-        errorMessage: contentError.message,
-        metadata: buildTraceMetadata({
+
+      if (!traceEnded) {
+        traceEnded =
+          (await endThreadTraceIfOpen({
+            prepared,
+            ended: traceEnded,
+            operation: "chat.stream",
+            status: "ok",
+            latencyMs: Date.now() - chatStartedAt,
+            outcome,
+          })) || traceEnded;
+      }
+      yield toSseData({ type: "finish" });
+    } finally {
+      if (!traceEnded) {
+        await endAgentRunSpanIfOpen({
           prepared,
-          operation: "chat.stream",
-        }),
-      });
-      traceEnded = true;
-
-      yield toSseData({ type: "text-end", id: textId });
-
-      yield toSseData({
-        type: "error",
-        code: contentError.code,
-        error: contentError.message,
-        userMessageId: prepared.userMessage.id,
-        messageId: errorMessage?.id,
-        parentMessageId: errorMessage?.parentMessageId,
-      });
+          started: agentSpanStarted,
+          completed: agentSpanCompleted,
+          status: "cancelled",
+          latencyMs: Date.now() - chatStartedAt,
+          errorCode: "CLIENT_CANCELLED",
+          errorMessage: "Client closed the stream before completion",
+        });
+        agentSpanCompleted = agentSpanCompleted || agentSpanStarted;
+        traceEnded =
+          (await endThreadTraceIfOpen({
+            prepared,
+            ended: traceEnded,
+            operation: "chat.stream",
+            status: "cancelled",
+            latencyMs: Date.now() - chatStartedAt,
+            errorCode: "CLIENT_CANCELLED",
+            errorMessage: "Client closed the stream before completion",
+          })) || traceEnded;
+      }
     }
-
-    if (!traceEnded) {
-      await endTrace({
-        traceId: prepared.traceContext.traceId,
-        status: "ok",
-        latencyMs: Date.now() - chatStartedAt,
-        output: outcome ? buildTraceOutput(outcome) : undefined,
-        metadata: buildTraceMetadata({
-          prepared,
-          operation: "chat.stream",
-        }),
-      });
-    }
-
-    yield toSseData({ type: "finish" });
   }
 
   async streamThread(input: StreamThreadEventInput) {
     const prepareStartedAt = new Date();
-    const prepared = await this.turnService.prepareThreadTurn(input);
+    const prepared = await this.turnService
+      .prepareThreadTurn(input)
+      .catch(async (error: unknown) => {
+        await observePrepareFailure({
+          request: input,
+          operation: "chat.complete",
+          startedAt: prepareStartedAt,
+          error,
+        });
+        throw error;
+      });
     const prepareEndedAt = new Date();
     prepared.traceContext = buildThreadTraceContext(prepared);
     await startThreadTrace({
@@ -627,7 +908,7 @@ class ContentThreadStreamService {
       operation: "chat.complete",
     });
     const chatStartedAt = Date.now();
-    await startSpan({
+    await threadStreamObservability.startSpan({
       ...prepared.traceContext,
       spanId: "prepare_thread_turn",
       name: "prepare_thread_turn",
@@ -641,15 +922,17 @@ class ContentThreadStreamService {
         profileAlias: prepared.profileAlias,
       },
     });
-    await endSpan({
+    await threadStreamObservability.endSpan({
       traceId: prepared.traceContext.traceId,
+      teamId: prepared.traceContext.teamId,
+      workspaceId: prepared.traceContext.workspaceId,
       spanId: "prepare_thread_turn",
       status: "ok",
       endedAt: prepareEndedAt,
       latencyMs: prepareEndedAt.getTime() - prepareStartedAt.getTime(),
       output: buildPrepareSpanOutput(prepared),
     });
-    await startSpan({
+    await threadStreamObservability.startSpan({
       ...prepared.traceContext,
       spanId: "agent_run",
       name: "agent_run",
@@ -667,83 +950,87 @@ class ContentThreadStreamService {
     });
     let agentSpanCompleted = false;
     let traceEnded = false;
+    let outcome: DeepAgentTurnOutcome | null = null;
 
-    const outcome = await (async () => {
-      let doneOutcome: DeepAgentTurnOutcome | null = null;
-      for await (const event of this.invokeAgentTurn({
-        prepared,
-        llm: prepared.llm,
-        traceContext: {
-          ...prepared.traceContext!,
-          parentSpanId: "agent_run",
-        },
-      })) {
-        if (event.type === "done") {
-          doneOutcome = event.outcome;
+    try {
+      outcome = await (async () => {
+        let doneOutcome: DeepAgentTurnOutcome | null = null;
+        for await (const event of this.invokeAgentTurn({
+          prepared,
+          llm: prepared.llm,
+          traceContext: {
+            ...prepared.traceContext!,
+            parentSpanId: "agent_run",
+          },
+        })) {
+          if (event.type === "done") {
+            doneOutcome = event.outcome;
+          }
         }
-      }
 
-      if (!doneOutcome) {
-        throw new ContentError(
-          502,
-          "MODEL_EMPTY_RESPONSE",
-          "Model returned no response",
-        );
-      }
+        if (!doneOutcome) {
+          throw new ContentError(
+            502,
+            "MODEL_EMPTY_RESPONSE",
+            "Model returned no response",
+          );
+        }
 
-      return doneOutcome;
-    })().catch(async (error: unknown) => {
-      const contentError =
-        error instanceof ContentError ? error : toContentServiceError(error);
-      await recordThreadStreamFailure({
-        prepared,
-        contentError,
-        operation: "chat.complete",
-        llm: prepared.llm,
-      });
-      const errorMessage = await this.createErrorMessage({
-        prepared,
-        contentError,
-      });
-      if (!errorMessage) {
-        await rollbackCreatedUserMessage({ prepared });
-      }
-      if (!agentSpanCompleted) {
-        await endSpan({
-          traceId: prepared.traceContext!.traceId,
-          spanId: "agent_run",
+        return doneOutcome;
+      })().catch(async (error: unknown) => {
+        const contentError = toObservationError(error);
+        await recordThreadStreamFailure({
+          prepared,
+          contentError,
+          operation: "chat.complete",
+          llm: prepared.llm,
+        });
+        const errorMessage = await this.createErrorMessage({
+          prepared,
+          contentError,
+        });
+        if (
+          !errorMessage &&
+          prepared.failurePersistence === "persist-error-turn"
+        ) {
+          await rollbackCreatedUserMessage({ prepared });
+        }
+        await endAgentRunSpanIfOpen({
+          prepared,
+          started: true,
+          completed: agentSpanCompleted,
           status: "error",
           latencyMs: Date.now() - chatStartedAt,
           errorCode: contentError.code,
           errorMessage: contentError.message,
         });
-      }
-      await endTrace({
-        traceId: prepared.traceContext!.traceId,
-        status: "error",
-        latencyMs: Date.now() - chatStartedAt,
-        errorCode: contentError.code,
-        errorMessage: contentError.message,
-        metadata: buildTraceMetadata({
-          prepared,
-          operation: "chat.complete",
-        }),
+        agentSpanCompleted = true;
+        traceEnded =
+          (await endThreadTraceIfOpen({
+            prepared,
+            ended: traceEnded,
+            operation: "chat.complete",
+            status: "error",
+            latencyMs: Date.now() - chatStartedAt,
+            errorCode: contentError.code,
+            errorMessage: contentError.message,
+          })) || traceEnded;
+        throw contentError;
       });
-      traceEnded = true;
-      throw contentError;
-    });
 
-    await endSpan({
-      traceId: prepared.traceContext.traceId,
-      spanId: "agent_run",
-      status: "ok",
-      latencyMs: Date.now() - chatStartedAt,
-      output: buildAgentRunSpanOutput(outcome),
-    });
-    agentSpanCompleted = true;
+      const completedOutcome = outcome;
+      await threadStreamObservability.endSpan({
+        traceId: prepared.traceContext.traceId,
+        teamId: prepared.traceContext.teamId,
+        workspaceId: prepared.traceContext.workspaceId,
+        spanId: "agent_run",
+        status: "ok",
+        latencyMs: Date.now() - chatStartedAt,
+        output: buildAgentRunSpanOutput(completedOutcome),
+      });
+      agentSpanCompleted = true;
 
-    const { assistantMessage, billing } =
-      await withObservedSpan({
+      const { assistantMessage, billing } = await withObservedSpan({
         trace: prepared.traceContext,
         spanId: "finalize_thread_turn",
         name: "finalize_thread_turn",
@@ -751,72 +1038,98 @@ class ContentThreadStreamService {
         operation: "thread.finalize",
         input: buildFinalizeSpanInput({
           prepared,
-          outcome,
+          outcome: completedOutcome,
           operation: "chat.complete",
           latencyMs: Date.now() - chatStartedAt,
         }),
         output: (result) => ({
           assistantMessageId: result.assistantMessage.id,
           parentMessageId: result.assistantMessage.parentMessageId,
-          contentLength: outcome.assistantContent.length,
-          citationCount: outcome.citations.length,
-          availableCitationCount: outcome.availableCitations.length,
-          toolCallCount: outcome.toolCalls.length,
-          retrievalCallCount: outcome.retrievalCalls.length,
+          contentLength: completedOutcome.assistantContent.length,
+          citationCount: completedOutcome.citations.length,
+          availableCitationCount: completedOutcome.availableCitations.length,
+          toolCallCount: completedOutcome.toolCalls.length,
+          retrievalCallCount: completedOutcome.retrievalCalls.length,
           saved: true,
         }),
-        execute: () => this.turnService.finalizeThreadTurn({
-          prepared,
-          retrieval: outcome.retrieval,
-          citations: outcome.citations,
-          availableCitations: outcome.availableCitations,
-          retrievalCalls: outcome.retrievalCalls,
-          toolCalls: outcome.toolCalls,
-          thinkingSteps: outcome.thinkingSteps,
-          reasoningSegments: outcome.reasoningSegments,
-          llm: prepared.llm,
-          operation: "chat.complete",
-          assistantContent: outcome.assistantContent,
-          usage: outcome.usage,
-          finishReason: outcome.finishReason,
-          reasoning: outcome.reasoning,
-          agentCheckpoint: outcome.agentCheckpoint,
-          latencyMs: Date.now() - chatStartedAt,
-          modelForMessage: prepared.modelAlias,
-        }),
+        execute: () =>
+          this.turnService.finalizeThreadTurn({
+            prepared,
+            retrieval: completedOutcome.retrieval,
+            citations: completedOutcome.citations,
+            availableCitations: completedOutcome.availableCitations,
+            retrievalCalls: completedOutcome.retrievalCalls,
+            toolCalls: completedOutcome.toolCalls,
+            thinkingSteps: completedOutcome.thinkingSteps,
+            reasoningSegments: completedOutcome.reasoningSegments,
+            llm: prepared.llm,
+            operation: "chat.complete",
+            assistantContent: completedOutcome.assistantContent,
+            usage: completedOutcome.usage,
+            finishReason: completedOutcome.finishReason,
+            reasoning: completedOutcome.reasoning,
+            agentCheckpoint: completedOutcome.agentCheckpoint,
+            latencyMs: Date.now() - chatStartedAt,
+            modelForMessage: prepared.modelAlias,
+          }),
       });
 
-    const titleJob = await this.enqueueTitleJob({ prepared });
-    if (titleJob) {
-      await waitForThreadTitleJob({ job: titleJob, prepared });
-    }
+      const titleJob = await this.enqueueTitleJob({ prepared });
+      if (titleJob) {
+        await waitForThreadTitleJob({ job: titleJob, prepared });
+      }
 
-    if (!traceEnded) {
-      await endTrace({
-        traceId: prepared.traceContext.traceId,
-        status: "ok",
+      if (!traceEnded) {
+        traceEnded =
+          (await endThreadTraceIfOpen({
+            prepared,
+            ended: traceEnded,
+            operation: "chat.complete",
+            status: "ok",
+            latencyMs: Date.now() - chatStartedAt,
+            outcome: completedOutcome,
+          })) || traceEnded;
+      }
+
+      return {
+        thread: prepared.thread,
+        userMessage: prepared.userMessage,
+        assistantMessage,
+        billing,
+        retrieval: {
+          embeddingProfileId: completedOutcome.retrieval?.profile.id ?? null,
+          vectorStrategy: completedOutcome.retrieval?.planner.strategy ?? null,
+          annIndexUsed:
+            completedOutcome.retrieval?.planner.annIndexUsed ?? null,
+          citations: completedOutcome.citations,
+          availableCitations: completedOutcome.availableCitations,
+        },
+      };
+    } catch (error) {
+      const contentError = toObservationError(error);
+      await endAgentRunSpanIfOpen({
+        prepared,
+        started: true,
+        completed: agentSpanCompleted,
+        status: "error",
         latencyMs: Date.now() - chatStartedAt,
-        output: buildTraceOutput(outcome),
-        metadata: buildTraceMetadata({
-          prepared,
-          operation: "chat.complete",
-        }),
+        errorCode: contentError.code,
+        errorMessage: contentError.message,
       });
+      agentSpanCompleted = true;
+      traceEnded =
+        (await endThreadTraceIfOpen({
+          prepared,
+          ended: traceEnded,
+          operation: "chat.complete",
+          status: "error",
+          latencyMs: Date.now() - chatStartedAt,
+          outcome,
+          errorCode: contentError.code,
+          errorMessage: contentError.message,
+        })) || traceEnded;
+      throw error;
     }
-
-    return {
-      thread: prepared.thread,
-      userMessage: prepared.userMessage,
-      assistantMessage,
-      billing,
-      retrieval: {
-        embeddingProfileId: outcome.retrieval?.profile.id ?? null,
-        vectorStrategy: outcome.retrieval?.planner.strategy ?? null,
-        annIndexUsed: outcome.retrieval?.planner.annIndexUsed ?? null,
-        citations: outcome.citations,
-        availableCitations: outcome.availableCitations,
-      },
-    };
   }
 }
 

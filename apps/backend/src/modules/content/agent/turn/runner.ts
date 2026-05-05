@@ -395,6 +395,11 @@ export async function* invokeDeepAgentTurn(input: {
   let lastEmittedCitationCount = 0;
   let eventSequence = 0;
   let currentReasoningSegment: DeepAgentTurnOutcome["reasoningSegments"][number] | null = null;
+  let nextReasoningContext:
+    | { phase: "initial" }
+    | { phase: "after_tool"; toolCallId: string; tool: string } = {
+      phase: "initial",
+    };
 
   const nextSequence = () => {
     eventSequence += 1;
@@ -420,6 +425,13 @@ export async function* invokeDeepAgentTurn(input: {
         text: "",
         sequence: nextSequence(),
         durationMs: 0,
+        phase: nextReasoningContext.phase,
+        ...(nextReasoningContext.phase === "after_tool"
+          ? {
+              toolCallId: nextReasoningContext.toolCallId,
+              tool: nextReasoningContext.tool,
+            }
+          : {}),
       };
       reasoningSegments.push(currentReasoningSegment);
     }
@@ -818,6 +830,12 @@ export async function* invokeDeepAgentTurn(input: {
     }
 
     if (event === "on_tool_end") {
+      currentReasoningSegment = null;
+      nextReasoningContext = {
+        phase: "after_tool",
+        toolCallId,
+        tool: toolName,
+      };
       const retrievalCall = retrievalCallsById.get(toolCallId);
       const toolRetrieval = retrievalsByToolCallId.get(toolCallId) ?? null;
       const startedAt = toolStartedAtById.get(toolCallId);
@@ -846,6 +864,8 @@ export async function* invokeDeepAgentTurn(input: {
       if (input.traceContext) {
         await endSpan({
           traceId: input.traceContext.traceId,
+          teamId: input.traceContext.teamId,
+          workspaceId: input.traceContext.workspaceId,
           spanId: toolCallId,
           status: "ok",
           latencyMs,
@@ -939,6 +959,12 @@ export async function* invokeDeepAgentTurn(input: {
     }
 
     if (event === "on_tool_error") {
+      currentReasoningSegment = null;
+      nextReasoningContext = {
+        phase: "after_tool",
+        toolCallId,
+        tool: toolName,
+      };
       const startedAt = toolStartedAtById.get(toolCallId);
       const latencyMs =
         typeof startedAt === "number"
@@ -956,6 +982,8 @@ export async function* invokeDeepAgentTurn(input: {
       if (input.traceContext) {
         await endSpan({
           traceId: input.traceContext.traceId,
+          teamId: input.traceContext.teamId,
+          workspaceId: input.traceContext.workspaceId,
           spanId: toolCallId,
           status: "error",
           latencyMs,

@@ -39,6 +39,8 @@ async function withRetrievalChildSpan<T>(input: {
     const output = await input.execute();
     await endSpan({
       traceId: input.traceContext.traceId,
+      teamId: input.traceContext.teamId,
+      workspaceId: input.traceContext.workspaceId,
       spanId: input.spanId,
       status: "ok",
       latencyMs: Date.now() - startedAt,
@@ -48,6 +50,8 @@ async function withRetrievalChildSpan<T>(input: {
   } catch (error) {
     await endSpan({
       traceId: input.traceContext.traceId,
+      teamId: input.traceContext.teamId,
+      workspaceId: input.traceContext.workspaceId,
       spanId: input.spanId,
       status: "error",
       latencyMs: Date.now() - startedAt,

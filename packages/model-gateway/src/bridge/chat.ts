@@ -86,6 +86,13 @@ function extractReasoningFromRecord(responseMetadata: Record<string, unknown> | 
   return undefined;
 }
 
+function appendText(current: string | undefined, next: string | undefined) {
+  if (!next) {
+    return current;
+  }
+  return current ? `${current}${next}` : next;
+}
+
 export function extractReasoning(raw: {
   additional_kwargs?: unknown;
   content?: unknown;
@@ -208,7 +215,7 @@ export async function* runBridgeChatStream(input: {
           }),
         ) ?? usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
-      reasoning = extractReasoning(chunk) ?? reasoning;
+      reasoning = appendText(reasoning, extractReasoning(chunk));
       providerFields = responseMetadata ?? providerFields;
 
       yield { type: "chunk", chunk };

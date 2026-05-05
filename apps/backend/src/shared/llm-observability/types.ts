@@ -58,6 +58,8 @@ export type StartTraceInput = WriterOptions & {
 
 export type EndTraceInput = WriterOptions & {
   traceId: string;
+  teamId: string;
+  workspaceId: string;
   status: Exclude<LlmObservationStatus, "running">;
   endedAt?: Date;
   latencyMs?: number | null;
@@ -80,6 +82,8 @@ export type StartSpanInput = WriterOptions & TraceContext & {
 
 export type EndSpanInput = WriterOptions & {
   traceId: string;
+  teamId: string;
+  workspaceId: string;
   spanId: string;
   status: Exclude<LlmObservationStatus, "running">;
   output?: unknown;
@@ -120,6 +124,8 @@ export type StartGenerationInput = WriterOptions & TraceContext & {
 
 export type EndGenerationInput = WriterOptions & {
   traceId: string;
+  teamId: string;
+  workspaceId: string;
   spanId: string;
   output?: unknown;
   outputText?: string | null;
@@ -144,6 +150,8 @@ export type EndGenerationInput = WriterOptions & {
 
 export type RecordGenerationErrorInput = WriterOptions & {
   traceId: string;
+  teamId: string;
+  workspaceId: string;
   spanId: string;
   error?: unknown;
   errorCode?: string | null;

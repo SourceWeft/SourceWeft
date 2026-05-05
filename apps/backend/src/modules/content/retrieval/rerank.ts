@@ -33,6 +33,7 @@ export async function rerankCandidates(input: {
 
   const rerankProfile = await requireDefaultModelGatewayProfile("rerank");
   const gateway = await getModelGatewayClient(rerankProfile.gatewayConfigId);
+  const startedAt = Date.now();
   const rerankResult = await gateway.rerank
     .rank(
       {
@@ -87,9 +88,33 @@ export async function rerankCandidates(input: {
         success: false,
         errorCode: contentError.code,
         errorMessage: contentError.message,
+        latencyMs: Date.now() - startedAt,
       });
       throw contentError;
     });
+
+  await recordGatewayOperationEvent({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    threadId: input.threadId,
+    messageId: null,
+    feature: "retrieval_rerank",
+    operation: "rerank.rank",
+    modelKind: "rerank",
+    modelAlias: rerankProfile.modelAlias,
+    llm: input.llm,
+    provider: rerankResult.provider,
+    routeDecision: rerankResult.routeDecision as unknown as Record<string, unknown> | null,
+    usage: rerankResult.usage,
+    traceId: input.traceContext?.traceId,
+    success: true,
+    latencyMs: Date.now() - startedAt,
+    attributes: {
+      inputCandidateCount: input.candidates.length,
+      outputCandidateCount: rerankResult.results.length,
+    },
+  });
 
   return {
     modelAlias: rerankProfile.modelAlias,

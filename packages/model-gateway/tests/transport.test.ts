@@ -53,16 +53,86 @@ test("requestJson retries retryable errors and emits a success span", async () =
     assert.equal(spans.length, 1);
     assert.equal(spans[0]?.status, "ok");
     assert.equal(spans[0]?.traceId, "trace_retry");
-    assert.equal(spans[0]?.name, "http:/health");
+    assert.equal(spans[0]?.name, "http.request");
 
     const attributes = spans[0]?.attributes as Record<string, unknown> | undefined;
     assert.equal(attributes?.attempt, 1);
-    assert.equal(attributes?.url, "https://gateway.example.com/health");
+    assert.equal("url" in (attributes ?? {}), false);
     assert.equal(attributes?.method, "POST");
     assert.equal(typeof attributes?.latencyMs, "number");
   } finally {
     Math.random = originalRandom;
   }
+});
+
+test("requestJson ignores observe span failures", async () => {
+  const warnings: Array<Record<string, unknown> | undefined> = [];
+  const config = resolveModelGatewayConfig({
+    baseUrl: "https://gateway.example.com",
+    fetch: async () => createJsonResponse({ ok: true }),
+    logger: {
+      warn(_message, data) {
+        warnings.push(data);
+      },
+    },
+    observeSink: {
+      onSpan() {
+        throw new Error("observer down");
+      },
+    },
+  });
+
+  const result = await requestJson<Record<string, unknown>>(config, {
+    path: "/health",
+    options: { traceId: "trace_observe_failure" },
+  });
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.error, "observer down");
+});
+
+test("requestJson includes request metadata scope in observe spans", async () => {
+  const spans: ObserveSpan[] = [];
+  const config = resolveModelGatewayConfig({
+    baseUrl: "https://gateway.example.com",
+    fetch: async () => createJsonResponse({ ok: true }),
+    observeSink: {
+      onSpan(span) {
+        spans.push(span);
+      },
+    },
+  });
+
+  await requestJson<Record<string, unknown>>(config, {
+    path: "/health",
+    options: {
+      traceId: "trace_scope",
+      metadata: {
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        threadId: "thread-1",
+        messageId: "message-1",
+        feature: "chat",
+        operation: "chat.complete",
+      },
+    },
+  });
+
+  assert.equal(spans.length, 1);
+  assert.deepEqual(spans[0]?.attributes, {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    userId: "user-1",
+    threadId: "thread-1",
+    messageId: "message-1",
+    feature: "chat",
+    operation: "chat.complete",
+    attempt: 0,
+    latencyMs: spans[0]?.attributes?.latencyMs,
+    method: "POST",
+  });
 });
 
 test("requestJson converts aborts into timeout errors and emits an error span", async () => {

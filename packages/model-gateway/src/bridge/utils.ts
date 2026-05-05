@@ -18,6 +18,7 @@ import type {
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RequestOptions,
+  ToolCall,
 } from "../types";
 import { resolveModelGatewayConfig, resolveRequestTarget } from "../config";
 import {
@@ -206,7 +207,10 @@ async function* observeStream(input: {
         responseMetadata,
       })) ?? usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
-      reasoning = extractReasoning(chunk as Parameters<typeof extractReasoning>[0]) ?? reasoning;
+      const nextReasoning = extractReasoning(
+        chunk as Parameters<typeof extractReasoning>[0],
+      );
+      reasoning = appendText(reasoning, nextReasoning);
       providerFields = responseMetadata ?? providerFields;
       const content = (chunk as { content?: unknown }).content;
       if (typeof content === "string") outputText += content;
@@ -252,6 +256,7 @@ function normalizeObservedMessages(value: unknown): GatewayMessage[] {
   }
   return value.map((message) => {
     const record = message && typeof message === "object" ? message as Record<string, unknown> : {};
+    const kwargs = toRecord(record.kwargs) ?? toRecord(record.lc_kwargs);
     const type = typeof record.type === "string" ? record.type : typeof record._getType === "string" ? record._getType : undefined;
     const role = type?.includes("system")
       ? "system"
@@ -260,19 +265,96 @@ function normalizeObservedMessages(value: unknown): GatewayMessage[] {
         : type?.includes("tool")
           ? "tool"
           : "user";
-    const content = normalizeObservedContent(record.content ?? toRecord(record.kwargs)?.content ?? toRecord(record.lc_kwargs)?.content);
-    return {
+    const content = normalizeObservedContent(record.content ?? kwargs?.content);
+    const toolCalls = normalizeObservedToolCalls(record, kwargs);
+    return compactGatewayMessage({
       role,
       content,
       toolCallId: typeof record.tool_call_id === "string" ? record.tool_call_id : typeof record.toolCallId === "string" ? record.toolCallId : undefined,
-    } satisfies GatewayMessage;
+      toolCalls,
+    });
   });
+}
+
+function compactGatewayMessage(message: GatewayMessage): GatewayMessage {
+  return Object.fromEntries(
+    Object.entries(message).filter(([, value]) => value !== undefined),
+  ) as unknown as GatewayMessage;
+}
+
+function appendText(current: string | undefined, next: string | undefined) {
+  if (!next) {
+    return current;
+  }
+  return current ? `${current}${next}` : next;
 }
 
 function toRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function firstArray(...values: unknown[]) {
+  return values.find(Array.isArray) as unknown[] | undefined;
+}
+
+function readString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function normalizeToolCallArgs(raw: unknown): Pick<ToolCall, "args" | "argsJson"> {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return { args: raw as Record<string, unknown> };
+  }
+  if (typeof raw === "string" && raw.length > 0) {
+    return { argsJson: raw };
+  }
+  return {};
+}
+
+function normalizeObservedToolCalls(
+  record: Record<string, unknown>,
+  kwargs: Record<string, unknown> | null,
+): ToolCall[] | undefined {
+  const additionalKwargs =
+    toRecord(record.additional_kwargs) ??
+    toRecord(kwargs?.additional_kwargs);
+  const rawToolCalls = firstArray(
+    record.tool_calls,
+    record.toolCalls,
+    kwargs?.tool_calls,
+    kwargs?.toolCalls,
+    additionalKwargs?.tool_calls,
+    additionalKwargs?.toolCalls,
+  );
+  if (!rawToolCalls?.length) {
+    return undefined;
+  }
+
+  const toolCalls = rawToolCalls.flatMap((rawToolCall) => {
+    const toolCall = toRecord(rawToolCall);
+    if (!toolCall) {
+      return [];
+    }
+    const fn = toRecord(toolCall.function);
+    const name = readString(toolCall.name, fn?.name);
+    if (!name) {
+      return [];
+    }
+    return [{
+      id: readString(toolCall.id, toolCall.tool_call_id),
+      name,
+      ...normalizeToolCallArgs(toolCall.args ?? fn?.arguments),
+    }];
+  });
+
+  return toolCalls.length > 0 ? toolCalls : undefined;
 }
 
 function normalizeObservedContent(value: unknown) {
