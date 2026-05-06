@@ -43,20 +43,36 @@ type Source = {
   id: string;
   title: string;
   contentText?: string;
+  sourceType: string;
   status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type Thread = {
+  id: string;
+  title: string;
+  sourceCount: number;
+  createdAt: string;
   updatedAt: string;
 };
 
 type WorkspaceWithPreview = Workspace & {
   sources: Source[];
   sourceCount: number;
+  threads: Thread[];
 };
+
+type ActivityKind = "workspace" | "source" | "thread";
 
 type ActivityItem = {
   id: string;
+  kind: ActivityKind;
   title: string;
+  description: string;
   workspaceName: string;
-  status: string;
+  badgeLabel: string;
+  badgeTone: string;
   updatedAt: string;
 };
 
@@ -75,7 +91,11 @@ function formatRelative(value: string) {
 
 function getWorkspaceLastActivity(workspace: WorkspaceWithPreview) {
   return (
-    [workspace.createdAt, ...workspace.sources.map((source) => source.updatedAt)].sort(
+    [
+      workspace.createdAt,
+      ...workspace.sources.map((source) => source.updatedAt),
+      ...workspace.threads.map((thread) => thread.updatedAt),
+    ].sort(
       (left, right) => new Date(right).getTime() - new Date(left).getTime(),
     )[0] ?? workspace.createdAt
   );
@@ -96,7 +116,9 @@ function WorkspaceCover({ workspace }: { workspace: WorkspaceWithPreview }) {
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <Folder className="h-4.5 w-4.5" />
           </div>
-          <div className="mt-2.5 text-sm font-medium text-foreground">No files yet</div>
+          <div className="mt-2.5 text-sm font-medium text-foreground">
+            No files yet
+          </div>
           <div className="mt-1 max-w-36 text-xs leading-5 text-muted-foreground/85">
             Add sources to start building context.
           </div>
@@ -146,29 +168,34 @@ function WorkspaceCover({ workspace }: { workspace: WorkspaceWithPreview }) {
   );
 }
 
-function getStatusLabel(status: string) {
-  switch (status) {
-    case "indexed":
-      return "Ready";
-    case "processing":
-      return "Indexing";
-    case "created":
-      return "New";
+function getSourceTypeLabel(sourceType: string) {
+  switch (sourceType) {
+    case "file_upload":
+    case "manual_upload":
+      return "File";
+    case "web_url":
+      return "Web";
+    case "youtube":
+      return "Video";
+    case "note":
+      return "Note";
+    case "artifact":
+      return "Artifact";
+    case "connector":
+      return "Connector";
     default:
       return "Source";
   }
 }
 
-function getStatusTone(status: string) {
-  switch (status) {
-    case "indexed":
-      return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    case "processing":
-      return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
-    case "created":
-      return "bg-sky-500/10 text-sky-700 dark:text-sky-300";
-    default:
-      return "bg-muted text-muted-foreground";
+function getActivityBadgeTone(kind: ActivityKind) {
+  switch (kind) {
+    case "workspace":
+      return "bg-violet-500/10 text-violet-700 dark:text-violet-300";
+    case "thread":
+      return "bg-blue-500/10 text-blue-700 dark:text-blue-300";
+    case "source":
+      return "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300";
   }
 }
 
@@ -180,21 +207,56 @@ function sortWorkspacesByRecent(workspaces: WorkspaceWithPreview[]) {
   );
 }
 
-function buildActivityItems(workspaces: WorkspaceWithPreview[]): ActivityItem[] {
-  const sourceItems = workspaces.flatMap((workspace) =>
-    workspace.sources.map((source) => ({
-      id: `${workspace.id}:${source.id}`,
-      title: source.title,
+function buildActivityItems(
+  workspaces: WorkspaceWithPreview[],
+): ActivityItem[] {
+  const items = workspaces.flatMap((workspace) => {
+    const workspaceItem: ActivityItem = {
+      id: `workspace:${workspace.id}`,
+      kind: "workspace",
+      title: workspace.name,
+      description: "Created",
       workspaceName: workspace.name,
-      status: source.status,
-      updatedAt: source.updatedAt,
-    })),
-  );
+      badgeLabel: "Workspace",
+      badgeTone: getActivityBadgeTone("workspace"),
+      updatedAt: workspace.createdAt,
+    };
 
-  return sourceItems
+    const sourceItems: ActivityItem[] = workspace.sources.map((source) => ({
+      id: `source:${source.id}`,
+      kind: "source",
+      title: source.title,
+      description: source.updatedAt === source.createdAt ? "Added" : "Updated",
+      workspaceName: workspace.name,
+      badgeLabel: getSourceTypeLabel(source.sourceType),
+      badgeTone: getActivityBadgeTone("source"),
+      updatedAt: source.updatedAt,
+    }));
+
+    const threadItems: ActivityItem[] = workspace.threads.map((thread) => ({
+      id: `thread:${thread.id}`,
+      kind: "thread",
+      title: thread.title,
+      description:
+        thread.sourceCount === 1
+          ? "1 source"
+          : thread.sourceCount > 1
+            ? `${thread.sourceCount} sources`
+            : "Updated",
+      workspaceName: workspace.name,
+      badgeLabel: "Chat",
+      badgeTone: getActivityBadgeTone("thread"),
+      updatedAt: thread.updatedAt,
+    }));
+
+    return [workspaceItem, ...sourceItems, ...threadItems];
+  });
+
+  return items
     .sort(
       (left, right) =>
-        new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+        new Date(right.updatedAt).getTime() -
+        new Date(left.updatedAt).getTime(),
     )
     .slice(0, 5);
 }
@@ -277,7 +339,8 @@ function OverviewPanel({
                   {featuredWorkspace.sourceCount} sources
                 </span>
                 <span className="rounded-full border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground">
-                  Updated {formatRelative(getWorkspaceLastActivity(featuredWorkspace))}
+                  Updated{" "}
+                  {formatRelative(getWorkspaceLastActivity(featuredWorkspace))}
                 </span>
               </div>
             ) : null}
@@ -287,10 +350,15 @@ function OverviewPanel({
         <div className="px-7 py-7 lg:px-8 lg:py-8">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-border/70 pb-3 text-sm font-medium text-muted-foreground">
             <span>Activity</span>
-            <span>Status</span>
+            <span>Type</span>
           </div>
 
           <div className="divide-y divide-border/70">
+            {recentActivity.length === 0 ? (
+              <div className="py-8 text-sm leading-6 text-muted-foreground">
+                Workspace, source, and chat activity will appear here.
+              </div>
+            ) : null}
             {recentActivity.map((item) => (
               <div
                 className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 py-4"
@@ -300,20 +368,30 @@ function OverviewPanel({
                   <div className="truncate text-[1.02rem] font-medium text-foreground">
                     {item.title}
                   </div>
-                  <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                    <span className="truncate">{item.workspaceName}</span>
+                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                    <span className="whitespace-nowrap">
+                      {item.description}
+                    </span>
+                    {item.kind !== "workspace" ? (
+                      <>
+                        <span>·</span>
+                        <span className="truncate">{item.workspaceName}</span>
+                      </>
+                    ) : null}
                     <span>·</span>
-                    <span className="whitespace-nowrap">{formatRelative(item.updatedAt)}</span>
+                    <span className="whitespace-nowrap">
+                      {formatRelative(item.updatedAt)}
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-start">
                   <span
                     className={cn(
                       "rounded-full px-2.5 py-1 text-xs font-medium",
-                      getStatusTone(item.status),
+                      item.badgeTone,
                     )}
                   >
-                    {getStatusLabel(item.status)}
+                    {item.badgeLabel}
                   </span>
                 </div>
               </div>
@@ -372,7 +450,7 @@ function WorkspaceCard({
     >
       <WorkspaceCover workspace={workspace} />
 
-        <div className="flex items-start justify-between gap-3 px-1.5 pb-1 pt-3.5">
+      <div className="flex items-start justify-between gap-3 px-1.5 pb-1 pt-3.5">
         <div className="min-w-0">
           <div className="line-clamp-1 text-base font-semibold leading-6 tracking-tight text-foreground">
             {workspace.name}
@@ -409,7 +487,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     async function loadWorkspaces() {
@@ -429,36 +509,55 @@ export default function DashboardPage() {
 
         const withPreviews = await Promise.all(
           workspaceResponse.items.map(async (workspace: Workspace) => {
-            try {
-              const sourceResponse = await contentClient.listSources(workspace.id);
-              const sources: Source[] = (sourceResponse.items ?? []).map(
-                (source: {
-                  id: string;
-                  title?: string;
-                  contentText?: string;
-                  status?: string;
-                  updatedAt?: string;
-                }) => ({
-                  id: source.id,
-                  title: source.title ?? "Untitled",
-                  contentText: source.contentText ?? source.title ?? "",
-                  status: source.status ?? "created",
-                  updatedAt: source.updatedAt ?? workspace.createdAt,
-                }),
-              );
+            const [sourceResult, threadResult] = await Promise.allSettled([
+              contentClient.listSources(workspace.id),
+              contentClient.listThreads(workspace.id, { limit: 5 }),
+            ]);
+            const sourceResponse =
+              sourceResult.status === "fulfilled" ? sourceResult.value : null;
+            const threadResponse =
+              threadResult.status === "fulfilled" ? threadResult.value : null;
+            const sources: Source[] = (sourceResponse?.items ?? []).map(
+              (source: {
+                id: string;
+                title?: string;
+                contentText?: string;
+                sourceType?: string;
+                status?: string;
+                createdAt?: string;
+                updatedAt?: string;
+              }) => ({
+                id: source.id,
+                title: source.title ?? "Untitled",
+                contentText: source.contentText ?? source.title ?? "",
+                sourceType: source.sourceType ?? "source",
+                status: source.status ?? "created",
+                createdAt: source.createdAt ?? workspace.createdAt,
+                updatedAt: source.updatedAt ?? workspace.createdAt,
+              }),
+            );
+            const threads: Thread[] = (threadResponse?.items ?? []).map(
+              (thread: {
+                id: string;
+                title?: string;
+                sourceCount?: number;
+                createdAt?: string;
+                updatedAt?: string;
+              }) => ({
+                id: thread.id,
+                title: thread.title ?? "Untitled chat",
+                sourceCount: thread.sourceCount ?? 0,
+                createdAt: thread.createdAt ?? workspace.createdAt,
+                updatedAt: thread.updatedAt ?? workspace.createdAt,
+              }),
+            );
 
-              return {
-                ...workspace,
-                sourceCount: sourceResponse.items?.length ?? 0,
-                sources: sources.slice(0, 4),
-              };
-            } catch {
-              return {
-                ...workspace,
-                sourceCount: 0,
-                sources: [],
-              };
-            }
+            return {
+              ...workspace,
+              sourceCount: sourceResponse?.items?.length ?? 0,
+              sources: sources.slice(0, 4),
+              threads,
+            };
           }),
         );
 
@@ -467,7 +566,9 @@ export default function DashboardPage() {
           sessionActiveOrganizationId,
         );
         const resolvedWorkspace =
-          withPreviews.find((workspace) => workspace.id === storedWorkspaceId) ??
+          withPreviews.find(
+            (workspace) => workspace.id === storedWorkspaceId,
+          ) ??
           withPreviews[0] ??
           null;
 
@@ -538,7 +639,9 @@ export default function DashboardPage() {
     if (!viewport) return;
 
     const horizontalDelta =
-      Math.abs(event.deltaX) > 0 || event.shiftKey ? event.deltaX || event.deltaY : 0;
+      Math.abs(event.deltaX) > 0 || event.shiftKey
+        ? event.deltaX || event.deltaY
+        : 0;
     const mappedDelta =
       horizontalDelta !== 0 || Math.abs(event.deltaY) < Math.abs(event.deltaX)
         ? horizontalDelta
@@ -619,7 +722,9 @@ export default function DashboardPage() {
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <div className="hidden h-5 w-px bg-border md:block" />
-            <DashboardTeamSwitcher onAddTeam={() => router.push("/dashboard/settings")} />
+            <DashboardTeamSwitcher
+              onAddTeam={() => router.push("/dashboard/settings")}
+            />
           </div>
 
           <div className="flex flex-1 items-center justify-end gap-2 md:gap-3">
@@ -653,7 +758,9 @@ export default function DashboardPage() {
                 createLoading={createLoading}
                 featuredWorkspace={featuredWorkspace}
                 onCreateWorkspace={() => void handleCreateWorkspace()}
-                onOpenWorkspace={(workspaceId) => void handleOpenWorkspace(workspaceId)}
+                onOpenWorkspace={(workspaceId) =>
+                  void handleOpenWorkspace(workspaceId)
+                }
                 recentActivity={recentActivity}
               />
             )}
@@ -661,7 +768,9 @@ export default function DashboardPage() {
 
           <section className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <SectionTitle title={search ? "Search results" : "Recent workspaces"} />
+              <SectionTitle
+                title={search ? "Search results" : "Recent workspaces"}
+              />
 
               <div className="flex items-center gap-2">
                 <Button
@@ -695,32 +804,35 @@ export default function DashboardPage() {
                     No workspaces match your search
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Try a different term, or clear the search to browse recent workspaces again.
+                    Try a different term, or clear the search to browse recent
+                    workspaces again.
                   </p>
                 </div>
               </div>
             ) : (
               <div onWheel={handleRecentWheel} ref={recentScrollRef}>
                 <ScrollArea className="w-full">
-                <div className="flex min-w-0 items-stretch gap-3 pb-3 pr-1">
-                  {!search ? (
-                    <div className="w-[292px] shrink-0">
-                      <CreateWorkspaceCard
-                        disabled={!canCreateWorkspace || createLoading}
-                        onCreate={() => void handleCreateWorkspace()}
-                      />
-                    </div>
-                  ) : null}
+                  <div className="flex min-w-0 items-stretch gap-3 pb-3 pr-1">
+                    {!search ? (
+                      <div className="w-[292px] shrink-0">
+                        <CreateWorkspaceCard
+                          disabled={!canCreateWorkspace || createLoading}
+                          onCreate={() => void handleCreateWorkspace()}
+                        />
+                      </div>
+                    ) : null}
 
-                  {filteredWorkspaces.map((workspace) => (
-                    <div className="w-[292px] shrink-0" key={workspace.id}>
-                      <WorkspaceCard
-                        onOpen={(workspaceId) => void handleOpenWorkspace(workspaceId)}
-                        workspace={workspace}
-                      />
-                    </div>
-                  ))}
-                </div>
+                    {filteredWorkspaces.map((workspace) => (
+                      <div className="w-[292px] shrink-0" key={workspace.id}>
+                        <WorkspaceCard
+                          onOpen={(workspaceId) =>
+                            void handleOpenWorkspace(workspaceId)
+                          }
+                          workspace={workspace}
+                        />
+                      </div>
+                    ))}
+                  </div>
                   <ScrollBar className="hidden" orientation="horizontal" />
                 </ScrollArea>
               </div>

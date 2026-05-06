@@ -42,12 +42,17 @@ type DashboardChatState = {
   isLoadingPrivateChats: boolean;
   toggleSourcesVisible: () => void;
   setWorkspaceName: (workspaceName: string) => void;
-  createWorkspace: (name?: string) => Promise<{ id: string; name: string } | null>;
+  createWorkspace: (
+    name?: string,
+  ) => Promise<{ id: string; name: string } | null>;
   renameWorkspace: (
     workspaceId: string,
     name: string,
   ) => Promise<{ id: string; name: string } | null>;
-  switchWorkspace: (workspaceId: string, workspaceName?: string) => Promise<void>;
+  switchWorkspace: (
+    workspaceId: string,
+    workspaceName?: string,
+  ) => Promise<void>;
   loadMorePrivateChats: () => Promise<void>;
   startNewChat: () => void;
   createChat: (input?: {
@@ -104,14 +109,16 @@ export function DashboardChatStateProvider({
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState("Workspace");
   const [organizationId, setOrganizationId] = useState<string | null>(null);
-  const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>(
-    [],
-  );
+  const [workspaces, setWorkspaces] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
 
   const [sharedChats, setSharedChats] = useState<ChatItem[]>([]);
   const [privateChats, setPrivateChats] = useState<ChatItem[]>([]);
   const [archivedChats, setArchivedChats] = useState<ChatItem[]>([]);
-  const [privateChatsCursor, setPrivateChatsCursor] = useState<string | null>(null);
+  const [privateChatsCursor, setPrivateChatsCursor] = useState<string | null>(
+    null,
+  );
   const [hasMorePrivateChats, setHasMorePrivateChats] = useState(false);
   const [isLoadingPrivateChats, setIsLoadingPrivateChats] = useState(false);
 
@@ -136,42 +143,51 @@ export function DashboardChatStateProvider({
     [],
   );
 
-  const hydrateWorkspace = useCallback(async (organizationId: string) => {
-    const listed = await workspaceClient.listWorkspaces(organizationId);
-    const resolvedItems =
-      listed.items.length > 0
-        ? listed.items
-        : [await workspaceClient.createWorkspace(organizationId, { name: "My Workspace" })];
-    const storedWorkspaceId = getStoredDashboardWorkspaceId(organizationId);
-    const active =
-      resolvedItems.find((item) => item.id === storedWorkspaceId) ??
-      resolvedItems[0]!;
+  const hydrateWorkspace = useCallback(
+    async (organizationId: string) => {
+      const listed = await workspaceClient.listWorkspaces(organizationId);
+      const resolvedItems =
+        listed.items.length > 0
+          ? listed.items
+          : [
+              await workspaceClient.createWorkspace(organizationId, {
+                name: "My Workspace",
+              }),
+            ];
+      const storedWorkspaceId = getStoredDashboardWorkspaceId(organizationId);
+      const active =
+        resolvedItems.find((item) => item.id === storedWorkspaceId) ??
+        resolvedItems[0]!;
 
-    setWorkspaces(resolvedItems.map((item) => ({ id: item.id, name: item.name })));
-    setWorkspaceId(active.id);
-    setWorkspaceName(active.name);
-    setStoredDashboardWorkspaceId(organizationId, active.id);
+      setWorkspaces(
+        resolvedItems.map((item) => ({ id: item.id, name: item.name })),
+      );
+      setWorkspaceId(active.id);
+      setWorkspaceName(active.name);
+      setStoredDashboardWorkspaceId(organizationId, active.id);
 
-    setIsLoadingPrivateChats(true);
-    setPrivateChats([]);
-    setPrivateChatsCursor(null);
-    setHasMorePrivateChats(false);
+      setIsLoadingPrivateChats(true);
+      setPrivateChats([]);
+      setPrivateChatsCursor(null);
+      setHasMorePrivateChats(false);
 
-    try {
-      await workspaceClient.setWorkspaceContext(active.id);
-    } catch {
-      // context persistence is best-effort for now
-    }
+      try {
+        await workspaceClient.setWorkspaceContext(active.id);
+      } catch {
+        // context persistence is best-effort for now
+      }
 
-    try {
-      const threads = await fetchPrivateChatsPage(active.id);
-      setPrivateChats(threads.items);
-      setPrivateChatsCursor(threads.nextCursor);
-      setHasMorePrivateChats(Boolean(threads.nextCursor));
-    } finally {
-      setIsLoadingPrivateChats(false);
-    }
-  }, [fetchPrivateChatsPage]);
+      try {
+        const threads = await fetchPrivateChatsPage(active.id);
+        setPrivateChats(threads.items);
+        setPrivateChatsCursor(threads.nextCursor);
+        setHasMorePrivateChats(Boolean(threads.nextCursor));
+      } finally {
+        setIsLoadingPrivateChats(false);
+      }
+    },
+    [fetchPrivateChatsPage],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -181,7 +197,10 @@ export function DashboardChatStateProvider({
         const current = await workspaceClient.getCurrentContext();
         const orgList = (orgs ?? []) as Array<{ id: string }>;
         const organizationId =
-          activeOrg?.id ?? current.activeOrganizationId ?? orgList[0]?.id ?? null;
+          activeOrg?.id ??
+          current.activeOrganizationId ??
+          orgList[0]?.id ??
+          null;
 
         if (!organizationId) {
           return;
@@ -255,9 +274,12 @@ export function DashboardChatStateProvider({
         return null;
       }
 
-      const workspace = await workspaceClient.updateWorkspace(targetWorkspaceId, {
-        name: safeName,
-      });
+      const workspace = await workspaceClient.updateWorkspace(
+        targetWorkspaceId,
+        {
+          name: safeName,
+        },
+      );
       const renamedWorkspace = { id: workspace.id, name: workspace.name };
 
       setWorkspaces((value) =>
@@ -278,13 +300,17 @@ export function DashboardChatStateProvider({
     async (nextWorkspaceId: string, nextWorkspaceName?: string) => {
       const target =
         workspaces.find((item) => item.id === nextWorkspaceId) ??
-        (nextWorkspaceName ? { id: nextWorkspaceId, name: nextWorkspaceName } : null);
+        (nextWorkspaceName
+          ? { id: nextWorkspaceId, name: nextWorkspaceName }
+          : null);
       if (!target) {
         return;
       }
 
       setWorkspaces((value) =>
-        value.some((item) => item.id === target.id) ? value : [...value, target],
+        value.some((item) => item.id === target.id)
+          ? value
+          : [...value, target],
       );
       setWorkspaceId(target.id);
       setWorkspaceName(target.name);
@@ -325,10 +351,15 @@ export function DashboardChatStateProvider({
     setIsLoadingPrivateChats(true);
 
     try {
-      const threads = await fetchPrivateChatsPage(workspaceId, privateChatsCursor);
+      const threads = await fetchPrivateChatsPage(
+        workspaceId,
+        privateChatsCursor,
+      );
       setPrivateChats((value) => {
         const existing = new Set(value.map((item) => item.id));
-        const nextItems = threads.items.filter((item) => !existing.has(item.id));
+        const nextItems = threads.items.filter(
+          (item) => !existing.has(item.id),
+        );
         return [...value, ...nextItems];
       });
       setPrivateChatsCursor(threads.nextCursor);
@@ -336,7 +367,12 @@ export function DashboardChatStateProvider({
     } finally {
       setIsLoadingPrivateChats(false);
     }
-  }, [workspaceId, privateChatsCursor, isLoadingPrivateChats, fetchPrivateChatsPage]);
+  }, [
+    workspaceId,
+    privateChatsCursor,
+    isLoadingPrivateChats,
+    fetchPrivateChatsPage,
+  ]);
 
   const startNewChat = useCallback(() => {
     setActiveChatId("");
@@ -350,30 +386,36 @@ export function DashboardChatStateProvider({
     setThreadTitle(title);
   }, []);
 
-  const updateChatSourceCount = useCallback((id: string, sourceCount: number) => {
-    setPrivateChats((value) =>
-      value.map((item) =>
+  const updateChatSourceCount = useCallback(
+    (id: string, sourceCount: number) => {
+      setPrivateChats((value) =>
+        value.map((item) =>
+          item.id === id
+            ? { ...item, sourceCount: Math.max(item.sourceCount, sourceCount) }
+            : item,
+        ),
+      );
+    },
+    [],
+  );
+
+  const updateChatTitle = useCallback(
+    (id: string, title: string) => {
+      const safeTitle = title.trim();
+      if (!safeTitle) return;
+
+      const updateItem = (item: ChatItem) =>
         item.id === id
-          ? { ...item, sourceCount: Math.max(item.sourceCount, sourceCount) }
-          : item,
-      ),
-    );
-  }, []);
+          ? { ...item, title: safeTitle, updatedAt: new Date().toISOString() }
+          : item;
 
-  const updateChatTitle = useCallback((id: string, title: string) => {
-    const safeTitle = title.trim();
-    if (!safeTitle) return;
-
-    const updateItem = (item: ChatItem) =>
-      item.id === id
-        ? { ...item, title: safeTitle, updatedAt: new Date().toISOString() }
-        : item;
-
-    setPrivateChats((value) => value.map(updateItem));
-    setSharedChats((value) => value.map(updateItem));
-    setArchivedChats((value) => value.map(updateItem));
-    setThreadTitle((value) => (activeChatId === id ? safeTitle : value));
-  }, [activeChatId]);
+      setPrivateChats((value) => value.map(updateItem));
+      setSharedChats((value) => value.map(updateItem));
+      setArchivedChats((value) => value.map(updateItem));
+      setThreadTitle((value) => (activeChatId === id ? safeTitle : value));
+    },
+    [activeChatId],
+  );
 
   const refreshChatThread = useCallback(
     async (id: string) => {
@@ -447,7 +489,10 @@ export function DashboardChatStateProvider({
         setArchivedChats((value) => {
           const exists = value.some((item) => item.id === candidate.id);
           if (exists) return value;
-          return [{ ...candidate, updatedAt: new Date().toISOString() }, ...value];
+          return [
+            { ...candidate, updatedAt: new Date().toISOString() },
+            ...value,
+          ];
         });
       }
     },
@@ -485,7 +530,9 @@ export function DashboardChatStateProvider({
     if (!workspaceId) return;
 
     await Promise.all(
-      privateChats.map((item) => contentClient.deleteThread(workspaceId, item.id)),
+      privateChats.map((item) =>
+        contentClient.deleteThread(workspaceId, item.id),
+      ),
     );
 
     privateIds.forEach(removeChatFromState);
@@ -505,7 +552,10 @@ export function DashboardChatStateProvider({
     setIsLoadingPrivateChats(true);
 
     try {
-      const threads = await fetchPrivateChatsPage(workspaceId, privateChatsCursor);
+      const threads = await fetchPrivateChatsPage(
+        workspaceId,
+        privateChatsCursor,
+      );
       setPrivateChats(threads.items);
       setPrivateChatsCursor(threads.nextCursor);
       setHasMorePrivateChats(Boolean(threads.nextCursor));
@@ -528,7 +578,9 @@ export function DashboardChatStateProvider({
     if (!workspaceId) return;
 
     await Promise.all(
-      archivedChats.map((item) => contentClient.deleteThread(workspaceId, item.id)),
+      archivedChats.map((item) =>
+        contentClient.deleteThread(workspaceId, item.id),
+      ),
     );
 
     archivedIds.forEach(removeChatFromState);

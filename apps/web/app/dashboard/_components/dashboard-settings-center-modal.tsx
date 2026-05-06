@@ -48,11 +48,7 @@ const menuItems: Array<{
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
-function OrgSwitcher({
-  className,
-}: {
-  className?: string;
-}) {
+function OrgSwitcher({ className }: { className?: string }) {
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
   const [open, setOpen] = React.useState(false);
@@ -82,7 +78,9 @@ function OrgSwitcher({
           type="button"
         >
           <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-semibold text-foreground">
-            {isPersonalActive ? "P" : (activeOrg?.name.slice(0, 2).toUpperCase() ?? "P")}
+            {isPersonalActive
+              ? "P"
+              : (activeOrg?.name.slice(0, 2).toUpperCase() ?? "P")}
           </div>
           <span className="truncate text-sm text-foreground">
             {isPersonalActive ? "Personal workspace" : activeOrg?.name}
@@ -99,9 +97,13 @@ function OrgSwitcher({
           onClick={() => void handleSwitch(null)}
           type="button"
         >
-          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">P</div>
+          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">
+            P
+          </div>
           <span className="flex-1 truncate">Personal workspace</span>
-          {isPersonalActive && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
+          {isPersonalActive && (
+            <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
+          )}
         </button>
         {orgList.length > 0 && (
           <>
@@ -120,7 +122,9 @@ function OrgSwitcher({
                   {org.name.slice(0, 2).toUpperCase()}
                 </div>
                 <span className="flex-1 truncate">{org.name}</span>
-                {activeOrg?.id === org.id && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
+                {activeOrg?.id === org.id && (
+                  <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
+                )}
               </button>
             ))}
           </>
@@ -129,7 +133,6 @@ function OrgSwitcher({
     </Popover>
   );
 }
-
 
 // ── Account / Profile panel ───────────────────────────────────────────────────
 
@@ -145,7 +148,9 @@ function AccountPanel({
   initials: string;
 }) {
   const [displayName, setDisplayName] = React.useState(userName ?? "");
-  const [avatarPreview, setAvatarPreview] = React.useState<string | null>(userImage ?? null);
+  const [avatarPreview, setAvatarPreview] = React.useState<string | null>(
+    userImage ?? null,
+  );
   const [avatarDirty, setAvatarDirty] = React.useState(false);
   const [nameError, setNameError] = React.useState<string | null>(null);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -154,7 +159,9 @@ function AccountPanel({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const { theme, setTheme } = useTheme();
 
-  React.useEffect(() => { setDisplayName(userName ?? ""); }, [userName]);
+  React.useEffect(() => {
+    setDisplayName(userName ?? "");
+  }, [userName]);
   React.useEffect(() => {
     setAvatarPreview(userImage ?? null);
     setAvatarDirty(false);
@@ -164,13 +171,22 @@ function AccountPanel({
   const isDirty = trimmed !== (userName ?? "") || avatarDirty;
 
   async function handleSave() {
-    if (!trimmed) { setNameError("Name is required."); return; }
+    if (!trimmed) {
+      setNameError("Name is required.");
+      return;
+    }
     setNameError(null);
     setIsSaving(true);
     try {
-      const result = await authClient.updateUser({ name: trimmed, image: avatarPreview ?? undefined });
+      const result = await authClient.updateUser({
+        name: trimmed,
+        image: avatarPreview ?? undefined,
+      });
       if ((result as { error?: { message?: string } } | null)?.error) {
-        throw new Error((result as { error?: { message?: string } }).error?.message ?? "Unable to save.");
+        throw new Error(
+          (result as { error?: { message?: string } }).error?.message ??
+            "Unable to save.",
+        );
       }
       setAvatarDirty(false);
       toast.success("Profile saved");
@@ -186,7 +202,9 @@ function AccountPanel({
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      setAvatarPreview(typeof reader.result === "string" ? reader.result : null);
+      setAvatarPreview(
+        typeof reader.result === "string" ? reader.result : null,
+      );
       setAvatarDirty(true);
     };
     reader.readAsDataURL(file);
@@ -197,11 +215,16 @@ function AccountPanel({
     try {
       const result = await authClient.deleteUser();
       if ((result as { error?: { message?: string } } | null)?.error) {
-        throw new Error((result as { error?: { message?: string } }).error?.message ?? "Unable to delete account.");
+        throw new Error(
+          (result as { error?: { message?: string } }).error?.message ??
+            "Unable to delete account.",
+        );
       }
       toast.success("Account deletion started");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Unable to delete account.");
+      toast.error(
+        err instanceof Error ? err.message : "Unable to delete account.",
+      );
     } finally {
       setIsDeleting(false);
     }
@@ -209,7 +232,11 @@ function AccountPanel({
 
   async function handleSignOut() {
     setIsSigningOut(true);
-    try { await authClient.signOut(); } finally { setIsSigningOut(false); }
+    try {
+      await authClient.signOut();
+    } finally {
+      setIsSigningOut(false);
+    }
   }
 
   return (
@@ -235,9 +262,15 @@ function AccountPanel({
             >
               {avatarPreview ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img alt="Avatar" className="h-full w-full object-cover" src={avatarPreview} />
+                <img
+                  alt="Avatar"
+                  className="h-full w-full object-cover"
+                  src={avatarPreview}
+                />
               ) : (
-                <span className="flex h-full w-full items-center justify-center">{initials}</span>
+                <span className="flex h-full w-full items-center justify-center">
+                  {initials}
+                </span>
               )}
               <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
                 Change
@@ -247,7 +280,10 @@ function AccountPanel({
 
           {/* Name field */}
           <div className="flex-1">
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="display-name">
+            <label
+              className="mb-1.5 block text-xs font-medium text-muted-foreground"
+              htmlFor="display-name"
+            >
               Display name
             </label>
             <input
@@ -256,20 +292,35 @@ function AccountPanel({
                 nameError ? "border-destructive" : "border-border",
               )}
               id="display-name"
-              onChange={(e) => { setDisplayName(e.target.value); if (nameError) setNameError(null); }}
+              onChange={(e) => {
+                setDisplayName(e.target.value);
+                if (nameError) setNameError(null);
+              }}
               placeholder="Your display name"
               type="text"
               value={displayName}
             />
-            {nameError ? <p className="mt-1 text-xs text-destructive">{nameError}</p> : null}
+            {nameError ? (
+              <p className="mt-1 text-xs text-destructive">{nameError}</p>
+            ) : null}
             {isDirty && (
               <div className="mt-3 flex items-center gap-2">
-                <Button disabled={isSaving} onClick={() => void handleSave()} size="sm" type="button">
+                <Button
+                  disabled={isSaving}
+                  onClick={() => void handleSave()}
+                  size="sm"
+                  type="button"
+                >
                   {isSaving ? "Saving…" : "Save changes"}
                 </Button>
                 <Button
                   disabled={isSaving}
-                  onClick={() => { setDisplayName(userName ?? ""); setAvatarPreview(userImage ?? null); setAvatarDirty(false); setNameError(null); }}
+                  onClick={() => {
+                    setDisplayName(userName ?? "");
+                    setAvatarPreview(userImage ?? null);
+                    setAvatarDirty(false);
+                    setNameError(null);
+                  }}
                   size="sm"
                   type="button"
                   variant="ghost"
@@ -284,11 +335,15 @@ function AccountPanel({
 
       {/* ── Appearance ── */}
       <div className="py-7">
-        <p className="mb-4 text-base font-semibold text-foreground">Appearance</p>
+        <p className="mb-4 text-base font-semibold text-foreground">
+          Appearance
+        </p>
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm text-foreground">Theme</p>
-            <p className="text-xs text-muted-foreground">Choose how SourceWeft looks to you.</p>
+            <p className="text-xs text-muted-foreground">
+              Choose how SourceWeft looks to you.
+            </p>
           </div>
           <div className="flex rounded-lg border border-border bg-muted/40 p-0.5">
             {(["light", "system", "dark"] as const).map((t) => (
@@ -351,13 +406,21 @@ function AccountPanel({
               <p className="text-sm text-foreground">{userEmail}</p>
               <p className="text-xs text-muted-foreground">Signed-in account</p>
             </div>
-            <Button disabled={isSigningOut} onClick={() => void handleSignOut()} size="sm" type="button" variant="outline">
+            <Button
+              disabled={isSigningOut}
+              onClick={() => void handleSignOut()}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
               {isSigningOut ? "Signing out…" : "Sign out"}
             </Button>
           </div>
           <div className="flex items-start justify-between gap-4 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-destructive">Delete account</p>
+              <p className="text-sm font-medium text-destructive">
+                Delete account
+              </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Permanently removes your account and all data. Cannot be undone.
               </p>
@@ -397,7 +460,9 @@ function TeamPanel({
   const [newTeamName, setNewTeamName] = React.useState("");
   const [isCreating, setIsCreating] = React.useState(false);
   const [inviteEmail, setInviteEmail] = React.useState("");
-  const [inviteRole, setInviteRole] = React.useState<"admin" | "member">("member");
+  const [inviteRole, setInviteRole] = React.useState<"admin" | "member">(
+    "member",
+  );
   const [isInviting, setIsInviting] = React.useState(false);
   const [inviteError, setInviteError] = React.useState<string | null>(null);
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
@@ -417,13 +482,18 @@ function TeamPanel({
     if (!name) return;
     setIsCreating(true);
     try {
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
       await authClient.organization.create({ name, slug });
       setCreateOpen(false);
       setNewTeamName("");
       toast.success("Team created.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create team.");
+      toast.error(
+        err instanceof Error ? err.message : "Failed to create team.",
+      );
     } finally {
       setIsCreating(false);
     }
@@ -435,18 +505,21 @@ function TeamPanel({
     setInviteError(null);
     setIsInviting(true);
     try {
-      const result = await authClient.organization.inviteMember({
+      const result = (await authClient.organization.inviteMember({
         email,
         role: inviteRole,
         organizationId: activeOrgFull!.id,
-      }) as { error?: { message?: string } } | null;
-      if (result?.error) throw new Error(result.error.message ?? "Failed to send invite.");
+      })) as { error?: { message?: string } } | null;
+      if (result?.error)
+        throw new Error(result.error.message ?? "Failed to send invite.");
       setInviteOpen(false);
       setInviteEmail("");
       setInviteRole("member");
       toast.success(`Invitation sent to ${email}`);
     } catch (err) {
-      setInviteError(err instanceof Error ? err.message : "Failed to send invitation.");
+      setInviteError(
+        err instanceof Error ? err.message : "Failed to send invitation.",
+      );
     } finally {
       setIsInviting(false);
     }
@@ -458,7 +531,9 @@ function TeamPanel({
       await authClient.organization.cancelInvitation({ invitationId });
       toast.success("Invitation revoked.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to revoke invitation.");
+      toast.error(
+        err instanceof Error ? err.message : "Failed to revoke invitation.",
+      );
     } finally {
       setRevokingId(null);
     }
@@ -471,13 +546,23 @@ function TeamPanel({
     | {
         id: string;
         name: string;
-        members: Array<{ id: string; role: string; user: { name: string; email: string } }>;
-        invitations: Array<{ id: string; email: string; role: string; status: string }>;
+        members: Array<{
+          id: string;
+          role: string;
+          user: { name: string; email: string };
+        }>;
+        invitations: Array<{
+          id: string;
+          email: string;
+          role: string;
+          status: string;
+        }>;
       }
     | null
     | undefined;
 
-  const pendingInvites = activeOrgFull?.invitations?.filter((inv) => inv.status === "pending") ?? [];
+  const pendingInvites =
+    activeOrgFull?.invitations?.filter((inv) => inv.status === "pending") ?? [];
 
   return (
     <div className="w-full max-w-2xl divide-y divide-border/60">
@@ -485,7 +570,12 @@ function TeamPanel({
       <div className="pb-7 pt-1">
         <div className="mb-4 flex items-center justify-between gap-3">
           <p className="text-base font-semibold text-foreground">Workspace</p>
-          <Button onClick={() => setCreateOpen(true)} size="sm" type="button" variant="outline">
+          <Button
+            onClick={() => setCreateOpen(true)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
             <Plus className="h-3.5 w-3.5" />
             Create team
           </Button>
@@ -500,7 +590,9 @@ function TeamPanel({
             >
               <div className="flex min-w-0 items-center gap-2.5">
                 <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-foreground">
-                  {activeOrgFull ? activeOrgFull.name.slice(0, 2).toUpperCase() : "P"}
+                  {activeOrgFull
+                    ? activeOrgFull.name.slice(0, 2).toUpperCase()
+                    : "P"}
                 </div>
                 <span className="truncate text-sm text-foreground">
                   {activeOrgFull ? activeOrgFull.name : "Personal workspace"}
@@ -518,9 +610,13 @@ function TeamPanel({
               onClick={() => void handleSwitch(null)}
               type="button"
             >
-              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">P</div>
+              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">
+                P
+              </div>
               <span className="flex-1 truncate">Personal workspace</span>
-              {!activeOrgFull && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
+              {!activeOrgFull && (
+                <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
+              )}
             </button>
             {orgList.length > 0 && (
               <>
@@ -539,7 +635,9 @@ function TeamPanel({
                       {org.name.slice(0, 2).toUpperCase()}
                     </div>
                     <span className="flex-1 truncate">{org.name}</span>
-                    {activeOrgFull?.id === org.id && <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />}
+                    {activeOrgFull?.id === org.id && (
+                      <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
+                    )}
                   </button>
                 ))}
               </>
@@ -554,7 +652,11 @@ function TeamPanel({
           <div className="py-7">
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-base font-semibold text-foreground">Members</p>
-              <Button onClick={() => setInviteOpen(true)} size="sm" type="button">
+              <Button
+                onClick={() => setInviteOpen(true)}
+                size="sm"
+                type="button"
+              >
                 <MailPlus className="h-3.5 w-3.5" />
                 Invite
               </Button>
@@ -564,20 +666,34 @@ function TeamPanel({
                 <table className="w-full text-sm">
                   <thead className="border-b border-border bg-muted/30">
                     <tr>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Name</th>
-                      <th className="hidden px-4 py-2.5 text-left text-xs font-medium text-muted-foreground sm:table-cell">Email</th>
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Role</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
+                        Name
+                      </th>
+                      <th className="hidden px-4 py-2.5 text-left text-xs font-medium text-muted-foreground sm:table-cell">
+                        Email
+                      </th>
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
+                        Role
+                      </th>
                       <th className="w-10 px-4 py-2.5" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {activeOrgFull.members.map((m) => (
                       <tr key={m.id}>
-                        <td className="px-4 py-2.5 font-medium text-foreground">{m.user.name}</td>
-                        <td className="hidden px-4 py-2.5 text-muted-foreground sm:table-cell">{m.user.email}</td>
-                        <td className="px-4 py-2.5 capitalize text-muted-foreground">{m.role}</td>
+                        <td className="px-4 py-2.5 font-medium text-foreground">
+                          {m.user.name}
+                        </td>
+                        <td className="hidden px-4 py-2.5 text-muted-foreground sm:table-cell">
+                          {m.user.email}
+                        </td>
+                        <td className="px-4 py-2.5 capitalize text-muted-foreground">
+                          {m.role}
+                        </td>
                         <td className="px-4 py-2.5 text-right">
-                          <Button size="xs" type="button" variant="ghost">···</Button>
+                          <Button size="xs" type="button" variant="ghost">
+                            ···
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -593,7 +709,9 @@ function TeamPanel({
 
           {pendingInvites.length > 0 && (
             <div className="py-7">
-              <p className="mb-4 text-base font-semibold text-foreground">Pending invites</p>
+              <p className="mb-4 text-base font-semibold text-foreground">
+                Pending invites
+              </p>
               <div className="overflow-hidden rounded-lg border border-border">
                 {pendingInvites.map((inv, i) => (
                   <div
@@ -605,7 +723,9 @@ function TeamPanel({
                   >
                     <div>
                       <p className="text-sm text-foreground">{inv.email}</p>
-                      <p className="mt-0.5 text-xs capitalize text-muted-foreground">{inv.role}</p>
+                      <p className="mt-0.5 text-xs capitalize text-muted-foreground">
+                        {inv.role}
+                      </p>
                     </div>
                     <Button
                       disabled={revokingId === inv.id}
@@ -630,7 +750,12 @@ function TeamPanel({
             <p className="text-sm text-muted-foreground">
               Switch to a team workspace to manage members and invites.
             </p>
-            <Button onClick={() => setCreateOpen(true)} size="sm" type="button" variant="outline">
+            <Button
+              onClick={() => setCreateOpen(true)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
               <Plus className="h-3.5 w-3.5" />
               Create team
             </Button>
@@ -645,7 +770,10 @@ function TeamPanel({
             <DialogTitle>Create team</DialogTitle>
           </DialogHeader>
           <div className="space-y-1.5 px-0.5">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="new-team-name">
+            <label
+              className="text-xs font-medium text-muted-foreground"
+              htmlFor="new-team-name"
+            >
               Team name
             </label>
             <input
@@ -653,14 +781,23 @@ function TeamPanel({
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
               id="new-team-name"
               onChange={(e) => setNewTeamName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void handleCreate(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleCreate();
+              }}
               placeholder="e.g. Acme Inc."
               type="text"
               value={newTeamName}
             />
           </div>
           <DialogFooter>
-            <Button variant="ghost" size="sm" type="button" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => setCreateOpen(false)}
+            >
+              Cancel
+            </Button>
             <Button
               disabled={isCreating || !newTeamName.trim()}
               onClick={() => void handleCreate()}
@@ -681,7 +818,10 @@ function TeamPanel({
           </DialogHeader>
           <div className="space-y-3 px-0.5">
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="invite-email">
+              <label
+                className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                htmlFor="invite-email"
+              >
                 Email address
               </label>
               <input
@@ -691,16 +831,26 @@ function TeamPanel({
                   inviteError ? "border-destructive" : "border-border",
                 )}
                 id="invite-email"
-                onChange={(e) => { setInviteEmail(e.target.value); if (inviteError) setInviteError(null); }}
-                onKeyDown={(e) => { if (e.key === "Enter") void handleInvite(); }}
+                onChange={(e) => {
+                  setInviteEmail(e.target.value);
+                  if (inviteError) setInviteError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleInvite();
+                }}
                 placeholder="colleague@company.com"
                 type="email"
                 value={inviteEmail}
               />
-              {inviteError ? <p className="mt-1 text-xs text-destructive">{inviteError}</p> : null}
+              {inviteError ? (
+                <p className="mt-1 text-xs text-destructive">{inviteError}</p>
+              ) : null}
             </div>
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="invite-role">
+              <label
+                className="mb-1.5 block text-xs font-medium text-muted-foreground"
+                htmlFor="invite-role"
+              >
                 Role
               </label>
               <div className="flex rounded-lg border border-border bg-muted/40 p-0.5">
@@ -723,7 +873,14 @@ function TeamPanel({
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" size="sm" type="button" onClick={() => setInviteOpen(false)}>Cancel</Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => setInviteOpen(false)}
+            >
+              Cancel
+            </Button>
             <Button
               disabled={isInviting || !inviteEmail.trim()}
               onClick={() => void handleInvite()}
@@ -756,8 +913,16 @@ function UsagePanel() {
           { label: "Active members", value: "4" },
         ],
         rows: [
-          { detail: "Team workspace research sync", date: "Apr 07", change: "−580" },
-          { detail: "Member onboarding bonus", date: "Apr 06", change: "+1,500" },
+          {
+            detail: "Team workspace research sync",
+            date: "Apr 07",
+            change: "−580",
+          },
+          {
+            detail: "Member onboarding bonus",
+            date: "Apr 06",
+            change: "+1,500",
+          },
           { detail: "Shared notebook summary", date: "Apr 05", change: "−260" },
         ],
       }
@@ -789,21 +954,31 @@ function UsagePanel() {
       <div className="py-7">
         <div className="overflow-hidden rounded-lg border border-border">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <p className="text-sm font-medium text-foreground">{data.plan} plan</p>
-            <Button size="sm" type="button" variant="outline">Manage plan</Button>
+            <p className="text-sm font-medium text-foreground">
+              {data.plan} plan
+            </p>
+            <Button size="sm" type="button" variant="outline">
+              Manage plan
+            </Button>
           </div>
           <div className="px-4 py-3">
             <div className="mb-1.5 flex items-center justify-between text-xs">
               <span className="text-muted-foreground">Credits</span>
-              <span className="font-medium text-foreground">{data.creditsLabel}</span>
+              <span className="font-medium text-foreground">
+                {data.creditsLabel}
+              </span>
             </div>
             <Progress className="h-1.5 bg-muted" value={data.creditsPercent} />
           </div>
           <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
             {data.metrics.map((m) => (
               <div className="px-4 py-3" key={m.label}>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{m.label}</p>
-                <p className="mt-0.5 text-base font-semibold text-foreground">{m.value}</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {m.label}
+                </p>
+                <p className="mt-0.5 text-base font-semibold text-foreground">
+                  {m.value}
+                </p>
               </div>
             ))}
           </div>
@@ -817,17 +992,27 @@ function UsagePanel() {
           <table className="w-full text-sm">
             <thead className="border-b border-border bg-muted/30">
               <tr>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Detail</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Date</th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Credits</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
+                  Detail
+                </th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
+                  Date
+                </th>
+                <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">
+                  Credits
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {data.rows.map((row) => (
                 <tr key={`${row.detail}-${row.date}`}>
                   <td className="px-4 py-2.5 text-foreground">{row.detail}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{row.date}</td>
-                  <td className="px-4 py-2.5 text-right font-medium text-foreground">{row.change}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground">
+                    {row.date}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-medium text-foreground">
+                    {row.change}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -881,10 +1066,14 @@ function BillingPanel() {
         <div className="overflow-hidden rounded-lg border border-border">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-foreground">{data.title} plan</p>
+              <p className="text-sm font-medium text-foreground">
+                {data.title} plan
+              </p>
               <p className="text-xs text-muted-foreground">{data.status}</p>
             </div>
-            <Button size="sm" type="button" variant="outline">Manage</Button>
+            <Button size="sm" type="button" variant="outline">
+              Manage
+            </Button>
           </div>
           <div className="grid grid-cols-3 divide-x divide-border">
             {[
@@ -893,8 +1082,12 @@ function BillingPanel() {
               { label: "Payment method", value: data.paymentMethod },
             ].map((item) => (
               <div className="px-4 py-3" key={item.label}>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{item.label}</p>
-                <p className="mt-0.5 text-sm font-medium text-foreground">{item.value}</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {item.label}
+                </p>
+                <p className="mt-0.5 text-sm font-medium text-foreground">
+                  {item.value}
+                </p>
               </div>
             ))}
           </div>
@@ -915,9 +1108,13 @@ function BillingPanel() {
             >
               <div>
                 <p className="text-sm text-foreground">{inv.period}</p>
-                <p className="text-xs text-muted-foreground">{inv.amount} · {inv.status}</p>
+                <p className="text-xs text-muted-foreground">
+                  {inv.amount} · {inv.status}
+                </p>
               </div>
-              <Button size="sm" type="button" variant="outline">Download</Button>
+              <Button size="sm" type="button" variant="outline">
+                Download
+              </Button>
             </div>
           ))}
         </div>
@@ -949,8 +1146,11 @@ export function DashboardSettingsCenterModal({
   initialTab: SettingsCenterTab;
   hasTeam?: boolean;
 }) {
-  const [activeTab, setActiveTab] = React.useState<SettingsCenterTab>(initialTab);
-  const [scope, setScope] = React.useState<BillingScope>(hasTeam ? "team" : "personal");
+  const [activeTab, setActiveTab] =
+    React.useState<SettingsCenterTab>(initialTab);
+  const [scope, setScope] = React.useState<BillingScope>(
+    hasTeam ? "team" : "personal",
+  );
   const wasOpenRef = React.useRef(open);
 
   React.useEffect(() => {
@@ -981,8 +1181,12 @@ export function DashboardSettingsCenterModal({
                   {initials}
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] font-medium text-foreground">{userName ?? "SourceWeft User"}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">{userEmail}</p>
+                  <p className="truncate text-[13px] font-medium text-foreground">
+                    {userName ?? "SourceWeft User"}
+                  </p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {userEmail}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1029,17 +1233,23 @@ export function DashboardSettingsCenterModal({
             {/* Scrollable area */}
             <div className="absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain px-6 pb-10 pt-6 pr-12">
               {activeTab === "account" && (
-                <AccountPanel initials={initials} userEmail={userEmail} userImage={userImage} userName={userName} />
+                <AccountPanel
+                  initials={initials}
+                  userEmail={userEmail}
+                  userImage={userImage}
+                  userName={userName}
+                />
               )}
               {activeTab === "team" && (
-                <TeamPanel hasTeam={hasTeam} onScopeChange={setScope} scope={scope} teamName={teamName} />
+                <TeamPanel
+                  hasTeam={hasTeam}
+                  onScopeChange={setScope}
+                  scope={scope}
+                  teamName={teamName}
+                />
               )}
-              {activeTab === "usage" && (
-                <UsagePanel />
-              )}
-              {activeTab === "billing" && (
-                <BillingPanel />
-              )}
+              {activeTab === "usage" && <UsagePanel />}
+              {activeTab === "billing" && <BillingPanel />}
             </div>
           </div>
         </div>
