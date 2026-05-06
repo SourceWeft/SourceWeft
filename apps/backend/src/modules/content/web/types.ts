@@ -3,6 +3,7 @@ export type WebProviderName = "anycrawl" | string;
 export type WebSearchProviderInput = {
   query: string;
   limit: number;
+  includeContent?: boolean;
   lang?: string;
   country?: string;
 };

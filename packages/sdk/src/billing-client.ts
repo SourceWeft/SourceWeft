@@ -13,6 +13,8 @@ import type {
   MeterConsumeResponse,
   MeterIngestionRequest,
   MeterIngestionResponse,
+  UpdateTeamSubscriptionSeatsRequest,
+  UpdateTeamSubscriptionSeatsResponse,
   UpdateSpendLimitsRequest,
   UpdateSpendLimitsResponse,
 } from "@sourceweft/contracts";
@@ -70,6 +72,16 @@ export class BillingClient {
   ) {
     return this.http.post<CreateTeamSubscriptionCheckoutResponse>(
       `/v1/teams/${encodeTeamId(teamId)}/billing/subscription/checkout`,
+      input,
+    );
+  }
+
+  updateSubscriptionSeats(
+    teamId: string,
+    input: UpdateTeamSubscriptionSeatsRequest,
+  ) {
+    return this.http.post<UpdateTeamSubscriptionSeatsResponse>(
+      `/v1/teams/${encodeTeamId(teamId)}/billing/subscription/seats`,
       input,
     );
   }

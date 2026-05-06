@@ -38,6 +38,10 @@ export type BillingStore = {
     client?: PoolClient,
   ): Promise<BillingLedgerRow[]>;
   countTeamMembers(teamId: string, client?: PoolClient): Promise<number>;
+  countPendingTeamInvitations(
+    teamId: string,
+    client?: PoolClient,
+  ): Promise<number>;
   getSubscriptionByTeam(
     teamId: string,
     client?: PoolClient,
@@ -91,6 +95,7 @@ export type BillingStore = {
     Array<{
       teamId: string;
       accountPlanFamily: BillingAccountState["planFamily"];
+      subscriptionPlanFamily: BillingSubscriptionState["planFamily"] | null;
       subscriptionStatus: BillingSubscriptionState["status"] | null;
       externalSubscriptionId: string | null;
     }>

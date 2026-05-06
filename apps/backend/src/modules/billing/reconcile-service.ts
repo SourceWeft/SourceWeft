@@ -33,6 +33,8 @@ export class BillingReconcileService {
     for (const state of states) {
       const expectedFromState = resolvePlanFromSubscription({
         status: state.subscriptionStatus ?? "inactive",
+        planFamily:
+          state.subscriptionPlanFamily ?? this.runtimeConfig.defaultPlanFamily,
         defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
       });
 
@@ -60,6 +62,9 @@ export class BillingReconcileService {
           );
           const expectedPlan = resolvePlanFromSubscription({
             status: latestSubscription?.status ?? "inactive",
+            planFamily:
+              latestSubscription?.planFamily ??
+              this.runtimeConfig.defaultPlanFamily,
             defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
           });
 

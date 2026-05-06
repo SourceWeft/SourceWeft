@@ -19,6 +19,10 @@ export const billingProviderSchema = z.enum([
 ]);
 
 export const teamPlanFamilySchema = z.enum(["team_standard"]);
+export const subscriptionPlanFamilySchema = z.enum([
+  "individual_pro",
+  "team_standard",
+]);
 
 export const billingSubscriptionStatusSchema = z.enum([
   "inactive",
@@ -172,16 +176,46 @@ export const billingSubscriptionResponseSchema = z.object({
   lastEventAt: z.string().nullable(),
 });
 
-export const createTeamSubscriptionCheckoutRequestSchema = z.object({
-  planFamily: z.literal("team_standard").default("team_standard"),
-  seatCount: z.number().int().min(2).max(20),
-  successUrl: z.string().url().optional(),
-});
+export const createTeamSubscriptionCheckoutRequestSchema = z
+  .object({
+    planFamily: subscriptionPlanFamilySchema.default("team_standard"),
+    billingInterval: z.enum(["monthly", "yearly"]).default("yearly"),
+    seatCount: z.number().int().min(2).max(20).optional(),
+    successUrl: z.string().url().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.planFamily === "team_standard" && value.seatCount === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "seatCount is required for team_standard subscriptions",
+        path: ["seatCount"],
+      });
+    }
+
+    if (value.planFamily === "individual_pro" && value.seatCount !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "seatCount is only supported for team_standard subscriptions",
+        path: ["seatCount"],
+      });
+    }
+  });
 
 export const createTeamSubscriptionCheckoutResponseSchema = z.object({
   teamId: z.string(),
   provider: billingProviderSchema,
   checkoutUrl: z.string().url(),
+});
+
+export const updateTeamSubscriptionSeatsRequestSchema = z.object({
+  seatCount: z.number().int().min(2).max(20),
+});
+
+export const updateTeamSubscriptionSeatsResponseSchema = z.object({
+  teamId: z.string(),
+  provider: billingProviderSchema,
+  seatCount: z.number().int().min(2),
+  seatsUsed: z.number().int().nonnegative(),
 });
 
 export const createTeamBillingPortalResponseSchema = z.object({
@@ -254,6 +288,9 @@ export type PlanFamily = z.infer<typeof planFamilySchema>;
 export type BillingMode = z.infer<typeof billingModeSchema>;
 export type BillingProvider = z.infer<typeof billingProviderSchema>;
 export type TeamPlanFamily = z.infer<typeof teamPlanFamilySchema>;
+export type SubscriptionPlanFamily = z.infer<
+  typeof subscriptionPlanFamilySchema
+>;
 export type BillingCycleSource = z.infer<typeof billingCycleSourceSchema>;
 export type BillingInterval = z.infer<typeof billingIntervalSchema>;
 export type BillingSubscriptionStatus = z.infer<
@@ -288,6 +325,12 @@ export type CreateTeamSubscriptionCheckoutRequest = z.infer<
 >;
 export type CreateTeamSubscriptionCheckoutResponse = z.infer<
   typeof createTeamSubscriptionCheckoutResponseSchema
+>;
+export type UpdateTeamSubscriptionSeatsRequest = z.infer<
+  typeof updateTeamSubscriptionSeatsRequestSchema
+>;
+export type UpdateTeamSubscriptionSeatsResponse = z.infer<
+  typeof updateTeamSubscriptionSeatsResponseSchema
 >;
 export type CreateTeamBillingPortalResponse = z.infer<
   typeof createTeamBillingPortalResponseSchema

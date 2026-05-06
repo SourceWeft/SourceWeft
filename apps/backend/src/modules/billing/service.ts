@@ -9,6 +9,8 @@ import type {
   MeterConsumeResponse,
   MeterIngestionRequest,
   MeterIngestionResponse,
+  UpdateTeamSubscriptionSeatsRequest,
+  UpdateTeamSubscriptionSeatsResponse,
   UpdateSpendLimitsRequest,
   UpdateSpendLimitsResponse,
 } from "@sourceweft/contracts";
@@ -37,6 +39,7 @@ export class BillingService {
     store: BillingStore,
     runtimeConfig: BillingRuntimeConfig,
     provider: BillingProviderAdapter,
+    alerts?: ConstructorParameters<typeof BillingSubscriptionService>[4],
   ) {
     this.accountService = new BillingAccountService(store, runtimeConfig);
     this.usageService = new BillingUsageService(
@@ -49,6 +52,7 @@ export class BillingService {
       runtimeConfig,
       provider,
       this.accountService,
+      alerts,
     );
     this.webhookService = new BillingWebhookService(
       store,
@@ -110,6 +114,41 @@ export class BillingService {
 
   syncSubscriptionSnapshot(snapshot: TeamSubscriptionSnapshot) {
     return this.subscriptionService.syncSubscriptionSnapshot(snapshot);
+  }
+
+  assertCanInviteTeamMember(teamId: string) {
+    return this.subscriptionService.assertCanInviteTeamMember(teamId);
+  }
+
+  assertCanAcceptTeamInvitation(teamId: string) {
+    return this.subscriptionService.assertCanAcceptTeamInvitation(teamId);
+  }
+
+  assertCanAddTeamMember(teamId: string) {
+    return this.subscriptionService.assertCanAddTeamMember(teamId);
+  }
+
+  syncTeamSubscriptionSeats(
+    teamId: string,
+    input: UpdateTeamSubscriptionSeatsRequest & {
+      actorUserId?: string | null;
+      reason?: string;
+    },
+  ): Promise<UpdateTeamSubscriptionSeatsResponse> {
+    return this.subscriptionService.syncTeamSubscriptionSeats(teamId, input);
+  }
+
+  syncTeamSubscriptionSeatsToMembers(
+    teamId: string,
+    input?: {
+      actorUserId?: string | null;
+      reason?: string;
+    },
+  ) {
+    return this.subscriptionService.syncTeamSubscriptionSeatsToMembers(
+      teamId,
+      input,
+    );
   }
 
   processSubscriptionWebhookEvent(

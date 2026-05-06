@@ -35,9 +35,12 @@ const runtimeConfig: BillingRuntimeConfig = {
     apiKey: "",
     webhookSecret: "",
     testMode: true,
-    teamStandardProductId: "",
-    defaultSuccessUrl: "http://localhost:3000",
+    individualProMonthlyProductId: "prod_individual_monthly",
+    individualProYearlyProductId: "prod_individual_yearly",
+    teamStandardMonthlyProductId: "prod_team_monthly",
+    teamStandardYearlyProductId: "prod_team_yearly",
   },
+  defaultSuccessUrl: "http://localhost:3000/app/billing?checkout=success",
 };
 
 class MemoryBillingStore implements BillingStore {
@@ -45,6 +48,8 @@ class MemoryBillingStore implements BillingStore {
   subscription: BillingSubscriptionState | null = null;
   webhook: BillingWebhookEventState | null = null;
   ledgers: BillingLedgerRow[] = [];
+  teamMemberCount = 1;
+  pendingInvitationCount = 0;
 
   async runInTransaction<T>(fn: (client: PoolClient) => Promise<T>) {
     return fn(client);
@@ -84,7 +89,11 @@ class MemoryBillingStore implements BillingStore {
   }
 
   async countTeamMembers() {
-    return 1;
+    return this.teamMemberCount;
+  }
+
+  async countPendingTeamInvitations() {
+    return this.pendingInvitationCount;
   }
 
   async getSubscriptionByTeam() {
@@ -174,6 +183,9 @@ const noopProvider: BillingProviderAdapter = {
     throw new Error("not implemented");
   },
   async createPortal() {
+    throw new Error("not implemented");
+  },
+  async updateSubscriptionSeats() {
     throw new Error("not implemented");
   },
 };
@@ -565,6 +577,262 @@ test("webhook with active snapshot without usable period is ignored without retr
   assert.equal(store.subscription, null);
 });
 
+test("team subscription checkout rejects seats below current members", async () => {
+  const store = new MemoryBillingStore();
+  store.teamMemberCount = 3;
+  const providerCalls: Array<unknown> = [];
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout(input) {
+        providerCalls.push(input);
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/team",
+        };
+      },
+    },
+  );
+
+  await assertRejectsWithBillingCode(
+    () =>
+      billingService.createSubscriptionCheckout(
+        "team_1",
+        {
+          planFamily: "team_standard",
+          billingInterval: "monthly",
+          seatCount: 2,
+        },
+        {
+          userId: "user_1",
+          email: "user@example.com",
+        },
+      ),
+    "SEAT_COUNT_BELOW_MEMBERS",
+  );
+  assert.equal(providerCalls.length, 0);
+});
+
+test("team subscription seat sync updates provider before local quota", async () => {
+  const store = new MemoryBillingStore();
+  store.teamMemberCount = 3;
+  const now = new Date().toISOString();
+  store.account = {
+    teamId: "team_1",
+    planFamily: "team_standard",
+    cycleAnchorAt: now,
+    cycleSource: "provider_subscription",
+    cycleStartAt: now,
+    cycleEndAt: new Date(Date.now() + 31 * 86_400_000).toISOString(),
+    pagesLimit: 12_000,
+    pagesUsed: 0,
+    monthlyPagesGrant: 12_000,
+    monthlyPagesBalance: 12_000,
+    addOnPagesBalance: 0,
+    pagesConsumedThisCycle: 0,
+    monthlyCreditsGrant: 40_000,
+    monthlyCreditsBalance: 40_000,
+    addOnCreditsBalance: 0,
+    creditsReserved: 0,
+    creditsConsumedThisCycle: 0,
+    seatCount: 3,
+    spendSoftCapUsd: null,
+    spendHardCapUsd: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.subscription = {
+    id: "sub_1",
+    teamId: "team_1",
+    provider: "creem",
+    planFamily: "team_standard",
+    status: "active",
+    billingInterval: "monthly",
+    currentPeriodStart: now,
+    currentPeriodEnd: new Date(Date.now() + 31 * 86_400_000).toISOString(),
+    externalCustomerId: "cus_1",
+    externalSubscriptionId: "ext_sub_1",
+    externalProductId: "prod_team_monthly",
+    cancelAtPeriodEnd: false,
+    metadata: {},
+    lastEventAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const updates: Array<{ externalSubscriptionId: string; seatCount: number }> =
+    [];
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async updateSubscriptionSeats(input) {
+        updates.push({
+          externalSubscriptionId: input.externalSubscriptionId,
+          seatCount: input.seatCount,
+        });
+        return {
+          provider: "creem",
+          seatCount: input.seatCount,
+        };
+      },
+    },
+  );
+
+  const result = await billingService.syncTeamSubscriptionSeats("team_1", {
+    seatCount: 5,
+    actorUserId: "user_1",
+  });
+
+  assert.deepEqual(updates, [
+    {
+      externalSubscriptionId: "ext_sub_1",
+      seatCount: 5,
+    },
+  ]);
+  assert.equal(result.seatCount, 5);
+  assert.equal(result.seatsUsed, 3);
+  assert.equal(store.account?.seatCount, 5);
+  assert.equal(store.account?.monthlyCreditsGrant, 100_000);
+  assert.equal(store.account?.monthlyPagesGrant, 30_000);
+});
+
+test("team subscription seat sync failure leaves local seat count unchanged", async () => {
+  const store = new MemoryBillingStore();
+  store.teamMemberCount = 2;
+  const now = new Date().toISOString();
+  await new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    noopProvider,
+  ).ensureBillingAccount("team_1");
+  assert.ok(store.account);
+  store.account = {
+    ...store.account,
+    planFamily: "team_standard",
+    seatCount: 2,
+    monthlyCreditsGrant: 40_000,
+    monthlyPagesGrant: 12_000,
+  };
+  store.subscription = {
+    id: "sub_1",
+    teamId: "team_1",
+    provider: "creem",
+    planFamily: "team_standard",
+    status: "active",
+    billingInterval: "monthly",
+    currentPeriodStart: now,
+    currentPeriodEnd: new Date(Date.now() + 31 * 86_400_000).toISOString(),
+    externalCustomerId: "cus_1",
+    externalSubscriptionId: "ext_sub_1",
+    externalProductId: "prod_team_monthly",
+    cancelAtPeriodEnd: false,
+    metadata: {},
+    lastEventAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const alerts: Array<Record<string, unknown>> = [];
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async updateSubscriptionSeats() {
+        throw new Error("provider down");
+      },
+    },
+    {
+      async trigger(input) {
+        alerts.push(input);
+      },
+      async resolve() {},
+    },
+  );
+
+  await assert.rejects(
+    () => billingService.syncTeamSubscriptionSeats("team_1", { seatCount: 4 }),
+    /provider down/,
+  );
+  assert.equal(store.account?.seatCount, 2);
+  assert.equal(store.account?.monthlyCreditsGrant, 40_000);
+  assert.equal(store.account?.monthlyPagesGrant, 12_000);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0]?.alertKey, "billing:seat-sync:failed:team_1");
+});
+
+test("active team subscription rejects invitations at seat capacity", async () => {
+  const store = new MemoryBillingStore();
+  store.teamMemberCount = 2;
+  store.pendingInvitationCount = 1;
+  const now = new Date().toISOString();
+  await new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    noopProvider,
+  ).ensureBillingAccount("team_1");
+  assert.ok(store.account);
+  store.account = {
+    ...store.account,
+    planFamily: "team_standard",
+    seatCount: 3,
+  };
+  store.subscription = {
+    id: "sub_1",
+    teamId: "team_1",
+    provider: "creem",
+    planFamily: "team_standard",
+    status: "active",
+    billingInterval: "monthly",
+    currentPeriodStart: now,
+    currentPeriodEnd: new Date(Date.now() + 31 * 86_400_000).toISOString(),
+    externalCustomerId: "cus_1",
+    externalSubscriptionId: "ext_sub_1",
+    externalProductId: "prod_team_monthly",
+    cancelAtPeriodEnd: false,
+    metadata: {},
+    lastEventAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    noopProvider,
+  );
+
+  await assertRejectsWithBillingCode(
+    () => billingService.assertCanInviteTeamMember("team_1"),
+    "TEAM_SEAT_LIMIT_REACHED",
+  );
+});
+
 test("creem expired event status overrides active payload status", async () => {
   const store = new MemoryBillingStore();
   const billingService = new BillingService(
@@ -607,6 +875,59 @@ test("creem expired event status overrides active payload status", async () => {
   assert.equal(store.webhook?.status, "processed");
   assert.equal(store.subscription?.status, "expired");
   assert.equal(store.subscription?.billingInterval, "unknown");
+});
+
+test("creem webhook resolves team seats from subscription item units", async () => {
+  const store = new MemoryBillingStore();
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    noopProvider,
+  );
+  const alerts = {
+    async trigger() {},
+    async resolve() {},
+  };
+  const syncCreemSubscriptionEvent = createCreemSubscriptionSync({
+    billing: billingService,
+    alerts: alerts as any,
+  });
+  const currentStart = new Date().toISOString();
+  const currentEnd = new Date(Date.now() + 31 * 86_400_000).toISOString();
+
+  await syncCreemSubscriptionEvent(
+    "subscription.active",
+    {
+      webhookId: "evt_items_units",
+      id: "ext_sub_1",
+      status: "active",
+      current_period_start_date: currentStart,
+      current_period_end_date: currentEnd,
+      customer: { id: "cus_1" },
+      product: { id: "prod_team_monthly" },
+      items: [
+        {
+          id: "item_1",
+          units: 4,
+        },
+      ],
+      metadata: {
+        teamId: "team_1",
+        planFamily: "team_standard",
+        billingInterval: "monthly",
+      },
+    },
+    "active",
+  );
+
+  assert.equal(store.webhook?.status, "processed");
+  assert.equal(store.subscription?.planFamily, "team_standard");
+  assert.equal(store.subscription?.billingInterval, "monthly");
+  assert.equal(store.account?.seatCount, 4);
 });
 
 test("billing portal actions reject subscriptions without provider customer", async () => {

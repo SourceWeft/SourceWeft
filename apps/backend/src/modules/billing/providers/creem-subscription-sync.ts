@@ -52,19 +52,81 @@ function resolveTeamId(metadata: Record<string, unknown> | null) {
   return null;
 }
 
+function resolveMetadata(record: Record<string, unknown> | null) {
+  const metadata = asRecord(record?.metadata ?? null);
+  if (metadata) {
+    return metadata;
+  }
+
+  const subscription = asRecord(record?.subscription ?? null);
+  return asRecord(subscription?.metadata ?? null);
+}
+
 function resolvePlanFamily(
   metadata: Record<string, unknown> | null,
   data: unknown,
-): "team_standard" | null {
-  if (metadata?.planFamily === "team_standard") {
-    return "team_standard";
+): "individual_pro" | "team_standard" | null {
+  if (
+    metadata?.planFamily === "individual_pro" ||
+    metadata?.planFamily === "team_standard"
+  ) {
+    return metadata.planFamily;
   }
 
   const product = asRecord(asRecord(data)?.product ?? null);
-  const productId = readString(product, "id");
+  const productId =
+    readString(product, "id") ?? readString(asRecord(data), "product");
 
-  if (productId && productId === config.billing.creem.teamStandardProductId) {
+  if (
+    productId &&
+    (productId === config.billing.creem.teamStandardMonthlyProductId ||
+      productId === config.billing.creem.teamStandardYearlyProductId)
+  ) {
     return "team_standard";
+  }
+
+  if (
+    productId &&
+    (productId === config.billing.creem.individualProMonthlyProductId ||
+      productId === config.billing.creem.individualProYearlyProductId)
+  ) {
+    return "individual_pro";
+  }
+
+  return null;
+}
+
+function resolveBillingIntervalFromProduct(
+  metadata: Record<string, unknown> | null,
+  data: unknown,
+): Exclude<BillingInterval, "unknown"> | null {
+  if (metadata?.billingInterval === "monthly") {
+    return "monthly";
+  }
+
+  if (metadata?.billingInterval === "yearly") {
+    return "yearly";
+  }
+
+  const product = asRecord(asRecord(data)?.product ?? null);
+  const productId =
+    readString(product, "id") ?? readString(asRecord(data), "product");
+  if (!productId) {
+    return null;
+  }
+
+  if (
+    productId === config.billing.creem.individualProMonthlyProductId ||
+    productId === config.billing.creem.teamStandardMonthlyProductId
+  ) {
+    return "monthly";
+  }
+
+  if (
+    productId === config.billing.creem.individualProYearlyProductId ||
+    productId === config.billing.creem.teamStandardYearlyProductId
+  ) {
+    return "yearly";
   }
 
   return null;
@@ -112,6 +174,9 @@ function resolveStatusFromEventType(
       return "trialing";
     case "subscription.past_due":
       return "past_due";
+    case "subscription.scheduled_cancel":
+    case "subscription.update":
+      return null;
     case "subscription.paused":
       return "paused";
     case "subscription.unpaid":
@@ -169,7 +234,12 @@ function inferBillingInterval(
 function resolveCreemSeatCount(
   data: unknown,
   metadata: Record<string, unknown> | null,
+  planFamily: "individual_pro" | "team_standard",
 ): number {
+  if (planFamily === "individual_pro") {
+    return 1;
+  }
+
   const parseSeatCount = (value: unknown) => {
     const parsed =
       typeof value === "number"
@@ -209,7 +279,7 @@ function buildCreemSubscriptionSnapshot(
   fallbackStatus: BillingSubscriptionStatus,
 ): TeamSubscriptionSnapshot | null {
   const record = asRecord(data);
-  const metadata = asRecord(record?.metadata ?? null);
+  const metadata = resolveMetadata(record);
   const teamId = resolveTeamId(metadata);
   const planFamily = resolvePlanFamily(metadata, data);
 
@@ -219,9 +289,19 @@ function buildCreemSubscriptionSnapshot(
 
   const customer = asRecord(record?.customer ?? null);
   const product = asRecord(record?.product ?? null);
+  const customerId =
+    readString(customer, "id") ?? readString(record, "customer");
+  const productId = readString(product, "id") ?? readString(record, "product");
   const rawStatus = readString(record, "status");
-  const currentPeriodStart = toDateIso(record?.current_period_start_date);
-  const currentPeriodEnd = toDateIso(record?.current_period_end_date);
+  const currentPeriodStart = toDateIso(
+    record?.current_period_start_date ?? record?.currentPeriodStartDate,
+  );
+  const currentPeriodEnd = toDateIso(
+    record?.current_period_end_date ?? record?.currentPeriodEndDate,
+  );
+  const billingInterval =
+    resolveBillingIntervalFromProduct(metadata, data) ??
+    inferBillingInterval(currentPeriodStart, currentPeriodEnd);
 
   return {
     teamId,
@@ -232,15 +312,18 @@ function buildCreemSubscriptionSnapshot(
       rawStatus,
       fallbackStatus,
     }),
-    billingInterval: inferBillingInterval(currentPeriodStart, currentPeriodEnd),
+    billingInterval,
     currentPeriodStart,
     currentPeriodEnd,
-    externalCustomerId: readString(customer, "id"),
+    externalCustomerId: customerId,
     externalSubscriptionId: readString(record, "id"),
-    externalProductId: readString(product, "id"),
-    cancelAtPeriodEnd: rawStatus === "scheduled_cancel",
+    externalProductId: productId,
+    cancelAtPeriodEnd:
+      rawStatus === "scheduled_cancel" ||
+      record?.cancel_at_period_end === true ||
+      eventType === "subscription.scheduled_cancel",
     metadata: metadata ?? {},
-    seatCount: resolveCreemSeatCount(data, metadata),
+    seatCount: resolveCreemSeatCount(data, metadata, planFamily),
   };
 }
 

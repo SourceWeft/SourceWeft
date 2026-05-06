@@ -12,3 +12,4 @@ onlyBuiltDependencies:
   - msw
   - sharp
   - spawn-sync
+  - tesseract.js

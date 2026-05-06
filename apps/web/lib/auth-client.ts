@@ -13,6 +13,7 @@ import {
 import { apiKeyClient } from "@better-auth/api-key/client";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { passkeyClient } from "@better-auth/passkey/client";
+import { creemClient } from "@creem_io/better-auth/client";
 
 function resolveAuthBaseUrl() {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
@@ -37,6 +38,7 @@ export const authClient = createAuthClient({
     magicLinkClient(),
     passkeyClient(),
     oauthProviderClient(),
+    creemClient(),
     ...(oneTapClientId
       ? [
           oneTapClient({

@@ -16,6 +16,7 @@ import type {
 export const DEFAULT_CONSUME_FEATURE = "chat";
 export const DEFAULT_INGESTION_FEATURE = "ingestion";
 export const TEAM_STANDARD_PLAN = "team_standard" as const;
+export const INDIVIDUAL_PRO_PLAN = "individual_pro" as const;
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<BillingSubscriptionStatus>([
   "trialing",
@@ -76,10 +77,11 @@ export function toSubscriptionSummary(input: {
 
 export function resolvePlanFromSubscription(input: {
   status: BillingSubscriptionStatus;
+  planFamily: PlanFamily;
   defaultPlanFamily: PlanFamily;
 }) {
   if (ACTIVE_SUBSCRIPTION_STATUSES.has(input.status)) {
-    return TEAM_STANDARD_PLAN;
+    return input.planFamily;
   }
 
   return input.defaultPlanFamily;

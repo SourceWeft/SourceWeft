@@ -32,14 +32,12 @@ import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
 import { billingClient } from "../../../lib/sdk";
 import { useTheme } from "next-themes";
-import { getPricingConfig } from "../../_landing/pricing-config";
 import {
   createTeamOrganizationMetadata,
   getPersonalOrganization,
   getVisibleTeamOrganizations,
   isPersonalOrganization,
 } from "./dashboard-team-selector-shared";
-import { DashboardPricingModal } from "./dashboard-pricing-modal";
 
 export type SettingsCenterTab = "account" | "team" | "usage" | "billing";
 type BillingScope = "personal" | "team";
@@ -1499,17 +1497,15 @@ function BillingPanel() {
     React.useState<BillingSubscription | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [actionLoading, setActionLoading] = React.useState(false);
-  const [pricingOpen, setPricingOpen] = React.useState(false);
+  const [seatActionLoading, setSeatActionLoading] = React.useState(false);
   const [billingPeriod, setBillingPeriod] = React.useState<
     "monthly" | "yearly"
   >("yearly");
+  const [targetSeatCount, setTargetSeatCount] = React.useState(2);
   const [error, setError] = React.useState<string | null>(null);
-  const plans = getPricingConfig();
 
-  React.useEffect(() => {
-    let cancelled = false;
-
-    async function loadBilling() {
+  const loadBilling = React.useCallback(
+    async (options?: { silent?: boolean }) => {
       if (!teamId) {
         setSummary(null);
         setSubscription(null);
@@ -1518,7 +1514,9 @@ function BillingPanel() {
         return;
       }
 
-      setLoading(true);
+      if (!options?.silent) {
+        setLoading(true);
+      }
       setError(null);
 
       try {
@@ -1527,33 +1525,45 @@ function BillingPanel() {
           billingClient.getSubscription(teamId),
         ]);
 
-        if (cancelled) {
-          return;
-        }
-
         setSummary(nextSummary);
         setSubscription(nextSubscription);
       } catch (err) {
-        if (cancelled) {
-          return;
-        }
-
         setSummary(null);
         setSubscription(null);
         setError(err instanceof Error ? err.message : "Failed to load billing");
       } finally {
-        if (!cancelled) {
+        if (!options?.silent) {
           setLoading(false);
         }
       }
+    },
+    [resolvingPersonalTeamId, teamId],
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      await loadBilling();
+      if (cancelled) {
+        setSummary(null);
+        setSubscription(null);
+      }
     }
 
-    void loadBilling();
+    void load();
 
     return () => {
       cancelled = true;
     };
-  }, [resolvingPersonalTeamId, teamId]);
+  }, [loadBilling]);
+
+  React.useEffect(() => {
+    const minimumSeats = Math.max(summary?.seats.used ?? 2, 2);
+    setTargetSeatCount((current) =>
+      Math.max(current, summary?.seats.limit ?? minimumSeats, minimumSeats),
+    );
+  }, [summary?.seats.limit, summary?.seats.used]);
 
   async function handleOpenPortal() {
     if (!teamId) {
@@ -1581,11 +1591,6 @@ function BillingPanel() {
   }
 
   async function handleUpgradePlan() {
-    if (isPersonal) {
-      setPricingOpen(true);
-      return;
-    }
-
     if (!teamId) {
       return;
     }
@@ -1593,10 +1598,13 @@ function BillingPanel() {
     setActionLoading(true);
 
     try {
-      const seatCount = Math.max(summary?.seats.limit ?? 2, 2);
+      const minimumSeats = Math.max(summary?.seats.used ?? 2, 2);
       const result = await billingClient.createSubscriptionCheckout(teamId, {
-        planFamily: "team_standard",
-        seatCount,
+        planFamily: isPersonal ? "individual_pro" : "team_standard",
+        billingInterval: billingPeriod,
+        ...(!isPersonal
+          ? { seatCount: Math.max(targetSeatCount, minimumSeats) }
+          : {}),
       });
       window.location.assign(result.checkoutUrl);
     } catch (err) {
@@ -1605,6 +1613,28 @@ function BillingPanel() {
       );
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function handleUpdateSeats() {
+    if (!teamId || isPersonal) {
+      return;
+    }
+
+    setSeatActionLoading(true);
+
+    try {
+      const minimumSeats = Math.max(summary?.seats.used ?? 2, 2);
+      const seatCount = Math.max(targetSeatCount, minimumSeats);
+      await billingClient.updateSubscriptionSeats(teamId, { seatCount });
+      toast.success("Seat count updated.");
+      await loadBilling({ silent: true });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Unable to update seats.",
+      );
+    } finally {
+      setSeatActionLoading(false);
     }
   }
 
@@ -1630,6 +1660,12 @@ function BillingPanel() {
   const seatsUsed = summary?.seats.used ?? 0;
   const seatsLimit = summary?.seats.limit ?? 0;
   const seatsRemaining = summary?.seats.remaining ?? 0;
+  const minimumSeatCount = Math.max(seatsUsed, 2);
+  const canUpdateSeats =
+    !isPersonal &&
+    isSubscriptionActive &&
+    targetSeatCount >= minimumSeatCount &&
+    targetSeatCount !== seatsLimit;
   const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
   const creditsLimit = summary?.credits.monthlyGrant ?? 0;
   const pagesUsed = summary?.pages.consumedThisCycle ?? 0;
@@ -1703,7 +1739,29 @@ function BillingPanel() {
                   {formatBillingInterval(subscription?.billingInterval)}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div
+                  aria-label="Billing period"
+                  className="flex rounded-lg border border-border bg-muted/40 p-0.5"
+                  role="group"
+                >
+                  {(["monthly", "yearly"] as const).map((period) => (
+                    <button
+                      aria-pressed={billingPeriod === period}
+                      className={cn(
+                        "min-w-16 rounded-md px-2.5 py-1 text-xs transition-colors",
+                        billingPeriod === period
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      key={period}
+                      onClick={() => setBillingPeriod(period)}
+                      type="button"
+                    >
+                      {period === "monthly" ? "Monthly" : "Yearly"}
+                    </button>
+                  ))}
+                </div>
                 {isSubscriptionActive ? (
                   <Button
                     disabled={actionLoading || !teamId}
@@ -1750,21 +1808,26 @@ function BillingPanel() {
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-base font-semibold text-foreground">Seats</p>
               <Button
-                disabled={actionLoading || !teamId}
+                disabled={
+                  actionLoading ||
+                  seatActionLoading ||
+                  !teamId ||
+                  (isSubscriptionActive && !canUpdateSeats)
+                }
                 onClick={() =>
                   void (isSubscriptionActive
-                    ? handleOpenPortal()
+                    ? handleUpdateSeats()
                     : handleUpgradePlan())
                 }
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                Add seats
+                {isSubscriptionActive ? "Update seats" : "Add seats"}
               </Button>
             </div>
             <div className="rounded-lg border border-border px-4 py-3">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-foreground">
                     {summary
@@ -1781,10 +1844,34 @@ function BillingPanel() {
                       : "Seat availability is unavailable"}
                   </p>
                 </div>
-                <p className="shrink-0 text-right text-sm font-medium text-foreground">
-                  {summary ? formatNumber(seatsLimit) : "--"} total
-                </p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <input
+                    aria-label="Total seats"
+                    className="h-9 w-20 rounded-md border border-input bg-background px-2 text-right text-sm font-medium text-foreground outline-none transition-colors focus:border-ring"
+                    disabled={!isSubscriptionActive || seatActionLoading}
+                    min={minimumSeatCount}
+                    onChange={(event) =>
+                      setTargetSeatCount(
+                        Math.max(
+                          minimumSeatCount,
+                          Number.parseInt(event.target.value, 10) ||
+                            minimumSeatCount,
+                        ),
+                      )
+                    }
+                    type="number"
+                    value={targetSeatCount}
+                  />
+                  <span className="text-sm font-medium text-foreground">
+                    total
+                  </span>
+                </div>
               </div>
+              {isSubscriptionActive && targetSeatCount === seatsLimit && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Seat count is already synced.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -1883,13 +1970,6 @@ function BillingPanel() {
           </div>
         </div>
       </div>
-      <DashboardPricingModal
-        billingPeriod={billingPeriod}
-        onBillingPeriodChange={setBillingPeriod}
-        onOpenChange={setPricingOpen}
-        open={pricingOpen}
-        plans={plans}
-      />
     </>
   );
 }

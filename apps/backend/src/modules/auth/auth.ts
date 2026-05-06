@@ -20,7 +20,7 @@ import { database } from "../../shared/database";
 import { logger } from "../../shared/logger";
 import { mailService } from "../../shared/mail";
 import { onboardingService } from "../onboarding";
-import { syncCreemSubscriptionEvent } from "../billing";
+import { billingService, syncCreemSubscriptionEvent } from "../billing";
 import { workspaceService } from "../workspace";
 import {
   isPersonalOrganizationMetadata,
@@ -91,6 +91,28 @@ async function assertUserHardDeleteAllowed(userId: string) {
   throw new APIError("BAD_REQUEST", {
     message: `Transfer the owner role for organization '${organizationLabel}' before deleting this account.`,
   });
+}
+
+async function syncOrganizationSeatsAfterMembershipChange(input: {
+  organizationId: string;
+  actorUserId?: string | null;
+  reason: string;
+}) {
+  try {
+    await billingService.syncTeamSubscriptionSeatsToMembers(
+      input.organizationId,
+      {
+        actorUserId: input.actorUserId ?? null,
+        reason: input.reason,
+      },
+    );
+  } catch (error) {
+    logger.error("Failed to sync billing seats after membership change", {
+      organizationId: input.organizationId,
+      reason: input.reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export const auth: any = betterAuth({
@@ -320,6 +342,8 @@ export const auth: any = betterAuth({
               message: "Personal workspace cannot add members.",
             });
           }
+
+          await billingService.assertCanAddTeamMember(organization.id);
         },
         async beforeCreateInvitation({ organization }) {
           if (isPersonalOrganizationMetadata(organization.metadata)) {
@@ -327,6 +351,8 @@ export const auth: any = betterAuth({
               message: "Personal workspace cannot invite members.",
             });
           }
+
+          await billingService.assertCanInviteTeamMember(organization.id);
         },
         async beforeAcceptInvitation({ organization }) {
           if (isPersonalOrganizationMetadata(organization.metadata)) {
@@ -334,6 +360,8 @@ export const auth: any = betterAuth({
               message: "Personal workspace cannot accept invitations.",
             });
           }
+
+          await billingService.assertCanAcceptTeamInvitation(organization.id);
         },
         async beforeDeleteOrganization({ organization }) {
           if (isPersonalOrganizationMetadata(organization.metadata)) {
@@ -346,6 +374,27 @@ export const auth: any = betterAuth({
           await onboardingService.provisionOrganization({
             organizationId: organization.id,
             userId: user.id,
+          });
+        },
+        async afterAddMember({ organization, user }) {
+          await syncOrganizationSeatsAfterMembershipChange({
+            organizationId: organization.id,
+            actorUserId: user.id,
+            reason: "member_added",
+          });
+        },
+        async afterRemoveMember({ organization, user }) {
+          await syncOrganizationSeatsAfterMembershipChange({
+            organizationId: organization.id,
+            actorUserId: user.id,
+            reason: "member_removed",
+          });
+        },
+        async afterAcceptInvitation({ organization, user }) {
+          await syncOrganizationSeatsAfterMembershipChange({
+            organizationId: organization.id,
+            actorUserId: user.id,
+            reason: "invitation_accepted",
           });
         },
       },
@@ -394,7 +443,8 @@ export const auth: any = betterAuth({
             apiKey: config.billing.creem.apiKey,
             webhookSecret: config.billing.creem.webhookSecret || undefined,
             testMode: config.billing.creem.testMode,
-            persistSubscriptions: false,
+            defaultSuccessUrl: config.billing.defaultSuccessUrl,
+            persistSubscriptions: true,
             onSubscriptionActive: async (data) => {
               await syncCreemSubscriptionEvent(
                 "subscription.active",

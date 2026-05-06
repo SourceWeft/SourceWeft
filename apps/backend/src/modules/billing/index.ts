@@ -11,6 +11,7 @@ export const billingService = new BillingService(
   billingStore,
   config.billing,
   billingProvider,
+  opsAlertService,
 );
 
 export const syncCreemSubscriptionEvent = createCreemSubscriptionSync({

@@ -441,14 +441,19 @@ export const config = {
       process.env.BACKEND_BILLING_RECONCILE_ENABLED,
       true,
     ),
+    defaultSuccessUrl: `${resolveWebBaseUrl()}/app/billing?checkout=success`,
     creem: {
       apiKey: process.env.CREEM_API_KEY || "",
       webhookSecret: process.env.CREEM_WEBHOOK_SECRET || "",
       testMode: parseBoolean(process.env.CREEM_TEST_MODE, true),
-      teamStandardProductId: process.env.CREEM_TEAM_STANDARD_PRODUCT_ID || "",
-      defaultSuccessUrl:
-        process.env.CREEM_DEFAULT_SUCCESS_URL ||
-        "http://localhost:3000/app/billing?checkout=success",
+      individualProMonthlyProductId:
+        process.env.CREEM_INDIVIDUAL_PRO_MONTHLY_PRODUCT_ID || "",
+      individualProYearlyProductId:
+        process.env.CREEM_INDIVIDUAL_PRO_YEARLY_PRODUCT_ID || "",
+      teamStandardMonthlyProductId:
+        process.env.CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID || "",
+      teamStandardYearlyProductId:
+        process.env.CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID || "",
     },
   },
   ops: {

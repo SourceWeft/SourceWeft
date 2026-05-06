@@ -6,8 +6,11 @@ import type {
   CreateTeamBillingPortalResponse,
   CreateTeamSubscriptionCheckoutRequest,
   CreateTeamSubscriptionCheckoutResponse,
+  UpdateTeamSubscriptionSeatsRequest,
+  UpdateTeamSubscriptionSeatsResponse,
 } from "@sourceweft/contracts";
 import { getAnchoredMonthlyCycleWindow } from "@sourceweft/credits-core";
+import { logger } from "../../shared/logger";
 import { BillingAccountService } from "./account-service";
 import { BillingError } from "./errors";
 import type { BillingStore } from "./store-port";
@@ -18,6 +21,7 @@ import type {
   TeamSubscriptionSnapshot,
 } from "./types";
 import {
+  INDIVIDUAL_PRO_PLAN,
   TEAM_STANDARD_PLAN,
   ensureTeamBillingEnabled,
   resolvePlanFromSubscription,
@@ -29,6 +33,21 @@ const ACTIVE_SUBSCRIPTION_STATUSES = new Set<BillingSubscriptionStatus>([
   "active",
   "past_due",
 ]);
+const TEAM_SEAT_MIN = 2;
+const TEAM_SEAT_MAX = 20;
+
+type BillingAlertSink = {
+  trigger(input: {
+    alertKey: string;
+    level: "warn" | "error" | "critical";
+    source: string;
+    title: string;
+    message: string;
+    teamId?: string | null;
+    metadata?: Record<string, unknown>;
+  }): Promise<unknown>;
+  resolve(alertKey: string): Promise<unknown>;
+};
 
 function isActiveSubscriptionStatus(status: BillingSubscriptionStatus) {
   return ACTIVE_SUBSCRIPTION_STATUSES.has(status);
@@ -95,6 +114,7 @@ export class BillingSubscriptionService {
     private readonly runtimeConfig: BillingRuntimeConfig,
     private readonly provider: BillingProviderAdapter,
     private readonly accountService: BillingAccountService,
+    private readonly alerts?: BillingAlertSink,
   ) {}
 
   async getSubscription(teamId: string): Promise<BillingSubscriptionResponse> {
@@ -122,21 +142,29 @@ export class BillingSubscriptionService {
   ): Promise<CreateTeamSubscriptionCheckoutResponse> {
     ensureTeamBillingEnabled(this.runtimeConfig);
 
-    if (input.planFamily !== TEAM_STANDARD_PLAN) {
+    if (
+      input.planFamily !== TEAM_STANDARD_PLAN &&
+      input.planFamily !== INDIVIDUAL_PRO_PLAN
+    ) {
       throw new BillingError(
-        "UNSUPPORTED_TEAM_PLAN",
+        "UNSUPPORTED_SUBSCRIPTION_PLAN",
         400,
-        "Only team_standard is available in this release",
+        "Only individual_pro and team_standard subscriptions are available",
       );
     }
 
-    return this.accountService.withLockedAccount(teamId, async ({ account }) => {
+    return this.accountService.withLockedAccount(teamId, async ({ account, client }) => {
+      const seatCount =
+        input.planFamily === TEAM_STANDARD_PLAN
+          ? await this.resolveCheckoutSeatCount(account.teamId, input, client)
+          : undefined;
       const result = await this.provider.createCheckout({
         teamId: account.teamId,
         actorUserId: actor.userId,
         actorEmail: actor.email,
         planFamily: input.planFamily,
-        seatCount: input.seatCount,
+        billingInterval: input.billingInterval,
+        seatCount,
         successUrl: input.successUrl,
       });
 
@@ -145,6 +173,201 @@ export class BillingSubscriptionService {
         provider: result.provider,
         checkoutUrl: result.checkoutUrl,
       };
+    });
+  }
+
+  async assertCanInviteTeamMember(teamId: string) {
+    await this.assertTeamSeatCapacity(teamId, "invite");
+  }
+
+  async assertCanAcceptTeamInvitation(teamId: string) {
+    await this.assertTeamSeatCapacity(teamId, "accept_invitation");
+  }
+
+  async assertCanAddTeamMember(teamId: string) {
+    await this.assertTeamSeatCapacity(teamId, "add_member");
+  }
+
+  async syncTeamSubscriptionSeats(
+    teamId: string,
+    input: UpdateTeamSubscriptionSeatsRequest & {
+      actorUserId?: string | null;
+      reason?: string;
+    },
+  ): Promise<UpdateTeamSubscriptionSeatsResponse> {
+    ensureTeamBillingEnabled(this.runtimeConfig);
+
+    const operation = await this.accountService.withLockedAccount(
+      teamId,
+      async ({ account, client }) => {
+        const subscription = await this.store.getSubscriptionByTeam(
+          account.teamId,
+          client,
+        );
+        const seatsUsed = await this.store.countTeamMembers(
+          account.teamId,
+          client,
+        );
+        const seatCount = this.normalizeRequestedSeatCount(input.seatCount);
+
+        if (seatCount < seatsUsed) {
+          throw new BillingError(
+            "SEAT_COUNT_BELOW_MEMBERS",
+            409,
+            "seatCount cannot be lower than current team members",
+            {
+              seatCount,
+              seatsUsed,
+            },
+          );
+        }
+
+        if (
+          !subscription ||
+          subscription.planFamily !== TEAM_STANDARD_PLAN ||
+          !isActiveSubscriptionStatus(subscription.status)
+        ) {
+          throw new BillingError(
+            "TEAM_SUBSCRIPTION_NOT_ACTIVE",
+            409,
+            "Seat updates require an active team_standard subscription",
+          );
+        }
+
+        if (!subscription.externalSubscriptionId) {
+          throw new BillingError(
+            "BILLING_SUBSCRIPTION_ID_MISSING",
+            409,
+            "No provider subscription ID is available for this team",
+          );
+        }
+
+        return {
+          teamId: account.teamId,
+          currentSeatCount: account.seatCount,
+          externalSubscriptionId: subscription.externalSubscriptionId,
+          seatCount,
+          seatsUsed,
+        };
+      },
+    );
+
+    if (operation.currentSeatCount === operation.seatCount) {
+      return {
+        teamId: operation.teamId,
+        provider: this.runtimeConfig.provider,
+        seatCount: operation.seatCount,
+        seatsUsed: operation.seatsUsed,
+      };
+    }
+
+    try {
+      const providerResult = await this.provider.updateSubscriptionSeats({
+        teamId: operation.teamId,
+        actorUserId: input.actorUserId,
+        externalSubscriptionId: operation.externalSubscriptionId,
+        seatCount: operation.seatCount,
+      });
+
+      const response = await this.accountService.withLockedAccount(
+        operation.teamId,
+        async ({ account, client }) => {
+          const seatsUsed = await this.store.countTeamMembers(
+            account.teamId,
+            client,
+          );
+
+          if (operation.seatCount < seatsUsed) {
+            throw new BillingError(
+              "SEAT_COUNT_BELOW_MEMBERS",
+              409,
+              "seatCount cannot be lower than current team members",
+              {
+                seatCount: operation.seatCount,
+                seatsUsed,
+              },
+            );
+          }
+
+          const previousSeatCount = account.seatCount;
+          account.seatCount = operation.seatCount;
+          await this.accountService.refreshPlanQuotaLocked(account, client, {
+            source: "seat_sync",
+            provider: providerResult.provider,
+            externalSubscriptionId: operation.externalSubscriptionId,
+            reason: input.reason ?? "seat_count_update",
+            previousSeatCount,
+            nextSeatCount: account.seatCount,
+          });
+
+          return {
+            teamId: account.teamId,
+            provider: providerResult.provider,
+            seatCount: account.seatCount,
+            seatsUsed,
+          };
+        },
+      );
+
+      await this.resolveSeatSyncAlert(operation.teamId);
+      return response;
+    } catch (error) {
+      await this.triggerSeatSyncAlert(operation, error);
+      throw error;
+    }
+  }
+
+  async syncTeamSubscriptionSeatsToMembers(
+    teamId: string,
+    input?: {
+      actorUserId?: string | null;
+      reason?: string;
+    },
+  ): Promise<UpdateTeamSubscriptionSeatsResponse | null> {
+    if (!this.runtimeConfig.teamBillingEnabled) {
+      return null;
+    }
+
+    const operation = await this.accountService.withLockedAccount(
+      teamId,
+      async ({ account, client }) => {
+        const subscription = await this.store.getSubscriptionByTeam(
+          account.teamId,
+          client,
+        );
+
+        if (
+          !subscription ||
+          subscription.planFamily !== TEAM_STANDARD_PLAN ||
+          !isActiveSubscriptionStatus(subscription.status)
+        ) {
+          return null;
+        }
+
+        const seatsUsed = await this.store.countTeamMembers(
+          account.teamId,
+          client,
+        );
+        const seatCount = Math.max(TEAM_SEAT_MIN, seatsUsed);
+        return {
+          seatCount,
+          currentSeatCount: account.seatCount,
+        };
+      },
+    );
+
+    if (operation === null) {
+      return null;
+    }
+
+    if (operation.seatCount === operation.currentSeatCount) {
+      return null;
+    }
+
+    return this.syncTeamSubscriptionSeats(teamId, {
+      seatCount: operation.seatCount,
+      actorUserId: input?.actorUserId,
+      reason: input?.reason ?? "member_count_changed",
     });
   }
 
@@ -265,6 +488,7 @@ export class BillingSubscriptionService {
   ) {
     const targetPlan = resolvePlanFromSubscription({
       status: snapshot.status,
+      planFamily: snapshot.planFamily,
       defaultPlanFamily: this.runtimeConfig.defaultPlanFamily,
     });
     const now = new Date();
@@ -414,5 +638,164 @@ export class BillingSubscriptionService {
         nextSeatCount: account.seatCount,
       });
     }
+  }
+
+  private normalizeRequestedSeatCount(value: number) {
+    const seatCount = Math.floor(value);
+    if (
+      !Number.isFinite(seatCount) ||
+      seatCount < TEAM_SEAT_MIN ||
+      seatCount > TEAM_SEAT_MAX
+    ) {
+      throw new BillingError(
+        "INVALID_SEAT_COUNT",
+        400,
+        `seatCount must be between ${TEAM_SEAT_MIN} and ${TEAM_SEAT_MAX}`,
+      );
+    }
+
+    return seatCount;
+  }
+
+  private async resolveCheckoutSeatCount(
+    teamId: string,
+    input: CreateTeamSubscriptionCheckoutRequest,
+    client: PoolClient,
+  ) {
+    const requested = input.seatCount;
+    if (requested === undefined) {
+      throw new BillingError(
+        "SEAT_COUNT_REQUIRED",
+        400,
+        "seatCount is required for team_standard subscriptions",
+      );
+    }
+
+    const seatCount = this.normalizeRequestedSeatCount(requested);
+    const seatsUsed = await this.store.countTeamMembers(teamId, client);
+    if (seatCount < seatsUsed) {
+      throw new BillingError(
+        "SEAT_COUNT_BELOW_MEMBERS",
+        409,
+        "seatCount cannot be lower than current team members",
+        {
+          seatCount,
+          seatsUsed,
+        },
+      );
+    }
+
+    return seatCount;
+  }
+
+  private async assertTeamSeatCapacity(
+    teamId: string,
+    mode: "invite" | "accept_invitation" | "add_member",
+  ) {
+    if (!this.runtimeConfig.teamBillingEnabled) {
+      return;
+    }
+
+    await this.accountService.withLockedAccount(
+      teamId,
+      async ({ account, client }) => {
+        const subscription = await this.store.getSubscriptionByTeam(
+          account.teamId,
+          client,
+        );
+
+        if (
+          !subscription ||
+          subscription.planFamily !== TEAM_STANDARD_PLAN ||
+          !isActiveSubscriptionStatus(subscription.status)
+        ) {
+          return;
+        }
+
+        const seatsUsed = await this.store.countTeamMembers(
+          account.teamId,
+          client,
+        );
+        const pendingInvites = await this.store.countPendingTeamInvitations(
+          account.teamId,
+          client,
+        );
+        const allocatedSeats =
+          mode === "add_member" ? seatsUsed : seatsUsed + pendingInvites;
+        const limitReached =
+          mode === "accept_invitation"
+            ? allocatedSeats > account.seatCount
+            : allocatedSeats >= account.seatCount;
+
+        if (!limitReached) {
+          return;
+        }
+
+        throw new BillingError(
+          "TEAM_SEAT_LIMIT_REACHED",
+          409,
+          "Team seat limit reached. Add seats in billing before adding more members.",
+          {
+            seatCount: account.seatCount,
+            seatsUsed,
+            pendingInvites,
+            mode,
+          },
+        );
+      },
+    );
+  }
+
+  private seatSyncAlertKey(teamId: string) {
+    return `billing:seat-sync:failed:${teamId}`;
+  }
+
+  private async triggerSeatSyncAlert(
+    operation: {
+      teamId: string;
+      currentSeatCount: number;
+      externalSubscriptionId: string;
+      seatCount: number;
+      seatsUsed: number;
+    },
+    error: unknown,
+  ) {
+    if (!this.alerts) {
+      return;
+    }
+
+    try {
+      await this.alerts.trigger({
+        alertKey: this.seatSyncAlertKey(operation.teamId),
+        level: "error",
+        source: "billing.seats",
+        title: "Team subscription seat sync failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown provider seat sync error",
+        teamId: operation.teamId,
+        metadata: {
+          currentSeatCount: operation.currentSeatCount,
+          requestedSeatCount: operation.seatCount,
+          seatsUsed: operation.seatsUsed,
+          externalSubscriptionId: operation.externalSubscriptionId,
+        },
+      });
+    } catch (alertError) {
+      logger.error("Failed to emit billing seat sync alert", {
+        teamId: operation.teamId,
+        error:
+          alertError instanceof Error ? alertError.message : String(alertError),
+      });
+    }
+  }
+
+  private async resolveSeatSyncAlert(teamId: string) {
+    if (!this.alerts) {
+      return;
+    }
+
+    await this.alerts.resolve(this.seatSyncAlertKey(teamId)).catch(() => null);
   }
 }

@@ -320,6 +320,20 @@ export class PostgresBillingStore implements BillingStore {
     return Number.isFinite(count) ? count : 0;
   }
 
+  async countPendingTeamInvitations(teamId: string, client?: PoolClient) {
+    const result = await pickDb(client).execute<{ count: string }>(sql`
+      select count(*)::text as count
+      from invitation
+      where "organizationId" = ${teamId}
+        and status = 'pending'
+        and "expiresAt" > now()
+    `);
+
+    const rawCount = result.rows?.[0]?.count;
+    const count = rawCount ? Number(rawCount) : 0;
+    return Number.isFinite(count) ? count : 0;
+  }
+
   async getSubscriptionByTeam(teamId: string, client?: PoolClient) {
     const [row] = await pickDb(client)
       .select()
@@ -578,6 +592,7 @@ export class PostgresBillingStore implements BillingStore {
       .select({
         teamId: billingAccounts.teamId,
         accountPlanFamily: billingAccounts.planFamily,
+        subscriptionPlanFamily: subscriptions.planFamily,
         subscriptionStatus: subscriptions.status,
         externalSubscriptionId: subscriptions.externalSubscriptionId,
       })
@@ -590,6 +605,7 @@ export class PostgresBillingStore implements BillingStore {
     return rows.map((row) => ({
       teamId: row.teamId,
       accountPlanFamily: row.accountPlanFamily,
+      subscriptionPlanFamily: row.subscriptionPlanFamily ?? null,
       subscriptionStatus: row.subscriptionStatus ?? null,
       externalSubscriptionId: row.externalSubscriptionId ?? null,
     }));

@@ -7,6 +7,7 @@ import type {
 import type {
   BillingCycleSource,
   BillingInterval,
+  SubscriptionPlanFamily,
   BillingSubscriptionStatus,
   BillingLedgerEntry,
   BillingSubscriptionResponse,
@@ -14,6 +15,8 @@ import type {
   CreateTeamBillingPortalResponse,
   CreateTeamSubscriptionCheckoutRequest,
   CreateTeamSubscriptionCheckoutResponse,
+  UpdateTeamSubscriptionSeatsRequest,
+  UpdateTeamSubscriptionSeatsResponse,
 } from "@sourceweft/contracts";
 
 export type BillingRuntimeConfig = {
@@ -32,9 +35,12 @@ export type BillingRuntimeConfig = {
     apiKey: string;
     webhookSecret: string;
     testMode: boolean;
-    teamStandardProductId: string;
-    defaultSuccessUrl: string;
+    individualProMonthlyProductId: string;
+    individualProYearlyProductId: string;
+    teamStandardMonthlyProductId: string;
+    teamStandardYearlyProductId: string;
   };
+  defaultSuccessUrl: string;
 };
 
 export type BillingAccountState = {
@@ -164,8 +170,9 @@ export type BillingProviderCheckoutInput = {
   teamId: string;
   actorUserId: string;
   actorEmail: string;
-  planFamily: "team_standard";
-  seatCount: number;
+  planFamily: SubscriptionPlanFamily;
+  billingInterval: Exclude<BillingInterval, "unknown">;
+  seatCount?: number;
   successUrl?: string;
 };
 
@@ -185,6 +192,18 @@ export type BillingProviderPortalResult = {
   portalUrl: string | null;
 };
 
+export type BillingProviderUpdateSeatsInput = {
+  teamId: string;
+  actorUserId?: string | null;
+  externalSubscriptionId: string;
+  seatCount: number;
+};
+
+export type BillingProviderUpdateSeatsResult = {
+  provider: BillingProvider;
+  seatCount: number;
+};
+
 export type BillingProviderAdapter = {
   createCheckout(
     input: BillingProviderCheckoutInput,
@@ -192,6 +211,9 @@ export type BillingProviderAdapter = {
   createPortal(
     input: BillingProviderPortalInput,
   ): Promise<BillingProviderPortalResult>;
+  updateSubscriptionSeats(
+    input: BillingProviderUpdateSeatsInput,
+  ): Promise<BillingProviderUpdateSeatsResult>;
 };
 
 export type TeamSubscriptionSummary = BillingSubscriptionResponse;
@@ -199,5 +221,7 @@ export type TeamSubscriptionCheckoutInput =
   CreateTeamSubscriptionCheckoutRequest;
 export type TeamSubscriptionCheckoutResult =
   CreateTeamSubscriptionCheckoutResponse;
+export type TeamSubscriptionSeatsInput = UpdateTeamSubscriptionSeatsRequest;
+export type TeamSubscriptionSeatsResult = UpdateTeamSubscriptionSeatsResponse;
 export type TeamSubscriptionPortalResult = CreateTeamBillingPortalResponse;
 export type TeamSubscriptionCancelResult = CancelTeamSubscriptionResponse;

@@ -5,6 +5,8 @@ import type {
   BillingProviderCheckoutResult,
   BillingProviderPortalInput,
   BillingProviderPortalResult,
+  BillingProviderUpdateSeatsInput,
+  BillingProviderUpdateSeatsResult,
 } from "../types";
 
 function notConfigured(): never {
@@ -25,6 +27,12 @@ export class NoopBillingProvider implements BillingProviderAdapter {
   async createPortal(
     _input: BillingProviderPortalInput,
   ): Promise<BillingProviderPortalResult> {
+    notConfigured();
+  }
+
+  async updateSubscriptionSeats(
+    _input: BillingProviderUpdateSeatsInput,
+  ): Promise<BillingProviderUpdateSeatsResult> {
     notConfigured();
   }
 }
