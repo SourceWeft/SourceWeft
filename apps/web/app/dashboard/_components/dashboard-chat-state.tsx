@@ -96,6 +96,37 @@ function mapThreadToChatItem(item: {
   };
 }
 
+function parseOrganizationMetadata(metadata: unknown) {
+  if (!metadata) return {};
+  if (typeof metadata === "object") return metadata as Record<string, unknown>;
+  if (typeof metadata !== "string") return {};
+
+  try {
+    let parsed: unknown = JSON.parse(metadata);
+    if (typeof parsed === "string") {
+      parsed = JSON.parse(parsed);
+    }
+
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function isPersonalOrganization(org: { metadata?: unknown }) {
+  const metadata = parseOrganizationMetadata(org.metadata);
+  const sourceweft = metadata.sourceweft;
+
+  return (
+    sourceweft &&
+    typeof sourceweft === "object" &&
+    "kind" in sourceweft &&
+    sourceweft.kind === "personal"
+  );
+}
+
 export function DashboardChatStateProvider({
   children,
 }: {
@@ -195,11 +226,15 @@ export function DashboardChatStateProvider({
     async function bootstrap() {
       try {
         const current = await workspaceClient.getCurrentContext();
-        const orgList = (orgs ?? []) as Array<{ id: string }>;
+        const orgList = (orgs ?? []) as Array<{
+          id: string;
+          metadata?: unknown;
+        }>;
+        const personalOrg = orgList.find(isPersonalOrganization);
         const organizationId =
           activeOrg?.id ??
           current.activeOrganizationId ??
-          orgList[0]?.id ??
+          personalOrg?.id ??
           null;
 
         if (!organizationId) {

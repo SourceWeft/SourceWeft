@@ -5,6 +5,8 @@ import type {
   PlanFamily,
 } from "@sourceweft/credits-core";
 import type {
+  BillingCycleSource,
+  BillingInterval,
   BillingSubscriptionStatus,
   BillingLedgerEntry,
   BillingSubscriptionResponse,
@@ -25,7 +27,6 @@ export type BillingRuntimeConfig = {
   creditUnitUsd: number;
   defaultMarkupRate: number;
   defaultPlanFamily: PlanFamily;
-  cycleAnchorDay: number;
   reconcileEnabled: boolean;
   creem: {
     apiKey: string;
@@ -39,7 +40,8 @@ export type BillingRuntimeConfig = {
 export type BillingAccountState = {
   teamId: string;
   planFamily: PlanFamily;
-  cycleAnchorDay: number;
+  cycleAnchorAt: string;
+  cycleSource: BillingCycleSource;
   cycleStartAt: string;
   cycleEndAt: string;
   pagesLimit: number;
@@ -68,6 +70,7 @@ export type BillingSubscriptionState = {
   provider: BillingProvider;
   planFamily: PlanFamily;
   status: BillingSubscriptionStatus;
+  billingInterval: BillingInterval;
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   externalCustomerId: string | null;
@@ -132,6 +135,7 @@ export type TeamSubscriptionSnapshot = {
   provider: BillingProvider;
   planFamily: PlanFamily;
   status: BillingSubscriptionStatus;
+  billingInterval: BillingInterval;
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   externalCustomerId: string | null;
@@ -181,18 +185,6 @@ export type BillingProviderPortalResult = {
   portalUrl: string | null;
 };
 
-export type BillingProviderCancelInput = {
-  teamId: string;
-  actorUserId: string;
-  externalSubscriptionId: string;
-};
-
-export type BillingProviderCancelResult = {
-  provider: BillingProvider;
-  status: BillingSubscriptionStatus;
-  cancelAtPeriodEnd: boolean;
-};
-
 export type BillingProviderAdapter = {
   createCheckout(
     input: BillingProviderCheckoutInput,
@@ -200,9 +192,6 @@ export type BillingProviderAdapter = {
   createPortal(
     input: BillingProviderPortalInput,
   ): Promise<BillingProviderPortalResult>;
-  cancelSubscription(
-    input: BillingProviderCancelInput,
-  ): Promise<BillingProviderCancelResult>;
 };
 
 export type TeamSubscriptionSummary = BillingSubscriptionResponse;

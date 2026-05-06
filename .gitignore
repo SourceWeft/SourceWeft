@@ -49,3 +49,5 @@ target/
 .agents
 .claude
 .tmp
+
+reference-*

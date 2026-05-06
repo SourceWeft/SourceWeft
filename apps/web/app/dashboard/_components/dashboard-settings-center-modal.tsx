@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   Check,
   ChevronDown,
+  CreditCard,
   LayoutGrid,
   MailPlus,
   Plus,
@@ -31,18 +32,29 @@ import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
 import { billingClient } from "../../../lib/sdk";
 import { useTheme } from "next-themes";
+import { getPricingConfig } from "../../_landing/pricing-config";
 import {
+  createTeamOrganizationMetadata,
+  getPersonalOrganization,
   getVisibleTeamOrganizations,
-  isAutoPersonalOrganization,
+  isPersonalOrganization,
 } from "./dashboard-team-selector-shared";
+import { DashboardPricingModal } from "./dashboard-pricing-modal";
 
 export type SettingsCenterTab = "account" | "team" | "usage" | "billing";
 type BillingScope = "personal" | "team";
 type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
-type BillingUsage = Awaited<ReturnType<typeof billingClient.getUsage>>;
+type BillingSubscription = Awaited<
+  ReturnType<typeof billingClient.getSubscription>
+>;
 type BillingLedger = Awaited<ReturnType<typeof billingClient.getLedger>>;
 type BillingLedgerEntry = BillingLedger["items"][number];
-type BillingOrg = { id: string; name: string; slug?: string };
+type BillingOrg = {
+  id: string;
+  metadata?: unknown;
+  name: string;
+  slug?: string;
+};
 type UsageActivityFilter = "all" | BillingLedgerEntry["unitType"];
 type UsageActivityRow = {
   key: string;
@@ -83,17 +95,23 @@ function OrgSwitcher({ className }: { className?: string }) {
   const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
 
   const orgList = getVisibleTeamOrganizations(
-    (orgs ?? []) as Array<{ id: string; name: string; slug: string }>,
+    (orgs ?? []) as Array<{
+      id: string;
+      metadata?: unknown;
+      name: string;
+      slug: string;
+    }>,
   );
+  const personalOrg = getPersonalOrganization((orgs ?? []) as BillingOrg[]);
   const isPersonalActive =
-    !activeOrgRecord || isAutoPersonalOrganization(activeOrgRecord);
+    !activeOrgRecord || isPersonalOrganization(activeOrgRecord);
 
-  async function handleSwitch(orgId: string | null) {
+  async function handleSwitch(orgId: string) {
     try {
       await authClient.organization.setActive({ organizationId: orgId });
       setOpen(false);
     } catch {
-      toast.error("Failed to switch workspace.");
+      toast.error("Failed to switch team.");
     }
   }
 
@@ -113,28 +131,32 @@ function OrgSwitcher({ className }: { className?: string }) {
               : (activeOrgRecord?.name.slice(0, 2).toUpperCase() ?? "P")}
           </div>
           <span className="truncate text-sm text-foreground">
-            {isPersonalActive ? "Personal workspace" : activeOrgRecord?.name}
+            {isPersonalActive
+              ? (personalOrg?.name ?? activeOrgRecord?.name)
+              : activeOrgRecord?.name}
           </span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[220px] p-1.5">
-        <button
-          className={cn(
-            "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-            isPersonalActive && "bg-accent/60",
-          )}
-          onClick={() => void handleSwitch(null)}
-          type="button"
-        >
-          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">
-            P
-          </div>
-          <span className="flex-1 truncate">Personal workspace</span>
-          {isPersonalActive && (
-            <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
-          )}
-        </button>
+        {personalOrg ? (
+          <button
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+              isPersonalActive && "bg-accent/60",
+            )}
+            onClick={() => void handleSwitch(personalOrg.id)}
+            type="button"
+          >
+            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">
+              P
+            </div>
+            <span className="flex-1 truncate">{personalOrg.name}</span>
+            {isPersonalActive && (
+              <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
+            )}
+          </button>
+        ) : null}
         {orgList.length > 0 && (
           <>
             <div className="my-1 border-t border-border/60" />
@@ -172,12 +194,12 @@ function resolveBillingTeamId(input: {
     return input.activeOrg.id;
   }
 
-  const personalOrg = input.orgs?.find(isAutoPersonalOrganization);
+  const personalOrg = input.orgs?.find(isPersonalOrganization);
   return personalOrg?.id ?? null;
 }
 
 function isPersonalBillingOrg(org?: BillingOrg | null) {
-  return !org || Boolean(isAutoPersonalOrganization(org));
+  return !org || Boolean(isPersonalOrganization(org));
 }
 
 function formatNumber(value: number) {
@@ -213,6 +235,34 @@ function formatUsageDate(value: string) {
     month: "short",
     day: "2-digit",
   }).format(new Date(value));
+}
+
+function formatBillingDate(value: string | null | undefined) {
+  if (!value) {
+    return "--";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function formatBillingStatus(value: string | null | undefined) {
+  if (!value) {
+    return "Unknown";
+  }
+
+  return formatFeatureName(value);
+}
+
+function formatBillingInterval(value: string | null | undefined) {
+  if (!value || value === "unknown") {
+    return "Not set";
+  }
+
+  return value === "yearly" ? "Annual" : "Monthly";
 }
 
 function formatLedgerChange(entry: BillingLedgerEntry) {
@@ -300,44 +350,15 @@ function formatLedgerDetail(entry: BillingLedgerEntry) {
   return feature;
 }
 
-function isLedgerEntryInCycle(entry: BillingLedgerEntry, summary: BillingSummary) {
+function isLedgerEntryInCycle(
+  entry: BillingLedgerEntry,
+  summary: BillingSummary,
+) {
   const createdAtMs = Date.parse(entry.createdAt);
   return (
     createdAtMs >= Date.parse(summary.cycleStartAt) &&
     createdAtMs < Date.parse(summary.cycleEndAt)
   );
-}
-
-function buildUsageMetrics(input: {
-  summary: BillingSummary;
-  personal: boolean;
-  usageEventCount: number;
-}) {
-  const seatsMetric = input.personal
-    ? {
-        label: "Usage events",
-        value: formatNumber(input.usageEventCount),
-      }
-    : {
-        label: "Seats used / left",
-        value: `${formatNumber(input.summary.seats.used)} / ${formatNumber(
-          input.summary.seats.remaining,
-        )}`,
-      };
-
-  return [
-    {
-      label: "Credits used",
-      value: formatNumber(input.summary.credits.consumedThisCycle),
-    },
-    {
-      label: "Pages used / left",
-      value: `${formatNumber(
-        input.summary.pages.consumedThisCycle,
-      )} / ${formatNumber(input.summary.pages.available)}`,
-    },
-    seatsMetric,
-  ];
 }
 
 // ── Account / Profile panel ───────────────────────────────────────────────────
@@ -673,13 +694,13 @@ function TeamPanel({
   const [inviteError, setInviteError] = React.useState<string | null>(null);
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
 
-  async function handleSwitch(orgId: string | null) {
+  async function handleSwitch(org: BillingOrg) {
     try {
-      await authClient.organization.setActive({ organizationId: orgId });
+      await authClient.organization.setActive({ organizationId: org.id });
       setSwitcherOpen(false);
-      onScopeChange(orgId ? "team" : "personal");
+      onScopeChange(isPersonalOrganization(org) ? "personal" : "team");
     } catch {
-      toast.error("Failed to switch workspace.");
+      toast.error("Failed to switch team.");
     }
   }
 
@@ -692,7 +713,11 @@ function TeamPanel({
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
-      await authClient.organization.create({ name, slug });
+      await authClient.organization.create({
+        name,
+        slug,
+        metadata: createTeamOrganizationMetadata(),
+      });
       setCreateOpen(false);
       setNewTeamName("");
       toast.success("Team created.");
@@ -709,12 +734,16 @@ function TeamPanel({
     const email = inviteEmail.trim();
     if (!email) return;
     setInviteError(null);
+    if (!activeOrgFull || isPersonalOrganization(activeOrgFull)) {
+      setInviteError("Personal team cannot invite members.");
+      return;
+    }
     setIsInviting(true);
     try {
       const result = (await authClient.organization.inviteMember({
         email,
         role: inviteRole,
-        organizationId: activeOrgFull!.id,
+        organizationId: activeOrgFull.id,
       })) as { error?: { message?: string } } | null;
       if (result?.error)
         throw new Error(result.error.message ?? "Failed to send invite.");
@@ -746,11 +775,18 @@ function TeamPanel({
   }
 
   const orgList = getVisibleTeamOrganizations(
-    (orgs ?? []) as Array<{ id: string; name: string; slug: string }>,
+    (orgs ?? []) as Array<{
+      id: string;
+      metadata?: unknown;
+      name: string;
+      slug: string;
+    }>,
   );
+  const personalOrg = getPersonalOrganization((orgs ?? []) as BillingOrg[]);
   const activeOrgFull = activeOrg as
     | {
         id: string;
+        metadata?: unknown;
         name: string;
         members: Array<{
           id: string;
@@ -766,16 +802,22 @@ function TeamPanel({
       }
     | null
     | undefined;
+  const isPersonalActive =
+    !activeOrgFull || isPersonalOrganization(activeOrgFull);
+  const canManageMembers = Boolean(activeOrgFull && !isPersonalActive);
+  const manageableOrg = canManageMembers ? activeOrgFull : null;
 
-  const pendingInvites =
-    activeOrgFull?.invitations?.filter((inv) => inv.status === "pending") ?? [];
+  const pendingInvites = manageableOrg
+    ? (manageableOrg.invitations?.filter((inv) => inv.status === "pending") ??
+      [])
+    : [];
 
   return (
     <div className="w-full max-w-2xl divide-y divide-border/60">
-      {/* ── Workspace ── */}
+      {/* ── Team ── */}
       <div className="pb-7 pt-1">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <p className="text-base font-semibold text-foreground">Workspace</p>
+          <p className="text-base font-semibold text-foreground">Team</p>
           <Button
             onClick={() => setCreateOpen(true)}
             size="sm"
@@ -796,34 +838,40 @@ function TeamPanel({
             >
               <div className="flex min-w-0 items-center gap-2.5">
                 <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-foreground">
-                  {activeOrgFull
-                    ? activeOrgFull.name.slice(0, 2).toUpperCase()
-                    : "P"}
+                  {isPersonalActive
+                    ? "P"
+                    : activeOrgFull
+                      ? activeOrgFull.name.slice(0, 2).toUpperCase()
+                      : "P"}
                 </div>
                 <span className="truncate text-sm text-foreground">
-                  {activeOrgFull ? activeOrgFull.name : "Personal workspace"}
+                  {isPersonalActive
+                    ? (personalOrg?.name ?? activeOrgFull?.name)
+                    : activeOrgFull?.name}
                 </span>
               </div>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </button>
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[260px] p-1.5">
-            <button
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                !activeOrgFull && "bg-accent/60",
-              )}
-              onClick={() => void handleSwitch(null)}
-              type="button"
-            >
-              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">
-                P
-              </div>
-              <span className="flex-1 truncate">Personal workspace</span>
-              {!activeOrgFull && (
-                <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
-              )}
-            </button>
+            {personalOrg ? (
+              <button
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+                  isPersonalActive && "bg-accent/60",
+                )}
+                onClick={() => void handleSwitch(personalOrg)}
+                type="button"
+              >
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">
+                  P
+                </div>
+                <span className="flex-1 truncate">{personalOrg.name}</span>
+                {isPersonalActive && (
+                  <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
+                )}
+              </button>
+            ) : null}
             {orgList.length > 0 && (
               <>
                 <div className="my-1 border-t border-border/60" />
@@ -834,7 +882,7 @@ function TeamPanel({
                       activeOrgFull?.id === org.id && "bg-accent/60",
                     )}
                     key={org.id}
-                    onClick={() => void handleSwitch(org.id)}
+                    onClick={() => void handleSwitch(org)}
                     type="button"
                   >
                     <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold">
@@ -853,7 +901,7 @@ function TeamPanel({
       </div>
 
       {/* ── Members (only when a team is active) ── */}
-      {activeOrgFull ? (
+      {manageableOrg ? (
         <>
           <div className="py-7">
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -868,7 +916,7 @@ function TeamPanel({
               </Button>
             </div>
             <div className="overflow-hidden rounded-lg border border-border">
-              {activeOrgFull.members?.length ? (
+              {manageableOrg.members?.length ? (
                 <table className="w-full text-sm">
                   <thead className="border-b border-border bg-muted/30">
                     <tr>
@@ -885,7 +933,7 @@ function TeamPanel({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
-                    {activeOrgFull.members.map((m) => (
+                    {manageableOrg.members.map((m) => (
                       <tr key={m.id}>
                         <td className="px-4 py-2.5 font-medium text-foreground">
                           {m.user.name}
@@ -954,7 +1002,8 @@ function TeamPanel({
           <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-5 py-10 text-center">
             <Users className="h-7 w-7 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
-              Switch to a team workspace to manage members and invites.
+              Personal team does not support members or invites. Create or
+              switch to a team to collaborate.
             </p>
             <Button
               onClick={() => setCreateOpen(true)}
@@ -1116,7 +1165,6 @@ function UsagePanel() {
   });
   const isPersonal = isPersonalBillingOrg(activeOrgRecord);
   const [summary, setSummary] = React.useState<BillingSummary | null>(null);
-  const [usage, setUsage] = React.useState<BillingUsage | null>(null);
   const [ledger, setLedger] = React.useState<BillingLedgerEntry[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -1132,7 +1180,6 @@ function UsagePanel() {
     async function loadUsage() {
       if (!teamId) {
         setSummary(null);
-        setUsage(null);
         setLedger([]);
         setLoading(resolvingPersonalTeamId);
         setError(null);
@@ -1143,18 +1190,16 @@ function UsagePanel() {
       setError(null);
 
       try {
-        const [nextSummary, nextUsage, nextLedger] = await Promise.all([
-          billingClient.getSummary(teamId),
-          billingClient.getUsage(teamId),
-          billingClient.getLedger(teamId, { limit: USAGE_ACTIVITY_FETCH_LIMIT }),
-        ]);
+        const nextSummary = await billingClient.getSummary(teamId);
+        const nextLedger = await billingClient.getLedger(teamId, {
+          limit: USAGE_ACTIVITY_FETCH_LIMIT,
+        });
 
         if (cancelled) {
           return;
         }
 
         setSummary(nextSummary);
-        setUsage(nextUsage);
         setLedger(nextLedger.items);
       } catch (err) {
         if (cancelled) {
@@ -1162,7 +1207,6 @@ function UsagePanel() {
         }
 
         setSummary(null);
-        setUsage(null);
         setLedger([]);
         setError(err instanceof Error ? err.message : "Failed to load usage");
       } finally {
@@ -1193,12 +1237,13 @@ function UsagePanel() {
     pagesMonthlyGrant > 0
       ? Math.min(100, (pagesUsed / pagesMonthlyGrant) * 100)
       : 0;
+  const seatsUsed = summary?.seats.used ?? 0;
+  const seatsLimit = summary?.seats.limit ?? 0;
+  const seatsPercent =
+    seatsLimit > 0 ? Math.min(100, (seatsUsed / seatsLimit) * 100) : 0;
   const cycleLedgerEntries = summary
     ? ledger.filter((entry) => isLedgerEntryInCycle(entry, summary))
     : ledger;
-  const usageEventCount = cycleLedgerEntries.filter(
-    (entry) => entry.eventType === "consume",
-  ).length;
   const seatActivityRow: UsageActivityRow | null =
     summary && !isPersonal && activityFilter === "all"
       ? {
@@ -1211,8 +1256,7 @@ function UsagePanel() {
           unitType: "seat",
         }
       : null;
-  const ledgerActivityLimit =
-    activityVisibleCount - (seatActivityRow ? 1 : 0);
+  const ledgerActivityLimit = activityVisibleCount - (seatActivityRow ? 1 : 0);
   const filteredLedgerEntries =
     activityFilter === "all"
       ? cycleLedgerEntries
@@ -1259,21 +1303,18 @@ function UsagePanel() {
       : loading
         ? "Monthly ... · Add-on ..."
         : "Monthly -- · Add-on --",
-    metrics:
-      summary
-        ? buildUsageMetrics({
-            personal: isPersonal,
-            summary,
-            usageEventCount: usage?.totals.events ?? usageEventCount,
-          })
-        : [
-            { label: "Credits used", value: loading ? "..." : "--" },
-            { label: "Pages used / left", value: loading ? "..." : "--" },
-            {
-              label: isPersonal ? "Usage events" : "Seats used / left",
-              value: loading ? "..." : "--",
-            },
-          ],
+    seatsLabel: summary
+      ? `${formatNumber(seatsUsed)} / ${formatNumber(seatsLimit)} seats`
+      : loading
+        ? "Loading seats..."
+        : "-- / -- seats",
+    seatsUsage: summary
+      ? `${formatNumber(seatsUsed)} used · ${formatNumber(
+          summary.seats.remaining,
+        )} left`
+      : loading
+        ? "Loading seats..."
+        : "-- used · -- left",
   };
   const emptyActivityLabel = loading
     ? "Loading activity..."
@@ -1299,7 +1340,7 @@ function UsagePanel() {
               {data.plan} plan
             </p>
             <Button size="sm" type="button" variant="outline">
-              Manage plan
+              Upgrade plan
             </Button>
           </div>
           <div className="px-4 py-3">
@@ -1323,18 +1364,20 @@ function UsagePanel() {
               {data.pagesWallet}
             </p>
           </div>
-          <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
-            {data.metrics.map((m) => (
-              <div className="px-4 py-3" key={m.label}>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {m.label}
-                </p>
-                <p className="mt-0.5 text-base font-semibold text-foreground">
-                  {m.value}
-                </p>
+          {!isPersonal && (
+            <div className="border-t border-border px-4 py-3">
+              <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">Seats</span>
+                <span className="text-right font-medium text-foreground">
+                  {data.seatsLabel}
+                </span>
               </div>
-            ))}
-          </div>
+              <Progress className="h-1.5 bg-muted" value={seatsPercent} />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {data.seatsUsage}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1432,9 +1475,7 @@ function UsagePanel() {
             </Button>
           </div>
         )}
-        {error && (
-          <p className="mt-3 text-xs text-muted-foreground">{error}</p>
-        )}
+        {error && <p className="mt-3 text-xs text-muted-foreground">{error}</p>}
       </div>
     </div>
   );
@@ -1443,100 +1484,413 @@ function UsagePanel() {
 // ── Billing panel ─────────────────────────────────────────────────────────────
 
 function BillingPanel() {
+  const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
-  const isTeam = !!activeOrg;
+  const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
+  const orgList = (orgs ?? []) as BillingOrg[];
+  const resolvingPersonalTeamId = !activeOrgRecord && orgs === undefined;
+  const teamId = resolveBillingTeamId({
+    activeOrg: activeOrgRecord,
+    orgs: orgList,
+  });
+  const isPersonal = isPersonalBillingOrg(activeOrgRecord);
+  const [summary, setSummary] = React.useState<BillingSummary | null>(null);
+  const [subscription, setSubscription] =
+    React.useState<BillingSubscription | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [actionLoading, setActionLoading] = React.useState(false);
+  const [pricingOpen, setPricingOpen] = React.useState(false);
+  const [billingPeriod, setBillingPeriod] = React.useState<
+    "monthly" | "yearly"
+  >("yearly");
+  const [error, setError] = React.useState<string | null>(null);
+  const plans = getPricingConfig();
 
-  const data = isTeam
-    ? {
-        title: "Team",
-        status: "Trialing · Trial ends May 12, 2026",
-        nextPayment: "$80.00",
-        usage: "11,600 / 80,000 credits",
-        paymentMethod: "Mastercard ···· 2244",
-        invoices: [
-          { period: "Apr 2026", amount: "$80.00", status: "Due" },
-          { period: "Mar 2026", amount: "$80.00", status: "Paid" },
-        ],
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadBilling() {
+      if (!teamId) {
+        setSummary(null);
+        setSubscription(null);
+        setLoading(resolvingPersonalTeamId);
+        setError(null);
+        return;
       }
-    : {
-        title: "Pro",
-        status: "Active · Renews May 7, 2026",
-        nextPayment: "$20.00",
-        usage: "2,400 / 20,000 credits",
-        paymentMethod: "Visa ···· 4242",
-        invoices: [
-          { period: "Apr 2026", amount: "$20.00", status: "Paid" },
-          { period: "Mar 2026", amount: "$20.00", status: "Paid" },
-        ],
-      };
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const [nextSummary, nextSubscription] = await Promise.all([
+          billingClient.getSummary(teamId),
+          billingClient.getSubscription(teamId),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setSummary(nextSummary);
+        setSubscription(nextSubscription);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        setSummary(null);
+        setSubscription(null);
+        setError(err instanceof Error ? err.message : "Failed to load billing");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadBilling();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvingPersonalTeamId, teamId]);
+
+  async function handleOpenPortal() {
+    if (!teamId) {
+      return;
+    }
+
+    setActionLoading(true);
+
+    try {
+      const result = await billingClient.createBillingPortal(teamId);
+
+      if (result.portalUrl) {
+        window.location.assign(result.portalUrl);
+        return;
+      }
+
+      toast.error("Billing portal is not available.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Unable to open billing portal.",
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleUpgradePlan() {
+    if (isPersonal) {
+      setPricingOpen(true);
+      return;
+    }
+
+    if (!teamId) {
+      return;
+    }
+
+    setActionLoading(true);
+
+    try {
+      const seatCount = Math.max(summary?.seats.limit ?? 2, 2);
+      const result = await billingClient.createSubscriptionCheckout(teamId, {
+        planFamily: "team_standard",
+        seatCount,
+      });
+      window.location.assign(result.checkoutUrl);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Unable to start checkout.",
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  const planName = summary
+    ? formatPlanName(summary.planFamily, isPersonal)
+    : isPersonal
+      ? "Personal"
+      : "Team";
+  const activeScopeLabel = isPersonal
+    ? "Personal billing"
+    : `${activeOrgRecord?.name ?? "Team"} billing`;
+  const subscriptionStatus = subscription?.status ?? "inactive";
+  const isSubscriptionActive = ["trialing", "active", "past_due"].includes(
+    subscriptionStatus,
+  );
+  const hasPaidSubscription = Boolean(subscription?.externalSubscriptionId);
+  const subscriptionStatusLabel = hasPaidSubscription
+    ? formatBillingStatus(subscriptionStatus)
+    : "No paid subscription";
+  const planStateLabel = hasPaidSubscription
+    ? subscriptionStatusLabel
+    : `${planName} account`;
+  const seatsUsed = summary?.seats.used ?? 0;
+  const seatsLimit = summary?.seats.limit ?? 0;
+  const seatsRemaining = summary?.seats.remaining ?? 0;
+  const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
+  const creditsLimit = summary?.credits.monthlyGrant ?? 0;
+  const pagesUsed = summary?.pages.consumedThisCycle ?? 0;
+  const pagesLimit = summary?.pages.monthlyGrant ?? 0;
+  const cycleLabel = summary
+    ? `${formatBillingDate(summary.cycleStartAt)} - ${formatBillingDate(
+        summary.cycleEndAt,
+      )}`
+    : loading
+      ? "Loading cycle..."
+      : "--";
+  const billingRows = [
+    {
+      label: "Cycle",
+      value: cycleLabel,
+      detail: summary ? formatFeatureName(summary.cycleSource) : "--",
+    },
+    {
+      label: "Credits",
+      value: summary
+        ? `${formatNumber(creditsUsed)} / ${formatNumber(creditsLimit)}`
+        : loading
+          ? "Loading..."
+          : "-- / --",
+      detail: summary
+        ? `${formatNumber(summary.credits.available)} available`
+        : "Credit availability is unavailable",
+    },
+    {
+      label: "Pages",
+      value: summary
+        ? `${formatNumber(pagesUsed)} / ${formatNumber(pagesLimit)}`
+        : loading
+          ? "Loading..."
+          : "-- / --",
+      detail: summary
+        ? `${formatNumber(summary.pages.available)} available`
+        : "Page availability is unavailable",
+    },
+  ];
+  const invoiceRows: Array<{
+    id: string;
+    period: string;
+    amount: string;
+    status: string;
+  }> = [];
 
   return (
-    <div className="w-full max-w-2xl divide-y divide-border/60">
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between gap-3 pb-7 pt-1">
-        <p className="text-base font-semibold text-foreground">Billing</p>
-        <OrgSwitcher />
-      </div>
+    <>
+      <div className="w-full max-w-2xl divide-y divide-border/60">
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between gap-3 pb-7 pt-1">
+          <p className="text-base font-semibold text-foreground">Billing</p>
+          <OrgSwitcher />
+        </div>
 
-      {/* ── Plan ── */}
-      <div className="py-7">
-        <div className="overflow-hidden rounded-lg border border-border">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                {data.title} plan
-              </p>
-              <p className="text-xs text-muted-foreground">{data.status}</p>
-            </div>
-            <Button size="sm" type="button" variant="outline">
-              Manage
-            </Button>
-          </div>
-          <div className="grid grid-cols-3 divide-x divide-border">
-            {[
-              { label: "Next payment", value: data.nextPayment },
-              { label: "Usage", value: data.usage },
-              { label: "Payment method", value: data.paymentMethod },
-            ].map((item) => (
-              <div className="px-4 py-3" key={item.label}>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {item.label}
+        {/* ── Plan ── */}
+        <div className="py-7">
+          <div className="overflow-hidden rounded-lg border border-border bg-background">
+            <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                  <CreditCard className="h-3.5 w-3.5" />
+                  {activeScopeLabel}
+                </div>
+                <p className="mt-3 text-lg font-semibold text-foreground">
+                  {planName} plan
                 </p>
-                <p className="mt-0.5 text-sm font-medium text-foreground">
-                  {item.value}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {planStateLabel} ·{" "}
+                  {formatBillingInterval(subscription?.billingInterval)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {isSubscriptionActive ? (
+                  <Button
+                    disabled={actionLoading || !teamId}
+                    onClick={() => void handleOpenPortal()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Manage billing
+                  </Button>
+                ) : (
+                  <Button
+                    disabled={actionLoading || (!teamId && !isPersonal)}
+                    onClick={() => void handleUpgradePlan()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Upgrade plan
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="grid gap-0 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+              {billingRows.map((row) => (
+                <div className="px-4 py-3" key={row.label}>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {row.label}
+                  </p>
+                  <p className="mt-1 text-sm font-medium leading-5 text-foreground">
+                    {row.value}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {row.detail}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {!isPersonal && (
+          <div className="pt-7">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-base font-semibold text-foreground">Seats</p>
+              <Button
+                disabled={actionLoading || !teamId}
+                onClick={() =>
+                  void (isSubscriptionActive
+                    ? handleOpenPortal()
+                    : handleUpgradePlan())
+                }
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Add seats
+              </Button>
+            </div>
+            <div className="rounded-lg border border-border px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {summary
+                      ? `${formatNumber(seatsUsed)} of ${formatNumber(
+                          seatsLimit,
+                        )} seats used`
+                      : loading
+                        ? "Loading seats..."
+                        : "-- of -- seats used"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {summary
+                      ? `${formatNumber(seatsRemaining)} seats remaining`
+                      : "Seat availability is unavailable"}
+                  </p>
+                </div>
+                <p className="shrink-0 text-right text-sm font-medium text-foreground">
+                  {summary ? formatNumber(seatsLimit) : "--"} total
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="pt-7">
+          <p className="mb-4 text-base font-semibold text-foreground">
+            Subscription
+          </p>
+          <div className="overflow-hidden rounded-lg border border-border">
+            {[
+              {
+                label: "Status",
+                value: subscriptionStatusLabel,
+              },
+              {
+                label: "Billing cadence",
+                value: formatBillingInterval(subscription?.billingInterval),
+              },
+              {
+                label: "Renewal",
+                value: subscription?.cancelAtPeriodEnd
+                  ? "Cancels at period end"
+                  : isSubscriptionActive
+                    ? "Renews automatically"
+                    : "Not scheduled",
+              },
+              {
+                label: "Last updated",
+                value: subscription?.lastEventAt
+                  ? formatBillingDate(subscription.lastEventAt)
+                  : "No subscription updates yet",
+              },
+            ].map((row, index) => (
+              <div
+                className={cn(
+                  "flex items-center justify-between gap-4 px-4 py-3",
+                  index !== 0 && "border-t border-border/60",
+                )}
+                key={row.label}
+              >
+                <p className="text-sm text-muted-foreground">{row.label}</p>
+                <p className="text-right text-sm font-medium text-foreground">
+                  {row.value}
                 </p>
               </div>
             ))}
           </div>
+          {error && (
+            <p className="mt-3 text-xs text-muted-foreground">{error}</p>
+          )}
         </div>
-      </div>
 
-      {/* ── Invoices ── */}
-      <div className="pt-7">
-        <p className="mb-4 text-base font-semibold text-foreground">Invoices</p>
-        <div className="overflow-hidden rounded-lg border border-border">
-          {data.invoices.map((inv, i) => (
-            <div
-              className={cn(
-                "flex items-center justify-between gap-3 px-4 py-3",
-                i !== 0 && "border-t border-border/60",
-              )}
-              key={`${inv.period}-${inv.amount}`}
+        <div className="pt-7">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <p className="text-base font-semibold text-foreground">Invoices</p>
+            <Button
+              disabled={!isSubscriptionActive || actionLoading || !teamId}
+              onClick={() => void handleOpenPortal()}
+              size="sm"
+              type="button"
+              variant="outline"
             >
-              <div>
-                <p className="text-sm text-foreground">{inv.period}</p>
-                <p className="text-xs text-muted-foreground">
-                  {inv.amount} · {inv.status}
-                </p>
+              View in portal
+            </Button>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border">
+            {invoiceRows.length > 0 ? (
+              invoiceRows.map((invoice, index) => (
+                <div
+                  className={cn(
+                    "flex items-center justify-between gap-4 px-4 py-3",
+                    index !== 0 && "border-t border-border/60",
+                  )}
+                  key={invoice.id}
+                >
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      {invoice.period}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {invoice.status}
+                    </p>
+                  </div>
+                  <p className="text-right text-sm font-medium text-foreground">
+                    {invoice.amount}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <div className="px-4 py-6 text-sm text-muted-foreground">
+                {isSubscriptionActive
+                  ? "Invoice history is available in the billing portal."
+                  : "No invoices yet. Invoice history will appear after checkout is completed."}
               </div>
-              <Button size="sm" type="button" variant="outline">
-                Download
-              </Button>
-            </div>
-          ))}
+            )}
+          </div>
         </div>
       </div>
-    </div>
+      <DashboardPricingModal
+        billingPeriod={billingPeriod}
+        onBillingPeriodChange={setBillingPeriod}
+        onOpenChange={setPricingOpen}
+        open={pricingOpen}
+        plans={plans}
+      />
+    </>
   );
 }
 

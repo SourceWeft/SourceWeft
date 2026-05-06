@@ -4,6 +4,7 @@ import type {
   BillingWebhookProcessInput,
   BillingWebhookProcessResult,
 } from "./types";
+import { isBillingError } from "./errors";
 import { BillingSubscriptionService } from "./subscription-service";
 import {
   createFallbackWebhookEventId,
@@ -118,6 +119,29 @@ export class BillingWebhookService {
       };
     } catch (error) {
       const details = toWebhookError(error);
+      if (
+        isBillingError(error) &&
+        error.code === "INVALID_PROVIDER_SUBSCRIPTION_PERIOD"
+      ) {
+        const ignored = await this.store.updateWebhookEventState(
+          webhookEvent.id,
+          {
+            status: "ignored",
+            teamId: input.snapshot.teamId,
+            externalSubscriptionId: input.snapshot.externalSubscriptionId,
+            processedAt: new Date().toISOString(),
+            errorCode: details.code,
+            errorMessage: details.message,
+          },
+        );
+
+        return {
+          outcome: "ignored",
+          webhookEvent: ignored,
+          reason: "provider_period_invalid",
+        };
+      }
+
       await this.store.updateWebhookEventState(webhookEvent.id, {
         status: "failed",
         teamId: input.snapshot.teamId,

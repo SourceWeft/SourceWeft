@@ -1,4 +1,7 @@
-import type { BillingSubscriptionStatus } from "@sourceweft/contracts";
+import type {
+  BillingInterval,
+  BillingSubscriptionStatus,
+} from "@sourceweft/contracts";
 import { config } from "../../../shared/config";
 import { logger } from "../../../shared/logger";
 import type { opsAlertService } from "../../ops";
@@ -98,6 +101,71 @@ function normalizeSubscriptionStatus(
   return fallback;
 }
 
+function resolveStatusFromEventType(
+  eventType: string,
+): BillingSubscriptionStatus | null {
+  switch (eventType) {
+    case "subscription.active":
+    case "subscription.paid":
+      return "active";
+    case "subscription.trialing":
+      return "trialing";
+    case "subscription.past_due":
+      return "past_due";
+    case "subscription.paused":
+      return "paused";
+    case "subscription.unpaid":
+      return "unpaid";
+    case "subscription.canceled":
+      return "canceled";
+    case "subscription.expired":
+      return "expired";
+    default:
+      return null;
+  }
+}
+
+function resolveCreemSubscriptionStatus(input: {
+  eventType: string;
+  rawStatus: string | null;
+  fallbackStatus: BillingSubscriptionStatus;
+}) {
+  return (
+    resolveStatusFromEventType(input.eventType) ??
+    normalizeSubscriptionStatus(input.rawStatus, input.fallbackStatus)
+  );
+}
+
+function inferBillingInterval(
+  currentPeriodStart: string | null,
+  currentPeriodEnd: string | null,
+): BillingInterval {
+  if (!currentPeriodStart || !currentPeriodEnd) {
+    return "unknown";
+  }
+
+  const startAt = Date.parse(currentPeriodStart);
+  const endAt = Date.parse(currentPeriodEnd);
+  if (
+    !Number.isFinite(startAt) ||
+    !Number.isFinite(endAt) ||
+    endAt <= startAt
+  ) {
+    return "unknown";
+  }
+
+  const durationDays = (endAt - startAt) / 86_400_000;
+  if (durationDays >= 300 && durationDays <= 370) {
+    return "yearly";
+  }
+
+  if (durationDays >= 20 && durationDays <= 45) {
+    return "monthly";
+  }
+
+  return "unknown";
+}
+
 function resolveCreemSeatCount(
   data: unknown,
   metadata: Record<string, unknown> | null,
@@ -136,6 +204,7 @@ function resolveCreemSeatCount(
 }
 
 function buildCreemSubscriptionSnapshot(
+  eventType: string,
   data: unknown,
   fallbackStatus: BillingSubscriptionStatus,
 ): TeamSubscriptionSnapshot | null {
@@ -151,14 +220,21 @@ function buildCreemSubscriptionSnapshot(
   const customer = asRecord(record?.customer ?? null);
   const product = asRecord(record?.product ?? null);
   const rawStatus = readString(record, "status");
+  const currentPeriodStart = toDateIso(record?.current_period_start_date);
+  const currentPeriodEnd = toDateIso(record?.current_period_end_date);
 
   return {
     teamId,
     provider: "creem",
     planFamily,
-    status: normalizeSubscriptionStatus(rawStatus, fallbackStatus),
-    currentPeriodStart: toDateIso(record?.current_period_start_date),
-    currentPeriodEnd: toDateIso(record?.current_period_end_date),
+    status: resolveCreemSubscriptionStatus({
+      eventType,
+      rawStatus,
+      fallbackStatus,
+    }),
+    billingInterval: inferBillingInterval(currentPeriodStart, currentPeriodEnd),
+    currentPeriodStart,
+    currentPeriodEnd,
     externalCustomerId: readString(customer, "id"),
     externalSubscriptionId: readString(record, "id"),
     externalProductId: readString(product, "id"),
@@ -178,7 +254,11 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
     const payload = record ?? {
       raw: data,
     };
-    const snapshot = buildCreemSubscriptionSnapshot(data, fallbackStatus);
+    const snapshot = buildCreemSubscriptionSnapshot(
+      eventType,
+      data,
+      fallbackStatus,
+    );
     const providerEventId = readString(record, "webhookId");
     const externalSubscriptionId =
       snapshot?.externalSubscriptionId || readString(record, "id");
@@ -222,6 +302,8 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
             "Webhook ignored due to missing team/plan mapping in provider payload",
           team_billing_disabled:
             "Webhook recorded but business sync skipped because team billing is disabled",
+          provider_period_invalid:
+            "Webhook ignored because the active subscription period is missing or expired",
         };
 
         await triggerAlertSafely({

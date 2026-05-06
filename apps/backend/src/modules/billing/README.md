@@ -4,7 +4,7 @@ Current Team V1 billing scope:
 
 - team-scoped `pages + credits` metering
 - PostgreSQL-backed billing accounts, subscriptions, and usage ledger
-- Creem-backed `team_standard` subscription lifecycle (checkout/portal/cancel)
+- Creem-backed `team_standard` subscription lifecycle (checkout/portal + webhook-confirmed state)
 - webhook processing with audit log (`billing_webhook_events`)
 - periodic reconcile for team plan consistency
 

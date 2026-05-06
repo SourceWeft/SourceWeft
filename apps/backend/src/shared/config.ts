@@ -134,24 +134,6 @@ function parsePlanFamily(value: string | undefined, fallback: PlanFamily) {
   return planFamilies.has(normalized) ? normalized : fallback;
 }
 
-function parseCycleAnchorDay(value: string | undefined, fallback: number) {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-
-  const rounded = Math.floor(parsed);
-  if (rounded < 1 || rounded > 28) {
-    return fallback;
-  }
-
-  return rounded;
-}
-
 function parseCsv(value: string | undefined): string[] {
   if (!value) {
     return [];
@@ -449,10 +431,6 @@ export const config = {
     defaultPlanFamily: parsePlanFamily(
       process.env.BACKEND_DEFAULT_PLAN_FAMILY,
       "individual_free",
-    ),
-    cycleAnchorDay: parseCycleAnchorDay(
-      process.env.BACKEND_BILLING_CYCLE_ANCHOR_DAY,
-      1,
     ),
     reconcileEnabled: parseBoolean(
       process.env.BACKEND_BILLING_RECONCILE_ENABLED,

@@ -2,13 +2,7 @@
 
 import * as React from "react";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
-import {
-  CreditCard,
-  LayoutGrid,
-  LogOut,
-  Plus,
-  User,
-} from "lucide-react";
+import { CreditCard, LayoutGrid, LogOut, Plus, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -37,6 +31,7 @@ import {
   DashboardSettingsCenterModal,
   type SettingsCenterTab,
 } from "./dashboard-settings-center-modal";
+import { DashboardRailTeamSwitcher } from "./dashboard-team-switcher";
 import {
   DashboardTeamDisplay,
   type DashboardTeamItem,
@@ -65,7 +60,8 @@ export function DashboardAccountMenu() {
     | undefined;
 
   const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const [initialTab, setInitialTab] = React.useState<SettingsCenterTab>("account");
+  const [initialTab, setInitialTab] =
+    React.useState<SettingsCenterTab>("account");
   const [teamSwitcherOpen, setTeamSwitcherOpen] = React.useState(false);
 
   const { activeOrg, currentItem, items, orgList, switchTeam, user } =
@@ -86,7 +82,7 @@ export function DashboardAccountMenu() {
       await switchTeam(item);
       setTeamSwitcherOpen(false);
     } catch {
-      toast.error("Failed to switch workspace.");
+      toast.error("Failed to switch team.");
     }
   }
 
@@ -96,7 +92,10 @@ export function DashboardAccountMenu() {
 
   return (
     <>
-      <SidebarMenu>
+      <SidebarMenu className="items-center gap-2">
+        <SidebarMenuItem>
+          <DashboardRailTeamSwitcher onAddTeam={() => openSettings("team")} />
+        </SidebarMenuItem>
         <SidebarMenuItem>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -125,26 +124,43 @@ export function DashboardAccountMenu() {
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                   <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarImage src={userImage ?? undefined} alt={userName ?? "User"} />
-                    <AvatarFallback className="rounded-lg">{initials || "SW"}</AvatarFallback>
+                    <AvatarImage
+                      src={userImage ?? undefined}
+                      alt={userName ?? "User"}
+                    />
+                    <AvatarFallback className="rounded-lg">
+                      {initials || "SW"}
+                    </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-medium">{userName || "SourceWeft User"}</span>
-                    <span className="truncate text-xs">{userEmail || "Signed in"}</span>
+                    <span className="truncate font-medium">
+                      {userName || "SourceWeft User"}
+                    </span>
+                    <span className="truncate text-xs">
+                      {userEmail || "Signed in"}
+                    </span>
                   </div>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuSub open={teamSwitcherOpen} onOpenChange={setTeamSwitcherOpen}>
+              <DropdownMenuSub
+                open={teamSwitcherOpen}
+                onOpenChange={setTeamSwitcherOpen}
+              >
                 <DropdownMenuSubTrigger className="gap-2 p-2">
-                  <DashboardTeamDisplay
-                    item={currentItem}
-                    labelClassName="flex-1 text-left text-sm font-medium"
-                    user={user}
-                    variant="menu"
-                  />
+                  {currentItem ? (
+                    <DashboardTeamDisplay
+                      item={currentItem}
+                      labelClassName="flex-1 text-left text-sm font-medium"
+                      user={user}
+                      variant="menu"
+                    />
+                  ) : null}
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-64 rounded-lg" sideOffset={4}>
+                <DropdownMenuSubContent
+                  className="w-64 rounded-lg"
+                  sideOffset={4}
+                >
                   {items.map((item) => (
                     <DropdownMenuItem
                       key={item.id}
@@ -160,11 +176,19 @@ export function DashboardAccountMenu() {
                     </DropdownMenuItem>
                   ))}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => { setTeamSwitcherOpen(false); openSettings("team"); }} className="gap-2 p-2">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setTeamSwitcherOpen(false);
+                      openSettings("team");
+                    }}
+                    className="gap-2 p-2"
+                  >
                     <div className="flex size-6 items-center justify-center rounded-md border bg-background">
                       <Plus className="size-4" />
                     </div>
-                    <div className="font-medium text-muted-foreground">Add team</div>
+                    <div className="font-medium text-muted-foreground">
+                      Add team
+                    </div>
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>

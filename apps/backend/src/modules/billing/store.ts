@@ -38,7 +38,8 @@ function mapAccount(row: BillingAccountRow): BillingAccountState {
   return {
     teamId: row.teamId,
     planFamily: row.planFamily,
-    cycleAnchorDay: row.cycleAnchorDay,
+    cycleAnchorAt: row.cycleAnchorAt.toISOString(),
+    cycleSource: row.cycleSource,
     cycleStartAt: row.cycleStartAt.toISOString(),
     cycleEndAt: row.cycleEndAt.toISOString(),
     pagesLimit: row.pagesLimit,
@@ -87,6 +88,7 @@ function mapSubscription(
     provider: row.provider,
     planFamily: row.planFamily,
     status: row.status,
+    billingInterval: row.billingInterval,
     currentPeriodStart: row.currentPeriodStart
       ? row.currentPeriodStart.toISOString()
       : null,
@@ -204,7 +206,8 @@ export class PostgresBillingStore implements BillingStore {
       .values({
         teamId: account.teamId,
         planFamily: account.planFamily,
-        cycleAnchorDay: account.cycleAnchorDay,
+        cycleAnchorAt: parseDate(account.cycleAnchorAt),
+        cycleSource: account.cycleSource,
         cycleStartAt: parseDate(account.cycleStartAt),
         cycleEndAt: parseDate(account.cycleEndAt),
         pagesLimit: account.pagesLimit,
@@ -231,7 +234,8 @@ export class PostgresBillingStore implements BillingStore {
       .update(billingAccounts)
       .set({
         planFamily: account.planFamily,
-        cycleAnchorDay: account.cycleAnchorDay,
+        cycleAnchorAt: parseDate(account.cycleAnchorAt),
+        cycleSource: account.cycleSource,
         cycleStartAt: parseDate(account.cycleStartAt),
         cycleEndAt: parseDate(account.cycleEndAt),
         pagesLimit: account.pagesLimit,
@@ -340,6 +344,7 @@ export class PostgresBillingStore implements BillingStore {
         provider: snapshot.provider,
         planFamily: snapshot.planFamily,
         status: snapshot.status,
+        billingInterval: snapshot.billingInterval,
         currentPeriodStart: parseDateOrNull(snapshot.currentPeriodStart),
         currentPeriodEnd: parseDateOrNull(snapshot.currentPeriodEnd),
         externalCustomerId: snapshot.externalCustomerId,
@@ -357,6 +362,7 @@ export class PostgresBillingStore implements BillingStore {
           provider: snapshot.provider,
           planFamily: snapshot.planFamily,
           status: snapshot.status,
+          billingInterval: snapshot.billingInterval,
           currentPeriodStart: parseDateOrNull(snapshot.currentPeriodStart),
           currentPeriodEnd: parseDateOrNull(snapshot.currentPeriodEnd),
           externalCustomerId: snapshot.externalCustomerId,

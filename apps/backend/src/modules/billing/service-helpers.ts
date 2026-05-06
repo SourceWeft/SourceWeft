@@ -64,6 +64,7 @@ export function toSubscriptionSummary(input: {
     provider: input.subscription?.provider ?? input.provider,
     planFamily: input.subscription?.planFamily ?? input.account.planFamily,
     status: input.subscription?.status ?? "inactive",
+    billingInterval: input.subscription?.billingInterval ?? "unknown",
     currentPeriodStart: input.subscription?.currentPeriodStart ?? null,
     currentPeriodEnd: input.subscription?.currentPeriodEnd ?? null,
     cancelAtPeriodEnd: input.subscription?.cancelAtPeriodEnd ?? false,
@@ -172,6 +173,8 @@ export function toSummary(input: {
     teamId: input.account.teamId,
     planFamily: input.account.planFamily,
     billingMode: input.billingMode,
+    cycleAnchorAt: input.account.cycleAnchorAt,
+    cycleSource: input.account.cycleSource,
     cycleStartAt: input.account.cycleStartAt,
     cycleEndAt: input.account.cycleEndAt,
     pages: {

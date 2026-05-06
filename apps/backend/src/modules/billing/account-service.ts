@@ -1,5 +1,8 @@
 import type { PoolClient } from "pg";
-import { getMonthlyCycleWindow, getPlanQuota } from "@sourceweft/credits-core";
+import {
+  getAnchoredMonthlyCycleWindow,
+  getPlanQuota,
+} from "@sourceweft/credits-core";
 import { BillingError } from "./errors";
 import { appendBillingLedger } from "./ledger";
 import type { BillingStore } from "./store-port";
@@ -9,6 +12,12 @@ import {
   getTotalCreditsBalance,
   normalizeTeamId,
 } from "./service-helpers";
+
+const ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES = new Set([
+  "trialing",
+  "active",
+  "past_due",
+]);
 
 export class BillingAccountService {
   constructor(
@@ -83,7 +92,7 @@ export class BillingAccountService {
     account: BillingAccountState,
     nextPlanFamily: typeof account.planFamily,
     client: PoolClient,
-    metadata: Record<string, unknown>,
+    metadata: Record<string, unknown> & { suppressImmediateGrant?: boolean },
   ) {
     if (account.planFamily === nextPlanFamily) {
       return;
@@ -100,7 +109,10 @@ export class BillingAccountService {
     account.pagesLimit = account.monthlyPagesGrant;
     account.pagesUsed = account.pagesConsumedThisCycle;
 
-    if (nextQuota.monthlyCreditsGrant > previousMonthlyGrant) {
+    if (
+      !metadata.suppressImmediateGrant &&
+      nextQuota.monthlyCreditsGrant > previousMonthlyGrant
+    ) {
       const grantDelta = nextQuota.monthlyCreditsGrant - previousMonthlyGrant;
       account.monthlyCreditsBalance += grantDelta;
 
@@ -124,7 +136,10 @@ export class BillingAccountService {
       });
     }
 
-    if (nextQuota.monthlyPagesLimit > previousMonthlyPagesGrant) {
+    if (
+      !metadata.suppressImmediateGrant &&
+      nextQuota.monthlyPagesLimit > previousMonthlyPagesGrant
+    ) {
       const grantDelta = nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
       account.monthlyPagesBalance += grantDelta;
 
@@ -233,6 +248,89 @@ export class BillingAccountService {
     await this.store.updateAccount(account, client);
   }
 
+  async realignCycleLocked(
+    account: BillingAccountState,
+    client: PoolClient,
+    input: {
+      cycleAnchorAt: string;
+      cycleSource: BillingAccountState["cycleSource"];
+      cycleStartAt: string;
+      cycleEndAt: string;
+      metadata: Record<string, unknown>;
+      expireCurrentMonthly?: boolean;
+      grantNewMonthly?: boolean;
+    },
+  ) {
+    const previousMonthlyBalance = account.monthlyCreditsBalance;
+    const previousMonthlyPagesBalance = account.monthlyPagesBalance;
+    const previousPagesConsumedThisCycle = account.pagesConsumedThisCycle;
+    const expiredCycleSource = account.cycleSource;
+    const expiredCycleStartAt = account.cycleStartAt;
+    const quota = getPlanQuota(account.planFamily, account.seatCount);
+
+    if (input.expireCurrentMonthly) {
+      if (this.runtimeConfig.creditsEnabled && previousMonthlyBalance > 0) {
+        account.monthlyCreditsBalance = 0;
+        await appendBillingLedger({
+          store: this.store,
+          client,
+          account,
+          entry: {
+            eventType: "expire",
+            unitType: "credit",
+            delta: -previousMonthlyBalance,
+            balanceAfter: getTotalCreditsBalance(account),
+            feature: "cycle_expire",
+            idempotencyKey: `cycle-expire:${expiredCycleSource}:${expiredCycleStartAt}`,
+            metadata: input.metadata,
+          },
+        });
+      }
+
+      if (this.runtimeConfig.pagesEnabled && previousMonthlyPagesBalance > 0) {
+        account.monthlyPagesBalance = 0;
+        await appendBillingLedger({
+          store: this.store,
+          client,
+          account,
+          entry: {
+            eventType: "expire",
+            unitType: "page",
+            delta: -previousMonthlyPagesBalance,
+            balanceAfter: getTotalPagesBalance(account),
+            feature: "cycle_expire",
+            idempotencyKey: `cycle-pages-expire:${expiredCycleSource}:${expiredCycleStartAt}`,
+            metadata: {
+              ...input.metadata,
+              previousPagesConsumedThisCycle,
+              previousMonthlyPagesBalance,
+              addOnPagesBalance: account.addOnPagesBalance,
+            },
+          },
+        });
+      }
+    }
+
+    account.cycleAnchorAt = input.cycleAnchorAt;
+    account.cycleSource = input.cycleSource;
+    account.cycleStartAt = input.cycleStartAt;
+    account.cycleEndAt = input.cycleEndAt;
+    account.creditsReserved = 0;
+    account.creditsConsumedThisCycle = 0;
+    account.monthlyCreditsGrant = quota.monthlyCreditsGrant;
+    account.monthlyPagesGrant = quota.monthlyPagesLimit;
+    account.pagesConsumedThisCycle = 0;
+    account.pagesLimit = quota.monthlyPagesLimit;
+    account.pagesUsed = 0;
+
+    if (input.grantNewMonthly) {
+      await this.grantCycleBalancesLocked(account, client, quota, input.metadata);
+    }
+
+    account.updatedAt = new Date().toISOString();
+    await this.store.updateAccount(account, client);
+  }
+
   private async getOrCreateAccountLocked(teamId: string, client: PoolClient) {
     const existing = await this.store.getAccountForUpdate(teamId, client);
     if (existing) {
@@ -245,13 +343,14 @@ export class BillingAccountService {
   private async createDefaultAccountLocked(teamId: string, client: PoolClient) {
     const quota = getPlanQuota(this.runtimeConfig.defaultPlanFamily);
     const now = new Date();
-    const cycle = getMonthlyCycleWindow(now, this.runtimeConfig.cycleAnchorDay);
     const nowIso = now.toISOString();
+    const cycle = getAnchoredMonthlyCycleWindow(now, now);
 
     const account: BillingAccountState = {
       teamId,
       planFamily: this.runtimeConfig.defaultPlanFamily,
-      cycleAnchorDay: this.runtimeConfig.cycleAnchorDay,
+      cycleAnchorAt: nowIso,
+      cycleSource: "free_account",
       cycleStartAt: cycle.startAt.toISOString(),
       cycleEndAt: cycle.endAt.toISOString(),
       pagesLimit: quota.monthlyPagesLimit,
@@ -285,7 +384,7 @@ export class BillingAccountService {
           delta: quota.monthlyPagesLimit,
           balanceAfter: getTotalPagesBalance(account),
           feature: "cycle_grant",
-          idempotencyKey: `cycle-pages-grant:${account.cycleStartAt}`,
+          idempotencyKey: `cycle-pages-grant:${account.cycleSource}:${account.cycleStartAt}`,
           metadata: {
             monthlyPagesGrant: account.monthlyPagesGrant,
             monthlyPagesBalance: account.monthlyPagesBalance,
@@ -307,7 +406,7 @@ export class BillingAccountService {
           delta: quota.monthlyCreditsGrant,
           balanceAfter: getTotalCreditsBalance(account),
           feature: "cycle_grant",
-          idempotencyKey: `cycle-grant:${account.cycleStartAt}`,
+          idempotencyKey: `cycle-grant:${account.cycleSource}:${account.cycleStartAt}`,
         },
       });
     }
@@ -326,11 +425,137 @@ export class BillingAccountService {
       return account;
     }
 
+    const subscription = await this.store.getSubscriptionByTeam(
+      account.teamId,
+      client,
+    );
+
+    if (
+      account.cycleSource === "provider_subscription" &&
+      subscription?.billingInterval === "monthly" &&
+      (!subscription.currentPeriodStart ||
+        !subscription.currentPeriodEnd ||
+        Date.parse(subscription.currentPeriodStart) <=
+          Date.parse(account.cycleStartAt))
+    ) {
+      await this.expireCurrentCycleLocked(account, client, {
+        source: "cycle_sync",
+        reason: "provider_monthly_renewal_not_confirmed",
+        cycleStartAt: account.cycleStartAt,
+        cycleEndAt: account.cycleEndAt,
+        billingInterval: subscription.billingInterval,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+      });
+      return account;
+    }
+
+    if (
+      account.cycleSource === "provider_subscription" &&
+      (!subscription ||
+        !ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES.has(subscription.status))
+    ) {
+      await this.expireCurrentCycleLocked(account, client, {
+        source: "cycle_sync",
+        reason: "provider_subscription_inactive",
+        cycleStartAt: account.cycleStartAt,
+        cycleEndAt: account.cycleEndAt,
+        subscriptionStatus: subscription?.status ?? null,
+      });
+      return account;
+    }
+
+    if (
+      account.cycleSource === "provider_subscription" &&
+      subscription?.billingInterval === "unknown"
+    ) {
+      await this.expireCurrentCycleLocked(account, client, {
+        source: "cycle_sync",
+        reason: "provider_billing_interval_unknown",
+        cycleStartAt: account.cycleStartAt,
+        cycleEndAt: account.cycleEndAt,
+        subscriptionStatus: subscription.status,
+      });
+      return account;
+    }
+
     const quota = getPlanQuota(account.planFamily, account.seatCount);
-    const nextCycle = getMonthlyCycleWindow(now, account.cycleAnchorDay);
-    const previousMonthlyBalance = account.monthlyCreditsBalance;
-    const previousMonthlyPagesBalance = account.monthlyPagesBalance;
-    const previousPagesConsumedThisCycle = account.pagesConsumedThisCycle;
+    const isProviderMonthlyCycle =
+      account.cycleSource === "provider_subscription" &&
+      subscription?.billingInterval === "monthly";
+    const isProviderYearlyCycle =
+      account.cycleSource === "provider_subscription" &&
+      subscription?.billingInterval === "yearly";
+
+    let nextCycle =
+      isProviderMonthlyCycle &&
+      subscription?.currentPeriodStart &&
+      subscription.currentPeriodEnd
+        ? {
+            startAt: new Date(subscription.currentPeriodStart),
+            endAt: new Date(subscription.currentPeriodEnd),
+          }
+        : getAnchoredMonthlyCycleWindow(
+            now,
+            isProviderYearlyCycle && subscription?.currentPeriodStart
+              ? new Date(subscription.currentPeriodStart)
+              : new Date(account.cycleAnchorAt),
+          );
+
+    if (
+      isProviderYearlyCycle &&
+      (!subscription?.currentPeriodStart || !subscription.currentPeriodEnd)
+    ) {
+      await this.expireCurrentCycleLocked(account, client, {
+        source: "cycle_sync",
+        reason: "provider_yearly_period_missing",
+        cycleStartAt: account.cycleStartAt,
+        cycleEndAt: account.cycleEndAt,
+      });
+      return account;
+    }
+
+    if (
+      isProviderYearlyCycle &&
+      subscription?.currentPeriodStart &&
+      nextCycle.startAt < new Date(subscription.currentPeriodStart)
+    ) {
+      nextCycle = {
+        ...nextCycle,
+        startAt: new Date(subscription.currentPeriodStart),
+      };
+    }
+
+    if (
+      isProviderYearlyCycle &&
+      subscription?.currentPeriodEnd &&
+      nextCycle.startAt >= new Date(subscription.currentPeriodEnd)
+    ) {
+      await this.expireCurrentCycleLocked(account, client, {
+        source: "cycle_sync",
+        reason: "provider_yearly_period_ended",
+        cycleStartAt: account.cycleStartAt,
+        cycleEndAt: account.cycleEndAt,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+      });
+      return account;
+    }
+
+    if (
+      isProviderYearlyCycle &&
+      subscription?.currentPeriodEnd &&
+      nextCycle.endAt > new Date(subscription.currentPeriodEnd)
+    ) {
+      nextCycle = {
+        ...nextCycle,
+        endAt: new Date(subscription.currentPeriodEnd),
+      };
+    }
+
+    const expiredCycle = {
+      source: account.cycleSource,
+      startAt: account.cycleStartAt,
+    };
 
     account.cycleStartAt = nextCycle.startAt.toISOString();
     account.cycleEndAt = nextCycle.endAt.toISOString();
@@ -341,6 +566,33 @@ export class BillingAccountService {
     account.pagesConsumedThisCycle = 0;
     account.pagesLimit = quota.monthlyPagesLimit;
     account.pagesUsed = 0;
+
+    await this.expireAndGrantCycleLocked(
+      account,
+      client,
+      quota,
+      {
+        source: "cycle_sync",
+        cycleStartAt: account.cycleStartAt,
+      },
+      expiredCycle,
+    );
+
+    account.updatedAt = now.toISOString();
+    await this.store.updateAccount(account, client);
+    return account;
+  }
+
+  private async expireAndGrantCycleLocked(
+    account: BillingAccountState,
+    client: PoolClient,
+    quota: ReturnType<typeof getPlanQuota>,
+    metadata: Record<string, unknown>,
+    expiredCycle: { source: string; startAt: string },
+  ) {
+    const previousMonthlyBalance = account.monthlyCreditsBalance;
+    const previousMonthlyPagesBalance = account.monthlyPagesBalance;
+    const previousPagesConsumedThisCycle = account.pagesConsumedThisCycle;
 
     if (this.runtimeConfig.creditsEnabled) {
       if (previousMonthlyBalance > 0) {
@@ -355,24 +607,8 @@ export class BillingAccountService {
             delta: -previousMonthlyBalance,
             balanceAfter: getTotalCreditsBalance(account),
             feature: "cycle_expire",
-            idempotencyKey: `cycle-expire:${account.cycleStartAt}`,
-          },
-        });
-      }
-
-      account.monthlyCreditsBalance = quota.monthlyCreditsGrant;
-      if (quota.monthlyCreditsGrant > 0) {
-        await appendBillingLedger({
-          store: this.store,
-          client,
-          account,
-          entry: {
-            eventType: "grant",
-            unitType: "credit",
-            delta: quota.monthlyCreditsGrant,
-            balanceAfter: getTotalCreditsBalance(account),
-            feature: "cycle_grant",
-            idempotencyKey: `cycle-grant:${account.cycleStartAt}`,
+            idempotencyKey: `cycle-expire:${expiredCycle.source}:${expiredCycle.startAt}`,
+            metadata,
           },
         });
       }
@@ -391,8 +627,9 @@ export class BillingAccountService {
             delta: -previousMonthlyPagesBalance,
             balanceAfter: getTotalPagesBalance(account),
             feature: "cycle_expire",
-            idempotencyKey: `cycle-pages-expire:${account.cycleStartAt}`,
+            idempotencyKey: `cycle-pages-expire:${expiredCycle.source}:${expiredCycle.startAt}`,
             metadata: {
+              ...metadata,
               previousPagesConsumedThisCycle,
               previousMonthlyPagesBalance,
               addOnPagesBalance: account.addOnPagesBalance,
@@ -400,7 +637,101 @@ export class BillingAccountService {
           },
         });
       }
+    }
 
+    await this.grantCycleBalancesLocked(account, client, quota, metadata);
+  }
+
+  private async expireCurrentCycleLocked(
+    account: BillingAccountState,
+    client: PoolClient,
+    metadata: Record<string, unknown>,
+  ) {
+    const previousMonthlyBalance = account.monthlyCreditsBalance;
+    const previousMonthlyPagesBalance = account.monthlyPagesBalance;
+    const previousPagesConsumedThisCycle = account.pagesConsumedThisCycle;
+
+    if (
+      previousMonthlyBalance <= 0 &&
+      previousMonthlyPagesBalance <= 0 &&
+      account.creditsReserved <= 0
+    ) {
+      return;
+    }
+
+    if (this.runtimeConfig.creditsEnabled && previousMonthlyBalance > 0) {
+      account.monthlyCreditsBalance = 0;
+      await appendBillingLedger({
+        store: this.store,
+        client,
+        account,
+        entry: {
+          eventType: "expire",
+          unitType: "credit",
+          delta: -previousMonthlyBalance,
+          balanceAfter: getTotalCreditsBalance(account),
+          feature: "cycle_expire",
+          idempotencyKey: `cycle-expire:${account.cycleSource}:${account.cycleStartAt}`,
+          metadata,
+        },
+      });
+    }
+
+    if (this.runtimeConfig.pagesEnabled && previousMonthlyPagesBalance > 0) {
+      account.monthlyPagesBalance = 0;
+      await appendBillingLedger({
+        store: this.store,
+        client,
+        account,
+        entry: {
+          eventType: "expire",
+          unitType: "page",
+          delta: -previousMonthlyPagesBalance,
+          balanceAfter: getTotalPagesBalance(account),
+          feature: "cycle_expire",
+          idempotencyKey: `cycle-pages-expire:${account.cycleSource}:${account.cycleStartAt}`,
+          metadata: {
+            ...metadata,
+            previousPagesConsumedThisCycle,
+            previousMonthlyPagesBalance,
+            addOnPagesBalance: account.addOnPagesBalance,
+          },
+        },
+      });
+    }
+
+    account.creditsReserved = 0;
+    account.updatedAt = new Date().toISOString();
+    await this.store.updateAccount(account, client);
+  }
+
+  private async grantCycleBalancesLocked(
+    account: BillingAccountState,
+    client: PoolClient,
+    quota: ReturnType<typeof getPlanQuota>,
+    metadata: Record<string, unknown>,
+  ) {
+    if (this.runtimeConfig.creditsEnabled) {
+      account.monthlyCreditsBalance = quota.monthlyCreditsGrant;
+      if (quota.monthlyCreditsGrant > 0) {
+        await appendBillingLedger({
+          store: this.store,
+          client,
+          account,
+          entry: {
+            eventType: "grant",
+            unitType: "credit",
+            delta: quota.monthlyCreditsGrant,
+            balanceAfter: getTotalCreditsBalance(account),
+            feature: "cycle_grant",
+            idempotencyKey: `cycle-grant:${account.cycleSource}:${account.cycleStartAt}`,
+            metadata,
+          },
+        });
+      }
+    }
+
+    if (this.runtimeConfig.pagesEnabled) {
       account.monthlyPagesBalance = quota.monthlyPagesLimit;
       if (quota.monthlyPagesLimit > 0) {
         await appendBillingLedger({
@@ -413,8 +744,9 @@ export class BillingAccountService {
             delta: quota.monthlyPagesLimit,
             balanceAfter: getTotalPagesBalance(account),
             feature: "cycle_grant",
-            idempotencyKey: `cycle-pages-grant:${account.cycleStartAt}`,
+            idempotencyKey: `cycle-pages-grant:${account.cycleSource}:${account.cycleStartAt}`,
             metadata: {
+              ...metadata,
               monthlyPagesGrant: account.monthlyPagesGrant,
               monthlyPagesBalance: account.monthlyPagesBalance,
               addOnPagesBalance: account.addOnPagesBalance,
@@ -426,9 +758,5 @@ export class BillingAccountService {
     } else {
       account.monthlyPagesBalance = quota.monthlyPagesLimit;
     }
-
-    account.updatedAt = now.toISOString();
-    await this.store.updateAccount(account, client);
-    return account;
   }
 }

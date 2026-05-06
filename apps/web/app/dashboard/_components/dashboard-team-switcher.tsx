@@ -1,12 +1,32 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown, Plus } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronsUpDown,
+  GalleryVerticalEnd,
+  Plus,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@sourceweft/ui-web/components/ui/popover";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import {
@@ -21,6 +41,13 @@ interface DashboardTeamSwitcherProps {
   size?: "sm" | "default";
 }
 
+function isTeamItemActive(
+  activeOrg: { id?: string } | null | undefined,
+  item: DashboardTeamItem,
+) {
+  return item.isPersonal && !activeOrg ? true : activeOrg?.id === item.id;
+}
+
 export function DashboardTeamSwitcher({
   className,
   onAddTeam,
@@ -30,12 +57,16 @@ export function DashboardTeamSwitcher({
     useDashboardTeamSelector();
   const [open, setOpen] = React.useState(false);
 
+  if (!currentItem) {
+    return null;
+  }
+
   async function handleSwitch(item: DashboardTeamItem) {
     try {
       await switchTeam(item);
       setOpen(false);
     } catch {
-      toast.error("Failed to switch workspace.");
+      toast.error("Failed to switch team.");
     }
   }
 
@@ -51,7 +82,9 @@ export function DashboardTeamSwitcher({
           type="button"
         >
           <DashboardTeamDisplay
-            endSlot={<ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+            endSlot={
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            }
             item={currentItem}
             labelClassName="max-w-[120px] text-sm text-foreground"
             user={user}
@@ -62,8 +95,7 @@ export function DashboardTeamSwitcher({
       <PopoverContent align="start" className="w-[220px] p-1.5">
         <div className="py-0.5">
           {items.map((item) => {
-            const isActive =
-              item.isPersonal && !activeOrg ? true : activeOrg?.id === item.id;
+            const isActive = isTeamItemActive(activeOrg, item);
 
             return (
               <button
@@ -110,5 +142,97 @@ export function DashboardTeamSwitcher({
         ) : null}
       </PopoverContent>
     </Popover>
+  );
+}
+
+export function DashboardRailTeamSwitcher({
+  className,
+  onAddTeam,
+}: Pick<DashboardTeamSwitcherProps, "className" | "onAddTeam">) {
+  const { isMobile } = useSidebar();
+  const { activeOrg, currentItem, items, switchTeam, user } =
+    useDashboardTeamSelector();
+
+  if (!currentItem) {
+    return null;
+  }
+
+  const triggerLabel = `Switch team: ${currentItem.name}`;
+
+  async function handleSwitch(item: DashboardTeamItem) {
+    try {
+      await switchTeam(item);
+    } catch {
+      toast.error("Failed to switch team.");
+    }
+  }
+
+  return (
+    <SidebarMenu className={cn("items-center", className)}>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              aria-label={triggerLabel}
+              className="h-10 w-10 justify-center p-1.5 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground [&>svg]:size-3"
+              size="lg"
+              title={triggerLabel}
+            >
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-[11px] font-semibold uppercase leading-none text-sidebar-primary-foreground">
+                <GalleryVerticalEnd className="size-4" />
+              </div>
+              <ChevronsUpDown className="absolute -right-1 -top-1 flex size-4 rounded-full border border-sidebar bg-background p-0.5 text-muted-foreground shadow-xs" />
+              <span className="sr-only">Team switcher</span>
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            side={isMobile ? "bottom" : "right"}
+            sideOffset={4}
+          >
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Teams
+            </DropdownMenuLabel>
+            {items.map((item) => {
+              const isActive = isTeamItemActive(activeOrg, item);
+
+              return (
+                <DropdownMenuItem
+                  className={cn("gap-2 p-2", isActive && "bg-accent/60")}
+                  key={item.id}
+                  onClick={() => void handleSwitch(item)}
+                >
+                  <DashboardTeamDisplay
+                    endSlot={
+                      isActive ? (
+                        <Check className="size-3.5 shrink-0 text-foreground" />
+                      ) : null
+                    }
+                    item={item}
+                    labelClassName="flex-1 text-sm"
+                    user={user}
+                    variant="menu"
+                  />
+                </DropdownMenuItem>
+              );
+            })}
+            {onAddTeam ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="gap-2 p-2" onClick={onAddTeam}>
+                  <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                    <Plus className="size-4 text-muted-foreground" />
+                  </div>
+                  <div className="font-medium text-muted-foreground">
+                    Add team
+                  </div>
+                </DropdownMenuItem>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }

@@ -21,6 +21,12 @@ import { logger } from "../../shared/logger";
 import { mailService } from "../../shared/mail";
 import { onboardingService } from "../onboarding";
 import { syncCreemSubscriptionEvent } from "../billing";
+import { workspaceService } from "../workspace";
+import {
+  isPersonalOrganizationMetadata,
+  parseSourceweftOrganizationKind,
+  withSourceweftOrganizationKind,
+} from "./organization-metadata";
 import { renderLinkTemplate, renderOtpTemplate } from "./templates";
 
 function withBaseUrl(path: string) {
@@ -249,6 +255,93 @@ export const auth: any = betterAuth({
         });
       },
       organizationHooks: {
+        async beforeCreateOrganization({ organization }) {
+          return {
+            data: {
+              ...organization,
+              metadata: withSourceweftOrganizationKind(
+                organization.metadata,
+                "team",
+              ),
+            },
+          };
+        },
+        async beforeUpdateOrganization({ organization, member }) {
+          const existing = await workspaceService.getOrganization(
+            member.organizationId,
+          );
+
+          if (!existing) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Organization not found.",
+            });
+          }
+
+          const existingKind = parseSourceweftOrganizationKind(
+            existing.metadata,
+          );
+
+          if (organization.metadata !== undefined) {
+            const nextKind = parseSourceweftOrganizationKind(
+              organization.metadata,
+            );
+
+            if (nextKind !== existingKind) {
+              throw new APIError("BAD_REQUEST", {
+                message: "Organization type cannot be changed.",
+              });
+            }
+          }
+
+          if (existingKind !== "personal") {
+            return { data: organization };
+          }
+
+          if (organization.name !== undefined || organization.slug !== undefined) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Personal workspace cannot be renamed.",
+            });
+          }
+
+          if (
+            organization.metadata !== undefined &&
+            !isPersonalOrganizationMetadata(organization.metadata)
+          ) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Personal workspace type cannot be changed.",
+            });
+          }
+
+          return { data: organization };
+        },
+        async beforeAddMember({ organization }) {
+          if (isPersonalOrganizationMetadata(organization.metadata)) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Personal workspace cannot add members.",
+            });
+          }
+        },
+        async beforeCreateInvitation({ organization }) {
+          if (isPersonalOrganizationMetadata(organization.metadata)) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Personal workspace cannot invite members.",
+            });
+          }
+        },
+        async beforeAcceptInvitation({ organization }) {
+          if (isPersonalOrganizationMetadata(organization.metadata)) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Personal workspace cannot accept invitations.",
+            });
+          }
+        },
+        async beforeDeleteOrganization({ organization }) {
+          if (isPersonalOrganizationMetadata(organization.metadata)) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Personal workspace cannot be deleted.",
+            });
+          }
+        },
         async afterCreateOrganization({ organization, user }) {
           await onboardingService.provisionOrganization({
             organizationId: organization.id,
@@ -455,7 +548,6 @@ export const auth: any = betterAuth({
         after: async (session) => {
           await onboardingService.ensurePersonalTeamForUser({
             userId: session.userId,
-            createOrganization: auth.api.createOrganization,
           });
         },
       },

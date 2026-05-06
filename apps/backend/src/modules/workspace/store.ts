@@ -16,6 +16,13 @@ type OrganizationMembershipRow = {
   role: string;
   created_at: string;
 };
+type OrganizationRow = {
+  id: string;
+  name: string;
+  slug: string;
+  metadata: unknown;
+  created_at: string;
+};
 
 function mapWorkspaceRow(row: WorkspaceRow): Workspace {
   return {
@@ -222,6 +229,143 @@ export async function findOrganizationMembership(input: {
       "createdAt"::text as created_at
     from member
     where "organizationId" = ${input.organizationId} and "userId" = ${input.userId}
+    limit 1
+  `);
+
+  const row = result.rows?.[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    organizationId: row.organization_id,
+    userId: row.user_id,
+    role: row.role,
+    createdAt: row.created_at,
+  };
+}
+
+export async function findOrganizationById(organizationId: string) {
+  const result = await db.execute<OrganizationRow>(sql`
+    select
+      id,
+      name,
+      slug,
+      metadata,
+      "createdAt"::text as created_at
+    from organization
+    where id = ${organizationId}
+    limit 1
+  `);
+
+  const row = result.rows?.[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+  };
+}
+
+export async function createPersonalOrganizationForUser(input: {
+  name: string;
+  slug: string;
+  userId: string;
+  metadata: Record<string, unknown>;
+}) {
+  const now = new Date();
+  const organizationId = randomUUID();
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select pg_advisory_xact_lock(
+        hashtext('sourceweft:personal-organization'),
+        hashtext(${input.userId})
+      )
+    `);
+
+    const existingResult = await tx.execute<OrganizationMembershipRow>(sql`
+      select
+        m."organizationId" as organization_id,
+        m."userId" as user_id,
+        m.role,
+        m."createdAt"::text as created_at
+      from member m
+      join organization o on o.id = m."organizationId"
+      where m."userId" = ${input.userId}
+        and o.metadata is not null
+        and o.metadata <> ''
+        and o.metadata::jsonb #>> '{sourceweft,kind}' = 'personal'
+      limit 1
+    `);
+
+    const existing = existingResult.rows?.[0];
+    if (existing) {
+      return { created: false, id: existing.organization_id };
+    }
+
+    const organizationResult = await tx.execute<{ id: string }>(sql`
+      insert into organization (
+        id,
+        name,
+        slug,
+        metadata,
+        "createdAt"
+      )
+      values (
+        ${organizationId},
+        ${input.name},
+        ${input.slug},
+        ${JSON.stringify(input.metadata)},
+        ${now}
+      )
+      returning id
+    `);
+
+    await tx.execute(sql`
+      insert into member (
+        id,
+        "organizationId",
+        "userId",
+        role,
+        "createdAt"
+      )
+      values (
+        ${randomUUID()},
+        ${organizationId},
+        ${input.userId},
+        'owner',
+        ${now}
+      )
+    `);
+
+    const row = organizationResult.rows?.[0];
+    if (!row) {
+      throw new Error("Failed to create personal organization");
+    }
+
+    return { created: true, id: row.id };
+  });
+}
+
+export async function findPersonalOrganizationMembershipByUser(userId: string) {
+  const result = await db.execute<OrganizationMembershipRow>(sql`
+    select
+      m."organizationId" as organization_id,
+      m."userId" as user_id,
+      m.role,
+      m."createdAt"::text as created_at
+    from member m
+    join organization o on o.id = m."organizationId"
+    where m."userId" = ${userId}
+      and o.metadata is not null
+      and o.metadata <> ''
+      and o.metadata::jsonb #>> '{sourceweft,kind}' = 'personal'
     limit 1
   `);
 

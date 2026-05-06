@@ -1,13 +1,7 @@
-import {
-  cancelSubscription,
-  createCheckout,
-  createPortal,
-} from "@creem_io/better-auth/server";
+import { createCheckout, createPortal } from "@creem_io/better-auth/server";
 import type { BillingRuntimeConfig } from "../types";
 import type {
   BillingProviderAdapter,
-  BillingProviderCancelInput,
-  BillingProviderCancelResult,
   BillingProviderCheckoutInput,
   BillingProviderCheckoutResult,
   BillingProviderPortalInput,
@@ -105,27 +99,6 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     return {
       provider: "creem",
       portalUrl: response.url,
-    };
-  }
-
-  async cancelSubscription(
-    input: BillingProviderCancelInput,
-  ): Promise<BillingProviderCancelResult> {
-    await cancelSubscription(
-      this.options as any,
-      {
-        id: input.externalSubscriptionId,
-        metadata: {
-          teamId: input.teamId,
-          actorUserId: input.actorUserId,
-        },
-      } as any,
-    );
-
-    return {
-      provider: "creem",
-      status: "canceled",
-      cancelAtPeriodEnd: true,
     };
   }
 }

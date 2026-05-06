@@ -40,6 +40,17 @@ export class BillingReconcileService {
         continue;
       }
 
+      if (expectedFromState !== this.runtimeConfig.defaultPlanFamily) {
+        anomalies.push({
+          teamId: state.teamId,
+          previousPlanFamily: state.accountPlanFamily,
+          expectedPlanFamily: expectedFromState,
+          subscriptionStatus: state.subscriptionStatus ?? "inactive",
+          externalSubscriptionId: state.externalSubscriptionId,
+        });
+        continue;
+      }
+
       await this.accountService.withLockedAccount(
         state.teamId,
         async ({ account, client }) => {
@@ -56,6 +67,18 @@ export class BillingReconcileService {
             return;
           }
 
+          if (expectedPlan !== this.runtimeConfig.defaultPlanFamily) {
+            anomalies.push({
+              teamId: account.teamId,
+              previousPlanFamily: account.planFamily,
+              expectedPlanFamily: expectedPlan,
+              subscriptionStatus: latestSubscription?.status ?? "inactive",
+              externalSubscriptionId:
+                latestSubscription?.externalSubscriptionId ?? null,
+            });
+            return;
+          }
+
           const previousPlanFamily = account.planFamily;
           await this.accountService.applyPlanFamilyLocked(
             account,
@@ -67,6 +90,7 @@ export class BillingReconcileService {
               previousPlanFamily,
               expectedPlanFamily: expectedPlan,
               subscriptionStatus: latestSubscription?.status ?? "inactive",
+              suppressImmediateGrant: true,
             },
           );
 

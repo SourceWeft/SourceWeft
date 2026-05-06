@@ -12,6 +12,7 @@ import {
   PanelsTopLeft,
   Search,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
@@ -403,10 +404,12 @@ function SkillCard({
   item,
   pending,
   onInstall,
+  onUninstall,
 }: {
   item: SkillCatalogItem;
   pending: boolean;
   onInstall: (item: SkillCatalogItem) => void;
+  onUninstall: (item: SkillCatalogItem) => void;
 }) {
   const href = skillHref(item);
 
@@ -449,8 +452,8 @@ function SkillCard({
         </Button>
         <Button
           className="flex-1 rounded-full"
-          disabled={item.enabled || pending}
-          onClick={() => onInstall(item)}
+          disabled={pending}
+          onClick={() => (item.enabled ? onUninstall(item) : onInstall(item))}
           size="xs"
           type="button"
           variant={item.enabled ? "secondary" : "default"}
@@ -458,11 +461,11 @@ function SkillCard({
           {pending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : item.enabled ? (
-            <Check className="h-3.5 w-3.5" />
+            <Trash2 className="h-3.5 w-3.5" />
           ) : (
             <Sparkles className="h-3.5 w-3.5" />
           )}
-          {item.enabled ? "Installed" : "Install"}
+          {item.enabled ? "Uninstall" : "Install"}
         </Button>
       </div>
     </article>
@@ -482,6 +485,11 @@ export default function SkillsPage() {
   const [isResolvingWorkspace, setIsResolvingWorkspace] = React.useState(true);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const workspaceIdRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    workspaceIdRef.current = workspace?.id ?? null;
+  }, [workspace?.id]);
 
   const resolveWorkspace = React.useCallback(async () => {
     if (dashboardState.workspaceId) {
@@ -566,7 +574,7 @@ export default function SkillsPage() {
       if (sort === "name_asc") return a.displayName.localeCompare(b.displayName);
       if (sort === "installed_first") return Number(b.enabled) - Number(a.enabled);
       if (sort === "official_first") return Number(b.sourceType === "builtin") - Number(a.sourceType === "builtin");
-      return Number(b.enabled) - Number(a.enabled) || a.displayName.localeCompare(b.displayName);
+      return 0;
     });
   }, [category, items, publisherFilter, query, sort, statusFilter]);
 
@@ -609,16 +617,62 @@ export default function SkillsPage() {
   async function installSkill(item: SkillCatalogItem) {
     if (!workspace || item.enabled) return;
 
+    const workspaceId = workspace.id;
     setPendingCatalogId(item.catalogId);
     try {
-      await contentClient.enableWorkspaceSkill(workspace.id, {
+      const result = await contentClient.enableWorkspaceSkill(workspaceId, {
         skillId: item.skillId,
         skillVersionId: item.skillVersionId,
       });
+      if (workspaceIdRef.current === workspaceId) {
+        setItems((currentItems) =>
+          currentItems.map((candidate) =>
+            candidate.catalogId === item.catalogId
+              ? {
+                  ...candidate,
+                  enabled: result.workspaceSkill.enabled,
+                  enabledWorkspaceSkillId: result.workspaceSkill.id,
+                }
+              : candidate,
+          ),
+        );
+      }
       toast.success("Skill installed");
-      await loadCatalog();
     } catch (installError) {
       toast.error(installError instanceof Error ? installError.message : "Failed to install skill.");
+    } finally {
+      setPendingCatalogId(null);
+    }
+  }
+
+  async function uninstallSkill(item: SkillCatalogItem) {
+    if (!workspace || !item.enabled) return;
+    if (!item.enabledWorkspaceSkillId) {
+      toast.error("Skill install record is missing. Refresh and try again.");
+      return;
+    }
+
+    const workspaceId = workspace.id;
+    const workspaceSkillId = item.enabledWorkspaceSkillId;
+    setPendingCatalogId(item.catalogId);
+    try {
+      await contentClient.deleteWorkspaceSkill(workspaceId, workspaceSkillId);
+      if (workspaceIdRef.current === workspaceId) {
+        setItems((currentItems) =>
+          currentItems.map((candidate) =>
+            candidate.catalogId === item.catalogId
+              ? {
+                  ...candidate,
+                  enabled: false,
+                  enabledWorkspaceSkillId: null,
+                }
+              : candidate,
+          ),
+        );
+      }
+      toast.success("Skill uninstalled");
+    } catch (uninstallError) {
+      toast.error(uninstallError instanceof Error ? uninstallError.message : "Failed to uninstall skill.");
     } finally {
       setPendingCatalogId(null);
     }
@@ -690,6 +744,7 @@ export default function SkillsPage() {
                       item={item}
                       key={item.catalogId}
                       onInstall={(next) => void installSkill(next)}
+                      onUninstall={(next) => void uninstallSkill(next)}
                       pending={pendingCatalogId === item.catalogId}
                     />
                   ))}

@@ -4,7 +4,6 @@ import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
-  FolderKanban,
   LayoutDashboard,
   MessageSquareText,
   Sparkles,
@@ -95,7 +94,7 @@ export function DashboardSidebar() {
   // Derive the active thread from the URL instead of context state.
   // Pattern: /dashboard/chat/[threadId]
   const activeThreadId = pathname.startsWith("/dashboard/chat/")
-    ? pathname.slice("/dashboard/chat/".length).split("/")[0] ?? ""
+    ? (pathname.slice("/dashboard/chat/".length).split("/")[0] ?? "")
     : "";
 
   const {
@@ -126,7 +125,9 @@ export function DashboardSidebar() {
   };
 
   const handleClearPrivateChats = async () => {
-    const shouldResetRoute = privateChats.some((item) => item.id === activeThreadId);
+    const shouldResetRoute = privateChats.some(
+      (item) => item.id === activeThreadId,
+    );
 
     await clearPrivateChats();
 
@@ -136,7 +137,9 @@ export function DashboardSidebar() {
   };
 
   const handleClearArchivedChats = async () => {
-    const shouldResetRoute = archivedChats.some((item) => item.id === activeThreadId);
+    const shouldResetRoute = archivedChats.some(
+      (item) => item.id === activeThreadId,
+    );
 
     await clearArchivedChats();
 

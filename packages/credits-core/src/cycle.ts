@@ -62,3 +62,60 @@ export function getMonthlyCycleWindow(
     endAt: thisMonthStart,
   };
 }
+
+function buildUtcAnchoredDate(year: number, month: number, anchorAt: Date) {
+  const safeDay = Math.min(anchorAt.getUTCDate(), daysInUtcMonth(year, month));
+  return new Date(
+    Date.UTC(
+      year,
+      month,
+      safeDay,
+      anchorAt.getUTCHours(),
+      anchorAt.getUTCMinutes(),
+      anchorAt.getUTCSeconds(),
+      anchorAt.getUTCMilliseconds(),
+    ),
+  );
+}
+
+function addAnchoredUtcMonths(anchorAt: Date, monthsFromAnchor: number) {
+  const shifted = shiftUtcMonth(
+    anchorAt.getUTCFullYear(),
+    anchorAt.getUTCMonth(),
+    monthsFromAnchor,
+  );
+  return buildUtcAnchoredDate(shifted.year, shifted.month, anchorAt);
+}
+
+function monthsBetweenUtcAnchors(now: Date, anchorAt: Date) {
+  return (
+    (now.getUTCFullYear() - anchorAt.getUTCFullYear()) * 12 +
+    (now.getUTCMonth() - anchorAt.getUTCMonth())
+  );
+}
+
+export function getAnchoredMonthlyCycleWindow(
+  now: Date,
+  anchorAt: Date,
+): BillingCycleWindow {
+  if (now < anchorAt) {
+    return {
+      startAt: anchorAt,
+      endAt: addAnchoredUtcMonths(anchorAt, 1),
+    };
+  }
+
+  const monthOffset = Math.max(0, monthsBetweenUtcAnchors(now, anchorAt));
+  let cycleStartOffset = monthOffset;
+  let startAt = addAnchoredUtcMonths(anchorAt, cycleStartOffset);
+
+  if (now < startAt) {
+    cycleStartOffset = Math.max(0, monthOffset - 1);
+    startAt = addAnchoredUtcMonths(anchorAt, cycleStartOffset);
+  }
+
+  return {
+    startAt,
+    endAt: addAnchoredUtcMonths(anchorAt, cycleStartOffset + 1),
+  };
+}

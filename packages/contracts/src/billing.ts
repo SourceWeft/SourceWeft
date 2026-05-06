@@ -31,6 +31,14 @@ export const billingSubscriptionStatusSchema = z.enum([
   "expired",
 ]);
 
+export const billingCycleSourceSchema = z.enum([
+  "free_account",
+  "provider_subscription",
+  "manual",
+]);
+
+export const billingIntervalSchema = z.enum(["monthly", "yearly", "unknown"]);
+
 export const ledgerEventTypeSchema = z.enum([
   "grant",
   "reserve",
@@ -47,6 +55,8 @@ export const billingSummaryResponseSchema = z.object({
   teamId: z.string(),
   planFamily: planFamilySchema,
   billingMode: billingModeSchema,
+  cycleAnchorAt: z.string(),
+  cycleSource: billingCycleSourceSchema,
   cycleStartAt: z.string(),
   cycleEndAt: z.string(),
   pages: z.object({
@@ -153,6 +163,7 @@ export const billingSubscriptionResponseSchema = z.object({
   provider: billingProviderSchema,
   planFamily: planFamilySchema.nullable(),
   status: billingSubscriptionStatusSchema,
+  billingInterval: billingIntervalSchema,
   currentPeriodStart: z.string().nullable(),
   currentPeriodEnd: z.string().nullable(),
   cancelAtPeriodEnd: z.boolean(),
@@ -183,6 +194,7 @@ export const cancelTeamSubscriptionResponseSchema = z.object({
   teamId: z.string(),
   status: billingSubscriptionStatusSchema,
   cancelAtPeriodEnd: z.boolean(),
+  portalUrl: z.string().url().nullable(),
 });
 
 export const meterConsumeRequestSchema = z
@@ -242,6 +254,8 @@ export type PlanFamily = z.infer<typeof planFamilySchema>;
 export type BillingMode = z.infer<typeof billingModeSchema>;
 export type BillingProvider = z.infer<typeof billingProviderSchema>;
 export type TeamPlanFamily = z.infer<typeof teamPlanFamilySchema>;
+export type BillingCycleSource = z.infer<typeof billingCycleSourceSchema>;
+export type BillingInterval = z.infer<typeof billingIntervalSchema>;
 export type BillingSubscriptionStatus = z.infer<
   typeof billingSubscriptionStatusSchema
 >;

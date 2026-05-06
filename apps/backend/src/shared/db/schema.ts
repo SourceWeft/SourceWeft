@@ -331,7 +331,14 @@ export const billingAccounts = pgTable(
       .primaryKey()
       ,
     planFamily: text("plan_family").$type<PlanFamily>().notNull(),
-    cycleAnchorDay: integer("cycle_anchor_day").notNull().default(1),
+    cycleAnchorAt: timestamp("cycle_anchor_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    cycleSource: text("cycle_source")
+      .$type<"free_account" | "provider_subscription" | "manual">()
+      .notNull()
+      .default("free_account"),
     cycleStartAt: timestamp("cycle_start_at", {
       withTimezone: true,
       mode: "date",
@@ -373,8 +380,8 @@ export const billingAccounts = pgTable(
   },
   (table) => [
     check(
-      "billing_accounts_cycle_anchor_day_check",
-      sql`${table.cycleAnchorDay} between 1 and 28`,
+      "billing_accounts_cycle_source_check",
+      sql`${table.cycleSource} in ('free_account', 'provider_subscription', 'manual')`,
     ),
     check("billing_accounts_pages_limit_check", sql`${table.pagesLimit} >= 0`),
     check("billing_accounts_pages_used_check", sql`${table.pagesUsed} >= 0`),
@@ -538,6 +545,10 @@ export const subscriptions = pgTable(
       .default("none"),
     planFamily: text("plan_family").$type<PlanFamily>().notNull(),
     status: text("status").$type<BillingSubscriptionStatus>().notNull(),
+    billingInterval: text("billing_interval")
+      .$type<"monthly" | "yearly" | "unknown">()
+      .notNull()
+      .default("unknown"),
     currentPeriodStart: timestamp("current_period_start", {
       withTimezone: true,
       mode: "date",
@@ -578,6 +589,10 @@ export const subscriptions = pgTable(
     check(
       "subscriptions_status_check",
       sql`${table.status} in ('inactive', 'trialing', 'active', 'past_due', 'paused', 'unpaid', 'canceled', 'expired')`,
+    ),
+    check(
+      "subscriptions_billing_interval_check",
+      sql`${table.billingInterval} in ('monthly', 'yearly', 'unknown')`,
     ),
   ],
 );

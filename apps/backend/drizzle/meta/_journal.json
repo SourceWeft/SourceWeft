@@ -71,6 +71,13 @@
       "when": 1778083200000,
       "tag": "0009_pages_wallet",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778086800000,
+      "tag": "0010_billing_cycle_anchor_at",
+      "breakpoints": true
     }
   ]
 }

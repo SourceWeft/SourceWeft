@@ -10,16 +10,20 @@ import {
 } from "@sourceweft/ui-web/components/ui/avatar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
-export const PERSONAL_WORKSPACE_LABEL = "Personal workspace";
-
 export type DashboardTeamItem = {
   id: string;
   name: string;
+  metadata?: unknown;
   slug?: string;
   isPersonal?: boolean;
 };
 
-type DashboardTeamOrganization = { id: string; name: string; slug?: string };
+type DashboardTeamOrganization = {
+  id: string;
+  metadata?: unknown;
+  name: string;
+  slug?: string;
+};
 
 type DashboardTeamUser = {
   email?: string;
@@ -47,14 +51,51 @@ export function getTeamInitials(name: string) {
     .join("");
 }
 
-export function isAutoPersonalOrganization(org: { name: string; slug?: string }) {
-  return org.name === "Personal" && org.slug?.startsWith("personal-");
+type SourceweftOrganizationMetadata = {
+  sourceweft?: {
+    kind?: "personal" | "team";
+  };
+};
+
+function parseOrganizationMetadata(metadata: unknown) {
+  if (!metadata) return {};
+  if (typeof metadata === "object") {
+    return metadata as SourceweftOrganizationMetadata;
+  }
+  if (typeof metadata !== "string") return {};
+
+  try {
+    let parsed: unknown = JSON.parse(metadata);
+    if (typeof parsed === "string") {
+      parsed = JSON.parse(parsed);
+    }
+
+    return parsed && typeof parsed === "object"
+      ? (parsed as SourceweftOrganizationMetadata)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function createTeamOrganizationMetadata() {
+  return { sourceweft: { kind: "team" } };
+}
+
+export function isPersonalOrganization(org: { metadata?: unknown }) {
+  return parseOrganizationMetadata(org.metadata).sourceweft?.kind === "personal";
 }
 
 export function getVisibleTeamOrganizations<T extends DashboardTeamOrganization>(
   orgs: T[],
 ) {
-  return orgs.filter((org) => !isAutoPersonalOrganization(org));
+  return orgs.filter((org) => !isPersonalOrganization(org));
+}
+
+export function getPersonalOrganization<T extends DashboardTeamOrganization>(
+  orgs: T[],
+) {
+  return orgs.find(isPersonalOrganization) ?? null;
 }
 
 export function useDashboardTeamSelector() {
@@ -68,9 +109,14 @@ export function useDashboardTeamSelector() {
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
 
-  const orgList = getVisibleTeamOrganizations(
-    (orgs ?? []) as Array<{ id: string; name: string; slug?: string }>,
-  );
+  const allOrgs = (orgs ?? []) as Array<{
+    id: string;
+    metadata?: unknown;
+    name: string;
+    slug?: string;
+  }>;
+  const personalOrg = getPersonalOrganization(allOrgs);
+  const orgList = getVisibleTeamOrganizations(allOrgs);
   const user: DashboardTeamUser = {
     email: sessionState?.user?.email,
     image: sessionState?.user?.image,
@@ -78,21 +124,34 @@ export function useDashboardTeamSelector() {
     name: sessionState?.user?.name,
   };
   const items: DashboardTeamItem[] = [
-    { id: "personal", name: PERSONAL_WORKSPACE_LABEL, isPersonal: true },
-    ...orgList.map((org) => ({ id: org.id, name: org.name, slug: org.slug })),
+    ...(personalOrg
+      ? [
+          {
+            id: personalOrg.id,
+            isPersonal: true,
+            metadata: personalOrg.metadata,
+            name: personalOrg.name,
+            slug: personalOrg.slug,
+          },
+        ]
+      : []),
+    ...orgList.map((org) => ({
+      id: org.id,
+      metadata: org.metadata,
+      name: org.name,
+      slug: org.slug,
+    })),
   ];
 
   const currentItem = (activeOrg
     ? items.find((item) => item.id === activeOrg.id) ?? items[0]
-    : items[0]) ?? {
-    id: "personal",
-    name: PERSONAL_WORKSPACE_LABEL,
-    isPersonal: true,
-  };
+    : personalOrg
+      ? items.find((item) => item.id === personalOrg.id)
+      : items[0]) ?? null;
 
   async function switchTeam(item: DashboardTeamItem) {
     await authClient.organization.setActive({
-      organizationId: item.isPersonal ? null : item.id,
+      organizationId: item.id,
     });
   }
 

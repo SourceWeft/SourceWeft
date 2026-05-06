@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
-  Check,
   Database,
   Loader2,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
@@ -95,6 +95,7 @@ export default function SkillDetailPage() {
   const [isResolvingWorkspace, setIsResolvingWorkspace] = React.useState(true);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isInstalling, setIsInstalling] = React.useState(false);
+  const [isUninstalling, setIsUninstalling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const resolveWorkspace = React.useCallback(async () => {
@@ -162,16 +163,57 @@ export default function SkillDetailPage() {
     setIsInstalling(true);
     try {
       const item = detail.skill;
-      await contentClient.enableWorkspaceSkill(workspace.id, {
+      const result = await contentClient.enableWorkspaceSkill(workspace.id, {
         skillId: item.skillId,
         skillVersionId: item.skillVersionId,
       });
+      setDetail((currentDetail) =>
+        currentDetail
+          ? {
+              ...currentDetail,
+              skill: {
+                ...currentDetail.skill,
+                enabled: result.workspaceSkill.enabled,
+                enabledWorkspaceSkillId: result.workspaceSkill.id,
+              },
+            }
+          : currentDetail,
+      );
       toast.success("Skill installed");
-      await loadDetail();
     } catch (installError) {
       toast.error(installError instanceof Error ? installError.message : "Failed to install skill.");
     } finally {
       setIsInstalling(false);
+    }
+  }
+
+  async function uninstallSkill() {
+    if (!workspace || !detail || !detail.skill.enabled) return;
+    if (!detail.skill.enabledWorkspaceSkillId) {
+      toast.error("Skill install record is missing. Refresh and try again.");
+      return;
+    }
+
+    setIsUninstalling(true);
+    try {
+      await contentClient.deleteWorkspaceSkill(workspace.id, detail.skill.enabledWorkspaceSkillId);
+      setDetail((currentDetail) =>
+        currentDetail
+          ? {
+              ...currentDetail,
+              skill: {
+                ...currentDetail.skill,
+                enabled: false,
+                enabledWorkspaceSkillId: null,
+              },
+            }
+          : currentDetail,
+      );
+      toast.success("Skill uninstalled");
+    } catch (uninstallError) {
+      toast.error(uninstallError instanceof Error ? uninstallError.message : "Failed to uninstall skill.");
+    } finally {
+      setIsUninstalling(false);
     }
   }
 
@@ -222,20 +264,20 @@ export default function SkillDetailPage() {
               {detail ? (
                 <Button
                   className="h-8 px-3 text-xs"
-                  disabled={detail.skill.enabled || isInstalling}
-                  onClick={() => void installSkill()}
+                  disabled={isInstalling || isUninstalling}
+                  onClick={() => void (detail.skill.enabled ? uninstallSkill() : installSkill())}
                   size="sm"
                   type="button"
                   variant={detail.skill.enabled ? "secondary" : "default"}
                 >
-                  {isInstalling ? (
+                  {isInstalling || isUninstalling ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : detail.skill.enabled ? (
-                    <Check className="h-4 w-4" />
+                    <Trash2 className="h-4 w-4" />
                   ) : (
                     <Sparkles className="h-4 w-4" />
                   )}
-                  {detail.skill.enabled ? "Installed" : "Install"}
+                  {detail.skill.enabled ? "Uninstall" : "Install"}
                 </Button>
               ) : null}
             </div>

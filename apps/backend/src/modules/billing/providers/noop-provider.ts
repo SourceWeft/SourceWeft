@@ -1,8 +1,6 @@
 import { BillingError } from "../errors";
 import type {
   BillingProviderAdapter,
-  BillingProviderCancelInput,
-  BillingProviderCancelResult,
   BillingProviderCheckoutInput,
   BillingProviderCheckoutResult,
   BillingProviderPortalInput,
@@ -27,12 +25,6 @@ export class NoopBillingProvider implements BillingProviderAdapter {
   async createPortal(
     _input: BillingProviderPortalInput,
   ): Promise<BillingProviderPortalResult> {
-    notConfigured();
-  }
-
-  async cancelSubscription(
-    _input: BillingProviderCancelInput,
-  ): Promise<BillingProviderCancelResult> {
     notConfigured();
   }
 }

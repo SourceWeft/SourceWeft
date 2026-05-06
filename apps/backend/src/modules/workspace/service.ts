@@ -1,11 +1,14 @@
 import {
+  createPersonalOrganizationForUser,
   createWorkspaceRecord,
   ensureWorkspaceMembership,
-  findOrganizationMembership,
-  findWorkspaceByIdInOrganization,
-  findWorkspaceByIdForMember,
-  findWorkspaceMembership,
   findMembershipByUser,
+  findOrganizationById,
+  findOrganizationMembership,
+  findPersonalOrganizationMembershipByUser,
+  findWorkspaceByIdForMember,
+  findWorkspaceByIdInOrganization,
+  findWorkspaceMembership,
   isOrganizationMember,
   listWorkspacesForMember,
   updateWorkspaceNameRecord,
@@ -140,6 +143,19 @@ export class WorkspaceService {
     return findOrganizationMembership(input);
   }
 
+  async getOrganization(organizationId: string) {
+    return findOrganizationById(organizationId);
+  }
+
+  async createPersonalOrganization(input: {
+    name: string;
+    slug: string;
+    userId: string;
+    metadata: Record<string, unknown>;
+  }) {
+    return createPersonalOrganizationForUser(input);
+  }
+
   async hasOrganizationMembership(input: {
     organizationId: string;
     userId: string;
@@ -149,6 +165,10 @@ export class WorkspaceService {
 
   async findAnyMembershipByUser(userId: string) {
     return findMembershipByUser(userId);
+  }
+
+  async findPersonalOrganizationMembershipByUser(userId: string) {
+    return findPersonalOrganizationMembershipByUser(userId);
   }
 }
 
