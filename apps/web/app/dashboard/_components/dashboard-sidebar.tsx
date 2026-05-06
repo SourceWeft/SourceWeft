@@ -36,16 +36,16 @@ const navMain: NavItem[] = [
     match: (p) => p.startsWith("/dashboard/chat"),
   },
   {
-    title: "Observability",
-    href: "/dashboard/observability",
-    icon: Activity,
-    match: (p) => p.startsWith("/dashboard/observability"),
-  },
-  {
     title: "Skills",
     href: "/dashboard/skills",
     icon: Sparkles,
     match: (p) => p.startsWith("/dashboard/skills"),
+  },
+  {
+    title: "Observability",
+    href: "/dashboard/observability",
+    icon: Activity,
+    match: (p) => p.startsWith("/dashboard/observability"),
   },
 ];
 
@@ -189,7 +189,6 @@ export function DashboardSidebar() {
                 label={item.title}
               />
             ))}
-            <RailButton icon={FolderKanban} label="Artifacts" />
           </div>
         </div>
 

@@ -69,12 +69,13 @@ import {
 import type { CitationRecord } from "./chat-canvas";
 import { SourcePreviewPanel } from "./source-preview-panel";
 
-const tabs = ["Library", "Skills", "Citations", "Connectors"] as const;
+const tabs = ["Library", "Skills", "Connectors", "Citations"] as const;
 const addTabs = ["Text", "File"] as const;
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+type HubTab = (typeof tabs)[number];
 type CheckedState = boolean | "indeterminate";
 type AddTab = (typeof addTabs)[number];
 type SourceApiRecord = Awaited<
@@ -96,6 +97,20 @@ export type ThreadCitationRecord = {
 
 type CitationOpenContext = {
   messageId?: string;
+};
+
+const searchPlaceholders: Record<HubTab, string> = {
+  Library: "Search sources...",
+  Skills: "Search installed skills...",
+  Citations: "Search citations...",
+  Connectors: "Search connectors...",
+};
+
+const searchScopeLabels: Record<HubTab, string> = {
+  Library: "Library",
+  Skills: "Skills",
+  Citations: "Citations",
+  Connectors: "Connectors",
 };
 
 export type HubSkillItem = {
@@ -511,7 +526,15 @@ function LibraryTab({
 
   const filtered = useMemo(
     () =>
-      q ? sources.filter((s) => s.title.toLowerCase().includes(q)) : sources,
+      q
+        ? sources.filter((source) =>
+            source.title.toLowerCase().includes(q) ||
+            source.type.toLowerCase().includes(q) ||
+            source.status.toLowerCase().includes(q) ||
+            source.meta.toLowerCase().includes(q) ||
+            source.folder?.toLowerCase().includes(q),
+          )
+        : sources,
     [sources, q],
   );
 
@@ -793,6 +816,59 @@ function SkillsTab({
   );
 }
 
+function filterCitations(items: DisplayCitationItem[], searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) {
+    return items;
+  }
+  return items.filter((citation) =>
+    citation.sourceTitle.toLowerCase().includes(q) ||
+    citation.messageLabel.toLowerCase().includes(q) ||
+    citation.excerpt.toLowerCase().includes(q) ||
+    citation.citationRecord.citation.toLowerCase().includes(q),
+  );
+}
+
+function filterConnectors(items: ConnectorItem[], searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) {
+    return items;
+  }
+  return items.filter((connector) =>
+    connector.name.toLowerCase().includes(q) ||
+    connector.status.toLowerCase().includes(q) ||
+    connector.meta.toLowerCase().includes(q),
+  );
+}
+
+function countFilteredSources(items: SourceItem[], searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) {
+    return items.length;
+  }
+  return items.filter((source) =>
+    source.title.toLowerCase().includes(q) ||
+    source.type.toLowerCase().includes(q) ||
+    source.status.toLowerCase().includes(q) ||
+    source.meta.toLowerCase().includes(q) ||
+    source.folder?.toLowerCase().includes(q),
+  ).length;
+}
+
+function countFilteredSkills(items: HubSkillItem[], searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) {
+    return items.length;
+  }
+  return items.filter((skill) =>
+    skill.displayName.toLowerCase().includes(q) ||
+    skill.description.toLowerCase().includes(q) ||
+    skill.name.toLowerCase().includes(q) ||
+    skill.slug.toLowerCase().includes(q) ||
+    skillSourceLabel(skill.sourceType).toLowerCase().includes(q),
+  ).length;
+}
+
 export function SourcesHub({
   activeCitationIndex = null,
   citations = [],
@@ -824,9 +900,15 @@ export function SourcesHub({
   selectedSkillIds?: string[];
   onSkillSelectionChange?: (ids: string[]) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("Library");
+  const [activeTab, setActiveTab] = useState<HubTab>("Library");
   const [citationScope, setCitationScope] = useState<CitationScope>("current");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
+    Library: "",
+    Skills: "",
+    Citations: "",
+    Connectors: "",
+  });
+  const searchQuery = searchQueries[activeTab];
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -840,6 +922,22 @@ export function SourcesHub({
   );
   const activeCitationItems =
     citationScope === "thread" ? threadCitationItems : currentCitationItems;
+  const filteredCitationItems = useMemo(
+    () => filterCitations(activeCitationItems, searchQueries.Citations),
+    [activeCitationItems, searchQueries.Citations],
+  );
+  const filteredConnectors = useMemo(
+    () => filterConnectors(connectors, searchQueries.Connectors),
+    [searchQueries.Connectors],
+  );
+  const filteredSourceCount = useMemo(
+    () => countFilteredSources(sources, searchQueries.Library),
+    [searchQueries.Library, sources],
+  );
+  const filteredSkillCount = useMemo(
+    () => countFilteredSkills(installedSkills, searchQueries.Skills),
+    [installedSkills, searchQueries.Skills],
+  );
   const activeCitationChunkId = activeCitationIndex
     ? citations[activeCitationIndex - 1]?.chunkId
     : null;
@@ -861,6 +959,13 @@ export function SourcesHub({
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
   const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
   const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
+
+  function setActiveSearchQuery(value: string) {
+    setSearchQueries((current) => ({
+      ...current,
+      [activeTab]: value,
+    }));
+  }
 
   useEffect(() => {
     setActiveTab("Library");
@@ -971,7 +1076,7 @@ export function SourcesHub({
     }
   }, [sources, selectedIds, onSelectionChange]);
 
-  const tabCounts: Partial<Record<(typeof tabs)[number], number>> = {
+  const tabCounts: Partial<Record<HubTab, number>> = {
     Library: selectedIds.length,
     Skills: selectedSkillIds.length,
     Citations: citations.length,
@@ -1275,15 +1380,18 @@ export function SourcesHub({
           <div className="relative mt-2">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              className="h-8 pl-8 text-xs"
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search sources..."
+              className="h-8 rounded-xl bg-muted/35 pr-20 pl-8 text-xs"
+              onChange={(e) => setActiveSearchQuery(e.target.value)}
+              placeholder={searchPlaceholders[activeTab]}
               value={searchQuery}
             />
+            <span className="pointer-events-none absolute top-1/2 right-7 hidden -translate-y-1/2 rounded-md bg-background/75 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border/60 sm:inline-flex">
+              {searchScopeLabels[activeTab]}
+            </span>
             {searchQuery && (
               <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setSearchQuery("")}
+                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setActiveSearchQuery("")}
                 type="button"
               >
                 <X className="size-3.5" />
@@ -1326,6 +1434,11 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {sources.length} sources
                   </span>
+                  {searchQueries.Library ? (
+                    <span className="text-[10px] text-primary">
+                      {filteredSourceCount} found
+                    </span>
+                  ) : null}
                   {selectedIds.length > 0 ? (
                     <span className="text-[10px] text-primary">
                       {selectedIds.length} selected
@@ -1398,6 +1511,11 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {installedSkills.length} installed
                   </span>
+                  {searchQueries.Skills ? (
+                    <span className="text-[10px] text-primary">
+                      {filteredSkillCount} found
+                    </span>
+                  ) : null}
                   {selectedSkillIds.length > 0 ? (
                     <span className="text-[10px] text-primary">
                       {selectedSkillIds.length} selected
@@ -1434,6 +1552,11 @@ export function SourcesHub({
                       ? `${threadCitationItems.length} in thread`
                       : `${currentCitationItems.length} current`}
                   </span>
+                  {searchQueries.Citations ? (
+                    <span className="text-[10px] text-primary">
+                      {filteredCitationItems.length} found
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
@@ -1460,17 +1583,21 @@ export function SourcesHub({
                 </div>
               ) : null}
 
-              {activeCitationItems.length === 0 ? (
-                <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
-                  {citationScope === "thread"
+              {filteredCitationItems.length === 0 ? (
+                <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+                  {searchQueries.Citations
+                    ? `No citations match "${searchQueries.Citations}".`
+                    : citationScope === "thread"
                     ? "No citations found in this thread."
                     : "No citations used in the selected answer."}
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {activeCitationItems.map((citation, index) => {
+                  {filteredCitationItems.map((citation) => {
                     const citationRecord = citation.citationRecord;
-                    const displayIndex = index + 1;
+                    const displayIndex = activeCitationItems.findIndex(
+                      (item) => item.id === citation.id,
+                    ) + 1;
                     const isActive =
                       citationScope === "current"
                         ? activeCitationIndex === displayIndex
@@ -1545,6 +1672,11 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {connectors.length} connectors
                   </span>
+                  {searchQueries.Connectors ? (
+                    <span className="text-[10px] text-primary">
+                      {filteredConnectors.length} found
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
                   <Button size="xs" type="button" variant="outline">
@@ -1553,8 +1685,15 @@ export function SourcesHub({
                   </Button>
                 </div>
               </div>
-              <div className="space-y-1.5">
-                {connectors.map((connector: ConnectorItem) => (
+              {filteredConnectors.length === 0 ? (
+                <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
+                  {searchQueries.Connectors
+                    ? `No connectors match "${searchQueries.Connectors}".`
+                    : "No connectors available yet."}
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {filteredConnectors.map((connector: ConnectorItem) => (
                   <article
                     className="rounded-lg border bg-background p-2.5 shadow-xs"
                     key={connector.id}
@@ -1579,8 +1718,9 @@ export function SourcesHub({
                       </div>
                     ) : null}
                   </article>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
         </div>
