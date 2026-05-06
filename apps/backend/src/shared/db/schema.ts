@@ -152,6 +152,19 @@ type RawCaptureMode =
   | "sdk_metadata"
   | "reconstructed"
   | "provider_wire";
+type SkillDefinitionSourceType = "builtin" | "workspace_custom" | "team_custom";
+type SkillDefinitionStatus = "active" | "archived";
+type SkillVersionStatus = "draft" | "published" | "deprecated" | "disabled";
+type SkillVersionStorageType = "repo_builtin" | "db_text";
+export type SkillManifestVisibility = "public" | "restricted" | "workspace" | "team";
+export type SkillManifestJson = {
+  slug: string;
+  displayName: string;
+  version: string;
+  description: string;
+  visibility: SkillManifestVisibility;
+  categories: string[];
+};
 
 const emptyJsonObject = sql`'{}'::jsonb`;
 
@@ -1661,6 +1674,223 @@ export const citations = pgTable(
     index("citations_message_rank_idx").on(table.messageId, table.rank),
     index("citations_chunk_idx").on(table.chunkId),
     index("citations_source_document_idx").on(table.sourceId, table.documentId),
+  ],
+);
+
+export const skillDefinitions = pgTable(
+  "skill_definitions",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id"),
+    workspaceId: text("workspace_id").references(() => workspaces.id, {
+      onDelete: "cascade",
+    }),
+    sourceType: text("source_type")
+      .$type<SkillDefinitionSourceType>()
+      .notNull(),
+    slug: text("slug").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description").notNull(),
+    visibility: text("visibility")
+      .$type<SkillManifestVisibility>()
+      .notNull(),
+    status: text("status")
+      .$type<SkillDefinitionStatus>()
+      .notNull()
+      .default("active"),
+    ownerUserId: text("owner_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "skill_definitions_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    check(
+      "skill_definitions_source_type_check",
+      sql`${table.sourceType} in ('builtin', 'workspace_custom', 'team_custom')`,
+    ),
+    check(
+      "skill_definitions_visibility_check",
+      sql`${table.visibility} in ('public', 'restricted', 'workspace', 'team')`,
+    ),
+    check(
+      "skill_definitions_status_check",
+      sql`${table.status} in ('active', 'archived')`,
+    ),
+    check(
+      "skill_definitions_scope_check",
+      sql`(${table.sourceType} = 'builtin' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted')) or (${table.sourceType} = 'workspace_custom' and ${table.teamId} is not null and ${table.workspaceId} is not null and ${table.visibility} = 'workspace') or (${table.sourceType} = 'team_custom' and ${table.teamId} is not null and ${table.workspaceId} is null and ${table.visibility} = 'team')`,
+    ),
+    uniqueIndex("skill_definitions_slug_uq").on(table.slug),
+    index("skill_definitions_team_workspace_status_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.status,
+    ),
+  ],
+);
+
+export const skillVersions = pgTable(
+  "skill_versions",
+  {
+    id: text("id").primaryKey(),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    status: text("status")
+      .$type<SkillVersionStatus>()
+      .notNull()
+      .default("draft"),
+    storageType: text("storage_type")
+      .$type<SkillVersionStorageType>()
+      .notNull(),
+    storagePointer: text("storage_pointer").notNull(),
+    isCurrent: boolean("is_current").notNull().default(false),
+    contentHash: text("content_hash").notNull(),
+    manifestJson: jsonb("manifest_json")
+      .$type<SkillManifestJson>()
+      .notNull(),
+    createdBy: text("created_by"),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "skill_versions_status_check",
+      sql`${table.status} in ('draft', 'published', 'deprecated', 'disabled')`,
+    ),
+    check(
+      "skill_versions_storage_type_check",
+      sql`${table.storageType} in ('repo_builtin', 'db_text')`,
+    ),
+    uniqueIndex("skill_versions_skill_version_uq").on(
+      table.skillId,
+      table.version,
+    ),
+    uniqueIndex("skill_versions_skill_current_uq")
+      .on(table.skillId)
+      .where(sql`${table.isCurrent} = true`),
+    index("skill_versions_skill_status_idx").on(table.skillId, table.status),
+  ],
+);
+
+export const skillVersionFiles = pgTable(
+  "skill_version_files",
+  {
+    id: text("id").primaryKey(),
+    skillVersionId: text("skill_version_id")
+      .notNull()
+      .references(() => skillVersions.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    contentText: text("content_text").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    contentHash: text("content_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("skill_version_files_version_path_uq").on(
+      table.skillVersionId,
+      table.path,
+    ),
+    check("skill_version_files_size_check", sql`${table.sizeBytes} >= 0`),
+    check(
+      "skill_version_files_relative_path_check",
+      sql`${table.path} <> '' and ${table.path} not like '/%' and ${table.path} not like '../%' and ${table.path} not like '%/../%'`,
+    ),
+  ],
+);
+
+export const workspaceSkills = pgTable(
+  "workspace_skills",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    skillVersionId: text("skill_version_id")
+      .notNull()
+      .references(() => skillVersions.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    configJson: jsonb("config_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    enabledBy: text("enabled_by"),
+    enabledAt: timestamp("enabled_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workspace_skills_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    uniqueIndex("workspace_skills_skill_uq").on(table.workspaceId, table.skillId),
+    index("workspace_skills_workspace_enabled_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.enabled,
+    ),
+  ],
+);
+
+export const skillEntitlements = pgTable(
+  "skill_entitlements",
+  {
+    id: text("id").primaryKey(),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    teamId: text("team_id"),
+    workspaceId: text("workspace_id").references(() => workspaces.id, {
+      onDelete: "cascade",
+    }),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    grantedBy: text("granted_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "skill_entitlements_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    check(
+      "skill_entitlements_scope_check",
+      sql`${table.teamId} is not null or ${table.workspaceId} is not null`,
+    ),
+    index("skill_entitlements_skill_idx").on(
+      table.skillId,
+      table.teamId,
+      table.workspaceId,
+    ),
   ],
 );
 

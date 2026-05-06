@@ -21,6 +21,7 @@ import {
 import {
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
+  type ChatSkillItem,
   type PromptThinkingSettings,
 } from "./_components/chat-canvas";
 import { SourcesHub } from "./_components/sources-hub";
@@ -137,6 +138,8 @@ export default function DashboardChatPage() {
 
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [selectedModels, setSelectedModels] = useState<
     Record<ModelType, ModelItem>
   >(() => resolveSelectedModels({ availableModels: allModels }));
@@ -200,6 +203,54 @@ export default function DashboardChatPage() {
 
     void loadModelCatalog();
 
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setAvailableSkills([]);
+      setActiveSkillIds([]);
+      return;
+    }
+
+    let cancelled = false;
+    const activeWorkspaceId = workspaceId;
+    async function loadSkills() {
+      try {
+        const result = await contentClient.listSkillsCatalog(activeWorkspaceId);
+        if (cancelled) {
+          return;
+        }
+        const enabledSkills = result.items
+          .filter((skill) => skill.enabled && skill.enabledWorkspaceSkillId)
+          .map((skill) => ({
+            id: skill.enabledWorkspaceSkillId as string,
+            catalogId: skill.catalogId,
+            slug: skill.slug,
+            name: skill.name,
+            displayName: skill.displayName,
+            description: skill.description,
+            sourceType: skill.sourceType,
+            version: skill.version,
+            hasReadme: skill.hasReadme,
+        }));
+        setAvailableSkills(enabledSkills);
+
+        const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
+        setActiveSkillIds((current) =>
+          current.filter((id) => enabledIds.has(id)).slice(0, 5),
+        );
+      } catch {
+        if (!cancelled) {
+          setAvailableSkills([]);
+          setActiveSkillIds([]);
+        }
+      }
+    }
+
+    void loadSkills();
     return () => {
       cancelled = true;
     };
@@ -322,6 +373,7 @@ export default function DashboardChatPage() {
         JSON.stringify({
           content: text,
           sourceIds: activeSourceIds,
+          skillIds: activeSkillIds,
           thinking: buildPendingThinking({
             capabilities: selectedModels.llm.capabilities,
             settings: thinkingSettings,
@@ -337,6 +389,7 @@ export default function DashboardChatPage() {
       workspaceId,
       createChat,
       activeSourceIds,
+      activeSkillIds,
       router,
       catalogKindEnabled,
       selectedModels,
@@ -398,13 +451,16 @@ export default function DashboardChatPage() {
         <ChatCanvas
           isStreaming={false}
           mode="new"
+          availableSkills={availableSkills}
           onRemoveSource={(id) =>
             setActiveSourceIds((prev) => prev.filter((x) => x !== id))
           }
+          onSkillSelectionChange={setActiveSkillIds}
           onSendMessage={handleSendMessage}
           searchEnabled={searchEnabled}
           onSearchEnabledChange={setSearchEnabled}
           selectedSources={selectedSources}
+          selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
           thinkingCapabilities={selectedModels.llm.capabilities}
           thinkingSettings={thinkingSettings}
@@ -415,11 +471,14 @@ export default function DashboardChatPage() {
       </div>
 
       {sourcesVisible ? (
-          <SourcesHub
-            mode="new"
+        <SourcesHub
+          mode="new"
+          installedSkills={availableSkills}
+          onSkillSelectionChange={setActiveSkillIds}
           onSelectionChange={setActiveSourceIds}
           onSourceLoad={setLibrarySources}
           selectedIds={activeSourceIds}
+          selectedSkillIds={activeSkillIds}
           workspaceId={workspaceId}
         />
       ) : null}

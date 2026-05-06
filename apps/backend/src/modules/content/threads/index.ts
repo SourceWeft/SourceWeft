@@ -12,6 +12,7 @@ export type {
   PreparedThreadTurn,
   RetrievalCallTrace,
   StreamThreadEventInput,
+  ThreadToolsSelection,
   ThinkingStepTrace,
   ToolCallStatus,
   ToolCallTrace,

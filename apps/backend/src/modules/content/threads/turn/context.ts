@@ -49,6 +49,33 @@ export function resolveSourceIdsFromMessage(
   );
 }
 
+export function resolveSkillIdsFromMessage(
+  message: MessageRecord | null | undefined,
+): string[] {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          skillIds?: unknown;
+          tools?: unknown;
+        })
+      : undefined;
+  const tools =
+    metadata?.tools && typeof metadata.tools === "object" && !Array.isArray(metadata.tools)
+      ? (metadata.tools as { skillIds?: unknown })
+      : undefined;
+  const skillIds = Array.isArray(tools?.skillIds)
+    ? tools.skillIds
+    : metadata?.skillIds;
+
+  if (!Array.isArray(skillIds)) {
+    return [];
+  }
+
+  return skillIds.filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+}
+
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;

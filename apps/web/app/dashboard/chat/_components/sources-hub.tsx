@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import {
   ChevronDown,
   ChevronRight,
@@ -21,12 +22,14 @@ import {
   Pencil,
   RotateCcw,
   Search,
+  Sparkles,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { HttpClientError } from "@sourceweft/sdk";
+import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   Alert,
   AlertDescription,
@@ -66,7 +69,7 @@ import {
 import type { CitationRecord } from "./chat-canvas";
 import { SourcePreviewPanel } from "./source-preview-panel";
 
-const tabs = ["Library", "Citations", "Connectors"] as const;
+const tabs = ["Library", "Skills", "Citations", "Connectors"] as const;
 const addTabs = ["Text", "File"] as const;
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
@@ -93,6 +96,18 @@ export type ThreadCitationRecord = {
 
 type CitationOpenContext = {
   messageId?: string;
+};
+
+export type HubSkillItem = {
+  id: string;
+  catalogId: string;
+  slug: string;
+  name: string;
+  displayName: string;
+  description: string;
+  sourceType: "builtin" | "workspace_custom" | "team_custom";
+  version: string;
+  hasReadme: boolean;
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -577,6 +592,207 @@ function LibraryTab({
   );
 }
 
+function skillSourceLabel(sourceType: HubSkillItem["sourceType"]) {
+  if (sourceType === "builtin") return "Official";
+  if (sourceType === "team_custom") return "Team";
+  return "Workspace";
+}
+
+function SkillReadmeDialog({
+  catalogId,
+  onOpenChange,
+  open,
+  workspaceId,
+}: {
+  catalogId: string | null;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  workspaceId?: string | null;
+}) {
+  const [detail, setDetail] = useState<Awaited<
+    ReturnType<typeof contentClient.getSkillCatalogDetail>
+  > | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open || !workspaceId || !catalogId) {
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    setDetail(null);
+    contentClient
+      .getSkillCatalogDetail(workspaceId, catalogId)
+      .then((result) => {
+        if (!cancelled) setDetail(result);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toast.error(getErrorMessage(error, "Failed to load skill details."));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogId, open, workspaceId]);
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent
+        className="grid max-h-[min(720px,calc(100svh-2rem))] w-[720px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
+        constrainWidth={false}
+      >
+        <DialogHeader className="border-b px-5 py-4 text-left">
+          <DialogTitle>{detail?.skill.displayName ?? "Skill"}</DialogTitle>
+          <DialogDescription>
+            {detail?.skill.description ?? "Review this skill before selecting it."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto px-5 py-5">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-14 text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading skill...
+            </div>
+          ) : detail?.readmeContent ? (
+            <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+              {detail.readmeContent}
+            </MessageResponse>
+          ) : (
+            <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-sm text-muted-foreground">
+              This skill does not include a README.md introduction yet.
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SkillRow({
+  skill,
+  selected,
+  onToggle,
+  onOpenSkill,
+}: {
+  skill: HubSkillItem;
+  selected: boolean;
+  onToggle: (id: string) => void;
+  onOpenSkill: (catalogId: string) => void;
+}) {
+  function handleRowClick(event: MouseEvent<HTMLElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest("button,input,textarea,select,a,[role='button']")) {
+      return;
+    }
+
+    onToggle(skill.id);
+  }
+
+  return (
+    <article
+      className={cn(
+        "group flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
+        selected ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-accent/60",
+      )}
+      onClick={handleRowClick}
+    >
+      <Checkbox
+        checked={selected}
+        className="mt-0.5"
+        onCheckedChange={() => onToggle(skill.id)}
+      />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <Sparkles
+            className={cn(
+              "size-3 shrink-0",
+              selected ? "text-primary" : "text-muted-foreground",
+            )}
+          />
+          <button
+            className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            onClick={() => onOpenSkill(skill.catalogId)}
+            title="Open skill introduction"
+            type="button"
+          >
+            {skill.displayName}
+          </button>
+        </div>
+        <p className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+          {skill.description}
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <TypeBadge label={skillSourceLabel(skill.sourceType)} />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function SkillsTab({
+  skills,
+  searchQuery,
+  selectedSkillIds,
+  onSkillSelectionChange,
+  onOpenSkill,
+}: {
+  skills: HubSkillItem[];
+  searchQuery: string;
+  selectedSkillIds: string[];
+  onSkillSelectionChange: (ids: string[]) => void;
+  onOpenSkill: (catalogId: string) => void;
+}) {
+  const q = searchQuery.trim().toLowerCase();
+  const selectedSet = useMemo(() => new Set(selectedSkillIds), [selectedSkillIds]);
+  const filtered = useMemo(
+    () =>
+      q
+        ? skills.filter(
+            (skill) =>
+              skill.displayName.toLowerCase().includes(q) ||
+              skill.description.toLowerCase().includes(q) ||
+              skill.name.toLowerCase().includes(q),
+          )
+        : skills,
+    [q, skills],
+  );
+
+  function toggleSkill(skillId: string) {
+    if (selectedSet.has(skillId)) {
+      onSkillSelectionChange(selectedSkillIds.filter((id) => id !== skillId));
+      return;
+    }
+    onSkillSelectionChange([...selectedSkillIds, skillId].slice(0, 5));
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <p className="py-6 text-center text-xs text-muted-foreground">
+        {searchQuery ? `No installed skills match "${searchQuery}"` : "No skills installed yet."}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      {filtered.map((skill) => (
+        <SkillRow
+          key={skill.id}
+          onOpenSkill={onOpenSkill}
+          onToggle={toggleSkill}
+          selected={selectedSet.has(skill.id)}
+          skill={skill}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function SourcesHub({
   activeCitationIndex = null,
   citations = [],
@@ -589,6 +805,9 @@ export function SourcesHub({
   threadCitations = [],
   workspaceId,
   onSourceLoad,
+  installedSkills = [],
+  selectedSkillIds = [],
+  onSkillSelectionChange = () => {},
 }: {
   activeCitationIndex?: number | null;
   citations?: CitationRecord[];
@@ -601,6 +820,9 @@ export function SourcesHub({
   threadCitations?: ThreadCitationRecord[];
   workspaceId?: string | null;
   onSourceLoad?: (sources: SourceItem[]) => void;
+  installedSkills?: HubSkillItem[];
+  selectedSkillIds?: string[];
+  onSkillSelectionChange?: (ids: string[]) => void;
 }) {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("Library");
   const [citationScope, setCitationScope] = useState<CitationScope>("current");
@@ -638,6 +860,7 @@ export function SourcesHub({
   const [editingTitle, setEditingTitle] = useState("");
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
   const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
+  const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
 
   useEffect(() => {
     setActiveTab("Library");
@@ -749,6 +972,8 @@ export function SourcesHub({
   }, [sources, selectedIds, onSelectionChange]);
 
   const tabCounts: Partial<Record<(typeof tabs)[number], number>> = {
+    Library: selectedIds.length,
+    Skills: selectedSkillIds.length,
     Citations: citations.length,
     Connectors: connectors.length,
   };
@@ -1163,6 +1388,40 @@ export function SourcesHub({
             </section>
           )}
 
+          {activeTab === "Skills" && (
+            <section className="space-y-1">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium text-foreground">
+                    Skills
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    {installedSkills.length} installed
+                  </span>
+                  {selectedSkillIds.length > 0 ? (
+                    <span className="text-[10px] text-primary">
+                      {selectedSkillIds.length} selected
+                    </span>
+                  ) : null}
+                </div>
+                <Button asChild size="xs" type="button" variant="outline">
+                  <Link href="/dashboard/skills">
+                    <Sparkles className="size-3.5" />
+                    Skills gallery
+                  </Link>
+                </Button>
+              </div>
+
+              <SkillsTab
+                onOpenSkill={setPreviewSkillCatalogId}
+                onSkillSelectionChange={onSkillSelectionChange}
+                searchQuery={searchQuery}
+                selectedSkillIds={selectedSkillIds}
+                skills={installedSkills}
+              />
+            </section>
+          )}
+
           {activeTab === "Citations" && (
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -1508,6 +1767,17 @@ export function SourcesHub({
         }}
         open={Boolean(previewSource)}
         source={previewSource}
+        workspaceId={workspaceId}
+      />
+
+      <SkillReadmeDialog
+        catalogId={previewSkillCatalogId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewSkillCatalogId(null);
+          }
+        }}
+        open={Boolean(previewSkillCatalogId)}
         workspaceId={workspaceId}
       />
     </>

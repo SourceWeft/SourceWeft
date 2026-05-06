@@ -8,20 +8,32 @@ import type {
   EditThreadResponse,
   CreateThreadRequest,
   CreateThreadResponse,
+  CreateCustomSkillRequest,
+  CreateCustomSkillVersionRequest,
+  CustomSkillResponse,
   DeleteByokKeyRefResponse,
+  DeleteCustomSkillVersionFileResponse,
   DeleteSourceResponse,
   DeleteThreadResponse,
+  DeleteWorkspaceSkillResponse,
+  EnableWorkspaceSkillRequest,
+  EnableWorkspaceSkillResponse,
   GetThreadResponse,
   RefreshThreadRequest,
   RefreshThreadResponse,
   GetSourceDocumentResponse,
   GetSourceResponse,
+  GetSkillCatalogDetailResponse,
   IndexSourceRequest,
   IndexSourceResponse,
   ListThreadModelCatalogResponse,
   ListByokKeyRefsResponse,
+  ListSkillsCatalogResponse,
   ListThreadsRequest,
   ListSourcesResponse,
+  ListWorkspaceSkillsResponse,
+  PutCustomSkillVersionFileRequest,
+  PutCustomSkillVersionFileResponse,
   SourceStatusResponse,
   ListThreadsResponse,
   StreamThreadRequest,
@@ -29,9 +41,12 @@ import type {
   UploadSourceResponse,
   UpdateThreadModelSettingsRequest,
   UpdateThreadModelSettingsResponse,
+  UpdateCustomSkillVersionRequest,
   ListThreadMessagesResponse,
   UpdateSourceRequest,
   UpdateSourceResponse,
+  UpdateWorkspaceSkillRequest,
+  UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
@@ -165,6 +180,113 @@ export class ContentClient {
   listThreadModelCatalog(workspaceId: string) {
     return this.http.get<ListThreadModelCatalogResponse>(
       `/v1/workspaces/${encode(workspaceId)}/model-gateway/models`,
+    );
+  }
+
+  listSkillsCatalog(workspaceId: string) {
+    return this.http.get<ListSkillsCatalogResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog`,
+    );
+  }
+
+  listWorkspaceSkills(workspaceId: string) {
+    return this.http.get<ListWorkspaceSkillsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills`,
+    );
+  }
+
+  getSkillCatalogDetail(workspaceId: string, catalogId: string) {
+    return this.http.get<GetSkillCatalogDetailResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}`,
+    );
+  }
+
+  enableWorkspaceSkill(workspaceId: string, input: EnableWorkspaceSkillRequest) {
+    return this.http.post<EnableWorkspaceSkillResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills`,
+      input,
+    );
+  }
+
+  updateWorkspaceSkill(
+    workspaceId: string,
+    workspaceSkillId: string,
+    input: UpdateWorkspaceSkillRequest,
+  ) {
+    return this.http.patch<UpdateWorkspaceSkillResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/${encode(workspaceSkillId)}`,
+      input,
+    );
+  }
+
+  deleteWorkspaceSkill(workspaceId: string, workspaceSkillId: string) {
+    return this.http.delete<DeleteWorkspaceSkillResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/${encode(workspaceSkillId)}`,
+    );
+  }
+
+  createCustomSkill(workspaceId: string, input: CreateCustomSkillRequest) {
+    return this.http.post<CustomSkillResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/custom`,
+      input,
+    );
+  }
+
+  createCustomSkillVersion(
+    workspaceId: string,
+    skillId: string,
+    input: CreateCustomSkillVersionRequest,
+  ) {
+    return this.http.post<CustomSkillResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/custom/${encode(skillId)}/versions`,
+      input,
+    );
+  }
+
+  updateCustomSkillVersion(
+    workspaceId: string,
+    skillId: string,
+    versionId: string,
+    input: UpdateCustomSkillVersionRequest,
+  ) {
+    return this.http.patch<CustomSkillResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/custom/${encode(skillId)}/versions/${encode(versionId)}`,
+      input,
+    );
+  }
+
+  putCustomSkillVersionFile(
+    workspaceId: string,
+    skillId: string,
+    versionId: string,
+    path: string,
+    input: PutCustomSkillVersionFileRequest,
+  ) {
+    return this.http.put<PutCustomSkillVersionFileResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/custom/${encode(skillId)}/versions/${encode(versionId)}/files/${path.split("/").map(encode).join("/")}`,
+      input,
+    );
+  }
+
+  deleteCustomSkillVersionFile(
+    workspaceId: string,
+    skillId: string,
+    versionId: string,
+    path: string,
+  ) {
+    return this.http.delete<DeleteCustomSkillVersionFileResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/custom/${encode(skillId)}/versions/${encode(versionId)}/files/${path.split("/").map(encode).join("/")}`,
+    );
+  }
+
+  publishCustomSkillVersion(
+    workspaceId: string,
+    skillId: string,
+    versionId: string,
+  ) {
+    return this.http.post<CustomSkillResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/custom/${encode(skillId)}/versions/${encode(versionId)}/publish`,
+      {},
     );
   }
 

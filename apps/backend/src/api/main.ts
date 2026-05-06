@@ -5,8 +5,10 @@ import { logger } from "../shared/logger";
 import { ensureModelConfigAvailable } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { createApp } from "./app";
+import { contentSkillsService } from "../modules/content/skills";
 
 await ensureModelConfigAvailable();
+await contentSkillsService.syncBuiltinCatalog();
 
 const app = createApp();
 

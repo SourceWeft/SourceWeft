@@ -19,6 +19,7 @@ import {
   Brain,
   RotateCcw,
   SlidersHorizontal,
+  Sparkles,
   WrenchIcon,
   X,
 } from "lucide-react";
@@ -142,6 +143,18 @@ export type PromptThinkingCapabilities = {
   reasoningEffort?: boolean;
   includeReasoning?: boolean;
   supportSources?: string[];
+};
+
+export type ChatSkillItem = {
+  id: string;
+  catalogId: string;
+  slug: string;
+  name: string;
+  displayName: string;
+  description: string;
+  sourceType: "builtin" | "workspace_custom" | "team_custom";
+  version: string;
+  hasReadme: boolean;
 };
 
 const thinkingEffortOptions: Array<{ value: ThinkingEffort; label: string }> = [
@@ -1056,7 +1069,10 @@ function Composer({
   initialInput = "",
   inputKey,
   selectedSources = [],
+  availableSkills = [],
+  selectedSkillIds = [],
   onRemoveSource,
+  onSkillSelectionChange,
   disabled,
   searchEnabled = false,
   onSearchEnabledChange,
@@ -1072,7 +1088,10 @@ function Composer({
   initialInput?: string;
   inputKey?: string | number;
   selectedSources?: SourceItem[];
+  availableSkills?: ChatSkillItem[];
+  selectedSkillIds?: string[];
   onRemoveSource?: (id: string) => void;
+  onSkillSelectionChange?: (skillIds: string[]) => void;
   disabled?: boolean;
   searchEnabled?: boolean;
   onSearchEnabledChange?: (enabled: boolean) => void;
@@ -1084,6 +1103,9 @@ function Composer({
   const showSourceCountOnly = selectedSources.length > 2;
   const visible = showSourceCountOnly ? [] : selectedSources;
   const hasSelectedSources = selectedSources.length > 0;
+  const selectedSkillIdSet = new Set(selectedSkillIds);
+  const selectedSkills = availableSkills.filter((skill) => selectedSkillIdSet.has(skill.id));
+  const selectedSkillNames = selectedSkills.map((skill) => skill.displayName).join(", ");
   const supportsThinking = thinkingCapabilities?.supportsThinking === true;
   const activeThinkingSettings = supportsThinking
     ? thinkingSettings
@@ -1305,6 +1327,20 @@ function Composer({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
+                {selectedSkillIds.length > 0 ? (
+                  <PromptInputButton
+                    aria-pressed
+                    className="rounded-xl bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
+                    size="icon-sm"
+                    tooltip={selectedSkillNames || "Selected skills"}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <Sparkles className="size-4" />
+                    <span className="sr-only">Selected skills</span>
+                  </PromptInputButton>
+                ) : null}
+
                 <PromptInputButton
                   aria-pressed={searchEnabled}
                   className={
@@ -1407,7 +1443,10 @@ function EmptyState({
   composerInitialInput,
   composerResetKey,
   selectedSources,
+  availableSkills,
+  selectedSkillIds,
   onRemoveSource,
+  onSkillSelectionChange,
   searchEnabled,
   onSearchEnabledChange,
   thinkingCapabilities,
@@ -1418,7 +1457,10 @@ function EmptyState({
   composerInitialInput?: string;
   composerResetKey?: number;
   selectedSources: SourceItem[];
+  availableSkills?: ChatSkillItem[];
+  selectedSkillIds?: string[];
   onRemoveSource: (id: string) => void;
+  onSkillSelectionChange?: (skillIds: string[]) => void;
   searchEnabled?: boolean;
   onSearchEnabledChange?: (enabled: boolean) => void;
   thinkingCapabilities?: PromptThinkingCapabilities;
@@ -1469,11 +1511,14 @@ function EmptyState({
             initialInput={composerInitialInput}
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
+            onSkillSelectionChange={onSkillSelectionChange}
             onSubmit={(message) => onSendMessage(message.text.trim())}
             onSearchEnabledChange={onSearchEnabledChange}
             onThinkingSettingsChange={onThinkingSettingsChange}
             placeholder="Message your documents, links, or connected tools..."
             searchEnabled={searchEnabled}
+            availableSkills={availableSkills}
+            selectedSkillIds={selectedSkillIds}
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}
@@ -1503,7 +1548,10 @@ export function ChatCanvas({
   onSendMessage,
   allSources = [],
   selectedSources = [],
+  availableSkills = [],
+  selectedSkillIds = [],
   onRemoveSource,
+  onSkillSelectionChange,
   searchEnabled,
   onSearchEnabledChange,
   workspaceId,
@@ -1539,7 +1587,10 @@ export function ChatCanvas({
   onSendMessage?: (content: string) => void;
   allSources?: SourceItem[];
   selectedSources?: SourceItem[];
+  availableSkills?: ChatSkillItem[];
+  selectedSkillIds?: string[];
   onRemoveSource?: (id: string) => void;
+  onSkillSelectionChange?: (skillIds: string[]) => void;
   searchEnabled?: boolean;
   onSearchEnabledChange?: (enabled: boolean) => void;
   workspaceId?: string | null;
@@ -1563,10 +1614,13 @@ export function ChatCanvas({
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
         onRemoveSource={onRemoveSource ?? (() => undefined)}
+        onSkillSelectionChange={onSkillSelectionChange}
         onSearchEnabledChange={onSearchEnabledChange}
         onSendMessage={handleSendMessage}
         onThinkingSettingsChange={onThinkingSettingsChange}
         searchEnabled={searchEnabled}
+        availableSkills={availableSkills}
+        selectedSkillIds={selectedSkillIds}
         selectedSources={selectedSources}
         thinkingCapabilities={thinkingCapabilities}
         thinkingSettings={thinkingSettings}
@@ -1919,12 +1973,15 @@ export function ChatCanvas({
             inputKey={`${threadTitle}-${composerResetKey ?? 0}`}
             onCancelEditing={onCancelEditing}
             onRemoveSource={onRemoveSource}
+            onSkillSelectionChange={onSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
             onSubmit={(message) =>
               handleSendMessage(message.text.trim())
             }
             onThinkingSettingsChange={onThinkingSettingsChange}
             searchEnabled={searchEnabled}
+            availableSkills={availableSkills}
+            selectedSkillIds={selectedSkillIds}
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}

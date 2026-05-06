@@ -4,6 +4,10 @@ import { ContentError } from "../../errors";
 import { dedupeSourceIds } from "../../source-ids";
 import { requireContentWorkspace } from "../../content-support";
 import {
+  normalizeSkillIds,
+  resolveSelectedSkills,
+} from "../../skills/selection";
+import {
   findThreadRecord,
   updateThreadModelSettingsRecord,
 } from "../thread/repository";
@@ -133,6 +137,12 @@ export async function prepareThreadTurn(
   const sourceIds = requestedSourceIds.length > 0
     ? requestedSourceIds
     : fallbackSourceIds;
+  const skillIds = normalizeSkillIds(input.tools?.skillIds);
+  const enabledSkills = await resolveSelectedSkills({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    skillIds,
+  });
 
   await assertSourcesExist({
     teamId: workspace.organizationId,
@@ -153,6 +163,8 @@ export async function prepareThreadTurn(
       metadata: {
         source: "api",
         sourceIds,
+        skillIds,
+        tools: { skillIds },
         versionOf: input.userMessageParentId ?? null,
       },
     }));
@@ -221,6 +233,8 @@ export async function prepareThreadTurn(
     thread,
     messageContent,
     sourceIds,
+    skillIds,
+    enabledSkills,
     userMessage: userMessageWithTraceId,
     runTraceId,
     createdUserMessage,

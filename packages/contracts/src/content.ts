@@ -326,10 +326,21 @@ const llmExecutionConfigSchema = z.object({
 
 export const streamThreadModeSchema = z.enum(["send", "refresh", "edit"]);
 
+const skillSourceTypeSchema = z.enum([
+  "builtin",
+  "workspace_custom",
+  "team_custom",
+]);
+
+const threadToolsRequestSchema = z.object({
+  skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
+}).strict();
+
 export const streamThreadRequestSchema = z.object({
   mode: streamThreadModeSchema.optional(),
   content: z.string().trim().min(1).max(20000).optional(),
   sourceIds: z.array(z.string()).max(100).optional(),
+  tools: threadToolsRequestSchema.optional(),
   stream: z.boolean().optional(),
   userMessageId: z.string().trim().min(1).max(128).optional(),
   assistantMessageId: z.string().trim().min(1).max(128).optional(),
@@ -358,6 +369,168 @@ export const listThreadMessagesResponseSchema = z.object({
 
 export const updateThreadModelSettingsRequestSchema =
   threadModelSettingsPatchSchema;
+
+export const workspaceSkillSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  workspaceId: z.string(),
+  skillId: z.string(),
+  skillVersionId: z.string(),
+  enabled: z.boolean(),
+  configJson: z.record(z.string(), z.unknown()),
+  enabledBy: z.string().nullable(),
+  enabledAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const skillCatalogItemSchema = z.object({
+  catalogId: z.string(),
+  sourceType: skillSourceTypeSchema,
+  skillId: z.string(),
+  skillVersionId: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  version: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+  visibility: z.enum(["public", "restricted", "workspace", "team"]),
+  categories: z.array(z.string()),
+  enabledWorkspaceSkillId: z.string().nullable(),
+  enabled: z.boolean(),
+  hasReadme: z.boolean(),
+});
+
+export const skillManifestJsonSchema = z.object({
+  slug: z.string(),
+  displayName: z.string(),
+  version: z.string(),
+  description: z.string(),
+  visibility: z.enum(["public", "restricted", "workspace", "team"]),
+  categories: z.array(z.string()),
+});
+
+export const listSkillsCatalogResponseSchema = z.object({
+  items: z.array(skillCatalogItemSchema),
+});
+
+export const listWorkspaceSkillsResponseSchema = z.object({
+  items: z.array(workspaceSkillSchema),
+});
+
+export const getSkillCatalogDetailResponseSchema = z.object({
+  skill: skillCatalogItemSchema,
+  readmeContent: z.string().nullable(),
+  skillContent: z.string().nullable(),
+});
+
+export const enableWorkspaceSkillRequestSchema = z.object({
+  skillId: z.string().trim().min(1).max(128),
+  skillVersionId: z.string().trim().min(1).max(128),
+  configJson: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+
+export const enableWorkspaceSkillResponseSchema = z.object({
+  workspaceSkill: workspaceSkillSchema,
+});
+
+export const updateWorkspaceSkillRequestSchema = z.object({
+  enabled: z.boolean().optional(),
+  configJson: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+
+export const updateWorkspaceSkillResponseSchema = z.object({
+  workspaceSkill: workspaceSkillSchema,
+});
+
+export const deleteWorkspaceSkillResponseSchema = z.object({
+  deleted: z.literal(true),
+  workspaceSkillId: z.string(),
+});
+
+const customSkillNameSchema = z.string().trim().min(1).max(64).regex(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/);
+const customSkillVersionLabelSchema = z.string().trim().min(1).max(64);
+
+export const customSkillDefinitionSchema = z.object({
+  id: z.string(),
+  teamId: z.string().nullable(),
+  workspaceId: z.string().nullable(),
+  sourceType: skillSourceTypeSchema,
+  slug: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+  visibility: z.enum(["public", "restricted", "workspace", "team"]),
+  status: z.enum(["active", "archived"]),
+  ownerUserId: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const customSkillVersionSchema = z.object({
+  id: z.string(),
+  skillId: z.string(),
+  version: z.string(),
+  status: z.enum(["draft", "published", "deprecated", "disabled"]),
+  storageType: z.enum(["repo_builtin", "db_text"]),
+  storagePointer: z.string(),
+  isCurrent: z.boolean(),
+  contentHash: z.string(),
+  manifestJson: skillManifestJsonSchema,
+  createdBy: z.string().nullable(),
+  publishedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const customSkillVersionFileSchema = z.object({
+  id: z.string(),
+  skillVersionId: z.string(),
+  path: z.string(),
+  contentText: z.string(),
+  mimeType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  contentHash: z.string(),
+  createdAt: z.string(),
+});
+
+export const customSkillSchema = z.object({
+  definition: customSkillDefinitionSchema,
+  version: customSkillVersionSchema,
+});
+
+export const createCustomSkillRequestSchema = z.object({
+  name: customSkillNameSchema,
+  displayName: z.string().trim().min(1).max(128).optional(),
+  description: z.string().trim().min(1).max(1024),
+  version: customSkillVersionLabelSchema.optional(),
+}).strict();
+
+export const createCustomSkillVersionRequestSchema = z.object({
+  version: customSkillVersionLabelSchema,
+}).strict();
+
+export const updateCustomSkillVersionRequestSchema = z.object({
+  displayName: z.string().trim().min(1).max(128).optional(),
+  description: z.string().trim().min(1).max(1024).optional(),
+}).strict();
+
+export const putCustomSkillVersionFileRequestSchema = z.object({
+  contentText: z.string().max(256 * 1024),
+  mimeType: z.string().trim().min(1).max(128).optional(),
+}).strict();
+
+export const customSkillResponseSchema = z.object({
+  customSkill: customSkillSchema,
+});
+
+export const putCustomSkillVersionFileResponseSchema = z.object({
+  file: customSkillVersionFileSchema,
+});
+
+export const deleteCustomSkillVersionFileResponseSchema = z.object({
+  deleted: z.literal(true),
+  path: z.string(),
+});
 
 export const updateThreadModelSettingsResponseSchema = z.object({
   thread: threadSchema,
@@ -480,6 +653,55 @@ export type UpdateThreadModelSettingsRequest = z.infer<
 >;
 export type UpdateThreadModelSettingsResponse = z.infer<
   typeof updateThreadModelSettingsResponseSchema
+>;
+export type WorkspaceSkill = z.infer<typeof workspaceSkillSchema>;
+export type SkillCatalogItem = z.infer<typeof skillCatalogItemSchema>;
+export type ListSkillsCatalogResponse = z.infer<
+  typeof listSkillsCatalogResponseSchema
+>;
+export type ListWorkspaceSkillsResponse = z.infer<
+  typeof listWorkspaceSkillsResponseSchema
+>;
+export type GetSkillCatalogDetailResponse = z.infer<
+  typeof getSkillCatalogDetailResponseSchema
+>;
+export type EnableWorkspaceSkillRequest = z.infer<
+  typeof enableWorkspaceSkillRequestSchema
+>;
+export type EnableWorkspaceSkillResponse = z.infer<
+  typeof enableWorkspaceSkillResponseSchema
+>;
+export type UpdateWorkspaceSkillRequest = z.infer<
+  typeof updateWorkspaceSkillRequestSchema
+>;
+export type UpdateWorkspaceSkillResponse = z.infer<
+  typeof updateWorkspaceSkillResponseSchema
+>;
+export type DeleteWorkspaceSkillResponse = z.infer<
+  typeof deleteWorkspaceSkillResponseSchema
+>;
+export type CustomSkillDefinition = z.infer<typeof customSkillDefinitionSchema>;
+export type CustomSkillVersion = z.infer<typeof customSkillVersionSchema>;
+export type CustomSkillVersionFile = z.infer<typeof customSkillVersionFileSchema>;
+export type CustomSkill = z.infer<typeof customSkillSchema>;
+export type CreateCustomSkillRequest = z.infer<
+  typeof createCustomSkillRequestSchema
+>;
+export type CreateCustomSkillVersionRequest = z.infer<
+  typeof createCustomSkillVersionRequestSchema
+>;
+export type UpdateCustomSkillVersionRequest = z.infer<
+  typeof updateCustomSkillVersionRequestSchema
+>;
+export type PutCustomSkillVersionFileRequest = z.infer<
+  typeof putCustomSkillVersionFileRequestSchema
+>;
+export type CustomSkillResponse = z.infer<typeof customSkillResponseSchema>;
+export type PutCustomSkillVersionFileResponse = z.infer<
+  typeof putCustomSkillVersionFileResponseSchema
+>;
+export type DeleteCustomSkillVersionFileResponse = z.infer<
+  typeof deleteCustomSkillVersionFileResponseSchema
 >;
 export type ModelCatalogItem = z.infer<typeof modelCatalogItemSchema>;
 export type ListThreadModelCatalogResponse = z.infer<

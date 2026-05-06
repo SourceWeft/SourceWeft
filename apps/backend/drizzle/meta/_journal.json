@@ -57,6 +57,13 @@
       "when": 1777831796310,
       "tag": "0007_llm_observability_scoped_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777996666268,
+      "tag": "0008_skills_catalog",
+      "breakpoints": true
     }
   ]
 }

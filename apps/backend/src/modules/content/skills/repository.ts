@@ -1,0 +1,925 @@
+import { createHash, randomUUID } from "node:crypto";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { db } from "../../../shared/database";
+import {
+  skillDefinitions,
+  skillEntitlements,
+  skillVersionFiles,
+  skillVersions,
+  workspaceSkills,
+} from "../../../shared/db/schema";
+import type { SkillManifestJson } from "../../../shared/db/schema";
+import type { SkillBundleFile } from "./builtin";
+import type { SkillSourceType, WorkspaceSkillRecord } from "./types";
+import type { ValidatedCustomSkillFile } from "./custom-validation";
+
+type WorkspaceSkillRow = typeof workspaceSkills.$inferSelect;
+type SkillDefinitionRow = typeof skillDefinitions.$inferSelect;
+type SkillVersionRow = typeof skillVersions.$inferSelect;
+type SkillVersionFileRow = typeof skillVersionFiles.$inferSelect;
+
+export type SkillDefinitionRecord = ReturnType<typeof mapSkillDefinition>;
+export type SkillVersionRecord = ReturnType<typeof mapSkillVersion>;
+export type SkillVersionFileRecord = ReturnType<typeof mapSkillVersionFile>;
+
+function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
+  return {
+    id: row.id,
+    teamId: row.teamId,
+    workspaceId: row.workspaceId,
+    skillId: row.skillId,
+    skillVersionId: row.skillVersionId,
+    enabled: row.enabled,
+    configJson: row.configJson ?? {},
+    enabledBy: row.enabledBy,
+    enabledAt: row.enabledAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function mapSkillDefinition(row: SkillDefinitionRow) {
+  return {
+    id: row.id,
+    teamId: row.teamId,
+    workspaceId: row.workspaceId,
+    sourceType: row.sourceType,
+    slug: row.slug,
+    displayName: row.displayName,
+    description: row.description,
+    visibility: row.visibility,
+    status: row.status,
+    ownerUserId: row.ownerUserId,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function mapSkillVersion(row: SkillVersionRow) {
+  return {
+    id: row.id,
+    skillId: row.skillId,
+    version: row.version,
+    status: row.status,
+    storageType: row.storageType,
+    storagePointer: row.storagePointer,
+    isCurrent: row.isCurrent,
+    contentHash: row.contentHash,
+    manifestJson: row.manifestJson,
+    createdBy: row.createdBy,
+    publishedAt: row.publishedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function mapSkillVersionFile(row: SkillVersionFileRow) {
+  return {
+    id: row.id,
+    skillVersionId: row.skillVersionId,
+    path: row.path,
+    contentText: row.contentText,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    contentHash: row.contentHash,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function skillManifestJson(input: {
+  slug: string;
+  displayName: string;
+  version: string;
+  description: string;
+  visibility: "workspace" | "team";
+}) {
+  return {
+    slug: input.slug,
+    displayName: input.displayName,
+    version: input.version,
+    description: input.description,
+    visibility: input.visibility,
+    categories: [],
+  } satisfies SkillManifestJson;
+}
+
+function visibleSkillCondition(input: { teamId: string; workspaceId: string }) {
+  return or(
+    eq(skillDefinitions.visibility, "public"),
+    sql`${skillDefinitions.visibility} = 'restricted' and exists (
+      select 1 from ${skillEntitlements}
+      where ${skillEntitlements.skillId} = ${skillDefinitions.id}
+        and (${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})
+        and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now())
+    )`,
+    and(eq(skillDefinitions.visibility, "team"), eq(skillDefinitions.teamId, input.teamId)),
+    and(
+      eq(skillDefinitions.visibility, "workspace"),
+      eq(skillDefinitions.teamId, input.teamId),
+      eq(skillDefinitions.workspaceId, input.workspaceId),
+    ),
+  );
+}
+
+export async function listWorkspaceSkillRecords(input: {
+  teamId: string;
+  workspaceId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(workspaceSkills)
+    .where(
+      and(
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+      ),
+    );
+  return rows.map(mapWorkspaceSkill);
+}
+
+export async function findWorkspaceSkillRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  workspaceSkillId: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(workspaceSkills)
+    .where(
+      and(
+        eq(workspaceSkills.id, input.workspaceSkillId),
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  return row ? mapWorkspaceSkill(row) : null;
+}
+
+export async function listWorkspaceSkillRecordsByIds(input: {
+  teamId: string;
+  workspaceId: string;
+  workspaceSkillIds: string[];
+}) {
+  if (input.workspaceSkillIds.length === 0) {
+    return [] as WorkspaceSkillRecord[];
+  }
+  const rows = await db
+    .select()
+    .from(workspaceSkills)
+    .where(
+      and(
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+        inArray(workspaceSkills.id, input.workspaceSkillIds),
+      ),
+    );
+  return rows.map(mapWorkspaceSkill);
+}
+
+export async function listCatalogSkillVersionsForWorkspace(input: {
+  teamId: string;
+  workspaceId: string;
+}) {
+  return db
+    .select({
+      definition: skillDefinitions,
+      version: skillVersions,
+      enabled: workspaceSkills,
+    })
+    .from(skillDefinitions)
+    .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+    .leftJoin(
+      workspaceSkills,
+      and(
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+        eq(workspaceSkills.skillId, skillDefinitions.id),
+      ),
+    )
+    .where(
+      and(
+        eq(skillDefinitions.status, "active"),
+        eq(skillVersions.status, "published"),
+        eq(skillVersions.isCurrent, true),
+        visibleSkillCondition(input),
+      ),
+    );
+}
+
+export async function findCatalogSkillVersionForWorkspace(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+}) {
+  const [row] = await db
+    .select({
+      definition: skillDefinitions,
+      version: skillVersions,
+      enabled: workspaceSkills,
+    })
+    .from(skillDefinitions)
+    .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+    .leftJoin(
+      workspaceSkills,
+      and(
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+        eq(workspaceSkills.skillId, skillDefinitions.id),
+      ),
+    )
+    .where(
+      and(
+        eq(skillDefinitions.id, input.skillId),
+        eq(skillVersions.id, input.skillVersionId),
+        eq(skillDefinitions.status, "active"),
+        eq(skillVersions.status, "published"),
+        visibleSkillCondition(input),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function upsertWorkspaceSkill(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+  enabledBy: string;
+  configJson?: Record<string, unknown>;
+}) {
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(workspaceSkills)
+      .where(
+        and(
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+          eq(workspaceSkills.skillId, input.skillId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      const [row] = await tx
+        .update(workspaceSkills)
+        .set({
+          skillVersionId: input.skillVersionId,
+          enabled: true,
+          configJson: input.configJson ?? {},
+          enabledBy: input.enabledBy,
+          enabledAt: now,
+          updatedAt: now,
+        })
+        .where(eq(workspaceSkills.id, existing.id))
+        .returning();
+      if (!row) {
+        throw new Error("Failed to enable skill");
+      }
+      return mapWorkspaceSkill(row);
+    }
+
+    const [row] = await tx
+      .insert(workspaceSkills)
+      .values({
+        id: randomUUID(),
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        skillId: input.skillId,
+        skillVersionId: input.skillVersionId,
+        enabled: true,
+        configJson: input.configJson ?? {},
+        enabledBy: input.enabledBy,
+        enabledAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    if (!row) {
+      throw new Error("Failed to enable skill");
+    }
+    return mapWorkspaceSkill(row);
+  });
+}
+
+export async function updateWorkspaceSkillRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  workspaceSkillId: string;
+  enabled?: boolean;
+  configJson?: Record<string, unknown>;
+  userId?: string;
+}) {
+  const now = new Date();
+  const updates: Partial<typeof workspaceSkills.$inferInsert> & { updatedAt: Date } = {
+    updatedAt: now,
+  };
+  if (input.enabled !== undefined) {
+    updates.enabled = input.enabled;
+    updates.enabledAt = input.enabled ? now : null;
+    updates.enabledBy = input.enabled ? input.userId ?? null : null;
+  }
+  if (input.configJson !== undefined) {
+    updates.configJson = input.configJson;
+  }
+
+  const [row] = await db
+    .update(workspaceSkills)
+    .set(updates)
+    .where(
+      and(
+        eq(workspaceSkills.id, input.workspaceSkillId),
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+  return row ? mapWorkspaceSkill(row) : null;
+}
+
+export async function deleteWorkspaceSkillRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  workspaceSkillId: string;
+}) {
+  const rows = await db
+    .delete(workspaceSkills)
+    .where(
+      and(
+        eq(workspaceSkills.id, input.workspaceSkillId),
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning({ id: workspaceSkills.id });
+  return rows.length > 0;
+}
+
+export async function loadSkillVersionBundle(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+}) {
+  const [versionRow] = await db
+    .select({
+      definition: skillDefinitions,
+      version: skillVersions,
+    })
+    .from(skillVersions)
+    .innerJoin(skillDefinitions, eq(skillDefinitions.id, skillVersions.skillId))
+    .where(
+      and(
+        eq(skillVersions.id, input.skillVersionId),
+        eq(skillVersions.skillId, input.skillId),
+        eq(skillDefinitions.status, "active"),
+        visibleSkillCondition(input),
+      ),
+    )
+    .limit(1);
+
+  if (!versionRow) {
+    return null;
+  }
+
+  const fileRows = versionRow.version.storageType === "db_text"
+    ? await db
+      .select()
+      .from(skillVersionFiles)
+      .where(eq(skillVersionFiles.skillVersionId, input.skillVersionId))
+    : [];
+
+  const files: SkillBundleFile[] = fileRows.map((file) => ({
+    path: file.path,
+    contentText: file.contentText,
+    mimeType: file.mimeType,
+    sizeBytes: file.sizeBytes,
+    contentHash: file.contentHash,
+  }));
+
+  return {
+    definition: versionRow.definition,
+    version: versionRow.version,
+    files,
+  };
+}
+
+export async function syncBuiltinSkillMetadata(input: {
+  slug: string;
+  displayName: string;
+  description: string;
+  visibility: "public" | "restricted";
+  version: string;
+  storagePointer: string;
+  contentHash: string;
+  manifestJson: SkillManifestJson;
+}) {
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const [conflict] = await tx
+      .select({ id: skillDefinitions.id, sourceType: skillDefinitions.sourceType })
+      .from(skillDefinitions)
+      .where(and(eq(skillDefinitions.slug, input.slug), sql`${skillDefinitions.sourceType} <> 'builtin'`))
+      .limit(1);
+    if (conflict) {
+      throw new Error(`Builtin skill slug '${input.slug}' conflicts with ${conflict.sourceType} skill`);
+    }
+
+    const [existing] = await tx
+      .select()
+      .from(skillDefinitions)
+      .where(and(eq(skillDefinitions.slug, input.slug), eq(skillDefinitions.sourceType, "builtin")))
+      .limit(1);
+
+    const skillId = existing?.id ?? randomUUID();
+    const [definition] = existing
+      ? await tx
+        .update(skillDefinitions)
+        .set({
+          teamId: null,
+          workspaceId: null,
+          displayName: input.displayName,
+          description: input.description,
+          visibility: input.visibility,
+          status: "active",
+          updatedAt: now,
+        })
+        .where(eq(skillDefinitions.id, skillId))
+        .returning()
+      : await tx
+        .insert(skillDefinitions)
+        .values({
+          id: skillId,
+          teamId: null,
+          workspaceId: null,
+          sourceType: "builtin",
+          slug: input.slug,
+          displayName: input.displayName,
+          description: input.description,
+          visibility: input.visibility,
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+    if (!definition) {
+      throw new Error(`Failed to sync builtin skill '${input.slug}'`);
+    }
+
+    await tx
+      .update(skillVersions)
+      .set({
+        isCurrent: false,
+        updatedAt: now,
+      })
+      .where(eq(skillVersions.skillId, skillId));
+
+    const [existingVersion] = await tx
+      .select()
+      .from(skillVersions)
+      .where(
+        and(
+          eq(skillVersions.skillId, skillId),
+          eq(skillVersions.version, input.version),
+        ),
+      )
+      .limit(1);
+    if (existingVersion) {
+      await tx
+        .update(skillVersions)
+        .set({
+          status: "published",
+          storageType: "repo_builtin",
+          storagePointer: input.storagePointer,
+          isCurrent: true,
+          contentHash: input.contentHash,
+          manifestJson: input.manifestJson,
+          publishedAt: existingVersion.publishedAt ?? now,
+          updatedAt: now,
+        })
+        .where(eq(skillVersions.id, existingVersion.id));
+    } else {
+      await tx.insert(skillVersions).values({
+        id: randomUUID(),
+        skillId,
+        version: input.version,
+        status: "published",
+        storageType: "repo_builtin",
+        storagePointer: input.storagePointer,
+        isCurrent: true,
+        contentHash: input.contentHash,
+        manifestJson: input.manifestJson,
+        publishedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    return mapSkillDefinition(definition);
+  });
+}
+
+export async function createWorkspaceCustomSkillDraft(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  name: string;
+  displayName: string;
+  description: string;
+  version?: string;
+}) {
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const skillId = randomUUID();
+    const versionId = randomUUID();
+    const [definition] = await tx
+      .insert(skillDefinitions)
+      .values({
+        id: skillId,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceType: "workspace_custom",
+        slug: input.name,
+        displayName: input.displayName,
+        description: input.description,
+        visibility: "workspace",
+        status: "active",
+        ownerUserId: input.userId,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    if (!definition) {
+      throw new Error("Failed to create custom skill");
+    }
+
+    const versionLabel = input.version ?? "0.1.0";
+    const [version] = await tx
+      .insert(skillVersions)
+      .values({
+        id: versionId,
+        skillId,
+        version: versionLabel,
+        status: "draft",
+        storageType: "db_text",
+        storagePointer: versionId,
+        isCurrent: false,
+        contentHash: sha256(""),
+        manifestJson: skillManifestJson({
+          slug: input.name,
+          displayName: input.displayName,
+          version: versionLabel,
+          description: input.description,
+          visibility: "workspace",
+        }),
+        createdBy: input.userId,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    if (!version) {
+      throw new Error("Failed to create custom skill version");
+    }
+
+    return {
+      definition: mapSkillDefinition(definition),
+      version: mapSkillVersion(version),
+    };
+  });
+}
+
+export async function createNextCustomSkillVersionDraft(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  userId: string;
+  version: string;
+}) {
+  const now = new Date();
+  const [definition] = await db
+    .select()
+    .from(skillDefinitions)
+    .where(
+      and(
+        eq(skillDefinitions.id, input.skillId),
+        eq(skillDefinitions.teamId, input.teamId),
+        eq(skillDefinitions.workspaceId, input.workspaceId),
+        eq(skillDefinitions.sourceType, "workspace_custom"),
+        eq(skillDefinitions.status, "active"),
+      ),
+    )
+    .limit(1);
+  if (!definition) {
+    return null;
+  }
+
+  const versionId = randomUUID();
+  const [version] = await db
+    .insert(skillVersions)
+    .values({
+      id: versionId,
+      skillId: input.skillId,
+      version: input.version,
+      status: "draft",
+      storageType: "db_text",
+      storagePointer: versionId,
+      isCurrent: false,
+      contentHash: sha256(""),
+      manifestJson: skillManifestJson({
+        slug: definition.slug,
+        displayName: definition.displayName,
+        version: input.version,
+        description: definition.description,
+        visibility: definition.sourceType === "team_custom" ? "team" : "workspace",
+      }),
+      createdBy: input.userId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+  if (!version) {
+    throw new Error("Failed to create custom skill version");
+  }
+
+  return {
+    definition: mapSkillDefinition(definition),
+    version: mapSkillVersion(version),
+  };
+}
+
+export async function findWorkspaceCustomDraftVersion(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+}) {
+  const [row] = await db
+    .select({
+      definition: skillDefinitions,
+      version: skillVersions,
+    })
+    .from(skillVersions)
+    .innerJoin(skillDefinitions, eq(skillDefinitions.id, skillVersions.skillId))
+    .where(
+      and(
+        eq(skillDefinitions.id, input.skillId),
+        eq(skillDefinitions.teamId, input.teamId),
+        eq(skillDefinitions.workspaceId, input.workspaceId),
+        eq(skillDefinitions.sourceType, "workspace_custom"),
+        eq(skillDefinitions.status, "active"),
+        eq(skillVersions.id, input.skillVersionId),
+        eq(skillVersions.status, "draft"),
+      ),
+    )
+    .limit(1);
+  return row
+    ? {
+        definition: mapSkillDefinition(row.definition),
+        version: mapSkillVersion(row.version),
+      }
+    : null;
+}
+
+export async function updateWorkspaceCustomDraftMetadata(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+  displayName?: string;
+  description?: string;
+}) {
+  const draft = await findWorkspaceCustomDraftVersion(input);
+  if (!draft) {
+    return null;
+  }
+  if (input.displayName === undefined && input.description === undefined) {
+    return draft;
+  }
+
+  const now = new Date();
+  const [definition] = await db
+    .update(skillDefinitions)
+    .set({
+      displayName: input.displayName ?? draft.definition.displayName,
+      description: input.description ?? draft.definition.description,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(skillDefinitions.id, input.skillId),
+        eq(skillDefinitions.teamId, input.teamId),
+        eq(skillDefinitions.workspaceId, input.workspaceId),
+        eq(skillDefinitions.sourceType, "workspace_custom"),
+        eq(skillDefinitions.status, "active"),
+      ),
+    )
+    .returning();
+  if (!definition) {
+    return null;
+  }
+
+  return {
+    definition: mapSkillDefinition(definition),
+    version: draft.version,
+  };
+}
+
+export async function deleteCustomSkillVersionFileRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+  path: string;
+}) {
+  const draft = await findWorkspaceCustomDraftVersion(input);
+  if (!draft) {
+    return false;
+  }
+
+  const rows = await db
+    .delete(skillVersionFiles)
+    .where(
+      and(
+        eq(skillVersionFiles.skillVersionId, input.skillVersionId),
+        eq(skillVersionFiles.path, input.path),
+      ),
+    )
+    .returning({ id: skillVersionFiles.id });
+  return rows.length > 0;
+}
+
+export async function upsertCustomSkillVersionFile(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+  file: ValidatedCustomSkillFile;
+}) {
+  const draft = await findWorkspaceCustomDraftVersion(input);
+  if (!draft) {
+    return null;
+  }
+
+  const [row] = await db
+    .insert(skillVersionFiles)
+    .values({
+      id: randomUUID(),
+      skillVersionId: input.skillVersionId,
+      path: input.file.path,
+      contentText: input.file.contentText,
+      mimeType: input.file.mimeType,
+      sizeBytes: input.file.sizeBytes,
+      contentHash: input.file.contentHash,
+    })
+    .onConflictDoUpdate({
+      target: [skillVersionFiles.skillVersionId, skillVersionFiles.path],
+      set: {
+        contentText: input.file.contentText,
+        mimeType: input.file.mimeType,
+        sizeBytes: input.file.sizeBytes,
+        contentHash: input.file.contentHash,
+      },
+    })
+    .returning();
+  if (!row) {
+    throw new Error("Failed to write custom skill file");
+  }
+  return mapSkillVersionFile(row);
+}
+
+export async function listCustomSkillVersionFileRecords(input: {
+  skillVersionId: string;
+}) {
+  const files = await db
+    .select()
+    .from(skillVersionFiles)
+    .where(eq(skillVersionFiles.skillVersionId, input.skillVersionId));
+  return files.map(mapSkillVersionFile);
+}
+
+export async function publishWorkspaceCustomSkillVersion(input: {
+  teamId: string;
+  workspaceId: string;
+  skillId: string;
+  skillVersionId: string;
+  name: string;
+  displayName?: string;
+  description: string;
+  version: string;
+  contentHash: string;
+  manifestJson: SkillManifestJson;
+}) {
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const [draftVersion] = await tx
+      .select({ id: skillVersions.id })
+      .from(skillVersions)
+      .where(
+        and(
+          eq(skillVersions.id, input.skillVersionId),
+          eq(skillVersions.skillId, input.skillId),
+          eq(skillVersions.status, "draft"),
+        ),
+      )
+      .limit(1);
+    if (!draftVersion) {
+      return null;
+    }
+
+    const [definition] = await tx
+      .update(skillDefinitions)
+      .set({
+        displayName: input.displayName ?? input.name,
+        description: input.description,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(skillDefinitions.id, input.skillId),
+          eq(skillDefinitions.teamId, input.teamId),
+          eq(skillDefinitions.workspaceId, input.workspaceId),
+          eq(skillDefinitions.sourceType, "workspace_custom"),
+          eq(skillDefinitions.status, "active"),
+        ),
+      )
+      .returning();
+    if (!definition) {
+      return null;
+    }
+
+    await tx
+      .update(skillVersions)
+      .set({
+        isCurrent: false,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(skillVersions.skillId, input.skillId),
+          sql`${skillVersions.id} <> ${input.skillVersionId}`,
+        ),
+      );
+
+    const [version] = await tx
+      .update(skillVersions)
+      .set({
+        version: input.version,
+        status: "published",
+        storageType: "db_text",
+        storagePointer: input.skillVersionId,
+        isCurrent: true,
+        contentHash: input.contentHash,
+        manifestJson: input.manifestJson,
+        publishedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(skillVersions.id, input.skillVersionId),
+          eq(skillVersions.skillId, input.skillId),
+          eq(skillVersions.status, "draft"),
+        ),
+      )
+      .returning();
+    if (!version) {
+      return null;
+    }
+
+    return {
+      definition: mapSkillDefinition(definition),
+      version: mapSkillVersion(version),
+    };
+  });
+}
+
+export async function hasSkillEntitlement(input: {
+  skillId: string;
+  teamId: string;
+  workspaceId: string;
+}) {
+  const now = new Date();
+  const [row] = await db
+    .select({ id: skillEntitlements.id })
+    .from(skillEntitlements)
+    .where(
+      and(
+        eq(skillEntitlements.skillId, input.skillId),
+        sql`(${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})`,
+        sql`(${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > ${now})`,
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
+export function isCustomSourceType(value: SkillSourceType) {
+  return value === "workspace_custom" || value === "team_custom";
+}

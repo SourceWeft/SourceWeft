@@ -2,6 +2,7 @@ import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { AgentCitation } from "../../agent/citation-registry";
 import type { ContentBillingPort } from "../../billing-port";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
+import type { EnabledSkillDescriptor } from "../../skills/types";
 import type { TraceContext } from "../../../../shared/llm-observability";
 import { contentRetrievalService } from "../../retrieval/service";
 import type { MessageRecord } from "../../types";
@@ -9,12 +10,17 @@ import type { requireContentWorkspace } from "../../content-support";
 import type { findThreadRecord } from "../thread/repository";
 import type { resolveActiveChatProfileByAlias } from "./model-resolution";
 
+export type ThreadToolsSelection = {
+  skillIds?: string[];
+};
+
 export type StreamThreadEventInput = {
   workspaceId: string;
   threadId: string;
   userId: string;
   content: string;
   sourceIds?: string[];
+  tools?: ThreadToolsSelection;
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
   userMessageParentId?: string | null;
@@ -44,6 +50,8 @@ export type PreparedThreadTurn = {
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;
   messageContent: string;
   sourceIds: string[];
+  skillIds: string[];
+  enabledSkills: EnabledSkillDescriptor[];
   userMessage: MessageRecord;
   runTraceId: string;
   createdUserMessage: boolean;

@@ -5,9 +5,11 @@ import {
   collapseSupersededMessages,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
+  resolveSkillIdsFromMessage,
   resolveSourceIdsFromMessage,
   resolveThreadTurnContext,
 } from "../turn/context";
+import { normalizeSkillIds } from "../../skills/selection";
 import { listMessageRecordsByThread } from "../message-repository";
 import type { StreamThreadEventInput } from "../turn/service";
 import type { AgentCheckpointRef } from "../turn/types";
@@ -66,6 +68,9 @@ export async function resolveRefreshThreadStreamInput(
   const sourceIds = originalSourceIds.length > 0
     ? originalSourceIds
     : dedupeSourceIds(input.sourceIds);
+  const skillIds = input.tools !== undefined
+    ? normalizeSkillIds(input.tools.skillIds)
+    : resolveSkillIdsFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const refreshRunThreadId = `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
 
@@ -75,6 +80,7 @@ export async function resolveRefreshThreadStreamInput(
     userId: input.userId,
     content: latestUserMessage.content,
     sourceIds,
+    tools: { skillIds },
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
     existingUserMessage: latestUserMessage,
@@ -104,6 +110,9 @@ export async function resolveEditThreadStreamInput(
   const sourceIds = requestedSourceIds.length > 0
     ? requestedSourceIds
     : resolveSourceIdsFromMessage(latestUserMessage);
+  const skillIds = input.tools !== undefined
+    ? normalizeSkillIds(input.tools.skillIds)
+    : resolveSkillIdsFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const agentBaseCheckpoint = checkpoint?.beforeInput ??
     await resolveFallbackEditBaseCheckpoint({
@@ -118,6 +127,7 @@ export async function resolveEditThreadStreamInput(
     userId: input.userId,
     content: input.content,
     sourceIds,
+    tools: { skillIds },
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
     userMessageParentId: latestUserMessage.id,

@@ -216,6 +216,7 @@ test("buildAgentRunSpanMetadata includes thinking settings", () => {
         provider: null,
         routeStrategy: null,
       },
+      selectedSkillCount: 0,
     },
   );
 });
@@ -246,6 +247,8 @@ const prepared: PreparedThreadTurn = {
   },
   messageContent: "What is in this invoice?",
   sourceIds: [],
+  skillIds: [],
+  enabledSkills: [],
   runTraceId: "user-message-1",
   userMessage: {
     id: "user-message-1",

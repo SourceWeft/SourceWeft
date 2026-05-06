@@ -1,3 +1,4 @@
+import { CompositeBackend } from "deepagents";
 import { buildAgentConfig, createThreadAgent } from "..";
 import {
   AgentCitationRegistry,
@@ -6,6 +7,7 @@ import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import {
   createRetrievalTool,
 } from "../tools/retrieval-tool";
+import { SelectedSkillsBackend } from "../../skills/backend";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { TraceContext } from "../../../../shared/llm-observability";
 import { endSpan, startSpan } from "../../../../shared/llm-observability";
@@ -174,34 +176,50 @@ function formatToolInputItems(input: Record<string, unknown>) {
   return entries.slice(0, 3);
 }
 
-function getFilesystemToolStartTitle(toolName: string) {
+function resolveFilesystemPath(input: Record<string, unknown>) {
+  for (const key of ["path", "file_path", "filePath"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function filesystemScope(input: Record<string, unknown>) {
+  return resolveFilesystemPath(input).startsWith("/skills") ? "skills" : "sources";
+}
+
+function getFilesystemToolStartTitle(toolName: string, input: Record<string, unknown>) {
+  const skillScoped = filesystemScope(input) === "skills";
   if (toolName === "ls") {
-    return "Listing selected sources";
+    return skillScoped ? "Listing selected skills" : "Listing selected sources";
   }
   if (toolName === "glob") {
-    return "Finding matching sources";
+    return skillScoped ? "Finding matching skill files" : "Finding matching sources";
   }
   if (toolName === "read_file") {
-    return "Reading source content";
+    return skillScoped ? "Reading skill instructions" : "Reading source content";
   }
   if (toolName === "grep") {
-    return "Searching exact terms";
+    return skillScoped ? "Searching skill instructions" : "Searching exact terms";
   }
   return null;
 }
 
-function getFilesystemToolEndTitle(toolName: string) {
+function getFilesystemToolEndTitle(toolName: string, input: Record<string, unknown>) {
+  const skillScoped = filesystemScope(input) === "skills";
   if (toolName === "ls") {
-    return "Listed selected sources";
+    return skillScoped ? "Listed selected skills" : "Listed selected sources";
   }
   if (toolName === "glob") {
-    return "Found matching sources";
+    return skillScoped ? "Found matching skill files" : "Found matching sources";
   }
   if (toolName === "read_file") {
-    return "Read source content";
+    return skillScoped ? "Read skill instructions" : "Read source content";
   }
   if (toolName === "grep") {
-    return "Searched exact terms";
+    return skillScoped ? "Searched skill instructions" : "Searched exact terms";
   }
   return null;
 }
@@ -309,7 +327,12 @@ function getFilesystemToolMetadata(toolName: string, output: unknown) {
   return metadata;
 }
 
-function getFilesystemToolDescription(toolName: string, metadata: Record<string, unknown>) {
+function getFilesystemToolDescription(
+  toolName: string,
+  metadata: Record<string, unknown>,
+  input?: Record<string, unknown>,
+) {
+  const noun = input && filesystemScope(input) === "skills" ? "skill" : "source";
   if (toolName === "ls" && typeof metadata.resultCount === "number") {
     return `Listed ${metadata.resultCount} entries.`;
   }
@@ -320,7 +343,7 @@ function getFilesystemToolDescription(toolName: string, metadata: Record<string,
     return `Found ${metadata.matchCount} text matches.`;
   }
   if (toolName === "read_file" && typeof metadata.chunkCount === "number") {
-    return `Read ${metadata.chunkCount} source ${metadata.chunkCount === 1 ? "chunk" : "chunks"}.`;
+    return `Read ${metadata.chunkCount} ${noun} ${metadata.chunkCount === 1 ? "chunk" : "chunks"}.`;
   }
   return undefined;
 }
@@ -536,13 +559,20 @@ export async function* invokeDeepAgentTurn(input: {
     sourceIds: input.prepared.sourceIds,
     citationRegistry,
   });
+  const skillsBackend = input.prepared.enabledSkills.length > 0
+    ? new SelectedSkillsBackend(input.prepared.enabledSkills)
+    : null;
+  const backend = skillsBackend
+    ? new CompositeBackend(databaseBackend, { "/skills/": skillsBackend })
+    : databaseBackend;
 
   const agent = await createThreadAgent({
     modelAlias: input.prepared.modelAlias,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     tools: [retrievalTool],
-    backend: databaseBackend,
-      execution: {
+    backend,
+    skills: skillsBackend ? ["/skills/"] : undefined,
+    execution: {
       executionMode: input.llm?.executionMode,
       providerHint: input.llm?.providerHint,
       byok: input.llm?.byok,
@@ -564,6 +594,8 @@ export async function* invokeDeepAgentTurn(input: {
         user_id: input.prepared.userId,
         thread_id: input.prepared.thread.id,
         message_id: input.prepared.userMessage.id,
+        selected_skill_ids: input.prepared.skillIds,
+        selected_skill_count: input.prepared.enabledSkills.length,
       },
     },
   });
@@ -599,9 +631,29 @@ export async function* invokeDeepAgentTurn(input: {
       workspace_id: input.prepared.workspace.id,
       user_id: input.prepared.userId,
       sourceweft_thread_id: input.prepared.thread.id,
+      selected_skill_ids: input.prepared.skillIds,
+      selected_skill_count: input.prepared.enabledSkills.length,
     },
     streamMode: ["messages", "tools", "updates", "checkpoints"],
   } satisfies AgentRunnableConfig;
+
+  if (input.prepared.enabledSkills.length > 0) {
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: "selected-skills",
+        kind: "state",
+        title: "Loaded selected skills",
+        status: "completed",
+        items: input.prepared.enabledSkills.map((skill) => skill.name),
+        description: `${input.prepared.enabledSkills.length} skill${input.prepared.enabledSkills.length === 1 ? "" : "s"} available under /skills.`,
+        metadata: {
+          skillIds: input.prepared.skillIds,
+          skillNames: input.prepared.enabledSkills.map((skill) => skill.name),
+        },
+      }),
+    };
+  }
 
   const streamInput = input.prepared.agentMode === "replay"
     ? null
@@ -788,7 +840,7 @@ export async function* invokeDeepAgentTurn(input: {
           }),
         };
       } else {
-        const title = getFilesystemToolStartTitle(toolName);
+        const title = getFilesystemToolStartTitle(toolName, normalizedInput);
         if (title) {
           yield {
             type: "thinking-step",
@@ -926,7 +978,7 @@ export async function* invokeDeepAgentTurn(input: {
         };
 
       } else {
-        const title = getFilesystemToolEndTitle(toolName);
+        const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
         if (title) {
           const metadata = {
             ...getFilesystemToolMetadata(toolName, output),
@@ -942,7 +994,11 @@ export async function* invokeDeepAgentTurn(input: {
               title,
               status: "completed",
               items: formatToolInputItems(nextToolCall.input),
-              description: getFilesystemToolDescription(toolName, metadata),
+              description: getFilesystemToolDescription(
+                toolName,
+                metadata,
+                nextToolCall.input,
+              ),
               metadata,
             }),
           };
@@ -1010,7 +1066,7 @@ export async function* invokeDeepAgentTurn(input: {
         status: "error",
         toolCall: nextToolCall,
       };
-      const title = getFilesystemToolEndTitle(toolName);
+      const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
       if (title) {
         yield {
           type: "thinking-step",

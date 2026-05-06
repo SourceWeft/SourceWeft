@@ -21,6 +21,7 @@ import {
 import {
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
+  type ChatSkillItem,
   type CitationRecord,
   type MessageVersion,
   type ModelReasoningSegmentRecord,
@@ -1107,6 +1108,8 @@ export default function DashboardChatThreadPage({
   // ── Sources state ──────────────────────────────────────────────────────────
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
 
   // ── Composer state ─────────────────────────────────────────────────────────
@@ -1272,6 +1275,54 @@ export default function DashboardChatThreadPage({
       searchEnabled ? "true" : "false",
     );
   }, [currentSearchStorageKey, searchEnabled]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setAvailableSkills([]);
+      setActiveSkillIds([]);
+      return;
+    }
+
+    let cancelled = false;
+    const activeWorkspaceId = workspaceId;
+    async function loadSkills() {
+      try {
+        const result = await contentClient.listSkillsCatalog(activeWorkspaceId);
+        if (cancelled) {
+          return;
+        }
+        const enabledSkills = result.items
+          .filter((skill) => skill.enabled && skill.enabledWorkspaceSkillId)
+          .map((skill) => ({
+            id: skill.enabledWorkspaceSkillId as string,
+            catalogId: skill.catalogId,
+            slug: skill.slug,
+            name: skill.name,
+            displayName: skill.displayName,
+            description: skill.description,
+            sourceType: skill.sourceType,
+            version: skill.version,
+            hasReadme: skill.hasReadme,
+        }));
+        setAvailableSkills(enabledSkills);
+
+        const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
+        setActiveSkillIds((current) =>
+          current.filter((id) => enabledIds.has(id)).slice(0, 5),
+        );
+      } catch {
+        if (!cancelled) {
+          setAvailableSkills([]);
+          setActiveSkillIds([]);
+        }
+      }
+    }
+
+    void loadSkills();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
 
   const messageGroups = useMemo(
     () => buildVersionedMessageGroups(messages),
@@ -1614,6 +1665,7 @@ export default function DashboardChatThreadPage({
       mode: "send" | "refresh" | "edit";
       content?: string;
       sourceIds: string[];
+      skillIds?: string[];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
       thinking?: RequestThinkingConfig;
@@ -1647,6 +1699,8 @@ export default function DashboardChatThreadPage({
             : null,
           metadata: {
             sourceIds: input.sourceIds,
+            skillIds: input.skillIds ?? [],
+            tools: { skillIds: input.skillIds ?? [] },
             versionOf: input.mode === "edit"
               ? (input.userMessageId ?? latestUserMessage?.id ?? null)
               : null,
@@ -1695,6 +1749,10 @@ export default function DashboardChatThreadPage({
           mode: input.mode,
           sourceIds: input.sourceIds,
         };
+        const selectedSkillIds = input.skillIds ?? [];
+        if (selectedSkillIds.length > 0) {
+          requestBody.tools = { skillIds: selectedSkillIds };
+        }
         const selectedLlmProfileAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
             ? selectedModels.llm?.id
@@ -2338,9 +2396,10 @@ export default function DashboardChatThreadPage({
       if (raw) {
         sessionStorage.removeItem(pendingKey);
         try {
-          const { content, sourceIds, thinking, thinkingSettings: pendingThinkingSettings, searchEnabled: pendingSearchEnabled } = JSON.parse(raw) as {
+          const { content, sourceIds, skillIds, thinking, thinkingSettings: pendingThinkingSettings, searchEnabled: pendingSearchEnabled } = JSON.parse(raw) as {
             content: string;
             sourceIds: string[];
+            skillIds?: string[];
             thinking?: RequestThinkingConfig;
             thinkingSettings?: PromptThinkingSettings;
             searchEnabled?: boolean;
@@ -2348,7 +2407,11 @@ export default function DashboardChatThreadPage({
           const pendingSourceIds = Array.isArray(sourceIds)
             ? sourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string")
             : [];
+          const pendingSkillIds = Array.isArray(skillIds)
+            ? skillIds.filter((skillId): skillId is string => typeof skillId === "string").slice(0, 5)
+            : [];
           persistActiveSourceIds(pendingSourceIds);
+          setActiveSkillIds(pendingSkillIds);
           if (pendingThinkingSettings) {
             setHasSavedThinkingPreference(true);
             setThinkingSettings(pendingThinkingSettings);
@@ -2360,6 +2423,7 @@ export default function DashboardChatThreadPage({
             mode: "send",
             content,
             sourceIds: pendingSourceIds,
+            skillIds: pendingSkillIds,
             thinking,
           });
         } catch {
@@ -2510,6 +2574,7 @@ export default function DashboardChatThreadPage({
           mode: "edit",
           content: text,
           sourceIds: editSourceIds,
+          skillIds: activeSkillIds,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
         });
@@ -2520,6 +2585,7 @@ export default function DashboardChatThreadPage({
         mode: "send",
         content: text,
         sourceIds: contextSourceIds,
+        skillIds: activeSkillIds,
       });
     },
     [
@@ -2531,6 +2597,7 @@ export default function DashboardChatThreadPage({
       messageGroups,
       messages,
       activeSourceIds,
+      activeSkillIds,
       streamThreadAction,
     ],
   );
@@ -2568,9 +2635,10 @@ export default function DashboardChatThreadPage({
     await streamThreadAction({
       mode: "refresh",
       sourceIds: refreshSourceIds,
+      skillIds: activeSkillIds,
       assistantMessageId: input.assistantMessageId,
     });
-  }, [activeSourceIds, isStreaming, messageGroups, streamThreadAction]);
+  }, [activeSourceIds, activeSkillIds, isStreaming, messageGroups, streamThreadAction]);
 
   const handleRestartFromMessage = useCallback(
     (input: {
@@ -2642,6 +2710,7 @@ export default function DashboardChatThreadPage({
         <ChatCanvas
           activeVersionByGroup={activeVersionByGroup}
           allSources={librarySources}
+          availableSkills={availableSkills}
           composerInitialInput={composerInitialInput}
           composerResetKey={composerResetKey}
           highlightedMessageId={highlightedMessageId}
@@ -2658,9 +2727,11 @@ export default function DashboardChatThreadPage({
           onRefreshLatest={handleRefreshLatest}
           onRestartFromMessage={handleRestartFromMessage}
           onSendMessage={handleSendMessage}
+          onSkillSelectionChange={setActiveSkillIds}
           searchEnabled={searchEnabled}
           onSearchEnabledChange={setSearchEnabled}
           selectedSources={selectedSources}
+          selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
           thinkingCapabilities={selectedModels.llm.capabilities}
           thinkingSettings={thinkingSettings}
@@ -2675,12 +2746,15 @@ export default function DashboardChatThreadPage({
           activeCitationIndex={activeCitationIndex}
           citations={displayedCitations}
           currentCitationMessageId={activeAssistantVersion?.id ?? null}
+          installedSkills={availableSkills}
           mode="thread"
           onCitationLocate={scrollToMessage}
           onCitationOpen={handleSourceHubCitationOpen}
+          onSkillSelectionChange={setActiveSkillIds}
           onSelectionChange={persistActiveSourceIds}
           onSourceLoad={setLibrarySources}
           selectedIds={activeSourceIds}
+          selectedSkillIds={activeSkillIds}
           threadCitations={threadCitations}
           workspaceId={workspaceId}
         />

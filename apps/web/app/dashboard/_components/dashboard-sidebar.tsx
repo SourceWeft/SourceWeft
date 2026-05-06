@@ -7,6 +7,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   MessageSquareText,
+  Sparkles,
 } from "lucide-react";
 import { Logo } from "@sourceweft/ui-web/logo";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -39,6 +40,12 @@ const navMain: NavItem[] = [
     href: "/dashboard/observability",
     icon: Activity,
     match: (p) => p.startsWith("/dashboard/observability"),
+  },
+  {
+    title: "Skills",
+    href: "/dashboard/skills",
+    icon: Sparkles,
+    match: (p) => p.startsWith("/dashboard/skills"),
   },
 ];
 

@@ -81,6 +81,7 @@ function buildTraceMetadata(input: {
     profileAlias: input.prepared.profileAlias,
     agentMode: input.prepared.agentMode,
     sourceCount: input.prepared.sourceIds.length,
+    selectedSkillCount: input.prepared.enabledSkills.length,
   };
 }
 
@@ -96,6 +97,7 @@ export function buildAgentRunSpanMetadata(
     modelAlias: prepared.modelAlias,
     profileAlias: prepared.profileAlias,
     gateway: buildGatewayAuditMetadata({ llm: prepared.llm }),
+    selectedSkillCount: prepared.enabledSkills.length,
   };
 }
 
@@ -107,6 +109,7 @@ function buildTraceInput(
     modelAlias: prepared.modelAlias,
     profileAlias: prepared.profileAlias,
     sourceIds: prepared.sourceIds,
+    skillIds: prepared.skillIds,
     threadId: prepared.thread.id,
     userMessageId: prepared.userMessage.id,
   };
@@ -212,6 +215,7 @@ function buildPrepareSpanInput(
     threadId: prepared.thread.id,
     userMessageId: prepared.userMessage.id,
     sourceIds: prepared.sourceIds,
+    skillIds: prepared.skillIds,
   };
 }
 
@@ -224,6 +228,7 @@ function buildPrepareSpanOutput(
     modelAlias: prepared.modelAlias,
     profileAlias: prepared.profileAlias,
     sourceCount: prepared.sourceIds.length,
+    selectedSkillCount: prepared.enabledSkills.length,
     isFirstAssistantResponse: prepared.isFirstAssistantResponse,
     assistantMessageParentId: prepared.assistantMessageParentId,
   };
@@ -301,6 +306,7 @@ async function observePrepareFailure(input: {
       input: {
         message: input.request.content,
         sourceIds: input.request.sourceIds ?? [],
+        skillIds: input.request.tools?.skillIds ?? [],
         threadId: input.request.threadId,
       },
       metadata: {
