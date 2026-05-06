@@ -668,11 +668,14 @@ type StreamEventPayload = {
 };
 
 type JobStatusResponse = {
-  data?: {
-    status?: string;
-    result?: unknown;
-  };
+  status?: string;
+  result?: unknown;
+  data?: JobStatusResponse;
 };
+
+function resolveJobStatusPayload(payload: JobStatusResponse | null) {
+  return payload?.data ?? payload;
+}
 
 function getTitleFromJobResult(value: unknown) {
   if (!value || typeof value !== "object") {
@@ -1826,8 +1829,9 @@ export default function DashboardChatThreadPage({
             }
 
             const payload = await response.json().catch(() => null) as JobStatusResponse | null;
-            const status = payload?.data?.status;
-            const title = getTitleFromJobResult(payload?.data?.result);
+            const jobStatus = resolveJobStatusPayload(payload);
+            const status = jobStatus?.status;
+            const title = getTitleFromJobResult(jobStatus?.result);
             if (title) {
               updateChatTitle(threadId, title);
               return;
