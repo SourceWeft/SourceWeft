@@ -12,7 +12,7 @@ const LOCALE_HEADER_NAME = "x-sourceweft-locale";
 const LOCALE_QUERY_PARAM = "lang";
 const LOCALE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const queryLocale = normalizeLocale(
     request.nextUrl.searchParams.get(LOCALE_QUERY_PARAM),
   );
