@@ -1,8 +1,11 @@
 import { resolveModelGatewayConfig } from "./config";
+import { ModelGatewayAsrEndpoint } from "./endpoints/asr";
 import { ModelGatewayChatEndpoint } from "./endpoints/chat";
 import { ModelGatewayEmbeddingsEndpoint } from "./endpoints/embeddings";
 import { ModelGatewayRerankEndpoint } from "./endpoints/rerank";
 import type {
+  AsrTranscribeInput,
+  AsrTranscribeResult,
   ChatCompleteInput,
   ChatCompleteResult,
   ChatStreamEvent,
@@ -25,11 +28,14 @@ export class ModelGatewayClient implements ModelGateway {
 
   private readonly rerankEndpoint: ModelGatewayRerankEndpoint;
 
+  private readonly asrEndpoint: ModelGatewayAsrEndpoint;
+
   constructor(config: ModelGatewayConfig) {
     const resolved = resolveModelGatewayConfig(config);
     this.chatEndpoint = new ModelGatewayChatEndpoint(resolved);
     this.embeddingsEndpoint = new ModelGatewayEmbeddingsEndpoint(resolved);
     this.rerankEndpoint = new ModelGatewayRerankEndpoint(resolved);
+    this.asrEndpoint = new ModelGatewayAsrEndpoint(resolved);
   }
 
   readonly chat = {
@@ -59,6 +65,13 @@ export class ModelGatewayClient implements ModelGateway {
       input: RerankInput,
       opts?: RequestOptions,
     ): Promise<RerankResult> => this.rerankEndpoint.rank(input, opts),
+  };
+
+  readonly asr = {
+    transcribe: async (
+      input: AsrTranscribeInput,
+      opts?: RequestOptions,
+    ): Promise<AsrTranscribeResult> => this.asrEndpoint.transcribe(input, opts),
   };
 }
 

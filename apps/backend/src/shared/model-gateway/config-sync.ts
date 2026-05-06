@@ -351,9 +351,11 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
   assertUniqueProfiles("chat", chatProfilesToSync);
   assertUniqueProfiles("image", imageProfilesToSync);
   assertUniqueProfiles("vision", visionProfilesToSync);
+  assertUniqueProfiles("asr", loaded.asrProfiles);
   assertUniqueRoutes("chat", chatProfilesToSync);
   assertUniqueRoutes("image", imageProfilesToSync);
   assertUniqueRoutes("vision", visionProfilesToSync);
+  assertUniqueRoutes("asr", loaded.asrProfiles);
 
   const now = new Date();
   await db.transaction(async (tx) => {
@@ -644,6 +646,43 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
     await tx
       .update(modelGatewayProfiles)
       .set({ isDefault: false, isActive: false, updatedAt: now })
+      .where(eq(modelGatewayProfiles.kind, "asr"));
+
+    for (const entry of loaded.asrProfiles) {
+      const gatewayConfigId = gatewayIdBySlug.get(entry.gatewaySlug);
+      if (!gatewayConfigId) {
+        throw new Error(
+          `Global model gateway config references missing gateway slug '${entry.gatewaySlug}' for asr profile '${entry.modelAlias}'`,
+        );
+      }
+      await upsertModelGatewayProfileFromGlobalConfig(
+        "asr",
+        entry,
+        gatewayConfigId,
+        now,
+        tx,
+      );
+      await tx.insert(modelGatewayRoutes).values({
+        id: randomUUID(),
+        configVersionId,
+        alias: entry.profileAlias,
+        routeKind: "asr",
+        strategy: entry.routingStrategy,
+        targetProviderName: entry.providerName,
+        targetModel: entry.targetModel,
+        priority: entry.priority,
+        weight: entry.weight,
+        constraintsJson: {},
+        isDefault: entry.isDefault,
+        isActive: entry.isActive,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await tx
+      .update(modelGatewayProfiles)
+      .set({ isDefault: false, isActive: false, updatedAt: now })
       .where(eq(modelGatewayProfiles.kind, "embedding"));
 
     for (const entry of loaded.embeddingProfiles) {
@@ -696,6 +735,7 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
     imageProfiles: imageProfilesToSync.length,
     visionProfiles: visionProfilesToSync.length,
     rerankProfiles: loaded.rerankProfiles.length,
+    asrProfiles: loaded.asrProfiles.length,
     embeddingProfiles: loaded.embeddingProfiles.length,
   });
 

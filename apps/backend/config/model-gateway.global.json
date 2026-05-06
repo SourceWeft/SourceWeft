@@ -32,7 +32,8 @@
       "supports": [
         "chat",
         "embeddings",
-        "rerank"
+        "rerank",
+        "asr"
       ],
       "timeoutMs": 30000,
       "maxRetries": 2,
@@ -130,6 +131,20 @@
         "inputCostPerToken": 2.5e-08,
         "outputCostPerToken": 0
       }
+    }
+  ],
+  "asrProfiles": [
+    {
+      "profileAlias": "asr-default",
+      "modelAlias": "asr-default",
+      "gatewaySlug": "deepinfra-default",
+      "providerName": "deepinfra",
+      "targetModel": "openai/whisper-large-v3",
+      "routingStrategy": "priority",
+      "priority": 1,
+      "weight": 100,
+      "isDefault": true,
+      "isActive": true
     }
   ],
   "embeddingProfiles": [

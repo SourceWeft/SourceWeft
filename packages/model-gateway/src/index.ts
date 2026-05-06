@@ -24,6 +24,13 @@ export { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 export { createDeepInfraProvider } from "./providers/deepinfra";
 
 export type {
+  AsrAudioInput,
+  AsrResponseFormat,
+  AsrSegment,
+  AsrTimestampGranularity,
+  AsrTranscribeInput,
+  AsrTranscribeResult,
+  AsrWord,
   ByokCredentialsInput,
   ChatCompleteInput,
   ChatCompleteResult,

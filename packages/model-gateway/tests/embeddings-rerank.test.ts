@@ -12,7 +12,7 @@ test("createDeepInfraProvider defaults to provider root URL", () => {
     baseUrl: "https://api.deepinfra.com/v1",
     apiKey: "deepinfra-key",
     defaultHeaders: undefined,
-    supports: ["chat", "embeddings", "rerank"],
+    supports: ["chat", "embeddings", "rerank", "asr"],
     enabled: true,
   });
 });
@@ -28,11 +28,55 @@ test("resolveDeepInfraBaseUrls accepts root and OpenAI-compatible URLs", () => {
     openAICompatibleBaseUrl: "https://api.deepinfra.com/v1/openai",
     inferenceBaseUrl: "https://api.deepinfra.com/v1/inference",
   });
+  assert.deepEqual(resolveDeepInfraBaseUrls("https://api.deepinfra.com/v1/openai/"), {
+    rootBaseUrl: "https://api.deepinfra.com/v1",
+    openAICompatibleBaseUrl: "https://api.deepinfra.com/v1/openai",
+    inferenceBaseUrl: "https://api.deepinfra.com/v1/inference",
+  });
 });
 
 test("DeepInfra chat and embeddings adapters expose provider identity", () => {
   assert.equal(new DeepInfraChatAdapter().kind, "deepinfra");
   assert.equal(new DeepInfraEmbeddingsAdapter().kind, "deepinfra");
+});
+
+test("DeepInfra embeddings reject base64 encoding format", async () => {
+  const gateway = createModelGateway({
+    allowedModelAliases: ["embed-default"],
+    providers: {
+      deepinfra: {
+        kind: "deepinfra",
+        baseUrl: "https://api.deepinfra.com/v1",
+        apiKey: "deepinfra-key",
+      },
+    },
+    modelRoutes: {
+      "embed-default": {
+        strategy: "priority",
+        targets: [{ provider: "deepinfra", model: "BAAI/bge-m3", priority: 1 }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      gateway.embeddings.embed({
+        model: "embed-default",
+        text: "hello",
+        encodingFormat: "base64",
+      }),
+    (error: unknown) => {
+      const normalized = error as {
+        code?: string;
+        provider?: string;
+        retryable?: boolean;
+      };
+      assert.equal(normalized.code, "BAD_REQUEST");
+      assert.equal(normalized.provider, "deepinfra");
+      assert.equal(normalized.retryable, false);
+      return true;
+    },
+  );
 });
 
 test("embeddings.embedBatch normalizes LangChain embeddings output", async () => {

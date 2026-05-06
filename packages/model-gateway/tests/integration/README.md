@@ -16,10 +16,10 @@ export OPENROUTER_API_KEY="..."
 export OPENROUTER_API_BASE="https://openrouter.ai/api/v1"
 
 export DEEPINFRA_API_KEY="..."
-export DEEPINFRA_API_BASE="https://api.deepinfra.com/v1/openai"
+export DEEPINFRA_API_BASE="https://api.deepinfra.com/v1"
 ```
 
-`OPENROUTER_API_BASE` and `DEEPINFRA_API_BASE` are optional. The defaults above are used when omitted.
+`OPENROUTER_API_BASE` and `DEEPINFRA_API_BASE` are optional. The defaults above are used when omitted. DeepInfra's `/v1/openai` base URL is also accepted for compatibility.
 
 ## Coverage
 

@@ -1,6 +1,7 @@
 import { normalizeGatewayError } from "../errors";
 import type {
   ChatCompleteInput,
+  AsrTranscribeInput,
   EmbedBatchInput,
   EmbedInput,
   GatewayOperation,
@@ -114,7 +115,7 @@ function buildChatLifecycleAttributes(messages: ChatCompleteInput["messages"]) {
 
 function buildLifecycleAttributes(
   operation: GatewayOperation,
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput,
 ) {
   if (operation !== "chat.complete" && operation !== "chat.stream") {
     return {};
@@ -195,7 +196,7 @@ function summarizeToolCalls(
 }
 
 function resolveModelParameters(
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput,
 ) {
   return compactRecord({
     ...("temperature" in payload && payload.temperature !== undefined
@@ -237,12 +238,24 @@ function resolveModelParameters(
     ...("returnDocuments" in payload && payload.returnDocuments !== undefined
       ? { returnDocuments: payload.returnDocuments }
       : {}),
+    ...("language" in payload && payload.language !== undefined
+      ? { language: payload.language }
+      : {}),
+    ...("prompt" in payload && payload.prompt !== undefined
+      ? { prompt: textSummary(payload.prompt) }
+      : {}),
+    ...("responseFormat" in payload && payload.responseFormat !== undefined
+      ? { responseFormat: payload.responseFormat }
+      : {}),
+    ...("timestampGranularities" in payload && payload.timestampGranularities !== undefined
+      ? { timestampGranularities: payload.timestampGranularities }
+      : {}),
   });
 }
 
 function buildInput(
   operation: GatewayOperation,
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput,
 ) {
   if (operation === "chat.complete" || operation === "chat.stream") {
     const chat = payload as ChatCompleteInput;
@@ -284,6 +297,20 @@ function buildInput(
     };
   }
 
+  if (operation === "asr.transcribe") {
+    const asr = payload as AsrTranscribeInput;
+    return {
+      fileName: asr.fileName,
+      mimeType: asr.mimeType,
+      audioBytes:
+        asr.audio instanceof Blob
+          ? asr.audio.size
+          : asr.audio instanceof ArrayBuffer
+            ? asr.audio.byteLength
+            : asr.audio.byteLength,
+    };
+  }
+
   const rerank = payload as RerankInput;
   return {
     query: textSummary(rerank.query),
@@ -296,7 +323,7 @@ function buildInput(
 
 export function createGenerationObservation(input: {
   operation: GatewayOperation;
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput;
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput;
   options?: RequestOptions;
   target: ResolvedRequestTarget;
 }) {

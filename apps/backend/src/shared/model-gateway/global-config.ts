@@ -86,6 +86,7 @@ export type GlobalModelGatewayConfig = {
   imageProfiles: GlobalModelProfileEntry[];
   visionProfiles: GlobalModelProfileEntry[];
   rerankProfiles: GlobalModelProfileEntry[];
+  asrProfiles: GlobalModelProfileEntry[];
   embeddingProfiles: GlobalEmbeddingProfileEntry[];
 };
 
@@ -170,6 +171,7 @@ type RawGlobalModelGatewayConfig = {
   imageProfiles?: unknown;
   visionProfiles?: unknown;
   rerankProfiles?: unknown;
+  asrProfiles?: unknown;
   embeddingProfiles?: unknown;
 };
 
@@ -439,7 +441,12 @@ function parseGatewayEntry(
 function parseModelProfileEntry(
   entry: RawGlobalModelProfileEntry,
   index: number,
-  field: "chatProfiles" | "imageProfiles" | "visionProfiles" | "rerankProfiles",
+  field:
+    | "chatProfiles"
+    | "imageProfiles"
+    | "visionProfiles"
+    | "rerankProfiles"
+    | "asrProfiles",
 ): GlobalModelProfileEntry {
   const modelAlias = asNonEmptyString(
     entry.modelAlias,
@@ -670,6 +677,15 @@ function parseGlobalModelGatewayConfig(
       "rerankProfiles",
     ),
   );
+  const asrProfiles = Array.isArray(raw.asrProfiles)
+    ? raw.asrProfiles.map((entry, index) =>
+        parseModelProfileEntry(
+          entry as RawGlobalModelProfileEntry,
+          index,
+          "asrProfiles",
+        ),
+      )
+    : [];
   const embeddingProfiles = raw.embeddingProfiles.map((entry, index) =>
     parseEmbeddingProfileEntry(entry as RawGlobalEmbeddingProfileEntry, index),
   );
@@ -680,6 +696,7 @@ function parseGlobalModelGatewayConfig(
     ...imageProfiles,
     ...visionProfiles,
     ...rerankProfiles,
+    ...asrProfiles,
     ...embeddingProfiles,
   ]) {
     if (profileAliasSet.has(profile.profileAlias)) {
@@ -695,6 +712,7 @@ function parseGlobalModelGatewayConfig(
     ...imageProfiles,
     ...visionProfiles,
     ...rerankProfiles,
+    ...asrProfiles,
     ...embeddingProfiles,
   ]) {
     if (!gatewaySlugSet.has(profile.gatewaySlug)) {
@@ -718,6 +736,9 @@ function parseGlobalModelGatewayConfig(
     assertSingleDefault(visionProfiles, "visionProfiles");
   }
   assertSingleDefault(rerankProfiles, "rerankProfiles");
+  if (asrProfiles.length > 0) {
+    assertSingleDefault(asrProfiles, "asrProfiles");
+  }
   assertSingleDefault(embeddingProfiles, "embeddingProfiles");
 
   return {
@@ -728,6 +749,7 @@ function parseGlobalModelGatewayConfig(
     imageProfiles,
     visionProfiles,
     rerankProfiles,
+    asrProfiles,
     embeddingProfiles,
   };
 }

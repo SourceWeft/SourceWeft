@@ -4,6 +4,7 @@ export type ModelKind =
   | "chat"
   | "embedding"
   | "rerank"
+  | "asr"
   | "image"
   | "vision"
   | "video";
@@ -276,7 +277,13 @@ export interface RouteDecision {
   providerKind: ProviderKind;
 }
 
-export type GatewayOperation = "chat.complete" | "chat.stream" | "embeddings.embed" | "embeddings.embedBatch" | "rerank.rank";
+export type GatewayOperation =
+  | "chat.complete"
+  | "chat.stream"
+  | "embeddings.embed"
+  | "embeddings.embedBatch"
+  | "rerank.rank"
+  | "asr.transcribe";
 
 export interface LangChainChatModelLike {
   getName?(): string;
@@ -449,6 +456,60 @@ export interface RerankResult {
   raw: Record<string, unknown>;
 }
 
+export type AsrAudioInput = Blob | ArrayBuffer | Uint8Array;
+
+export type AsrResponseFormat =
+  | "json"
+  | "text"
+  | "srt"
+  | "verbose_json"
+  | "vtt";
+
+export type AsrTimestampGranularity = "segment" | "word";
+
+export interface AsrTranscribeInput extends GatewayExecutionInput {
+  model: string;
+  audio: AsrAudioInput;
+  fileName: string;
+  mimeType?: string;
+  language?: string;
+  prompt?: string;
+  temperature?: number;
+  responseFormat?: AsrResponseFormat;
+  timestampGranularities?: AsrTimestampGranularity[];
+  metadata?: GatewayRequestMetadata;
+  extraBody?: Record<string, unknown>;
+}
+
+export interface AsrSegment {
+  id?: number;
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface AsrWord {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface AsrTranscribeResult {
+  model: string;
+  text: string;
+  language?: string;
+  duration?: number;
+  inputLengthMs?: number;
+  segments?: AsrSegment[];
+  words?: AsrWord[];
+  usage?: UsageInfo;
+  provider?: string;
+  providerModel?: string;
+  routeDecision?: RouteDecision;
+  traceId?: string;
+  raw: Record<string, unknown>;
+}
+
 export interface ModelGateway {
   chat: {
     complete(
@@ -469,6 +530,12 @@ export interface ModelGateway {
   };
   rerank: {
     rank(input: RerankInput, opts?: RequestOptions): Promise<RerankResult>;
+  };
+  asr: {
+    transcribe(
+      input: AsrTranscribeInput,
+      opts?: RequestOptions,
+    ): Promise<AsrTranscribeResult>;
   };
 }
 

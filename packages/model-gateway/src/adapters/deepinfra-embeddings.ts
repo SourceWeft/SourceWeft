@@ -1,4 +1,5 @@
 import { OpenAIEmbeddings } from "@langchain/openai";
+import { ModelGatewayError } from "../errors";
 import { resolveDeepInfraBaseUrls } from "./deepinfra-url";
 import type { EmbeddingsAdapter } from "./types";
 
@@ -12,11 +13,27 @@ export class DeepInfraEmbeddingsAdapter implements EmbeddingsAdapter {
       model: target.providerModel,
       apiKey: target.apiKey,
       dimensions: input.dimensions,
-      encodingFormat: input.encodingFormat,
+      encodingFormat: resolveDeepInfraEncodingFormat(input.encodingFormat),
       configuration: {
         baseURL: openAICompatibleBaseUrl,
         defaultHeaders: target.defaultHeaders,
       },
     });
   }
+}
+
+function resolveDeepInfraEncodingFormat(
+  encodingFormat: Parameters<EmbeddingsAdapter["createModel"]>[1]["encodingFormat"],
+) {
+  if (encodingFormat === "base64") {
+    throw new ModelGatewayError({
+      code: "BAD_REQUEST",
+      message:
+        "DeepInfra OpenAI-compatible embeddings only support encodingFormat 'float' in this gateway",
+      retryable: false,
+      provider: "deepinfra",
+    });
+  }
+
+  return encodingFormat ?? "float";
 }

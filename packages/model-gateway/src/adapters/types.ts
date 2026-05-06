@@ -2,6 +2,8 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type {
   ChatCompleteInput,
+  AsrTranscribeInput,
+  AsrTranscribeResult,
   EmbedBatchInput,
   EmbedInput,
   ProviderKind,
@@ -40,4 +42,16 @@ export interface RerankTransport {
     options?: RequestOptions;
     fetch: typeof globalThis.fetch;
   }): Promise<RerankResult>;
+}
+
+export interface AsrTransport {
+  readonly kind: ProviderKind;
+  readonly supportedAudioFormats: readonly string[];
+
+  execute(input: {
+    target: ResolvedRequestTarget;
+    payload: AsrTranscribeInput;
+    options?: RequestOptions;
+    fetch: typeof globalThis.fetch;
+  }): Promise<AsrTranscribeResult>;
 }

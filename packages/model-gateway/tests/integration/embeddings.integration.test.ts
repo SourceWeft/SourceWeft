@@ -45,7 +45,7 @@ test(
     assert.equal(result.provider, "deepinfra");
     assert.equal(result.providerModel, DEEPINFRA_EMBED_MODEL);
     assert.ok(Array.isArray(result.embedding));
-    assert.ok(result.embedding.length > 0);
+    assert.equal(result.embedding.length, 1024);
     assert.ok(result.embedding.every((value) => typeof value === "number"));
   },
 );
@@ -82,6 +82,41 @@ test(
     assert.equal(result.embeddings.length, 2);
     assert.ok(result.embeddings.every((embedding) => embedding.length > 0));
     assert.equal(result.provider, "deepinfra");
+  },
+);
+
+test(
+  "embeddings.embed via DeepInfra accepts OpenAI-compatible base URL",
+  { skip: !readIntegrationEnv().deepinfra },
+  async () => {
+    const provider = requireProvider(readIntegrationEnv().deepinfra, "DEEPINFRA_API_KEY");
+    const gateway = createModelGateway(
+      createIntegrationGatewayConfig({
+        aliases: [EMBED_ALIAS],
+        providers: {
+          deepinfra: createProviderConfig({
+            kind: "deepinfra",
+            baseUrl: "https://api.deepinfra.com/v1/openai",
+            apiKey: provider.apiKey,
+          }),
+        },
+        routes: {
+          [EMBED_ALIAS]: createPriorityRoute({
+            provider: "deepinfra",
+            model: DEEPINFRA_EMBED_MODEL,
+          }),
+        },
+      }),
+    );
+
+    const result = await gateway.embeddings.embed({
+      model: EMBED_ALIAS,
+      text: "integration vector sample",
+    });
+
+    assert.equal(result.provider, "deepinfra");
+    assert.equal(result.providerModel, DEEPINFRA_EMBED_MODEL);
+    assert.ok(result.embedding.every((value) => typeof value === "number"));
   },
 );
 

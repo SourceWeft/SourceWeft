@@ -45,7 +45,7 @@ export function readIntegrationEnv(): IntegrationEnvConfig {
           apiKey: deepinfraApiKey,
           baseUrl:
             process.env.DEEPINFRA_API_BASE?.trim() ||
-            "https://api.deepinfra.com/v1/openai",
+            "https://api.deepinfra.com/v1",
         }
       : null,
   };

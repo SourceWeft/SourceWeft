@@ -19,6 +19,7 @@ export const DEFAULT_ALLOWED_MODEL_ALIASES: readonly string[] = [
   "chat-default",
   "embed-default",
   "rerank-default",
+  "asr-default",
 ];
 
 function normalizeBaseUrl(baseUrl: string): string {
