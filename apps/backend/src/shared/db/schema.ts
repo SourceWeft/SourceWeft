@@ -342,6 +342,12 @@ export const billingAccounts = pgTable(
     }).notNull(),
     pagesLimit: integer("pages_limit").notNull(),
     pagesUsed: integer("pages_used").notNull().default(0),
+    monthlyPagesGrant: integer("monthly_pages_grant").notNull().default(0),
+    monthlyPagesBalance: integer("monthly_pages_balance").notNull().default(0),
+    addOnPagesBalance: integer("add_on_pages_balance").notNull().default(0),
+    pagesConsumedThisCycle: integer("pages_consumed_this_cycle")
+      .notNull()
+      .default(0),
     monthlyCreditsGrant: integer("monthly_credits_grant").notNull(),
     monthlyCreditsBalance: integer("monthly_credits_balance").notNull(),
     addOnCreditsBalance: integer("add_on_credits_balance").notNull().default(0),
@@ -372,6 +378,22 @@ export const billingAccounts = pgTable(
     ),
     check("billing_accounts_pages_limit_check", sql`${table.pagesLimit} >= 0`),
     check("billing_accounts_pages_used_check", sql`${table.pagesUsed} >= 0`),
+    check(
+      "billing_accounts_monthly_pages_grant_check",
+      sql`${table.monthlyPagesGrant} >= 0`,
+    ),
+    check(
+      "billing_accounts_monthly_pages_balance_check",
+      sql`${table.monthlyPagesBalance} >= 0`,
+    ),
+    check(
+      "billing_accounts_add_on_pages_balance_check",
+      sql`${table.addOnPagesBalance} >= 0`,
+    ),
+    check(
+      "billing_accounts_pages_consumed_check",
+      sql`${table.pagesConsumedThisCycle} >= 0`,
+    ),
     check(
       "billing_accounts_monthly_grant_check",
       sql`${table.monthlyCreditsGrant} >= 0`,

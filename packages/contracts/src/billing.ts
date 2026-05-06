@@ -53,6 +53,11 @@ export const billingSummaryResponseSchema = z.object({
     limit: z.number().int().nonnegative(),
     used: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
+    monthlyGrant: z.number().int().nonnegative(),
+    monthlyBalance: z.number().int().nonnegative(),
+    addOnBalance: z.number().int().nonnegative(),
+    consumedThisCycle: z.number().int().nonnegative(),
+    available: z.number().int().nonnegative(),
   }),
   credits: z.object({
     monthlyGrant: z.number().int().nonnegative(),

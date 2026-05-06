@@ -25,8 +25,10 @@ import {
   DEFAULT_CONSUME_FEATURE,
   DEFAULT_INGESTION_FEATURE,
   getAvailableCredits,
-  getPagesRemaining,
+  getAvailablePages,
+  getTotalPagesBalance,
   getTotalCreditsBalance,
+  spendPages,
   spendCredits,
   toSummary,
 } from "./service-helpers";
@@ -314,8 +316,8 @@ export class BillingUsageService {
           return {
             teamId: account.teamId,
             pagesConsumed: 0,
-            pagesUsed: account.pagesUsed,
-            pagesRemaining: getPagesRemaining(account),
+            pagesUsed: account.pagesConsumedThisCycle,
+            pagesRemaining: getAvailablePages(account),
             idempotencyReplayed: false,
           };
         }
@@ -336,8 +338,8 @@ export class BillingUsageService {
             return {
               teamId: account.teamId,
               pagesConsumed: Math.abs(existing.delta),
-              pagesUsed: account.pagesUsed,
-              pagesRemaining: getPagesRemaining(account),
+              pagesUsed: account.pagesConsumedThisCycle,
+              pagesRemaining: getAvailablePages(account),
               idempotencyReplayed: true,
             };
           }
@@ -365,7 +367,10 @@ export class BillingUsageService {
           client,
         });
 
-        account.pagesUsed += pagesToConsume;
+        spendPages(account, pagesToConsume);
+        account.pagesConsumedThisCycle += pagesToConsume;
+        account.pagesLimit = account.monthlyPagesGrant;
+        account.pagesUsed = account.pagesConsumedThisCycle;
         account.updatedAt = new Date().toISOString();
         await this.store.updateAccount(account, client);
 
@@ -377,15 +382,17 @@ export class BillingUsageService {
             eventType: "consume",
             unitType: "page",
             delta: -pagesToConsume,
-            balanceAfter: getPagesRemaining(account),
+            balanceAfter: getAvailablePages(account),
             feature: input.feature ?? DEFAULT_INGESTION_FEATURE,
             actorUserId,
             workspaceId: input.workspaceId,
             referenceId: input.referenceId,
             idempotencyKey,
             metadata: {
-              pageLimit: account.pagesLimit,
-              pagesUsed: account.pagesUsed,
+              monthlyPagesGrant: account.monthlyPagesGrant,
+              monthlyPagesBalance: account.monthlyPagesBalance,
+              addOnPagesBalance: account.addOnPagesBalance,
+              consumedThisCycle: account.pagesConsumedThisCycle,
             },
           },
         });
@@ -393,8 +400,8 @@ export class BillingUsageService {
         return {
           teamId: account.teamId,
           pagesConsumed: pagesToConsume,
-          pagesUsed: account.pagesUsed,
-          pagesRemaining: getPagesRemaining(account),
+          pagesUsed: account.pagesConsumedThisCycle,
+          pagesRemaining: getAvailablePages(account),
           idempotencyReplayed: false,
         };
       },
@@ -485,9 +492,9 @@ export class BillingUsageService {
     client: PoolClient;
   }) {
     const { account, pagesToConsume, feature, actorUserId, client } = input;
-    const projected = account.pagesUsed + pagesToConsume;
+    const available = getAvailablePages(account);
 
-    if (projected <= account.pagesLimit) {
+    if (available >= pagesToConsume) {
       return;
     }
 
@@ -501,33 +508,33 @@ export class BillingUsageService {
         "Ingestion pages limit exceeded",
         {
           teamId: account.teamId,
-          limit: account.pagesLimit,
-          used: account.pagesUsed,
           requested: pagesToConsume,
+          available,
+          monthlyPagesBalance: account.monthlyPagesBalance,
+          addOnPagesBalance: account.addOnPagesBalance,
         },
       );
     }
 
-    const previousLimit = account.pagesLimit;
-    account.pagesLimit = projected;
-    const limitDelta = account.pagesLimit - previousLimit;
+    const missing = pagesToConsume - available;
+    account.addOnPagesBalance += missing;
 
     await appendBillingLedger({
       store: this.store,
       client,
       account,
       entry: {
-        eventType: "adjust",
+        eventType: "grant",
         unitType: "page",
-        delta: limitDelta,
-        balanceAfter: getPagesRemaining(account),
-        feature: "shadow_limit_expand",
+        delta: missing,
+        balanceAfter: getTotalPagesBalance(account),
+        feature: "shadow_auto_grant",
         actorUserId,
         metadata: {
-          previousLimit,
-          expandedLimit: projected,
-          pagesUsed: account.pagesUsed,
+          reason: "shadow_overage",
           originalFeature: feature ?? DEFAULT_INGESTION_FEATURE,
+          monthlyPagesBalance: account.monthlyPagesBalance,
+          addOnPagesBalance: account.addOnPagesBalance,
         },
       },
     });

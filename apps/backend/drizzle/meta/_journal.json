@@ -64,6 +64,13 @@
       "when": 1777996666268,
       "tag": "0008_skills_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778083200000,
+      "tag": "0009_pages_wallet",
+      "breakpoints": true
     }
   ]
 }

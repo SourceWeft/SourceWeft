@@ -153,19 +153,25 @@ test("page quota writes grant and consume ledger balances", async () => {
   assert.equal(pageLedgers[1]?.delta, -6);
   assert.equal(pageLedgers[1]?.balanceAfter, 294);
   assert.deepEqual(pageLedgers[1]?.metadata, {
-    pageLimit: 300,
-    pagesUsed: 6,
+    monthlyPagesGrant: 300,
+    monthlyPagesBalance: 294,
+    addOnPagesBalance: 0,
+    consumedThisCycle: 6,
   });
 });
 
-test("shadow page overage expands quota before consuming", async () => {
+test("shadow page overage grants add-on pages before consuming", async () => {
   const store = new MemoryBillingStore();
   const shadowConfig: BillingRuntimeConfig = {
     ...runtimeConfig,
     mode: "shadow",
   };
   const accountService = new BillingAccountService(store, shadowConfig);
-  const usageService = new BillingUsageService(store, shadowConfig, accountService);
+  const usageService = new BillingUsageService(
+    store,
+    shadowConfig,
+    accountService,
+  );
 
   await usageService.meterIngestion(
     "team_1",
@@ -184,12 +190,62 @@ test("shadow page overage expands quota before consuming", async () => {
   assert.equal(pageLedgers[0]?.delta, 300);
   assert.equal(pageLedgers[0]?.balanceAfter, 300);
 
-  assert.equal(pageLedgers[1]?.eventType, "adjust");
-  assert.equal(pageLedgers[1]?.feature, "shadow_limit_expand");
+  assert.equal(pageLedgers[1]?.eventType, "grant");
+  assert.equal(pageLedgers[1]?.feature, "shadow_auto_grant");
   assert.equal(pageLedgers[1]?.delta, 5);
   assert.equal(pageLedgers[1]?.balanceAfter, 305);
 
   assert.equal(pageLedgers[2]?.eventType, "consume");
   assert.equal(pageLedgers[2]?.delta, -305);
   assert.equal(pageLedgers[2]?.balanceAfter, 0);
+});
+
+test("monthly pages expire and regrant while add-on pages carry over", async () => {
+  const store = new MemoryBillingStore();
+  const accountService = new BillingAccountService(store, runtimeConfig);
+  const usageService = new BillingUsageService(
+    store,
+    runtimeConfig,
+    accountService,
+  );
+
+  await usageService.meterIngestion(
+    "team_1",
+    {
+      pages: 290,
+      feature: "ingestion",
+      idempotencyKey: "source-index:3",
+    },
+    "user_1",
+  );
+
+  assert.ok(store.account);
+  store.account = {
+    ...store.account,
+    cycleEndAt: new Date(Date.now() - 60_000).toISOString(),
+    addOnPagesBalance: 7,
+  };
+
+  const summary = await usageService.getSummary("team_1");
+
+  assert.equal(summary.pages.monthlyGrant, 300);
+  assert.equal(summary.pages.monthlyBalance, 300);
+  assert.equal(summary.pages.addOnBalance, 7);
+  assert.equal(summary.pages.consumedThisCycle, 0);
+  assert.equal(summary.pages.used, 0);
+  assert.equal(summary.pages.remaining, 307);
+
+  const pageLedgers = store.ledgers.filter((entry) => entry.unitType === "page");
+  const expireLedger = pageLedgers.find(
+    (entry) => entry.eventType === "expire",
+  );
+  const cycleGrants = pageLedgers.filter(
+    (entry) =>
+      entry.eventType === "grant" && entry.feature === "cycle_grant",
+  );
+
+  assert.equal(expireLedger?.delta, -10);
+  assert.equal(expireLedger?.balanceAfter, 7);
+  assert.equal(cycleGrants.at(-1)?.delta, 300);
+  assert.equal(cycleGrants.at(-1)?.balanceAfter, 307);
 });

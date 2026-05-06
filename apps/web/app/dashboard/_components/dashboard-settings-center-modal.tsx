@@ -43,16 +43,25 @@ type BillingUsage = Awaited<ReturnType<typeof billingClient.getUsage>>;
 type BillingLedger = Awaited<ReturnType<typeof billingClient.getLedger>>;
 type BillingLedgerEntry = BillingLedger["items"][number];
 type BillingOrg = { id: string; name: string; slug?: string };
+type UsageActivityFilter = "all" | BillingLedgerEntry["unitType"];
 type UsageActivityRow = {
   key: string;
   detail: string;
   date: string;
   change: string;
-  unit?: string;
+  unitType: UsageActivityFilter | "seat";
 };
 
-const USAGE_ACTIVITY_DISPLAY_LIMIT = 20;
+const USAGE_ACTIVITY_PAGE_SIZE = 20;
 const USAGE_ACTIVITY_FETCH_LIMIT = 200;
+const usageActivityFilters = [
+  { label: "All", value: "all" },
+  { label: "Pages", value: "page" },
+  { label: "Credits", value: "credit" },
+] as const satisfies Array<{
+  label: string;
+  value: UsageActivityFilter;
+}>;
 
 const menuItems: Array<{
   key: SettingsCenterTab;
@@ -215,6 +224,12 @@ function formatLedgerUnit(unitType: BillingLedgerEntry["unitType"]) {
   return unitType === "page" ? "pages" : "credits";
 }
 
+function formatLedgerActivityChange(entry: BillingLedgerEntry) {
+  return `${formatLedgerChange(entry)} ${formatLedgerUnit(
+    entry.unitType,
+  )} · ${formatNumber(Math.max(entry.balanceAfter, 0))} left`;
+}
+
 function formatLedgerDetail(entry: BillingLedgerEntry) {
   const feature = formatFeatureName(entry.feature);
 
@@ -233,12 +248,24 @@ function formatLedgerDetail(entry: BillingLedgerEntry) {
   if (entry.eventType === "grant") {
     if (entry.feature === "cycle_grant") {
       return entry.unitType === "page"
-        ? "Monthly page quota granted"
+        ? "Monthly pages granted"
         : "Monthly credits granted";
     }
 
     if (entry.feature === "seat_quota_grant") {
-      return "Seat credits granted";
+      return entry.unitType === "page"
+        ? "Seat pages granted"
+        : "Seat credits granted";
+    }
+
+    if (entry.feature === "plan_upgrade_grant") {
+      return entry.unitType === "page"
+        ? "Plan pages granted"
+        : "Plan credits granted";
+    }
+
+    if (entry.unitType === "page" && entry.feature === "shadow_auto_grant") {
+      return "Add-on pages granted";
     }
 
     return `${feature} granted`;
@@ -246,7 +273,7 @@ function formatLedgerDetail(entry: BillingLedgerEntry) {
 
   if (entry.eventType === "expire") {
     return entry.unitType === "page"
-      ? "Unused page quota expired"
+      ? "Monthly pages expired"
       : "Unused credits expired";
   }
 
@@ -304,8 +331,10 @@ function buildUsageMetrics(input: {
       value: formatNumber(input.summary.credits.consumedThisCycle),
     },
     {
-      label: "Pages used",
-      value: formatNumber(input.summary.pages.used),
+      label: "Pages used / left",
+      value: `${formatNumber(
+        input.summary.pages.consumedThisCycle,
+      )} / ${formatNumber(input.summary.pages.available)}`,
     },
     seatsMetric,
   ];
@@ -1091,6 +1120,11 @@ function UsagePanel() {
   const [ledger, setLedger] = React.useState<BillingLedgerEntry[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [activityFilter, setActivityFilter] =
+    React.useState<UsageActivityFilter>("all");
+  const [activityVisibleCount, setActivityVisibleCount] = React.useState(
+    USAGE_ACTIVITY_PAGE_SIZE,
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1145,10 +1179,20 @@ function UsagePanel() {
     };
   }, [resolvingPersonalTeamId, teamId]);
 
+  React.useEffect(() => {
+    setActivityVisibleCount(USAGE_ACTIVITY_PAGE_SIZE);
+  }, [teamId]);
+
   const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
   const creditsLimit = summary?.credits.monthlyGrant ?? 0;
   const creditsPercent =
     creditsLimit > 0 ? Math.min(100, (creditsUsed / creditsLimit) * 100) : 0;
+  const pagesUsed = summary?.pages.consumedThisCycle ?? 0;
+  const pagesMonthlyGrant = summary?.pages.monthlyGrant ?? 0;
+  const pagesPercent =
+    pagesMonthlyGrant > 0
+      ? Math.min(100, (pagesUsed / pagesMonthlyGrant) * 100)
+      : 0;
   const cycleLedgerEntries = summary
     ? ledger.filter((entry) => isLedgerEntryInCycle(entry, summary))
     : ledger;
@@ -1156,7 +1200,7 @@ function UsagePanel() {
     (entry) => entry.eventType === "consume",
   ).length;
   const seatActivityRow: UsageActivityRow | null =
-    summary && !isPersonal
+    summary && !isPersonal && activityFilter === "all"
       ? {
           detail: "Seats occupied",
           date: formatUsageDate(new Date().toISOString()),
@@ -1164,22 +1208,30 @@ function UsagePanel() {
             summary.seats.remaining,
           )} left`,
           key: "seats-current",
+          unitType: "seat",
         }
       : null;
   const ledgerActivityLimit =
-    USAGE_ACTIVITY_DISPLAY_LIMIT - (seatActivityRow ? 1 : 0);
-  const ledgerActivityRows = cycleLedgerEntries
+    activityVisibleCount - (seatActivityRow ? 1 : 0);
+  const filteredLedgerEntries =
+    activityFilter === "all"
+      ? cycleLedgerEntries
+      : cycleLedgerEntries.filter((entry) => entry.unitType === activityFilter);
+  const ledgerActivityRows = filteredLedgerEntries
     .slice(0, ledgerActivityLimit)
     .map<UsageActivityRow>((entry) => ({
       detail: formatLedgerDetail(entry),
       date: formatUsageDate(entry.createdAt),
-      unit: formatLedgerUnit(entry.unitType),
-      change: formatLedgerChange(entry),
+      change: formatLedgerActivityChange(entry),
       key: entry.id,
+      unitType: entry.unitType,
     }));
   const activityRows = seatActivityRow
     ? [seatActivityRow, ...ledgerActivityRows]
     : ledgerActivityRows;
+  const totalActivityRowCount =
+    filteredLedgerEntries.length + (seatActivityRow ? 1 : 0);
+  const hasMoreActivityRows = activityRows.length < totalActivityRowCount;
   const data = {
     plan: summary
       ? formatPlanName(summary.planFamily, isPersonal)
@@ -1192,6 +1244,21 @@ function UsagePanel() {
         ? "Loading credits..."
         : "-- / -- credits",
     creditsPercent,
+    pagesLabel: summary
+      ? `${formatNumber(pagesUsed)} used · ${formatNumber(
+          summary.pages.available,
+        )} left`
+      : loading
+        ? "Loading pages..."
+        : "-- used · -- left",
+    pagesPercent,
+    pagesWallet: summary
+      ? `Monthly ${formatNumber(
+          summary.pages.monthlyBalance,
+        )} · Add-on ${formatNumber(summary.pages.addOnBalance)}`
+      : loading
+        ? "Monthly ... · Add-on ..."
+        : "Monthly -- · Add-on --",
     metrics:
       summary
         ? buildUsageMetrics({
@@ -1201,7 +1268,7 @@ function UsagePanel() {
           })
         : [
             { label: "Credits used", value: loading ? "..." : "--" },
-            { label: "Pages used", value: loading ? "..." : "--" },
+            { label: "Pages used / left", value: loading ? "..." : "--" },
             {
               label: isPersonal ? "Usage events" : "Seats used / left",
               value: loading ? "..." : "--",
@@ -1211,7 +1278,9 @@ function UsagePanel() {
   const emptyActivityLabel = loading
     ? "Loading activity..."
     : teamId
-      ? "No usage activity yet"
+      ? activityFilter === "all"
+        ? "No usage activity yet"
+        : `No ${formatLedgerUnit(activityFilter)} activity yet`
       : "Usage account unavailable";
 
   return (
@@ -1242,6 +1311,18 @@ function UsagePanel() {
             </div>
             <Progress className="h-1.5 bg-muted" value={data.creditsPercent} />
           </div>
+          <div className="border-t border-border px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
+              <span className="text-muted-foreground">Pages</span>
+              <span className="text-right font-medium text-foreground">
+                {data.pagesLabel}
+              </span>
+            </div>
+            <Progress className="h-1.5 bg-muted" value={data.pagesPercent} />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {data.pagesWallet}
+            </p>
+          </div>
           <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
             {data.metrics.map((m) => (
               <div className="px-4 py-3" key={m.label}>
@@ -1259,7 +1340,34 @@ function UsagePanel() {
 
       {/* ── Activity ── */}
       <div className="pt-7">
-        <p className="mb-4 text-base font-semibold text-foreground">Activity</p>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-base font-semibold text-foreground">Activity</p>
+          <div
+            aria-label="Filter usage activity"
+            className="flex rounded-lg border border-border bg-muted/40 p-0.5"
+            role="group"
+          >
+            {usageActivityFilters.map((filter) => (
+              <button
+                aria-pressed={activityFilter === filter.value}
+                className={cn(
+                  "min-w-14 rounded-md px-2.5 py-1 text-xs transition-colors",
+                  activityFilter === filter.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                key={filter.value}
+                onClick={() => {
+                  setActivityFilter(filter.value);
+                  setActivityVisibleCount(USAGE_ACTIVITY_PAGE_SIZE);
+                }}
+                type="button"
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full text-sm">
             <thead className="border-b border-border bg-muted/30">
@@ -1286,7 +1394,7 @@ function UsagePanel() {
                       {row.date}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-foreground">
-                      {row.unit ? `${row.change} ${row.unit}` : row.change}
+                      {row.change}
                     </td>
                   </tr>
                 ))
@@ -1304,6 +1412,26 @@ function UsagePanel() {
             </tbody>
           </table>
         </div>
+        {hasMoreActivityRows && (
+          <div className="px-4 py-2">
+            <Button
+              className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+              onClick={() =>
+                setActivityVisibleCount((count) =>
+                  Math.min(
+                    count + USAGE_ACTIVITY_PAGE_SIZE,
+                    totalActivityRowCount,
+                  ),
+                )
+              }
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              Load more
+            </Button>
+          </div>
+        )}
         {error && (
           <p className="mt-3 text-xs text-muted-foreground">{error}</p>
         )}

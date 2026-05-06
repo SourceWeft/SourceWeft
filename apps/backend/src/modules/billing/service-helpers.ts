@@ -120,8 +120,43 @@ export function getAvailableCredits(account: BillingAccountState) {
   return Math.max(available, 0);
 }
 
+export function spendPages(
+  account: BillingAccountState,
+  pagesToConsume: number,
+) {
+  let remaining = pagesToConsume;
+
+  if (account.monthlyPagesBalance > 0) {
+    const fromMonthly = Math.min(account.monthlyPagesBalance, remaining);
+    account.monthlyPagesBalance -= fromMonthly;
+    remaining -= fromMonthly;
+  }
+
+  if (remaining > 0 && account.addOnPagesBalance > 0) {
+    const fromAddOn = Math.min(account.addOnPagesBalance, remaining);
+    account.addOnPagesBalance -= fromAddOn;
+    remaining -= fromAddOn;
+  }
+
+  if (remaining > 0) {
+    throw new BillingError(
+      "INSUFFICIENT_PAGES_INTERNAL",
+      500,
+      "Unable to allocate page buckets for consumption",
+    );
+  }
+}
+
+export function getTotalPagesBalance(account: BillingAccountState) {
+  return account.monthlyPagesBalance + account.addOnPagesBalance;
+}
+
+export function getAvailablePages(account: BillingAccountState) {
+  return Math.max(getTotalPagesBalance(account), 0);
+}
+
 export function getPagesRemaining(account: BillingAccountState) {
-  return Math.max(account.pagesLimit - account.pagesUsed, 0);
+  return getAvailablePages(account);
 }
 
 export function toSummary(input: {
@@ -129,10 +164,7 @@ export function toSummary(input: {
   billingMode: BillingRuntimeConfig["mode"];
   seatsUsed?: number;
 }): BillingSummaryResponse {
-  const pagesRemaining = Math.max(
-    input.account.pagesLimit - input.account.pagesUsed,
-    0,
-  );
+  const pagesRemaining = getAvailablePages(input.account);
   const seatsUsed = Math.max(0, Math.floor(input.seatsUsed ?? 0));
   const seatsLimit = Math.max(0, input.account.seatCount);
 
@@ -144,8 +176,13 @@ export function toSummary(input: {
     cycleEndAt: input.account.cycleEndAt,
     pages: {
       limit: input.account.pagesLimit,
-      used: input.account.pagesUsed,
+      used: input.account.pagesConsumedThisCycle,
       remaining: pagesRemaining,
+      monthlyGrant: input.account.monthlyPagesGrant,
+      monthlyBalance: input.account.monthlyPagesBalance,
+      addOnBalance: input.account.addOnPagesBalance,
+      consumedThisCycle: input.account.pagesConsumedThisCycle,
+      available: getAvailablePages(input.account),
     },
     credits: {
       monthlyGrant: input.account.monthlyCreditsGrant,

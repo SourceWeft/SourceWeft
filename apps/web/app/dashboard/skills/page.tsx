@@ -9,6 +9,7 @@ import {
   Database,
   FileText,
   Loader2,
+  PanelsTopLeft,
   Search,
   Sparkles,
 } from "lucide-react";
@@ -135,6 +136,75 @@ function SortMenu<T extends string>({
             {option.key === value ? <Check className="h-3.5 w-3.5" /> : null}
           </DropdownMenuItem>
         ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function WorkspaceMenu({
+  disabled,
+  onChange,
+  workspaceId,
+  workspaceName,
+  workspaces,
+}: {
+  disabled?: boolean;
+  onChange: (workspaceId: string, workspaceName: string) => void;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  workspaces: Array<{ id: string; name: string }>;
+}) {
+  const options =
+    workspaceId &&
+    workspaceName &&
+    !workspaces.some((item) => item.id === workspaceId)
+      ? [{ id: workspaceId, name: workspaceName }, ...workspaces]
+      : workspaces;
+  const activeWorkspace =
+    options.find((item) => item.id === workspaceId) ??
+    (workspaceId && workspaceName
+      ? { id: workspaceId, name: workspaceName }
+      : null);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="flex h-8 max-w-[280px] min-w-0 items-center gap-2 rounded-md border border-border bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 aria-expanded:bg-accent"
+          disabled={disabled || options.length === 0}
+          type="button"
+        >
+          <PanelsTopLeft className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-left font-medium">
+            {activeWorkspace?.name ?? "Select workspace"}
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        {options.length === 0 ? (
+          <DropdownMenuItem disabled>No workspaces</DropdownMenuItem>
+        ) : (
+          options.map((item, index) => {
+            const active = item.id === workspaceId;
+            return (
+              <DropdownMenuItem
+                className="gap-2"
+                key={item.id}
+                onClick={() => onChange(item.id, item.name)}
+              >
+                <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {active ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    `⌘${index + 1}`
+                  )}
+                </span>
+              </DropdownMenuItem>
+            );
+          })
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -507,6 +577,35 @@ export default function SkillsPage() {
     setPublisherFilter("all");
   }, []);
 
+  const handleWorkspaceChange = React.useCallback(
+    async (nextWorkspaceId: string, nextWorkspaceName: string) => {
+      if (nextWorkspaceId === workspace?.id) {
+        return;
+      }
+
+      setWorkspace({ id: nextWorkspaceId, name: nextWorkspaceName });
+      setItems([]);
+      setError(null);
+      setIsLoading(true);
+      try {
+        await dashboardState.switchWorkspace(nextWorkspaceId, nextWorkspaceName);
+        const result = await contentClient.listSkillsCatalog(nextWorkspaceId);
+        setItems(result.items);
+      } catch (changeError) {
+        setItems([]);
+        setError(
+          changeError instanceof Error
+            ? changeError.message
+            : "Failed to switch workspace.",
+        );
+      } finally {
+        setIsLoading(false);
+        setIsResolvingWorkspace(false);
+      }
+    },
+    [dashboardState, workspace?.id],
+  );
+
   async function installSkill(item: SkillCatalogItem) {
     if (!workspace || item.enabled) return;
 
@@ -548,7 +647,16 @@ export default function SkillsPage() {
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
           <ScrollArea className="min-h-0 flex-1">
             <div className="px-4 py-5">
-              <div className="mb-4 flex items-center justify-end">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <WorkspaceMenu
+                  disabled={isResolvingWorkspace}
+                  onChange={(nextWorkspaceId, nextWorkspaceName) =>
+                    void handleWorkspaceChange(nextWorkspaceId, nextWorkspaceName)
+                  }
+                  workspaceId={workspace?.id ?? dashboardState.workspaceId}
+                  workspaceName={workspace?.name ?? dashboardState.workspaceName}
+                  workspaces={dashboardState.workspaces}
+                />
                 <SortMenu
                   onChange={setSort}
                   options={sortOptions}

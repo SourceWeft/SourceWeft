@@ -44,6 +44,10 @@ export type BillingAccountState = {
   cycleEndAt: string;
   pagesLimit: number;
   pagesUsed: number;
+  monthlyPagesGrant: number;
+  monthlyPagesBalance: number;
+  addOnPagesBalance: number;
+  pagesConsumedThisCycle: number;
   monthlyCreditsGrant: number;
   monthlyCreditsBalance: number;
   addOnCreditsBalance: number;
