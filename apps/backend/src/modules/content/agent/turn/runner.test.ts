@@ -21,3 +21,18 @@ test("preserves non-read_file tool outputs", () => {
 
   assert.equal(normalizeToolOutputForObservability("search_sources", output), output);
 });
+
+test("normalizes web tool outputs to display-safe metadata", () => {
+  const output = normalizeToolOutputForObservability(
+    "web_search",
+    "Use these web search results internally.\n\n<web_result id='c1' rank='1' url='https://example.com/a' title='A'>Snippet</web_result>",
+  );
+
+  assert.deepEqual(output, {
+    resultCount: 1,
+    urlCount: 1,
+    urls: ["https://example.com/a"],
+    truncated: false,
+  });
+  assert.equal(JSON.stringify(output).includes("Use these web search results internally"), false);
+});

@@ -7,7 +7,9 @@ import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import {
   createRetrievalTool,
 } from "../tools/retrieval-tool";
+import { createWebTools } from "../tools/web-tools";
 import { SelectedSkillsBackend } from "../../skills/backend";
+import { createDefaultWebProvider } from "../../web";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { TraceContext } from "../../../../shared/llm-observability";
 import { endSpan, startSpan } from "../../../../shared/llm-observability";
@@ -164,7 +166,7 @@ function compactTraceText(value: string, maxLength = 96) {
 }
 
 function formatToolInputItems(input: Record<string, unknown>) {
-  const entries = ["query", "path", "pattern", "glob"]
+  const entries = ["query", "url", "path", "pattern", "glob"]
     .map((key) => {
       const value = input[key];
       return typeof value === "string" && value.trim().length > 0
@@ -173,7 +175,33 @@ function formatToolInputItems(input: Record<string, unknown>) {
     })
     .filter((item): item is string => item !== null);
 
+  const items = input.items;
+  if (Array.isArray(items)) {
+    for (const item of items) {
+      const record = toObjectRecord(item);
+      const url = typeof record?.url === "string" ? record.url.trim() : "";
+      if (url) {
+        entries.push(`url: ${compactTraceText(url)}`);
+      }
+    }
+  }
+
   return entries.slice(0, 3);
+}
+
+function extractWebFetchUrls(input: Record<string, unknown>) {
+  const items = input.items;
+  if (!Array.isArray(items)) {
+    return [] as string[];
+  }
+
+  return items
+    .map((item) => {
+      const record = toObjectRecord(item);
+      return typeof record?.url === "string" ? record.url.trim() : "";
+    })
+    .filter((url) => url.length > 0)
+    .slice(0, 5);
 }
 
 function resolveFilesystemPath(input: Record<string, unknown>) {
@@ -261,6 +289,10 @@ function extractToolOutputText(output: unknown) {
 }
 
 export function normalizeToolOutputForObservability(toolName: string, output: unknown) {
+  if (toolName === "web_search" || toolName === "web_fetch") {
+    return normalizeWebToolOutput(toolName, output);
+  }
+
   if (toolName !== "read_file") {
     return output;
   }
@@ -346,6 +378,129 @@ function getFilesystemToolDescription(
     return `Read ${metadata.chunkCount} ${noun} ${metadata.chunkCount === 1 ? "chunk" : "chunks"}.`;
   }
   return undefined;
+}
+
+function getWebToolStartTitle(toolName: string) {
+  if (toolName === "web_search") {
+    return "Searching the web";
+  }
+  if (toolName === "web_fetch") {
+    return "Fetching web pages";
+  }
+  return null;
+}
+
+function getWebToolEndTitle(toolName: string) {
+  if (toolName === "web_search") {
+    return "Searched the web";
+  }
+  if (toolName === "web_fetch") {
+    return "Fetched web pages";
+  }
+  return null;
+}
+
+function getWebToolInputMetadata(toolName: string, input: Record<string, unknown>) {
+  if (toolName === "web_search") {
+    const query = typeof input.query === "string" ? input.query.trim() : "";
+    return {
+      ...(query ? { query } : {}),
+    };
+  }
+
+  if (toolName === "web_fetch") {
+    const urls = extractWebFetchUrls(input);
+    return {
+      urlCount: urls.length,
+    };
+  }
+
+  return {};
+}
+
+function getWebToolMetadata(output: unknown) {
+  const outputText = extractToolOutputText(output);
+  const metadata: Record<string, unknown> = {};
+  if (!outputText) {
+    return metadata;
+  }
+
+  const webResultMatches = outputText.match(/<web_result /g);
+  const webPageMatches = outputText.match(/<web_page /g);
+  if (webResultMatches) {
+    metadata.resultCount = webResultMatches.length;
+  }
+  if (webPageMatches) {
+    metadata.resultCount = webPageMatches.length;
+    metadata.pageCount = webPageMatches.length;
+    const errorMatches = outputText.match(/<web_page [^>]* error=/g);
+    if (errorMatches) {
+      metadata.errorCount = errorMatches.length;
+      metadata.successCount = Math.max(0, webPageMatches.length - errorMatches.length);
+    }
+  }
+  metadata.truncated = outputText.includes("truncated='true'");
+  return metadata;
+}
+
+function normalizeWebToolOutput(toolName: string, output: unknown) {
+  if (toolName !== "web_search" && toolName !== "web_fetch") {
+    return output;
+  }
+
+  const outputText = extractToolOutputText(output);
+  if (!outputText) {
+    return output;
+  }
+
+  const urls = [...outputText.matchAll(/url='([^']+)'/g)]
+    .map((match) => match[1])
+    .filter((url): url is string => typeof url === "string");
+  const webResultMatches = outputText.match(/<web_result /g);
+  const webPageMatches = outputText.match(/<web_page /g);
+  const errorMatches = outputText.match(/<web_page [^>]* error=/g);
+
+  return {
+    ...(webResultMatches ? { resultCount: webResultMatches.length } : {}),
+    ...(webPageMatches ? { pageCount: webPageMatches.length } : {}),
+    ...(errorMatches ? { errorCount: errorMatches.length } : {}),
+    urlCount: urls.length,
+    urls: urls.slice(0, 10),
+    truncated: outputText.includes("truncated='true'"),
+  };
+}
+
+function formatDateInTimeZone(date: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function buildAgentRuntimePrompt(input: {
+  webToolsAvailable: boolean;
+  timezone: string;
+}) {
+  const timeZone = input.timezone;
+  const currentDate = formatDateInTimeZone(new Date(), timeZone);
+  const lines = [
+    `Current date: ${currentDate}.`,
+    `Current timezone: ${timeZone}.`,
+  ];
+
+  if (input.webToolsAvailable) {
+    lines.push(
+      "web_search and web_fetch are available for public web access in this turn.",
+      "Use web_search for real-time, current, or external public web information instead of answering from memory.",
+      "Use web_fetch for specific webpages, full-page analysis, or when web_search evidence is insufficient or conflicting.",
+      "For workspace-specific or selected-source questions, use selected source tools first. Use web tools only when the user explicitly asks for internet information, asks about current public facts, or selected sources do not contain enough evidence.",
+      `When a date qualifier is useful, use the current date/year from this runtime context: ${currentDate}.`,
+    );
+  }
+
+  return lines.join("\n");
 }
 
 function extractReasoningSummaryFromProviderFields(
@@ -552,6 +707,16 @@ export async function* invokeDeepAgentTurn(input: {
       return buildRetrievalChunks({ retrieval, citationByChunkId });
     },
   });
+  const webProvider = input.prepared.webSearchEnabled
+    ? createDefaultWebProvider()
+    : null;
+  const webTools = webProvider
+    ? createWebTools({ provider: webProvider, citationRegistry })
+    : [];
+  const runtimePrompt = buildAgentRuntimePrompt({
+    webToolsAvailable: webTools.length > 0,
+    timezone: input.prepared.timezone,
+  });
 
   const databaseBackend = new DatabaseKnowledgeBackend({
     teamId: input.prepared.workspace.organizationId,
@@ -569,9 +734,10 @@ export async function* invokeDeepAgentTurn(input: {
   const agent = await createThreadAgent({
     modelAlias: input.prepared.modelAlias,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
-    tools: [retrievalTool],
+    tools: [retrievalTool, ...webTools],
     backend,
     skills: skillsBackend ? ["/skills/"] : undefined,
+    runtimePrompt,
     execution: {
       executionMode: input.llm?.executionMode,
       providerHint: input.llm?.providerHint,
@@ -839,6 +1005,28 @@ export async function* invokeDeepAgentTurn(input: {
             },
           }),
         };
+      } else if (toolName === "web_search" || toolName === "web_fetch") {
+        const title = getWebToolStartTitle(toolName);
+        if (title) {
+          const metadata = {
+            ...getWebToolInputMetadata(toolName, normalizedInput),
+            toolCallId,
+            tool: toolName,
+          };
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: `tool:${toolCallId}`,
+              kind: "state",
+              title,
+              status: "in_progress",
+              items: formatToolInputItems(normalizedInput),
+              metadata: {
+                ...metadata,
+              },
+            }),
+          };
+        }
       } else {
         const title = getFilesystemToolStartTitle(toolName, normalizedInput);
         if (title) {
@@ -977,6 +1165,28 @@ export async function* invokeDeepAgentTurn(input: {
           }),
         };
 
+      } else if (toolName === "web_search" || toolName === "web_fetch") {
+        const title = getWebToolEndTitle(toolName);
+        if (title) {
+          const metadata: Record<string, unknown> = {
+            ...getWebToolInputMetadata(toolName, nextToolCall.input),
+            ...getWebToolMetadata(toolPayload.output),
+            latencyMs,
+            toolCallId,
+            tool: toolName,
+          };
+          yield {
+            type: "thinking-step",
+            step: setThinkingStep({
+              id: `tool:${toolCallId}`,
+              kind: "state",
+              title,
+              status: "completed",
+              items: formatToolInputItems(nextToolCall.input),
+              metadata,
+            }),
+          };
+        }
       } else {
         const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
         if (title) {
@@ -1066,8 +1276,26 @@ export async function* invokeDeepAgentTurn(input: {
         status: "error",
         toolCall: nextToolCall,
       };
+      const webTitle = getWebToolEndTitle(toolName);
       const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
-      if (title) {
+      if (webTitle) {
+        yield {
+          type: "thinking-step",
+          step: setThinkingStep({
+            id: `tool:${toolCallId}`,
+            kind: "state",
+            title: `${webTitle} failed`,
+            status: "completed",
+            items: formatToolInputItems(nextToolCall.input),
+            description: errorText,
+            metadata: {
+              latencyMs,
+              toolCallId,
+              tool: toolName,
+            },
+          }),
+        };
+      } else if (title) {
         yield {
           type: "thinking-step",
           step: setThinkingStep({

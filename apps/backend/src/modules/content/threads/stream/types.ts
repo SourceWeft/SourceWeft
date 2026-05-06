@@ -7,6 +7,7 @@ export type RefreshThreadInput = {
   userId: string;
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
+  timezone?: string;
   userMessageId?: string;
   assistantMessageId?: string;
   idempotencyKey?: string;

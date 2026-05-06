@@ -70,7 +70,7 @@ import type { CitationRecord } from "./chat-canvas";
 import { SourcePreviewPanel } from "./source-preview-panel";
 
 const tabs = ["Library", "Skills", "Connectors", "Citations"] as const;
-const addTabs = ["Text", "File"] as const;
+const addTabs = ["File", "Text"] as const;
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -942,7 +942,7 @@ export function SourcesHub({
     ? citations[activeCitationIndex - 1]?.chunkId
     : null;
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [addTab, setAddTab] = useState<AddTab>("Text");
+  const [addTab, setAddTab] = useState<AddTab>("File");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [textTitle, setTextTitle] = useState("");
   const [textContent, setTextContent] = useState("");
@@ -1201,7 +1201,7 @@ export function SourcesHub({
     setTextContent("");
     setFiles([]);
     setUploadProgress(0);
-    setAddTab("Text");
+    setAddTab("File");
     setIsDragActive(false);
     dragDepthRef.current = 0;
   }, []);

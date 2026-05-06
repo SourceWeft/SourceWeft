@@ -12,6 +12,7 @@ import type { resolveActiveChatProfileByAlias } from "./model-resolution";
 
 export type ThreadToolsSelection = {
   skillIds?: string[];
+  webSearchEnabled?: boolean;
 };
 
 export type StreamThreadEventInput = {
@@ -21,6 +22,7 @@ export type StreamThreadEventInput = {
   content: string;
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
+  timezone?: string;
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
   userMessageParentId?: string | null;
@@ -51,6 +53,8 @@ export type PreparedThreadTurn = {
   messageContent: string;
   sourceIds: string[];
   skillIds: string[];
+  webSearchEnabled: boolean;
+  timezone: string;
   enabledSkills: EnabledSkillDescriptor[];
   userMessage: MessageRecord;
   runTraceId: string;

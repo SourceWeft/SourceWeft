@@ -172,13 +172,14 @@ export const DEFAULT_PROMPT_THINKING_SETTINGS: PromptThinkingSettings = {
 
 export type CitationRecord = {
   citation: string;
-  sourceId: string;
+  sourceId: string | null;
   sourceTitle?: string;
-  documentId: string;
+  documentId: string | null;
   chunkId: string;
   chunkNo?: number;
   score: number;
   excerpt: string;
+  externalUri?: string;
 };
 
 export type ToolCallRecord = {
@@ -584,10 +585,13 @@ function getToolOutputContent(output: unknown) {
 
   if (typeof output === "object") {
     const record = output as Record<string, unknown>;
+    if (typeof record.displayContent === "string") {
+      return record.displayContent;
+    }
     if (typeof record.content === "string") {
       return record.content;
     }
-    return JSON.stringify(output);
+    return null;
   }
 
   return String(output);
@@ -632,6 +636,61 @@ function getToolHitCount(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord
     : null;
 }
 
+function getToolResultCount(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
+  const output = toolCall.output && typeof toolCall.output === "object"
+    ? (toolCall.output as Record<string, unknown>)
+    : undefined;
+  const outputCount = getRecordValue(output, "resultCount") ?? getRecordValue(output, "urlCount");
+  if (typeof outputCount === "number" && Number.isFinite(outputCount)) {
+    return outputCount;
+  }
+
+  const metadataCount = getRecordValue(toolStep?.metadata, "resultCount");
+  return typeof metadataCount === "number" && Number.isFinite(metadataCount)
+    ? metadataCount
+    : null;
+}
+
+function getToolFetchUrls(toolCall: ToolCallRecord) {
+  const items = getRecordValue(toolCall.input, "items");
+  if (!Array.isArray(items)) {
+    return [] as string[];
+  }
+
+  return items
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const url = (item as Record<string, unknown>).url;
+      return typeof url === "string" && url.trim().length > 0 ? url.trim() : null;
+    })
+    .filter((url): url is string => url !== null);
+}
+
+function getToolFetchCount(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
+  const urls = getToolFetchUrls(toolCall);
+  if (urls.length > 0) {
+    return urls.length;
+  }
+
+  const metadataUrlCount = getRecordValue(toolStep?.metadata, "urlCount");
+  return typeof metadataUrlCount === "number" && Number.isFinite(metadataUrlCount)
+    ? metadataUrlCount
+    : null;
+}
+
+function getToolConcurrency(toolStep?: ThinkingStepRecord) {
+  const concurrency = getRecordValue(toolStep?.metadata, "concurrency");
+  return typeof concurrency === "number" && Number.isFinite(concurrency)
+    ? concurrency
+    : null;
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
 function summarizeToolOutput(output: unknown) {
   const content = getToolOutputContent(output);
   return content ? compactText(content) : null;
@@ -645,6 +704,32 @@ function getToolDisplayLabel(toolCall: ToolCallRecord) {
   if (toolCall.tool === "search_sources") {
     const query = getToolQuery(toolCall);
     return query ? `Search sources: ${compactText(query, 72)}` : "Search sources";
+  }
+
+  if (toolCall.tool === "web_search") {
+    const query = getToolQuery(toolCall);
+    const verb = toolCall.status === "running"
+      ? "Searching web"
+      : toolCall.status === "error"
+        ? "Web search failed"
+        : "Searched web";
+    return query ? `${verb}: ${compactText(query, 72)}` : verb;
+  }
+
+  if (toolCall.tool === "web_fetch") {
+    const urls = getToolFetchUrls(toolCall);
+    const count = urls.length;
+    const firstUrl = urls[0] ? compactText(urls[0], 56) : null;
+    const verb = toolCall.status === "running"
+      ? "Fetching pages"
+      : toolCall.status === "error"
+        ? "Page fetch failed"
+        : "Fetched pages";
+    if (count > 0 && firstUrl) {
+      const suffix = count > 1 ? ` +${count - 1}` : "";
+      return `${verb}: ${firstUrl}${suffix}`;
+    }
+    return verb;
   }
 
   const inputPreview = Object.entries(toolCall.input)
@@ -702,7 +787,9 @@ function getThinkingMetadataParts(metadata: Record<string, unknown> | undefined)
     chunkCount: "chunks",
     hitCount: "hits",
     latencyMs: "time",
+    limit: "limit",
     matchCount: "matches",
+    pageCount: "pages",
     removedCitationCount: "removed citations",
     resultCount: "results",
     sourceCount: "sources",
@@ -724,18 +811,32 @@ function getToolStepMetadataParts(metadata: Record<string, unknown> | undefined)
   }
 
   const rest = { ...metadata };
+  delete rest.concurrency;
   delete rest.hitCount;
   delete rest.latencyMs;
+  delete rest.limit;
+  delete rest.pageCount;
+  delete rest.query;
+  delete rest.resultCount;
+  delete rest.urlCount;
   return getThinkingMetadataParts(rest);
 }
 
 function getToolCallDetailParts(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
   const hitCount = getToolHitCount(toolCall, toolStep);
+  const resultCount = toolCall.tool === "web_search"
+    ? getToolResultCount(toolCall, toolStep)
+    : null;
+  const fetchCount = toolCall.tool === "web_fetch" ? getToolFetchCount(toolCall, toolStep) : null;
+  const concurrency = toolCall.tool === "web_fetch" ? getToolConcurrency(toolStep) : null;
   const latencyMs = toolCall.latencyMs ??
     (typeof toolStep?.metadata?.latencyMs === "number" ? toolStep.metadata.latencyMs : null);
   return [
     `status: ${toolCall.status}`,
     hitCount !== null ? `hits: ${hitCount}` : null,
+    resultCount !== null ? `${resultCount} ${pluralize(resultCount, "result")}` : null,
+    fetchCount !== null ? `${fetchCount} ${pluralize(fetchCount, "URL")}` : null,
+    concurrency !== null ? `concurrency: ${concurrency}` : null,
     typeof latencyMs === "number" ? `time: ${Math.round(latencyMs)}ms` : null,
   ].filter((part): part is string => part !== null);
 }
@@ -749,6 +850,7 @@ function ToolCallDetails({
 }) {
   const query = getToolQuery(toolCall, toolStep);
   const shouldShowQuery = Boolean(query && toolCall.tool !== "search_sources");
+  const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
   const shouldShowOutputSummary = Boolean(
       outputSummary &&
@@ -764,6 +866,17 @@ function ToolCallDetails({
         </p>
       ) : null}
       {toolStep?.detail ? <p>{toolStep.detail}</p> : null}
+      {fetchUrls.length > 0 ? (
+        <div>
+          <span className="font-medium text-foreground/80">URLs:</span>{" "}
+          {fetchUrls.slice(0, 5).map((url, index) => (
+            <span key={url}>
+              {index > 0 ? ", " : null}
+              {compactText(url, 80)}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
       {toolCall.error ? <p className="text-destructive">{toolCall.error}</p> : null}
     </div>

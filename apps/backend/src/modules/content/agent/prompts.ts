@@ -64,6 +64,19 @@ Do not expose internal tool parameters, /kb paths, /skills paths, backend IDs, r
 - Citation markers should appear only where they support a source-grounded statement.
 </output_rules>`;
 
+export function buildRuntimeSystemPrompt(runtimePrompt?: string) {
+  const compactRuntimePrompt = runtimePrompt?.trim();
+  if (!compactRuntimePrompt) {
+    return CHAT_SYSTEM_PROMPT;
+  }
+
+  return `${CHAT_SYSTEM_PROMPT}
+
+<runtime_context>
+${compactRuntimePrompt}
+</runtime_context>`;
+}
+
 export function buildChatTitlePrompt(userQuery: string) {
   return `You are a title generator. Output ONLY a thread title. Nothing else.
 

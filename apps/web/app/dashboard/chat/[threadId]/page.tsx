@@ -139,6 +139,14 @@ function buildRequestThinking(input: {
   };
 }
 
+function resolveClientTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function appendReasoningChunk(current: string | undefined, next: string) {
   if (!current) {
     return next;
@@ -230,14 +238,14 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       const chunkNo = toNullableNumber(record.chunkNo) ?? undefined;
       const score = toNullableNumber(record.score);
       const excerpt = toNullableString(record.excerpt);
+      const externalUri = toNullableString(record.externalUri) ?? undefined;
 
       if (
         citation === null ||
-        !sourceId ||
-        !documentId ||
         !chunkId ||
         score === null ||
-        excerpt === null
+        excerpt === null ||
+        (!externalUri && (!sourceId || !documentId))
       ) {
         return null;
       }
@@ -256,6 +264,9 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       }
       if (chunkNo !== undefined) {
         citationRecord.chunkNo = chunkNo;
+      }
+      if (externalUri !== undefined) {
+        citationRecord.externalUri = externalUri;
       }
 
       return citationRecord;
@@ -1672,6 +1683,7 @@ export default function DashboardChatThreadPage({
       userMessageId?: string | null;
       assistantMessageId?: string | null;
       thinking?: RequestThinkingConfig;
+      searchEnabled?: boolean;
     }) => {
       if (!workspaceId) {
         return;
@@ -1703,7 +1715,10 @@ export default function DashboardChatThreadPage({
           metadata: {
             sourceIds: input.sourceIds,
             skillIds: input.skillIds ?? [],
-            tools: { skillIds: input.skillIds ?? [] },
+            tools: {
+              skillIds: input.skillIds ?? [],
+              webSearchEnabled: input.searchEnabled ?? searchEnabled,
+            },
             versionOf: input.mode === "edit"
               ? (input.userMessageId ?? latestUserMessage?.id ?? null)
               : null,
@@ -1751,11 +1766,13 @@ export default function DashboardChatThreadPage({
         const requestBody: Record<string, unknown> = {
           mode: input.mode,
           sourceIds: input.sourceIds,
+          timezone: resolveClientTimezone(),
         };
         const selectedSkillIds = input.skillIds ?? [];
-        if (selectedSkillIds.length > 0) {
-          requestBody.tools = { skillIds: selectedSkillIds };
-        }
+        requestBody.tools = {
+          skillIds: selectedSkillIds,
+          webSearchEnabled: input.searchEnabled ?? searchEnabled,
+        };
         const selectedLlmProfileAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
             ? selectedModels.llm?.id
@@ -2348,6 +2365,7 @@ export default function DashboardChatThreadPage({
       loadThreadMessages,
       messages,
       selectedModels,
+      searchEnabled,
       streamWithSelectedLlm,
       threadId,
       thinkingSettings,
@@ -2429,6 +2447,7 @@ export default function DashboardChatThreadPage({
             sourceIds: pendingSourceIds,
             skillIds: pendingSkillIds,
             thinking,
+            searchEnabled: pendingSearchEnabled === true,
           });
         } catch {
           void loadThreadMessagesRef.current();
@@ -2579,6 +2598,7 @@ export default function DashboardChatThreadPage({
           content: text,
           sourceIds: editSourceIds,
           skillIds: activeSkillIds,
+          searchEnabled,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
         });
@@ -2590,6 +2610,7 @@ export default function DashboardChatThreadPage({
         content: text,
         sourceIds: contextSourceIds,
         skillIds: activeSkillIds,
+        searchEnabled,
       });
     },
     [
@@ -2602,6 +2623,7 @@ export default function DashboardChatThreadPage({
       messages,
       activeSourceIds,
       activeSkillIds,
+      searchEnabled,
       streamThreadAction,
     ],
   );
@@ -2640,9 +2662,10 @@ export default function DashboardChatThreadPage({
       mode: "refresh",
       sourceIds: refreshSourceIds,
       skillIds: activeSkillIds,
+      searchEnabled,
       assistantMessageId: input.assistantMessageId,
     });
-  }, [activeSourceIds, activeSkillIds, isStreaming, messageGroups, streamThreadAction]);
+  }, [activeSourceIds, activeSkillIds, isStreaming, messageGroups, searchEnabled, streamThreadAction]);
 
   const handleRestartFromMessage = useCallback(
     (input: {

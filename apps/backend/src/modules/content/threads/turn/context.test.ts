@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
+  resolveWebSearchEnabledFromMessage,
   resolveSourceIdsFromMessage,
 } from "./context";
 import type { MessageRecord } from "../../types";
@@ -42,6 +43,19 @@ test("resolveSourceIdsFromMessage filters invalid values", () => {
   assert.deepEqual(
     resolveSourceIdsFromMessage(message({ sourceIds: ["source-1", "", 1] })),
     ["source-1"],
+  );
+});
+
+test("resolveWebSearchEnabledFromMessage reads tools schema flag only", () => {
+  assert.equal(
+    resolveWebSearchEnabledFromMessage(
+      message({ tools: { webSearchEnabled: true } }),
+    ),
+    true,
+  );
+  assert.equal(
+    resolveWebSearchEnabledFromMessage(message({ webSearchEnabled: true })),
+    false,
   );
 });
 

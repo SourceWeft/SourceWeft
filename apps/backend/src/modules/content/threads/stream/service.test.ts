@@ -248,6 +248,8 @@ const prepared: PreparedThreadTurn = {
   messageContent: "What is in this invoice?",
   sourceIds: [],
   skillIds: [],
+  webSearchEnabled: false,
+  timezone: "UTC",
   enabledSkills: [],
   runTraceId: "user-message-1",
   userMessage: {

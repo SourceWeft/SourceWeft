@@ -147,12 +147,13 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       sourceId: citation.sourceId,
       sourceTitle: citation.sourceTitle,
       documentId: citation.documentId,
-      chunkId: citation.chunkId,
+      chunkId: citation.externalUri ? null : citation.chunkId,
       chunkNo: citation.chunkNo,
       excerpt: citation.excerpt,
       quoteText: citation.quoteText,
       rank: index + 1,
       score: citation.score,
+      externalUri: citation.externalUri,
     })),
   });
 

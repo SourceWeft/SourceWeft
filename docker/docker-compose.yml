@@ -47,6 +47,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MODEL_GATEWAY_GLOBAL_CONFIG_PATH: ${MODEL_GATEWAY_GLOBAL_CONFIG_PATH:-/app/apps/backend/config/model-gateway.global.json}
       MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET}
+      ANYCRAWL_API_KEY: ${ANYCRAWL_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,6 +66,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       MODEL_GATEWAY_GLOBAL_CONFIG_PATH: ${MODEL_GATEWAY_GLOBAL_CONFIG_PATH:-/app/apps/backend/config/model-gateway.global.json}
       MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET}
+      ANYCRAWL_API_KEY: ${ANYCRAWL_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

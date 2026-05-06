@@ -13,7 +13,7 @@ import type { AnyBackendProtocol } from "deepagents";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
 import { createMiddleware } from "langchain";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
-import { CHAT_SYSTEM_PROMPT } from "./prompts";
+import { CHAT_SYSTEM_PROMPT, buildRuntimeSystemPrompt } from "./prompts";
 import { getChatCheckpointer } from "../../../shared/chat-checkpointer";
 import { createAgentChatModel } from "../../../shared/model-gateway/index";
 
@@ -66,6 +66,7 @@ export interface CreateThreadAgentParams {
   tools?: Array<ClientTool | ServerTool>;
   backend?: AnyBackendProtocol;
   skills?: string[];
+  runtimePrompt?: string;
 }
 
 /**
@@ -91,7 +92,7 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
   const agent = createDeepAgent({
     model,
     tools: params.tools ?? [],
-    systemPrompt: CHAT_SYSTEM_PROMPT,
+    systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt),
     middleware: [createKnowledgeFilesystemToolDescriptionMiddleware()],
     checkpointer,
     backend: params.backend,

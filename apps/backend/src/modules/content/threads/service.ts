@@ -256,8 +256,9 @@ class ContentThreadService {
         sourceId: citation.sourceId,
         sourceTitle: citation.sourceTitle ?? sourceTitleSnapshot,
         documentId: citation.documentId,
-        chunkId: citation.chunkId,
+        chunkId: citation.chunkId ?? citation.externalUri ?? `external:${citation.citationKey}`,
         chunkNo: chunkNoSnapshot,
+        externalUri: citation.externalUri,
         excerpt: citation.quoteText ?? citation.chunkContent ?? excerptSnapshot ?? "",
       },
     };

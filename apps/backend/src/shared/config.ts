@@ -362,6 +362,11 @@ export const config = {
       30000,
     ),
   },
+  webProviders: {
+    anycrawl: {
+      apiKey: process.env.ANYCRAWL_API_KEY?.trim() || "",
+    },
+  },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
     false,

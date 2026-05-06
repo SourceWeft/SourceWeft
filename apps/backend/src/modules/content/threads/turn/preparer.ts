@@ -45,6 +45,7 @@ function normalizeSupportedParameters(value: unknown) {
 }
 
 const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const DEFAULT_TIMEZONE = "UTC";
 
 function normalizeSupportedEfforts(value: unknown) {
   if (!Array.isArray(value)) {
@@ -61,6 +62,28 @@ function normalizeSupportedEfforts(value: unknown) {
         ),
     ),
   );
+}
+
+function isValidTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeTimezone(value: unknown) {
+  if (typeof value !== "string") {
+    return DEFAULT_TIMEZONE;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 100) {
+    return DEFAULT_TIMEZONE;
+  }
+
+  return isValidTimeZone(trimmed) ? trimmed : DEFAULT_TIMEZONE;
 }
 
 function resolvePreparedLlmConfig(input: {
@@ -138,6 +161,8 @@ export async function prepareThreadTurn(
     ? requestedSourceIds
     : fallbackSourceIds;
   const skillIds = normalizeSkillIds(input.tools?.skillIds);
+  const webSearchEnabled = input.tools?.webSearchEnabled === true;
+  const timezone = normalizeTimezone(input.timezone);
   const enabledSkills = await resolveSelectedSkills({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
@@ -164,7 +189,7 @@ export async function prepareThreadTurn(
         source: "api",
         sourceIds,
         skillIds,
-        tools: { skillIds },
+        tools: { skillIds, webSearchEnabled },
         versionOf: input.userMessageParentId ?? null,
       },
     }));
@@ -234,6 +259,8 @@ export async function prepareThreadTurn(
     messageContent,
     sourceIds,
     skillIds,
+    webSearchEnabled,
+    timezone,
     enabledSkills,
     userMessage: userMessageWithTraceId,
     runTraceId,

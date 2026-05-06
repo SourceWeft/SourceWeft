@@ -7,6 +7,7 @@ import {
   resolveAgentCheckpointMetadata,
   resolveSkillIdsFromMessage,
   resolveSourceIdsFromMessage,
+  resolveWebSearchEnabledFromMessage,
   resolveThreadTurnContext,
 } from "../turn/context";
 import { normalizeSkillIds } from "../../skills/selection";
@@ -71,6 +72,8 @@ export async function resolveRefreshThreadStreamInput(
   const skillIds = input.tools !== undefined
     ? normalizeSkillIds(input.tools.skillIds)
     : resolveSkillIdsFromMessage(latestUserMessage);
+  const webSearchEnabled = input.tools?.webSearchEnabled ??
+    resolveWebSearchEnabledFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const refreshRunThreadId = `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
 
@@ -80,7 +83,8 @@ export async function resolveRefreshThreadStreamInput(
     userId: input.userId,
     content: latestUserMessage.content,
     sourceIds,
-    tools: { skillIds },
+    tools: { skillIds, webSearchEnabled },
+    timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
     existingUserMessage: latestUserMessage,
@@ -113,6 +117,8 @@ export async function resolveEditThreadStreamInput(
   const skillIds = input.tools !== undefined
     ? normalizeSkillIds(input.tools.skillIds)
     : resolveSkillIdsFromMessage(latestUserMessage);
+  const webSearchEnabled = input.tools?.webSearchEnabled ??
+    resolveWebSearchEnabledFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const agentBaseCheckpoint = checkpoint?.beforeInput ??
     await resolveFallbackEditBaseCheckpoint({
@@ -127,7 +133,8 @@ export async function resolveEditThreadStreamInput(
     userId: input.userId,
     content: input.content,
     sourceIds,
-    tools: { skillIds },
+    tools: { skillIds, webSearchEnabled },
+    timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
     userMessageParentId: latestUserMessage.id,

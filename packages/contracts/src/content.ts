@@ -13,13 +13,14 @@ const retrievalVectorStrategySchema = z.enum([
 
 const retrievalCitationSchema = z.object({
   citation: z.string().min(1),
-  sourceId: z.string(),
+  sourceId: z.string().nullable(),
   sourceTitle: z.string().optional(),
-  documentId: z.string(),
+  documentId: z.string().nullable(),
   chunkId: z.string(),
   chunkNo: z.number().int().nonnegative().optional(),
   score: z.number(),
   excerpt: z.string(),
+  externalUri: z.string().url().optional(),
 });
 
 const retrievalResponseSchema = z.object({
@@ -334,6 +335,7 @@ const skillSourceTypeSchema = z.enum([
 
 const threadToolsRequestSchema = z.object({
   skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
+  webSearchEnabled: z.boolean().optional(),
 }).strict();
 
 export const streamThreadRequestSchema = z.object({
@@ -342,6 +344,7 @@ export const streamThreadRequestSchema = z.object({
   sourceIds: z.array(z.string()).max(100).optional(),
   tools: threadToolsRequestSchema.optional(),
   stream: z.boolean().optional(),
+  timezone: z.string().trim().min(1).max(100).optional(),
   userMessageId: z.string().trim().min(1).max(128).optional(),
   assistantMessageId: z.string().trim().min(1).max(128).optional(),
   idempotencyKey: z.string().trim().min(1).max(256).optional(),

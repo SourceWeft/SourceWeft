@@ -76,6 +76,23 @@ export function resolveSkillIdsFromMessage(
   );
 }
 
+export function resolveWebSearchEnabledFromMessage(
+  message: MessageRecord | null | undefined,
+) {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          tools?: unknown;
+        })
+      : undefined;
+  const tools =
+    metadata?.tools && typeof metadata.tools === "object" && !Array.isArray(metadata.tools)
+      ? (metadata.tools as { webSearchEnabled?: unknown })
+      : undefined;
+
+  return tools?.webSearchEnabled === true;
+}
+
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;

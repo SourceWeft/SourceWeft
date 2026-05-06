@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FileText, Hash, Loader2, Sparkles } from "lucide-react";
+import { ExternalLink, FileText, Hash, Loader2, Sparkles } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -48,7 +48,7 @@ export function SourcePreviewPanel({
   }, [citation?.chunkId, open, source?.id]);
 
   useEffect(() => {
-    if (!open || !workspaceId || (!citation && !source)) {
+    if (!open || citation?.externalUri || !workspaceId || (!citation && !source)) {
       return;
     }
 
@@ -59,7 +59,7 @@ export function SourcePreviewPanel({
     setIsDeletedCitation(false);
     setIsHistoricalCitation(false);
 
-    const request = citation
+    const request = citation && citation.sourceId && citation.documentId
       ? Promise.all([
           contentClient.getSourceDocument(
             workspaceId,
@@ -163,6 +163,7 @@ export function SourcePreviewPanel({
     detail?.documents[0]?.contentText ?? detail?.source.contentText ?? "";
   const title =
     detail?.source.title ?? citation?.sourceTitle ?? source?.title ?? "Source";
+  const isExternalCitation = Boolean(citation?.externalUri);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -256,7 +257,47 @@ export function SourcePreviewPanel({
           </div>
         </DialogHeader>
 
-        {isLoading ? (
+        {isExternalCitation && citation ? (
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
+              <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
+                <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
+                  <ExternalLink className="size-4" />
+                  Web citation
+                </div>
+                This citation points to a public web page.
+              </div>
+
+              <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
+                <div className="flex items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-foreground">
+                      {citation.sourceTitle?.trim() || citation.externalUri}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {citation.externalUri}
+                    </div>
+                  </div>
+                  <Button
+                    className="shrink-0 gap-1.5"
+                    onClick={() => window.open(citation.externalUri, "_blank", "noopener,noreferrer")}
+                    size="xs"
+                    type="button"
+                    variant="outline"
+                  >
+                    <ExternalLink className="size-3.5" />
+                    Open
+                  </Button>
+                </div>
+                <div className="px-4 py-4 lg:px-5">
+                  <MessageResponse className="text-sm leading-7 text-foreground">
+                    {citation.excerpt || "No citation excerpt was saved."}
+                  </MessageResponse>
+                </div>
+              </article>
+            </div>
+          </ScrollArea>
+        ) : isLoading ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 size-4 animate-spin" />
             Loading source preview...

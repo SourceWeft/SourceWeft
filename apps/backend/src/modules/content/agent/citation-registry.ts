@@ -2,26 +2,28 @@ import type { RetrievalCandidate } from "../retrieval/planner";
 
 export type AgentCitation = {
   citation: string;
-  sourceId: string;
+  sourceId: string | null;
   sourceTitle: string;
-  documentId: string;
+  documentId: string | null;
   chunkId: string;
-  chunkNo: number;
+  chunkNo?: number;
   score: number;
   excerpt: string;
   quoteText: string;
-  origin: "search_sources" | "read_file" | "grep";
+  origin: "search_sources" | "read_file" | "grep" | "web_search" | "web_fetch";
+  externalUri?: string;
   path?: string;
 };
 
 export type CitationRecordInput = {
   citationKey: string;
-  sourceId: string;
-  documentId: string;
-  chunkId: string;
+  sourceId: string | null;
+  documentId: string | null;
+  chunkId: string | null;
   quoteText: string;
   rank: number;
   score: number;
+  externalUri?: string;
 };
 
 function cleanCitationExcerpt(content: string) {
@@ -42,7 +44,14 @@ function cleanCitationExcerpt(content: string) {
 
 export class AgentCitationRegistry {
   private byChunkId = new Map<string, AgentCitation>();
+  private byExternalUri = new Map<string, AgentCitation>();
   private order: string[] = [];
+
+  private addEvidence(key: string, evidence: AgentCitation) {
+    this.byChunkId.set(key, evidence);
+    this.order.push(key);
+    return evidence;
+  }
 
   addChunk(input: {
     origin: "search_sources" | "read_file" | "grep";
@@ -76,9 +85,7 @@ export class AgentCitationRegistry {
       path: input.path,
     };
 
-    this.byChunkId.set(input.chunkId, evidence);
-    this.order.push(input.chunkId);
-    return evidence;
+    return this.addEvidence(input.chunkId, evidence);
   }
 
   addRetrievalCandidate(candidate: RetrievalCandidate) {
@@ -94,6 +101,38 @@ export class AgentCitationRegistry {
     });
   }
 
+  addExternal(input: {
+    origin: "web_search" | "web_fetch";
+    externalUri: string;
+    sourceTitle?: string | null;
+    content: string;
+    score?: number | null;
+  }) {
+    const existing = this.byExternalUri.get(input.externalUri);
+    if (existing) {
+      return existing;
+    }
+
+    const citation = `c${this.order.length + 1}`;
+    const excerpt = cleanCitationExcerpt(input.content).slice(0, 320);
+    const key = `external:${input.externalUri}`;
+    const evidence: AgentCitation = {
+      citation,
+      sourceId: null,
+      sourceTitle: input.sourceTitle || input.externalUri,
+      documentId: null,
+      chunkId: key,
+      score: Number((input.score ?? 1).toFixed(6)),
+      excerpt,
+      quoteText: excerpt.slice(0, 400),
+      origin: input.origin,
+      externalUri: input.externalUri,
+    };
+
+    this.byExternalUri.set(input.externalUri, evidence);
+    return this.addEvidence(key, evidence);
+  }
+
   list() {
     return this.order
       .map((chunkId) => this.byChunkId.get(chunkId))
@@ -105,10 +144,11 @@ export class AgentCitationRegistry {
       citationKey: citation.citation,
       sourceId: citation.sourceId,
       documentId: citation.documentId,
-      chunkId: citation.chunkId,
+      chunkId: citation.externalUri ? null : citation.chunkId,
       quoteText: citation.quoteText,
       rank: index + 1,
       score: citation.score,
+      externalUri: citation.externalUri,
     }));
   }
 }

@@ -1,6 +1,5 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { AgentCitation } from "../citation-registry";
-import { buildCitationMetadata } from "../../retrieval/planner";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
   AgentCheckpointMetadata,
@@ -84,8 +83,8 @@ export type DeepAgentTurnEvent =
     }
   | {
       type: "citations";
-      citations: ReturnType<typeof buildCitationMetadata>;
-      availableCitations?: ReturnType<typeof buildCitationMetadata>;
+      citations: AgentCitation[];
+      availableCitations?: AgentCitation[];
     }
   | {
       type: "reasoning";

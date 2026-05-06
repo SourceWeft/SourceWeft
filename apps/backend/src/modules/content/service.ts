@@ -436,6 +436,7 @@ export class ContentService {
     userId: string;
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -450,6 +451,7 @@ export class ContentService {
     userId: string;
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -465,6 +467,7 @@ export class ContentService {
     content: string;
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
@@ -480,6 +483,7 @@ export class ContentService {
     content: string;
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;

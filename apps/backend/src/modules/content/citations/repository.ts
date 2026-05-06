@@ -10,15 +10,16 @@ export async function createCitationRecords(input: {
   messageId: string;
   citations: Array<{
     citationKey: string;
-    sourceId: string;
+    sourceId?: string | null;
     sourceTitle?: string;
-    documentId: string;
-    chunkId: string;
+    documentId?: string | null;
+    chunkId?: string | null;
     chunkNo?: number;
     excerpt?: string;
     quoteText: string;
     rank: number;
     score: number;
+    externalUri?: string | null;
   }>;
 }) {
   if (input.citations.length === 0) {
@@ -39,10 +40,12 @@ export async function createCitationRecords(input: {
       quoteText: citation.quoteText,
       rank: citation.rank,
       score: citation.score,
+      externalUri: citation.externalUri ?? null,
       metadataJson: {
         sourceTitle: citation.sourceTitle,
         chunkNo: citation.chunkNo,
         excerpt: citation.excerpt,
+        origin: citation.externalUri ? "external" : "source",
       },
       createdAt: new Date(),
     })),
@@ -66,6 +69,7 @@ export async function findCitationByMessageRank(input: {
       quoteText: citations.quoteText,
       rank: citations.rank,
       score: citations.score,
+      externalUri: citations.externalUri,
       metadataJson: citations.metadataJson,
       sourceTitle: sources.title,
       chunkContent: chunks.content,
