@@ -46,8 +46,20 @@ export class BillingUsageService {
   }
 
   async getSummary(teamId: string): Promise<BillingSummaryResponse> {
-    return this.accountService.withLockedAccount(teamId, async ({ account }) =>
-      toSummary({ account, billingMode: this.runtimeConfig.mode }),
+    return this.accountService.withLockedAccount(
+      teamId,
+      async ({ account, client }) => {
+        const seatsUsed = await this.store.countTeamMembers(
+          account.teamId,
+          client,
+        );
+
+        return toSummary({
+          account,
+          billingMode: this.runtimeConfig.mode,
+          seatsUsed,
+        });
+      },
     );
   }
 

@@ -127,11 +127,14 @@ export function getPagesRemaining(account: BillingAccountState) {
 export function toSummary(input: {
   account: BillingAccountState;
   billingMode: BillingRuntimeConfig["mode"];
+  seatsUsed?: number;
 }): BillingSummaryResponse {
   const pagesRemaining = Math.max(
     input.account.pagesLimit - input.account.pagesUsed,
     0,
   );
+  const seatsUsed = Math.max(0, Math.floor(input.seatsUsed ?? 0));
+  const seatsLimit = Math.max(0, input.account.seatCount);
 
   return {
     teamId: input.account.teamId,
@@ -151,6 +154,11 @@ export function toSummary(input: {
       reserved: input.account.creditsReserved,
       consumedThisCycle: input.account.creditsConsumedThisCycle,
       available: getAvailableCredits(input.account),
+    },
+    seats: {
+      used: seatsUsed,
+      limit: seatsLimit,
+      remaining: Math.max(seatsLimit - seatsUsed, 0),
     },
     spendLimits: {
       softCapUsd: input.account.spendSoftCapUsd,

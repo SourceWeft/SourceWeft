@@ -62,6 +62,11 @@ export const billingSummaryResponseSchema = z.object({
     consumedThisCycle: z.number().int().nonnegative(),
     available: z.number().int().nonnegative(),
   }),
+  seats: z.object({
+    used: z.number().int().nonnegative(),
+    limit: z.number().int().nonnegative(),
+    remaining: z.number().int().nonnegative(),
+  }),
   spendLimits: z.object({
     softCapUsd: z.number().nonnegative().nullable(),
     hardCapUsd: z.number().nonnegative().nullable(),

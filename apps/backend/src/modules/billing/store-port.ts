@@ -37,6 +37,7 @@ export type BillingStore = {
     limit?: number,
     client?: PoolClient,
   ): Promise<BillingLedgerRow[]>;
+  countTeamMembers(teamId: string, client?: PoolClient): Promise<number>;
   getSubscriptionByTeam(
     teamId: string,
     client?: PoolClient,

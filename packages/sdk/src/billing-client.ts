@@ -37,9 +37,10 @@ export class BillingClient {
     );
   }
 
-  getLedger(teamId: string) {
+  getLedger(teamId: string, input?: { limit?: number }) {
+    const query = input?.limit ? `?limit=${encodeURIComponent(input.limit)}` : "";
     return this.http.get<BillingLedgerResponse>(
-      `/v1/teams/${encodeTeamId(teamId)}/billing/ledger`,
+      `/v1/teams/${encodeTeamId(teamId)}/billing/ledger${query}`,
     );
   }
 

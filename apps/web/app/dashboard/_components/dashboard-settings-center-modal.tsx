@@ -29,11 +29,30 @@ import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
+import { billingClient } from "../../../lib/sdk";
 import { useTheme } from "next-themes";
-import { getVisibleTeamOrganizations } from "./dashboard-team-selector-shared";
+import {
+  getVisibleTeamOrganizations,
+  isAutoPersonalOrganization,
+} from "./dashboard-team-selector-shared";
 
 export type SettingsCenterTab = "account" | "team" | "usage" | "billing";
 type BillingScope = "personal" | "team";
+type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
+type BillingUsage = Awaited<ReturnType<typeof billingClient.getUsage>>;
+type BillingLedger = Awaited<ReturnType<typeof billingClient.getLedger>>;
+type BillingLedgerEntry = BillingLedger["items"][number];
+type BillingOrg = { id: string; name: string; slug?: string };
+type UsageActivityRow = {
+  key: string;
+  detail: string;
+  date: string;
+  change: string;
+  unit?: string;
+};
+
+const USAGE_ACTIVITY_DISPLAY_LIMIT = 20;
+const USAGE_ACTIVITY_FETCH_LIMIT = 200;
 
 const menuItems: Array<{
   key: SettingsCenterTab;
@@ -52,11 +71,13 @@ function OrgSwitcher({ className }: { className?: string }) {
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
   const [open, setOpen] = React.useState(false);
+  const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
 
   const orgList = getVisibleTeamOrganizations(
     (orgs ?? []) as Array<{ id: string; name: string; slug: string }>,
   );
-  const isPersonalActive = !activeOrg;
+  const isPersonalActive =
+    !activeOrgRecord || isAutoPersonalOrganization(activeOrgRecord);
 
   async function handleSwitch(orgId: string | null) {
     try {
@@ -80,10 +101,10 @@ function OrgSwitcher({ className }: { className?: string }) {
           <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-semibold text-foreground">
             {isPersonalActive
               ? "P"
-              : (activeOrg?.name.slice(0, 2).toUpperCase() ?? "P")}
+              : (activeOrgRecord?.name.slice(0, 2).toUpperCase() ?? "P")}
           </div>
           <span className="truncate text-sm text-foreground">
-            {isPersonalActive ? "Personal workspace" : activeOrg?.name}
+            {isPersonalActive ? "Personal workspace" : activeOrgRecord?.name}
           </span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </button>
@@ -112,7 +133,7 @@ function OrgSwitcher({ className }: { className?: string }) {
               <button
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                  activeOrg?.id === org.id && "bg-accent/60",
+                  activeOrgRecord?.id === org.id && "bg-accent/60",
                 )}
                 key={org.id}
                 onClick={() => void handleSwitch(org.id)}
@@ -122,7 +143,7 @@ function OrgSwitcher({ className }: { className?: string }) {
                   {org.name.slice(0, 2).toUpperCase()}
                 </div>
                 <span className="flex-1 truncate">{org.name}</span>
-                {activeOrg?.id === org.id && (
+                {activeOrgRecord?.id === org.id && (
                   <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
                 )}
               </button>
@@ -132,6 +153,162 @@ function OrgSwitcher({ className }: { className?: string }) {
       </PopoverContent>
     </Popover>
   );
+}
+
+function resolveBillingTeamId(input: {
+  activeOrg?: BillingOrg | null;
+  orgs?: BillingOrg[] | null;
+}) {
+  if (input.activeOrg?.id) {
+    return input.activeOrg.id;
+  }
+
+  const personalOrg = input.orgs?.find(isAutoPersonalOrganization);
+  return personalOrg?.id ?? null;
+}
+
+function isPersonalBillingOrg(org?: BillingOrg | null) {
+  return !org || Boolean(isAutoPersonalOrganization(org));
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatPlanName(planFamily: string, personal: boolean) {
+  const labelByPlan: Record<string, string> = {
+    individual_free: "Free",
+    individual_pro: "Pro",
+    team_standard: "Team",
+    team_premium: "Team Premium",
+    enterprise_usage: "Enterprise",
+  };
+
+  return labelByPlan[planFamily] ?? (personal ? "Personal" : "Team");
+}
+
+function formatFeatureName(feature: string) {
+  const label = feature
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  return label || "Usage";
+}
+
+function formatUsageDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatLedgerChange(entry: BillingLedgerEntry) {
+  const prefix = entry.delta > 0 ? "+" : "";
+  return `${prefix}${formatNumber(entry.delta)}`;
+}
+
+function formatLedgerUnit(unitType: BillingLedgerEntry["unitType"]) {
+  return unitType === "page" ? "pages" : "credits";
+}
+
+function formatLedgerDetail(entry: BillingLedgerEntry) {
+  const feature = formatFeatureName(entry.feature);
+
+  if (entry.eventType === "consume") {
+    if (entry.unitType === "page" && entry.feature === "ingestion") {
+      return "Pages indexed";
+    }
+
+    if (entry.unitType === "credit") {
+      return `${feature} credits used`;
+    }
+
+    return `${feature} pages used`;
+  }
+
+  if (entry.eventType === "grant") {
+    if (entry.feature === "cycle_grant") {
+      return entry.unitType === "page"
+        ? "Monthly page quota granted"
+        : "Monthly credits granted";
+    }
+
+    if (entry.feature === "seat_quota_grant") {
+      return "Seat credits granted";
+    }
+
+    return `${feature} granted`;
+  }
+
+  if (entry.eventType === "expire") {
+    return entry.unitType === "page"
+      ? "Unused page quota expired"
+      : "Unused credits expired";
+  }
+
+  if (entry.eventType === "adjust") {
+    if (entry.feature === "seat_quota_change") {
+      return "Seat page quota adjusted";
+    }
+
+    return `${feature} adjusted`;
+  }
+
+  if (entry.eventType === "refund") {
+    return `${feature} refunded`;
+  }
+
+  if (entry.eventType === "reserve") {
+    return `${feature} reserved`;
+  }
+
+  if (entry.eventType === "release") {
+    return `${feature} released`;
+  }
+
+  return feature;
+}
+
+function isLedgerEntryInCycle(entry: BillingLedgerEntry, summary: BillingSummary) {
+  const createdAtMs = Date.parse(entry.createdAt);
+  return (
+    createdAtMs >= Date.parse(summary.cycleStartAt) &&
+    createdAtMs < Date.parse(summary.cycleEndAt)
+  );
+}
+
+function buildUsageMetrics(input: {
+  summary: BillingSummary;
+  personal: boolean;
+  usageEventCount: number;
+}) {
+  const seatsMetric = input.personal
+    ? {
+        label: "Usage events",
+        value: formatNumber(input.usageEventCount),
+      }
+    : {
+        label: "Seats used / left",
+        value: `${formatNumber(input.summary.seats.used)} / ${formatNumber(
+          input.summary.seats.remaining,
+        )}`,
+      };
+
+  return [
+    {
+      label: "Credits used",
+      value: formatNumber(input.summary.credits.consumedThisCycle),
+    },
+    {
+      label: "Pages used",
+      value: formatNumber(input.summary.pages.used),
+    },
+    seatsMetric,
+  ];
 }
 
 // ── Account / Profile panel ───────────────────────────────────────────────────
@@ -899,48 +1076,143 @@ function TeamPanel({
 // ── Usage panel ───────────────────────────────────────────────────────────────
 
 function UsagePanel() {
+  const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
-  const isTeam = !!activeOrg;
+  const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
+  const orgList = (orgs ?? []) as BillingOrg[];
+  const resolvingPersonalTeamId = !activeOrgRecord && orgs === undefined;
+  const teamId = resolveBillingTeamId({
+    activeOrg: activeOrgRecord,
+    orgs: orgList,
+  });
+  const isPersonal = isPersonalBillingOrg(activeOrgRecord);
+  const [summary, setSummary] = React.useState<BillingSummary | null>(null);
+  const [usage, setUsage] = React.useState<BillingUsage | null>(null);
+  const [ledger, setLedger] = React.useState<BillingLedgerEntry[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
-  const data = isTeam
-    ? {
-        plan: "Team",
-        creditsLabel: "11,600 / 80,000 credits",
-        creditsPercent: 14,
-        metrics: [
-          { label: "Threads this week", value: "47" },
-          { label: "Sources indexed", value: "312" },
-          { label: "Active members", value: "4" },
-        ],
-        rows: [
-          {
-            detail: "Team workspace research sync",
-            date: "Apr 07",
-            change: "−580",
-          },
-          {
-            detail: "Member onboarding bonus",
-            date: "Apr 06",
-            change: "+1,500",
-          },
-          { detail: "Shared notebook summary", date: "Apr 05", change: "−260" },
-        ],
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadUsage() {
+      if (!teamId) {
+        setSummary(null);
+        setUsage(null);
+        setLedger([]);
+        setLoading(resolvingPersonalTeamId);
+        setError(null);
+        return;
       }
-    : {
-        plan: "Free",
-        creditsLabel: "938 / 3,000 credits",
-        creditsPercent: 31,
-        metrics: [
-          { label: "Threads this week", value: "12" },
-          { label: "Sources indexed", value: "58" },
-          { label: "Private notebooks", value: "3" },
-        ],
-        rows: [
-          { detail: "Notebook synthesis", date: "Apr 07", change: "−44" },
-          { detail: "Source extraction", date: "Apr 06", change: "−132" },
-          { detail: "Daily refresh", date: "Apr 06", change: "+300" },
-        ],
-      };
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const [nextSummary, nextUsage, nextLedger] = await Promise.all([
+          billingClient.getSummary(teamId),
+          billingClient.getUsage(teamId),
+          billingClient.getLedger(teamId, { limit: USAGE_ACTIVITY_FETCH_LIMIT }),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setSummary(nextSummary);
+        setUsage(nextUsage);
+        setLedger(nextLedger.items);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        setSummary(null);
+        setUsage(null);
+        setLedger([]);
+        setError(err instanceof Error ? err.message : "Failed to load usage");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadUsage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvingPersonalTeamId, teamId]);
+
+  const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
+  const creditsLimit = summary?.credits.monthlyGrant ?? 0;
+  const creditsPercent =
+    creditsLimit > 0 ? Math.min(100, (creditsUsed / creditsLimit) * 100) : 0;
+  const cycleLedgerEntries = summary
+    ? ledger.filter((entry) => isLedgerEntryInCycle(entry, summary))
+    : ledger;
+  const usageEventCount = cycleLedgerEntries.filter(
+    (entry) => entry.eventType === "consume",
+  ).length;
+  const seatActivityRow: UsageActivityRow | null =
+    summary && !isPersonal
+      ? {
+          detail: "Seats occupied",
+          date: formatUsageDate(new Date().toISOString()),
+          change: `${formatNumber(summary.seats.used)} used / ${formatNumber(
+            summary.seats.remaining,
+          )} left`,
+          key: "seats-current",
+        }
+      : null;
+  const ledgerActivityLimit =
+    USAGE_ACTIVITY_DISPLAY_LIMIT - (seatActivityRow ? 1 : 0);
+  const ledgerActivityRows = cycleLedgerEntries
+    .slice(0, ledgerActivityLimit)
+    .map<UsageActivityRow>((entry) => ({
+      detail: formatLedgerDetail(entry),
+      date: formatUsageDate(entry.createdAt),
+      unit: formatLedgerUnit(entry.unitType),
+      change: formatLedgerChange(entry),
+      key: entry.id,
+    }));
+  const activityRows = seatActivityRow
+    ? [seatActivityRow, ...ledgerActivityRows]
+    : ledgerActivityRows;
+  const data = {
+    plan: summary
+      ? formatPlanName(summary.planFamily, isPersonal)
+      : isPersonal
+        ? "Personal"
+        : "Team",
+    creditsLabel: summary
+      ? `${formatNumber(creditsUsed)} / ${formatNumber(creditsLimit)} credits`
+      : loading
+        ? "Loading credits..."
+        : "-- / -- credits",
+    creditsPercent,
+    metrics:
+      summary
+        ? buildUsageMetrics({
+            personal: isPersonal,
+            summary,
+            usageEventCount: usage?.totals.events ?? usageEventCount,
+          })
+        : [
+            { label: "Credits used", value: loading ? "..." : "--" },
+            { label: "Pages used", value: loading ? "..." : "--" },
+            {
+              label: isPersonal ? "Usage events" : "Seats used / left",
+              value: loading ? "..." : "--",
+            },
+          ],
+  };
+  const emptyActivityLabel = loading
+    ? "Loading activity..."
+    : teamId
+      ? "No usage activity yet"
+      : "Usage account unavailable";
 
   return (
     <div className="w-full max-w-2xl divide-y divide-border/60">
@@ -999,25 +1271,42 @@ function UsagePanel() {
                   Date
                 </th>
                 <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">
-                  Credits
+                  Usage
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {data.rows.map((row) => (
-                <tr key={`${row.detail}-${row.date}`}>
-                  <td className="px-4 py-2.5 text-foreground">{row.detail}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {row.date}
+              {activityRows.length > 0 ? (
+                activityRows.map((row) => (
+                  <tr key={row.key}>
+                    <td className="px-4 py-2.5 text-foreground">
+                      {row.detail}
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      {row.date}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-foreground">
+                      {row.unit ? `${row.change} ${row.unit}` : row.change}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-2.5 text-foreground">
+                    {emptyActivityLabel}
                   </td>
+                  <td className="px-4 py-2.5 text-muted-foreground">--</td>
                   <td className="px-4 py-2.5 text-right font-medium text-foreground">
-                    {row.change}
+                    --
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
+        {error && (
+          <p className="mt-3 text-xs text-muted-foreground">{error}</p>
+        )}
       </div>
     </div>
   );

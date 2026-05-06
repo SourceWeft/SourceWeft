@@ -79,6 +79,10 @@ class MemoryBillingStore implements BillingStore {
     return [...this.ledgers];
   }
 
+  async countTeamMembers() {
+    return 1;
+  }
+
   async getSubscriptionByTeam() {
     return null;
   }

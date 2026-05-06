@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { db, database } from "../../shared/database";
 import * as schema from "../../shared/db/schema";
@@ -290,6 +290,18 @@ export class PostgresBillingStore implements BillingStore {
     const rows = limit !== undefined ? await query.limit(limit) : await query;
 
     return rows.map(mapLedger);
+  }
+
+  async countTeamMembers(teamId: string, client?: PoolClient) {
+    const result = await pickDb(client).execute<{ count: string }>(sql`
+      select count(*)::text as count
+      from member
+      where "organizationId" = ${teamId}
+    `);
+
+    const rawCount = result.rows?.[0]?.count;
+    const count = rawCount ? Number(rawCount) : 0;
+    return Number.isFinite(count) ? count : 0;
   }
 
   async getSubscriptionByTeam(teamId: string, client?: PoolClient) {
