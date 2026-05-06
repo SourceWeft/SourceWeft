@@ -23,6 +23,11 @@ import {
 import { SidebarTrigger } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../lib/sdk";
+import {
+  getStoredDashboardWorkspaceId,
+  setStoredDashboardWorkspaceId,
+} from "../../lib/dashboard-workspace-context";
+import { useDashboardChatState } from "./_components/dashboard-chat-state";
 import { DashboardTeamSwitcher } from "./_components/dashboard-team-switcher";
 
 type Workspace = {
@@ -387,6 +392,7 @@ function WorkspaceCard({
 export default function DashboardPage() {
   const router = useRouter();
   const authState = useAuthenticate();
+  const dashboardState = useDashboardChatState();
   const sessionState = authState.data as
     | {
         user?: { email?: string; name?: string };
@@ -403,11 +409,13 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadWorkspaces() {
       if (!sessionActiveOrganizationId) {
         setWorkspaces([]);
+        setActiveWorkspaceId(null);
         setLoading(false);
         return;
       }
@@ -455,6 +463,15 @@ export default function DashboardPage() {
         );
 
         setWorkspaces(withPreviews);
+        const storedWorkspaceId = getStoredDashboardWorkspaceId(
+          sessionActiveOrganizationId,
+        );
+        const resolvedWorkspace =
+          withPreviews.find((workspace) => workspace.id === storedWorkspaceId) ??
+          withPreviews[0] ??
+          null;
+
+        setActiveWorkspaceId(resolvedWorkspace?.id ?? null);
       } catch {
         toast.error("Failed to load workspaces.");
       } finally {
@@ -491,7 +508,10 @@ export default function DashboardPage() {
     );
   }, [recentWorkspaces, search]);
 
-  const featuredWorkspace = recentWorkspaces[0] ?? null;
+  const featuredWorkspace =
+    recentWorkspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
+    recentWorkspaces[0] ??
+    null;
   const recentActivity = useMemo(
     () => buildActivityItems(workspaceCollection),
     [workspaceCollection],
@@ -554,7 +574,9 @@ export default function DashboardPage() {
       );
 
       toast.success(`Created "${workspace.name}"`);
-      await workspaceClient.setWorkspaceContext(workspace.id);
+      setStoredDashboardWorkspaceId(sessionActiveOrganizationId, workspace.id);
+      setActiveWorkspaceId(workspace.id);
+      await dashboardState.switchWorkspace(workspace.id, workspace.name);
       router.push("/dashboard/chat");
     } catch {
       toast.error("Failed to create workspace.");
@@ -564,11 +586,12 @@ export default function DashboardPage() {
   }
 
   async function handleOpenWorkspace(workspaceId: string) {
-    try {
-      await workspaceClient.setWorkspaceContext(workspaceId);
-    } catch {
-      // Keep navigation forgiving even if context persistence fails.
-    }
+    const workspace = workspaces.find((item) => item.id === workspaceId);
+
+    setStoredDashboardWorkspaceId(sessionActiveOrganizationId, workspaceId);
+    setActiveWorkspaceId(workspaceId);
+
+    await dashboardState.switchWorkspace(workspaceId, workspace?.name);
 
     router.push("/dashboard/chat");
   }
@@ -611,20 +634,6 @@ export default function DashboardPage() {
                 value={search}
               />
             </div>
-
-            <Button
-              className="h-10 rounded-xl px-4 text-sm"
-              disabled={createLoading || !canCreateWorkspace}
-              onClick={() => void handleCreateWorkspace()}
-              size="sm"
-            >
-              {createLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Plus className="h-3.5 w-3.5" />
-              )}
-              <span className="hidden md:inline">New workspace</span>
-            </Button>
           </div>
         </div>
       </header>

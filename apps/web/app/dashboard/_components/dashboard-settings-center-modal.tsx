@@ -951,12 +951,18 @@ export function DashboardSettingsCenterModal({
 }) {
   const [activeTab, setActiveTab] = React.useState<SettingsCenterTab>(initialTab);
   const [scope, setScope] = React.useState<BillingScope>(hasTeam ? "team" : "personal");
+  const wasOpenRef = React.useRef(open);
 
   React.useEffect(() => {
-    if (!open) return;
-    setActiveTab(initialTab);
+    if (open && !wasOpenRef.current) {
+      setActiveTab(initialTab);
+    }
+    wasOpenRef.current = open;
+  }, [open, initialTab]);
+
+  React.useEffect(() => {
     if (!hasTeam) setScope("personal");
-  }, [open, initialTab, hasTeam]);
+  }, [hasTeam]);
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
