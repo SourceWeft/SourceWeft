@@ -292,6 +292,21 @@ export default function DashboardChatPage() {
     }
   }, [workspaceId]);
 
+  const persistActiveSourceIds = useCallback(
+    (sourceIds: string[]) => {
+      setActiveSourceIds(sourceIds);
+      if (!workspaceId) {
+        return;
+      }
+
+      window.sessionStorage.setItem(
+        `chat:sources:${workspaceId}:current`,
+        JSON.stringify(sourceIds),
+      );
+    },
+    [workspaceId],
+  );
+
   useEffect(() => {
     if (!workspaceId) {
       setThinkingSettings(DEFAULT_PROMPT_THINKING_SETTINGS);
@@ -471,7 +486,7 @@ export default function DashboardChatPage() {
           mode="new"
           availableSkills={availableSkills}
           onRemoveSource={(id) =>
-            setActiveSourceIds((prev) => prev.filter((x) => x !== id))
+            persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
           }
           onSkillSelectionChange={setActiveSkillIds}
           onSendMessage={handleSendMessage}
@@ -493,7 +508,7 @@ export default function DashboardChatPage() {
           mode="new"
           installedSkills={availableSkills}
           onSkillSelectionChange={setActiveSkillIds}
-          onSelectionChange={setActiveSourceIds}
+          onSelectionChange={persistActiveSourceIds}
           onSourceLoad={setLibrarySources}
           selectedIds={activeSourceIds}
           selectedSkillIds={activeSkillIds}

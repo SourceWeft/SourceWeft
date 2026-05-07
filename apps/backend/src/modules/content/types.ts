@@ -1,5 +1,3 @@
-import type { Chunk } from "@chonkiejs/core";
-
 export type EmbeddingVectorStrategy = "ann_hnsw" | "exact_vector" | "bm25_only";
 
 export type EmbeddingProfileRecord = {
@@ -74,7 +72,13 @@ export type DocumentParseMode =
   | "image_ocr"
   | "generic";
 
-export type ChunkSpec = Chunk;
+export type ChunkSpec = {
+  text: string;
+  startIndex: number;
+  endIndex: number;
+  tokenCount: number;
+  embedding?: number[];
+};
 
 export type SourceMetadata = {
   fileName?: string;

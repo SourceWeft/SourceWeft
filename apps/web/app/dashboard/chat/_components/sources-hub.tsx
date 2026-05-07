@@ -419,11 +419,20 @@ function SourceRow({
     }
 
     const target = event.target as HTMLElement;
-    if (target.closest("button,input,textarea,select,a,[role='button']")) {
+    if (
+      target.closest(
+        "button,input,textarea,select,a,[role='button'],[role='menuitem']",
+      )
+    ) {
       return;
     }
 
     onToggle(source.id);
+  }
+
+  function handleMenuAction(event: MouseEvent<HTMLElement>, action: () => void) {
+    event.stopPropagation();
+    action();
   }
 
   return (
@@ -504,6 +513,7 @@ function SourceRow({
             <Button
               className="opacity-100 md:opacity-0 md:group-hover:opacity-100"
               disabled={isBusy}
+              onClick={(event) => event.stopPropagation()}
               size="icon-xs"
               title="Source actions"
               type="button"
@@ -518,26 +528,35 @@ function SourceRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-36">
-            <DropdownMenuItem onClick={onPreview}>
+            <DropdownMenuItem
+              onClick={(event) => handleMenuAction(event, onPreview)}
+            >
               <FileText className="size-3.5" />
               Preview
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!source.storageKey}
-              onClick={onDownload}
+              onClick={(event) => handleMenuAction(event, onDownload)}
             >
               <Download className="size-3.5" />
               Download
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onStartRename}>
+            <DropdownMenuItem
+              onClick={(event) => handleMenuAction(event, onStartRename)}
+            >
               <Pencil className="size-3.5" />
               Rename
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onReindex}>
+            <DropdownMenuItem
+              onClick={(event) => handleMenuAction(event, onReindex)}
+            >
               <RotateCcw className="size-3.5" />
               Re-index
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onDelete} variant="destructive">
+            <DropdownMenuItem
+              onClick={(event) => handleMenuAction(event, onDelete)}
+              variant="destructive"
+            >
               <Trash2 className="size-3.5" />
               Delete
             </DropdownMenuItem>
@@ -1330,17 +1349,13 @@ export function SourcesHub({
       try {
         await contentClient.indexSource(workspaceId, source.id, {});
         toast.success("Re-index queued.");
-        setPendingSourceIds((prev) =>
-          prev.includes(source.id) ? prev : [...prev, source.id],
-        );
-        await refreshSources();
       } catch (error) {
         toast.error(getErrorMessage(error, "Failed to re-index source."));
       } finally {
         setRowBusy(source.id, false);
       }
     },
-    [workspaceId, refreshSources],
+    [workspaceId],
   );
 
   const handlePreviewSource = useCallback((source: SourceItem) => {
