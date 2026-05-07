@@ -4,6 +4,19 @@ import type { ChunkSpec, ParsingConfig } from "./types";
 const DEFAULT_CHUNK_SIZE = 1000;
 const DEFAULT_CHUNK_OVERLAP = 150;
 const MIN_CHUNK_SIZE = 200;
+const HTML_TAG_DENSITY_THRESHOLD = 0.12;
+const HTML_TAG_COUNT_THRESHOLD = 8;
+const HTML_EXTRA_SEPARATORS = [
+  "<tbody",
+  "<thead",
+  "<tfoot",
+  "<a",
+  "<img",
+  "<center",
+  "<form",
+  "<input",
+  "<b",
+];
 
 type ChunkRange = {
   startIndex: number;
@@ -14,12 +27,47 @@ function getChunkSize(config?: Pick<ParsingConfig, "chunkSize"> | null) {
   return config?.chunkSize ?? DEFAULT_CHUNK_SIZE;
 }
 
+function getChunkOverlap(chunkSize: number) {
+  return Math.min(DEFAULT_CHUNK_OVERLAP, Math.max(0, chunkSize - 1));
+}
+
 function createTextSplitter(config?: Pick<ParsingConfig, "chunkSize"> | null) {
   const chunkSize = getChunkSize(config);
   return new RecursiveCharacterTextSplitter({
     chunkSize,
-    chunkOverlap: Math.min(DEFAULT_CHUNK_OVERLAP, Math.max(0, chunkSize - 1)),
+    chunkOverlap: getChunkOverlap(chunkSize),
   });
+}
+
+function createHtmlTextSplitter(config?: Pick<ParsingConfig, "chunkSize"> | null) {
+  const chunkSize = getChunkSize(config);
+  return new RecursiveCharacterTextSplitter({
+    chunkSize,
+    chunkOverlap: getChunkOverlap(chunkSize),
+    separators: createHtmlSeparators(),
+  });
+}
+
+function createSourceTextSplitter(
+  content: string,
+  config?: Pick<ParsingConfig, "chunkSize"> | null,
+) {
+  return isLikelyHtml(content)
+    ? createHtmlTextSplitter(config)
+    : createTextSplitter(config);
+}
+
+function createHtmlSeparators() {
+  const baseSeparators = RecursiveCharacterTextSplitter.getSeparatorsForLanguage("html");
+  const separators = baseSeparators.map((separator) =>
+    /^<[a-z][a-z0-9]*>$/i.test(separator) ? separator.slice(0, -1) : separator,
+  );
+  const tailSeparators = separators.filter((separator) => separator === " " || separator === "");
+  const tagSeparators = separators.filter((separator) => separator !== " " && separator !== "");
+
+  return Array.from(
+    new Set([...tagSeparators, ...HTML_EXTRA_SEPARATORS, ...tailSeparators]),
+  );
 }
 
 function estimateTokenCount(text: string) {
@@ -82,6 +130,20 @@ function toRanges(content: string, splitTexts: string[]) {
   return ranges;
 }
 
+function isLikelyHtml(content: string) {
+  const tagMatches = content.match(/<\/?[a-z][^>]*>/gi) ?? [];
+  if (tagMatches.length === 0) {
+    return false;
+  }
+
+  const tagLength = tagMatches.reduce((sum, tag) => sum + tag.length, 0);
+  return (
+    /<!doctype\s+html\b|<html\b|<body\b|<table\b|<tr\b/i.test(content) ||
+    tagMatches.length >= HTML_TAG_COUNT_THRESHOLD ||
+    tagLength / Math.max(content.length, 1) >= HTML_TAG_DENSITY_THRESHOLD
+  );
+}
+
 function mergeShortChunks(content: string, ranges: ChunkRange[]) {
   if (ranges.length <= 1) {
     return ranges;
@@ -130,9 +192,12 @@ export async function chunkSourceContent(
     return [];
   }
 
-  const splitter = createTextSplitter(config);
+  const splitter = createSourceTextSplitter(normalized, config);
   const splitTexts = await splitter.splitText(normalized);
-  const ranges = mergeShortChunks(normalized, toRanges(normalized, splitTexts));
+  const ranges = mergeShortChunks(
+    normalized,
+    toRanges(normalized, splitTexts),
+  );
 
   return ranges.map((range) =>
     toChunk({

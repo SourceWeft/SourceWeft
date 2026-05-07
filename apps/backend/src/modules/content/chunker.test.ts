@@ -80,3 +80,62 @@ test("chunkSourceContent merges short invoice tail chunks into previous chunk", 
     assert.equal(content.trim().slice(chunk.startIndex, chunk.endIndex), chunk.text);
   }
 });
+
+test("chunkSourceContent uses the HTML splitter for HTML-heavy content", async () => {
+  const paragraph = "This is a paragraph inside a div. ".repeat(12);
+  const content = [
+    "<!DOCTYPE html>",
+    "<html>",
+    "<body>",
+    "<div>",
+    "<h1>Hello World</h1>",
+    `<p>${paragraph}</p>`,
+    "</div>",
+    "<div>",
+    "<h2>Section 2</h2>",
+    `<p>${paragraph}</p>`,
+    "</div>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+
+  const chunks = await chunkSourceContent(content, {
+    chunkSize: 220,
+  });
+
+  assert.equal(chunks.length > 1, true);
+  assert.equal(chunks[0]?.text.startsWith("<!DOCTYPE html>"), true);
+  assert.equal(
+    chunks.some((chunk) => chunk.text.startsWith("<div>\n<h2>Section 2</h2>")),
+    true,
+  );
+
+  for (const chunk of chunks) {
+    assert.equal(content.trim().slice(chunk.startIndex, chunk.endIndex), chunk.text);
+  }
+});
+
+test("chunkSourceContent does not start HTML chunks inside tag attributes", async () => {
+  const content = [
+    "<table id=\"hnmain\"><tbody><tr id=\"bigbox\"><td><table><tbody>",
+    "<tr class=\"athing submission\" id=\"48047826\"><td align=\"right\" valign=\"top\" class=\"title\"><span class=\"rank\">25.</span></td><td class=\"title\"><span class=\"titleline\"><a href=\"https://ahk.cardor.dev/\">Agent-harness-kit scaffolding for multi-agent workflows (MCP, provider-agnostic)</a><span class=\"sitebit comhead\"> (<a href=\"https://news.ycombinator.com/from?site=cardor.dev\"><span class=\"sitestr\">cardor.dev</span></a>)</span></span></td></tr>",
+    "<tr><td colspan=\"2\"></td><td class=\"subtext\"><span class=\"subline\"><span class=\"score\" id=\"score_48047826\">61 points</span> by <a href=\"https://news.ycombinator.com/user?id=enmanuelmag\" class=\"hnuser\">enmanuelmag</a><span class=\"age\" title=\"2026-05-07T10:45:59 1778150759\"><a href=\"https://news.ycombinator.com/item?id=48047826\">7 hours ago</a></span> | <a href=\"https://news.ycombinator.com/hide?id=48047826&amp;goto=news\">hide</a> | <a href=\"https://news.ycombinator.com/item?id=48047826\">18&nbsp;comments</a></span></td></tr>",
+    "<tr class=\"spacer\" style=\"height:5px\"></tr>",
+    "<tr class=\"athing submission\" id=\"48045012\"><td align=\"right\" valign=\"top\" class=\"title\"><span class=\"rank\">26.</span></td><td class=\"title\"><span class=\"titleline\"><a href=\"https://aniket.foo/posts/20260505-netboot/\">Diskless Linux boot using ZFS, iSCSI and PXE</a><span class=\"sitebit comhead\"> (<a href=\"https://news.ycombinator.com/from?site=aniket.foo\"><span class=\"sitestr\">aniket.foo</span></a>)</span></span></td></tr>",
+    "<tr><td colspan=\"2\"></td><td class=\"subtext\"><span class=\"subline\"><span class=\"score\" id=\"score_48045012\">174 points</span> by <a href=\"https://news.ycombinator.com/user?id=stereo-highway\" class=\"hnuser\">stereo-highway</a><span class=\"age\" title=\"2026-05-07T03:13:24 1778123604\"><a href=\"https://news.ycombinator.com/item?id=48045012\">15 hours ago</a></span> | <a href=\"https://news.ycombinator.com/hide?id=48045012&amp;goto=news\">hide</a> | <a href=\"https://news.ycombinator.com/item?id=48045012\">91&nbsp;comments</a></span></td></tr>",
+    "</tbody></table></td></tr></tbody></table>",
+  ].join("\n");
+
+  const chunks = await chunkSourceContent(content, {
+    chunkSize: 260,
+  });
+
+  assert.equal(
+    chunks.some((chunk) => /^(align|valign|class|href|title)=/.test(chunk.text.trim())),
+    false,
+  );
+
+  for (const chunk of chunks) {
+    assert.equal(content.trim().slice(chunk.startIndex, chunk.endIndex), chunk.text);
+  }
+});

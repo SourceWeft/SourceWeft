@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, FileText, Hash, Loader2, Sparkles } from "lucide-react";
+import {
+  Code2,
+  ExternalLink,
+  FileText,
+  Hash,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -39,11 +46,13 @@ export function SourcePreviewPanel({
   const [isDeletedCitation, setIsDeletedCitation] = useState(false);
   const [isHistoricalCitation, setIsHistoricalCitation] = useState(false);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("preview");
+  const [rawChunkIds, setRawChunkIds] = useState<Set<string>>(() => new Set());
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (open) {
       setPreviewMode("preview");
+      setRawChunkIds(new Set());
     }
   }, [citation?.chunkId, open, source?.id]);
 
@@ -164,6 +173,17 @@ export function SourcePreviewPanel({
   const title =
     detail?.source.title ?? citation?.sourceTitle ?? source?.title ?? "Source";
   const isExternalCitation = Boolean(citation?.externalUri);
+  const toggleRawChunk = (chunkId: string) => {
+    setRawChunkIds((current) => {
+      const next = new Set(current);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
+      } else {
+        next.add(chunkId);
+      }
+      return next;
+    });
+  };
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -423,6 +443,7 @@ export function SourcePreviewPanel({
                 <div className="mx-auto max-w-4xl space-y-4 px-5 py-6 lg:px-8">
                   {detail.chunks.map((chunk, index) => {
                     const isCited = chunk.id === citation?.chunkId;
+                    const isRawOpen = rawChunkIds.has(chunk.id);
                     return (
                       <article
                         className={cn(
@@ -433,8 +454,8 @@ export function SourcePreviewPanel({
                         data-source-chunk-id={chunk.id}
                         key={chunk.id}
                       >
-                        <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
-                          <div className="flex items-center gap-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
+                          <div className="flex min-w-0 items-center gap-2.5">
                             <span
                               className={cn(
                                 "inline-flex h-7 min-w-7 items-center justify-center rounded-full text-xs font-semibold",
@@ -449,17 +470,36 @@ export function SourcePreviewPanel({
                               Chunk {index + 1}
                             </span>
                           </div>
-                          {isCited ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                              <Sparkles className="size-3.5" />
-                              Cited source
-                            </span>
-                          ) : null}
+                          <div className="flex shrink-0 items-center gap-2">
+                            {isCited ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                                <Sparkles className="size-3.5" />
+                                Cited source
+                              </span>
+                            ) : null}
+                            <Button
+                              aria-expanded={isRawOpen}
+                              className="h-7 gap-1.5 px-2 text-xs"
+                              onClick={() => toggleRawChunk(chunk.id)}
+                              size="xs"
+                              type="button"
+                              variant={isRawOpen ? "secondary" : "ghost"}
+                            >
+                              <Code2 className="size-3.5" />
+                              Raw
+                            </Button>
+                          </div>
                         </div>
                         <div className="px-4 py-4 lg:px-5">
-                          <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                            {chunk.content}
-                          </MessageResponse>
+                          {isRawOpen ? (
+                            <pre className="max-h-96 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap break-words text-muted-foreground">
+                              {chunk.content || "No raw chunk content."}
+                            </pre>
+                          ) : (
+                            <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                              {chunk.content}
+                            </MessageResponse>
+                          )}
                         </div>
                       </article>
                     );

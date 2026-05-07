@@ -483,6 +483,7 @@ function SourceRow({
   onEditReadme,
   onMove,
   onPreview,
+  onReindex,
   onRetry,
 }: {
   source: SourceItem;
@@ -505,6 +506,7 @@ function SourceRow({
   onEditReadme: () => void;
   onMove: () => void;
   onPreview: () => void;
+  onReindex: () => void;
   onRetry: () => void;
 }) {
   const isDirectory = source.sourceType === "directory";
@@ -678,7 +680,8 @@ function SourceRow({
                 <RotateCcw className="size-3.5" />
                 Retry
               </DropdownMenuItem>
-            ) : isDirectory ? (
+            ) : null}
+            {isDirectory ? (
               <>
                 <DropdownMenuItem
                   className="whitespace-nowrap"
@@ -738,6 +741,15 @@ function SourceRow({
               <MoveRight className="size-3.5" />
               Move to...
             </DropdownMenuItem>
+            {!isDirectory ? (
+              <DropdownMenuItem
+                className="whitespace-nowrap"
+                onClick={(event) => handleMenuAction(event, onReindex)}
+              >
+                <RotateCcw className="size-3.5" />
+                Re-index
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
               className="whitespace-nowrap"
               onClick={(event) => handleMenuAction(event, onDelete)}
@@ -999,6 +1011,7 @@ function SourceTreeRow({
   onEditReadme,
   onMove,
   onPreview,
+  onReindex,
   onRetry,
 }: {
   node: SourceTreeNode;
@@ -1020,6 +1033,7 @@ function SourceTreeRow({
   onEditReadme: (source: SourceItem) => void;
   onMove: (source: SourceItem) => void;
   onPreview: (source: SourceItem) => void;
+  onReindex: (source: SourceItem) => void;
   onRetry: (source: SourceItem) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -1058,6 +1072,7 @@ function SourceTreeRow({
         onEditTitleChange={onEditTitleChange}
         onMove={() => onMove(source)}
         onPreview={() => onPreview(source)}
+        onReindex={() => onReindex(source)}
         onRetry={() => onRetry(source)}
         onStartRename={() => onStartRename(source)}
         onSubmitRename={() => onSubmitRename(source.id)}
@@ -1099,6 +1114,7 @@ function SourceTreeRow({
         onEditTitleChange={onEditTitleChange}
         onMove={() => onMove(source)}
         onPreview={() => onPreview(source)}
+        onReindex={() => onReindex(source)}
         onRetry={() => onRetry(source)}
         onStartRename={() => onStartRename(source)}
         onSubmitRename={() => onSubmitRename(source.id)}
@@ -1131,6 +1147,7 @@ function SourceTreeRow({
               onEditTitleChange={onEditTitleChange}
               onMove={onMove}
               onPreview={onPreview}
+              onReindex={onReindex}
               onRetry={onRetry}
               onStartRename={onStartRename}
               onSubmitRename={onSubmitRename}
@@ -1185,6 +1202,7 @@ function SourcesTab({
   onEditReadme,
   onMove,
   onPreview,
+  onReindex,
   onRetry,
 }: {
   sources: SourceItem[];
@@ -1205,6 +1223,7 @@ function SourcesTab({
   onEditReadme: (source: SourceItem) => void;
   onMove: (source: SourceItem) => void;
   onPreview: (source: SourceItem) => void;
+  onReindex: (source: SourceItem) => void;
   onRetry: (source: SourceItem) => void;
 }) {
   const tree = useMemo(
@@ -1252,6 +1271,7 @@ function SourcesTab({
           onEditTitleChange={onEditTitleChange}
           onMove={onMove}
           onPreview={onPreview}
+          onReindex={onReindex}
           onRetry={onRetry}
           onStartRename={onStartRename}
           onSubmitRename={onSubmitRename}
@@ -1951,6 +1971,24 @@ export function SourcesHub({
     [workspaceId, refreshSources],
   );
 
+  const handleReindexSource = useCallback(
+    async (source: SourceItem) => {
+      if (!workspaceId) return;
+
+      setRowBusy(source.id, true);
+      try {
+        await contentClient.indexSource(workspaceId, source.id, {});
+        toast.success("Re-index queued.");
+        await refreshSources();
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to re-index source."));
+      } finally {
+        setRowBusy(source.id, false);
+      }
+    },
+    [workspaceId, refreshSources],
+  );
+
   const handlePreviewSource = useCallback((source: SourceItem) => {
     if (source.sourceType === "directory") return;
     setPreviewSource(source);
@@ -2408,6 +2446,7 @@ export function SourcesHub({
                   onCreateDirectory={handleOpenCreateDirectory}
                   onMove={handleOpenMoveDialog}
                   onPreview={handlePreviewSource}
+                  onReindex={handleReindexSource}
                   onRetry={handleRetrySource}
                   onStartRename={handleStartRename}
                   onSubmitRename={handleSubmitRename}
