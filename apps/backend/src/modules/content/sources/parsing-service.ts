@@ -168,42 +168,42 @@ export class SourceParsingService {
       return;
     }
 
-    if (!source.storageKey || !source.mimeType) {
-      throw new ContentError(
-        400,
-        "SOURCE_STORAGE_MISSING",
-        "Source file storage is incomplete",
-      );
-    }
-
-    const parser = getSourceParser(source.mimeType);
-    if (!parser) {
-      throw new ContentError(
-        400,
-        "UNSUPPORTED_SOURCE_TYPE",
-        `Unsupported MIME type: ${source.mimeType}`,
-      );
-    }
-
-    const parsingConfig = defaultParsingConfig(source.parsingConfig ?? undefined);
-
-    const processingSource = await updateSourceStatusForLatestRevision({
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      sourceId: input.sourceId,
-      sourceRevisionId: input.sourceRevisionId,
-      status: "processing",
-      error: {},
-      metadata: mergeStatusMetadata(source, {
-        progress: 20,
-        currentStep: "parsing",
-      }),
-    });
-    if (!processingSource) {
-      return;
-    }
-
     try {
+      if (!source.storageKey || !source.mimeType) {
+        throw new ContentError(
+          400,
+          "SOURCE_STORAGE_MISSING",
+          "Source file storage is incomplete",
+        );
+      }
+
+      const parser = getSourceParser(source.mimeType);
+      if (!parser) {
+        throw new ContentError(
+          400,
+          "UNSUPPORTED_SOURCE_TYPE",
+          `Unsupported MIME type: ${source.mimeType}`,
+        );
+      }
+
+      const parsingConfig = defaultParsingConfig(source.parsingConfig ?? undefined);
+
+      const processingSource = await updateSourceStatusForLatestRevision({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceId: input.sourceId,
+        sourceRevisionId: input.sourceRevisionId,
+        status: "processing",
+        error: {},
+        metadata: mergeStatusMetadata(source, {
+          progress: 20,
+          currentStep: "parsing",
+        }),
+      });
+      if (!processingSource) {
+        return;
+      }
+
       const fileBuffer = await downloadSourceObject({
         bucket: source.storageBucket,
         key: source.storageKey,
@@ -214,6 +214,12 @@ export class SourceParsingService {
         fileSize: source.sizeBytes ?? fileBuffer.length,
         content: fileBuffer,
         config: parsingConfig,
+        sourceId: input.sourceId,
+        sourceRevisionId: input.sourceRevisionId,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        idempotencyKey: input.idempotencyKey,
       };
       const providerOutcome = isDocumentProviderMimeType(source.mimeType)
         ? await startDocumentParse({
@@ -281,27 +287,27 @@ export class SourceParsingService {
       throw new ContentError(404, "SOURCE_NOT_FOUND", "Source not found");
     }
 
-    if (!source.storageKey) {
-      throw new ContentError(
-        400,
-        "SOURCE_STORAGE_MISSING",
-        "Source file storage is incomplete",
-      );
-    }
-
     if (!(await this.isCurrentRevision(input))) {
       return;
     }
 
-    const provider = getDocumentProviderForResume(
-      input.backendId as DocumentParseProviderId,
-    );
-    const fileBuffer = await downloadSourceObject({
-      bucket: source.storageBucket,
-      key: source.storageKey,
-    });
-
     try {
+      if (!source.storageKey) {
+        throw new ContentError(
+          400,
+          "SOURCE_STORAGE_MISSING",
+          "Source file storage is incomplete",
+        );
+      }
+
+      const provider = getDocumentProviderForResume(
+        input.backendId as DocumentParseProviderId,
+      );
+      const fileBuffer = await downloadSourceObject({
+        bucket: source.storageBucket,
+        key: source.storageKey,
+      });
+
       const outcome = await provider.resume(
         {
           backendId: input.backendId as DocumentParseProviderId,
@@ -378,6 +384,7 @@ export class SourceParsingService {
     const contentHash = computeContentHash(input.parsed.content);
     const parsedTokens = estimateTokens(input.parsed.content);
     const parsedPages = input.parsed.pages.length;
+    const billablePages = input.parsed.metadata.pageCount ?? parsedPages;
     const parsedSource = await updateSourceRecordForLatestRevision({
       teamId: input.input.teamId,
       workspaceId: input.input.workspaceId,
@@ -394,7 +401,7 @@ export class SourceParsingService {
         ...(input.source.metadata ?? {}),
         ...input.parsed.metadata,
         parsedPages: input.parsed.pages.length,
-        totalPages: input.parsed.metadata.pageCount ?? input.parsed.pages.length,
+        totalPages: billablePages || input.parsed.pages.length,
         progress: 60,
         currentStep: "chunking",
         error: null,
@@ -411,7 +418,7 @@ export class SourceParsingService {
       userId: input.input.userId,
       sourceRevisionId: input.input.sourceRevisionId,
       estimatedPages: input.parsed.metadata.pageCount,
-      parsedPages,
+      parsedPages: billablePages || parsedPages,
       parsedTokens,
       idempotencyKey: input.input.idempotencyKey,
       chunks: input.parsed.chunks,
@@ -432,7 +439,7 @@ export class SourceParsingService {
       sourceRevisionId: input.input.sourceRevisionId,
       metadata: mergeStatusMetadata(result.source, {
         parsedPages: input.parsed.pages.length,
-        totalPages: input.parsed.metadata.pageCount ?? input.parsed.pages.length,
+        totalPages: billablePages || input.parsed.pages.length,
         progress: 100,
         currentStep: "completed",
         error: null,

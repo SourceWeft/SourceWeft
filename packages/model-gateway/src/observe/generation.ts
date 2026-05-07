@@ -82,6 +82,7 @@ function buildObserveAttributes(metadata: Record<string, unknown>) {
       keySource: readMetadataValue(metadata, "keySource"),
       provider: readMetadataValue(metadata, "provider"),
       modelAlias: readMetadataValue(metadata, "modelAlias"),
+      modelKind: readMetadataValue(metadata, "modelKind"),
       routeStrategy: readMetadataValue(metadata, "routeStrategy"),
     }) ?? {}
   );

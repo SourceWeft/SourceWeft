@@ -18,7 +18,7 @@ export type ChatItem = {
 export type SourceItem = {
   id: string;
   title: string;
-  type: "PDF" | "DOC" | "WEB" | "NOTE";
+  type: "PDF" | "DOC" | "WEB" | "NOTE" | "TEXT" | "CSV" | "JSON" | "IMG" | "AUDIO";
   status: "Indexed" | "Syncing" | "Needs review";
   meta: string;
   folder?: string;

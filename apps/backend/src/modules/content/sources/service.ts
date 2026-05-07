@@ -22,6 +22,10 @@ import {
   uploadSourceObject,
 } from "../storage";
 import { getSourceParser } from "../parsers";
+import {
+  assertSourceContentCanBeParsed,
+  requireSupportedSourceFile,
+} from "../source-file-classifier";
 import { enqueueSourceParseJob } from "../queue";
 import type { SourceRecord, SourceStatusDetail } from "../types";
 import { defaultParsingConfig } from "./parsing-config";
@@ -62,16 +66,37 @@ export class ContentSourceService {
       userId: input.userId,
     });
 
-    const parser = getSourceParser(input.mimeType);
+    const classification = requireSupportedSourceFile({
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+    });
+    assertSourceContentCanBeParsed({
+      classification,
+      content: input.content,
+      fileName: input.fileName,
+    });
+
+    const parser = getSourceParser(classification.mimeType);
     if (!parser) {
       throw new ContentError(
         400,
         "UNSUPPORTED_SOURCE_TYPE",
-        `Unsupported MIME type: ${input.mimeType}`,
+        `Unsupported MIME type: ${classification.mimeType}`,
       );
     }
 
     const parsingConfig = defaultParsingConfig();
+    const sourceMetadata = {
+      fileName: input.fileName,
+      fileSize: input.sizeBytes,
+      mimeType: classification.mimeType,
+      originalMimeType: classification.originalMimeType,
+      sourceFileKind: classification.kind,
+      sourceFileExtension: classification.extension,
+      uploadMethod: "api" as const,
+      progress: 0,
+      currentStep: "uploading",
+    };
     const source = await createSourceRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -79,18 +104,11 @@ export class ContentSourceService {
       contentText: "",
       createdBy: input.userId,
       sourceType: "file_upload",
-      mimeType: input.mimeType,
+      mimeType: classification.mimeType,
       sizeBytes: input.sizeBytes,
       parserVersion: parsingConfig.parserVersion,
       parsingConfig,
-      metadata: {
-        fileName: input.fileName,
-        fileSize: input.sizeBytes,
-        mimeType: input.mimeType,
-        uploadMethod: "api",
-        progress: 0,
-        currentStep: "uploading",
-      },
+      metadata: sourceMetadata,
     });
 
     const storageKey = buildSourceStorageKey({
@@ -103,7 +121,7 @@ export class ContentSourceService {
       await uploadSourceObject({
         key: storageKey,
         body: input.content,
-        contentType: input.mimeType,
+        contentType: classification.mimeType,
       });
 
       const updatedSource = await updateSourceRecord({
@@ -114,9 +132,7 @@ export class ContentSourceService {
         storageKey,
         status: "queued",
         metadata: mergeStatusMetadata(source, {
-          fileName: input.fileName,
-          fileSize: input.sizeBytes,
-          mimeType: input.mimeType,
+          ...sourceMetadata,
           progress: 5,
           currentStep: "queued",
         }),

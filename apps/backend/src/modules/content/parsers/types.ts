@@ -6,6 +6,12 @@ export type ParseInput = {
   fileSize: number;
   content: Buffer;
   config: ParsingConfig;
+  sourceId?: string;
+  sourceRevisionId?: string;
+  teamId?: string;
+  workspaceId?: string;
+  userId?: string;
+  idempotencyKey?: string;
 };
 
 export type ParsedPage = {

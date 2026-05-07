@@ -1,4 +1,5 @@
 import type { SourceParser } from "./types";
+import { audioSourceParser } from "./audio";
 import { csvSourceParser } from "./csv";
 import { docxSourceParser } from "./docx";
 import { documentProviderParser } from "./document-provider-parser";
@@ -11,6 +12,7 @@ import { textSourceParser } from "./text";
 
 const registeredParsers: SourceParser[] = [
   documentProviderParser,
+  audioSourceParser,
   docxSourceParser,
   epubSourceParser,
   csvSourceParser,
@@ -31,6 +33,7 @@ export function listSupportedSourceMimeTypes() {
 }
 
 export {
+  audioSourceParser,
   csvSourceParser,
   docxSourceParser,
   documentProviderParser,

@@ -140,7 +140,7 @@ export async function recordGatewayOperationEvent(input: {
       attributes: {
         thinkingEnabled: gateway.thinkingEnabled,
         thinkingEffort: gateway.thinkingEffort,
-        modelKind: input.modelKind ?? null,
+        modelKind: input.modelKind ?? input.attributes?.modelKind ?? null,
         billable: input.modelKind === "chat",
         ...(input.attributes ?? {}),
       },
@@ -192,6 +192,7 @@ export function buildGatewayRequestMetadata(input: {
     observationOperation: input.operation,
     modelAlias: input.modelAlias ?? null,
     profileAlias: input.profileAlias ?? null,
+    modelKind: input.modelKind ?? null,
     parentSpanId: input.parentSpanId ?? null,
     executionMode:
       typeof audit.executionMode === "string" ? audit.executionMode : null,

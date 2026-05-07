@@ -18,6 +18,7 @@ import {
   updateSourceStatus,
   updateSourceStatusForLatestRevision,
 } from "./repository";
+import { resolveBillingPages } from "./billing-pages";
 
 type StaleIndexingResult = {
   stale: true;
@@ -30,23 +31,6 @@ type StaleIndexingResult = {
     annIndexUsed: null;
   };
 };
-
-function resolveBillingPages(input: {
-  parsedPages?: number;
-  estimatedPages?: number;
-  sourceEstimatedPages?: number | null;
-}) {
-  const pages = input.parsedPages ?? input.estimatedPages ?? input.sourceEstimatedPages;
-  if (!Number.isFinite(pages) || (pages ?? 0) <= 0) {
-    throw new ContentError(
-      400,
-      "INGESTION_PAGE_COUNT_MISSING",
-      "Parsed page count is required for source ingestion billing",
-    );
-  }
-
-  return Math.ceil(pages ?? 0);
-}
 
 async function requireDefaultEmbeddingProfile() {
   try {
@@ -141,6 +125,9 @@ export class SourceIndexingService {
       }
     }
 
+    let estimatedPages = input.estimatedPages ?? source.estimatedPages;
+    const parsedTokens = input.parsedTokens ?? source.parsedTokens;
+
     const processingSource = input.sourceRevisionId
       ? await updateSourceStatusForLatestRevision({
           sourceId: source.id,
@@ -148,16 +135,16 @@ export class SourceIndexingService {
           teamId: workspace.organizationId,
           workspaceId: workspace.id,
           status: "processing",
-          estimatedPages: input.estimatedPages ?? source.estimatedPages,
-          parsedTokens: input.parsedTokens ?? source.parsedTokens,
+          estimatedPages,
+          parsedTokens,
         })
       : await updateSourceStatus({
           sourceId: source.id,
           teamId: workspace.organizationId,
           workspaceId: workspace.id,
           status: "processing",
-          estimatedPages: input.estimatedPages ?? source.estimatedPages,
-          parsedTokens: input.parsedTokens ?? source.parsedTokens,
+          estimatedPages,
+          parsedTokens,
         });
     if (!processingSource) {
       return this.handleStaleRevision(source, chunkSpecs.length, input.staleMode);
@@ -165,6 +152,15 @@ export class SourceIndexingService {
 
     let embeddings: number[][] = [];
     try {
+      const billingPages = resolveBillingPages({
+        parsedPages: input.parsedPages,
+        estimatedPages: input.estimatedPages,
+        sourceEstimatedPages: source.estimatedPages,
+        chunkCount: chunkSpecs.length,
+        contentText: source.contentText,
+      });
+      estimatedPages ??= billingPages;
+
       if (chunkSpecs.length > 0 && profile.vectorStrategy !== "disabled") {
         const embedStartedAt = Date.now();
         const result = await embeddingGateway.embeddings
@@ -259,8 +255,8 @@ export class SourceIndexingService {
         chunks: chunkSpecs,
         parsingConfig: source.parsingConfig,
         markSourceIndexed: true,
-        estimatedPages: input.estimatedPages ?? source.estimatedPages,
-        parsedTokens: input.parsedTokens ?? source.parsedTokens,
+        estimatedPages,
+        parsedTokens,
       });
 
       if (!writeResult) {
@@ -280,12 +276,6 @@ export class SourceIndexingService {
         }
       }
 
-      const billingPages = resolveBillingPages({
-        parsedPages: input.parsedPages,
-        estimatedPages: input.estimatedPages,
-        sourceEstimatedPages: source.estimatedPages,
-      });
-
       const billing = await this.billing.meterIngestion(
         workspace.organizationId,
         {
@@ -304,8 +294,8 @@ export class SourceIndexingService {
         workspaceId: workspace.id,
         status: "indexed",
         indexedAt: new Date(),
-        estimatedPages: input.estimatedPages ?? source.estimatedPages,
-        parsedTokens: input.parsedTokens ?? source.parsedTokens,
+        estimatedPages,
+        parsedTokens,
       }));
 
       return {
@@ -339,8 +329,8 @@ export class SourceIndexingService {
           teamId: workspace.organizationId,
           workspaceId: workspace.id,
           status: "failed",
-          estimatedPages: input.estimatedPages ?? source.estimatedPages,
-          parsedTokens: input.parsedTokens ?? source.parsedTokens,
+          estimatedPages,
+          parsedTokens,
         });
 
         if (!failedSource) {
@@ -352,8 +342,8 @@ export class SourceIndexingService {
           teamId: workspace.organizationId,
           workspaceId: workspace.id,
           status: "failed",
-          estimatedPages: input.estimatedPages ?? source.estimatedPages,
-          parsedTokens: input.parsedTokens ?? source.parsedTokens,
+          estimatedPages,
+          parsedTokens,
         });
       }
       throw error;

@@ -16,6 +16,7 @@ import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
 import { registerWorkspaceRoutes } from "./routes/workspace";
+import { withBetterAuthClientIp } from "./better-auth-request";
 
 export function createApp() {
   const app = new Hono();
@@ -55,15 +56,15 @@ export function createApp() {
   );
 
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
-    return auth.handler(c.req.raw);
+    return auth.handler(withBetterAuthClientIp(c));
   });
 
   app.get("/.well-known/oauth-authorization-server/api/auth", (c) =>
-    oauthProviderAuthServerMetadata(auth)(c.req.raw),
+    oauthProviderAuthServerMetadata(auth)(withBetterAuthClientIp(c)),
   );
 
   app.get("/.well-known/openid-configuration", (c) =>
-    oauthProviderOpenIdConfigMetadata(auth)(c.req.raw),
+    oauthProviderOpenIdConfigMetadata(auth)(withBetterAuthClientIp(c)),
   );
 
   app.get("/v1/health", (c) => {

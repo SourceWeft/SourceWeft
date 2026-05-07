@@ -74,6 +74,115 @@ const addTabs = ["File", "Text"] as const;
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const SOURCE_FILE_EXTENSIONS = [
+  "txt",
+  "text",
+  "md",
+  "markdown",
+  "mdx",
+  "rst",
+  "adoc",
+  "asciidoc",
+  "org",
+  "json",
+  "jsonl",
+  "ndjson",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "cfg",
+  "conf",
+  "properties",
+  "xml",
+  "html",
+  "htm",
+  "xhtml",
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "svg",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "mjs",
+  "cjs",
+  "py",
+  "java",
+  "kt",
+  "scala",
+  "c",
+  "h",
+  "cpp",
+  "cxx",
+  "cc",
+  "hpp",
+  "cs",
+  "go",
+  "rs",
+  "rb",
+  "php",
+  "lua",
+  "swift",
+  "r",
+  "jl",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "bat",
+  "cmd",
+  "ps1",
+  "sql",
+  "graphql",
+  "gql",
+  "tex",
+  "bib",
+  "log",
+  "vue",
+  "svelte",
+  "astro",
+  "tf",
+  "hcl",
+  "proto",
+  "env",
+  "gitignore",
+  "dockerignore",
+  "editorconfig",
+  "dockerfile",
+  "makefile",
+  "cmake",
+  "tsv",
+  "csv",
+  "srt",
+  "pdf",
+  "doc",
+  "docx",
+  "pptx",
+  "epub",
+  "avif",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "tif",
+  "tiff",
+  "bmp",
+  "gif",
+  "flac",
+  "mp3",
+  "mp4",
+  "mpeg",
+  "mpga",
+  "m4a",
+  "ogg",
+  "wav",
+  "webm",
+] as const;
+const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(",");
+const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
 
 type HubTab = (typeof tabs)[number];
 type CheckedState = boolean | "indeterminate";
@@ -148,7 +257,67 @@ function apiTypeToSourceType(
   if (sourceType === "web_url" || sourceType === "youtube") return "WEB";
   if (sourceType === "note") return "NOTE";
   if (mimeType?.includes("pdf")) return "PDF";
+  if (mimeType?.startsWith("image/")) return "IMG";
+  if (mimeType?.startsWith("audio/") || mimeType?.startsWith("video/")) {
+    return "AUDIO";
+  }
+  if (mimeType?.includes("csv")) return "CSV";
+  if (mimeType?.includes("json")) return "JSON";
+  if (mimeType?.startsWith("text/")) return "TEXT";
   return "DOC";
+}
+
+function getUploadFileExtension(fileName: string) {
+  const baseName = fileName.split(/[\\/]/).at(-1)?.trim().toLowerCase() ?? "";
+  if (!baseName) return null;
+  if (baseName === "dockerfile" || baseName.startsWith("dockerfile.")) {
+    return "dockerfile";
+  }
+  if (baseName === "makefile" || baseName.startsWith("makefile.")) {
+    return "makefile";
+  }
+  if (baseName.startsWith(".env")) return "env";
+  if (baseName.startsWith(".") && SOURCE_FILE_EXTENSION_SET.has(baseName.slice(1))) {
+    return baseName.slice(1);
+  }
+  const dotIndex = baseName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === baseName.length - 1) return null;
+  return baseName.slice(dotIndex + 1);
+}
+
+function getUploadFileLabel(file: File) {
+  const extension = getUploadFileExtension(file.name);
+  if (!extension) return "FILE";
+  if (["pdf"].includes(extension)) return "PDF";
+  if (["doc", "docx"].includes(extension)) return "DOC";
+  if (["pptx"].includes(extension)) return "PPT";
+  if (["epub"].includes(extension)) return "EPUB";
+  if (["csv", "tsv"].includes(extension)) return "CSV";
+  if (extension === "json") return "JSON";
+  if (extension === "srt") return "SRT";
+  if (
+    ["avif", "png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp", "gif"].includes(
+      extension,
+    )
+  ) {
+    return "IMG";
+  }
+  if (
+    ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"].includes(
+      extension,
+    )
+  ) {
+    return "AUDIO";
+  }
+  return "TEXT";
+}
+
+function isSupportedUploadFile(file: File) {
+  const extension = getUploadFileExtension(file.name);
+  if (extension && SOURCE_FILE_EXTENSION_SET.has(extension)) {
+    return true;
+  }
+  return file.type.startsWith("text/");
 }
 
 function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
@@ -1226,6 +1395,10 @@ export function SourcesHub({
 
       const nextFiles = [...files];
       for (const file of incoming) {
+        if (!isSupportedUploadFile(file)) {
+          toast.error(`"${file.name}" is not a supported source file.`);
+          continue;
+        }
         if (file.size > MAX_FILE_SIZE_BYTES) {
           toast.error(`"${file.name}" exceeds ${MAX_FILE_SIZE_MB}MB.`);
           continue;
@@ -1787,6 +1960,7 @@ export function SourcesHub({
                     onDrop={handleDrop}
                   >
                     <input
+                      accept={SOURCE_FILE_ACCEPT}
                       className="hidden"
                       ref={fileInputRef}
                       multiple
@@ -1824,9 +1998,12 @@ export function SourcesHub({
                             className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5"
                             key={`${file.name}-${file.size}-${idx}`}
                           >
-                            <span className="truncate text-xs text-foreground">
-                              {file.name}
-                            </span>
+                            <div className="min-w-0 flex-1">
+                              <span className="block truncate text-xs text-foreground">
+                                {file.name}
+                              </span>
+                            </div>
+                            <TypeBadge label={getUploadFileLabel(file)} />
                             <Button
                               onClick={() =>
                                 setFiles((prev) =>

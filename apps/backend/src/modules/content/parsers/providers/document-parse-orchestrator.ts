@@ -98,6 +98,19 @@ export async function startDocumentParse(
   const strategy = getConfiguredStrategy();
   const requestedProvider = getConfiguredProviderId();
 
+  if (isSupportedImageMimeType(input.mimeType)) {
+    return startWithProvider({
+      providerId: "pdf2markdown",
+      parseInput: input,
+      strategy,
+      requestedProvider,
+      extraMetadata:
+        requestedProvider === "pdf2markdown"
+          ? undefined
+          : { documentParseProviderFallbackReason: "image_requires_ocr" },
+    });
+  }
+
   if (strategy === "explicit") {
     return startWithProvider({
       providerId: requestedProvider,
@@ -108,15 +121,6 @@ export async function startDocumentParse(
   }
 
   if (strategy === "quality") {
-    return startWithProvider({
-      providerId: requestedProvider,
-      parseInput: input,
-      strategy,
-      requestedProvider,
-    });
-  }
-
-  if (isSupportedImageMimeType(input.mimeType)) {
     return startWithProvider({
       providerId: requestedProvider,
       parseInput: input,
