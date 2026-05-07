@@ -1,12 +1,8 @@
 import { CompositeBackend } from "deepagents";
 import { buildAgentConfig, createThreadAgent } from "..";
-import {
-  AgentCitationRegistry,
-} from "../citation-registry";
+import { AgentCitationRegistry } from "../citation-registry";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
-import {
-  createRetrievalTool,
-} from "../tools/retrieval-tool";
+import { createRetrievalTool } from "../tools/retrieval-tool";
 import { createWebTools } from "../tools/web-tools";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { createDefaultWebProvider } from "../../web";
@@ -61,19 +57,20 @@ function checkpointRefFromConfig(value: unknown): AgentCheckpointRef | null {
     return null;
   }
 
-  const threadId = typeof configurable.thread_id === "string"
-    ? configurable.thread_id
-    : null;
-  const checkpointId = typeof configurable.checkpoint_id === "string"
-    ? configurable.checkpoint_id
-    : null;
+  const threadId =
+    typeof configurable.thread_id === "string" ? configurable.thread_id : null;
+  const checkpointId =
+    typeof configurable.checkpoint_id === "string"
+      ? configurable.checkpoint_id
+      : null;
   if (!threadId || !checkpointId) {
     return null;
   }
 
-  const checkpointNs = typeof configurable.checkpoint_ns === "string"
-    ? configurable.checkpoint_ns
-    : undefined;
+  const checkpointNs =
+    typeof configurable.checkpoint_ns === "string"
+      ? configurable.checkpoint_ns
+      : undefined;
 
   return checkpointNs === undefined
     ? { threadId, checkpointId }
@@ -85,11 +82,12 @@ function checkpointHasPendingTasks(value: unknown) {
   return Array.isArray(record?.next) && record.next.length > 0;
 }
 
-type AgentRunnableConfig = Awaited<ReturnType<typeof createThreadAgent>> extends {
-  stream: (input: unknown, config?: infer Config) => unknown;
-}
-  ? NonNullable<Config>
-  : Record<string, unknown>;
+type AgentRunnableConfig =
+  Awaited<ReturnType<typeof createThreadAgent>> extends {
+    stream: (input: unknown, config?: infer Config) => unknown;
+  }
+    ? NonNullable<Config>
+    : Record<string, unknown>;
 
 async function getAgentStateOrNull(
   agent: Awaited<ReturnType<typeof createThreadAgent>>,
@@ -215,33 +213,49 @@ function resolveFilesystemPath(input: Record<string, unknown>) {
 }
 
 function filesystemScope(input: Record<string, unknown>) {
-  return resolveFilesystemPath(input).startsWith("/skills") ? "skills" : "sources";
+  return resolveFilesystemPath(input).startsWith("/skills")
+    ? "skills"
+    : "sources";
 }
 
-function getFilesystemToolStartTitle(toolName: string, input: Record<string, unknown>) {
+function getFilesystemToolStartTitle(
+  toolName: string,
+  input: Record<string, unknown>,
+) {
   const skillScoped = filesystemScope(input) === "skills";
   if (toolName === "ls") {
     return skillScoped ? "Listing selected skills" : "Listing selected sources";
   }
   if (toolName === "glob") {
-    return skillScoped ? "Finding matching skill files" : "Finding matching sources";
+    return skillScoped
+      ? "Finding matching skill files"
+      : "Finding matching sources";
   }
   if (toolName === "read_file") {
-    return skillScoped ? "Reading skill instructions" : "Reading source content";
+    return skillScoped
+      ? "Reading skill instructions"
+      : "Reading source content";
   }
   if (toolName === "grep") {
-    return skillScoped ? "Searching skill instructions" : "Searching exact terms";
+    return skillScoped
+      ? "Searching skill instructions"
+      : "Searching exact terms";
   }
   return null;
 }
 
-function getFilesystemToolEndTitle(toolName: string, input: Record<string, unknown>) {
+function getFilesystemToolEndTitle(
+  toolName: string,
+  input: Record<string, unknown>,
+) {
   const skillScoped = filesystemScope(input) === "skills";
   if (toolName === "ls") {
     return skillScoped ? "Listed selected skills" : "Listed selected sources";
   }
   if (toolName === "glob") {
-    return skillScoped ? "Found matching skill files" : "Found matching sources";
+    return skillScoped
+      ? "Found matching skill files"
+      : "Found matching sources";
   }
   if (toolName === "read_file") {
     return skillScoped ? "Read skill instructions" : "Read source content";
@@ -266,7 +280,8 @@ function extractToolOutputText(output: unknown) {
     return record.content;
   }
 
-  const kwargs = toObjectRecord(record.kwargs) ?? toObjectRecord(record.lc_kwargs);
+  const kwargs =
+    toObjectRecord(record.kwargs) ?? toObjectRecord(record.lc_kwargs);
   const content = kwargs?.content;
   if (typeof content === "string") {
     return content;
@@ -288,7 +303,10 @@ function extractToolOutputText(output: unknown) {
   return null;
 }
 
-export function normalizeToolOutputForObservability(toolName: string, output: unknown) {
+export function normalizeToolOutputForObservability(
+  toolName: string,
+  output: unknown,
+) {
   if (toolName === "web_search" || toolName === "web_fetch") {
     return normalizeWebToolOutput(toolName, output);
   }
@@ -364,7 +382,8 @@ function getFilesystemToolDescription(
   metadata: Record<string, unknown>,
   input?: Record<string, unknown>,
 ) {
-  const noun = input && filesystemScope(input) === "skills" ? "skill" : "source";
+  const noun =
+    input && filesystemScope(input) === "skills" ? "skill" : "source";
   if (toolName === "ls" && typeof metadata.resultCount === "number") {
     return `Listed ${metadata.resultCount} entries.`;
   }
@@ -400,7 +419,10 @@ function getWebToolEndTitle(toolName: string) {
   return null;
 }
 
-function getWebToolInputMetadata(toolName: string, input: Record<string, unknown>) {
+function getWebToolInputMetadata(
+  toolName: string,
+  input: Record<string, unknown>,
+) {
   if (toolName === "web_search") {
     const query = typeof input.query === "string" ? input.query.trim() : "";
     const fresh = input.fresh === true;
@@ -431,8 +453,12 @@ function getWebToolMetadata(output: unknown) {
 
   const webResultMatches = outputText.match(/<web_result /g);
   const webPageMatches = outputText.match(/<web_page /g);
+  const toolErrorMatches = outputText.match(/<web_tool_error /g);
   if (webResultMatches) {
     metadata.resultCount = webResultMatches.length;
+  }
+  if (toolErrorMatches) {
+    metadata.errorCount = toolErrorMatches.length;
   }
   if (webPageMatches) {
     metadata.resultCount = webPageMatches.length;
@@ -440,7 +466,10 @@ function getWebToolMetadata(output: unknown) {
     const errorMatches = outputText.match(/<web_page [^>]* error=/g);
     if (errorMatches) {
       metadata.errorCount = errorMatches.length;
-      metadata.successCount = Math.max(0, webPageMatches.length - errorMatches.length);
+      metadata.successCount = Math.max(
+        0,
+        webPageMatches.length - errorMatches.length,
+      );
     }
   }
   metadata.truncated = outputText.includes("truncated='true'");
@@ -463,17 +492,71 @@ function normalizeWebToolOutput(toolName: string, output: unknown) {
   const webResultMatches = outputText.match(/<web_result /g);
   const webPageMatches = outputText.match(/<web_page /g);
   const errorMatches = outputText.match(/<web_page [^>]* error=/g);
+  const toolError = extractWebToolError(outputText);
   const pages = extractWebToolPages(outputText);
 
   return {
     ...(webResultMatches ? { resultCount: webResultMatches.length } : {}),
     ...(webPageMatches ? { pageCount: webPageMatches.length } : {}),
-    ...(errorMatches ? { errorCount: errorMatches.length } : {}),
+    ...(errorMatches || toolError
+      ? { errorCount: (errorMatches?.length ?? 0) + (toolError ? 1 : 0) }
+      : {}),
+    ...(toolError ? { error: toolError.error, query: toolError.query } : {}),
     urlCount: urls.length,
     urls: urls.slice(0, 10),
     ...(pages.length > 0 ? { pages } : {}),
     truncated: outputText.includes("truncated='true'"),
   };
+}
+
+function extractWebToolError(outputText: string) {
+  const match = outputText.match(/<web_tool_error\b([^>]*)>/);
+  if (!match) {
+    return null;
+  }
+  const attributes = extractXmlAttributes(match[1] ?? "");
+  const error = attributes.error?.trim();
+  if (!error) {
+    return null;
+  }
+  const query = attributes.query?.trim();
+  return {
+    error,
+    ...(query ? { query } : {}),
+  };
+}
+
+function getWebToolOutputError(output: unknown) {
+  const record = toObjectRecord(output);
+  if (
+    record &&
+    typeof record.error === "string" &&
+    record.error.trim().length > 0
+  ) {
+    return record.error.trim();
+  }
+  const pages = Array.isArray(record?.pages) ? record.pages : [];
+  if (pages.length > 0) {
+    const pageErrors = pages
+      .map((page) => {
+        const pageRecord = toObjectRecord(page);
+        const error = pageRecord?.error;
+        return typeof error === "string" && error.trim().length > 0
+          ? error.trim()
+          : null;
+      })
+      .filter((error): error is string => error !== null);
+    if (pageErrors.length === pages.length) {
+      return pageErrors[0] ?? "Web tool failed.";
+    }
+  }
+
+  const outputText = extractToolOutputText(output);
+  if (!outputText) {
+    return null;
+  }
+
+  return extractWebToolError(outputText)?.error ?? null;
 }
 
 function decodeXmlAttribute(value: string) {
@@ -630,12 +713,14 @@ export async function* invokeDeepAgentTurn(input: {
   let hasTextSinceLastToolBoundary = false;
   let lastEmittedCitationCount = 0;
   let eventSequence = 0;
-  let currentReasoningSegment: DeepAgentTurnOutcome["reasoningSegments"][number] | null = null;
+  let currentReasoningSegment:
+    | DeepAgentTurnOutcome["reasoningSegments"][number]
+    | null = null;
   let nextReasoningContext:
     | { phase: "initial" }
     | { phase: "after_tool"; toolCallId: string; tool: string } = {
-      phase: "initial",
-    };
+    phase: "initial",
+  };
 
   const nextSequence = () => {
     eventSequence += 1;
@@ -673,10 +758,9 @@ export async function* invokeDeepAgentTurn(input: {
     }
 
     currentReasoningSegment.durationMs = Date.now() - runStartedAt;
-    currentReasoningSegment.text = appendReasoningChunk(
-      currentReasoningSegment.text,
-      text,
-    ) ?? currentReasoningSegment.text;
+    currentReasoningSegment.text =
+      appendReasoningChunk(currentReasoningSegment.text, text) ??
+      currentReasoningSegment.text;
 
     return currentReasoningSegment;
   };
@@ -723,11 +807,15 @@ export async function* invokeDeepAgentTurn(input: {
 
   const buildRetrievalChunks = (input: {
     retrieval: Awaited<ReturnType<typeof runToolRetrieval>>;
-    citationByChunkId: Map<string, ReturnType<AgentCitationRegistry["addRetrievalCandidate"]>>;
+    citationByChunkId: Map<
+      string,
+      ReturnType<AgentCitationRegistry["addRetrievalCandidate"]>
+    >;
   }) =>
     input.retrieval.fusedCandidates.map((candidate, index) => ({
       citation:
-        input.citationByChunkId.get(candidate.chunkId)?.citation ?? `c${index + 1}`,
+        input.citationByChunkId.get(candidate.chunkId)?.citation ??
+        `c${index + 1}`,
       chunkId: candidate.chunkId,
       content: candidate.content,
       sourceTitle: input.citationByChunkId.get(candidate.chunkId)?.sourceTitle,
@@ -740,16 +828,17 @@ export async function* invokeDeepAgentTurn(input: {
         prepared: input.prepared,
         query,
         llm: input.llm,
-        traceContext: runtime?.toolCallId && input.traceContext
-          ? {
-              ...input.traceContext,
-              parentSpanId: resolveToolCallId({
-                toolCallId: runtime.toolCallId,
-                toolName: "search_sources",
-                fallbackIndex: retrievalCallOrder.length + 1,
-              }),
-            }
-          : input.traceContext,
+        traceContext:
+          runtime?.toolCallId && input.traceContext
+            ? {
+                ...input.traceContext,
+                parentSpanId: resolveToolCallId({
+                  toolCallId: runtime.toolCallId,
+                  toolName: "search_sources",
+                  fallbackIndex: retrievalCallOrder.length + 1,
+                }),
+              }
+            : input.traceContext,
       });
       const callId = resolveToolCallId({
         toolCallId: runtime?.toolCallId,
@@ -782,9 +871,10 @@ export async function* invokeDeepAgentTurn(input: {
     sourceIds: input.prepared.sourceIds,
     citationRegistry,
   });
-  const skillsBackend = input.prepared.enabledSkills.length > 0
-    ? new SelectedSkillsBackend(input.prepared.enabledSkills)
-    : null;
+  const skillsBackend =
+    input.prepared.enabledSkills.length > 0
+      ? new SelectedSkillsBackend(input.prepared.enabledSkills)
+      : null;
   const backend = skillsBackend
     ? new CompositeBackend(databaseBackend, { "/skills/": skillsBackend })
     : databaseBackend;
@@ -834,23 +924,27 @@ export async function* invokeDeepAgentTurn(input: {
   const baseConfig = input.prepared.agentBaseCheckpoint
     ? checkpointRefToConfig(input.prepared.agentBaseCheckpoint)
     : buildAgentConfig(input.prepared.agentRunThreadId);
-  const beforeInputState = input.prepared.agentMode === "continue"
-    ? await getAgentStateOrNull(agent, baseConfig as AgentRunnableConfig)
-    : null;
-  const beforeInputCheckpoint = input.prepared.agentMode === "fork"
-    ? input.prepared.agentBaseCheckpoint
-    : checkpointRefFromConfig(
-        (beforeInputState as { config?: unknown } | null)?.config,
-      );
-  let beforeAssistantCheckpoint = input.prepared.agentMode === "replay"
-    ? input.prepared.agentBaseCheckpoint
-    : null;
+  const beforeInputState =
+    input.prepared.agentMode === "continue"
+      ? await getAgentStateOrNull(agent, baseConfig as AgentRunnableConfig)
+      : null;
+  const beforeInputCheckpoint =
+    input.prepared.agentMode === "fork"
+      ? input.prepared.agentBaseCheckpoint
+      : checkpointRefFromConfig(
+          (beforeInputState as { config?: unknown } | null)?.config,
+        );
+  let beforeAssistantCheckpoint =
+    input.prepared.agentMode === "replay"
+      ? input.prepared.agentBaseCheckpoint
+      : null;
   let finalCheckpoint: AgentCheckpointRef | null = null;
 
   const runConfig = {
     ...baseConfig,
     configurable: {
-      ...((baseConfig as { configurable?: Record<string, unknown> }).configurable ?? {}),
+      ...((baseConfig as { configurable?: Record<string, unknown> })
+        .configurable ?? {}),
       team_id: input.prepared.workspace.organizationId,
       workspace_id: input.prepared.workspace.id,
       user_id: input.prepared.userId,
@@ -879,10 +973,12 @@ export async function* invokeDeepAgentTurn(input: {
     };
   }
 
-  const streamInput = input.prepared.agentMode === "replay"
-    ? null
-    : { messages: agentMessages };
-  const stream = await agent.stream(streamInput, runConfig as AgentRunnableConfig);
+  const streamInput =
+    input.prepared.agentMode === "replay" ? null : { messages: agentMessages };
+  const stream = await agent.stream(
+    streamInput,
+    runConfig as AgentRunnableConfig,
+  );
   const suppressModelReasoning = input.llm?.thinking?.mode === "off";
 
   for await (const streamChunk of stream as AsyncGenerator<unknown>) {
@@ -914,8 +1010,10 @@ export async function* invokeDeepAgentTurn(input: {
       const messageChunk = payload[0];
       const messageMetadata = payload[1];
       usage = addUsage(usage, extractUsageFromMessageChunk(messageChunk));
-      finishReason = extractFinishReasonFromMessageChunk(messageChunk) ?? finishReason;
-      providerFields = extractProviderFieldsFromMessageChunk(messageChunk) ?? providerFields;
+      finishReason =
+        extractFinishReasonFromMessageChunk(messageChunk) ?? finishReason;
+      providerFields =
+        extractProviderFieldsFromMessageChunk(messageChunk) ?? providerFields;
       const nextReasoning =
         extractReasoningFromMessageChunk(messageChunk) ??
         extractReasoningFromMessageChunk(messageMetadata) ??
@@ -946,7 +1044,8 @@ export async function* invokeDeepAgentTurn(input: {
     }
 
     if (mode === "updates") {
-      const assistantFromUpdates = resolveAssistantContentFromUpdatesChunk(payload);
+      const assistantFromUpdates =
+        resolveAssistantContentFromUpdatesChunk(payload);
       if (assistantFromUpdates && assistantFromUpdates.trim().length > 0) {
         fallbackAssistantContent = assistantFromUpdates.trim();
       }
@@ -962,7 +1061,8 @@ export async function* invokeDeepAgentTurn(input: {
       continue;
     }
 
-    const event = typeof toolPayload.event === "string" ? toolPayload.event : "";
+    const event =
+      typeof toolPayload.event === "string" ? toolPayload.event : "";
     const toolName =
       typeof toolPayload.name === "string" && toolPayload.name.length > 0
         ? toolPayload.name
@@ -1056,7 +1156,10 @@ export async function* invokeDeepAgentTurn(input: {
             title: "Searching sources",
             status: "in_progress",
             items: [],
-            description: query.length > 0 ? `Query: ${compactTraceText(query)}` : undefined,
+            description:
+              query.length > 0
+                ? `Query: ${compactTraceText(query)}`
+                : undefined,
             metadata: {
               toolCallId,
               tool: toolName,
@@ -1147,16 +1250,22 @@ export async function* invokeDeepAgentTurn(input: {
             hitCount: retrievalCall.hitCount,
           }
         : normalizeToolOutputForObservability(toolName, toolPayload.output);
+      const outputError =
+        toolName === "web_search" || toolName === "web_fetch"
+          ? getWebToolOutputError(output)
+          : null;
+      const toolStatus: ToolCallStatus = outputError ? "error" : "completed";
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
         tool: toolName,
-        input: Object.keys(currentToolCall.input).length > 0
-          ? currentToolCall.input
-          : normalizedInput,
+        input:
+          Object.keys(currentToolCall.input).length > 0
+            ? currentToolCall.input
+            : normalizedInput,
         output,
-        status: "completed",
+        status: toolStatus,
         latencyMs,
-        error: null,
+        error: outputError,
       };
       toolCallsById.set(toolCallId, nextToolCall);
       if (input.traceContext) {
@@ -1165,9 +1274,10 @@ export async function* invokeDeepAgentTurn(input: {
           teamId: input.traceContext.teamId,
           workspaceId: input.traceContext.workspaceId,
           spanId: toolCallId,
-          status: "ok",
+          status: toolStatus === "error" ? "error" : "ok",
           latencyMs,
           output,
+          ...(outputError ? { errorMessage: outputError } : {}),
           metadata: {
             toolName,
             ...(retrievalCall
@@ -1176,27 +1286,40 @@ export async function* invokeDeepAgentTurn(input: {
           },
         });
       }
-      yield {
-        type: "tool-call-result",
-        id: toolCallId,
-        tool: toolName,
-        input: nextToolCall.input,
-        output,
-        latencyMs,
-        toolCall: nextToolCall,
-        ...(retrievalCall
-          ? {
-              query: retrievalCall.query,
-              hitCount: retrievalCall.hitCount,
-            }
-          : {}),
-      };
+      if (toolStatus === "completed") {
+        yield {
+          type: "tool-call-result",
+          id: toolCallId,
+          tool: toolName,
+          input: nextToolCall.input,
+          output,
+          latencyMs,
+          toolCall: nextToolCall,
+          ...(retrievalCall
+            ? {
+                query: retrievalCall.query,
+                hitCount: retrievalCall.hitCount,
+              }
+            : {}),
+        };
+      }
+      if (toolStatus === "error" && outputError) {
+        yield {
+          type: "tool-call-error",
+          id: toolCallId,
+          tool: toolName,
+          input: nextToolCall.input,
+          error: outputError,
+          latencyMs,
+          toolCall: nextToolCall,
+        };
+      }
       yield {
         type: "tool-call-end",
         id: toolCallId,
         tool: toolName,
         latencyMs,
-        status: "completed",
+        status: toolStatus,
         toolCall: nextToolCall,
       };
       if (toolName === "search_sources") {
@@ -1222,7 +1345,6 @@ export async function* invokeDeepAgentTurn(input: {
             },
           }),
         };
-
       } else if (toolName === "web_search" || toolName === "web_fetch") {
         const title = getWebToolEndTitle(toolName);
         if (title) {
@@ -1238,9 +1360,10 @@ export async function* invokeDeepAgentTurn(input: {
             step: setThinkingStep({
               id: `tool:${toolCallId}`,
               kind: "state",
-              title,
+              title: toolStatus === "error" ? `${title} failed` : title,
               status: "completed",
               items: formatToolInputItems(nextToolCall.input),
+              description: outputError ?? undefined,
               metadata,
             }),
           };
@@ -1384,7 +1507,8 @@ export async function* invokeDeepAgentTurn(input: {
 
   const finalRetrieval = latestToolRetrieval;
   const finalCitations = citationRegistry.list();
-  const reasoningSummary = extractReasoningSummaryFromProviderFields(providerFields);
+  const reasoningSummary =
+    extractReasoningSummaryFromProviderFields(providerFields);
 
   if (reasoningSummary) {
     yield {
@@ -1434,7 +1558,9 @@ export async function* invokeDeepAgentTurn(input: {
       items: [],
       description: [
         `Used ${usedCitationCount} of ${availableCitationCount} available citations`,
-        missingInlineCitationMarkers ? "no inline citation markers found" : null,
+        missingInlineCitationMarkers
+          ? "no inline citation markers found"
+          : null,
         citationNormalization.removedInvalidCitations
           ? `removed ${removedCitationCount} unsupported markers`
           : null,
@@ -1446,10 +1572,10 @@ export async function* invokeDeepAgentTurn(input: {
         usedCitationCount,
         citationMarkerCount: citationNormalization.markerCount,
         validCitationMarkerCount: citationNormalization.validMarkerCount,
-        ...(missingInlineCitationMarkers ? { missingInlineCitationMarkers: true } : {}),
-        ...(removedCitationCount > 0
-          ? { removedCitationCount }
+        ...(missingInlineCitationMarkers
+          ? { missingInlineCitationMarkers: true }
           : {}),
+        ...(removedCitationCount > 0 ? { removedCitationCount } : {}),
       },
     }),
   };

@@ -2,20 +2,18 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import {
-  PanelRightClose,
-  PanelRightOpen,
-} from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import {
-  allModels,
+  emptyModelCatalog,
   HeaderModelSelector,
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
   type ModelAliasSettings,
   type ModelItem,
+  type SelectedModels,
   type ModelType,
 } from "../_components/header-model-selector";
 import {
@@ -30,7 +28,10 @@ import {
   type ToolCallRecord,
   type VersionedMessageGroup,
 } from "../_components/chat-canvas";
-import { SourcesHub, type ThreadCitationRecord } from "../_components/sources-hub";
+import {
+  SourcesHub,
+  type ThreadCitationRecord,
+} from "../_components/sources-hub";
 import { SourcePreviewPanel } from "../_components/source-preview-panel";
 import type { SourceItem } from "../_components/mock-data";
 import { contentClient } from "../../../../lib/sdk";
@@ -45,6 +46,11 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   vision: false,
 };
 const EMPTY_CITATIONS: CitationRecord[] = [];
+const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
+
+function getSearchPreferenceStorageKey(workspaceId: string) {
+  return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
+}
 
 type ThreadMessageItem = Awaited<
   ReturnType<typeof contentClient.listThreadMessages>
@@ -76,7 +82,9 @@ type RequestThinkingConfig = {
   includeReasoning?: boolean;
 };
 
-function parseStoredThinkingSettings(value: string | null): PromptThinkingSettings | null {
+function parseStoredThinkingSettings(
+  value: string | null,
+): PromptThinkingSettings | null {
   if (!value) {
     return null;
   }
@@ -120,7 +128,11 @@ function buildRequestThinking(input: {
   }
 
   if (input.settings.mode === "effort") {
-    if (!(input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+    if (
+      !(input.capabilities?.supportedEfforts ?? []).includes(
+        input.settings.effort,
+      )
+    ) {
       return {
         mode: "auto",
       };
@@ -180,7 +192,9 @@ function normalizeThinkingSettingsForModel(input: {
     return input.settings;
   }
 
-  if ((input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+  if (
+    (input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)
+  ) {
     return input.settings;
   }
 
@@ -284,10 +298,13 @@ function resolveMessageSourceIds(message: ChatMessageItem) {
     return [] as string[];
   }
 
-  return rawSourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string");
+  return rawSourceIds.filter(
+    (sourceId): sourceId is string => typeof sourceId === "string",
+  );
 }
 
-const CITATION_PATTERN = /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
+const CITATION_PATTERN =
+  /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
 
 function splitCitationIds(value: string) {
   return value
@@ -369,7 +386,8 @@ function resolveActiveAssistantVersion(input: {
         (entry) => entry.version.sourceUserMessageId === selectedUserVersionId,
       )
     : versionEntries;
-  const visibleEntries = scopedEntries.length > 0 ? scopedEntries : versionEntries;
+  const visibleEntries =
+    scopedEntries.length > 0 ? scopedEntries : versionEntries;
   const latestVisibleIndex = Math.max(visibleEntries.length - 1, 0);
   const desiredOriginalIndex =
     input.activeVersionByGroup[input.group.groupId] ??
@@ -524,7 +542,9 @@ function normalizeToolOutput(value: unknown): unknown {
   return value;
 }
 
-function normalizeThinkingStepRecord(value: unknown): ThinkingStepRecord | null {
+function normalizeThinkingStepRecord(
+  value: unknown,
+): ThinkingStepRecord | null {
   const record = toObjectRecord(value);
   if (!record) {
     return null;
@@ -605,7 +625,9 @@ function normalizeModelReasoningSegmentRecord(
   };
 }
 
-function resolveModelReasoningSegmentsFromMetadata(metadata: Record<string, unknown>) {
+function resolveModelReasoningSegmentsFromMetadata(
+  metadata: Record<string, unknown>,
+) {
   if (!Array.isArray(metadata.reasoningSegments)) {
     return [] as ModelReasoningSegmentRecord[];
   }
@@ -746,14 +768,15 @@ function resolveToolCallFromStreamEvent(input: {
     normalizedToolCall?.tool ??
     (typeof input.event.tool === "string" && input.event.tool.length > 0
       ? input.event.tool
-      : existing?.tool ?? "tool");
+      : (existing?.tool ?? "tool"));
 
   const eventInput = toObjectRecord(input.event.input);
   const normalizedInput = {
     ...(existing?.input ?? {}),
     ...(eventInput ?? {}),
     ...(normalizedToolCall?.input ?? {}),
-    ...(typeof input.event.query === "string" && input.event.query.trim().length > 0
+    ...(typeof input.event.query === "string" &&
+    input.event.query.trim().length > 0
       ? { query: input.event.query }
       : {}),
   };
@@ -762,7 +785,9 @@ function resolveToolCallFromStreamEvent(input: {
     input.event.type === "tool-call-event"
       ? (input.event.data ?? null)
       : input.event.type === "tool-call-result"
-        ? (input.event.output !== undefined ? input.event.output : null)
+        ? input.event.output !== undefined
+          ? input.event.output
+          : null
         : null;
   const normalizedToolOutput = normalizedToolCall?.output;
   const mergedOutput = (() => {
@@ -780,10 +805,13 @@ function resolveToolCallFromStreamEvent(input: {
         ...(existingOutput ?? {}),
         ...(eventOutputRecord ?? {}),
         ...(normalizedToolOutputRecord ?? {}),
-        ...(typeof input.event.query === "string" && input.event.query.trim().length > 0
+        ...(typeof input.event.query === "string" &&
+        input.event.query.trim().length > 0
           ? { query: input.event.query }
           : {}),
-        ...(typeof input.event.hitCount === "number" ? { hitCount: input.event.hitCount } : {}),
+        ...(typeof input.event.hitCount === "number"
+          ? { hitCount: input.event.hitCount }
+          : {}),
       };
     }
 
@@ -847,7 +875,9 @@ function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
   return metadata.toolCalls
     .map((item) => normalizeToolCallRecord(item))
     .filter((item): item is ToolCallRecord => item !== null)
-    .filter((item) => shouldRenderToolCall(item, resolveThinkingStepsFromMetadata(metadata)));
+    .filter((item) =>
+      shouldRenderToolCall(item, resolveThinkingStepsFromMetadata(metadata)),
+    );
 }
 
 function resolveAssistantSourceUserMessageId(
@@ -995,8 +1025,8 @@ function buildVersionedMessageGroups(
     const rootId = resolveRootId(message);
     const turnId =
       message.role === "user"
-        ? userRootToTurnId.get(rootId) ?? `turn:${rootId}`
-        : assistantRootToTurnId.get(rootId) ?? `turn:${rootId}`;
+        ? (userRootToTurnId.get(rootId) ?? `turn:${rootId}`)
+        : (assistantRootToTurnId.get(rootId) ?? `turn:${rootId}`);
     const groupId = `${message.role}:${rootId}`;
     const existing = grouped.get(groupId);
     if (existing) {
@@ -1017,8 +1047,8 @@ function buildVersionedMessageGroups(
           new Date(left.createdAt).getTime() -
           new Date(right.createdAt).getTime(),
       );
-      const latestVersion = sortedVersions[sortedVersions.length - 1] ??
-        sortedVersions[0];
+      const latestVersion =
+        sortedVersions[sortedVersions.length - 1] ?? sortedVersions[0];
 
       return {
         groupId,
@@ -1026,9 +1056,10 @@ function buildVersionedMessageGroups(
         latestVersionId: latestVersion?.id ?? groupId,
         role: group.role,
         versions: sortedVersions.map((version) => {
-          const citationMetadata = group.role === "assistant"
-            ? resolveCitationMetadata(version.metadata)
-            : null;
+          const citationMetadata =
+            group.role === "assistant"
+              ? resolveCitationMetadata(version.metadata)
+              : null;
 
           return {
             id: version.id,
@@ -1036,34 +1067,47 @@ function buildVersionedMessageGroups(
             citations: citationMetadata?.citations,
             availableCitations: citationMetadata?.availableCitations,
             isError: version.metadata.isError === true,
+            error: toNullableString(version.metadata.error),
+            errorCode: toNullableString(version.metadata.errorCode),
             isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
-            isTextInterrupted: version.metadata[STREAM_TEXT_INTERRUPTED_KEY] === true,
-            sourceIds: group.role === "user"
-              ? resolveMessageSourceIds(version)
-              : undefined,
-            sourceAssistantMessageId: group.role === "assistant"
-              ? (toNullableString(version.metadata.sourceAssistantMessageId) ?? null)
-              : undefined,
-            sourceUserMessageId: group.role === "assistant"
-              ? (assistantSourceUserById.get(version.id) ?? null)
-              : undefined,
+            isTextInterrupted:
+              version.metadata[STREAM_TEXT_INTERRUPTED_KEY] === true,
+            sourceIds:
+              group.role === "user"
+                ? resolveMessageSourceIds(version)
+                : undefined,
+            sourceAssistantMessageId:
+              group.role === "assistant"
+                ? (toNullableString(
+                    version.metadata.sourceAssistantMessageId,
+                  ) ?? null)
+                : undefined,
+            sourceUserMessageId:
+              group.role === "assistant"
+                ? (assistantSourceUserById.get(version.id) ?? null)
+                : undefined,
             toolCalls: resolveToolCallsFromMetadata(version.metadata),
-            thinkingSteps: group.role === "assistant"
-              ? resolveThinkingStepsFromMetadata(version.metadata)
-              : undefined,
-            modelReasoning: group.role === "assistant"
-              ? resolveModelReasoningFromMetadata(version.metadata)
-              : undefined,
-            modelReasoningSegments: group.role === "assistant"
-              ? resolveModelReasoningSegmentsFromMetadata(version.metadata)
-              : undefined,
+            thinkingSteps:
+              group.role === "assistant"
+                ? resolveThinkingStepsFromMetadata(version.metadata)
+                : undefined,
+            modelReasoning:
+              group.role === "assistant"
+                ? resolveModelReasoningFromMetadata(version.metadata)
+                : undefined,
+            modelReasoningSegments:
+              group.role === "assistant"
+                ? resolveModelReasoningSegmentsFromMetadata(version.metadata)
+                : undefined,
           };
         }),
       } satisfies VersionedMessageGroup;
     })
     .sort((left, right) => {
-      const leftTurnOrder = turnOrder.get(left.turnId ?? "") ?? Number.MAX_SAFE_INTEGER;
-      const rightTurnOrder = turnOrder.get(right.turnId ?? "") ?? Number.MAX_SAFE_INTEGER;
+      const leftTurnOrder =
+        turnOrder.get(left.turnId ?? "") ?? Number.MAX_SAFE_INTEGER;
+      const rightTurnOrder =
+        turnOrder.get(right.turnId ?? "") ?? Number.MAX_SAFE_INTEGER;
       if (leftTurnOrder !== rightTurnOrder) {
         return leftTurnOrder - rightTurnOrder;
       }
@@ -1115,10 +1159,18 @@ export default function DashboardChatThreadPage({
   const [activeVersionByGroup, setActiveVersionByGroup] = useState<
     Record<string, number>
   >({});
-  const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(null);
-  const [previewCitation, setPreviewCitation] = useState<CitationRecord | null>(null);
-  const [displayedCitations, setDisplayedCitations] = useState<CitationRecord[]>([]);
-  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [activeCitationIndex, setActiveCitationIndex] = useState<number | null>(
+    null,
+  );
+  const [previewCitation, setPreviewCitation] = useState<CitationRecord | null>(
+    null,
+  );
+  const [displayedCitations, setDisplayedCitations] = useState<
+    CitationRecord[]
+  >([]);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<
+    string | null
+  >(null);
   const latestSignatureByGroupRef = useRef<Record<string, string>>({});
   const pendingLatestVersionSelectionRef =
     useRef<PendingLatestVersionSelection | null>(null);
@@ -1133,21 +1185,23 @@ export default function DashboardChatThreadPage({
   // ── Composer state ─────────────────────────────────────────────────────────
   const [composerInitialInput, setComposerInitialInput] = useState("");
   const [composerResetKey, setComposerResetKey] = useState(0);
-  const [selectedModels, setSelectedModels] = useState<
-    Record<ModelType, ModelItem>
-  >(() => resolveSelectedModels({ availableModels: allModels }));
-  const [availableModels, setAvailableModels] = useState<
-    Record<ModelType, ModelItem[]>
-  >(allModels);
+  const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
+    resolveSelectedModels({ availableModels: emptyModelCatalog }),
+  );
+  const [availableModels, setAvailableModels] =
+    useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
   const [streamWithSelectedLlm, setStreamWithSelectedLlm] = useState(false);
-  const [thinkingSettings, setThinkingSettings] = useState<PromptThinkingSettings>(
-    DEFAULT_PROMPT_THINKING_SETTINGS,
-  );
-  const [hasSavedThinkingPreference, setHasSavedThinkingPreference] = useState(false);
+  const [thinkingSettings, setThinkingSettings] =
+    useState<PromptThinkingSettings>(DEFAULT_PROMPT_THINKING_SETTINGS);
+  const [hasSavedThinkingPreference, setHasSavedThinkingPreference] =
+    useState(false);
   const [searchEnabled, setSearchEnabled] = useState(true);
+  const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
+    string | null
+  >(null);
 
   const clearEditingState = useCallback(() => {
     setEditingMessageId(null);
@@ -1165,7 +1219,7 @@ export default function DashboardChatThreadPage({
   useEffect(() => {
     setThinkingSettings((current) =>
       normalizeThinkingSettingsForModel({
-        capabilities: selectedModels.llm.capabilities,
+        capabilities: selectedModels.llm?.capabilities,
         hasSavedPreference: hasSavedThinkingPreference,
         settings: current,
       }),
@@ -1177,8 +1231,7 @@ export default function DashboardChatThreadPage({
 
   // ── Session storage: persist selected source IDs per thread ───────────────
   const selectionStorageKey = useMemo(
-    () =>
-      workspaceId ? `chat:sources:${workspaceId}:${threadId}` : null,
+    () => (workspaceId ? `chat:sources:${workspaceId}:${threadId}` : null),
     [workspaceId, threadId],
   );
   const currentSelectionStorageKey = useMemo(
@@ -1190,7 +1243,7 @@ export default function DashboardChatThreadPage({
     [workspaceId],
   );
   const currentSearchStorageKey = useMemo(
-    () => (workspaceId ? `chat:search:${workspaceId}:current` : null),
+    () => (workspaceId ? getSearchPreferenceStorageKey(workspaceId) : null),
     [workspaceId],
   );
 
@@ -1223,15 +1276,24 @@ export default function DashboardChatThreadPage({
     }
   }, [selectionStorageKey]);
 
-  const persistActiveSourceIds = useCallback((sourceIds: string[]) => {
-    setActiveSourceIds(sourceIds);
-    if (selectionStorageKey) {
-      window.sessionStorage.setItem(selectionStorageKey, JSON.stringify(sourceIds));
-    }
-    if (currentSelectionStorageKey) {
-      window.sessionStorage.setItem(currentSelectionStorageKey, JSON.stringify(sourceIds));
-    }
-  }, [currentSelectionStorageKey, selectionStorageKey]);
+  const persistActiveSourceIds = useCallback(
+    (sourceIds: string[]) => {
+      setActiveSourceIds(sourceIds);
+      if (selectionStorageKey) {
+        window.sessionStorage.setItem(
+          selectionStorageKey,
+          JSON.stringify(sourceIds),
+        );
+      }
+      if (currentSelectionStorageKey) {
+        window.sessionStorage.setItem(
+          currentSelectionStorageKey,
+          JSON.stringify(sourceIds),
+        );
+      }
+    },
+    [currentSelectionStorageKey, selectionStorageKey],
+  );
 
   useEffect(() => {
     if (!selectionLoaded || !selectionStorageKey) return;
@@ -1245,7 +1307,12 @@ export default function DashboardChatThreadPage({
         JSON.stringify(activeSourceIds),
       );
     }
-  }, [activeSourceIds, currentSelectionStorageKey, selectionLoaded, selectionStorageKey]);
+  }, [
+    activeSourceIds,
+    currentSelectionStorageKey,
+    selectionLoaded,
+    selectionStorageKey,
+  ]);
 
   useEffect(() => {
     if (!currentThinkingStorageKey) {
@@ -1260,19 +1327,24 @@ export default function DashboardChatThreadPage({
     setThinkingSettings(storedThinking ?? DEFAULT_PROMPT_THINKING_SETTINGS);
   }, [currentThinkingStorageKey]);
 
-  const handleThinkingSettingsChange = useCallback((settings: PromptThinkingSettings) => {
-    setHasSavedThinkingPreference(true);
-    setThinkingSettings(settings);
-  }, []);
+  const handleThinkingSettingsChange = useCallback(
+    (settings: PromptThinkingSettings) => {
+      setHasSavedThinkingPreference(true);
+      setThinkingSettings(settings);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!currentSearchStorageKey) {
       setSearchEnabled(true);
+      setLoadedSearchPreferenceKey(null);
       return;
     }
 
     const stored = window.sessionStorage.getItem(currentSearchStorageKey);
     setSearchEnabled(stored === null ? true : stored === "true");
+    setLoadedSearchPreferenceKey(currentSearchStorageKey);
   }, [currentSearchStorageKey]);
 
   useEffect(() => {
@@ -1286,14 +1358,17 @@ export default function DashboardChatThreadPage({
   }, [currentThinkingStorageKey, thinkingSettings]);
 
   useEffect(() => {
-    if (!currentSearchStorageKey) {
+    if (
+      !currentSearchStorageKey ||
+      loadedSearchPreferenceKey !== currentSearchStorageKey
+    ) {
       return;
     }
     window.sessionStorage.setItem(
       currentSearchStorageKey,
       searchEnabled ? "true" : "false",
     );
-  }, [currentSearchStorageKey, searchEnabled]);
+  }, [currentSearchStorageKey, loadedSearchPreferenceKey, searchEnabled]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -1322,7 +1397,7 @@ export default function DashboardChatThreadPage({
             sourceType: skill.sourceType,
             version: skill.version,
             hasReadme: skill.hasReadme,
-        }));
+          }));
         setAvailableSkills(enabledSkills);
 
         const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
@@ -1349,7 +1424,11 @@ export default function DashboardChatThreadPage({
   );
 
   const activeAssistantVersion = useMemo(() => {
-    for (let groupIndex = messageGroups.length - 1; groupIndex >= 0; groupIndex -= 1) {
+    for (
+      let groupIndex = messageGroups.length - 1;
+      groupIndex >= 0;
+      groupIndex -= 1
+    ) {
       const group = messageGroups[groupIndex];
       if (!group || group.role !== "assistant") {
         continue;
@@ -1366,26 +1445,26 @@ export default function DashboardChatThreadPage({
   }, [activeVersionByGroup, messageGroups]);
 
   const activeCitations = useMemo(
-    () => resolveUsedCitationsForText({
-      citations: activeAssistantVersion?.citations,
-      text: activeAssistantVersion?.content ?? "",
-    }),
+    () =>
+      resolveUsedCitationsForText({
+        citations: activeAssistantVersion?.citations,
+        text: activeAssistantVersion?.content ?? "",
+      }),
     [activeAssistantVersion],
   );
-  const activeAssistantCitations = activeAssistantVersion?.citations ?? EMPTY_CITATIONS;
-  const activeAvailableCitations = activeAssistantVersion?.availableCitations ?? EMPTY_CITATIONS;
-  const visibleCitations = useMemo(
-    () => {
-      if (activeCitations.length > 0) {
-        return activeCitations;
-      }
-      if (activeAssistantCitations.length > 0) {
-        return activeAssistantCitations;
-      }
-      return activeAvailableCitations;
-    },
-    [activeAssistantCitations, activeAvailableCitations, activeCitations],
-  );
+  const activeAssistantCitations =
+    activeAssistantVersion?.citations ?? EMPTY_CITATIONS;
+  const activeAvailableCitations =
+    activeAssistantVersion?.availableCitations ?? EMPTY_CITATIONS;
+  const visibleCitations = useMemo(() => {
+    if (activeCitations.length > 0) {
+      return activeCitations;
+    }
+    if (activeAssistantCitations.length > 0) {
+      return activeAssistantCitations;
+    }
+    return activeAvailableCitations;
+  }, [activeAssistantCitations, activeAvailableCitations, activeCitations]);
   const threadCitations = useMemo<ThreadCitationRecord[]>(() => {
     const citationsByAnswer: ThreadCitationRecord[][] = [];
     let answerIndex = 0;
@@ -1409,10 +1488,12 @@ export default function DashboardChatThreadPage({
         citations: version.citations,
         text: version.content,
       });
-      const answerCitations = usedCitations.length > 0
-        ? usedCitations
-        : (version.citations?.length ? version.citations : version.availableCitations) ??
-          EMPTY_CITATIONS;
+      const answerCitations =
+        usedCitations.length > 0
+          ? usedCitations
+          : ((version.citations?.length
+              ? version.citations
+              : version.availableCitations) ?? EMPTY_CITATIONS);
 
       if (answerCitations.length === 0) {
         continue;
@@ -1436,7 +1517,10 @@ export default function DashboardChatThreadPage({
       setDisplayedCitations((current) => {
         if (
           current.length === visibleCitations.length &&
-          current.every((citation, index) => citation.chunkId === visibleCitations[index]?.chunkId)
+          current.every(
+            (citation, index) =>
+              citation.chunkId === visibleCitations[index]?.chunkId,
+          )
         ) {
           return current;
         }
@@ -1545,15 +1629,17 @@ export default function DashboardChatThreadPage({
     });
   }, [messageGroups]);
 
-  const loadThreadMessages = useCallback(
-    async () => {
+  const loadThreadMessages = useCallback(async () => {
     if (!workspaceId) {
       setMessages([]);
       return;
     }
 
     try {
-      const result = await contentClient.listThreadMessages(workspaceId, threadId);
+      const result = await contentClient.listThreadMessages(
+        workspaceId,
+        threadId,
+      );
       const serverMessages = result.items
         .filter(
           (
@@ -1586,14 +1672,14 @@ export default function DashboardChatThreadPage({
     } catch {
       setMessages([]);
     }
-    },
-    [threadId, workspaceId],
-  );
+  }, [threadId, workspaceId]);
 
   const loadThreadModelState = useCallback(async () => {
     if (!workspaceId) {
-      setAvailableModels(allModels);
-      setSelectedModels(resolveSelectedModels({ availableModels: allModels }));
+      setAvailableModels(emptyModelCatalog);
+      setSelectedModels(
+        resolveSelectedModels({ availableModels: emptyModelCatalog }),
+      );
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       setStreamWithSelectedLlm(false);
       return;
@@ -1621,14 +1707,15 @@ export default function DashboardChatThreadPage({
           availableModels: catalogModels,
           threadAliases: threadResponse.thread.modelSettings,
           fallbackAliases: catalog.defaults,
-          fallbackModels: allModels,
         }),
       );
       setStreamWithSelectedLlm(kindEnabled.llm);
     } catch {
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
-      setAvailableModels(allModels);
-      setSelectedModels(resolveSelectedModels({ availableModels: allModels }));
+      setAvailableModels(emptyModelCatalog);
+      setSelectedModels(
+        resolveSelectedModels({ availableModels: emptyModelCatalog }),
+      );
       setStreamWithSelectedLlm(false);
     }
   }, [threadId, workspaceId]);
@@ -1651,7 +1738,11 @@ export default function DashboardChatThreadPage({
             : { visionProfileAlias: input.model.id };
 
       try {
-        await contentClient.updateThreadModelSettings(workspaceId, threadId, patch);
+        await contentClient.updateThreadModelSettings(
+          workspaceId,
+          threadId,
+          patch,
+        );
         if (input.type === "llm") {
           setThinkingSettings((current) =>
             normalizeThinkingSettingsForModel({
@@ -1676,7 +1767,13 @@ export default function DashboardChatThreadPage({
         await loadThreadModelState();
       }
     },
-    [catalogKindEnabled, hasSavedThinkingPreference, loadThreadModelState, threadId, workspaceId],
+    [
+      catalogKindEnabled,
+      hasSavedThinkingPreference,
+      loadThreadModelState,
+      threadId,
+      workspaceId,
+    ],
   );
 
   const streamThreadAction = useCallback(
@@ -1714,9 +1811,10 @@ export default function DashboardChatThreadPage({
           id: tempUserId,
           role: "user",
           content: input.content ?? "",
-          parentMessageId: input.mode === "edit"
-            ? (input.userMessageId ?? latestUserMessage?.id ?? null)
-            : null,
+          parentMessageId:
+            input.mode === "edit"
+              ? (input.userMessageId ?? latestUserMessage?.id ?? null)
+              : null,
           metadata: {
             sourceIds: input.sourceIds,
             skillIds: input.skillIds ?? [],
@@ -1724,9 +1822,10 @@ export default function DashboardChatThreadPage({
               skillIds: input.skillIds ?? [],
               webSearchEnabled: input.searchEnabled ?? searchEnabled,
             },
-            versionOf: input.mode === "edit"
-              ? (input.userMessageId ?? latestUserMessage?.id ?? null)
-              : null,
+            versionOf:
+              input.mode === "edit"
+                ? (input.userMessageId ?? latestUserMessage?.id ?? null)
+                : null,
           },
           createdAt: new Date(now).toISOString(),
         });
@@ -1737,14 +1836,19 @@ export default function DashboardChatThreadPage({
         id: tempAssistantId,
         role: "assistant",
         content: "",
-        parentMessageId: input.mode === "send"
-          ? null
-          : (input.assistantMessageId ?? latestAssistantMessage?.id ?? null),
-        metadata: {
-          userMessageId: tempUserId ?? input.userMessageId ?? latestUserMessage?.id ?? null,
-          versionOf: input.mode === "send"
+        parentMessageId:
+          input.mode === "send"
             ? null
             : (input.assistantMessageId ?? latestAssistantMessage?.id ?? null),
+        metadata: {
+          userMessageId:
+            tempUserId ?? input.userMessageId ?? latestUserMessage?.id ?? null,
+          versionOf:
+            input.mode === "send"
+              ? null
+              : (input.assistantMessageId ??
+                latestAssistantMessage?.id ??
+                null),
           toolCalls: [],
           thinkingSteps: [],
         },
@@ -1782,11 +1886,16 @@ export default function DashboardChatThreadPage({
           streamWithSelectedLlm && catalogKindEnabled.llm
             ? selectedModels.llm?.id
             : undefined;
-        const requestThinking = input.thinking ?? buildRequestThinking({
-          capabilities: selectedModels.llm?.capabilities,
-          settings: thinkingSettings,
-        });
-        if (typeof selectedLlmProfileAlias === "string" && selectedLlmProfileAlias.length > 0) {
+        const requestThinking =
+          input.thinking ??
+          buildRequestThinking({
+            capabilities: selectedModels.llm?.capabilities,
+            settings: thinkingSettings,
+          });
+        if (
+          typeof selectedLlmProfileAlias === "string" &&
+          selectedLlmProfileAlias.length > 0
+        ) {
           requestBody.llm = {
             profileAlias: selectedLlmProfileAlias,
             ...(requestThinking ? { thinking: requestThinking } : {}),
@@ -1850,7 +1959,9 @@ export default function DashboardChatThreadPage({
               continue;
             }
 
-            const payload = await response.json().catch(() => null) as JobStatusResponse | null;
+            const payload = (await response
+              .json()
+              .catch(() => null)) as JobStatusResponse | null;
             const jobStatus = resolveJobStatusPayload(payload);
             const status = jobStatus?.status;
             const title = getTitleFromJobResult(jobStatus?.result);
@@ -1897,8 +2008,8 @@ export default function DashboardChatThreadPage({
                 );
               });
 
-                if (!hasRenderedDelta && assistantText.length > 0) {
-                  hasRenderedDelta = true;
+              if (!hasRenderedDelta && assistantText.length > 0) {
+                hasRenderedDelta = true;
               }
 
               await waitForAnimationFrame();
@@ -1925,8 +2036,8 @@ export default function DashboardChatThreadPage({
 
         const syncStreamingToolCalls = () => {
           const thinkingSteps = [...streamThinkingStepsById.values()];
-          const toolCalls = [...streamToolCallsById.values()].filter((toolCall) =>
-            shouldRenderToolCall(toolCall, thinkingSteps)
+          const toolCalls = [...streamToolCallsById.values()].filter(
+            (toolCall) => shouldRenderToolCall(toolCall, thinkingSteps),
           );
           const shouldShowTextPause =
             assistantText.length > 0 &&
@@ -1951,8 +2062,8 @@ export default function DashboardChatThreadPage({
 
         const syncStreamingThinkingSteps = () => {
           const thinkingSteps = [...streamThinkingStepsById.values()];
-          const toolCalls = [...streamToolCallsById.values()].filter((toolCall) =>
-            shouldRenderToolCall(toolCall, thinkingSteps)
+          const toolCalls = [...streamToolCallsById.values()].filter(
+            (toolCall) => shouldRenderToolCall(toolCall, thinkingSteps),
           );
           const shouldShowTextPause =
             assistantText.length > 0 &&
@@ -1971,7 +2082,7 @@ export default function DashboardChatThreadPage({
                         toolCalls,
                       },
                     }
-                    : message,
+                  : message,
               ),
             );
           });
@@ -2036,24 +2147,28 @@ export default function DashboardChatThreadPage({
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
-                    previousUserMessageId && message.id === previousUserMessageId
+                    previousUserMessageId &&
+                    message.id === previousUserMessageId
                       ? {
                           ...message,
                           id: serverUserMessageId,
                         }
                       : message.id === streamingAssistantMessageId
-                      ? {
-                          ...message,
-                          metadata: {
-                            ...message.metadata,
-                            userMessageId: serverUserMessageId,
-                          },
-                        }
-                      : message,
+                        ? {
+                            ...message,
+                            metadata: {
+                              ...message.metadata,
+                              userMessageId: serverUserMessageId,
+                            },
+                          }
+                        : message,
                   ),
                 );
               });
-            } else if (data.type === "text-delta" && typeof data.delta === "string") {
+            } else if (
+              data.type === "text-delta" &&
+              typeof data.delta === "string"
+            ) {
               const hasVisibleDelta = data.delta.trim().length > 0;
               const hasRunningTool = [...streamToolCallsById.values()].some(
                 (toolCall) => toolCall.status === "running",
@@ -2124,56 +2239,75 @@ export default function DashboardChatThreadPage({
                 mergeThinkingStepRecords(streamThinkingStepsById, nextStep);
                 syncStreamingThinkingSteps();
               }
-            } else if (data.type === "reasoning" && typeof data.reasoning === "string") {
+            } else if (
+              data.type === "reasoning" &&
+              typeof data.reasoning === "string"
+            ) {
               const reasoning = data.reasoning;
               if (reasoning.length > 0) {
-                const nextSegment = normalizeModelReasoningSegmentRecord(data.segment);
+                const nextSegment = normalizeModelReasoningSegmentRecord(
+                  data.segment,
+                );
                 flushSync(() => {
                   setMessages((previous) =>
                     previous.map((message) => {
-                        if (message.id !== streamingAssistantMessageId) {
-                          return message;
-                        }
+                      if (message.id !== streamingAssistantMessageId) {
+                        return message;
+                      }
 
-                        const currentReasoning = appendReasoningChunk(
-                          toNullableString(message.metadata.reasoning) ?? undefined,
-                          reasoning,
-                        );
-                        const currentSegments = Array.isArray(message.metadata.reasoningSegments)
-                          ? message.metadata.reasoningSegments
-                              .map((item, index) => normalizeModelReasoningSegmentRecord(item, index))
-                              .filter((item): item is ModelReasoningSegmentRecord => item !== null)
-                          : [];
-                        const reasoningSegments = nextSegment
-                          ? [
-                              ...currentSegments.filter((segment) => segment.id !== nextSegment.id),
-                              nextSegment,
-                            ].sort((left, right) =>
-                              (left.sequence ?? Number.MAX_SAFE_INTEGER) -
-                              (right.sequence ?? Number.MAX_SAFE_INTEGER)
+                      const currentReasoning = appendReasoningChunk(
+                        toNullableString(message.metadata.reasoning) ??
+                          undefined,
+                        reasoning,
+                      );
+                      const currentSegments = Array.isArray(
+                        message.metadata.reasoningSegments,
+                      )
+                        ? message.metadata.reasoningSegments
+                            .map((item, index) =>
+                              normalizeModelReasoningSegmentRecord(item, index),
                             )
-                          : currentSegments;
+                            .filter(
+                              (item): item is ModelReasoningSegmentRecord =>
+                                item !== null,
+                            )
+                        : [];
+                      const reasoningSegments = nextSegment
+                        ? [
+                            ...currentSegments.filter(
+                              (segment) => segment.id !== nextSegment.id,
+                            ),
+                            nextSegment,
+                          ].sort(
+                            (left, right) =>
+                              (left.sequence ?? Number.MAX_SAFE_INTEGER) -
+                              (right.sequence ?? Number.MAX_SAFE_INTEGER),
+                          )
+                        : currentSegments;
 
-                        return {
-                          ...message,
-                          metadata: {
-                            ...message.metadata,
-                            reasoning: currentReasoning,
-                            reasoningSegments,
-                          },
-                        };
-                      }),
+                      return {
+                        ...message,
+                        metadata: {
+                          ...message.metadata,
+                          reasoning: currentReasoning,
+                          reasoningSegments,
+                        },
+                      };
+                    }),
                   );
                 });
               }
             } else if (data.type === "citations") {
               const citations = normalizeCitationRecords(data.citations);
-              const availableCitations = normalizeCitationRecords(data.availableCitations);
+              const availableCitations = normalizeCitationRecords(
+                data.availableCitations,
+              );
               syncStreamingCitations({
                 citations,
-                availableCitations: availableCitations.length > 0
-                  ? availableCitations
-                  : citations,
+                availableCitations:
+                  availableCitations.length > 0
+                    ? availableCitations
+                    : citations,
               });
             } else if (
               data.type === "thread-title-update" &&
@@ -2187,10 +2321,14 @@ export default function DashboardChatThreadPage({
               typeof data.threadId === "string"
             ) {
               shouldPollThreadTitle = data.threadId === threadId;
-              pendingTitleJobId = typeof data.jobId === "string" ? data.jobId : null;
+              pendingTitleJobId =
+                typeof data.jobId === "string" ? data.jobId : null;
             } else if (data.type === "error") {
               if (streamToolCallsById.size > 0) {
-                for (const [toolId, toolCall] of streamToolCallsById.entries()) {
+                for (const [
+                  toolId,
+                  toolCall,
+                ] of streamToolCallsById.entries()) {
                   if (toolCall.status === "running") {
                     streamToolCallsById.set(toolId, {
                       ...toolCall,
@@ -2205,7 +2343,8 @@ export default function DashboardChatThreadPage({
               persistedAssistantMessageId =
                 typeof data.messageId === "string" ? data.messageId : null;
               const messageId = persistedAssistantMessageId ?? tempAssistantId;
-              const userMessageId = data.userMessageId ?? persistedUserMessageId;
+              const userMessageId =
+                data.userMessageId ?? persistedUserMessageId;
               const previousAssistantMessageId = streamingAssistantMessageId;
               streamingAssistantMessageId = messageId;
               flushSync(() => {
@@ -2215,7 +2354,7 @@ export default function DashboardChatThreadPage({
                       ? {
                           ...message,
                           id: messageId,
-                          content: errorMessage,
+                          content: assistantText,
                           parentMessageId:
                             data.parentMessageId === undefined
                               ? message.parentMessageId
@@ -2229,10 +2368,15 @@ export default function DashboardChatThreadPage({
                             userMessageId,
                             sourceUserMessageId: userMessageId,
                             [STREAM_TEXT_PAUSED_KEY]: false,
-                            toolCalls: [...streamToolCallsById.values()].filter((toolCall) =>
-                              shouldRenderToolCall(toolCall, [...streamThinkingStepsById.values()])
+                            toolCalls: [...streamToolCallsById.values()].filter(
+                              (toolCall) =>
+                                shouldRenderToolCall(toolCall, [
+                                  ...streamThinkingStepsById.values(),
+                                ]),
                             ),
-                            thinkingSteps: [...streamThinkingStepsById.values()],
+                            thinkingSteps: [
+                              ...streamThinkingStepsById.values(),
+                            ],
                           },
                         }
                       : message,
@@ -2247,7 +2391,8 @@ export default function DashboardChatThreadPage({
               typeof data.messageId === "string"
             ) {
               persistedAssistantMessageId = data.messageId;
-              const userMessageId = data.userMessageId ?? persistedUserMessageId;
+              const userMessageId =
+                data.userMessageId ?? persistedUserMessageId;
               const previousAssistantMessageId = streamingAssistantMessageId;
               streamingAssistantMessageId = data.messageId;
               flushSync(() => {
@@ -2277,7 +2422,10 @@ export default function DashboardChatThreadPage({
               });
             } else if (data.type === "finish") {
               if (streamToolCallsById.size > 0) {
-                for (const [toolId, toolCall] of streamToolCallsById.entries()) {
+                for (const [
+                  toolId,
+                  toolCall,
+                ] of streamToolCallsById.entries()) {
                   if (toolCall.status === "running") {
                     streamToolCallsById.set(toolId, {
                       ...toolCall,
@@ -2288,7 +2436,10 @@ export default function DashboardChatThreadPage({
                 syncStreamingToolCalls();
               }
               if (streamThinkingStepsById.size > 0) {
-                for (const [stepId, step] of streamThinkingStepsById.entries()) {
+                for (const [
+                  stepId,
+                  step,
+                ] of streamThinkingStepsById.entries()) {
                   if (step.status === "in_progress") {
                     streamThinkingStepsById.set(stepId, {
                       ...step,
@@ -2423,7 +2574,14 @@ export default function DashboardChatThreadPage({
       if (raw) {
         sessionStorage.removeItem(pendingKey);
         try {
-          const { content, sourceIds, skillIds, thinking, thinkingSettings: pendingThinkingSettings, searchEnabled: pendingSearchEnabled } = JSON.parse(raw) as {
+          const {
+            content,
+            sourceIds,
+            skillIds,
+            thinking,
+            thinkingSettings: pendingThinkingSettings,
+            searchEnabled: pendingSearchEnabled,
+          } = JSON.parse(raw) as {
             content: string;
             sourceIds: string[];
             skillIds?: string[];
@@ -2432,10 +2590,16 @@ export default function DashboardChatThreadPage({
             searchEnabled?: boolean;
           };
           const pendingSourceIds = Array.isArray(sourceIds)
-            ? sourceIds.filter((sourceId): sourceId is string => typeof sourceId === "string")
+            ? sourceIds.filter(
+                (sourceId): sourceId is string => typeof sourceId === "string",
+              )
             : [];
           const pendingSkillIds = Array.isArray(skillIds)
-            ? skillIds.filter((skillId): skillId is string => typeof skillId === "string").slice(0, 5)
+            ? skillIds
+                .filter(
+                  (skillId): skillId is string => typeof skillId === "string",
+                )
+                .slice(0, 5)
             : [];
           persistActiveSourceIds(pendingSourceIds);
           setActiveSkillIds(pendingSkillIds);
@@ -2511,7 +2675,8 @@ export default function DashboardChatThreadPage({
           return next;
         }
 
-        const selectedAssistantVersion = changedGroup.versions[input.branchIndex];
+        const selectedAssistantVersion =
+          changedGroup.versions[input.branchIndex];
         if (!selectedAssistantVersion?.sourceUserMessageId) {
           return next;
         }
@@ -2522,7 +2687,8 @@ export default function DashboardChatThreadPage({
           }
 
           const userVersionIndex = userGroup.versions.findIndex(
-            (version) => version.id === selectedAssistantVersion.sourceUserMessageId,
+            (version) =>
+              version.id === selectedAssistantVersion.sourceUserMessageId,
           );
           if (userVersionIndex >= 0) {
             next[userGroup.groupId] = userVersionIndex;
@@ -2577,7 +2743,8 @@ export default function DashboardChatThreadPage({
           }
 
           if (editingAssistantGroup) {
-            const nextAssistantBranchIndex = editingAssistantGroup.versions.length;
+            const nextAssistantBranchIndex =
+              editingAssistantGroup.versions.length;
             next[editingAssistantGroup.groupId] = Math.max(
               previous[editingAssistantGroup.groupId] ?? 0,
               nextAssistantBranchIndex,
@@ -2633,44 +2800,57 @@ export default function DashboardChatThreadPage({
     ],
   );
 
-  const handleRefreshLatest = useCallback(async (input: {
-    groupId: string;
-    assistantMessageId: string;
-    branchIndex: number;
-  }) => {
-    if (isStreaming) {
-      return;
-    }
+  const handleRefreshLatest = useCallback(
+    async (input: {
+      groupId: string;
+      assistantMessageId: string;
+      branchIndex: number;
+    }) => {
+      if (isStreaming) {
+        return;
+      }
 
-    const assistantGroup = messageGroups.find(
-      (group) => group.groupId === input.groupId,
-    );
-    const nextBranchIndex = assistantGroup
-      ? assistantGroup.versions.length
-      : input.branchIndex + 1;
+      const assistantGroup = messageGroups.find(
+        (group) => group.groupId === input.groupId,
+      );
+      const nextBranchIndex = assistantGroup
+        ? assistantGroup.versions.length
+        : input.branchIndex + 1;
 
-    setActiveVersionByGroup((previous) => ({
-      ...previous,
-      [input.groupId]: Math.max(previous[input.groupId] ?? 0, nextBranchIndex),
-    }));
-    pendingLatestVersionSelectionRef.current = {
-      assistantGroupId: input.groupId,
-    };
+      setActiveVersionByGroup((previous) => ({
+        ...previous,
+        [input.groupId]: Math.max(
+          previous[input.groupId] ?? 0,
+          nextBranchIndex,
+        ),
+      }));
+      pendingLatestVersionSelectionRef.current = {
+        assistantGroupId: input.groupId,
+      };
 
-    const refreshSourceIds = resolveRefreshSourceIds({
+      const refreshSourceIds = resolveRefreshSourceIds({
+        activeSourceIds,
+        assistantMessageId: input.assistantMessageId,
+        groups: messageGroups,
+      });
+
+      await streamThreadAction({
+        mode: "refresh",
+        sourceIds: refreshSourceIds,
+        skillIds: activeSkillIds,
+        searchEnabled,
+        assistantMessageId: input.assistantMessageId,
+      });
+    },
+    [
       activeSourceIds,
-      assistantMessageId: input.assistantMessageId,
-      groups: messageGroups,
-    });
-
-    await streamThreadAction({
-      mode: "refresh",
-      sourceIds: refreshSourceIds,
-      skillIds: activeSkillIds,
+      activeSkillIds,
+      isStreaming,
+      messageGroups,
       searchEnabled,
-      assistantMessageId: input.assistantMessageId,
-    });
-  }, [activeSourceIds, activeSkillIds, isStreaming, messageGroups, searchEnabled, streamThreadAction]);
+      streamThreadAction,
+    ],
+  );
 
   const handleRestartFromMessage = useCallback(
     (input: {
@@ -2765,7 +2945,7 @@ export default function DashboardChatThreadPage({
           selectedSources={selectedSources}
           selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
-          thinkingCapabilities={selectedModels.llm.capabilities}
+          thinkingCapabilities={selectedModels.llm?.capabilities}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle={threadTitle}

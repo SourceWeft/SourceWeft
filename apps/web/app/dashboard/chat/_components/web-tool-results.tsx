@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronUp, FileText, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -133,13 +133,7 @@ export function WebToolResults({
     toolCall.tool === "web_search" || toolCall.tool === "web_fetch"
   );
   const pages = webToolCalls.flatMap((toolCall) => getWebPageToolResults(toolCall));
-  const [isOpen, setIsOpen] = useState(true);
-
-  useEffect(() => {
-    if (webToolCalls.some((toolCall) => toolCall.status === "running")) {
-      setIsOpen(true);
-    }
-  }, [webToolCalls]);
+  const [isOpen, setIsOpen] = useState(false);
 
   if (pages.length === 0) {
     return null;

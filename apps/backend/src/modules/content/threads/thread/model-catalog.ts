@@ -20,6 +20,9 @@ type ThreadModelCatalogEntry = {
   modelAlias: string;
   isDefault: boolean;
   isActive: boolean;
+  providerName: string | null;
+  providerKind: string | null;
+  targetModel: string | null;
   displayName: string;
   subtitle: string;
   badges: string[];
@@ -284,6 +287,9 @@ export async function listThreadModelCatalog(input: {
       modelAlias: row.modelAlias,
       isDefault: row.isDefault,
       isActive: row.isActive,
+      providerName: route.providerName,
+      providerKind: route.providerKind,
+      targetModel: route.targetModel,
       displayName,
       subtitle,
       badges,

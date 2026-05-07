@@ -616,6 +616,7 @@ class ContentThreadStreamService {
     let agentSpanStarted = false;
     let agentSpanCompleted = false;
     let outcome: DeepAgentTurnOutcome | null = null;
+    let assistantContent = "";
     try {
       yield toSseData({ type: "start", messageId: prepared.userMessage.id });
       yield toSseData({ type: "text-start", id: textId });
@@ -712,6 +713,10 @@ class ContentThreadStreamService {
           if (event.type === "done") {
             outcome = event.outcome;
             continue;
+          }
+
+          if (event.type === "text-delta") {
+            assistantContent += event.delta;
           }
 
           yield mapDeepAgentEventToSse(event, textId);
@@ -815,6 +820,7 @@ class ContentThreadStreamService {
         const errorMessage = await this.createErrorMessage({
           prepared,
           contentError,
+          partialAssistantContent: assistantContent,
         });
         if (
           !errorMessage &&

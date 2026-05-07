@@ -117,6 +117,8 @@ export type MessageVersion = {
   citations?: CitationRecord[];
   availableCitations?: CitationRecord[];
   isError?: boolean;
+  error?: string | null;
+  errorCode?: string | null;
   isTextPaused?: boolean;
   isTextInterrupted?: boolean;
   sourceIds?: string[];
@@ -226,7 +228,8 @@ function getMessageText(version: MessageVersion): string {
   return version.content;
 }
 
-const CITATION_PATTERN = /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
+const CITATION_PATTERN =
+  /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
 
 function splitCitationIds(value: string) {
   return value
@@ -240,11 +243,19 @@ function resolveCitationFromId(input: {
   citationByKey: Map<string, CitationRecord>;
   id: string;
 }) {
-  return input.citationByKey.get(input.id) ?? input.citationByChunkId.get(input.id);
+  return (
+    input.citationByKey.get(input.id) ?? input.citationByChunkId.get(input.id)
+  );
 }
 
-function getCitationLabel(citation: CitationRecord | undefined, fallback: string) {
-  return citation?.sourceTitle?.trim() || (citation ? "Source" : fallback || "Source");
+function getCitationLabel(
+  citation: CitationRecord | undefined,
+  fallback: string,
+) {
+  return (
+    citation?.sourceTitle?.trim() ||
+    (citation ? "Source" : fallback || "Source")
+  );
 }
 
 function CitationBadge({
@@ -260,7 +271,8 @@ function CitationBadge({
     <button
       className={cn(
         "mx-0.5 inline-flex max-w-[14rem] cursor-pointer items-center justify-center rounded-full bg-primary/10 px-1.5 py-0.5 align-baseline text-[11px] font-medium leading-none text-primary transition-colors hover:bg-primary/15",
-        !citation && "cursor-default bg-muted text-muted-foreground hover:bg-muted",
+        !citation &&
+          "cursor-default bg-muted text-muted-foreground hover:bg-muted",
       )}
       disabled={!citation}
       onClick={() => {
@@ -400,11 +412,15 @@ function CitationAwareMessageResponse({
     CITATION_PATTERN.lastIndex = 0;
     return CITATION_PATTERN.test(children);
   })();
-  const possibleEvidence = !hasInlineCitationMarkers &&
-    (citations?.length ?? 0) === 0
-    ? (availableCitations ?? [])
-    : [];
-  const textComponent = ({ children: nodeChildren }: { children?: ReactNode }) => (
+  const possibleEvidence =
+    !hasInlineCitationMarkers && (citations?.length ?? 0) === 0
+      ? (availableCitations ?? [])
+      : [];
+  const textComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) => (
     <>
       {processCitationChildren({
         children: nodeChildren,
@@ -415,16 +431,37 @@ function CitationAwareMessageResponse({
     </>
   );
 
-  const paragraphComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
-    createElement("p", null, textComponent({ children: nodeChildren }));
-  const listItemComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
-    createElement("li", null, textComponent({ children: nodeChildren }));
-  const strongComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+  const paragraphComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) => createElement("p", null, textComponent({ children: nodeChildren }));
+  const listItemComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) => createElement("li", null, textComponent({ children: nodeChildren }));
+  const strongComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) =>
     createElement("strong", null, textComponent({ children: nodeChildren }));
-  const emphasisComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
-    createElement("em", null, textComponent({ children: nodeChildren }));
-  const blockquoteComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
-    createElement("blockquote", null, textComponent({ children: nodeChildren }));
+  const emphasisComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) => createElement("em", null, textComponent({ children: nodeChildren }));
+  const blockquoteComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) =>
+    createElement(
+      "blockquote",
+      null,
+      textComponent({ children: nodeChildren }),
+    );
   const h1Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
     createElement("h1", null, textComponent({ children: nodeChildren }));
   const h2Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
@@ -437,16 +474,27 @@ function CitationAwareMessageResponse({
     createElement("h5", null, textComponent({ children: nodeChildren }));
   const h6Component = ({ children: nodeChildren }: { children?: ReactNode }) =>
     createElement("h6", null, textComponent({ children: nodeChildren }));
-  const tableCellComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+  const tableCellComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) =>
     createElement(
       "td",
       { className: "border border-border px-3 py-2 align-top" },
       textComponent({ children: nodeChildren }),
     );
-  const tableHeaderComponent = ({ children: nodeChildren }: { children?: ReactNode }) =>
+  const tableHeaderComponent = ({
+    children: nodeChildren,
+  }: {
+    children?: ReactNode;
+  }) =>
     createElement(
       "th",
-      { className: "border border-border bg-muted/40 px-3 py-2 text-left align-top font-semibold text-foreground" },
+      {
+        className:
+          "border border-border bg-muted/40 px-3 py-2 text-left align-top font-semibold text-foreground",
+      },
       textComponent({ children: nodeChildren }),
     );
 
@@ -454,7 +502,9 @@ function CitationAwareMessageResponse({
     <div>
       <MessageResponse
         components={{
-          a: ({ children: nodeChildren, ...props }) => <a {...props}>{nodeChildren}</a>,
+          a: ({ children: nodeChildren, ...props }) => (
+            <a {...props}>{nodeChildren}</a>
+          ),
           blockquote: blockquoteComponent as never,
           em: emphasisComponent as never,
           h1: h1Component as never,
@@ -473,7 +523,10 @@ function CitationAwareMessageResponse({
         {children}
       </MessageResponse>
       {showLoading ? (
-        <span className="mt-1 inline-flex items-center gap-1 text-muted-foreground" aria-label="Thinking">
+        <span
+          className="mt-1 inline-flex items-center gap-1 text-muted-foreground"
+          aria-label="Thinking"
+        >
           <span className="size-1 animate-pulse rounded-full bg-current" />
           <span className="size-1 animate-pulse rounded-full bg-current [animation-delay:120ms]" />
           <span className="size-1 animate-pulse rounded-full bg-current [animation-delay:240ms]" />
@@ -573,7 +626,9 @@ function ReferencedFiles({ sources }: { sources: SourceItem[] }) {
 
 function compactText(value: string, maxLength = 160) {
   const compacted = value.replace(/\s+/g, " ").trim();
-  return compacted.length > maxLength ? `${compacted.slice(0, maxLength - 1)}…` : compacted;
+  return compacted.length > maxLength
+    ? `${compacted.slice(0, maxLength - 1)}…`
+    : compacted;
 }
 
 function getToolOutputContent(output: unknown) {
@@ -599,7 +654,10 @@ function getToolOutputContent(output: unknown) {
   return String(output);
 }
 
-function getRecordValue(record: Record<string, unknown> | undefined, key: string) {
+function getRecordValue(
+  record: Record<string, unknown> | undefined,
+  key: string,
+) {
   return record ? record[key] : undefined;
 }
 
@@ -609,9 +667,10 @@ function getToolQuery(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
     return inputQuery.trim();
   }
 
-  const output = toolCall.output && typeof toolCall.output === "object"
-    ? (toolCall.output as Record<string, unknown>)
-    : undefined;
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
   const outputQuery = getRecordValue(output, "query");
   if (typeof outputQuery === "string" && outputQuery.trim().length > 0) {
     return outputQuery.trim();
@@ -623,26 +682,36 @@ function getToolQuery(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
     : null;
 }
 
-function getToolHitCount(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
-  const output = toolCall.output && typeof toolCall.output === "object"
-    ? (toolCall.output as Record<string, unknown>)
-    : undefined;
+function getToolHitCount(
+  toolCall: ToolCallRecord,
+  toolStep?: ThinkingStepRecord,
+) {
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
   const outputHitCount = getRecordValue(output, "hitCount");
   if (typeof outputHitCount === "number" && Number.isFinite(outputHitCount)) {
     return outputHitCount;
   }
 
   const metadataHitCount = getRecordValue(toolStep?.metadata, "hitCount");
-  return typeof metadataHitCount === "number" && Number.isFinite(metadataHitCount)
+  return typeof metadataHitCount === "number" &&
+    Number.isFinite(metadataHitCount)
     ? metadataHitCount
     : null;
 }
 
-function getToolResultCount(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
-  const output = toolCall.output && typeof toolCall.output === "object"
-    ? (toolCall.output as Record<string, unknown>)
-    : undefined;
-  const outputCount = getRecordValue(output, "resultCount") ?? getRecordValue(output, "urlCount");
+function getToolResultCount(
+  toolCall: ToolCallRecord,
+  toolStep?: ThinkingStepRecord,
+) {
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
+  const outputCount =
+    getRecordValue(output, "resultCount") ?? getRecordValue(output, "urlCount");
   if (typeof outputCount === "number" && Number.isFinite(outputCount)) {
     return outputCount;
   }
@@ -665,19 +734,25 @@ function getToolFetchUrls(toolCall: ToolCallRecord) {
         return null;
       }
       const url = (item as Record<string, unknown>).url;
-      return typeof url === "string" && url.trim().length > 0 ? url.trim() : null;
+      return typeof url === "string" && url.trim().length > 0
+        ? url.trim()
+        : null;
     })
     .filter((url): url is string => url !== null);
 }
 
-function getToolFetchCount(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
+function getToolFetchCount(
+  toolCall: ToolCallRecord,
+  toolStep?: ThinkingStepRecord,
+) {
   const urls = getToolFetchUrls(toolCall);
   if (urls.length > 0) {
     return urls.length;
   }
 
   const metadataUrlCount = getRecordValue(toolStep?.metadata, "urlCount");
-  return typeof metadataUrlCount === "number" && Number.isFinite(metadataUrlCount)
+  return typeof metadataUrlCount === "number" &&
+    Number.isFinite(metadataUrlCount)
     ? metadataUrlCount
     : null;
 }
@@ -699,22 +774,27 @@ function summarizeToolOutput(output: unknown) {
 }
 
 function formatToolName(toolName: string) {
-  return toolName.replace(/[_-]+/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
+  return toolName
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function getToolDisplayLabel(toolCall: ToolCallRecord) {
   if (toolCall.tool === "search_sources") {
     const query = getToolQuery(toolCall);
-    return query ? `Search sources: ${compactText(query, 72)}` : "Search sources";
+    return query
+      ? `Search sources: ${compactText(query, 72)}`
+      : "Search sources";
   }
 
   if (toolCall.tool === "web_search") {
     const query = getToolQuery(toolCall);
-    const verb = toolCall.status === "running"
-      ? "Searching web"
-      : toolCall.status === "error"
-        ? "Web search failed"
-        : "Searched web";
+    const verb =
+      toolCall.status === "running"
+        ? "Searching web"
+        : toolCall.status === "error"
+          ? "Web search failed"
+          : "Searched web";
     return query ? `${verb}: ${compactText(query, 72)}` : verb;
   }
 
@@ -722,11 +802,12 @@ function getToolDisplayLabel(toolCall: ToolCallRecord) {
     const urls = getToolFetchUrls(toolCall);
     const count = urls.length;
     const firstUrl = urls[0] ? compactText(urls[0], 56) : null;
-    const verb = toolCall.status === "running"
-      ? "Fetching pages"
-      : toolCall.status === "error"
-        ? "Page fetch failed"
-        : "Fetched pages";
+    const verb =
+      toolCall.status === "running"
+        ? "Fetching pages"
+        : toolCall.status === "error"
+          ? "Page fetch failed"
+          : "Fetched pages";
     if (count > 0 && firstUrl) {
       const suffix = count > 1 ? ` +${count - 1}` : "";
       return `${verb}: ${firstUrl}${suffix}`;
@@ -750,7 +831,9 @@ function getToolDisplayLabel(toolCall: ToolCallRecord) {
         ? "Failed"
         : "Used";
 
-  return inputPreview ? `${prefix} ${toolName} (${inputPreview})` : `${prefix} ${toolName}`;
+  return inputPreview
+    ? `${prefix} ${toolName} (${inputPreview})`
+    : `${prefix} ${toolName}`;
 }
 
 function formatThinkingMetadataValue(key: string, value: unknown) {
@@ -779,7 +862,9 @@ function formatThinkingMetadataValue(key: string, value: unknown) {
   return null;
 }
 
-function getThinkingMetadataParts(metadata: Record<string, unknown> | undefined) {
+function getThinkingMetadataParts(
+  metadata: Record<string, unknown> | undefined,
+) {
   if (!metadata) {
     return [] as string[];
   }
@@ -807,7 +892,9 @@ function getThinkingMetadataParts(metadata: Record<string, unknown> | undefined)
     .filter((item): item is string => item !== null);
 }
 
-function getToolStepMetadataParts(metadata: Record<string, unknown> | undefined) {
+function getToolStepMetadataParts(
+  metadata: Record<string, unknown> | undefined,
+) {
   if (!metadata) {
     return [] as string[];
   }
@@ -824,20 +911,35 @@ function getToolStepMetadataParts(metadata: Record<string, unknown> | undefined)
   return getThinkingMetadataParts(rest);
 }
 
-function getToolCallDetailParts(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
+function getToolCallDetailParts(
+  toolCall: ToolCallRecord,
+  toolStep?: ThinkingStepRecord,
+) {
   const hitCount = getToolHitCount(toolCall, toolStep);
-  const resultCount = toolCall.tool === "web_search"
-    ? getToolResultCount(toolCall, toolStep)
-    : null;
-  const fetchCount = toolCall.tool === "web_fetch" ? getToolFetchCount(toolCall, toolStep) : null;
-  const concurrency = toolCall.tool === "web_fetch" ? getToolConcurrency(toolStep) : null;
-  const latencyMs = toolCall.latencyMs ??
-    (typeof toolStep?.metadata?.latencyMs === "number" ? toolStep.metadata.latencyMs : null);
+  const resultCount =
+    toolCall.tool === "web_search"
+      ? getToolResultCount(toolCall, toolStep)
+      : null;
+  const fetchCount =
+    toolCall.tool === "web_fetch"
+      ? getToolFetchCount(toolCall, toolStep)
+      : null;
+  const concurrency =
+    toolCall.tool === "web_fetch" ? getToolConcurrency(toolStep) : null;
+  const latencyMs =
+    toolCall.latencyMs ??
+    (typeof toolStep?.metadata?.latencyMs === "number"
+      ? toolStep.metadata.latencyMs
+      : null);
   return [
     `status: ${toolCall.status}`,
     hitCount !== null ? `hits: ${hitCount}` : null,
-    resultCount !== null ? `${resultCount} ${pluralize(resultCount, "result")}` : null,
-    fetchCount !== null ? `${fetchCount} ${pluralize(fetchCount, "URL")}` : null,
+    resultCount !== null
+      ? `${resultCount} ${pluralize(resultCount, "result")}`
+      : null,
+    fetchCount !== null
+      ? `${fetchCount} ${pluralize(fetchCount, "URL")}`
+      : null,
     concurrency !== null ? `concurrency: ${concurrency}` : null,
     typeof latencyMs === "number" ? `time: ${Math.round(latencyMs)}ms` : null,
   ].filter((part): part is string => part !== null);
@@ -855,7 +957,7 @@ function ToolCallDetails({
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
   const shouldShowOutputSummary = Boolean(
-      outputSummary &&
+    outputSummary &&
       toolCall.tool !== "search_sources" &&
       toolCall.tool !== "web_search" &&
       toolCall.tool !== "web_fetch" &&
@@ -882,7 +984,9 @@ function ToolCallDetails({
         </div>
       ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
-      {toolCall.error ? <p className="text-destructive">{toolCall.error}</p> : null}
+      {toolCall.error ? (
+        <p className="text-destructive">{toolCall.error}</p>
+      ) : null}
     </div>
   );
 }
@@ -929,9 +1033,10 @@ function ReasoningTrace({
           },
         ]
       : [];
-  const displayReasoningSegments = safeReasoningSegments.length > 0
-    ? safeReasoningSegments
-    : fallbackReasoningSegments;
+  const displayReasoningSegments =
+    safeReasoningSegments.length > 0
+      ? safeReasoningSegments
+      : fallbackReasoningSegments;
   const hasModelReasoning = displayReasoningSegments.length > 0;
   const safeSteps = steps ?? [];
   const safeToolCalls = (toolCalls ?? []).filter((toolCall, index, calls) => {
@@ -941,9 +1046,14 @@ function ReasoningTrace({
     safeSteps
       .map((step) => {
         const toolCallId = step.metadata?.toolCallId;
-        return typeof toolCallId === "string" ? ([toolCallId, step] as const) : null;
+        return typeof toolCallId === "string"
+          ? ([toolCallId, step] as const)
+          : null;
       })
-      .filter((entry): entry is readonly [string, ThinkingStepRecord] => entry !== null),
+      .filter(
+        (entry): entry is readonly [string, ThinkingStepRecord] =>
+          entry !== null,
+      ),
   );
   const toolCallIds = new Set(safeToolCalls.map((toolCall) => toolCall.id));
   const displaySteps = safeSteps.filter((step) => {
@@ -951,9 +1061,12 @@ function ReasoningTrace({
     return !(typeof toolCallId === "string" && toolCallIds.has(toolCallId));
   });
   const activeStep = safeSteps.find((step) => step.status === "in_progress");
-  const hasRunningToolCall = safeToolCalls.some((toolCall) => toolCall.status === "running");
+  const hasRunningToolCall = safeToolCalls.some(
+    (toolCall) => toolCall.status === "running",
+  );
   const isThinking = isStreaming || Boolean(activeStep) || hasRunningToolCall;
-  const hasTraceItems = safeSteps.length + safeToolCalls.length + (hasModelReasoning ? 1 : 0) > 0;
+  const hasTraceItems =
+    safeSteps.length + safeToolCalls.length + (hasModelReasoning ? 1 : 0) > 0;
   const allComplete =
     hasTraceItems &&
     safeSteps.every((step) => step.status === "completed") &&
@@ -999,16 +1112,15 @@ function ReasoningTrace({
       return `${item.key}:${item.toolCall.status}:${item.toolCall.latencyMs ?? ""}`;
     })
     .join("|");
-  const reasoningDurationMs = displayReasoningSegments.reduce<number | undefined>(
-    (longest, segment) => {
-      if (typeof segment.durationMs !== "number") {
-        return longest;
-      }
+  const reasoningDurationMs = displayReasoningSegments.reduce<
+    number | undefined
+  >((longest, segment) => {
+    if (typeof segment.durationMs !== "number") {
+      return longest;
+    }
 
-      return Math.max(longest ?? 0, segment.durationMs);
-    },
-    undefined,
-  );
+    return Math.max(longest ?? 0, segment.durationMs);
+  }, undefined);
 
   useEffect(() => {
     if (!isOpen) {
@@ -1055,15 +1167,13 @@ function ReasoningTrace({
     >
       <ChainOfThoughtHeader
         className="py-0"
-        icon={isThinking ? <Loader2 className="size-4 animate-spin" /> : undefined}
+        icon={
+          isThinking ? <Loader2 className="size-4 animate-spin" /> : undefined
+        }
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate">
-            {isThinking ? (
-              <Shimmer duration={1}>{title}</Shimmer>
-            ) : (
-              title
-            )}
+            {isThinking ? <Shimmer duration={1}>{title}</Shimmer> : title}
           </span>
           {isThinking ? (
             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
@@ -1073,7 +1183,10 @@ function ReasoningTrace({
         </span>
       </ChainOfThoughtHeader>
       {isOpen && timelineItems.length > 0 ? (
-        <ChainOfThoughtContent className="max-h-64 overflow-y-auto pr-1" ref={contentRef}>
+        <ChainOfThoughtContent
+          className="max-h-64 overflow-y-auto pr-1"
+          ref={contentRef}
+        >
           {timelineItems.map((item) => {
             if (item.kind === "model-reasoning") {
               return (
@@ -1092,12 +1205,13 @@ function ReasoningTrace({
             if (item.kind === "step") {
               const { step } = item;
               const metadataParts = getThinkingMetadataParts(step.metadata);
-              const stepDescription = [
-                step.description ?? null,
-                metadataParts.length > 0 ? metadataParts.join(" · ") : null,
-              ]
-                .filter((part): part is string => Boolean(part))
-                .join(" · ") || undefined;
+              const stepDescription =
+                [
+                  step.description ?? null,
+                  metadataParts.length > 0 ? metadataParts.join(" · ") : null,
+                ]
+                  .filter((part): part is string => Boolean(part))
+                  .join(" · ") || undefined;
               const stepLabel = (
                 <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <span className="truncate">{step.title}</span>
@@ -1133,8 +1247,13 @@ function ReasoningTrace({
                   {step.items.length > 0 ? (
                     <ChainOfThoughtSearchResults>
                       {step.items.map((result) => (
-                        <ChainOfThoughtSearchResult key={`${step.id}:${result}`} title={result}>
-                          <span className="max-w-[220px] truncate">{result}</span>
+                        <ChainOfThoughtSearchResult
+                          key={`${step.id}:${result}`}
+                          title={result}
+                        >
+                          <span className="max-w-[220px] truncate">
+                            {result}
+                          </span>
                         </ChainOfThoughtSearchResult>
                       ))}
                     </ChainOfThoughtSearchResults>
@@ -1146,13 +1265,14 @@ function ReasoningTrace({
             const { toolCall, toolStep } = item;
             const metadataParts = getToolStepMetadataParts(toolStep?.metadata);
             const detailParts = getToolCallDetailParts(toolCall, toolStep);
-            const summary = [
-              toolStep?.description ?? null,
-              detailParts.length > 0 ? detailParts.join(" · ") : null,
-              metadataParts.length > 0 ? metadataParts.join(" · ") : null,
-            ]
-              .filter((part): part is string => Boolean(part))
-              .join(" · ") || undefined;
+            const summary =
+              [
+                toolStep?.description ?? null,
+                detailParts.length > 0 ? detailParts.join(" · ") : null,
+                metadataParts.length > 0 ? metadataParts.join(" · ") : null,
+              ]
+                .filter((part): part is string => Boolean(part))
+                .join(" · ") || undefined;
             return (
               <ChainOfThoughtStep
                 description={summary}
@@ -1221,21 +1341,26 @@ function Composer({
   const visible = showSourceCountOnly ? [] : selectedSources;
   const hasSelectedSources = selectedSources.length > 0;
   const selectedSkillIdSet = new Set(selectedSkillIds);
-  const selectedSkills = availableSkills.filter((skill) => selectedSkillIdSet.has(skill.id));
-  const selectedSkillNames = selectedSkills.map((skill) => skill.displayName).join(", ");
+  const selectedSkills = availableSkills.filter((skill) =>
+    selectedSkillIdSet.has(skill.id),
+  );
+  const selectedSkillNames = selectedSkills
+    .map((skill) => skill.displayName)
+    .join(", ");
   const supportsThinking = thinkingCapabilities?.supportsThinking === true;
   const activeThinkingSettings = supportsThinking
     ? thinkingSettings
     : DEFAULT_PROMPT_THINKING_SETTINGS;
   const thinkingEnabled = activeThinkingSettings.mode !== "off";
   const supportedThinkingEfforts = thinkingEffortOptions.filter((option) =>
-    (thinkingCapabilities?.supportedEfforts ?? []).includes(option.value)
+    (thinkingCapabilities?.supportedEfforts ?? []).includes(option.value),
   );
-  const selectedThinkingValue = activeThinkingSettings.mode === "off"
-    ? "off"
-    : activeThinkingSettings.mode === "effort"
-      ? activeThinkingSettings.effort
-      : "auto";
+  const selectedThinkingValue =
+    activeThinkingSettings.mode === "off"
+      ? "off"
+      : activeThinkingSettings.mode === "effort"
+        ? activeThinkingSettings.effort
+        : "auto";
 
   function updateThinkingSettings(next: PromptThinkingSettings) {
     if (!supportsThinking) {
@@ -1329,29 +1454,29 @@ function Composer({
             </PromptInputHeader>
           ) : null}
           <PromptInputBody>
-              <PromptInputTextarea
-                autoFocus={isEditing && !disabled}
-                onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-                  if (isEditing && event.key === "Escape") {
-                    event.preventDefault();
-                    onCancelEditing?.();
-                    return;
-                  }
-
-                  if (
-                    disabled &&
-                    event.key === "Enter" &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
-                    event.preventDefault();
-                  }
-                }}
-                placeholder={
-                  placeholder ||
-                  "Message your documents, links, or connected tools..."
+            <PromptInputTextarea
+              autoFocus={isEditing && !disabled}
+              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                if (isEditing && event.key === "Escape") {
+                  event.preventDefault();
+                  onCancelEditing?.();
+                  return;
                 }
-              />
+
+                if (
+                  disabled &&
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                }
+              }}
+              placeholder={
+                placeholder ||
+                "Message your documents, links, or connected tools..."
+              }
+            />
           </PromptInputBody>
           <PromptInputFooter className="border-t-0">
             <PromptInputTools className="w-full flex-wrap gap-3">
@@ -1386,7 +1511,8 @@ function Composer({
                               onValueChange={(value) => {
                                 if (value === "off") {
                                   updateThinkingSettings({
-                                    ...(activeThinkingSettings ?? DEFAULT_PROMPT_THINKING_SETTINGS),
+                                    ...(activeThinkingSettings ??
+                                      DEFAULT_PROMPT_THINKING_SETTINGS),
                                     mode: "off",
                                   });
                                   return;
@@ -1394,7 +1520,8 @@ function Composer({
 
                                 if (value === "auto") {
                                   updateThinkingSettings({
-                                    ...(activeThinkingSettings ?? DEFAULT_PROMPT_THINKING_SETTINGS),
+                                    ...(activeThinkingSettings ??
+                                      DEFAULT_PROMPT_THINKING_SETTINGS),
                                     mode: "auto",
                                   });
                                   return;
@@ -1433,11 +1560,17 @@ function Composer({
                         </DropdownMenuSub>
                       </>
                     ) : supportsThinking ? (
-                      <DropdownMenuItem className="h-8 rounded-lg px-2 text-xs" disabled>
+                      <DropdownMenuItem
+                        className="h-8 rounded-lg px-2 text-xs"
+                        disabled
+                      >
                         Thinking effort unavailable
                       </DropdownMenuItem>
                     ) : (
-                      <DropdownMenuItem className="h-8 rounded-lg px-2 text-xs" disabled>
+                      <DropdownMenuItem
+                        className="h-8 rounded-lg px-2 text-xs"
+                        disabled
+                      >
                         No options available
                       </DropdownMenuItem>
                     )}
@@ -1477,7 +1610,9 @@ function Composer({
 
                 {supportsThinking ? (
                   <button
-                    aria-label={thinkingEnabled ? "Disable Thinking" : "Enable Thinking"}
+                    aria-label={
+                      thinkingEnabled ? "Disable Thinking" : "Enable Thinking"
+                    }
                     aria-pressed={thinkingEnabled}
                     className={cn(
                       "ml-1 inline-flex h-8 items-center justify-center overflow-hidden rounded-full text-xs font-medium select-none transition-all duration-200 ease-out",
@@ -1486,19 +1621,25 @@ function Composer({
                         : "w-8 border border-transparent bg-transparent px-0 text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                     onClick={toggleThinking}
-                    title={thinkingEnabled ? "Disable Thinking" : "Enable Thinking"}
+                    title={
+                      thinkingEnabled ? "Disable Thinking" : "Enable Thinking"
+                    }
                     type="button"
                   >
                     <Brain
                       className={cn(
                         "size-4 shrink-0 transition-transform duration-300 ease-out",
-                        thinkingEnabled ? "rotate-180 scale-110" : "rotate-0 scale-100",
+                        thinkingEnabled
+                          ? "rotate-180 scale-110"
+                          : "rotate-0 scale-100",
                       )}
                     />
                     <span
                       className={cn(
                         "overflow-hidden whitespace-nowrap transition-all duration-200 ease-out",
-                        thinkingEnabled ? "max-w-20 opacity-100" : "max-w-0 opacity-0",
+                        thinkingEnabled
+                          ? "max-w-20 opacity-100"
+                          : "max-w-0 opacity-0",
                       )}
                     >
                       Thinking
@@ -1600,8 +1741,7 @@ function EmptyState({
                   </h1>
                   <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
                     Start with a prompt, compare evidence, or have the agent
-                    synthesize what matters most before you open a
-                    thread.
+                    synthesize what matters most before you open a thread.
                   </p>
                 </div>
               </div>
@@ -1686,7 +1826,10 @@ export function ChatCanvas({
   mode: "thread" | "new";
   sourcesVisible: boolean;
   threadTitle: string;
-  onActiveVersionChange?: (input: { groupId: string; branchIndex: number }) => void;
+  onActiveVersionChange?: (input: {
+    groupId: string;
+    branchIndex: number;
+  }) => void;
   onCancelEditing?: () => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onRestartFromMessage?: (input: {
@@ -1796,15 +1939,19 @@ export function ChatCanvas({
                       ),
                       latestUserVersionIndex,
                     );
-                    return userGroup.versions[activeUserBranchIndex]?.id ?? null;
+                    return (
+                      userGroup.versions[activeUserBranchIndex]?.id ?? null
+                    );
                   })()
                 : null;
 
               const versionEntries = (() => {
-                const allEntries = group.versions.map((version, originalIndex) => ({
-                  version,
-                  originalIndex,
-                }));
+                const allEntries = group.versions.map(
+                  (version, originalIndex) => ({
+                    version,
+                    originalIndex,
+                  }),
+                );
 
                 if (!isAssistant || !selectedUserVersionIdForAssistant) {
                   return allEntries;
@@ -1854,7 +2001,8 @@ export function ChatCanvas({
                         candidate.role === "assistant" &&
                         candidate.versions.some(
                           (version) =>
-                            version.sourceUserMessageId === selectedUserVersionId,
+                            version.sourceUserMessageId ===
+                            selectedUserVersionId,
                         ),
                     )
                   : null;
@@ -1876,7 +2024,8 @@ export function ChatCanvas({
                   maxAssistantIndex,
                 );
                 const preferredAssistantVersion =
-                  assistantGroupForUser.versions[preferredAssistantIndex] ?? null;
+                  assistantGroupForUser.versions[preferredAssistantIndex] ??
+                  null;
                 if (
                   preferredAssistantVersion?.sourceUserMessageId ===
                   selectedUserVersionId
@@ -1890,14 +2039,18 @@ export function ChatCanvas({
                   index -= 1
                 ) {
                   const candidate = assistantGroupForUser.versions[index];
-                  if (candidate?.sourceUserMessageId === selectedUserVersionId) {
+                  if (
+                    candidate?.sourceUserMessageId === selectedUserVersionId
+                  ) {
                     return candidate;
                   }
                 }
 
                 return null;
               })();
-              const sourceById = new Map(allSources.map((source) => [source.id, source]));
+              const sourceById = new Map(
+                allSources.map((source) => [source.id, source]),
+              );
               const toolbarVisibilityClass =
                 "invisible pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:visible group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:visible group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100";
 
@@ -1929,19 +2082,21 @@ export function ChatCanvas({
                       const referencedSources = !isAssistant
                         ? (version.sourceIds ?? [])
                             .map((sourceId) => sourceById.get(sourceId))
-                            .filter((source): source is SourceItem => Boolean(source))
+                            .filter((source): source is SourceItem =>
+                              Boolean(source),
+                            )
                         : [];
 
-                        return (
-                          <div
-                            className={cn(
-                              "flex w-full flex-col gap-1 rounded-2xl transition-colors duration-700",
-                              highlightedMessageId === version.id &&
-                                "bg-primary/10 ring-1 ring-primary/25",
-                            )}
-                            data-chat-message-id={version.id}
-                            key={version.id}
-                          >
+                      return (
+                        <div
+                          className={cn(
+                            "flex w-full flex-col gap-1 rounded-2xl transition-colors duration-700",
+                            highlightedMessageId === version.id &&
+                              "bg-primary/10 ring-1 ring-primary/25",
+                          )}
+                          data-chat-message-id={version.id}
+                          key={version.id}
+                        >
                           {!isAssistant && referencedSources.length > 0 ? (
                             <ReferencedFiles sources={referencedSources} />
                           ) : null}
@@ -1957,29 +2112,28 @@ export function ChatCanvas({
                                 <div className="whitespace-pre-wrap break-words leading-6">
                                   {messageText}
                                 </div>
-                              ) : version.isError ? (
-                                <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                                  <p className="font-medium">Message failed</p>
-                                  <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
-                                    {messageText}
-                                  </p>
-                                </div>
                               ) : (
                                 <div className="space-y-3">
                                   <ReasoningTrace
                                     isStreaming={isStreamingThisVersion}
                                     modelReasoning={version.modelReasoning}
-                                    modelReasoningSegments={version.modelReasoningSegments}
+                                    modelReasoningSegments={
+                                      version.modelReasoningSegments
+                                    }
                                     steps={version.thinkingSteps}
                                     toolCalls={version.toolCalls}
                                   />
                                   <WebToolResults
-                                    availableCitations={version.availableCitations}
+                                    availableCitations={
+                                      version.availableCitations
+                                    }
                                     onCitationClick={onCitationClick}
                                     toolCalls={version.toolCalls}
                                   />
                                   <CitationAwareMessageResponse
-                                    availableCitations={version.availableCitations}
+                                    availableCitations={
+                                      version.availableCitations
+                                    }
                                     citations={version.citations}
                                     onCitationClick={onCitationClick}
                                     showLoading={
@@ -1990,6 +2144,21 @@ export function ChatCanvas({
                                   >
                                     {messageText}
                                   </CitationAwareMessageResponse>
+                                  {version.isError ? (
+                                    <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                      <p className="font-medium">
+                                        Message failed
+                                      </p>
+                                      <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
+                                        {version.error ?? messageText}
+                                      </p>
+                                      {version.errorCode ? (
+                                        <p className="mt-1 text-xs text-destructive/70">
+                                          {version.errorCode}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                 </div>
                               )}
                             </MessageContent>
@@ -2007,7 +2176,9 @@ export function ChatCanvas({
                                 <MessageAction
                                   className="text-muted-foreground hover:text-foreground"
                                   label="Copy"
-                                  onClick={() => void handleCopyMessage(messageText)}
+                                  onClick={() =>
+                                    void handleCopyMessage(messageText)
+                                  }
                                   size="icon-sm"
                                   tooltip="Copy"
                                   type="button"
@@ -2029,7 +2200,8 @@ export function ChatCanvas({
                                         message: messageText,
                                         messageId: version.id,
                                         assistantMessageId:
-                                          selectedAssistantVersionForUser?.id ?? null,
+                                          selectedAssistantVersionForUser?.id ??
+                                          null,
                                         branchIndex: activeOriginalBranchIndex,
                                       });
                                     }}
@@ -2097,9 +2269,7 @@ export function ChatCanvas({
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(message) =>
-              handleSendMessage(message.text.trim())
-            }
+            onSubmit={(message) => handleSendMessage(message.text.trim())}
             onThinkingSettingsChange={onThinkingSettingsChange}
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}

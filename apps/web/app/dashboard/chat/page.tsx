@@ -10,12 +10,13 @@ import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { useDashboardChatState } from "../_components/dashboard-chat-state";
 import {
-  allModels,
+  emptyModelCatalog,
   HeaderModelSelector,
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
   type ModelAliasSettings,
   type ModelItem,
+  type SelectedModels,
   type ModelType,
 } from "./_components/header-model-selector";
 import {
@@ -33,6 +34,11 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   image: false,
   vision: false,
 };
+const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
+
+function getSearchPreferenceStorageKey(workspaceId: string) {
+  return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
+}
 
 function parseStoredThinkingSettings(value: string | null): PromptThinkingSettings | null {
   if (!value) {
@@ -140,11 +146,11 @@ export default function DashboardChatPage() {
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
-  const [selectedModels, setSelectedModels] = useState<
-    Record<ModelType, ModelItem>
-  >(() => resolveSelectedModels({ availableModels: allModels }));
+  const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
+    resolveSelectedModels({ availableModels: emptyModelCatalog }),
+  );
   const [availableModels, setAvailableModels] = useState<Record<ModelType, ModelItem[]>>(
-    allModels,
+    emptyModelCatalog,
   );
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
@@ -153,12 +159,17 @@ export default function DashboardChatPage() {
     DEFAULT_PROMPT_THINKING_SETTINGS,
   );
   const [hasSavedThinkingPreference, setHasSavedThinkingPreference] = useState(false);
-  const [searchEnabled, setSearchEnabled] = useState(false);
+  const [searchEnabled, setSearchEnabled] = useState(true);
+  const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (!workspaceId) {
-      setAvailableModels(allModels);
-      setSelectedModels(resolveSelectedModels({ availableModels: allModels }));
+      setAvailableModels(emptyModelCatalog);
+      setSelectedModels(
+        resolveSelectedModels({ availableModels: emptyModelCatalog }),
+      );
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       return;
     }
@@ -187,7 +198,6 @@ export default function DashboardChatPage() {
           resolveSelectedModels({
             availableModels: catalogModels,
             fallbackAliases: catalog.defaults,
-            fallbackModels: allModels,
           }),
         );
       } catch {
@@ -196,8 +206,10 @@ export default function DashboardChatPage() {
         }
 
         setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
-        setAvailableModels(allModels);
-        setSelectedModels(resolveSelectedModels({ availableModels: allModels }));
+        setAvailableModels(emptyModelCatalog);
+        setSelectedModels(
+          resolveSelectedModels({ availableModels: emptyModelCatalog }),
+        );
       }
     }
 
@@ -283,18 +295,20 @@ export default function DashboardChatPage() {
   useEffect(() => {
     if (!workspaceId) {
       setThinkingSettings(DEFAULT_PROMPT_THINKING_SETTINGS);
-      setSearchEnabled(false);
+      setSearchEnabled(true);
+      setLoadedSearchPreferenceKey(null);
       return;
     }
 
+    const searchPreferenceKey = getSearchPreferenceStorageKey(workspaceId);
     const storedThinking = parseStoredThinkingSettings(
       window.sessionStorage.getItem(`chat:thinking:${workspaceId}:current`),
     );
     setHasSavedThinkingPreference(Boolean(storedThinking));
     setThinkingSettings(storedThinking ?? DEFAULT_PROMPT_THINKING_SETTINGS);
-    setSearchEnabled(
-      window.sessionStorage.getItem(`chat:search:${workspaceId}:current`) === "true",
-    );
+    const storedSearch = window.sessionStorage.getItem(searchPreferenceKey);
+    setSearchEnabled(storedSearch === null ? true : storedSearch === "true");
+    setLoadedSearchPreferenceKey(searchPreferenceKey);
   }, [workspaceId]);
 
   useEffect(() => {
@@ -311,16 +325,20 @@ export default function DashboardChatPage() {
     if (!workspaceId) {
       return;
     }
+    const searchPreferenceKey = getSearchPreferenceStorageKey(workspaceId);
+    if (loadedSearchPreferenceKey !== searchPreferenceKey) {
+      return;
+    }
     window.sessionStorage.setItem(
-      `chat:search:${workspaceId}:current`,
+      searchPreferenceKey,
       searchEnabled ? "true" : "false",
     );
-  }, [searchEnabled, workspaceId]);
+  }, [loadedSearchPreferenceKey, searchEnabled, workspaceId]);
 
   useEffect(() => {
     setThinkingSettings((current) =>
       normalizeThinkingSettingsForModel({
-        capabilities: selectedModels.llm.capabilities,
+        capabilities: selectedModels.llm?.capabilities,
         hasSavedPreference: hasSavedThinkingPreference,
         settings: current,
       }),
@@ -347,13 +365,13 @@ export default function DashboardChatPage() {
       if (!text) return;
 
       const modelSettings: ModelAliasSettings = {};
-      if (catalogKindEnabled.llm) {
+      if (catalogKindEnabled.llm && selectedModels.llm) {
         modelSettings.llmProfileAlias = selectedModels.llm.id;
       }
-      if (catalogKindEnabled.image) {
+      if (catalogKindEnabled.image && selectedModels.image) {
         modelSettings.imageProfileAlias = selectedModels.image.id;
       }
-      if (catalogKindEnabled.vision) {
+      if (catalogKindEnabled.vision && selectedModels.vision) {
         modelSettings.visionProfileAlias = selectedModels.vision.id;
       }
 
@@ -375,7 +393,7 @@ export default function DashboardChatPage() {
           sourceIds: activeSourceIds,
           skillIds: activeSkillIds,
           thinking: buildPendingThinking({
-            capabilities: selectedModels.llm.capabilities,
+            capabilities: selectedModels.llm?.capabilities,
             settings: thinkingSettings,
           }),
           thinkingSettings,
@@ -462,7 +480,7 @@ export default function DashboardChatPage() {
           selectedSources={selectedSources}
           selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
-          thinkingCapabilities={selectedModels.llm.capabilities}
+          thinkingCapabilities={selectedModels.llm?.capabilities}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle="New chat"

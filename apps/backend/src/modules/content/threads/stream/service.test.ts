@@ -714,6 +714,59 @@ test("streamThreadEvents persists send errors as assistant error messages", asyn
   assert.equal(errorEvent.parentMessageId, null);
 });
 
+test("streamThreadEvents preserves partial assistant content for persisted errors", async () => {
+  let partialAssistantContent: string | undefined;
+  const turnService = createTurnService();
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "text-delta",
+        delta: "Partial answer before failure.",
+      };
+      throw new Error("provider exploded");
+    },
+    async () => null,
+    async (input) => {
+      partialAssistantContent = input.partialAssistantContent;
+      return {
+        id: "assistant-error-1",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        threadId: "thread-1",
+        parentMessageId: null,
+        role: "assistant",
+        content: "Partial answer before failure.",
+        createdBy: null,
+        model: "test-model",
+        creditsConsumed: 0,
+        metadata: {},
+        createdAt: new Date(0).toISOString(),
+      };
+    },
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  const textDeltaEvent = events.find((event) => event.type === "text-delta");
+  const errorEvent = events.find((event) => event.type === "error");
+
+  assert.equal(textDeltaEvent?.delta, "Partial answer before failure.");
+  assert.equal(partialAssistantContent, "Partial answer before failure.");
+  assert.equal(errorEvent?.messageId, "assistant-error-1");
+});
+
 test("streamThreadEvents treats refresh/edit errors as transient", async () => {
   const transientPrepared = createPrepared({
     failurePersistence: "transient",
