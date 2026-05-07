@@ -30,6 +30,7 @@ import {
   Trash2,
   Upload,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { HttpClientError } from "@sourceweft/sdk";
@@ -68,7 +69,13 @@ import type { CitationRecord } from "./chat-canvas";
 import { SourcePreviewPanel } from "./source-preview-panel";
 import { expandSelectedSources, type SourceItem } from "./source-types";
 
-const tabs = ["Library", "Skills", "Connectors", "Citations"] as const;
+const tabs = [
+  "Sources",
+  "Files",
+  "Artifacts",
+  "Connectors",
+  "Skills",
+] as const;
 const addTabs = ["File", "Text"] as const;
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
@@ -184,7 +191,7 @@ const SOURCE_FILE_EXTENSIONS = [
 const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(",");
 const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
 
-type HubTab = (typeof tabs)[number];
+type HubTab = (typeof tabs)[number] | "Citations";
 type AddTab = (typeof addTabs)[number];
 type SourceApiRecord = Awaited<
   ReturnType<typeof contentClient.listSources>
@@ -226,14 +233,18 @@ type CitationOpenContext = {
 };
 
 const searchPlaceholders: Record<HubTab, string> = {
-  Library: "Search sources...",
+  Sources: "Search sources...",
+  Files: "Search working files...",
+  Artifacts: "Search artifacts...",
   Skills: "Search installed skills...",
   Citations: "Search citations...",
   Connectors: "Search connectors...",
 };
 
 const searchScopeLabels: Record<HubTab, string> = {
-  Library: "Library",
+  Sources: "Sources",
+  Files: "Files",
+  Artifacts: "Artifacts",
   Skills: "Skills",
   Citations: "Citations",
   Connectors: "Connectors",
@@ -1083,7 +1094,27 @@ function SourceTreeRow({
   );
 }
 
-function LibraryTab({
+function HubEmptyState({
+  description,
+  icon: Icon,
+  title,
+}: {
+  description: string;
+  icon: LucideIcon;
+  title: string;
+}) {
+  return (
+    <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center">
+      <Icon className="mx-auto size-5 text-muted-foreground" />
+      <h4 className="mt-3 text-sm font-medium text-foreground">{title}</h4>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function SourcesTab({
   sources,
   searchQuery,
   selectedIds,
@@ -1135,11 +1166,19 @@ function LibraryTab({
 
   if (countTreeNodes(tree) === 0) {
     return (
-      <p className="py-6 text-center text-xs text-muted-foreground">
-        {searchQuery
-          ? `No sources match "${searchQuery}"`
-          : "No sources in this workspace yet."}
-      </p>
+      <HubEmptyState
+        description={
+          searchQuery
+            ? "Try a different source title, folder, type, or status."
+            : "Add documents, links, notes, or folders to build the source set for this project."
+        }
+        icon={FileText}
+        title={
+          searchQuery
+            ? `No sources match "${searchQuery}"`
+            : "Sources will appear here."
+        }
+      />
     );
   }
 
@@ -1329,7 +1368,7 @@ function DirectoryPicker({
         type="button"
       >
         <Folder className="size-3.5 shrink-0" />
-        <span>Library root</span>
+        <span>Sources root</span>
       </button>
       <div className="ml-3 border-l border-border/70 pl-1">
         {directoryTree.map(function render(node) {
@@ -1448,9 +1487,19 @@ function SkillsTab({
 
   if (filtered.length === 0) {
     return (
-      <p className="py-6 text-center text-xs text-muted-foreground">
-        {searchQuery ? `No installed skills match "${searchQuery}"` : "No skills installed yet."}
-      </p>
+      <HubEmptyState
+        description={
+          searchQuery
+            ? "Try a different skill name, slug, description, or source."
+            : "Install skills to add reusable creation workflows and agent capabilities to this project."
+        }
+        icon={Sparkles}
+        title={
+          searchQuery
+            ? `No installed skills match "${searchQuery}"`
+            : "Skills will appear here."
+        }
+      />
     );
   }
 
@@ -1547,10 +1596,12 @@ export function SourcesHub({
   selectedSkillIds?: string[];
   onSkillSelectionChange?: (ids: string[]) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<HubTab>("Library");
+  const [activeTab, setActiveTab] = useState<HubTab>("Sources");
   const [citationScope, setCitationScope] = useState<CitationScope>("current");
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
-    Library: "",
+    Sources: "",
+    Files: "",
+    Artifacts: "",
     Skills: "",
     Citations: "",
     Connectors: "",
@@ -1578,8 +1629,8 @@ export function SourcesHub({
     [searchQueries.Connectors],
   );
   const filteredSourceCount = useMemo(
-    () => countFilteredSources(sources, searchQueries.Library),
-    [searchQueries.Library, sources],
+    () => countFilteredSources(sources, searchQueries.Sources),
+    [searchQueries.Sources, sources],
   );
   const filteredSkillCount = useMemo(
     () => countFilteredSkills(installedSkills, searchQueries.Skills),
@@ -1629,7 +1680,7 @@ export function SourcesHub({
   }
 
   useEffect(() => {
-    setActiveTab("Library");
+    setActiveTab("Sources");
     setCitationScope("current");
   }, [mode]);
 
@@ -1741,7 +1792,9 @@ export function SourcesHub({
   }, [fullSourceTree, sources, selectedIds, onSelectionChange]);
 
   const tabCounts: Partial<Record<HubTab, number>> = {
-    Library: selectedLibrarySources.length,
+    Sources: selectedLibrarySources.length,
+    Files: 0,
+    Artifacts: 0,
     Skills: selectedSkillIds.length,
     Citations: citations.length,
     Connectors: connectors.length,
@@ -2131,7 +2184,7 @@ export function SourcesHub({
       <aside className="flex h-full w-[410px] shrink-0 flex-col border-l bg-background">
         <div className="shrink-0 border-b px-3 py-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-medium text-foreground">Sources</h2>
+            <h2 className="text-sm font-medium text-foreground">Hub</h2>
             {pendingSourceIds.length > 0 ? (
               <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                 <Loader2 className="size-3 animate-spin" />
@@ -2187,17 +2240,17 @@ export function SourcesHub({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          {activeTab === "Library" && (
+          {activeTab === "Sources" && (
             <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h3 className="text-xs font-medium text-foreground">
-                    Library
+                    Sources
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
                     {sources.length} sources
                   </span>
-                  {searchQueries.Library ? (
+                  {searchQueries.Sources ? (
                     <span className="text-[10px] text-primary">
                       {filteredSourceCount} found
                     </span>
@@ -2243,7 +2296,7 @@ export function SourcesHub({
                   Loading sources...
                 </div>
               ) : (
-                <LibraryTab
+                <SourcesTab
                   editingId={editingSourceId}
                   editingTitle={editingTitle}
                   onCancelRename={handleCancelRename}
@@ -2265,6 +2318,46 @@ export function SourcesHub({
                   sources={sources}
                 />
               )}
+            </section>
+          )}
+
+          {activeTab === "Files" && (
+            <section className="space-y-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium text-foreground">
+                    Files
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    0 working files
+                  </span>
+                </div>
+              </div>
+              <HubEmptyState
+                description="Generated drafts, scratch notes, tables, and intermediate files from the virtual workspace."
+                icon={FileText}
+                title="Working files will appear here."
+              />
+            </section>
+          )}
+
+          {activeTab === "Artifacts" && (
+            <section className="space-y-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium text-foreground">
+                    Artifacts
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    0 artifacts
+                  </span>
+                </div>
+              </div>
+              <HubEmptyState
+                description="Reports, slides, mind maps, tables, audio briefs, and other deliverables."
+                icon={Sparkles}
+                title="Finished artifacts will appear here."
+              />
             </section>
           )}
 
@@ -2453,11 +2546,19 @@ export function SourcesHub({
                 </div>
               </div>
               {filteredConnectors.length === 0 ? (
-                <div className="px-1 py-6 text-sm text-muted-foreground">
-                  {searchQueries.Connectors
-                    ? `No connectors match "${searchQueries.Connectors}".`
-                    : "No connectors available yet."}
-                </div>
+                <HubEmptyState
+                  description={
+                    searchQueries.Connectors
+                      ? "Try a different connector name, status, or provider."
+                      : "Connect external apps and storage to pull project sources into the Hub."
+                  }
+                  icon={Link2}
+                  title={
+                    searchQueries.Connectors
+                      ? `No connectors match "${searchQueries.Connectors}"`
+                      : "Connectors will appear here."
+                  }
+                />
               ) : (
                 <div className="space-y-1.5">
                   {filteredConnectors.map((connector: ConnectorItem) => (
@@ -2501,7 +2602,7 @@ export function SourcesHub({
           <DialogHeader>
             <DialogTitle>Add source</DialogTitle>
             <DialogDescription>
-              Add text notes or upload files into your workspace library.
+              Add text notes or upload files as sources.
             </DialogDescription>
           </DialogHeader>
 
@@ -2683,7 +2784,7 @@ export function SourcesHub({
           <DialogHeader>
             <DialogTitle>Create folder</DialogTitle>
             <DialogDescription>
-              Add a directory to organize the Source Library.
+              Add a folder to organize Sources.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
