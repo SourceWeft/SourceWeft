@@ -5,6 +5,7 @@ import {
   buildGatewayAuditMetadata,
   recordGatewayOperationEvent,
 } from "../../model-gateway-audit";
+import { consumeSourceWeftContextCompressionReport } from "../../agent/context-compression";
 import { createMessageRecord } from "../message-repository";
 import { computeProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
@@ -26,6 +27,21 @@ async function zeroBillingResponse(input: {
 
 export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   const { prepared, retrieval } = input;
+  const contextCompression =
+    consumeSourceWeftContextCompressionReport(prepared.userMessage.id) ?? {
+      enabled: false,
+      contextEditingEnabled: false,
+      toolPruned: false,
+      summarized: false,
+      summaryModelAlias: null,
+      estimatedInputTokensBefore: null,
+      estimatedInputTokensAfter: null,
+      retainedMessageCount: null,
+      triggerReason: "not_recorded",
+      prunedToolCount: 0,
+      contextLength: 0,
+      usableInputTokens: 0,
+    };
   const { providerCostUsd, pricingSnapshot } = await computeProviderCost({
     gatewayConfigId: prepared.chatProfile.gatewayConfigId,
     modelKind: "chat",
@@ -110,6 +126,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       usage: input.usage,
       reasoning: input.reasoning,
       reasoningSegments: input.reasoningSegments,
+      contextCompression,
       versionOf: prepared.assistantMessageParentId,
       gateway: buildGatewayAuditMetadata({
         llm: input.llm,

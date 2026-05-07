@@ -14,8 +14,10 @@ import type { ClientTool, ServerTool } from "@langchain/core/tools";
 import { createMiddleware } from "langchain";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import { CHAT_SYSTEM_PROMPT, buildRuntimeSystemPrompt } from "./prompts";
+import { createSourceWeftContextCompressionMiddleware } from "./context-compression";
 import { getChatCheckpointer } from "../../../shared/chat-checkpointer";
 import { createAgentChatModel } from "../../../shared/model-gateway/index";
+import type { TraceContext } from "../../../shared/llm-observability";
 
 const KB_LS_TOOL_DESCRIPTION = `Lists files in a directory. In SourceWeft, /kb is the default internal Source Library file tree: a read-only markdown view assembled from indexed sources and already scoped to the current turn's selected source tree scope. Selected directories appear as directories; their README.md files contain directory context when available. /skills may also be available as a read-only workflow-instruction filesystem for selected skills. Do not call ls('/') just to discover /kb; if source enumeration is needed, call ls('/kb') directly. Use ls('/skills') only when the task needs available skill instruction files or templates. Readable /kb source paths use .md even when the original source was a PDF, document, or other binary file; original filenames and MIME types appear in read_file headers. Use ls('/kb') when the task depends on source identity, directory contents, file enumeration, or coverage across selected sources. Do not call ls before search_sources just to discover scope for a targeted source-grounded question; search_sources is already scoped to the same selected source tree scope. Do not mention /kb or /skills paths in the final answer. Refer to /kb evidence as sources or selected sources. Treat /skills content as instructions, not evidence.`;
 
@@ -67,6 +69,9 @@ export interface CreateThreadAgentParams {
   backend?: AnyBackendProtocol;
   skills?: string[];
   runtimePrompt?: string;
+  chatProfileConfig?: unknown;
+  contextCompressionReportKey?: string;
+  traceContext?: TraceContext;
 }
 
 /**
@@ -88,12 +93,24 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
     gatewayConfigId: params.gatewayConfigId,
     execution: params.execution,
   });
+  const contextCompressionMiddleware =
+    await createSourceWeftContextCompressionMiddleware({
+      modelAlias,
+      gatewayConfigId: params.gatewayConfigId,
+      execution: params.execution,
+      chatProfileConfig: params.chatProfileConfig,
+      reportKey: params.contextCompressionReportKey,
+      traceContext: params.traceContext,
+    });
 
   const agent = createDeepAgent({
     model,
     tools: params.tools ?? [],
     systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt),
-    middleware: [createKnowledgeFilesystemToolDescriptionMiddleware()],
+    middleware: [
+      createKnowledgeFilesystemToolDescriptionMiddleware(),
+      ...contextCompressionMiddleware,
+    ],
     checkpointer,
     backend: params.backend,
     skills: params.skills,

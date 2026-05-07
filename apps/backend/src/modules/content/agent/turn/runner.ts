@@ -886,6 +886,9 @@ export async function* invokeDeepAgentTurn(input: {
     backend,
     skills: skillsBackend ? ["/skills/"] : undefined,
     runtimePrompt,
+    chatProfileConfig: input.prepared.chatProfile.configJson,
+    contextCompressionReportKey: input.prepared.userMessage.id,
+    traceContext: input.traceContext,
     execution: {
       executionMode: input.llm?.executionMode,
       providerHint: input.llm?.providerHint,
