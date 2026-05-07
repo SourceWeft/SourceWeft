@@ -2453,7 +2453,7 @@ export function SourcesHub({
                 </div>
               </div>
               {filteredConnectors.length === 0 ? (
-                <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
+                <div className="px-1 py-6 text-sm text-muted-foreground">
                   {searchQueries.Connectors
                     ? `No connectors match "${searchQueries.Connectors}".`
                     : "No connectors available yet."}
