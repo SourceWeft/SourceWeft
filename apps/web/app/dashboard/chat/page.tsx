@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   PanelRightClose,
@@ -26,7 +31,10 @@ import {
   type PromptThinkingSettings,
 } from "./_components/chat-canvas";
 import { SourcesHub } from "./_components/sources-hub";
-import type { SourceItem } from "./_components/mock-data";
+import {
+  expandSelectedSources,
+  type SourceItem,
+} from "./_components/source-types";
 import { contentClient } from "../../../lib/sdk";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
@@ -35,6 +43,8 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   vision: false,
 };
 const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
+const useBrowserLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function getSearchPreferenceStorageKey(workspaceId: string) {
   return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
@@ -138,6 +148,7 @@ export default function DashboardChatPage() {
   const {
     createChat,
     sourcesVisible,
+    startNewChat,
     toggleSourcesVisible,
     workspaceId,
   } = useDashboardChatState();
@@ -163,6 +174,10 @@ export default function DashboardChatPage() {
   const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
     string | null
   >(null);
+
+  useBrowserLayoutEffect(() => {
+    startNewChat();
+  }, [startNewChat]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -365,9 +380,7 @@ export default function DashboardChatPage() {
     setThinkingSettings(settings);
   }, []);
 
-  const selectedSources = librarySources.filter((s) =>
-    activeSourceIds.includes(s.id),
-  );
+  const selectedSources = expandSelectedSources(librarySources, activeSourceIds);
 
   const handleSendMessage = useCallback(
     async (content: string) => {
@@ -413,6 +426,11 @@ export default function DashboardChatPage() {
           }),
           thinkingSettings,
           searchEnabled,
+          modelState: {
+            availableModels,
+            catalogKindEnabled,
+            selectedModels,
+          },
         }),
       );
 
@@ -425,6 +443,7 @@ export default function DashboardChatPage() {
       activeSkillIds,
       router,
       catalogKindEnabled,
+      availableModels,
       selectedModels,
       thinkingSettings,
       searchEnabled,

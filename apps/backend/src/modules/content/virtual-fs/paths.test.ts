@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildChunkFilePath,
   buildVirtualSource,
+  buildVirtualSourceTree,
   findVirtualSource,
   normalizeVirtualPath,
   parseVirtualPath,
@@ -48,6 +49,51 @@ test("buildVirtualSource creates stable source and directory paths", () => {
   assert.equal(item.shortId, "source-1");
   assert.equal(item.filePath, "/kb/Quarterly-Report__src_source-1.md");
   assert.equal(item.dirPath, "/kb/Quarterly-Report__src_source-1");
+  assert.equal(item.readmePath, null);
+});
+
+test("buildVirtualSource creates plain directory paths without id suffixes", () => {
+  const item = source({
+    sourceType: "directory",
+    title: "Design",
+    fileName: null,
+    chunkCount: 0,
+  });
+
+  assert.equal(item.safeName, "Design");
+  assert.equal(item.filePath, null);
+  assert.equal(item.dirPath, "/kb/Design");
+  assert.equal(item.readmePath, "/kb/Design/README.md");
+});
+
+test("buildVirtualSourceTree nests sources under directory paths", () => {
+  const items = buildVirtualSourceTree([
+    {
+      sourceId: "dir-1234567890",
+      sourceType: "directory",
+      parentSourceId: null,
+      title: "Design",
+      fileName: null,
+      chunkCount: 0,
+      sizeBytes: null,
+      mimeType: null,
+      updatedAt: "2026-04-29T00:00:00.000Z",
+    },
+    {
+      sourceId: "source-1234567890",
+      sourceType: "manual_upload",
+      parentSourceId: "dir-1234567890",
+      title: "Design System",
+      fileName: "Design System.md",
+      chunkCount: 1,
+      sizeBytes: null,
+      mimeType: "text/markdown",
+      updatedAt: "2026-04-29T00:00:00.000Z",
+    },
+  ]);
+
+  assert.equal(items[0]?.dirPath, "/kb/Design");
+  assert.equal(items[1]?.filePath, "/kb/Design/Design-System__src_source-1.md");
 });
 
 test("buildChunkFilePath pads chunk numbers under the chunks directory", () => {
@@ -63,22 +109,36 @@ test("parseVirtualPath resolves root, kb root, source, chunks dir, and chunk fil
 
   assert.deepEqual(parseVirtualPath("/", sources), { kind: "root" });
   assert.deepEqual(parseVirtualPath("/kb", sources), { kind: "kbRoot" });
-  assert.deepEqual(parseVirtualPath(item.filePath, sources), {
+  assert.deepEqual(parseVirtualPath(item.filePath!, sources), {
     kind: "sourceFile",
     sourceId: item.sourceId,
   });
-  assert.deepEqual(parseVirtualPath(item.dirPath, sources), {
-    kind: "sourceDir",
-    sourceId: item.sourceId,
-  });
   assert.deepEqual(parseVirtualPath(`${item.dirPath}/chunks`, sources), {
-    kind: "chunksDir",
+    kind: "sourceChunksDir",
     sourceId: item.sourceId,
   });
   assert.deepEqual(parseVirtualPath(buildChunkFilePath(item, 2), sources), {
     kind: "chunkFile",
     sourceId: item.sourceId,
     chunkNo: 2,
+  });
+});
+
+test("parseVirtualPath resolves library directories and readmes", () => {
+  const item = source({
+    sourceType: "directory",
+    title: "Design",
+    fileName: null,
+    chunkCount: 0,
+  });
+
+  assert.deepEqual(parseVirtualPath(item.dirPath, [item]), {
+    kind: "libraryDirectory",
+    sourceId: item.sourceId,
+  });
+  assert.deepEqual(parseVirtualPath(item.readmePath!, [item]), {
+    kind: "libraryDirectoryReadme",
+    sourceId: item.sourceId,
   });
 });
 

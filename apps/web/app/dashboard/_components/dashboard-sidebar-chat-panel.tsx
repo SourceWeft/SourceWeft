@@ -43,7 +43,7 @@ import {
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
-import { workspaceSummary, type ChatItem } from "../chat/_components/mock-data";
+import type { ChatItem } from "./dashboard-chat-types";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -485,6 +485,7 @@ export function DashboardSidebarChatPanel({
   isLoadingPrivateChats,
   privateChats,
   sharedChats,
+  organizationName,
   workspaceId,
   workspaces,
   onWorkspaceChange,
@@ -505,6 +506,7 @@ export function DashboardSidebarChatPanel({
   isLoadingPrivateChats: boolean;
   privateChats: ChatItem[];
   sharedChats: ChatItem[];
+  organizationName: string;
   workspaceId: string | null;
   workspaces: Array<{ id: string; name: string }>;
   onWorkspaceChange: (workspaceId: string) => void;
@@ -534,7 +536,7 @@ export function DashboardSidebarChatPanel({
       <SidebarHeader className="gap-2.5 border-b px-3.5 py-2.5">
         <div className="flex w-full items-center justify-between gap-2">
           <span className="text-[10px] text-muted-foreground">
-            {workspaceSummary.organizationName}
+            {organizationName}
           </span>
         </div>
         <WorkspaceSwitcher

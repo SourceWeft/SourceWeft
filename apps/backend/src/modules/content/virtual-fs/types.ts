@@ -1,11 +1,14 @@
 export type VirtualFsSource = {
   sourceId: string;
+  sourceType: "manual_upload" | "file_upload" | "web_url" | "youtube" | "note" | "artifact" | "connector" | "directory";
+  parentSourceId: string | null;
   title: string;
   fileName: string | null;
   safeName: string;
   shortId: string;
-  filePath: string;
+  filePath: string | null;
   dirPath: string;
+  readmePath: string | null;
   chunkCount: number;
   sizeBytes: number | null;
   mimeType: string | null;
@@ -16,8 +19,9 @@ export type VirtualPathTarget =
   | { kind: "root" }
   | { kind: "kbRoot" }
   | { kind: "sourceFile"; sourceId: string }
-  | { kind: "sourceDir"; sourceId: string }
-  | { kind: "chunksDir"; sourceId: string }
+  | { kind: "libraryDirectory"; sourceId: string }
+  | { kind: "libraryDirectoryReadme"; sourceId: string }
+  | { kind: "sourceChunksDir"; sourceId: string }
   | { kind: "chunkFile"; sourceId: string; chunkNo: number };
 
 export type VirtualFsChunk = {

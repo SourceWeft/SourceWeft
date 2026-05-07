@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  type CSSProperties,
   type MouseEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -18,7 +20,9 @@ import {
   FolderPlus,
   Link2,
   Loader2,
+  Music2,
   MoreHorizontal,
+  MoveRight,
   Pencil,
   RotateCcw,
   Search,
@@ -60,20 +64,16 @@ import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
-import {
-  connectors,
-  type CitationItem,
-  type ConnectorItem,
-  type SourceItem,
-} from "./mock-data";
 import type { CitationRecord } from "./chat-canvas";
 import { SourcePreviewPanel } from "./source-preview-panel";
+import { expandSelectedSources, type SourceItem } from "./source-types";
 
 const tabs = ["Library", "Skills", "Connectors", "Citations"] as const;
 const addTabs = ["File", "Text"] as const;
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const SOURCE_TREE_INDENT_PX = 10;
 const SOURCE_FILE_EXTENSIONS = [
   "txt",
   "text",
@@ -185,17 +185,34 @@ const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join("
 const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
 
 type HubTab = (typeof tabs)[number];
-type CheckedState = boolean | "indeterminate";
 type AddTab = (typeof addTabs)[number];
 type SourceApiRecord = Awaited<
   ReturnType<typeof contentClient.listSources>
 >["items"][number];
 type CitationScope = "current" | "thread";
+type SourceTreeNode = {
+  source: SourceItem;
+  children: SourceTreeNode[];
+};
+type SourceSelectionState = boolean | "indeterminate";
 
-type DisplayCitationItem = CitationItem & {
+type DisplayCitationItem = {
+  id: string;
+  sourceTitle: string;
+  messageLabel: string;
+  excerpt: string;
   citationRecord: CitationRecord;
   messageId?: string;
 };
+
+type ConnectorItem = {
+  id: string;
+  name: string;
+  status: "Connected" | "Syncing" | "Action needed";
+  meta: string;
+};
+
+const connectors: ConnectorItem[] = [];
 
 export type ThreadCitationRecord = {
   citation: CitationRecord;
@@ -254,6 +271,7 @@ function apiTypeToSourceType(
   sourceType: string,
   mimeType: string | null,
 ): SourceItem["type"] {
+  if (sourceType === "directory") return "DIR";
   if (sourceType === "web_url" || sourceType === "youtube") return "WEB";
   if (sourceType === "note") return "NOTE";
   if (mimeType?.includes("pdf")) return "PDF";
@@ -324,14 +342,19 @@ function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
   return items.map((item) => ({
     id: item.id,
     title: item.title || "Untitled",
+    sourceType: item.sourceType,
+    parentSourceId: item.parentSourceId,
     type: apiTypeToSourceType(item.sourceType, item.mimeType),
     status: apiStatusToSourceStatus(item.status),
     meta:
-      item.status === "failed"
+      item.sourceType === "directory"
+        ? "Folder"
+        : item.status === "failed"
         ? "Processing failed"
         : item.status === "queued" || item.status === "processing"
         ? "Sync in progress"
         : new Date(item.updatedAt).toLocaleString(),
+    contentText: item.contentText,
     storageKey: item.storageKey,
   }));
 }
@@ -382,9 +405,45 @@ function StatusDot({ status }: { status: SourceItem["status"] }) {
   );
 }
 
+function SourceTypeIcon({
+  isSelected,
+  isPartiallySelected,
+  source,
+}: {
+  isSelected: boolean;
+  isPartiallySelected: boolean;
+  source: SourceItem;
+}) {
+  if (source.sourceType === "directory" || source.type === "DIR") {
+    return (
+      <Folder
+        className={cn(
+          "size-3.5 shrink-0",
+          isSelected || isPartiallySelected
+            ? "text-primary"
+            : "text-muted-foreground",
+        )}
+      />
+    );
+  }
+
+  if (source.type === "AUDIO") {
+    return <Music2 className="size-3 shrink-0 text-muted-foreground" />;
+  }
+
+  return <FileText className="size-3 shrink-0 text-muted-foreground" />;
+}
+
+function areStringArraysEqual(a: string[], b: string[]) {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 function SourceRow({
   source,
-  selected,
+  depth = 0,
+  childCount = 0,
+  selectionState,
+  leading,
   onToggle,
   isBusy,
   isEditing,
@@ -393,14 +452,21 @@ function SourceRow({
   onStartRename,
   onCancelRename,
   onSubmitRename,
+  onAddSource,
+  onCreateDirectory,
   onDelete,
   onDownload,
+  onEditReadme,
+  onMove,
   onPreview,
   onReindex,
 }: {
   source: SourceItem;
-  selected: boolean;
-  onToggle: (id: string) => void;
+  depth?: number;
+  childCount?: number;
+  selectionState: SourceSelectionState;
+  leading?: ReactNode;
+  onToggle: () => void;
   isBusy: boolean;
   isEditing: boolean;
   editTitle: string;
@@ -408,11 +474,23 @@ function SourceRow({
   onStartRename: () => void;
   onCancelRename: () => void;
   onSubmitRename: () => void;
+  onAddSource: () => void;
+  onCreateDirectory: () => void;
   onDelete: () => void;
   onDownload: () => void;
+  onEditReadme: () => void;
+  onMove: () => void;
   onPreview: () => void;
   onReindex: () => void;
 }) {
+  const isDirectory = source.sourceType === "directory";
+  const isSelected = selectionState === true;
+  const isPartiallySelected = selectionState === "indeterminate";
+  const metaLabel =
+    isDirectory && childCount > 0
+      ? `${childCount} item${childCount === 1 ? "" : "s"}`
+      : source.meta;
+
   function handleRowClick(event: MouseEvent<HTMLDivElement>) {
     if (isBusy || isEditing) {
       return;
@@ -427,7 +505,7 @@ function SourceRow({
       return;
     }
 
-    onToggle(source.id);
+    onToggle();
   }
 
   function handleMenuAction(event: MouseEvent<HTMLElement>, action: () => void) {
@@ -438,30 +516,47 @@ function SourceRow({
   return (
     <div
       className={cn(
-        "group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
+        "group flex min-h-8 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors",
         !isBusy && !isEditing && "cursor-pointer",
-        selected ? "hover:bg-primary/5" : "hover:bg-accent/60",
+        "hover:bg-accent/60",
       )}
       onClick={handleRowClick}
+      style={{ paddingLeft: `${4 + depth * SOURCE_TREE_INDENT_PX}px` }}
     >
+      {leading ?? <span className="size-5 shrink-0" />}
       <Checkbox
-        checked={selected}
-        className="mt-0.5"
+        checked={selectionState}
+        className={cn(!isDirectory && !isEditing && "mt-0.5")}
         disabled={isBusy}
-        onCheckedChange={() => onToggle(source.id)}
+        onCheckedChange={() => onToggle()}
       />
 
       <div className="min-w-0 flex-1">
         {isEditing ? (
-          <div className="space-y-2">
-            <Input
-              autoFocus
-              className="h-7 text-xs"
-              disabled={isBusy}
-              onChange={(e) => onEditTitleChange(e.target.value)}
-              value={editTitle}
-            />
-            <div className="flex items-center gap-1.5">
+          <div className="rounded-md border bg-background/95 p-2 shadow-xs">
+            <div className="flex items-center gap-2">
+              <SourceTypeIcon
+                isPartiallySelected={isPartiallySelected}
+                isSelected={isSelected}
+                source={source}
+              />
+              <Input
+                autoFocus
+                className="h-8 min-w-0 flex-1 text-xs"
+                disabled={isBusy}
+                onChange={(e) => onEditTitleChange(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    onSubmitRename();
+                  }
+                  if (event.key === "Escape") {
+                    onCancelRename();
+                  }
+                }}
+                value={editTitle}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-end gap-1.5">
               <Button
                 disabled={isBusy || !editTitle.trim()}
                 onClick={onSubmitRename}
@@ -485,24 +580,38 @@ function SourceRow({
         ) : (
           <>
             <div className="flex items-center gap-1.5">
-              <FileText className="size-3 shrink-0 text-muted-foreground" />
+              <SourceTypeIcon
+                isPartiallySelected={isPartiallySelected}
+                isSelected={isSelected}
+                source={source}
+              />
               <button
                 className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={isBusy}
-                onClick={onPreview}
-                title="Preview source"
+                onClick={onToggle}
+                title={isDirectory ? "Select folder" : "Select source"}
                 type="button"
               >
                 {source.title}
               </button>
+              {isDirectory ? (
+                <>
+                  <span className="truncate text-[10px] text-muted-foreground">
+                    {metaLabel}
+                  </span>
+                  <TypeBadge label={source.type} />
+                </>
+              ) : null}
             </div>
-            <div className="mt-0.5 flex items-center gap-1.5">
-              <StatusDot status={source.status} />
-              <span className="truncate text-[10px] text-muted-foreground">
-                {source.meta}
-              </span>
-              <TypeBadge label={source.type} />
-            </div>
+            {!isDirectory ? (
+              <div className="mt-0.5 flex items-center gap-1.5">
+                <StatusDot status={source.status} />
+                <span className="truncate text-[10px] text-muted-foreground">
+                  {metaLabel}
+                </span>
+                <TypeBadge label={source.type} />
+              </div>
+            ) : null}
           </>
         )}
       </div>
@@ -527,33 +636,78 @@ function SourceRow({
               <span className="sr-only">Source actions</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36">
+          <DropdownMenuContent align="end" className="w-44">
+            {isDirectory ? (
+              <>
+                <DropdownMenuItem
+                  className="whitespace-nowrap"
+                  onClick={(event) => handleMenuAction(event, onAddSource)}
+                >
+                  <Upload className="size-3.5" />
+                  Add source
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="whitespace-nowrap"
+                  onClick={(event) =>
+                    handleMenuAction(event, onCreateDirectory)
+                  }
+                >
+                  <FolderPlus className="size-3.5" />
+                  New folder
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="whitespace-nowrap"
+                  onClick={(event) => handleMenuAction(event, onEditReadme)}
+                >
+                  <FileText className="size-3.5" />
+                  Edit README
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <>
+                <DropdownMenuItem
+                  className="whitespace-nowrap"
+                  onClick={(event) => handleMenuAction(event, onPreview)}
+                >
+                  <FileText className="size-3.5" />
+                  Preview
+                </DropdownMenuItem>
+                {source.storageKey ? (
+                  <DropdownMenuItem
+                    className="whitespace-nowrap"
+                    onClick={(event) => handleMenuAction(event, onDownload)}
+                  >
+                    <Download className="size-3.5" />
+                    Download
+                  </DropdownMenuItem>
+                ) : null}
+              </>
+            )}
             <DropdownMenuItem
-              onClick={(event) => handleMenuAction(event, onPreview)}
-            >
-              <FileText className="size-3.5" />
-              Preview
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={!source.storageKey}
-              onClick={(event) => handleMenuAction(event, onDownload)}
-            >
-              <Download className="size-3.5" />
-              Download
-            </DropdownMenuItem>
-            <DropdownMenuItem
+              className="whitespace-nowrap"
               onClick={(event) => handleMenuAction(event, onStartRename)}
             >
               <Pencil className="size-3.5" />
               Rename
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={(event) => handleMenuAction(event, onReindex)}
+              className="whitespace-nowrap"
+              onClick={(event) => handleMenuAction(event, onMove)}
             >
-              <RotateCcw className="size-3.5" />
-              Re-index
+              <MoveRight className="size-3.5" />
+              Move to...
             </DropdownMenuItem>
+            {!isDirectory ? (
+              <DropdownMenuItem
+                className="whitespace-nowrap"
+                onClick={(event) => handleMenuAction(event, onReindex)}
+              >
+                <RotateCcw className="size-3.5" />
+                Re-index
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
+              className="whitespace-nowrap"
               onClick={(event) => handleMenuAction(event, onDelete)}
               variant="destructive"
             >
@@ -567,10 +721,206 @@ function SourceRow({
   );
 }
 
-function FolderGroup({
-  name,
-  sources,
+function sourceMatchesQuery(source: SourceItem, q: string) {
+  return (
+    source.title.toLowerCase().includes(q) ||
+    source.type.toLowerCase().includes(q) ||
+    source.status.toLowerCase().includes(q) ||
+    source.meta.toLowerCase().includes(q)
+  );
+}
+
+function buildSourceTree(sources: SourceItem[], searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase();
+  const byParent = new Map<string | null, SourceItem[]>();
+  const byId = new Map(sources.map((source) => [source.id, source]));
+
+  for (const source of sources) {
+    const parentId =
+      source.parentSourceId && byId.get(source.parentSourceId)?.sourceType === "directory"
+        ? source.parentSourceId
+        : null;
+    const items = byParent.get(parentId) ?? [];
+    items.push(source);
+    byParent.set(parentId, items);
+  }
+
+  for (const items of byParent.values()) {
+    items.sort((a, b) => {
+      if (a.sourceType === "directory" && b.sourceType !== "directory") return -1;
+      if (a.sourceType !== "directory" && b.sourceType === "directory") return 1;
+      return a.title.localeCompare(b.title);
+    });
+  }
+
+  function build(parentId: string | null, ancestorsMatch = false): SourceTreeNode[] {
+    return (byParent.get(parentId) ?? [])
+      .map((source) => {
+        const selfMatch = !q || sourceMatchesQuery(source, q);
+        const children = build(source.id, ancestorsMatch || selfMatch);
+        if (q && !selfMatch && children.length === 0 && !ancestorsMatch) {
+          return null;
+        }
+        return { source, children } satisfies SourceTreeNode;
+      })
+      .filter((node): node is SourceTreeNode => node !== null);
+  }
+
+  return build(null);
+}
+
+function countTreeNodes(nodes: SourceTreeNode[]): number {
+  return nodes.reduce((sum, node) => sum + 1 + countTreeNodes(node.children), 0);
+}
+
+function collectTreeIds(node: SourceTreeNode): string[] {
+  return [
+    node.source.id,
+    ...node.children.flatMap((child) => collectTreeIds(child)),
+  ];
+}
+
+function getNodeSelectionState(
+  node: SourceTreeNode,
+  selectedSet: Set<string>,
+  ancestorSelected = false,
+): SourceSelectionState {
+  if (ancestorSelected || selectedSet.has(node.source.id)) {
+    return true;
+  }
+
+  if (node.children.length === 0) {
+    return false;
+  }
+
+  const childStates = node.children.map((child) =>
+    getNodeSelectionState(child, selectedSet),
+  );
+  if (childStates.every((state) => state === true)) {
+    return true;
+  }
+  if (childStates.some((state) => state !== false)) {
+    return "indeterminate";
+  }
+  return false;
+}
+
+function findNodePath(
+  nodes: SourceTreeNode[],
+  sourceId: string,
+): SourceTreeNode[] | null {
+  for (const node of nodes) {
+    if (node.source.id === sourceId) {
+      return [node];
+    }
+
+    const childPath = findNodePath(node.children, sourceId);
+    if (childPath) {
+      return [node, ...childPath];
+    }
+  }
+
+  return null;
+}
+
+function subtreeContainsSource(node: SourceTreeNode, sourceId: string): boolean {
+  return (
+    node.source.id === sourceId ||
+    node.children.some((child) => subtreeContainsSource(child, sourceId))
+  );
+}
+
+function selectSubtreeExcept(
+  node: SourceTreeNode,
+  excludedNode: SourceTreeNode,
+): string[] {
+  if (node.source.id === excludedNode.source.id) {
+    return [];
+  }
+
+  const childWithExcludedNode = node.children.find((child) =>
+    subtreeContainsSource(child, excludedNode.source.id),
+  );
+  if (!childWithExcludedNode) {
+    return [node.source.id];
+  }
+
+  return node.children.flatMap((child) =>
+    child.source.id === childWithExcludedNode.source.id
+      ? selectSubtreeExcept(child, excludedNode)
+      : [child.source.id],
+  );
+}
+
+function normalizeSourceSelectionFromTree(
+  nodes: SourceTreeNode[],
+  selectedIds: string[],
+) {
+  const selectedSet = new Set(selectedIds);
+
+  function normalizeNode(node: SourceTreeNode): string[] {
+    if (selectedSet.has(node.source.id)) {
+      return [node.source.id];
+    }
+
+    if (node.children.length === 0) {
+      return [];
+    }
+
+    const childIds = node.children.flatMap(normalizeNode);
+    const allChildrenSelected = node.children.every(
+      (child) => getNodeSelectionState(child, selectedSet) === true,
+    );
+
+    if (!allChildrenSelected) {
+      return childIds;
+    }
+
+    return [node.source.id];
+  }
+
+  return nodes.flatMap(normalizeNode);
+}
+
+function toggleSourceSelectionInTree(
+  fullTree: SourceTreeNode[],
+  node: SourceTreeNode,
+  selectedIds: string[],
+) {
+  const selectedSet = new Set(selectedIds);
+  const nodePath = findNodePath(fullTree, node.source.id) ?? [node];
+  const selectedAncestor = [...nodePath]
+    .slice(0, -1)
+    .reverse()
+    .find((ancestor) => selectedSet.has(ancestor.source.id));
+  const nodeState = getNodeSelectionState(
+    node,
+    selectedSet,
+    Boolean(selectedAncestor),
+  );
+  const idsToRemove = new Set(collectTreeIds(node));
+
+  if (nodeState === true) {
+    if (selectedAncestor) {
+      const replacementIds = selectSubtreeExcept(selectedAncestor, node);
+      return [
+        ...selectedIds.filter((id) => id !== selectedAncestor.source.id),
+        ...replacementIds,
+      ];
+    }
+
+    return selectedIds.filter((id) => !idsToRemove.has(id));
+  }
+
+  const next = selectedIds.filter((id) => !idsToRemove.has(id));
+  return [...next, node.source.id];
+}
+
+function SourceTreeRow({
+  node,
+  depth,
   selectedIds,
+  sourceById,
   onToggle,
   rowBusyById,
   editingId,
@@ -579,15 +929,20 @@ function FolderGroup({
   onStartRename,
   onCancelRename,
   onSubmitRename,
+  onAddSource,
+  onCreateDirectory,
   onDelete,
   onDownload,
+  onEditReadme,
+  onMove,
   onPreview,
   onReindex,
 }: {
-  name: string;
-  sources: SourceItem[];
+  node: SourceTreeNode;
+  depth: number;
   selectedIds: string[];
-  onToggle: (id: string) => void;
+  sourceById: Map<string, SourceItem>;
+  onToggle: (node: SourceTreeNode) => void;
   rowBusyById: Record<string, boolean>;
   editingId: string | null;
   editingTitle: string;
@@ -595,80 +950,131 @@ function FolderGroup({
   onStartRename: (source: SourceItem) => void;
   onCancelRename: () => void;
   onSubmitRename: (id: string) => void;
+  onAddSource: (parentSourceId: string) => void;
+  onCreateDirectory: (parentSourceId: string) => void;
   onDelete: (source: SourceItem) => void;
   onDownload: (source: SourceItem) => void;
+  onEditReadme: (source: SourceItem) => void;
+  onMove: (source: SourceItem) => void;
   onPreview: (source: SourceItem) => void;
   onReindex: (source: SourceItem) => void;
 }) {
   const [open, setOpen] = useState(true);
-
-  const selectedCount = sources.filter((s) =>
-    selectedIds.includes(s.id),
-  ).length;
-  const folderChecked: CheckedState =
-    selectedCount === 0
-      ? false
-      : selectedCount === sources.length
-        ? true
-        : "indeterminate";
-
-  function handleFolderCheck(checked: boolean) {
-    if (checked) {
-      sources.forEach((s) => {
-        if (!selectedIds.includes(s.id)) onToggle(s.id);
-      });
-    } else {
-      sources.forEach((s) => {
-        if (selectedIds.includes(s.id)) onToggle(s.id);
-      });
+  const source = node.source;
+  const isDirectory = source.sourceType === "directory";
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const ancestorSelected = useMemo(() => {
+    let parentId = source.parentSourceId;
+    while (parentId) {
+      if (selectedSet.has(parentId)) {
+        return true;
+      }
+      parentId = sourceById.get(parentId)?.parentSourceId ?? null;
     }
+    return false;
+  }, [source.parentSourceId, selectedSet, sourceById]);
+  const selectionState = getNodeSelectionState(
+    node,
+    selectedSet,
+    ancestorSelected,
+  );
+
+  if (!isDirectory) {
+    return (
+      <SourceRow
+        depth={depth}
+        editTitle={editingTitle}
+        isBusy={Boolean(rowBusyById[source.id])}
+        isEditing={editingId === source.id}
+        onCancelRename={onCancelRename}
+        onAddSource={() => {}}
+        onCreateDirectory={() => {}}
+        onDelete={() => onDelete(source)}
+        onDownload={() => onDownload(source)}
+        onEditReadme={() => onEditReadme(source)}
+        onEditTitleChange={onEditTitleChange}
+        onMove={() => onMove(source)}
+        onPreview={() => onPreview(source)}
+        onReindex={() => onReindex(source)}
+        onStartRename={() => onStartRename(source)}
+        onSubmitRename={() => onSubmitRename(source.id)}
+        onToggle={() => onToggle(node)}
+        selectionState={selectionState}
+        source={source}
+      />
+    );
   }
 
   return (
     <Collapsible onOpenChange={setOpen} open={open}>
-      <div className="flex items-center gap-1.5 py-1">
-        <Checkbox
-          checked={folderChecked}
-          onCheckedChange={(val) => handleFolderCheck(val as boolean)}
-        />
-        <CollapsibleTrigger asChild>
-          <button
-            className="flex flex-1 items-center gap-1.5 text-left"
-            type="button"
-          >
-            {open ? (
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
-            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="text-xs font-medium text-foreground">{name}</span>
-            <span className="ml-auto text-[10px] text-muted-foreground">
-              {sources.length}
-            </span>
-          </button>
-        </CollapsibleTrigger>
-      </div>
-
+      <SourceRow
+        childCount={node.children.length}
+        depth={depth}
+        editTitle={editingTitle}
+        isBusy={Boolean(rowBusyById[source.id])}
+        isEditing={editingId === source.id}
+        leading={
+          <CollapsibleTrigger asChild>
+            <button
+              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+              type="button"
+            >
+              {open ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              )}
+            </button>
+          </CollapsibleTrigger>
+        }
+        onCancelRename={onCancelRename}
+        onAddSource={() => onAddSource(source.id)}
+        onCreateDirectory={() => onCreateDirectory(source.id)}
+        onDelete={() => onDelete(source)}
+        onDownload={() => onDownload(source)}
+        onEditReadme={() => onEditReadme(source)}
+        onEditTitleChange={onEditTitleChange}
+        onMove={() => onMove(source)}
+        onPreview={() => onPreview(source)}
+        onReindex={() => onReindex(source)}
+        onStartRename={() => onStartRename(source)}
+        onSubmitRename={() => onSubmitRename(source.id)}
+        onToggle={() => onToggle(node)}
+        selectionState={selectionState}
+        source={source}
+      />
       <CollapsibleContent>
-        <div className="ml-5 space-y-0.5 border-l border-border pl-2.5 pb-1">
-          {sources.map((source) => (
-            <SourceRow
-              editTitle={editingTitle}
-              isBusy={Boolean(rowBusyById[source.id])}
-              isEditing={editingId === source.id}
-              key={source.id}
+        <div
+          className="relative space-y-0.5 before:absolute before:bottom-1 before:top-0 before:left-[var(--source-tree-branch-left)] before:w-px before:bg-border/70"
+          style={
+            {
+              "--source-tree-branch-left": `${9 + depth * SOURCE_TREE_INDENT_PX}px`,
+            } as CSSProperties
+          }
+        >
+          {node.children.map((child) => (
+            <SourceTreeRow
+              depth={depth + 1}
+              editingId={editingId}
+              editingTitle={editingTitle}
+              key={child.source.id}
+              node={child}
               onCancelRename={onCancelRename}
-              onDelete={() => onDelete(source)}
-              onDownload={() => onDownload(source)}
+              onAddSource={onAddSource}
+              onCreateDirectory={onCreateDirectory}
+              onDelete={onDelete}
+              onDownload={onDownload}
+              onEditReadme={onEditReadme}
               onEditTitleChange={onEditTitleChange}
-              onPreview={() => onPreview(source)}
-              onReindex={() => onReindex(source)}
-              onStartRename={() => onStartRename(source)}
-              onSubmitRename={() => onSubmitRename(source.id)}
+              onMove={onMove}
+              onPreview={onPreview}
+              onReindex={onReindex}
+              onStartRename={onStartRename}
+              onSubmitRename={onSubmitRename}
               onToggle={onToggle}
-              selected={selectedIds.includes(source.id)}
-              source={source}
+              rowBusyById={rowBusyById}
+              selectedIds={selectedIds}
+              sourceById={sourceById}
             />
           ))}
         </div>
@@ -689,15 +1095,19 @@ function LibraryTab({
   onStartRename,
   onCancelRename,
   onSubmitRename,
+  onAddSource,
+  onCreateDirectory,
   onDelete,
   onDownload,
+  onEditReadme,
+  onMove,
   onPreview,
   onReindex,
 }: {
   sources: SourceItem[];
   searchQuery: string;
   selectedIds: string[];
-  onToggle: (id: string) => void;
+  onToggle: (node: SourceTreeNode) => void;
   rowBusyById: Record<string, boolean>;
   editingId: string | null;
   editingTitle: string;
@@ -705,45 +1115,25 @@ function LibraryTab({
   onStartRename: (source: SourceItem) => void;
   onCancelRename: () => void;
   onSubmitRename: (id: string) => void;
+  onAddSource: (parentSourceId: string) => void;
+  onCreateDirectory: (parentSourceId: string) => void;
   onDelete: (source: SourceItem) => void;
   onDownload: (source: SourceItem) => void;
+  onEditReadme: (source: SourceItem) => void;
+  onMove: (source: SourceItem) => void;
   onPreview: (source: SourceItem) => void;
   onReindex: (source: SourceItem) => void;
 }) {
-  const q = searchQuery.toLowerCase();
-
-  const filtered = useMemo(
-    () =>
-      q
-        ? sources.filter((source) =>
-            source.title.toLowerCase().includes(q) ||
-            source.type.toLowerCase().includes(q) ||
-            source.status.toLowerCase().includes(q) ||
-            source.meta.toLowerCase().includes(q) ||
-            source.folder?.toLowerCase().includes(q),
-          )
-        : sources,
-    [sources, q],
+  const tree = useMemo(
+    () => buildSourceTree(sources, searchQuery),
+    [sources, searchQuery],
+  );
+  const sourceById = useMemo(
+    () => new Map(sources.map((source) => [source.id, source])),
+    [sources],
   );
 
-  const folders = useMemo(() => {
-    const map = new Map<string | undefined, SourceItem[]>();
-    for (const s of filtered) {
-      const key = s.folder;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(s);
-    }
-    return map;
-  }, [filtered]);
-
-  const folderNames = useMemo(
-    () =>
-      Array.from(folders.keys()).filter((k): k is string => k !== undefined),
-    [folders],
-  );
-  const rootItems = folders.get(undefined) ?? [];
-
-  if (filtered.length === 0) {
+  if (countTreeNodes(tree) === 0) {
     return (
       <p className="py-6 text-center text-xs text-muted-foreground">
         {searchQuery
@@ -754,17 +1144,22 @@ function LibraryTab({
   }
 
   return (
-    <div className="space-y-1">
-      {folderNames.map((name) => (
-        <FolderGroup
+    <div className="space-y-0.5">
+      {tree.map((node) => (
+        <SourceTreeRow
+          depth={0}
           editingId={editingId}
           editingTitle={editingTitle}
-          key={name}
-          name={name}
+          key={node.source.id}
+          node={node}
           onCancelRename={onCancelRename}
+          onAddSource={onAddSource}
+          onCreateDirectory={onCreateDirectory}
           onDelete={onDelete}
           onDownload={onDownload}
+          onEditReadme={onEditReadme}
           onEditTitleChange={onEditTitleChange}
+          onMove={onMove}
           onPreview={onPreview}
           onReindex={onReindex}
           onStartRename={onStartRename}
@@ -772,33 +1167,9 @@ function LibraryTab({
           onToggle={onToggle}
           rowBusyById={rowBusyById}
           selectedIds={selectedIds}
-          sources={folders.get(name)!}
+          sourceById={sourceById}
         />
       ))}
-
-      {rootItems.length > 0 && (
-        <div className="space-y-0.5">
-          {rootItems.map((source) => (
-            <SourceRow
-              editTitle={editingTitle}
-              isBusy={Boolean(rowBusyById[source.id])}
-              isEditing={editingId === source.id}
-              key={source.id}
-              onCancelRename={onCancelRename}
-              onDelete={() => onDelete(source)}
-              onDownload={() => onDownload(source)}
-              onEditTitleChange={onEditTitleChange}
-              onPreview={() => onPreview(source)}
-              onReindex={() => onReindex(source)}
-              onStartRename={() => onStartRename(source)}
-              onSubmitRename={() => onSubmitRename(source.id)}
-              onToggle={onToggle}
-              selected={selectedIds.includes(source.id)}
-              source={source}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -880,6 +1251,100 @@ function SkillReadmeDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function DirectoryPicker({
+  sources,
+  value,
+  onChange,
+  excludeSourceId,
+  framed = true,
+}: {
+  sources: SourceItem[];
+  value: string | null;
+  onChange: (value: string | null) => void;
+  excludeSourceId?: string | null;
+  framed?: boolean;
+}) {
+  const excludedIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!excludeSourceId) return ids;
+    ids.add(excludeSourceId);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const source of sources) {
+        if (source.parentSourceId && ids.has(source.parentSourceId) && !ids.has(source.id)) {
+          ids.add(source.id);
+          changed = true;
+        }
+      }
+    }
+    return ids;
+  }, [excludeSourceId, sources]);
+  const directoryTree = useMemo(
+    () =>
+      buildSourceTree(
+        sources.filter(
+          (source) =>
+            source.sourceType === "directory" && !excludedIds.has(source.id),
+        ),
+        "",
+      ),
+    [excludedIds, sources],
+  );
+
+  function renderNode(node: SourceTreeNode, depth: number) {
+    return (
+      <button
+        className={cn(
+          "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent",
+          value === node.source.id && "bg-primary/10 text-primary",
+        )}
+        key={node.source.id}
+        onClick={() => onChange(node.source.id)}
+        style={{ paddingLeft: `${8 + depth * 14}px` }}
+        type="button"
+      >
+        <Folder className="size-3.5 shrink-0" />
+        <span className="truncate">{node.source.title}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "max-h-56 overflow-y-auto",
+        framed ? "rounded-lg border bg-background p-1" : "py-1",
+      )}
+    >
+      <button
+        className={cn(
+          "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-medium hover:bg-accent",
+          value === null && "bg-primary/10 text-primary",
+        )}
+        onClick={() => onChange(null)}
+        type="button"
+      >
+        <Folder className="size-3.5 shrink-0" />
+        <span>Library root</span>
+      </button>
+      <div className="ml-3 border-l border-border/70 pl-1">
+        {directoryTree.map(function render(node) {
+          function renderTree(current: SourceTreeNode, depth: number) {
+            return (
+              <div key={current.source.id}>
+                {renderNode(current, depth)}
+                {current.children.map((child) => renderTree(child, depth + 1))}
+              </div>
+            );
+          }
+          return renderTree(node, 0);
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -1034,13 +1499,7 @@ function countFilteredSources(items: SourceItem[], searchQuery: string) {
   if (!q) {
     return items.length;
   }
-  return items.filter((source) =>
-    source.title.toLowerCase().includes(q) ||
-    source.type.toLowerCase().includes(q) ||
-    source.status.toLowerCase().includes(q) ||
-    source.meta.toLowerCase().includes(q) ||
-    source.folder?.toLowerCase().includes(q),
-  ).length;
+  return items.filter((source) => sourceMatchesQuery(source, q)).length;
 }
 
 function countFilteredSkills(items: HubSkillItem[], searchQuery: string) {
@@ -1130,7 +1589,16 @@ export function SourcesHub({
     ? citations[activeCitationIndex - 1]?.chunkId
     : null;
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addParentSourceId, setAddParentSourceId] = useState<string | null>(null);
   const [addTab, setAddTab] = useState<AddTab>("File");
+  const [isCreateDirectoryOpen, setIsCreateDirectoryOpen] = useState(false);
+  const [directoryTitle, setDirectoryTitle] = useState("");
+  const [directoryContext, setDirectoryContext] = useState("");
+  const [directoryParentSourceId, setDirectoryParentSourceId] = useState<string | null>(null);
+  const [readmeSource, setReadmeSource] = useState<SourceItem | null>(null);
+  const [readmeContent, setReadmeContent] = useState("");
+  const [moveSource, setMoveSource] = useState<SourceItem | null>(null);
+  const [moveParentSourceId, setMoveParentSourceId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [textTitle, setTextTitle] = useState("");
   const [textContent, setTextContent] = useState("");
@@ -1147,6 +1615,11 @@ export function SourcesHub({
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
   const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
   const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
+  const fullSourceTree = useMemo(() => buildSourceTree(sources, ""), [sources]);
+  const selectedLibrarySources = useMemo(
+    () => expandSelectedSources(sources, selectedIds),
+    [selectedIds, sources],
+  );
 
   function setActiveSearchQuery(value: string) {
     setSearchQueries((current) => ({
@@ -1258,25 +1731,29 @@ export function SourcesHub({
     }
 
     const sourceIds = new Set(sources.map((s) => s.id));
-    const nextSelected = selectedIds.filter((id) => sourceIds.has(id));
-    if (nextSelected.length !== selectedIds.length) {
+    const nextSelected = normalizeSourceSelectionFromTree(
+      fullSourceTree,
+      selectedIds.filter((id) => sourceIds.has(id)),
+    );
+    if (!areStringArraysEqual(nextSelected, selectedIds)) {
       onSelectionChange(nextSelected);
     }
-  }, [sources, selectedIds, onSelectionChange]);
+  }, [fullSourceTree, sources, selectedIds, onSelectionChange]);
 
   const tabCounts: Partial<Record<HubTab, number>> = {
-    Library: selectedIds.length,
+    Library: selectedLibrarySources.length,
     Skills: selectedSkillIds.length,
     Citations: citations.length,
     Connectors: connectors.length,
   };
 
-  function handleToggle(id: string) {
-    if (selectedIds.includes(id)) {
-      onSelectionChange(selectedIds.filter((x) => x !== id));
-    } else {
-      onSelectionChange([...selectedIds, id]);
-    }
+  function handleToggle(node: SourceTreeNode) {
+    onSelectionChange(
+      normalizeSourceSelectionFromTree(
+        fullSourceTree,
+        toggleSourceSelectionInTree(fullSourceTree, node, selectedIds),
+      ),
+    );
   }
 
   function setRowBusy(id: string, busy: boolean) {
@@ -1323,7 +1800,7 @@ export function SourcesHub({
   const handleDeleteSource = useCallback(
     async (source: SourceItem) => {
       if (!workspaceId) return;
-      const confirmed = window.confirm(`Delete source "${source.title}"?`);
+      const confirmed = window.confirm(`Delete ${source.sourceType === "directory" ? "folder" : "source"} "${source.title}"?`);
       if (!confirmed) return;
 
       setRowBusy(source.id, true);
@@ -1359,8 +1836,101 @@ export function SourcesHub({
   );
 
   const handlePreviewSource = useCallback((source: SourceItem) => {
+    if (source.sourceType === "directory") return;
     setPreviewSource(source);
   }, []);
+
+  const handleOpenReadmeDialog = useCallback((source: SourceItem) => {
+    if (source.sourceType !== "directory") return;
+    setReadmeSource(source);
+    setReadmeContent(source.contentText);
+  }, []);
+
+  const handleOpenCreateDirectory = useCallback((parentSourceId: string | null = null) => {
+    setDirectoryParentSourceId(parentSourceId);
+    setDirectoryTitle("");
+    setDirectoryContext("");
+    setIsCreateDirectoryOpen(true);
+  }, []);
+
+  const handleCreateDirectory = useCallback(async () => {
+    if (!workspaceId) return;
+    const title = directoryTitle.trim();
+    if (!title) {
+      toast.error("Folder name is required.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const created = await contentClient.createSource(workspaceId, {
+        sourceType: "directory",
+        parentSourceId: directoryParentSourceId,
+        title,
+        contentText: directoryContext.trim() || undefined,
+      });
+      if (directoryContext.trim()) {
+        await contentClient.indexSource(workspaceId, created.source.id, {});
+        setPendingSourceIds((prev) =>
+          prev.includes(created.source.id) ? prev : [...prev, created.source.id],
+        );
+      }
+      toast.success("Folder created.");
+      setIsCreateDirectoryOpen(false);
+      setDirectoryTitle("");
+      setDirectoryContext("");
+      await refreshSources();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to create folder."));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [workspaceId, directoryTitle, directoryContext, directoryParentSourceId, refreshSources]);
+
+  const handleUpdateReadme = useCallback(async () => {
+    if (!workspaceId || !readmeSource) return;
+
+    setIsSubmitting(true);
+    setRowBusy(readmeSource.id, true);
+    try {
+      await contentClient.updateSource(workspaceId, readmeSource.id, {
+        contentText: readmeContent,
+      });
+      toast.success("README updated.");
+      setReadmeSource(null);
+      setReadmeContent("");
+      await refreshSources();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to update README."));
+    } finally {
+      setIsSubmitting(false);
+      setRowBusy(readmeSource.id, false);
+    }
+  }, [workspaceId, readmeSource, readmeContent, refreshSources]);
+
+  const handleOpenMoveDialog = useCallback((source: SourceItem) => {
+    setMoveSource(source);
+    setMoveParentSourceId(source.parentSourceId);
+  }, []);
+
+  const handleMoveSource = useCallback(async () => {
+    if (!workspaceId || !moveSource) return;
+    setRowBusy(moveSource.id, true);
+    setIsSubmitting(true);
+    try {
+      await contentClient.updateSource(workspaceId, moveSource.id, {
+        parentSourceId: moveParentSourceId,
+      });
+      toast.success("Source moved.");
+      setMoveSource(null);
+      await refreshSources();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to move source."));
+    } finally {
+      setIsSubmitting(false);
+      setRowBusy(moveSource.id, false);
+    }
+  }, [workspaceId, moveSource, moveParentSourceId, refreshSources]);
 
   const handleDownloadSource = useCallback(
     async (source: SourceItem) => {
@@ -1387,10 +1957,12 @@ export function SourcesHub({
     setUploadProgress(0);
     setAddTab("File");
     setIsDragActive(false);
+    setAddParentSourceId(null);
     dragDepthRef.current = 0;
   }, []);
 
-  const handleOpenAddDialog = useCallback(() => {
+  const handleOpenAddDialog = useCallback((parentSourceId: string | null = null) => {
+    setAddParentSourceId(parentSourceId);
     setIsAddOpen(true);
   }, []);
 
@@ -1488,6 +2060,7 @@ export function SourcesHub({
       const created = await contentClient.createSource(workspaceId, {
         title: textTitle.trim() || undefined,
         contentText,
+        parentSourceId: addParentSourceId,
       });
 
       await contentClient.indexSource(workspaceId, created.source.id, {});
@@ -1504,7 +2077,7 @@ export function SourcesHub({
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, textTitle, textContent, resetAddForm, refreshSources]);
+  }, [workspaceId, textTitle, textContent, addParentSourceId, resetAddForm, refreshSources]);
 
   const handleUploadFiles = useCallback(async () => {
     if (!workspaceId) {
@@ -1524,7 +2097,9 @@ export function SourcesHub({
 
     try {
       for (const file of files) {
-        const result = await contentClient.uploadSource(workspaceId, file);
+        const result = await contentClient.uploadSource(workspaceId, file, {
+          parentSourceId: addParentSourceId,
+        });
         createdSourceIds.push(result.source.id);
         processed += 1;
         setUploadProgress(Math.round((processed / total) * 100));
@@ -1549,7 +2124,7 @@ export function SourcesHub({
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, files, resetAddForm, refreshSources]);
+  }, [workspaceId, files, addParentSourceId, resetAddForm, refreshSources]);
 
   return (
     <>
@@ -1627,17 +2202,17 @@ export function SourcesHub({
                       {filteredSourceCount} found
                     </span>
                   ) : null}
-                  {selectedIds.length > 0 ? (
+                  {selectedLibrarySources.length > 0 ? (
                     <span className="text-[10px] text-primary">
-                      {selectedIds.length} selected
+                      {selectedLibrarySources.length} selected
                     </span>
                   ) : null}
                 </div>
                 <div className="flex min-h-8 items-center justify-end gap-1.5">
                   <Button
-                    disabled
+                    onClick={() => handleOpenCreateDirectory(null)}
                     size="icon-xs"
-                    title="Folder management is not available yet"
+                    title="Create folder"
                     type="button"
                     variant="ghost"
                   >
@@ -1645,7 +2220,7 @@ export function SourcesHub({
                     <span className="sr-only">Create folder</span>
                   </Button>
                   <Button
-                    onClick={handleOpenAddDialog}
+                    onClick={() => handleOpenAddDialog(null)}
                     size="xs"
                     type="button"
                     variant="outline"
@@ -1674,7 +2249,11 @@ export function SourcesHub({
                   onCancelRename={handleCancelRename}
                   onDelete={handleDeleteSource}
                   onDownload={handleDownloadSource}
+                  onEditReadme={handleOpenReadmeDialog}
                   onEditTitleChange={setEditingTitle}
+                  onAddSource={handleOpenAddDialog}
+                  onCreateDirectory={handleOpenCreateDirectory}
+                  onMove={handleOpenMoveDialog}
                   onPreview={handlePreviewSource}
                   onReindex={handleReindexSource}
                   onStartRename={handleStartRename}
@@ -1927,6 +2506,14 @@ export function SourcesHub({
           </DialogHeader>
 
           <div className="space-y-3">
+            {addParentSourceId ? (
+              <div className="flex items-center gap-1.5 rounded-lg border bg-muted/25 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <Folder className="size-3.5" />
+                <span className="truncate">
+                  {sources.find((source) => source.id === addParentSourceId)?.title ?? "Selected folder"}
+                </span>
+              </div>
+            ) : null}
             <div className="flex gap-1 rounded-lg border bg-muted/30 p-1">
               {addTabs.map((tab) => (
                 <button
@@ -2085,6 +2672,196 @@ export function SourcesHub({
                 </>
               ) : (
                 <>{addTab === "Text" ? "Create source" : "Upload files"}</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog onOpenChange={setIsCreateDirectoryOpen} open={isCreateDirectoryOpen}>
+        <DialogContent className="w-[520px] max-w-[calc(100%-2rem)]" constrainWidth={false}>
+          <DialogHeader>
+            <DialogTitle>Create folder</DialogTitle>
+            <DialogDescription>
+              Add a directory to organize the Source Library.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              autoFocus
+              onChange={(event) => setDirectoryTitle(event.target.value)}
+              placeholder="Folder name"
+              value={directoryTitle}
+            />
+            <Textarea
+              className="min-h-28"
+              onChange={(event) => setDirectoryContext(event.target.value)}
+              placeholder="README context (optional)"
+              value={directoryContext}
+            />
+            <DirectoryPicker
+              onChange={setDirectoryParentSourceId}
+              sources={sources}
+              value={directoryParentSourceId}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={isSubmitting}
+              onClick={() => setIsCreateDirectoryOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isSubmitting || !directoryTitle.trim()}
+              onClick={() => void handleCreateDirectory()}
+              type="button"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Working...
+                </>
+              ) : (
+                "Create folder"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setMoveSource(null);
+            setMoveParentSourceId(null);
+          }
+        }}
+        open={Boolean(moveSource)}
+      >
+        <DialogContent className="w-[520px] max-w-[calc(100%-2rem)]" constrainWidth={false}>
+          <DialogHeader>
+            <DialogTitle>Move source</DialogTitle>
+            <DialogDescription>
+              Choose a destination under the root directory.
+            </DialogDescription>
+          </DialogHeader>
+          {moveSource ? (
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/25 px-3 py-2">
+              <SourceTypeIcon
+                isPartiallySelected={false}
+                isSelected={false}
+                source={moveSource}
+              />
+              <div className="min-w-0">
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Moving
+                </div>
+                <div className="truncate text-sm font-medium text-foreground">
+                  {moveSource.title}
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DirectoryPicker
+            excludeSourceId={moveSource?.id}
+            framed={false}
+            onChange={setMoveParentSourceId}
+            sources={sources}
+            value={moveParentSourceId}
+          />
+          <DialogFooter>
+            <Button
+              disabled={isSubmitting}
+              onClick={() => setMoveSource(null)}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isSubmitting}
+              onClick={() => void handleMoveSource()}
+              type="button"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Moving...
+                </>
+              ) : (
+                "Move"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setReadmeSource(null);
+            setReadmeContent("");
+          }
+        }}
+        open={Boolean(readmeSource)}
+      >
+        <DialogContent className="w-[640px] max-w-[calc(100%-2rem)]" constrainWidth={false}>
+          <DialogHeader>
+            <DialogTitle>Edit README</DialogTitle>
+            <DialogDescription>
+              Update the context attached to this folder.
+            </DialogDescription>
+          </DialogHeader>
+          {readmeSource ? (
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/25 px-3 py-2">
+              <SourceTypeIcon
+                isPartiallySelected={false}
+                isSelected={false}
+                source={readmeSource}
+              />
+              <div className="min-w-0">
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Folder
+                </div>
+                <div className="truncate text-sm font-medium text-foreground">
+                  {readmeSource.title}
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <Textarea
+            className="min-h-52 text-sm"
+            onChange={(event) => setReadmeContent(event.target.value)}
+            placeholder="README context for this folder..."
+            value={readmeContent}
+          />
+          <DialogFooter>
+            <Button
+              disabled={isSubmitting}
+              onClick={() => {
+                setReadmeSource(null);
+                setReadmeContent("");
+              }}
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isSubmitting}
+              onClick={() => void handleUpdateReadme()}
+              type="button"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save README"
               )}
             </Button>
           </DialogFooter>

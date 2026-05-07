@@ -46,7 +46,8 @@ export type SourceType =
   | "youtube"
   | "note"
   | "artifact"
-  | "connector";
+  | "connector"
+  | "directory";
 
 export type ParsingConfig = {
   chunkSize: number;
@@ -153,6 +154,7 @@ export type SourceRecord = {
     | "note"
     | "artifact";
   sourceType: SourceType;
+  parentSourceId: string | null;
   title: string;
   contentText: string;
   mimeType: string | null;

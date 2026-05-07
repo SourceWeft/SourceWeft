@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../../shared/database";
 import { toPostgresTextArray } from "../sql";
-import { buildVirtualSource } from "./paths";
+import { buildVirtualSourceTree } from "./paths";
 import type {
   VirtualFsDocument,
   VirtualFsGrepCandidate,
@@ -27,6 +27,8 @@ export async function listVirtualFsSources(input: {
 }): Promise<VirtualFsSource[]> {
   const rows = await db.execute<{
     source_id: string;
+    source_type: VirtualFsSource["sourceType"];
+    parent_source_id: string | null;
     title: string;
     file_name: string | null;
     mime_type: string | null;
@@ -36,6 +38,8 @@ export async function listVirtualFsSources(input: {
   }>(sql`
     select
       s.id as source_id,
+      s.source_type,
+      s.parent_source_id,
       s.title,
       nullif(s.metadata_json->>'fileName', '') as file_name,
       s.mime_type,
@@ -70,20 +74,22 @@ export async function listVirtualFsSources(input: {
       and s.status = 'indexed'
       ${sourceIdsClause(input.sourceIds)}
     group by s.id
-    order by s.updated_at desc
+    order by s.parent_source_id nulls first, s.source_type asc, s.title asc, s.updated_at desc
     limit ${input.limit ?? 500}
   `);
 
-  return rows.rows.map((row) =>
-    buildVirtualSource({
+  return buildVirtualSourceTree(
+    rows.rows.map((row) => ({
       sourceId: row.source_id,
+      sourceType: row.source_type,
+      parentSourceId: row.parent_source_id,
       title: row.title,
       fileName: row.file_name,
       chunkCount: Number(row.chunk_count),
       sizeBytes: row.size_bytes == null ? null : Number(row.size_bytes),
       mimeType: row.mime_type,
       updatedAt: row.updated_at,
-    }),
+    })),
   );
 }
 

@@ -38,6 +38,10 @@ export function registerSourceRoutes(app: Hono) {
       mimeType: file.type || "application/octet-stream",
       content: Buffer.from(await file.arrayBuffer()),
       sizeBytes: file.size,
+      parentSourceId:
+        typeof form.get("parentSourceId") === "string"
+          ? String(form.get("parentSourceId")).trim() || null
+          : null,
     });
 
     return ApiResponse.success(c, result, 201);
@@ -76,6 +80,8 @@ export function registerSourceRoutes(app: Hono) {
       userId: getSessionUserId(session),
       title: parsed.data.title,
       contentText: parsed.data.contentText,
+      sourceType: parsed.data.sourceType,
+      parentSourceId: parsed.data.parentSourceId,
       estimatedPages: parsed.data.estimatedPages,
       parsedTokens: parsed.data.parsedTokens,
     });
@@ -182,6 +188,7 @@ export function registerSourceRoutes(app: Hono) {
       userId: getSessionUserId(session),
       title: parsed.data.title,
       contentText: parsed.data.contentText,
+      parentSourceId: parsed.data.parentSourceId,
       estimatedPages: parsed.data.estimatedPages,
       parsedTokens: parsed.data.parsedTokens,
     });

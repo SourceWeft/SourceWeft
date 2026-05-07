@@ -80,7 +80,8 @@ function buildTraceMetadata(input: {
     modelAlias: input.prepared.modelAlias,
     profileAlias: input.prepared.profileAlias,
     agentMode: input.prepared.agentMode,
-    sourceCount: input.prepared.sourceIds.length,
+    sourceCount: input.prepared.selectedSourceIds.length,
+    effectiveSourceCount: input.prepared.sourceIds.length,
     selectedSkillCount: input.prepared.enabledSkills.length,
   };
 }
@@ -108,7 +109,8 @@ function buildTraceInput(
     message: prepared.messageContent,
     modelAlias: prepared.modelAlias,
     profileAlias: prepared.profileAlias,
-    sourceIds: prepared.sourceIds,
+    sourceIds: prepared.selectedSourceIds,
+    effectiveSourceIds: prepared.sourceIds,
     skillIds: prepared.skillIds,
     threadId: prepared.thread.id,
     userMessageId: prepared.userMessage.id,
@@ -214,7 +216,8 @@ function buildPrepareSpanInput(
     message: prepared.messageContent,
     threadId: prepared.thread.id,
     userMessageId: prepared.userMessage.id,
-    sourceIds: prepared.sourceIds,
+    sourceIds: prepared.selectedSourceIds,
+    effectiveSourceIds: prepared.sourceIds,
     skillIds: prepared.skillIds,
   };
 }
@@ -227,7 +230,8 @@ function buildPrepareSpanOutput(
     agentMode: prepared.agentMode,
     modelAlias: prepared.modelAlias,
     profileAlias: prepared.profileAlias,
-    sourceCount: prepared.sourceIds.length,
+    sourceCount: prepared.selectedSourceIds.length,
+    effectiveSourceCount: prepared.sourceIds.length,
     selectedSkillCount: prepared.enabledSkills.length,
     isFirstAssistantResponse: prepared.isFirstAssistantResponse,
     assistantMessageParentId: prepared.assistantMessageParentId,
@@ -657,7 +661,8 @@ class ContentThreadStreamService {
             message: prepared.messageContent,
             modelAlias: prepared.modelAlias,
             profileAlias: prepared.profileAlias,
-            sourceCount: prepared.sourceIds.length,
+            sourceCount: prepared.selectedSourceIds.length,
+            effectiveSourceCount: prepared.sourceIds.length,
           },
           metadata: {
             ...buildAgentRunSpanMetadata(prepared),
@@ -954,7 +959,8 @@ class ContentThreadStreamService {
         message: prepared.messageContent,
         modelAlias: prepared.modelAlias,
         profileAlias: prepared.profileAlias,
-        sourceCount: prepared.sourceIds.length,
+        sourceCount: prepared.selectedSourceIds.length,
+        effectiveSourceCount: prepared.sourceIds.length,
       },
       metadata: {
         ...buildAgentRunSpanMetadata(prepared),

@@ -70,9 +70,16 @@ export class ContentClient {
     );
   }
 
-  uploadSource(workspaceId: string, file: File) {
+  uploadSource(
+    workspaceId: string,
+    file: File,
+    input: { parentSourceId?: string | null } = {},
+  ) {
     const formData = new FormData();
     formData.append("file", file);
+    if (input.parentSourceId) {
+      formData.append("parentSourceId", input.parentSourceId);
+    }
 
     return this.http.postForm<UploadSourceResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/upload`,

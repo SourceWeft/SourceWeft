@@ -91,13 +91,15 @@ export function DashboardSidebar() {
   const router = useRouter();
   const hasChatPanel = pathname.startsWith("/dashboard/chat");
 
-  // Derive the active thread from the URL instead of context state.
-  // Pattern: /dashboard/chat/[threadId]
-  const activeThreadId = pathname.startsWith("/dashboard/chat/")
+  // Pattern: /dashboard/chat/[threadId]. While a newly created chat is
+  // navigating from /dashboard/chat to /dashboard/chat/[threadId], context has
+  // the new active id one render before the URL catches up.
+  const routeThreadId = pathname.startsWith("/dashboard/chat/")
     ? (pathname.slice("/dashboard/chat/".length).split("/")[0] ?? "")
     : "";
 
   const {
+    activeChatId,
     archivedChats,
     archiveChat,
     clearArchivedChats,
@@ -108,13 +110,20 @@ export function DashboardSidebar() {
     hasMorePrivateChats,
     isLoadingPrivateChats,
     loadMorePrivateChats,
+    mode,
+    organizationName,
     renameWorkspace,
     switchWorkspace,
     sharedChats,
+    startNewChat,
     workspaceId,
     workspaceName,
     workspaces,
   } = useDashboardChatState();
+
+  const activeThreadId =
+    routeThreadId ||
+    (pathname === "/dashboard/chat" && mode === "thread" ? activeChatId : "");
 
   const handleDeleteChat = async (id: string) => {
     await deleteChat(id);
@@ -206,7 +215,10 @@ export function DashboardSidebar() {
             onArchiveChat={archiveChat}
             onClearArchivedChats={handleClearArchivedChats}
             onClearPrivateChats={handleClearPrivateChats}
-            onCreateChat={() => router.push("/dashboard/chat")}
+            onCreateChat={() => {
+              startNewChat();
+              router.push("/dashboard/chat");
+            }}
             onCreateWorkspace={handleCreateWorkspace}
             onDeleteChat={handleDeleteChat}
             onLoadMoreChats={() => void loadMorePrivateChats()}
@@ -217,9 +229,11 @@ export function DashboardSidebar() {
             privateChats={privateChats}
             sharedChats={sharedChats}
             onWorkspaceChange={(nextId) => {
+              startNewChat();
               void switchWorkspace(nextId);
               router.push("/dashboard/chat");
             }}
+            organizationName={organizationName}
             workspaceId={workspaceId}
             workspaceName={workspaceName}
             workspaces={workspaces}

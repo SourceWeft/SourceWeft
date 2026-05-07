@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../../../shared/database";
 import {
   chunkEmbeddings,
@@ -46,6 +46,7 @@ export async function createSourceRecord(input: {
   estimatedPages?: number;
   parsedTokens?: number;
   sourceType?: SourceRecord["sourceType"];
+  parentSourceId?: string | null;
   mimeType?: string | null;
   sizeBytes?: number | null;
   contentHash?: string | null;
@@ -53,6 +54,8 @@ export async function createSourceRecord(input: {
   storageKey?: string | null;
   parserVersion?: string | null;
   parsingConfig?: ParsingConfig | null;
+  status?: SourceStatus;
+  indexedAt?: Date | null;
   metadata?: SourceMetadata;
   error?: Record<string, unknown>;
 }) {
@@ -65,6 +68,7 @@ export async function createSourceRecord(input: {
       workspaceId: input.workspaceId,
       ingestKind: "manual_upload",
       sourceType: input.sourceType ?? "manual_upload",
+      parentSourceId: input.parentSourceId ?? null,
       title: input.title,
       contentText: input.contentText,
       mimeType: input.mimeType ?? null,
@@ -74,13 +78,13 @@ export async function createSourceRecord(input: {
       storageKey: input.storageKey ?? null,
       parserVersion: input.parserVersion ?? null,
       parsingConfig: input.parsingConfig ?? {},
-      status: "created",
+      status: input.status ?? "created",
       estimatedPages: input.estimatedPages ?? null,
       parsedTokens: input.parsedTokens ?? null,
       errorJson: input.error ?? {},
       metadataJson: input.metadata ?? {},
       createdBy: input.createdBy,
-      indexedAt: null,
+      indexedAt: input.indexedAt ?? null,
     })
     .returning();
 
@@ -110,6 +114,115 @@ export async function listSourceRecords(input: {
   return rows.map(mapSource);
 }
 
+export async function listSourceRecordsByIds(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceIds: string[];
+}) {
+  if (input.sourceIds.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select()
+    .from(sources)
+    .where(
+      and(
+        eq(sources.teamId, input.teamId),
+        eq(sources.workspaceId, input.workspaceId),
+        inArray(sources.id, input.sourceIds),
+        ne(sources.status, "archived"),
+      ),
+    );
+
+  return rows.map(mapSource);
+}
+
+export async function listSourceChildren(input: {
+  teamId: string;
+  workspaceId: string;
+  parentSourceId: string | null;
+}) {
+  const parentCondition = input.parentSourceId === null
+    ? sql`${sources.parentSourceId} is null`
+    : eq(sources.parentSourceId, input.parentSourceId);
+  const rows = await db
+    .select()
+    .from(sources)
+    .where(
+      and(
+        eq(sources.teamId, input.teamId),
+        eq(sources.workspaceId, input.workspaceId),
+        ne(sources.status, "archived"),
+        parentCondition,
+      ),
+    )
+    .orderBy(asc(sources.sourceType), asc(sources.title), asc(sources.createdAt));
+
+  return rows.map(mapSource);
+}
+
+export async function hasSourceChildren(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+}) {
+  const [row] = await db
+    .select({ id: sources.id })
+    .from(sources)
+    .where(
+      and(
+        eq(sources.teamId, input.teamId),
+        eq(sources.workspaceId, input.workspaceId),
+        eq(sources.parentSourceId, input.sourceId),
+        ne(sources.status, "archived"),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(row);
+}
+
+export async function listSourceDescendants(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceIds: string[];
+  maxDepth?: number;
+}) {
+  const maxDepth = input.maxDepth ?? 64;
+  const descendants: SourceRecord[] = [];
+  const visited = new Set(input.sourceIds);
+  let frontier = [...new Set(input.sourceIds)];
+
+  for (let depth = 0; depth < maxDepth && frontier.length > 0; depth += 1) {
+    const rows = await db
+      .select()
+      .from(sources)
+      .where(
+        and(
+          eq(sources.teamId, input.teamId),
+          eq(sources.workspaceId, input.workspaceId),
+          inArray(sources.parentSourceId, frontier),
+          ne(sources.status, "archived"),
+        ),
+      )
+      .orderBy(asc(sources.createdAt));
+
+    const nextFrontier: string[] = [];
+    for (const row of rows) {
+      if (visited.has(row.id)) {
+        continue;
+      }
+      visited.add(row.id);
+      descendants.push(mapSource(row));
+      nextFrontier.push(row.id);
+    }
+    frontier = nextFrontier;
+  }
+
+  return descendants;
+}
+
 export async function findSourceRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -136,6 +249,7 @@ export async function updateSourceRecord(input: {
   sourceId: string;
   title?: string;
   contentText?: string;
+  parentSourceId?: string | null;
   estimatedPages?: number | null;
   parsedTokens?: number | null;
   mimeType?: string | null;
@@ -148,12 +262,14 @@ export async function updateSourceRecord(input: {
   metadata?: SourceMetadata;
   error?: Record<string, unknown>;
   status?: SourceStatus;
+  indexedAt?: Date | null;
 }) {
   const updates: Partial<typeof sources.$inferInsert> & { updatedAt: Date } = {
     updatedAt: new Date(),
   };
 
   if (input.title !== undefined) updates.title = input.title;
+  if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
   if (input.contentText !== undefined) {
     updates.contentText = input.contentText;
     updates.status = "created";
@@ -171,6 +287,7 @@ export async function updateSourceRecord(input: {
   if (input.metadata !== undefined) updates.metadataJson = input.metadata;
   if (input.error !== undefined) updates.errorJson = input.error;
   if (input.status !== undefined) updates.status = input.status;
+  if (input.indexedAt !== undefined) updates.indexedAt = input.indexedAt;
 
   const [row] = await db
     .update(sources)
@@ -194,6 +311,7 @@ export async function updateSourceRecordForLatestRevision(input: {
   sourceRevisionId: string;
   title?: string;
   contentText?: string;
+  parentSourceId?: string | null;
   estimatedPages?: number | null;
   parsedTokens?: number | null;
   contentHash?: string | null;
@@ -208,6 +326,7 @@ export async function updateSourceRecordForLatestRevision(input: {
   };
 
   if (input.title !== undefined) updates.title = input.title;
+  if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
   if (input.contentText !== undefined) {
     updates.contentText = input.contentText;
     updates.status = "created";
@@ -309,8 +428,11 @@ export async function updateSourceRecordAndInvalidateDocuments(input: {
   sourceId: string;
   title?: string;
   contentText: string;
+  parentSourceId?: string | null;
   estimatedPages?: number | null;
   parsedTokens?: number | null;
+  status?: SourceStatus;
+  indexedAt?: Date | null;
 }) {
   return db.transaction(async (tx) => {
     const updates: Partial<typeof sources.$inferInsert> & { updatedAt: Date } = {
@@ -321,8 +443,11 @@ export async function updateSourceRecordAndInvalidateDocuments(input: {
     };
 
     if (input.title !== undefined) updates.title = input.title;
+    if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
     if (input.estimatedPages !== undefined) updates.estimatedPages = input.estimatedPages;
     if (input.parsedTokens !== undefined) updates.parsedTokens = input.parsedTokens;
+    if (input.status !== undefined) updates.status = input.status;
+    if (input.indexedAt !== undefined) updates.indexedAt = input.indexedAt;
 
     const [row] = await tx
       .update(sources)

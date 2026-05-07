@@ -15,7 +15,7 @@ import {
   setStoredDashboardWorkspaceId,
 } from "../../../lib/dashboard-workspace-context";
 import { contentClient, workspaceClient } from "../../../lib/sdk";
-import type { ChatItem } from "../chat/_components/mock-data";
+import type { ChatItem } from "./dashboard-chat-types";
 
 type ThreadModelSettingsInput = {
   llmProfileAlias?: string | null;
@@ -30,6 +30,7 @@ type DashboardChatState = {
   mode: ViewMode;
   sourcesVisible: boolean;
   organizationId: string | null;
+  organizationName: string;
   workspaceId: string | null;
   workspaceName: string;
   workspaces: Array<{ id: string; name: string }>;
@@ -140,6 +141,7 @@ export function DashboardChatStateProvider({
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState("Workspace");
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [organizationName, setOrganizationName] = useState("SourceWeft");
   const [workspaces, setWorkspaces] = useState<
     Array<{ id: string; name: string }>
   >([]);
@@ -228,6 +230,7 @@ export function DashboardChatStateProvider({
         const current = await workspaceClient.getCurrentContext();
         const orgList = (orgs ?? []) as Array<{
           id: string;
+          name?: string;
           metadata?: unknown;
         }>;
         const personalOrg = orgList.find(isPersonalOrganization);
@@ -236,6 +239,10 @@ export function DashboardChatStateProvider({
           current.activeOrganizationId ??
           personalOrg?.id ??
           null;
+        const organizationName =
+          activeOrg?.name ??
+          orgList.find((org) => org.id === organizationId)?.name ??
+          "SourceWeft";
 
         if (!organizationId) {
           return;
@@ -243,6 +250,7 @@ export function DashboardChatStateProvider({
 
         if (!cancelled) {
           setOrganizationId(organizationId);
+          setOrganizationName(organizationName);
         }
 
         if (!activeOrg?.id) {
@@ -266,7 +274,7 @@ export function DashboardChatStateProvider({
     return () => {
       cancelled = true;
     };
-  }, [activeOrg?.id, hydrateWorkspace, orgs]);
+  }, [activeOrg?.id, activeOrg?.name, hydrateWorkspace, orgs]);
 
   const createWorkspace = useCallback(
     async (name?: string) => {
@@ -633,6 +641,7 @@ export function DashboardChatStateProvider({
       mode,
       sourcesVisible,
       organizationId,
+      organizationName,
       workspaceId,
       workspaceName,
       workspaces,
@@ -664,6 +673,7 @@ export function DashboardChatStateProvider({
       mode,
       sourcesVisible,
       organizationId,
+      organizationName,
       workspaceId,
       workspaceName,
       workspaces,

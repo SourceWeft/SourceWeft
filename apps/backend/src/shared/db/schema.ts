@@ -35,6 +35,15 @@ type SourceIngestKind =
   | "youtube"
   | "note"
   | "artifact";
+type SourceType =
+  | "manual_upload"
+  | "file_upload"
+  | "web_url"
+  | "youtube"
+  | "note"
+  | "artifact"
+  | "connector"
+  | "directory";
 type ConnectorStatus = "active" | "paused" | "error" | "disabled";
 type SyncRunTriggerType = "manual" | "scheduled" | "webhook" | "backfill";
 type SyncRunStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
@@ -1168,9 +1177,10 @@ export const sources = pgTable(
       .$type<SourceIngestKind>()
       .notNull()
       .default("manual_upload"),
-    sourceType: text("source_type").notNull().default("manual_upload"),
+    sourceType: text("source_type").$type<SourceType>().notNull().default("manual_upload"),
     connectorId: text("connector_id").references(() => sourceConnectors.id),
     syncRunId: text("sync_run_id").references(() => connectorSyncRuns.id),
+    parentSourceId: text("parent_source_id"),
     title: text("title").notNull(),
     contentText: text("content_text").notNull().default(""),
     externalId: text("external_id"),
@@ -1229,6 +1239,10 @@ export const sources = pgTable(
       sql`${table.ingestKind} in ('connector', 'manual_upload', 'web_url', 'youtube', 'note', 'artifact')`,
     ),
     check(
+      "sources_source_type_check",
+      sql`${table.sourceType} in ('manual_upload', 'file_upload', 'web_url', 'youtube', 'note', 'artifact', 'connector', 'directory')`,
+    ),
+    check(
       "sources_connector_requirement_check",
       sql`(${table.ingestKind} = 'connector' and ${table.connectorId} is not null) or (${table.ingestKind} <> 'connector' and ${table.connectorId} is null)`,
     ),
@@ -1255,6 +1269,11 @@ export const sources = pgTable(
       table.workspaceId,
       table.status,
       desc(table.updatedAt),
+    ),
+    index("sources_team_workspace_parent_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.parentSourceId,
     ),
     index("sources_workspace_created_idx").on(
       table.workspaceId,

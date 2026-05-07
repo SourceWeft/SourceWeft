@@ -32,6 +32,7 @@ import {
 } from "./model-resolution";
 import { assertSourcesExist } from "./source-validation";
 import type { PreparedThreadTurn, StreamThreadEventInput } from "./types";
+import { resolveSourceTreeScope } from "../../sources/service";
 
 function normalizeSupportedParameters(value: unknown) {
   if (!Array.isArray(value)) {
@@ -157,9 +158,15 @@ export async function prepareThreadTurn(
   });
 
   const fallbackSourceIds = resolveLatestSourceIds(messageRecords);
-  const sourceIds = requestedSourceIds.length > 0
+  const selectedSourceIds = requestedSourceIds.length > 0
     ? requestedSourceIds
     : fallbackSourceIds;
+  const sourceScope = await resolveSourceTreeScope({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    selectedSourceIds,
+  });
+  const sourceIds = sourceScope.effectiveSourceIds;
   const skillIds = normalizeSkillIds(input.tools?.skillIds);
   const webSearchEnabled = input.tools?.webSearchEnabled === true;
   const timezone = normalizeTimezone(input.timezone);
@@ -172,7 +179,7 @@ export async function prepareThreadTurn(
   await assertSourcesExist({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
-    sourceIds,
+    sourceIds: selectedSourceIds,
   });
 
   const userMessage =
@@ -187,7 +194,7 @@ export async function prepareThreadTurn(
       createdBy: input.userId,
       metadata: {
         source: "api",
-        sourceIds,
+        sourceIds: selectedSourceIds,
         skillIds,
         tools: { skillIds, webSearchEnabled },
         versionOf: input.userMessageParentId ?? null,
@@ -257,7 +264,9 @@ export async function prepareThreadTurn(
     workspace,
     thread,
     messageContent,
+    selectedSourceIds,
     sourceIds,
+    sourceScope,
     skillIds,
     webSearchEnabled,
     timezone,

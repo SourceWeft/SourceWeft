@@ -9,10 +9,14 @@ import {
   createSourceRecord,
   createSourceRevisionRecord,
   deleteSourceRecord,
+  findSourceRecord,
   getSourceDetailRecord,
   getSourceDocumentDetailRecord,
   getSourceStatusDetail,
+  hasSourceChildren,
+  listSourceDescendants,
   listSourceRecords,
+  listSourceRecordsByIds,
   updateSourceRecordAndInvalidateDocuments,
   updateSourceRecord,
 } from "./repository";
@@ -29,6 +33,8 @@ import {
 import { enqueueSourceParseJob } from "../queue";
 import type { SourceRecord, SourceStatusDetail } from "../types";
 import { defaultParsingConfig } from "./parsing-config";
+
+const SOURCE_TREE_MAX_DEPTH = 64;
 
 function resolveUploadTitle(fileName: string) {
   const trimmed = fileName.trim();
@@ -52,6 +58,134 @@ function mergeStatusMetadata(
   };
 }
 
+function normalizeDirectoryTitleForConflict(value: string) {
+  return value.trim().normalize("NFKC").replace(/\s+/g, " ").toLowerCase();
+}
+
+async function assertNoDirectoryNameConflict(input: {
+  teamId: string;
+  workspaceId: string;
+  title: string;
+  parentSourceId: string | null;
+  sourceId?: string;
+}) {
+  const siblings = await listSourceRecords({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+  });
+  const normalizedTitle = normalizeDirectoryTitleForConflict(input.title);
+  const conflict = siblings.find((candidate) =>
+    candidate.sourceType === "directory" &&
+    candidate.id !== input.sourceId &&
+    candidate.parentSourceId === input.parentSourceId &&
+    normalizeDirectoryTitleForConflict(candidate.title) === normalizedTitle
+  );
+
+  if (conflict) {
+    throw new ContentError(
+      409,
+      "DIRECTORY_NAME_CONFLICT",
+      `A directory named "${input.title}" already exists in this location`,
+    );
+  }
+}
+
+async function validateSourceParent(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId?: string;
+  parentSourceId: string | null | undefined;
+}) {
+  if (input.parentSourceId === undefined || input.parentSourceId === null) {
+    return null;
+  }
+
+  if (input.sourceId && input.parentSourceId === input.sourceId) {
+    throw new ContentError(
+      400,
+      "INVALID_SOURCE_PARENT",
+      "A source cannot be moved under itself",
+    );
+  }
+
+  const parent = await findSourceRecord({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    sourceId: input.parentSourceId,
+  });
+  if (!parent) {
+    throw new ContentError(404, "SOURCE_PARENT_NOT_FOUND", "Parent source not found");
+  }
+  if (parent.sourceType !== "directory") {
+    throw new ContentError(
+      400,
+      "INVALID_SOURCE_PARENT",
+      "Parent source must be a directory",
+    );
+  }
+
+  if (input.sourceId) {
+    const descendants = await listSourceDescendants({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      sourceIds: [input.sourceId],
+      maxDepth: SOURCE_TREE_MAX_DEPTH,
+    });
+    if (descendants.some((descendant) => descendant.id === input.parentSourceId)) {
+      throw new ContentError(
+        400,
+        "INVALID_SOURCE_PARENT",
+        "A source cannot be moved under one of its descendants",
+      );
+    }
+  }
+
+  return parent;
+}
+
+export async function resolveSourceTreeScope(input: {
+  teamId: string;
+  workspaceId: string;
+  selectedSourceIds: string[];
+}) {
+  const requestedSourceIds = Array.from(new Set(input.selectedSourceIds));
+  if (requestedSourceIds.length === 0) {
+    return {
+      requestedSourceIds,
+      effectiveSourceIds: [],
+      selectedDirectoryIds: [],
+      expandedDescendantSourceIds: [],
+    };
+  }
+
+  const selectedSources = await listSourceRecordsByIds({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    sourceIds: requestedSourceIds,
+  });
+  const selectedById = new Map(selectedSources.map((source) => [source.id, source]));
+  const selectedDirectoryIds = requestedSourceIds.filter(
+    (sourceId) => selectedById.get(sourceId)?.sourceType === "directory",
+  );
+  const descendants = await listSourceDescendants({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    sourceIds: selectedDirectoryIds,
+    maxDepth: SOURCE_TREE_MAX_DEPTH,
+  });
+  const expandedDescendantSourceIds = descendants.map((source) => source.id);
+  const effectiveSourceIds = Array.from(
+    new Set([...requestedSourceIds, ...expandedDescendantSourceIds]),
+  );
+
+  return {
+    requestedSourceIds,
+    effectiveSourceIds,
+    selectedDirectoryIds,
+    expandedDescendantSourceIds,
+  };
+}
+
 export class ContentSourceService {
   async uploadSource(input: {
     workspaceId: string;
@@ -60,6 +194,7 @@ export class ContentSourceService {
     mimeType: string;
     content: Buffer;
     sizeBytes: number;
+    parentSourceId?: string | null;
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
@@ -86,6 +221,11 @@ export class ContentSourceService {
     }
 
     const parsingConfig = defaultParsingConfig();
+    await validateSourceParent({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      parentSourceId: input.parentSourceId,
+    });
     const sourceMetadata = {
       fileName: input.fileName,
       fileSize: input.sizeBytes,
@@ -104,6 +244,7 @@ export class ContentSourceService {
       contentText: "",
       createdBy: input.userId,
       sourceType: "file_upload",
+      parentSourceId: input.parentSourceId ?? null,
       mimeType: classification.mimeType,
       sizeBytes: input.sizeBytes,
       parserVersion: parsingConfig.parserVersion,
@@ -217,17 +358,52 @@ export class ContentSourceService {
     userId: string;
     title?: string;
     contentText?: string;
+    sourceType?: SourceRecord["sourceType"];
+    parentSourceId?: string | null;
     estimatedPages?: number;
     parsedTokens?: number;
   }) {
     const workspace = await requireContentWorkspace(input);
+    const sourceType = input.sourceType ?? "manual_upload";
+    if (sourceType !== "manual_upload" && sourceType !== "directory") {
+      throw new ContentError(
+        400,
+        "UNSUPPORTED_SOURCE_TYPE",
+        `Source type '${sourceType}' cannot be created from this endpoint`,
+      );
+    }
+    const title = normalizeContentTitle(
+      input.title,
+      sourceType === "directory" ? "Untitled Folder" : "Untitled Source",
+    );
+
+    await validateSourceParent({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      parentSourceId: input.parentSourceId,
+    });
+    if (sourceType === "directory") {
+      await assertNoDirectoryNameConflict({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        parentSourceId: input.parentSourceId ?? null,
+        title,
+      });
+    }
+
+    const contentText = input.contentText ?? "";
+    const emptyDirectory = sourceType === "directory" && contentText.trim().length === 0;
 
     const source = await createSourceRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
-      title: normalizeContentTitle(input.title, "Untitled Source"),
-      contentText: input.contentText ?? "",
+      title,
+      contentText,
       createdBy: input.userId,
+      sourceType,
+      parentSourceId: input.parentSourceId ?? null,
+      status: emptyDirectory ? "indexed" : undefined,
+      indexedAt: emptyDirectory ? new Date() : undefined,
       estimatedPages: input.estimatedPages,
       parsedTokens: input.parsedTokens,
     });
@@ -350,6 +526,7 @@ export class ContentSourceService {
     userId: string;
     title?: string;
     contentText?: string;
+    parentSourceId?: string | null;
     estimatedPages?: number | null;
     parsedTokens?: number | null;
   }) {
@@ -359,14 +536,53 @@ export class ContentSourceService {
       input.title !== undefined
         ? normalizeContentTitle(input.title, source.title)
         : undefined;
+    const nextParentSourceId =
+      input.parentSourceId !== undefined ? input.parentSourceId : undefined;
+    if (nextParentSourceId !== undefined) {
+      await validateSourceParent({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: source.id,
+        parentSourceId: nextParentSourceId,
+      });
+    }
+    if (source.sourceType === "directory" && (nextTitle !== undefined || nextParentSourceId !== undefined)) {
+      await assertNoDirectoryNameConflict({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: source.id,
+        parentSourceId: nextParentSourceId !== undefined
+          ? nextParentSourceId
+          : source.parentSourceId,
+        title: nextTitle ?? source.title,
+      });
+    }
+    const directoryContentCleared =
+      source.sourceType === "directory" &&
+      input.contentText !== undefined &&
+      input.contentText.trim().length === 0;
     const updated =
-      input.contentText !== undefined
+      directoryContentCleared
+        ? await updateSourceRecordAndInvalidateDocuments({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            sourceId: source.id,
+            title: nextTitle,
+            parentSourceId: nextParentSourceId,
+            contentText: "",
+            status: "indexed",
+            indexedAt: new Date(),
+            estimatedPages: input.estimatedPages,
+            parsedTokens: input.parsedTokens,
+          })
+        : input.contentText !== undefined
         ? await updateSourceRecordAndInvalidateDocuments({
             teamId: workspace.organizationId,
             workspaceId: workspace.id,
             sourceId: source.id,
             title: nextTitle,
             contentText: input.contentText,
+            parentSourceId: nextParentSourceId,
             estimatedPages: input.estimatedPages,
             parsedTokens: input.parsedTokens,
           })
@@ -375,6 +591,7 @@ export class ContentSourceService {
             workspaceId: workspace.id,
             sourceId: source.id,
             title: nextTitle,
+            parentSourceId: nextParentSourceId,
             estimatedPages: input.estimatedPages,
             parsedTokens: input.parsedTokens,
           });
@@ -392,6 +609,20 @@ export class ContentSourceService {
     userId: string;
   }) {
     const { workspace, source } = await requireContentSource(input);
+    if (
+      source.sourceType === "directory" &&
+      await hasSourceChildren({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: source.id,
+      })
+    ) {
+      throw new ContentError(
+        409,
+        "DIRECTORY_NOT_EMPTY",
+        "Directory must be empty before it can be deleted",
+      );
+    }
     const deleted = await deleteSourceRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,

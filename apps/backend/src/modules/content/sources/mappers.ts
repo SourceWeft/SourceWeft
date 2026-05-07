@@ -28,6 +28,7 @@ export function mapSource(row: SourceRow): SourceRecord {
     workspaceId: row.workspaceId,
     ingestKind: row.ingestKind,
     sourceType: row.sourceType as SourceRecord["sourceType"],
+    parentSourceId: row.parentSourceId,
     title: row.title,
     contentText: row.contentText,
     mimeType: row.mimeType,

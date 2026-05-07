@@ -70,14 +70,15 @@ export function buildGrepGlobMatcher(glob: string | null | undefined, path: stri
 export function matchesGrepGlob(input: {
   glob: string | null | undefined;
   globMatcher: RegExp;
-  sourceFilePath: string;
+  sourceFilePath: string | null;
   sourceTitlePath?: string | null;
   chunkPath: string;
 }) {
   return (
     !input.glob ||
     input.globMatcher.test(input.chunkPath) ||
-    input.globMatcher.test(input.sourceFilePath) ||
+    (typeof input.sourceFilePath === "string" &&
+      input.globMatcher.test(input.sourceFilePath)) ||
     (typeof input.sourceTitlePath === "string" &&
       input.globMatcher.test(input.sourceTitlePath))
   );
@@ -129,6 +130,7 @@ function buildSourceHeader(source: VirtualFsSource) {
   const originalFile = source.fileName?.trim() || source.title;
   return [
     `Source: ${source.title}`,
+    source.sourceType === "directory" ? "Library entry: directory README" : null,
     originalFile ? `Original file: ${originalFile}` : null,
     source.mimeType ? `Original MIME: ${source.mimeType}` : null,
     "Virtual MIME: text/markdown",
@@ -139,8 +141,13 @@ function buildCandidatePaths(sources: VirtualFsSource[], includeChunks: boolean)
   const paths: FileInfo[] = [];
   for (const source of sources) {
     const modifiedAt = formatTimestamp(source.updatedAt);
-    paths.push({ path: source.filePath, is_dir: false, modified_at: modifiedAt });
     paths.push({ path: `${source.dirPath}/`, is_dir: true, modified_at: modifiedAt });
+    if (source.readmePath) {
+      paths.push({ path: source.readmePath, is_dir: false, modified_at: modifiedAt });
+    }
+    if (source.filePath) {
+      paths.push({ path: source.filePath, is_dir: false, modified_at: modifiedAt });
+    }
     if (includeChunks) {
       for (let chunkNo = 0; chunkNo < source.chunkCount; chunkNo += 1) {
         paths.push({ path: buildChunkFilePath(source, chunkNo), is_dir: false, modified_at: modifiedAt });
@@ -198,6 +205,47 @@ function appendRegexMatches(input: {
   }
 }
 
+function sourceReadablePath(source: VirtualFsSource) {
+  return source.filePath ?? source.readmePath ?? source.dirPath;
+}
+
+function listDirectChildren(sources: VirtualFsSource[], parentSourceId: string | null) {
+  return sources.filter((source) => source.parentSourceId === parentSourceId);
+}
+
+function listDescendantSources(sources: VirtualFsSource[], sourceId: string) {
+  const descendants: VirtualFsSource[] = [];
+  const visited = new Set<string>([sourceId]);
+  let frontier = [sourceId];
+
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const source of sources) {
+      if (!source.parentSourceId || !frontier.includes(source.parentSourceId) || visited.has(source.sourceId)) {
+        continue;
+      }
+      visited.add(source.sourceId);
+      descendants.push(source);
+      next.push(source.sourceId);
+    }
+    frontier = next;
+  }
+
+  return descendants;
+}
+
+function buildTreeEntry(source: VirtualFsSource): FileInfo {
+  const modifiedAt = formatTimestamp(source.updatedAt);
+  if (source.sourceType === "directory") {
+    return { path: `${source.dirPath}/`, is_dir: true, modified_at: modifiedAt };
+  }
+  return {
+    path: source.filePath ?? source.dirPath,
+    is_dir: false,
+    modified_at: modifiedAt,
+  };
+}
+
 function countChunks(sources: VirtualFsSource[]) {
   return sources.reduce((sum, source) => sum + source.chunkCount, 0);
 }
@@ -243,13 +291,22 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         return { files: [{ path: "/kb/", is_dir: true }] };
       }
       if (target.kind === "kbRoot") {
-        return { files: buildCandidatePaths(sources, false) };
+        return { files: listDirectChildren(sources, null).map(buildTreeEntry) };
       }
-      if (target.kind === "sourceDir") {
+      if (target.kind === "libraryDirectory") {
         const source = findVirtualSource(sources, target.sourceId);
-        return { files: [{ path: `${source.dirPath}/chunks/`, is_dir: true }] };
+        const files: FileInfo[] = [];
+        if (source.readmePath) {
+          files.push({
+            path: source.readmePath,
+            is_dir: false,
+            modified_at: formatTimestamp(source.updatedAt),
+          });
+        }
+        files.push(...listDirectChildren(sources, source.sourceId).map(buildTreeEntry));
+        return { files };
       }
-      if (target.kind === "chunksDir") {
+      if (target.kind === "sourceChunksDir") {
         const source = findVirtualSource(sources, target.sourceId);
         return {
           files: Array.from({ length: source.chunkCount }, (_, chunkNo) => ({
@@ -324,7 +381,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         };
       }
 
-      if (target.kind === "sourceFile") {
+      if (target.kind === "sourceFile" || target.kind === "libraryDirectoryReadme") {
         const source = findVirtualSource(sources, target.sourceId);
         const boundedLimit = Math.max(1, Math.min(limit, MAX_READ_CHUNK_LIMIT));
         const boundedOffset = Math.max(0, offset);
@@ -336,6 +393,18 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           limit: boundedLimit,
         });
         if (chunks.length === 0) {
+          if (target.kind === "libraryDirectoryReadme") {
+            return {
+              mimeType: "text/markdown",
+              content: [
+                `Path: ${source.readmePath ?? filePath}`,
+                ...buildSourceHeader(source),
+                "This directory has no indexed README context yet. Directory names and paths alone are not citable evidence.",
+                "",
+                `# ${source.title}`,
+              ].join("\n"),
+            };
+          }
           return { error: `ENOENT: no readable chunks, read_file '${filePath}'` };
         }
 
@@ -362,12 +431,12 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         });
 
         const more = boundedOffset + chunks.length < source.chunkCount
-          ? `\n\nOutput truncated. Continue with read_file(path: "${source.filePath}", offset: ${boundedOffset + chunks.length}, limit: ${boundedLimit}) or read a specific chunk path.`
+          ? `\n\nOutput truncated. Continue with read_file(path: "${sourceReadablePath(source)}", offset: ${boundedOffset + chunks.length}, limit: ${boundedLimit}) or read a specific chunk path.`
           : "";
         return {
           mimeType: "text/markdown",
           content: [
-            `Path: ${source.filePath}`,
+            `Path: ${sourceReadablePath(source)}`,
             ...buildSourceHeader(source),
             "This virtual file is assembled from indexed chunks. Every final-answer claim that uses this content MUST cite the relevant chunk marker shown below using the exact [citation:id] format. In markdown tables, put the marker inside the relevant source-grounded value cell.",
             "",
@@ -476,13 +545,23 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         return { matches };
       }
 
-      const sourceIds = target.kind === "sourceFile" || target.kind === "sourceDir" || target.kind === "chunksDir"
-        ? [target.sourceId]
-        : this.input.sourceIds;
-
-      const targetSources = target.kind === "sourceFile" || target.kind === "sourceDir" || target.kind === "chunksDir"
-        ? [findVirtualSource(sources, target.sourceId)]
-        : sources;
+      const targetSources = (() => {
+        if (
+          target.kind === "sourceFile" ||
+          target.kind === "libraryDirectoryReadme" ||
+          target.kind === "sourceChunksDir"
+        ) {
+          return [findVirtualSource(sources, target.sourceId)];
+        }
+        if (target.kind === "libraryDirectory") {
+          return [
+            findVirtualSource(sources, target.sourceId),
+            ...listDescendantSources(sources, target.sourceId),
+          ];
+        }
+        return sources;
+      })();
+      const sourceIds = targetSources.map((source) => source.sourceId);
       const fallbackChunkCount = countChunks(targetSources);
 
       if (fallbackChunkCount <= MAX_GREP_FALLBACK_CHUNKS) {

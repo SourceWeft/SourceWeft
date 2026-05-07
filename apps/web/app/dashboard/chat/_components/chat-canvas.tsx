@@ -13,8 +13,10 @@ import {
   ArrowUp,
   Copy,
   FileText,
+  Folder,
   Globe,
   Loader2,
+  Music2,
   Pencil,
   Brain,
   RotateCcw,
@@ -90,7 +92,7 @@ import {
   ChainOfThoughtStep,
 } from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import type { SourceItem } from "./mock-data";
+import type { SourceItem } from "./source-types";
 import { hasWebPageToolResults, WebToolResults } from "./web-tool-results";
 
 const starterSuggestions = [
@@ -109,6 +111,25 @@ function toAttachmentData(source: SourceItem) {
     title: source.title,
     type: "source-document" as const,
   };
+}
+
+function SourceIcon({
+  className = "size-3.5",
+  source,
+}: {
+  className?: string;
+  source: SourceItem;
+}) {
+  if (source.sourceType === "directory" || source.type === "DIR") {
+    return <Folder className={cn(className, "text-primary")} />;
+  }
+  if (source.type === "AUDIO") {
+    return <Music2 className={cn(className, "text-muted-foreground")} />;
+  }
+  if (source.type === "WEB") {
+    return <Globe className={cn(className, "text-muted-foreground")} />;
+  }
+  return <FileText className={cn(className, "text-muted-foreground")} />;
 }
 
 export type MessageVersion = {
@@ -602,11 +623,11 @@ function ReferencedFiles({ sources }: { sources: SourceItem[] }) {
   return (
     <div className="ml-auto flex max-w-[85%] flex-wrap justify-end gap-1.5 pb-1 text-xs text-muted-foreground">
       <span className="inline-flex items-center px-1 font-medium text-foreground/70">
-        Referenced files
+        Referenced sources
       </span>
       {showCountOnly ? (
         <span className="rounded-full border border-input bg-background/80 px-2 py-0.5 shadow-xs">
-          {sources.length} files
+          {sources.length} sources
         </span>
       ) : (
         visible.map((source) => (
@@ -615,7 +636,7 @@ function ReferencedFiles({ sources }: { sources: SourceItem[] }) {
             key={source.id}
             title={source.title}
           >
-            <FileText className="size-3" />
+            <SourceIcon className="size-3" source={source} />
             <span className="truncate">{source.title}</span>
           </span>
         ))
@@ -1309,7 +1330,6 @@ function Composer({
   availableSkills = [],
   selectedSkillIds = [],
   onRemoveSource,
-  onSkillSelectionChange,
   disabled,
   searchEnabled = false,
   onSearchEnabledChange,
@@ -1424,11 +1444,11 @@ function Composer({
                       id: "source-count",
                       mediaType: "text/plain",
                       sourceId: "source-count",
-                      title: `${selectedSources.length} selected files`,
+                      title: `${selectedSources.length} selected sources`,
                       type: "source-document",
                     }}
                   >
-                    {selectedSources.length} selected files
+                    {selectedSources.length} selected sources
                   </Attachment>
                 ) : (
                   visible.map((source) => (
@@ -1440,7 +1460,9 @@ function Composer({
                     >
                       <AttachmentPreview
                         className="text-foreground/75"
-                        fallbackIcon={<FileText className="size-4" />}
+                        fallbackIcon={
+                          <SourceIcon className="size-4" source={source} />
+                        }
                       />
                       <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
                       <AttachmentRemove

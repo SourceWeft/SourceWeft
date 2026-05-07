@@ -15,7 +15,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
 import type { CitationRecord } from "./chat-canvas";
-import type { SourceItem } from "./mock-data";
+import type { SourceItem } from "./source-types";
 
 type SourceDetail = Awaited<ReturnType<typeof contentClient.getSource>>;
 type PreviewMode = "chunks" | "preview" | "raw";

@@ -40,6 +40,7 @@ export class ContentService {
     mimeType: string;
     content: Buffer;
     sizeBytes: number;
+    parentSourceId?: string | null;
   }) {
     return contentSourceService.uploadSource(input);
   }
@@ -49,6 +50,8 @@ export class ContentService {
     userId: string;
     title?: string;
     contentText?: string;
+    sourceType?: Parameters<typeof contentSourceService.createSource>[0]["sourceType"];
+    parentSourceId?: string | null;
     estimatedPages?: number;
     parsedTokens?: number;
   }) {
@@ -292,6 +295,7 @@ export class ContentService {
     userId: string;
     title?: string;
     contentText?: string;
+    parentSourceId?: string | null;
     estimatedPages?: number | null;
     parsedTokens?: number | null;
   }) {

@@ -1,6 +1,14 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  use,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
@@ -33,7 +41,10 @@ import {
   type ThreadCitationRecord,
 } from "../_components/sources-hub";
 import { SourcePreviewPanel } from "../_components/source-preview-panel";
-import type { SourceItem } from "../_components/mock-data";
+import {
+  expandSelectedSources,
+  type SourceItem,
+} from "../_components/source-types";
 import { contentClient } from "../../../../lib/sdk";
 import { HttpClientError } from "@sourceweft/sdk";
 
@@ -47,6 +58,8 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
 };
 const EMPTY_CITATIONS: CitationRecord[] = [];
 const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
+const useBrowserLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function getSearchPreferenceStorageKey(workspaceId: string) {
   return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
@@ -2552,7 +2565,7 @@ export default function DashboardChatThreadPage({
   }, [clearEditingState, threadId, workspaceId]);
 
   // ── On mount: consume pending first message OR load history ───────────────
-  useEffect(() => {
+  useBrowserLayoutEffect(() => {
     if (!workspaceId) {
       return;
     }
@@ -2562,74 +2575,81 @@ export default function DashboardChatThreadPage({
       return;
     }
 
-    const bootstrapTimer = window.setTimeout(() => {
-      if (bootstrappedThreadKeyRef.current === bootstrapKey) {
-        return;
-      }
-      bootstrappedThreadKeyRef.current = bootstrapKey;
+    bootstrappedThreadKeyRef.current = bootstrapKey;
 
-      const pendingKey = `chat:pending:${threadId}`;
-      const raw = sessionStorage.getItem(pendingKey);
+    const pendingKey = `chat:pending:${threadId}`;
+    const raw = window.sessionStorage.getItem(pendingKey);
 
-      if (raw) {
-        sessionStorage.removeItem(pendingKey);
-        try {
-          const {
-            content,
-            sourceIds,
-            skillIds,
-            thinking,
-            thinkingSettings: pendingThinkingSettings,
-            searchEnabled: pendingSearchEnabled,
-          } = JSON.parse(raw) as {
-            content: string;
-            sourceIds: string[];
-            skillIds?: string[];
-            thinking?: RequestThinkingConfig;
-            thinkingSettings?: PromptThinkingSettings;
-            searchEnabled?: boolean;
+    if (raw) {
+      window.sessionStorage.removeItem(pendingKey);
+      try {
+        const {
+          content,
+          sourceIds,
+          skillIds,
+          thinking,
+          thinkingSettings: pendingThinkingSettings,
+          searchEnabled: pendingSearchEnabled,
+          modelState: pendingModelState,
+        } = JSON.parse(raw) as {
+          content: string;
+          sourceIds: string[];
+          skillIds?: string[];
+          thinking?: RequestThinkingConfig;
+          thinkingSettings?: PromptThinkingSettings;
+          searchEnabled?: boolean;
+          modelState?: {
+            availableModels?: Record<ModelType, ModelItem[]>;
+            catalogKindEnabled?: Record<ModelType, boolean>;
+            selectedModels?: SelectedModels;
           };
-          const pendingSourceIds = Array.isArray(sourceIds)
-            ? sourceIds.filter(
-                (sourceId): sourceId is string => typeof sourceId === "string",
+        };
+        const pendingSourceIds = Array.isArray(sourceIds)
+          ? sourceIds.filter(
+              (sourceId): sourceId is string => typeof sourceId === "string",
+            )
+          : [];
+        const pendingSkillIds = Array.isArray(skillIds)
+          ? skillIds
+              .filter(
+                (skillId): skillId is string => typeof skillId === "string",
               )
-            : [];
-          const pendingSkillIds = Array.isArray(skillIds)
-            ? skillIds
-                .filter(
-                  (skillId): skillId is string => typeof skillId === "string",
-                )
-                .slice(0, 5)
-            : [];
-          persistActiveSourceIds(pendingSourceIds);
-          setActiveSkillIds(pendingSkillIds);
-          if (pendingThinkingSettings) {
-            setHasSavedThinkingPreference(true);
-            setThinkingSettings(pendingThinkingSettings);
-          }
-          if (typeof pendingSearchEnabled === "boolean") {
-            setSearchEnabled(pendingSearchEnabled);
-          }
-          void streamThreadActionRef.current({
-            mode: "send",
-            content,
-            sourceIds: pendingSourceIds,
-            skillIds: pendingSkillIds,
-            thinking,
-            searchEnabled: pendingSearchEnabled === true,
-          });
-        } catch {
-          void loadThreadMessagesRef.current();
+              .slice(0, 5)
+          : [];
+        persistActiveSourceIds(pendingSourceIds);
+        setActiveSkillIds(pendingSkillIds);
+        if (pendingThinkingSettings) {
+          setHasSavedThinkingPreference(true);
+          setThinkingSettings(pendingThinkingSettings);
         }
-        return;
+        if (typeof pendingSearchEnabled === "boolean") {
+          setSearchEnabled(pendingSearchEnabled);
+        }
+        if (pendingModelState?.availableModels) {
+          setAvailableModels(pendingModelState.availableModels);
+        }
+        if (pendingModelState?.catalogKindEnabled) {
+          setCatalogKindEnabled(pendingModelState.catalogKindEnabled);
+          setStreamWithSelectedLlm(pendingModelState.catalogKindEnabled.llm);
+        }
+        if (pendingModelState?.selectedModels) {
+          setSelectedModels(pendingModelState.selectedModels);
+        }
+        void streamThreadActionRef.current({
+          mode: "send",
+          content,
+          sourceIds: pendingSourceIds,
+          skillIds: pendingSkillIds,
+          thinking,
+          searchEnabled: pendingSearchEnabled === true,
+        });
+      } catch {
+        void loadThreadMessagesRef.current();
       }
+      return;
+    }
 
-      void loadThreadMessagesRef.current();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(bootstrapTimer);
-    };
+    void loadThreadMessagesRef.current();
   }, [persistActiveSourceIds, threadId, workspaceId]);
 
   // ── Public send handler (called by Composer) ──────────────────────────────
@@ -2875,8 +2895,9 @@ export default function DashboardChatThreadPage({
     [cancelEditing, editingMessageId],
   );
 
-  const selectedSources = librarySources.filter((s) =>
-    activeSourceIds.includes(s.id),
+  const selectedSources = useMemo(
+    () => expandSelectedSources(librarySources, activeSourceIds),
+    [activeSourceIds, librarySources],
   );
 
   return (

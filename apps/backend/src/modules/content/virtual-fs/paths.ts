@@ -31,27 +31,92 @@ export function safeVirtualName(value: string | null | undefined, fallback: stri
 
 export function buildVirtualSource(input: {
   sourceId: string;
+  sourceType?: VirtualFsSource["sourceType"];
+  parentSourceId?: string | null;
   title: string;
   fileName: string | null;
   chunkCount: number;
   sizeBytes: number | null;
   mimeType: string | null;
   updatedAt: Date | string;
+  parentDirPath?: string;
 }): VirtualFsSource {
   const shortId = input.sourceId.slice(0, 8);
+  const sourceType = input.sourceType ?? "manual_upload";
   const safeName = safeVirtualName(input.fileName || input.title, input.sourceId);
-  const basePath = `${KB_ROOT}/${safeName}__src_${shortId}`;
+  const parentDirPath = input.parentDirPath ?? KB_ROOT;
+  const basePath = sourceType === "directory"
+    ? `${parentDirPath}/${safeName}`.replace(/\/+/g, "/")
+    : `${parentDirPath}/${safeName}__src_${shortId}`.replace(/\/+/g, "/");
   return {
     ...input,
+    sourceType,
+    parentSourceId: input.parentSourceId ?? null,
     safeName,
     shortId,
-    filePath: `${basePath}.md`,
+    filePath: sourceType === "directory" ? null : `${basePath}.md`,
     dirPath: basePath,
+    readmePath: sourceType === "directory" ? `${basePath}/README.md` : null,
   };
 }
 
 export function buildChunkFilePath(source: VirtualFsSource, chunkNo: number) {
   return `${source.dirPath}/chunks/${String(chunkNo).padStart(4, "0")}.md`;
+}
+
+export function buildVirtualSourceTree(
+  inputs: Array<Parameters<typeof buildVirtualSource>[0]>,
+): VirtualFsSource[] {
+  const byParent = new Map<string | null, Array<Parameters<typeof buildVirtualSource>[0]>>();
+  for (const input of inputs) {
+    const parentId = input.parentSourceId ?? null;
+    const siblings = byParent.get(parentId) ?? [];
+    siblings.push(input);
+    byParent.set(parentId, siblings);
+  }
+
+  const built = new Map<string, VirtualFsSource>();
+  const ordered: VirtualFsSource[] = [];
+  const visiting = new Set<string>();
+
+  function buildNode(input: Parameters<typeof buildVirtualSource>[0], parentDirPath = KB_ROOT) {
+    if (built.has(input.sourceId)) {
+      return built.get(input.sourceId)!;
+    }
+    if (visiting.has(input.sourceId)) {
+      return buildVirtualSource({ ...input, parentDirPath: KB_ROOT, parentSourceId: null });
+    }
+    visiting.add(input.sourceId);
+
+    const parent = input.parentSourceId ? built.get(input.parentSourceId) : null;
+    const resolvedParentDirPath = parent?.sourceType === "directory"
+      ? parent.dirPath
+      : parentDirPath;
+    const source = buildVirtualSource({
+      ...input,
+      parentDirPath: resolvedParentDirPath,
+    });
+    visiting.delete(input.sourceId);
+    built.set(source.sourceId, source);
+    ordered.push(source);
+
+    const children = byParent.get(input.sourceId) ?? [];
+    for (const child of children) {
+      buildNode(child, source.sourceType === "directory" ? source.dirPath : KB_ROOT);
+    }
+    return source;
+  }
+
+  for (const root of byParent.get(null) ?? []) {
+    buildNode(root);
+  }
+  for (const input of inputs) {
+    if (!built.has(input.sourceId)) {
+      buildNode({ ...input, parentSourceId: null });
+    }
+  }
+
+  return ordered;
 }
 
 export function parseVirtualPath(path: string, sources: VirtualFsSource[]): VirtualPathTarget {
@@ -63,10 +128,12 @@ export function parseVirtualPath(path: string, sources: VirtualFsSource[]): Virt
     return { kind: "kbRoot" };
   }
 
-  const source = sources.find(
+  const orderedSources = [...sources].sort((a, b) => b.dirPath.length - a.dirPath.length);
+  const source = orderedSources.find(
     (candidate) =>
-      normalized === candidate.filePath ||
+      (candidate.filePath !== null && normalized === candidate.filePath) ||
       normalized === candidate.dirPath ||
+      (candidate.readmePath !== null && normalized === candidate.readmePath) ||
       normalized === `${candidate.dirPath}/chunks` ||
       normalized.startsWith(`${candidate.dirPath}/chunks/`),
   );
@@ -75,14 +142,20 @@ export function parseVirtualPath(path: string, sources: VirtualFsSource[]): Virt
     throw new Error(`ENOENT: no such file or directory, '${normalized}'`);
   }
 
-  if (normalized === source.filePath) {
+  if (source.filePath !== null && normalized === source.filePath) {
     return { kind: "sourceFile", sourceId: source.sourceId };
   }
+  if (source.readmePath !== null && normalized === source.readmePath) {
+    return { kind: "libraryDirectoryReadme", sourceId: source.sourceId };
+  }
   if (normalized === source.dirPath) {
-    return { kind: "sourceDir", sourceId: source.sourceId };
+    if (source.sourceType === "directory") {
+      return { kind: "libraryDirectory", sourceId: source.sourceId };
+    }
+    throw new Error(`ENOENT: no such file or directory, '${normalized}'`);
   }
   if (normalized === `${source.dirPath}/chunks`) {
-    return { kind: "chunksDir", sourceId: source.sourceId };
+    return { kind: "sourceChunksDir", sourceId: source.sourceId };
   }
 
   const chunkMatch = normalized.match(/\/chunks\/(\d+)\.md$/);

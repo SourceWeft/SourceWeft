@@ -51,7 +51,14 @@ export type PreparedThreadTurn = {
   workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;
   messageContent: string;
+  selectedSourceIds: string[];
   sourceIds: string[];
+  sourceScope: {
+    requestedSourceIds: string[];
+    effectiveSourceIds: string[];
+    selectedDirectoryIds: string[];
+    expandedDescendantSourceIds: string[];
+  };
   skillIds: string[];
   webSearchEnabled: boolean;
   timezone: string;

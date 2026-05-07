@@ -84,7 +84,9 @@ export const sourceSchema = z.object({
     "note",
     "artifact",
     "connector",
+    "directory",
   ]),
+  parentSourceId: z.string().nullable(),
   title: z.string(),
   contentText: z.string(),
   mimeType: z.string().nullable(),
@@ -171,6 +173,17 @@ export const sourceContentResponseSchema = z.object({
 export const createSourceRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   contentText: z.string().max(100000).optional(),
+  sourceType: z.enum([
+    "manual_upload",
+    "file_upload",
+    "web_url",
+    "youtube",
+    "note",
+    "artifact",
+    "connector",
+    "directory",
+  ]).optional(),
+  parentSourceId: z.string().nullable().optional(),
   estimatedPages: z.number().int().positive().optional(),
   parsedTokens: z.number().int().positive().optional(),
 });
@@ -196,6 +209,7 @@ export const getSourceDocumentResponseSchema = getSourceResponseSchema;
 export const updateSourceRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   contentText: z.string().max(100000).optional(),
+  parentSourceId: z.string().nullable().optional(),
   estimatedPages: z.number().int().positive().nullable().optional(),
   parsedTokens: z.number().int().positive().nullable().optional(),
 });
