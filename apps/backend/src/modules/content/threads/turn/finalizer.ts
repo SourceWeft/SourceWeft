@@ -154,6 +154,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       rank: index + 1,
       score: citation.score,
       externalUri: citation.externalUri,
+      content: citation.content,
     })),
   });
 

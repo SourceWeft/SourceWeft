@@ -4,7 +4,7 @@ import type { AgentCitationRegistry } from "../citation-registry";
 import type { WebFetchResultItem, WebProvider, WebSearchResultItem } from "../../web";
 
 const WEB_SEARCH_QUERY_MAX_CHARS = 240;
-const WEB_SEARCH_LIMIT_DEFAULT = 20;
+const WEB_SEARCH_LIMIT_DEFAULT = 10;
 const WEB_FETCH_MAX_ITEMS = 5;
 
 function compactWhitespace(value: string) {
@@ -35,6 +35,8 @@ function addSearchCitation(input: {
     externalUri: input.result.url,
     sourceTitle: input.result.title,
     content: input.result.markdown || input.result.snippet || input.result.title || input.result.url,
+    excerptContent: input.result.snippet || input.result.title || input.result.url,
+    fullContent: input.result.markdown,
   });
 }
 
@@ -47,6 +49,8 @@ function addFetchCitation(input: {
     externalUri: input.result.url,
     sourceTitle: input.result.title,
     content: input.result.markdown || input.result.description || input.result.url,
+    excerptContent: input.result.description || input.result.title || input.result.url,
+    fullContent: input.result.markdown,
   });
 }
 
@@ -110,6 +114,7 @@ export function createWebTools(input: {
     async (
       args: {
         query: string;
+        fresh?: boolean;
         lang?: string;
         country?: string;
       },
@@ -126,6 +131,8 @@ export function createWebTools(input: {
       const search = await input.provider.search({
         query,
         limit: WEB_SEARCH_LIMIT_DEFAULT,
+        includeContent: true,
+        fresh: args.fresh === true,
         ...(args.lang ? { lang: args.lang } : {}),
         ...(args.country ? { country: args.country } : {}),
       });
@@ -146,9 +153,10 @@ export function createWebTools(input: {
     {
       name: "web_search",
       description:
-        "Search the public web for real-time, current, or external information. Use specific, descriptive search terms. Search results include titles, snippets, URLs, citations, and may include extracted main page content. Use web_fetch only when search result content is insufficient, conflicting, or the user needs a specific page read in full.",
+        "Search the public web for real-time, current, or external information. Use specific, descriptive search terms. Search results include titles, snippets, URLs, citations, and may include extracted main page content. Set fresh=true for current, latest, live, today, or otherwise time-sensitive searches; omit it when cached search content is acceptable. Use web_fetch only when search result content is insufficient, conflicting, or the user needs a specific page read in full.",
       schema: z.object({
         query: z.string().min(1).max(WEB_SEARCH_QUERY_MAX_CHARS),
+        fresh: z.boolean().optional(),
         lang: z.string().min(1).max(16).optional(),
         country: z.string().min(1).max(16).optional(),
       }),
@@ -158,6 +166,7 @@ export function createWebTools(input: {
   const webFetchTool = tool(
     async (
       args: {
+        fresh?: boolean;
         items: Array<{
           url: string;
           prompt?: string;
@@ -170,7 +179,10 @@ export function createWebTools(input: {
         throw new Error("At least one URL is required.");
       }
 
-      const fetched = await input.provider.fetch({ items });
+      const fetched = await input.provider.fetch({
+        items,
+        fresh: args.fresh === true,
+      });
       const results = fetched.results.map((result) => {
         if (result.error) {
           return result;
@@ -192,8 +204,9 @@ export function createWebTools(input: {
     {
       name: "web_fetch",
       description:
-        "Fetch and read full web page content from URLs. Use when the user provides a URL, asks for full-page analysis, or web_search evidence is insufficient or conflicting.",
+        "Fetch and read full web page content from URLs. Use when the user provides a URL, asks for full-page analysis, or web_search evidence is insufficient or conflicting. Set fresh=true when the page content is current, latest, live, today, or otherwise time-sensitive; omit it when cached page content is acceptable.",
       schema: z.object({
+        fresh: z.boolean().optional(),
         items: z.array(z.object({
           url: z.string().url(),
           prompt: z.string().max(1000).optional(),

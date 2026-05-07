@@ -10,6 +10,7 @@ export type AgentCitation = {
   score: number;
   excerpt: string;
   quoteText: string;
+  content?: string;
   origin: "search_sources" | "read_file" | "grep" | "web_search" | "web_fetch";
   externalUri?: string;
   path?: string;
@@ -24,6 +25,7 @@ export type CitationRecordInput = {
   rank: number;
   score: number;
   externalUri?: string;
+  content?: string;
 };
 
 function cleanCitationExcerpt(content: string) {
@@ -39,6 +41,13 @@ function cleanCitationExcerpt(content: string) {
     .replace(/\\\$/g, "$ ")
     .replace(/\|/g, " ")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanCitationContent(content: string) {
+  return content
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
     .trim();
 }
 
@@ -106,15 +115,26 @@ export class AgentCitationRegistry {
     externalUri: string;
     sourceTitle?: string | null;
     content: string;
+    excerptContent?: string;
+    fullContent?: string;
     score?: number | null;
   }) {
+    const fullContent = cleanCitationContent(input.fullContent ?? "");
+    const excerptSource = input.excerptContent || input.content;
+    const excerpt = cleanCitationExcerpt(excerptSource).slice(0, 320);
     const existing = this.byExternalUri.get(input.externalUri);
     if (existing) {
+      if (!existing.content && fullContent) {
+        existing.content = fullContent;
+      }
+      if (!existing.excerpt && excerpt) {
+        existing.excerpt = excerpt;
+        existing.quoteText = excerpt.slice(0, 400);
+      }
       return existing;
     }
 
     const citation = `c${this.order.length + 1}`;
-    const excerpt = cleanCitationExcerpt(input.content).slice(0, 320);
     const key = `external:${input.externalUri}`;
     const evidence: AgentCitation = {
       citation,
@@ -125,6 +145,7 @@ export class AgentCitationRegistry {
       score: Number((input.score ?? 1).toFixed(6)),
       excerpt,
       quoteText: excerpt.slice(0, 400),
+      ...(fullContent ? { content: fullContent } : {}),
       origin: input.origin,
       externalUri: input.externalUri,
     };
@@ -149,6 +170,7 @@ export class AgentCitationRegistry {
       rank: index + 1,
       score: citation.score,
       externalUri: citation.externalUri,
+      content: citation.content,
     }));
   }
 }

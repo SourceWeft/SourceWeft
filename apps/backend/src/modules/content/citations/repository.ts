@@ -20,6 +20,7 @@ export async function createCitationRecords(input: {
     rank: number;
     score: number;
     externalUri?: string | null;
+    content?: string;
   }>;
 }) {
   if (input.citations.length === 0) {
@@ -45,6 +46,7 @@ export async function createCitationRecords(input: {
         sourceTitle: citation.sourceTitle,
         chunkNo: citation.chunkNo,
         excerpt: citation.excerpt,
+        content: citation.content,
         origin: citation.externalUri ? "external" : "source",
       },
       createdAt: new Date(),

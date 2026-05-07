@@ -14,9 +14,11 @@ import type {
   WebSearchResultItem,
 } from "./types";
 import { validatePublicHttpUrl } from "./url-safety";
+import { logger } from "../../../shared/logger";
 
 const SEARCH_MARKDOWN_MAX_CHARS = 12_000;
 const SEARCH_LIMIT_MAX = 20;
+const SEARCH_WITH_CONTENT_LIMIT_MAX = 10;
 const FETCH_MARKDOWN_MAX_CHARS = 50_000;
 const FETCH_CONCURRENCY = 5;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -46,6 +48,23 @@ function truncateMarkdown(markdown: string, maxChars: number) {
   return {
     markdown: markdown.slice(0, maxChars).trimEnd(),
     truncated: true,
+  };
+}
+
+function summarizeWordCounts(counts: number[]) {
+  if (counts.length === 0) {
+    return {
+      min: 0,
+      max: 0,
+      average: 0,
+    };
+  }
+
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  return {
+    min: Math.min(...counts),
+    max: Math.max(...counts),
+    average: Math.round(total / counts.length),
   };
 }
 
@@ -189,21 +208,51 @@ export class AnyCrawlWebProvider implements WebProvider {
 
   async search(input: WebSearchProviderInput): Promise<WebSearchProviderResult> {
     const query = compactWhitespace(input.query);
-    const limit = clamp(input.limit, 1, SEARCH_LIMIT_MAX);
+    const includeContent = input.includeContent !== false;
+    const fresh = input.fresh === true;
+    const limit = clamp(
+      input.limit,
+      1,
+      includeContent ? SEARCH_WITH_CONTENT_LIMIT_MAX : SEARCH_LIMIT_MAX,
+    );
     const pages = Math.max(1, Math.ceil(limit / 10));
-    const results = await this.client.search({
+    const scrapeOptions = includeContent
+      ? {
+          engine: "cheerio" as const,
+          formats: ["markdown" as const],
+          only_main_content: true,
+          ...(fresh ? { max_age: 0 } : {}),
+        }
+      : undefined;
+    const searchRequest = {
       query,
       engine: "google",
       pages,
       limit,
-      scrape_options: {
-        engine: "cheerio",
-        formats: ["markdown"],
-        only_main_content: true,
-      },
+      ...(scrapeOptions ? { scrape_options: scrapeOptions } : {}),
       ...(input.lang ? { lang: input.lang } : {}),
       ...(input.country ? { country: input.country } : {}),
+    } as const;
+
+    logger.debug("AnyCrawl web search request", {
+      provider: this.name,
+      queryLength: query.length,
+      limit,
+      pages,
+      includeContent,
+      fresh,
+      scrapeOptionsSent: Boolean(searchRequest.scrape_options),
+      scrapeEngine: searchRequest.scrape_options?.engine ?? null,
+      scrapeFormats: searchRequest.scrape_options?.formats ?? null,
+      onlyMainContent: searchRequest.scrape_options?.only_main_content ?? null,
+      maxAgeMs: searchRequest.scrape_options && "max_age" in searchRequest.scrape_options
+        ? searchRequest.scrape_options.max_age
+        : null,
+      lang: input.lang ?? null,
+      country: input.country ?? null,
     });
+
+    const results = await this.client.search(searchRequest);
 
     const normalized = results
       .map((result) => {
@@ -216,6 +265,23 @@ export class AnyCrawlWebProvider implements WebProvider {
       .filter((item): item is WebSearchResultItem => item !== null)
       .slice(0, limit);
 
+    const markdownWordCounts = normalized
+      .map((result) => result.wordCount ?? 0)
+      .filter((count) => count > 0);
+    logger.debug("AnyCrawl web search response", {
+      provider: this.name,
+      queryLength: query.length,
+      includeContent,
+      fresh,
+      requestedLimit: limit,
+      rawResultCount: results.length,
+      normalizedResultCount: normalized.length,
+      markdownResultCount: markdownWordCounts.length,
+      missingMarkdownCount: Math.max(0, normalized.length - markdownWordCounts.length),
+      markdownWordCounts: summarizeWordCounts(markdownWordCounts),
+      truncatedResultCount: normalized.filter((result) => result.truncated === true).length,
+    });
+
     return {
       provider: this.name,
       query,
@@ -225,6 +291,7 @@ export class AnyCrawlWebProvider implements WebProvider {
   }
 
   async fetch(input: WebFetchProviderInput): Promise<WebFetchProviderResult> {
+    const fresh = input.fresh === true;
     const items = input.items.slice(0, FETCH_CONCURRENCY).map((item) => ({
       ...item,
       url: validatePublicHttpUrl(item.url),
@@ -235,7 +302,7 @@ export class AnyCrawlWebProvider implements WebProvider {
       FETCH_CONCURRENCY,
       async (item): Promise<WebFetchResultItem> => {
         try {
-          return await this.fetchOne(item.url);
+          return await this.fetchOne(item.url, fresh);
         } catch (error) {
           return {
             url: item.url,
@@ -263,7 +330,7 @@ export class AnyCrawlWebProvider implements WebProvider {
     return Math.min(this.fetchTimeoutMs, remaining);
   }
 
-  private async scrape(url: string, engine: Engine, deadlineMs: number) {
+  private async scrape(url: string, engine: Engine, deadlineMs: number, fresh: boolean) {
     const timeoutMs = this.remainingTimeoutMs(deadlineMs);
     return withTimeout(
       this.client.scrape({
@@ -272,25 +339,32 @@ export class AnyCrawlWebProvider implements WebProvider {
         formats: ["markdown"],
         only_main_content: true,
         timeout: timeoutMs,
+        ...(fresh ? { max_age: 0 } : {}),
       }),
       timeoutMs,
     );
   }
 
-  private async fetchOne(url: string) {
+  private async fetchOne(url: string, fresh: boolean) {
     const deadlineMs = Date.now() + this.fetchTimeoutMs;
     try {
-      const cheerioResult = normalizeFetchResult(url, await this.scrape(url, "cheerio", deadlineMs));
-      if (!shouldFallbackToPlaywright(cheerioResult)) {
-        return cheerioResult;
+      const autoResult = normalizeFetchResult(
+        url,
+        await this.scrape(url, "auto", deadlineMs, fresh),
+      );
+      if (!shouldFallbackToPlaywright(autoResult)) {
+        return autoResult;
       }
     } catch (error) {
       if (isTimeoutError(error)) {
         throw error;
       }
-      // Retry with a browser engine when the static fetch path cannot extract usable content.
+      // Retry with a browser engine when the default extraction path cannot extract usable content.
     }
 
-    return normalizeFetchResult(url, await this.scrape(url, "playwright", deadlineMs));
+    return normalizeFetchResult(
+      url,
+      await this.scrape(url, "playwright", deadlineMs, fresh),
+    );
   }
 }

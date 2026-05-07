@@ -403,15 +403,19 @@ function getWebToolEndTitle(toolName: string) {
 function getWebToolInputMetadata(toolName: string, input: Record<string, unknown>) {
   if (toolName === "web_search") {
     const query = typeof input.query === "string" ? input.query.trim() : "";
+    const fresh = input.fresh === true;
     return {
       ...(query ? { query } : {}),
+      ...(fresh ? { fresh: true } : {}),
     };
   }
 
   if (toolName === "web_fetch") {
     const urls = extractWebFetchUrls(input);
+    const fresh = input.fresh === true;
     return {
       urlCount: urls.length,
+      ...(fresh ? { fresh: true } : {}),
     };
   }
 
@@ -459,6 +463,7 @@ function normalizeWebToolOutput(toolName: string, output: unknown) {
   const webResultMatches = outputText.match(/<web_result /g);
   const webPageMatches = outputText.match(/<web_page /g);
   const errorMatches = outputText.match(/<web_page [^>]* error=/g);
+  const pages = extractWebToolPages(outputText);
 
   return {
     ...(webResultMatches ? { resultCount: webResultMatches.length } : {}),
@@ -466,8 +471,60 @@ function normalizeWebToolOutput(toolName: string, output: unknown) {
     ...(errorMatches ? { errorCount: errorMatches.length } : {}),
     urlCount: urls.length,
     urls: urls.slice(0, 10),
+    ...(pages.length > 0 ? { pages } : {}),
     truncated: outputText.includes("truncated='true'"),
   };
+}
+
+function decodeXmlAttribute(value: string) {
+  return value
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function extractXmlAttributes(value: string) {
+  const attributes: Record<string, string> = {};
+  for (const match of value.matchAll(/([a-zA-Z_][\w:-]*)='([^']*)'/g)) {
+    const key = match[1];
+    const rawValue = match[2];
+    if (key && rawValue !== undefined) {
+      attributes[key] = decodeXmlAttribute(rawValue);
+    }
+  }
+  return attributes;
+}
+
+function extractWebToolPages(outputText: string) {
+  return [...outputText.matchAll(/<(web_result|web_page)\b([^>]*)>/g)]
+    .map((match) => {
+      const tagName = match[1];
+      const attributesText = match[2] ?? "";
+      const attributes = extractXmlAttributes(attributesText);
+      const url = attributes.url?.trim();
+      if (!url) {
+        return null;
+      }
+
+      const rank = Number(attributes.rank);
+      const wordCount = Number(attributes.word_count);
+      const title = attributes.title?.trim();
+      const error = attributes.error?.trim();
+      return {
+        url,
+        ...(title ? { title } : {}),
+        ...(Number.isFinite(rank) ? { rank } : {}),
+        ...(attributes.id ? { citation: attributes.id } : {}),
+        ...(Number.isFinite(wordCount) ? { wordCount } : {}),
+        ...(error ? { error } : {}),
+        ...(attributes.truncated === "true" ? { truncated: true } : {}),
+        hasContent: tagName === "web_page" || Number.isFinite(wordCount),
+      };
+    })
+    .filter((page): page is NonNullable<typeof page> => page !== null)
+    .slice(0, 20);
 }
 
 function formatDateInTimeZone(date: Date, timeZone: string) {
@@ -494,7 +551,8 @@ function buildAgentRuntimePrompt(input: {
     lines.push(
       "web_search and web_fetch are available for public web access in this turn.",
       "Use web_search for real-time, current, or external public web information instead of answering from memory.",
-      "Use web_fetch for specific webpages, full-page analysis, or when web_search evidence is insufficient or conflicting.",
+      "For current, latest, live, today, or otherwise time-sensitive web searches, call web_search with fresh=true. Omit fresh when cached search content is acceptable.",
+      "Use web_fetch for specific webpages, full-page analysis, or when web_search evidence is insufficient or conflicting. Set fresh=true for time-sensitive page content.",
       "For workspace-specific or selected-source questions, use selected source tools first. Use web tools only when the user explicitly asks for internet information, asks about current public facts, or selected sources do not contain enough evidence.",
       `When a date qualifier is useful, use the current date/year from this runtime context: ${currentDate}.`,
     );

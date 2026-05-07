@@ -4,6 +4,7 @@ export type WebSearchProviderInput = {
   query: string;
   limit: number;
   includeContent?: boolean;
+  fresh?: boolean;
   lang?: string;
   country?: string;
 };
@@ -27,6 +28,7 @@ export type WebSearchResultItem = {
 };
 
 export type WebFetchProviderInput = {
+  fresh?: boolean;
   items: Array<{
     url: string;
     prompt?: string;

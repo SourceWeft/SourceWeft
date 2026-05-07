@@ -47,13 +47,17 @@ function createInvokableWebTools(input: {
   return createWebTools(input) as InvokableTool[];
 }
 
-test("web_search defaults to limit 20 and registers citation", async () => {
+test("web_search defaults to 10 enriched results and registers citation", async () => {
   let observedLimit = 0;
+  let observedIncludeContent: boolean | undefined;
+  let observedFresh: boolean | undefined;
   const provider = createProvider();
   const wrappedProvider: WebProvider = {
     ...provider,
     async search(input) {
       observedLimit = input.limit;
+      observedIncludeContent = input.includeContent;
+      observedFresh = input.fresh;
       return provider.search(input);
     },
   };
@@ -66,10 +70,33 @@ test("web_search defaults to limit 20 and registers citation", async () => {
 
   const output = await webSearch.invoke({ query: "OpenAI news" });
 
-  assert.equal(observedLimit, 20);
+  assert.equal(observedLimit, 10);
+  assert.equal(observedIncludeContent, true);
+  assert.equal(observedFresh, false);
   assert.match(String(output), /\[citation:c1\]|id='c1'/);
   assert.equal(citationRegistry.list()[0]?.externalUri, "https://example.com");
   assert.equal(citationRegistry.toCitationRecords()[0]?.chunkId, null);
+});
+
+test("web_search passes fresh flag for time-sensitive searches", async () => {
+  let observedFresh: boolean | undefined;
+  const provider = createProvider();
+  const wrappedProvider: WebProvider = {
+    ...provider,
+    async search(input) {
+      observedFresh = input.fresh;
+      return provider.search(input);
+    },
+  };
+  const [webSearch] = createInvokableWebTools({
+    provider: wrappedProvider,
+    citationRegistry: new AgentCitationRegistry(),
+  });
+  assert.ok(webSearch);
+
+  await webSearch.invoke({ query: "gold price today", fresh: true });
+
+  assert.equal(observedFresh, true);
 });
 
 test("web_search returns main content from search results", async () => {
@@ -100,7 +127,71 @@ test("web_search returns main content from search results", async () => {
   const output = String(await webSearch.invoke({ query: "OpenAI news" }));
 
   assert.match(output, /<main_content>Search result main content<\/main_content>/);
-  assert.equal(citationRegistry.list()[0]?.excerpt, "Search result main content");
+  assert.equal(citationRegistry.list()[0]?.excerpt, "Example snippet");
+  assert.equal(citationRegistry.list()[0]?.content, "Search result main content");
+});
+
+test("web_search keeps full citation content when main content is long", async () => {
+  const citationRegistry = new AgentCitationRegistry();
+  const longMainContent = `Full content ${"word ".repeat(200)}`.trim();
+  const [webSearch] = createInvokableWebTools({
+    provider: {
+      ...createProvider(),
+      async search(input) {
+        return {
+          provider: "test",
+          query: input.query,
+          count: 1,
+          results: [{
+            title: "Long page",
+            url: "https://example.com/long",
+            snippet: "Short search summary",
+            markdown: longMainContent,
+            wordCount: 202,
+            truncated: false,
+          }],
+        };
+      },
+    },
+    citationRegistry,
+  });
+  assert.ok(webSearch);
+
+  await webSearch.invoke({ query: "long page" });
+
+  const citation = citationRegistry.list()[0];
+  assert.equal(citation?.excerpt, "Short search summary");
+  assert.equal(citation?.content, longMainContent);
+  assert.equal(citation?.content?.length, longMainContent.length);
+});
+
+test("web_search uses snippet as citation summary when main content is missing", async () => {
+  const citationRegistry = new AgentCitationRegistry();
+  const [webSearch] = createInvokableWebTools({
+    provider: {
+      ...createProvider(),
+      async search(input) {
+        return {
+          provider: "test",
+          query: input.query,
+          count: 1,
+          results: [{
+            title: "Snippet only",
+            url: "https://example.com/snippet",
+            snippet: "Only a search snippet is available",
+          }],
+        };
+      },
+    },
+    citationRegistry,
+  });
+  assert.ok(webSearch);
+
+  await webSearch.invoke({ query: "snippet only" });
+
+  const citation = citationRegistry.list()[0];
+  assert.equal(citation?.excerpt, "Only a search snippet is available");
+  assert.equal(citation?.content, undefined);
 });
 
 test("web_search rejects overly long queries", async () => {
@@ -118,11 +209,13 @@ test("web_search rejects overly long queries", async () => {
 
 test("web_fetch accepts up to 5 URLs and registers citations", async () => {
   let observedCount = 0;
+  let observedFresh: boolean | undefined;
   const provider = createProvider();
   const wrappedProvider: WebProvider = {
     ...provider,
     async fetch(input) {
       observedCount = input.items.length;
+      observedFresh = input.fresh;
       return provider.fetch(input);
     },
   };
@@ -140,8 +233,33 @@ test("web_fetch accepts up to 5 URLs and registers citations", async () => {
   });
 
   assert.equal(observedCount, 5);
+  assert.equal(observedFresh, false);
   assert.match(String(output), /<web_page id='c1'/);
   assert.equal(citationRegistry.list().length, 5);
+});
+
+test("web_fetch passes fresh flag for time-sensitive pages", async () => {
+  let observedFresh: boolean | undefined;
+  const provider = createProvider();
+  const wrappedProvider: WebProvider = {
+    ...provider,
+    async fetch(input) {
+      observedFresh = input.fresh;
+      return provider.fetch(input);
+    },
+  };
+  const [, webFetch] = createInvokableWebTools({
+    provider: wrappedProvider,
+    citationRegistry: new AgentCitationRegistry(),
+  });
+  assert.ok(webFetch);
+
+  await webFetch.invoke({
+    fresh: true,
+    items: [{ url: "https://example.com/live" }],
+  });
+
+  assert.equal(observedFresh, true);
 });
 
 test("web tools escape result fields", async () => {

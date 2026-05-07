@@ -91,6 +91,7 @@ import {
 } from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { SourceItem } from "./mock-data";
+import { hasWebPageToolResults, WebToolResults } from "./web-tool-results";
 
 const starterSuggestions = [
   "Summarize the selected sources",
@@ -179,6 +180,7 @@ export type CitationRecord = {
   chunkNo?: number;
   score: number;
   excerpt: string;
+  content?: string;
   externalUri?: string;
 };
 
@@ -855,6 +857,8 @@ function ToolCallDetails({
   const shouldShowOutputSummary = Boolean(
       outputSummary &&
       toolCall.tool !== "search_sources" &&
+      toolCall.tool !== "web_search" &&
+      toolCall.tool !== "web_fetch" &&
       outputSummary !== "{}",
   );
 
@@ -866,7 +870,7 @@ function ToolCallDetails({
         </p>
       ) : null}
       {toolStep?.detail ? <p>{toolStep.detail}</p> : null}
-      {fetchUrls.length > 0 ? (
+      {fetchUrls.length > 0 && !hasWebPageToolResults([toolCall]) ? (
         <div>
           <span className="font-medium text-foreground/80">URLs:</span>{" "}
           {fetchUrls.slice(0, 5).map((url, index) => (
@@ -1967,6 +1971,11 @@ export function ChatCanvas({
                                     modelReasoning={version.modelReasoning}
                                     modelReasoningSegments={version.modelReasoningSegments}
                                     steps={version.thinkingSteps}
+                                    toolCalls={version.toolCalls}
+                                  />
+                                  <WebToolResults
+                                    availableCitations={version.availableCitations}
+                                    onCitationClick={onCitationClick}
                                     toolCalls={version.toolCalls}
                                   />
                                   <CitationAwareMessageResponse

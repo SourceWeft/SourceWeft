@@ -238,6 +238,7 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       const chunkNo = toNullableNumber(record.chunkNo) ?? undefined;
       const score = toNullableNumber(record.score);
       const excerpt = toNullableString(record.excerpt);
+      const content = toNullableString(record.content) ?? undefined;
       const externalUri = toNullableString(record.externalUri) ?? undefined;
 
       if (
@@ -267,6 +268,9 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       }
       if (externalUri !== undefined) {
         citationRecord.externalUri = externalUri;
+      }
+      if (content !== undefined) {
+        citationRecord.content = content;
       }
 
       return citationRecord;
@@ -1143,7 +1147,7 @@ export default function DashboardChatThreadPage({
     DEFAULT_PROMPT_THINKING_SETTINGS,
   );
   const [hasSavedThinkingPreference, setHasSavedThinkingPreference] = useState(false);
-  const [searchEnabled, setSearchEnabled] = useState(false);
+  const [searchEnabled, setSearchEnabled] = useState(true);
 
   const clearEditingState = useCallback(() => {
     setEditingMessageId(null);
@@ -1263,11 +1267,12 @@ export default function DashboardChatThreadPage({
 
   useEffect(() => {
     if (!currentSearchStorageKey) {
-      setSearchEnabled(false);
+      setSearchEnabled(true);
       return;
     }
 
-    setSearchEnabled(window.sessionStorage.getItem(currentSearchStorageKey) === "true");
+    const stored = window.sessionStorage.getItem(currentSearchStorageKey);
+    setSearchEnabled(stored === null ? true : stored === "true");
   }, [currentSearchStorageKey]);
 
   useEffect(() => {

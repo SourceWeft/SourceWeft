@@ -68,6 +68,7 @@ test("AnyCrawlWebProvider search requests cheerio main content enrichment", asyn
       engine?: string;
       formats?: string[];
       only_main_content?: boolean;
+      max_age?: number;
     };
   }> = [];
 
@@ -81,6 +82,7 @@ test("AnyCrawlWebProvider search requests cheerio main content enrichment", asyn
           engine?: string;
           formats?: string[];
           only_main_content?: boolean;
+          max_age?: number;
         };
       }): Promise<unknown>;
     };
@@ -99,12 +101,13 @@ test("AnyCrawlWebProvider search requests cheerio main content enrichment", asyn
 
   const result = await provider.search({
     query: "example query",
-    limit: 20,
+    limit: 10,
+    includeContent: true,
   });
 
   assert.equal(result.results.length, 1);
-  assert.equal(observedInputs[0]?.limit, 20);
-  assert.equal(observedInputs[0]?.pages, 2);
+  assert.equal(observedInputs[0]?.limit, 10);
+  assert.equal(observedInputs[0]?.pages, 1);
   assert.deepEqual(observedInputs[0]?.scrape_options, {
     engine: "cheerio",
     formats: ["markdown"],
@@ -115,17 +118,73 @@ test("AnyCrawlWebProvider search requests cheerio main content enrichment", asyn
   assert.equal(result.results[0]?.truncated, false);
 });
 
-test("AnyCrawlWebProvider search allows 20 results", async () => {
+test("AnyCrawlWebProvider fresh search forces main content refresh", async () => {
   const provider = new AnyCrawlWebProvider("test-key");
-  let observedLimit = 0;
+  let observedScrapeOptions: {
+    engine?: string;
+    formats?: string[];
+    only_main_content?: boolean;
+    max_age?: number;
+  } | undefined;
 
   (provider as unknown as {
     client: {
-      search(input: { limit?: number }): Promise<unknown>;
+      search(input: {
+        scrape_options?: {
+          engine?: string;
+          formats?: string[];
+          only_main_content?: boolean;
+          max_age?: number;
+        };
+      }): Promise<unknown>;
+    };
+  }).client = {
+    async search(input) {
+      observedScrapeOptions = input.scrape_options;
+      return [{
+        title: "Example",
+        url: "https://example.com/fresh",
+        description: "Snippet",
+        source: "example",
+        markdown: "Fresh main content",
+      }];
+    },
+  };
+
+  await provider.search({
+    query: "today price",
+    limit: 10,
+    includeContent: true,
+    fresh: true,
+  });
+
+  assert.deepEqual(observedScrapeOptions, {
+    engine: "cheerio",
+    formats: ["markdown"],
+    only_main_content: true,
+    max_age: 0,
+  });
+});
+
+test("AnyCrawlWebProvider plain search allows 20 results without scrape options", async () => {
+  const provider = new AnyCrawlWebProvider("test-key");
+  let observedLimit = 0;
+  let observedPages = 0;
+  let observedScrapeOptions: unknown = null;
+
+  (provider as unknown as {
+    client: {
+      search(input: {
+        limit?: number;
+        pages?: number;
+        scrape_options?: unknown;
+      }): Promise<unknown>;
     };
   }).client = {
     async search(input) {
       observedLimit = input.limit ?? 0;
+      observedPages = input.pages ?? 0;
+      observedScrapeOptions = input.scrape_options;
       return Array.from({ length: 20 }, (_, index) => ({
         title: `Result ${index}`,
         url: `https://example.com/result-${index}`,
@@ -139,9 +198,12 @@ test("AnyCrawlWebProvider search allows 20 results", async () => {
   const result = await provider.search({
     query: "example query",
     limit: 20,
+    includeContent: false,
   });
 
   assert.equal(observedLimit, 20);
+  assert.equal(observedPages, 2);
+  assert.equal(observedScrapeOptions, undefined);
   assert.equal(result.count, 20);
   assert.equal(result.results.length, 20);
 });
@@ -184,13 +246,23 @@ test("AnyCrawlWebProvider fetch only accepts the first 5 URLs", async () => {
   ]);
 });
 
-test("AnyCrawlWebProvider fetch uses cheerio with a 30s scrape timeout by default", async () => {
+test("AnyCrawlWebProvider fetch uses auto with a 30s scrape timeout by default", async () => {
   const provider = new AnyCrawlWebProvider("test-key");
-  const observedInputs: Array<{ url: string; engine?: string; timeout?: number }> = [];
+  const observedInputs: Array<{
+    url: string;
+    engine?: string;
+    timeout?: number;
+    max_age?: number;
+  }> = [];
 
   (provider as unknown as {
     client: {
-      scrape(input: { url: string; engine?: string; timeout?: number }): Promise<unknown>;
+      scrape(input: {
+        url: string;
+        engine?: string;
+        timeout?: number;
+        max_age?: number;
+      }): Promise<unknown>;
     };
   }).client = {
     async scrape(input) {
@@ -211,11 +283,52 @@ test("AnyCrawlWebProvider fetch uses cheerio with a 30s scrape timeout by defaul
 
   assert.equal(result.count, 1);
   assert.equal(observedInputs.length, 1);
-  assert.equal(observedInputs[0]?.engine, "cheerio");
+  assert.equal(observedInputs[0]?.engine, "auto");
   assert.equal(observedInputs[0]?.timeout, 30_000);
+  assert.equal(observedInputs[0]?.max_age, undefined);
 });
 
-test("AnyCrawlWebProvider fetch falls back to playwright when cheerio content is too small", async () => {
+test("AnyCrawlWebProvider fresh fetch forces page refresh", async () => {
+  const provider = new AnyCrawlWebProvider("test-key");
+  const observedInputs: Array<{
+    url: string;
+    engine?: string;
+    max_age?: number;
+  }> = [];
+
+  (provider as unknown as {
+    client: {
+      scrape(input: {
+        url: string;
+        engine?: string;
+        max_age?: number;
+      }): Promise<unknown>;
+    };
+  }).client = {
+    async scrape(input) {
+      observedInputs.push(input);
+      return {
+        status: "completed",
+        url: input.url,
+        title: input.url,
+        markdown: "word ".repeat(100),
+        metadata: [],
+      };
+    },
+  };
+
+  const result = await provider.fetch({
+    fresh: true,
+    items: [{ url: "https://example.com/live" }],
+  });
+
+  assert.equal(result.count, 1);
+  assert.equal(observedInputs.length, 1);
+  assert.equal(observedInputs[0]?.engine, "auto");
+  assert.equal(observedInputs[0]?.max_age, 0);
+});
+
+test("AnyCrawlWebProvider fetch falls back to playwright when auto content is too small", async () => {
   const provider = new AnyCrawlWebProvider("test-key");
   const observedEngines: string[] = [];
 
@@ -230,7 +343,7 @@ test("AnyCrawlWebProvider fetch falls back to playwright when cheerio content is
         status: "completed",
         url: input.url,
         title: input.url,
-        markdown: input.engine === "cheerio" ? "short" : "word ".repeat(100),
+        markdown: input.engine === "auto" ? "short" : "word ".repeat(100),
         metadata: [],
       };
     },
@@ -241,11 +354,11 @@ test("AnyCrawlWebProvider fetch falls back to playwright when cheerio content is
   });
 
   assert.equal(result.count, 1);
-  assert.deepEqual(observedEngines, ["cheerio", "playwright"]);
+  assert.deepEqual(observedEngines, ["auto", "playwright"]);
   assert.equal(result.results[0]?.wordCount, 100);
 });
 
-test("AnyCrawlWebProvider fetch falls back to playwright when cheerio fails", async () => {
+test("AnyCrawlWebProvider fetch falls back to playwright when auto fails", async () => {
   const provider = new AnyCrawlWebProvider("test-key");
   const observedEngines: string[] = [];
 
@@ -256,8 +369,8 @@ test("AnyCrawlWebProvider fetch falls back to playwright when cheerio fails", as
   }).client = {
     async scrape(input) {
       observedEngines.push(input.engine ?? "");
-      if (input.engine === "cheerio") {
-        throw new Error("static fetch failed");
+      if (input.engine === "auto") {
+        throw new Error("auto fetch failed");
       }
       return {
         status: "completed",
@@ -274,7 +387,7 @@ test("AnyCrawlWebProvider fetch falls back to playwright when cheerio fails", as
   });
 
   assert.equal(result.count, 1);
-  assert.deepEqual(observedEngines, ["cheerio", "playwright"]);
+  assert.deepEqual(observedEngines, ["auto", "playwright"]);
 });
 
 test("AnyCrawlWebProvider fetch returns an item error when scrapes exceed timeout", async () => {

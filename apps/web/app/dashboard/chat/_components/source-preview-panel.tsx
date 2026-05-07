@@ -18,7 +18,7 @@ import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./mock-data";
 
 type SourceDetail = Awaited<ReturnType<typeof contentClient.getSource>>;
-type PreviewMode = "chunks" | "raw";
+type PreviewMode = "chunks" | "preview" | "raw";
 
 export function SourcePreviewPanel({
   citation,
@@ -38,12 +38,12 @@ export function SourcePreviewPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [isDeletedCitation, setIsDeletedCitation] = useState(false);
   const [isHistoricalCitation, setIsHistoricalCitation] = useState(false);
-  const [previewMode, setPreviewMode] = useState<PreviewMode>("chunks");
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("preview");
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (open) {
-      setPreviewMode("chunks");
+      setPreviewMode("preview");
     }
   }, [citation?.chunkId, open, source?.id]);
 
@@ -210,6 +210,18 @@ export function SourcePreviewPanel({
                   <button
                     className={cn(
                       "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                      previewMode === "preview"
+                        ? "bg-secondary text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setPreviewMode("preview")}
+                    type="button"
+                  >
+                    Preview
+                  </button>
+                  <button
+                    className={cn(
+                      "rounded-md px-2 py-1 text-xs font-medium transition-colors",
                       previewMode === "chunks"
                         ? "bg-secondary text-foreground shadow-xs"
                         : "text-muted-foreground hover:text-foreground",
@@ -291,7 +303,7 @@ export function SourcePreviewPanel({
                 </div>
                 <div className="px-4 py-4 lg:px-5">
                   <MessageResponse className="text-sm leading-7 text-foreground">
-                    {citation.excerpt || "No citation excerpt was saved."}
+                    {citation.content || citation.excerpt || "No citation content was saved."}
                   </MessageResponse>
                 </div>
               </article>
@@ -354,6 +366,14 @@ export function SourcePreviewPanel({
               <pre className="mx-auto min-h-full max-w-5xl whitespace-pre-wrap break-words px-5 py-6 font-mono text-xs leading-6 text-foreground lg:px-8">
                 {rawMarkdown || "No markdown content available."}
               </pre>
+            </ScrollArea>
+          ) : previewMode === "preview" ? (
+            <ScrollArea className="min-h-0 flex-1">
+              <article className="mx-auto min-h-full max-w-4xl px-5 py-6 lg:px-8">
+                <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                  {rawMarkdown || "No markdown content available."}
+                </MessageResponse>
+              </article>
             </ScrollArea>
           ) : (
             <div className="flex min-h-0 flex-1 overflow-hidden">

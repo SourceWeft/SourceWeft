@@ -248,6 +248,7 @@ class ContentThreadService {
     const sourceTitleSnapshot = getMetadataString(snapshot, "sourceTitle");
     const chunkNoSnapshot = getMetadataNumber(snapshot, "chunkNo");
     const excerptSnapshot = getMetadataString(snapshot, "excerpt");
+    const contentSnapshot = getMetadataString(snapshot, "content");
 
     return {
       citation: {
@@ -260,6 +261,7 @@ class ContentThreadService {
         chunkNo: chunkNoSnapshot,
         externalUri: citation.externalUri,
         excerpt: citation.quoteText ?? citation.chunkContent ?? excerptSnapshot ?? "",
+        content: contentSnapshot,
       },
     };
   }

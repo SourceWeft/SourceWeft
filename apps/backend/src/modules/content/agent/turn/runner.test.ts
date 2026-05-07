@@ -32,6 +32,13 @@ test("normalizes web tool outputs to display-safe metadata", () => {
     resultCount: 1,
     urlCount: 1,
     urls: ["https://example.com/a"],
+    pages: [{
+      url: "https://example.com/a",
+      title: "A",
+      rank: 1,
+      citation: "c1",
+      hasContent: false,
+    }],
     truncated: false,
   });
   assert.equal(JSON.stringify(output).includes("Use these web search results internally"), false);
