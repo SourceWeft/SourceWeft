@@ -157,6 +157,9 @@ export type SourceRecord = {
   parentSourceId: string | null;
   title: string;
   contentText: string;
+  externalId: string | null;
+  externalUri: string | null;
+  externalUpdatedAt: string | null;
   mimeType: string | null;
   sizeBytes: number | null;
   contentHash: string | null;

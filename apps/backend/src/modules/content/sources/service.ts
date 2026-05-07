@@ -10,6 +10,7 @@ import {
   createSourceRevisionRecord,
   deleteSourceRecord,
   findSourceRecord,
+  findSourceRecordByExternalUri,
   getSourceDetailRecord,
   getSourceDocumentDetailRecord,
   getSourceStatusDetail,
@@ -26,12 +27,14 @@ import {
   uploadSourceObject,
 } from "../storage";
 import { getSourceParser } from "../parsers";
+import { WEB_FETCH_SOURCE_MIME_TYPE } from "../parsers/web-fetch";
 import {
   assertSourceContentCanBeParsed,
   requireSupportedSourceFile,
 } from "../source-file-classifier";
 import { enqueueSourceParseJob } from "../queue";
 import type { SourceRecord, SourceStatusDetail } from "../types";
+import { validatePublicHttpUrl } from "../web";
 import { defaultParsingConfig } from "./parsing-config";
 
 const SOURCE_TREE_MAX_DEPTH = 64;
@@ -60,6 +63,29 @@ function mergeStatusMetadata(
 
 function normalizeDirectoryTitleForConflict(value: string) {
   return value.trim().normalize("NFKC").replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeExternalUrl(value: string) {
+  const url = new URL(validatePublicHttpUrl(value));
+  url.hash = "";
+  return url.toString();
+}
+
+function resolveUrlSourceTitle(input: { title?: string; url: string }) {
+  const title = input.title?.trim();
+  if (title) {
+    return normalizeContentTitle(title, "Web Source");
+  }
+
+  try {
+    const url = new URL(input.url);
+    return normalizeContentTitle(
+      url.hostname.replace(/^www\./, "") || input.url,
+      "Web Source",
+    );
+  } catch {
+    return normalizeContentTitle(input.url, "Web Source");
+  }
 }
 
 async function assertNoDirectoryNameConflict(input: {
@@ -409,6 +435,164 @@ export class ContentSourceService {
     });
 
     return { source };
+  }
+
+  async createUrlSource(input: {
+    workspaceId: string;
+    userId: string;
+    url: string;
+    title?: string;
+    parentSourceId?: string | null;
+    forceRefresh?: boolean;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+    const externalUri = normalizeExternalUrl(input.url);
+
+    await validateSourceParent({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      parentSourceId: input.parentSourceId,
+    });
+
+    const existing = await findSourceRecordByExternalUri({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceType: "web_url",
+      externalUri,
+    });
+    if (existing && input.forceRefresh !== true) {
+      return {
+        source: existing,
+        status: (await getSourceStatusDetail({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          sourceId: existing.id,
+        })) ?? {
+          status: existing.status,
+          progress: existing.status === "indexed" ? 100 : 0,
+          currentStep: existing.status === "indexed" ? "completed" : "created",
+          parsedPages: null,
+          totalPages: null,
+          error: null,
+          jobId: null,
+        },
+      };
+    }
+
+    const parsingConfig = defaultParsingConfig();
+    const now = new Date();
+    const sourceMetadata = {
+      loaderId: "web-fetch",
+      parserId: "web-fetch",
+      requestedUrl: externalUri,
+      sourceUrl: externalUri,
+      forceRefresh: input.forceRefresh === true,
+      userTitleProvided: Boolean(input.title?.trim()),
+      progress: 0,
+      currentStep: "created",
+    };
+    const source = existing
+      ? await updateSourceRecord({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          sourceId: existing.id,
+          title: input.title
+            ? resolveUrlSourceTitle({ title: input.title, url: externalUri })
+            : undefined,
+          parentSourceId: input.parentSourceId,
+          externalUri,
+          externalUpdatedAt: now,
+          mimeType: WEB_FETCH_SOURCE_MIME_TYPE,
+          sizeBytes: Buffer.byteLength(externalUri, "utf8"),
+          parserVersion: parsingConfig.parserVersion,
+          parsingConfig,
+          status: "queued",
+          error: {},
+          metadata: {
+            ...(existing.metadata ?? {}),
+            ...sourceMetadata,
+            progress: 5,
+            currentStep: "queued",
+            queuedAt: now.toISOString(),
+          },
+        })
+      : await createSourceRecord({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          title: resolveUrlSourceTitle({ title: input.title, url: externalUri }),
+          contentText: "",
+          createdBy: input.userId,
+          ingestKind: "web_url",
+          sourceType: "web_url",
+          parentSourceId: input.parentSourceId ?? null,
+          externalUri,
+          externalUpdatedAt: now,
+          mimeType: WEB_FETCH_SOURCE_MIME_TYPE,
+          sizeBytes: Buffer.byteLength(externalUri, "utf8"),
+          parserVersion: parsingConfig.parserVersion,
+          parsingConfig,
+          status: "queued",
+          metadata: {
+            ...sourceMetadata,
+            progress: 5,
+            currentStep: "queued",
+            queuedAt: now.toISOString(),
+          },
+        });
+
+    if (!source) {
+      throw new ContentError(
+        500,
+        "URL_SOURCE_CREATE_FAILED",
+        "Failed to create URL source",
+      );
+    }
+
+    const revision = await createSourceRevisionRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceId: source.id,
+      parserVersion: parsingConfig.parserVersion,
+      externalUpdatedAt: now,
+    });
+
+    const job = await enqueueSourceParseJob({
+      sourceId: source.id,
+      sourceRevisionId: revision.id,
+      workspaceId: workspace.id,
+      teamId: workspace.organizationId,
+      userId: input.userId,
+      idempotencyKey: `source_parse_${source.id}_${revision.revisionNo}`,
+      forceRefresh: input.forceRefresh === true,
+    });
+
+    const queuedSource = await updateSourceRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceId: source.id,
+      metadata: mergeStatusMetadata(source, {
+        progress: 10,
+        currentStep: "queued",
+        jobId: String(job.id),
+      }),
+    });
+
+    return {
+      source: queuedSource ?? source,
+      status: (await getSourceStatusDetail({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId: source.id,
+      })) ?? {
+        status: "queued",
+        progress: 10,
+        currentStep: "queued",
+        parsedPages: null,
+        totalPages: null,
+        error: null,
+        jobId: String(job.id),
+      },
+    };
   }
 
   async listSources(input: { workspaceId: string; userId: string }) {

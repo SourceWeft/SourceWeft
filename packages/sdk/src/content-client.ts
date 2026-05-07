@@ -2,6 +2,8 @@ import type {
   CitationDetailResponse,
   CreateSourceRequest,
   CreateSourceResponse,
+  CreateUrlSourceRequest,
+  CreateUrlSourceResponse,
   CreateByokKeyRefRequest,
   CreateByokKeyRefResponse,
   EditThreadRequest,
@@ -34,6 +36,10 @@ import type {
   ListWorkspaceSkillsResponse,
   PutCustomSkillVersionFileRequest,
   PutCustomSkillVersionFileResponse,
+  ReparseSourceRequest,
+  ReparseSourceResponse,
+  RetrySourceRequest,
+  RetrySourceResponse,
   SourceStatusResponse,
   ListThreadsResponse,
   StreamThreadRequest,
@@ -60,6 +66,13 @@ export class ContentClient {
   createSource(workspaceId: string, input: CreateSourceRequest) {
     return this.http.post<CreateSourceResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources`,
+      input,
+    );
+  }
+
+  createUrlSource(workspaceId: string, input: CreateUrlSourceRequest) {
+    return this.http.post<CreateUrlSourceResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/url`,
       input,
     );
   }
@@ -129,6 +142,28 @@ export class ContentClient {
   ) {
     return this.http.post<IndexSourceResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/index`,
+      input,
+    );
+  }
+
+  reparseSource(
+    workspaceId: string,
+    sourceId: string,
+    input: ReparseSourceRequest = {},
+  ) {
+    return this.http.post<ReparseSourceResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/reparse`,
+      input,
+    );
+  }
+
+  retrySource(
+    workspaceId: string,
+    sourceId: string,
+    input: RetrySourceRequest = {},
+  ) {
+    return this.http.post<RetrySourceResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/retry`,
       input,
     );
   }

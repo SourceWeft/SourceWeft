@@ -9,6 +9,7 @@ import { pdfSourceParser } from "./pdf";
 import { pptxSourceParser } from "./pptx";
 import { srtSourceParser } from "./srt";
 import { textSourceParser } from "./text";
+import { webFetchSourceParser } from "./web-fetch";
 
 const registeredParsers: SourceParser[] = [
   documentProviderParser,
@@ -20,6 +21,7 @@ const registeredParsers: SourceParser[] = [
   pptxSourceParser,
   srtSourceParser,
   textSourceParser,
+  webFetchSourceParser,
 ];
 
 export function getSourceParser(mimeType: string) {
@@ -43,5 +45,6 @@ export {
   pptxSourceParser,
   srtSourceParser,
   textSourceParser,
+  webFetchSourceParser,
 };
 export type { ParsedDocument, ParseInput, ParsedPage, SourceParser } from "./types";

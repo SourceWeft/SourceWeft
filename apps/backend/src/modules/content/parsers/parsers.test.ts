@@ -7,6 +7,8 @@ process.env.DOCUMENT_PARSE_PROVIDER = "langchain";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { estimateAsrPageCount, formatAsrTranscriptMarkdown } from "./audio";
+import { WebFetchSourceParser } from "./web-fetch";
+import type { WebProvider } from "../web";
 import { csvSourceParser } from "./csv";
 import { docxSourceParser } from "./docx";
 import { epubSourceParser } from "./epub";
@@ -305,6 +307,85 @@ test("audio transcript formatter emits segment timestamps", () => {
     content,
     "# Transcript: meeting.mp3\n\n[00:00 - 00:01] Hello\n\n[01:04 - 01:05] World",
   );
+});
+
+test("web fetch parser extracts markdown without forcing fresh by default", async () => {
+  const observedFreshValues: Array<boolean | undefined> = [];
+  const provider: WebProvider = {
+    name: "test-web",
+    async search() {
+      throw new Error("search should not be called");
+    },
+    async fetch(input) {
+      observedFreshValues.push(input.fresh);
+      return {
+        provider: "test-web",
+        count: 1,
+        results: [{
+          url: input.items[0]?.url ?? "https://example.com/article",
+          title: "Fetched Title",
+          description: "Fetched description",
+          markdown: "Fetched markdown content.",
+          wordCount: 3,
+          truncated: false,
+        }],
+      };
+    },
+  };
+  const parser = new WebFetchSourceParser(() => provider);
+
+  const result = await parser.parse({
+    fileName: "Requested Title",
+    mimeType: "text/x-sourceweft-web-url",
+    fileSize: 0,
+    content: Buffer.from("https://example.com/article"),
+    config: { chunkSize: 1000, parserVersion: "v1" },
+    sourceExternalUri: "https://example.com/article",
+  });
+
+  assert.deepEqual(observedFreshValues, [undefined]);
+  assert.equal(result.title, "Fetched Title");
+  assert.match(result.content, /Source: https:\/\/example.com\/article/);
+  assert.match(result.content, /Fetched markdown content/);
+  assert.equal(result.metadata.provider, "test-web");
+  assert.equal(result.metadata.parserId, "web-fetch");
+});
+
+test("web fetch parser passes fresh only for force refresh", async () => {
+  const observedFreshValues: Array<boolean | undefined> = [];
+  const provider: WebProvider = {
+    name: "test-web",
+    async search() {
+      throw new Error("search should not be called");
+    },
+    async fetch(input) {
+      observedFreshValues.push(input.fresh);
+      return {
+        provider: "test-web",
+        count: 1,
+        results: [{
+          url: input.items[0]?.url ?? "https://example.com/article",
+          title: "Fetched Title",
+          markdown: "Fetched markdown content.",
+          wordCount: 3,
+          truncated: false,
+        }],
+      };
+    },
+  };
+  const parser = new WebFetchSourceParser(() => provider);
+
+  await parser.parse({
+    fileName: "Requested Title",
+    mimeType: "text/x-sourceweft-web-url",
+    fileSize: 0,
+    content: Buffer.from("https://example.com/article"),
+    config: { chunkSize: 1000, parserVersion: "v1" },
+    sourceExternalUri: "https://example.com/article",
+    forceRefresh: true,
+  });
+
+  assert.deepEqual(observedFreshValues, [true]);
 });
 test("pdf2markdown result extractor handles documented page fields", () => {
   const result = extractPdf2MarkdownResult({

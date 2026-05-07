@@ -89,6 +89,9 @@ export const sourceSchema = z.object({
   parentSourceId: z.string().nullable(),
   title: z.string(),
   contentText: z.string(),
+  externalId: z.string().nullable(),
+  externalUri: z.string().nullable(),
+  externalUpdatedAt: z.string().nullable(),
   mimeType: z.string().nullable(),
   sizeBytes: z.number().int().nonnegative().nullable(),
   contentHash: z.string().nullable(),
@@ -157,6 +160,7 @@ export const uploadSourceResponseSchema = z.object({
 
 export const reparseSourceRequestSchema = z.object({
   chunkSize: z.number().int().positive().max(8192).optional(),
+  forceRefresh: z.boolean().optional(),
 });
 
 export const reparseSourceResponseSchema = z.object({
@@ -190,6 +194,18 @@ export const createSourceRequestSchema = z.object({
 
 export const createSourceResponseSchema = z.object({
   source: sourceSchema,
+});
+
+export const createUrlSourceRequestSchema = z.object({
+  url: z.string().trim().min(1).max(4096),
+  title: z.string().trim().min(1).max(200).optional(),
+  parentSourceId: z.string().nullable().optional(),
+  forceRefresh: z.boolean().optional(),
+});
+
+export const createUrlSourceResponseSchema = z.object({
+  source: sourceSchema,
+  status: sourceStatusResponseSchema,
 });
 
 export const listSourcesResponseSchema = z.object({
@@ -239,6 +255,20 @@ export const indexSourceResponseSchema = z.object({
     annIndexUsed: z.string().nullable(),
   }),
 });
+
+export const retrySourceRequestSchema = z.object({
+  chunkSize: z.number().int().positive().max(8192).optional(),
+  forceRefresh: z.boolean().optional(),
+});
+
+export const retrySourceResponseSchema = z.discriminatedUnion("mode", [
+  reparseSourceResponseSchema.extend({
+    mode: z.literal("reparse"),
+  }),
+  indexSourceResponseSchema.extend({
+    mode: z.literal("index"),
+  }),
+]);
 
 export const threadSchema = z.object({
   id: z.string(),
@@ -632,6 +662,8 @@ export const billingDashboardResponseSchema = z.object({
 export type Source = z.infer<typeof sourceSchema>;
 export type CreateSourceRequest = z.infer<typeof createSourceRequestSchema>;
 export type CreateSourceResponse = z.infer<typeof createSourceResponseSchema>;
+export type CreateUrlSourceRequest = z.infer<typeof createUrlSourceRequestSchema>;
+export type CreateUrlSourceResponse = z.infer<typeof createUrlSourceResponseSchema>;
 export type ListSourcesResponse = z.infer<typeof listSourcesResponseSchema>;
 export type GetSourceResponse = z.infer<typeof getSourceResponseSchema>;
 export type GetSourceDocumentResponse = z.infer<
@@ -644,6 +676,8 @@ export type UpdateSourceResponse = z.infer<typeof updateSourceResponseSchema>;
 export type DeleteSourceResponse = z.infer<typeof deleteSourceResponseSchema>;
 export type ReparseSourceRequest = z.infer<typeof reparseSourceRequestSchema>;
 export type ReparseSourceResponse = z.infer<typeof reparseSourceResponseSchema>;
+export type RetrySourceRequest = z.infer<typeof retrySourceRequestSchema>;
+export type RetrySourceResponse = z.infer<typeof retrySourceResponseSchema>;
 export type SourceContentResponse = z.infer<typeof sourceContentResponseSchema>;
 export type IndexSourceRequest = z.infer<typeof indexSourceRequestSchema>;
 export type IndexSourceResponse = z.infer<typeof indexSourceResponseSchema>;

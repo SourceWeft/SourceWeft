@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { config } from "../../../shared/config";
+import { logger } from "../../../shared/logger";
 import { ContentError } from "../errors";
 import { getSourceParser, type ParsedDocument } from "../parsers";
+import { webFetchSourceParser, WEB_FETCH_SOURCE_MIME_TYPE } from "../parsers/web-fetch";
 import { startDocumentParse } from "../parsers/providers/document-parse-orchestrator";
 import { getDocumentProviderForResume } from "../parsers/providers/registry";
 import type { DocumentParseProviderId, ParsingConfig, SourceRecord, SourceStatusDetail } from "../types";
@@ -28,6 +30,11 @@ import {
   requireContentSource,
 } from "../content-support";
 import { DEFAULT_PARSER_VERSION, defaultParsingConfig } from "./parsing-config";
+import {
+  buildSourceParseErrorLogContext,
+  buildSourceParseFailureError,
+  buildSourceParseLogContext,
+} from "./parse-diagnostics";
 
 function estimateTokens(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
@@ -70,18 +77,40 @@ function nextProviderPollDelay(attempt: number) {
 export class SourceParsingService {
   constructor(private readonly sourceIndexingService: SourceIndexingService) {}
 
+  async tryQueueSourceReparse(input: {
+    workspaceId: string;
+    sourceId: string;
+    userId: string;
+    chunkSize?: number;
+    forceRefresh?: boolean;
+  }) {
+    const { source } = await requireContentSource(input);
+    if (!source.storageKey && source.sourceType !== "web_url") {
+      return null;
+    }
+    return this.reparseSource(input);
+  }
+
   async reparseSource(input: {
     workspaceId: string;
     sourceId: string;
     userId: string;
     chunkSize?: number;
+    forceRefresh?: boolean;
   }) {
     const { workspace, source } = await requireContentSource(input);
-    if (!source.storageKey) {
+    if (!source.storageKey && source.sourceType !== "web_url") {
       throw new ContentError(
         400,
         "SOURCE_NOT_UPLOADED",
         "Source has no uploaded file to reparse",
+      );
+    }
+    if (source.sourceType === "web_url" && !source.externalUri) {
+      throw new ContentError(
+        400,
+        "WEB_SOURCE_URL_MISSING",
+        "Web source URL is missing",
       );
     }
 
@@ -119,6 +148,9 @@ export class SourceParsingService {
       contentHash: source.contentHash,
       storageBucket: source.storageBucket,
       storageKey: source.storageKey,
+      externalUpdatedAt: source.externalUpdatedAt
+        ? new Date(source.externalUpdatedAt)
+        : null,
       parserVersion: parsingConfig.parserVersion,
     });
 
@@ -129,6 +161,7 @@ export class SourceParsingService {
       teamId: workspace.organizationId,
       userId: input.userId,
       idempotencyKey: `source_parse_${source.id}_${revision.revisionNo}`,
+      forceRefresh: input.forceRefresh,
     });
 
     const queuedSource = await updateSourceRecord({
@@ -153,7 +186,9 @@ export class SourceParsingService {
     };
   }
 
-  async processSourceParseJob(input: SourceParseJobPayload) {
+  async processSourceParseJob(
+    input: SourceParseJobPayload & { isFinalAttempt?: boolean },
+  ) {
     const source = await findSourceRecord({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
@@ -169,6 +204,14 @@ export class SourceParsingService {
     }
 
     try {
+      if (source.sourceType === "web_url") {
+        await this.processWebUrlSourceParseJob({
+          input,
+          source,
+        });
+        return;
+      }
+
       if (!source.storageKey || !source.mimeType) {
         throw new ContentError(
           400,
@@ -271,12 +314,75 @@ export class SourceParsingService {
 
       await this.completeParsedSource({ input, source, parsed, parsingConfig });
     } catch (error) {
-      await this.failSource(input, source, error);
+      logger.error("Source parse failed", {
+        ...buildSourceParseLogContext({ job: input, source }),
+        ...buildSourceParseErrorLogContext(error),
+      });
+      if (input.isFinalAttempt !== false) {
+        await this.failSource(input, source, error);
+      }
       throw error;
     }
   }
 
-  async processSourceParsePollJob(input: SourceParsePollJobPayload) {
+  private async processWebUrlSourceParseJob(input: {
+    input: SourceParseJobPayload;
+    source: SourceRecord;
+  }) {
+    if (!input.source.externalUri) {
+      throw new ContentError(
+        400,
+        "WEB_SOURCE_URL_MISSING",
+        "Web source URL is missing",
+      );
+    }
+
+    const parsingConfig = defaultParsingConfig(input.source.parsingConfig ?? undefined);
+    const processingSource = await updateSourceStatusForLatestRevision({
+      teamId: input.input.teamId,
+      workspaceId: input.input.workspaceId,
+      sourceId: input.input.sourceId,
+      sourceRevisionId: input.input.sourceRevisionId,
+      status: "processing",
+      error: {},
+      metadata: mergeStatusMetadata(input.source, {
+        progress: 20,
+        currentStep: "parsing",
+      }),
+    });
+    if (!processingSource) {
+      return;
+    }
+
+    const urlBuffer = Buffer.from(input.source.externalUri, "utf8");
+    const parsed = await webFetchSourceParser.parse({
+      fileName: input.source.title,
+      mimeType: input.source.mimeType || WEB_FETCH_SOURCE_MIME_TYPE,
+      fileSize: input.source.sizeBytes ?? urlBuffer.length,
+      content: urlBuffer,
+      config: parsingConfig,
+      sourceExternalUri: input.source.externalUri,
+      forceRefresh: input.input.forceRefresh,
+      preferInputTitle: input.source.metadata.userTitleProvided === true,
+      sourceId: input.input.sourceId,
+      sourceRevisionId: input.input.sourceRevisionId,
+      teamId: input.input.teamId,
+      workspaceId: input.input.workspaceId,
+      userId: input.input.userId,
+      idempotencyKey: input.input.idempotencyKey,
+    });
+
+    await this.completeParsedSource({
+      input: input.input,
+      source: input.source,
+      parsed,
+      parsingConfig,
+    });
+  }
+
+  async processSourceParsePollJob(
+    input: SourceParsePollJobPayload & { isFinalAttempt?: boolean },
+  ) {
     const source = await findSourceRecord({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
@@ -366,7 +472,17 @@ export class SourceParsingService {
         parsingConfig: input.parsingConfig,
       });
     } catch (error) {
-      await this.failSource(input, source, error);
+      logger.error("Source parse poll failed", {
+        ...buildSourceParseLogContext({ job: input, source }),
+        backendId: input.backendId,
+        taskId: input.taskId,
+        providerMimeType: input.mimeType,
+        pollAttempt: input.attempt,
+        ...buildSourceParseErrorLogContext(error),
+      });
+      if (input.isFinalAttempt !== false) {
+        await this.failSource(input, source, error);
+      }
       throw error;
     }
   }
@@ -393,6 +509,7 @@ export class SourceParsingService {
       title: normalizeContentTitle(input.parsed.title, input.source.title),
       contentText: input.parsed.content,
       contentHash,
+      sizeBytes: Buffer.byteLength(input.parsed.content, "utf8"),
       parserVersion: input.parsingConfig.parserVersion,
       parsingConfig: input.parsingConfig,
       estimatedPages: input.parsed.metadata.pageCount ?? input.source.estimatedPages,
@@ -458,14 +575,18 @@ export class SourceParsingService {
       return;
     }
 
-    const message = error instanceof Error ? error.message : "Source parse failed";
+    const failure = buildSourceParseFailureError({ source, error });
+    const message =
+      typeof failure.message === "string"
+        ? failure.message
+        : "Source parse failed";
     await updateSourceStatusForLatestRevision({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       sourceId: input.sourceId,
       sourceRevisionId: input.sourceRevisionId,
       status: "failed",
-      error: { message },
+      error: failure,
       metadata: {
         ...(source.metadata ?? {}),
         progress: 100,

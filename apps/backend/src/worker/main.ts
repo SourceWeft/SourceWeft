@@ -3,6 +3,7 @@ import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { ensureModelConfigAvailable } from "../shared/model-gateway/index";
 import { connectionOptions } from "../shared/redis-connection";
+import { buildWorkerJobFailureLog } from "./job-failure-log";
 import { processExampleJob } from "./processors/example-job";
 import {
   processSourceParseJob,
@@ -46,11 +47,7 @@ worker.on("completed", (job: Job<JobPayload>) => {
 });
 
 worker.on("failed", (job: Job<JobPayload> | undefined, error: Error) => {
-  logger.error("Job failed", {
-    jobId: job?.id ? String(job.id) : "unknown",
-    type: job?.name || "unknown",
-    error: error.message,
-  });
+  logger.error("Job failed", buildWorkerJobFailureLog(job, error));
 });
 
 logger.info("Worker started", {

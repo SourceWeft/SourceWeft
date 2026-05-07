@@ -4,6 +4,8 @@ import { jobsQueue } from "../../shared/queue";
 export const SOURCE_PARSE_JOB = "source-parse";
 export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
 export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
+export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
+const SOURCE_PARSE_JOB_BACKOFF_MS = 5_000;
 
 export type SourceParseJobPayload = {
   sourceId: string;
@@ -12,6 +14,7 @@ export type SourceParseJobPayload = {
   teamId: string;
   userId: string;
   idempotencyKey?: string;
+  forceRefresh?: boolean;
 };
 
 export type SourceParsePollJobPayload = SourceParseJobPayload & {
@@ -56,6 +59,8 @@ export type ThreadTitleGenerateJobResult =
 export async function enqueueSourceParseJob(payload: SourceParseJobPayload) {
   return jobsQueue.add(SOURCE_PARSE_JOB, payload, {
     jobId: payload.idempotencyKey,
+    attempts: SOURCE_PARSE_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: SOURCE_PARSE_JOB_BACKOFF_MS },
     removeOnComplete: 100,
     removeOnFail: 100,
   });
@@ -68,6 +73,8 @@ export async function enqueueSourceParsePollJob(
   return jobsQueue.add(SOURCE_PARSE_POLL_JOB, payload, {
     delay: delayMs,
     jobId: `${payload.idempotencyKey ?? `${SOURCE_PARSE_POLL_JOB}_${payload.sourceId}_${payload.taskId}`}_${payload.attempt}`,
+    attempts: SOURCE_PARSE_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: SOURCE_PARSE_JOB_BACKOFF_MS },
     removeOnComplete: 100,
     removeOnFail: 100,
   });

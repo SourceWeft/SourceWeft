@@ -43,10 +43,14 @@ export async function createSourceRecord(input: {
   title: string;
   contentText: string;
   createdBy: string;
+  ingestKind?: SourceRecord["ingestKind"];
   estimatedPages?: number;
   parsedTokens?: number;
   sourceType?: SourceRecord["sourceType"];
   parentSourceId?: string | null;
+  externalId?: string | null;
+  externalUri?: string | null;
+  externalUpdatedAt?: Date | null;
   mimeType?: string | null;
   sizeBytes?: number | null;
   contentHash?: string | null;
@@ -66,11 +70,14 @@ export async function createSourceRecord(input: {
       id,
       teamId: input.teamId,
       workspaceId: input.workspaceId,
-      ingestKind: "manual_upload",
+      ingestKind: input.ingestKind ?? "manual_upload",
       sourceType: input.sourceType ?? "manual_upload",
       parentSourceId: input.parentSourceId ?? null,
       title: input.title,
       contentText: input.contentText,
+      externalId: input.externalId ?? null,
+      externalUri: input.externalUri ?? null,
+      externalUpdatedAt: input.externalUpdatedAt ?? null,
       mimeType: input.mimeType ?? null,
       sizeBytes: input.sizeBytes ?? null,
       contentHash: input.contentHash ?? null,
@@ -243,6 +250,29 @@ export async function findSourceRecord(input: {
   return row ? mapSource(row) : null;
 }
 
+export async function findSourceRecordByExternalUri(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceType: SourceRecord["sourceType"];
+  externalUri: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(sources)
+    .where(
+      and(
+        eq(sources.teamId, input.teamId),
+        eq(sources.workspaceId, input.workspaceId),
+        eq(sources.sourceType, input.sourceType),
+        eq(sources.externalUri, input.externalUri),
+        ne(sources.status, "archived"),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapSource(row) : null;
+}
+
 export async function updateSourceRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -250,6 +280,9 @@ export async function updateSourceRecord(input: {
   title?: string;
   contentText?: string;
   parentSourceId?: string | null;
+  externalId?: string | null;
+  externalUri?: string | null;
+  externalUpdatedAt?: Date | null;
   estimatedPages?: number | null;
   parsedTokens?: number | null;
   mimeType?: string | null;
@@ -270,6 +303,9 @@ export async function updateSourceRecord(input: {
 
   if (input.title !== undefined) updates.title = input.title;
   if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
+  if (input.externalId !== undefined) updates.externalId = input.externalId;
+  if (input.externalUri !== undefined) updates.externalUri = input.externalUri;
+  if (input.externalUpdatedAt !== undefined) updates.externalUpdatedAt = input.externalUpdatedAt;
   if (input.contentText !== undefined) {
     updates.contentText = input.contentText;
     updates.status = "created";
@@ -314,6 +350,7 @@ export async function updateSourceRecordForLatestRevision(input: {
   parentSourceId?: string | null;
   estimatedPages?: number | null;
   parsedTokens?: number | null;
+  sizeBytes?: number | null;
   contentHash?: string | null;
   parserVersion?: string | null;
   parsingConfig?: ParsingConfig | null;
@@ -334,6 +371,7 @@ export async function updateSourceRecordForLatestRevision(input: {
   }
   if (input.estimatedPages !== undefined) updates.estimatedPages = input.estimatedPages;
   if (input.parsedTokens !== undefined) updates.parsedTokens = input.parsedTokens;
+  if (input.sizeBytes !== undefined) updates.sizeBytes = input.sizeBytes;
   if (input.contentHash !== undefined) updates.contentHash = input.contentHash;
   if (input.parserVersion !== undefined) updates.parserVersion = input.parserVersion;
   if (input.parsingConfig !== undefined) updates.parsingConfig = input.parsingConfig ?? {};

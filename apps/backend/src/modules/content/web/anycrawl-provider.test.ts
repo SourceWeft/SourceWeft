@@ -288,6 +288,47 @@ test("AnyCrawlWebProvider fetch uses auto with a 30s scrape timeout by default",
   assert.equal(observedInputs[0]?.max_age, undefined);
 });
 
+test("createDefaultWebProvider forwards fetch timeout options", async () => {
+  process.env.ANYCRAWL_API_KEY = "test-key";
+  const { createDefaultWebProvider } = await import("./index");
+  const provider = createDefaultWebProvider({ fetchTimeoutMs: 60_000 });
+  assert.ok(provider instanceof AnyCrawlWebProvider);
+
+  const observedInputs: Array<{
+    url: string;
+    engine?: string;
+    timeout?: number;
+  }> = [];
+
+  (provider as unknown as {
+    client: {
+      scrape(input: {
+        url: string;
+        engine?: string;
+        timeout?: number;
+      }): Promise<unknown>;
+    };
+  }).client = {
+    async scrape(input) {
+      observedInputs.push(input);
+      return {
+        status: "completed",
+        url: input.url,
+        title: input.url,
+        markdown: "word ".repeat(100),
+        metadata: [],
+      };
+    },
+  };
+
+  await provider.fetch({
+    items: [{ url: "https://example.com/article" }],
+  });
+
+  assert.equal(observedInputs[0]?.engine, "auto");
+  assert.equal(observedInputs[0]?.timeout, 60_000);
+});
+
 test("AnyCrawlWebProvider fresh fetch forces page refresh", async () => {
   const provider = new AnyCrawlWebProvider("test-key");
   const observedInputs: Array<{

@@ -1,8 +1,10 @@
 import type { Hono } from "hono";
 import {
   createSourceRequestSchema,
+  createUrlSourceRequestSchema,
   indexSourceRequestSchema,
   reparseSourceRequestSchema,
+  retrySourceRequestSchema,
   updateSourceRequestSchema,
 } from "@sourceweft/contracts";
 import { contentService } from "../../../modules/content";
@@ -84,6 +86,32 @@ export function registerSourceRoutes(app: Hono) {
       parentSourceId: parsed.data.parentSourceId,
       estimatedPages: parsed.data.estimatedPages,
       parsedTokens: parsed.data.parsedTokens,
+    });
+
+    return ApiResponse.success(c, result, 201);
+  });
+
+  app.post("/sources/url", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = createUrlSourceRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentService.createUrlSource({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      url: parsed.data.url,
+      title: parsed.data.title,
+      parentSourceId: parsed.data.parentSourceId,
+      forceRefresh: parsed.data.forceRefresh,
     });
 
     return ApiResponse.success(c, result, 201);
@@ -256,6 +284,32 @@ export function registerSourceRoutes(app: Hono) {
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
       chunkSize: parsed.data.chunkSize,
+      forceRefresh: parsed.data.forceRefresh,
+    });
+
+    return ApiResponse.success(c, result, 202);
+  });
+
+  app.post("/sources/:id/retry", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = retrySourceRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentService.retrySource({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      sourceId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      chunkSize: parsed.data.chunkSize,
+      forceRefresh: parsed.data.forceRefresh,
     });
 
     return ApiResponse.success(c, result, 202);

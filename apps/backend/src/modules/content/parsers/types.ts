@@ -6,6 +6,9 @@ export type ParseInput = {
   fileSize: number;
   content: Buffer;
   config: ParsingConfig;
+  sourceExternalUri?: string;
+  forceRefresh?: boolean;
+  preferInputTitle?: boolean;
   sourceId?: string;
   sourceRevisionId?: string;
   teamId?: string;

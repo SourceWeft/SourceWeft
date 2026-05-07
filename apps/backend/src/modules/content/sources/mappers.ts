@@ -31,6 +31,11 @@ export function mapSource(row: SourceRow): SourceRecord {
     parentSourceId: row.parentSourceId,
     title: row.title,
     contentText: row.contentText,
+    externalId: row.externalId,
+    externalUri: row.externalUri,
+    externalUpdatedAt: row.externalUpdatedAt
+      ? row.externalUpdatedAt.toISOString()
+      : null,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     contentHash: row.contentHash,

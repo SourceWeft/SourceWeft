@@ -12,7 +12,7 @@ export type SourceItem = {
     | "directory";
   parentSourceId: string | null;
   type: "DIR" | "PDF" | "DOC" | "WEB" | "NOTE" | "TEXT" | "CSV" | "JSON" | "IMG" | "AUDIO";
-  status: "Indexed" | "Syncing" | "Needs review";
+  status: "Indexed" | "Syncing" | "Failed" | "Needs review";
   meta: string;
   contentText: string;
   storageKey?: string | null;
@@ -34,8 +34,12 @@ export function expandSelectedSources(
   const expanded: SourceItem[] = [];
   const seen = new Set<string>();
 
+  function isSelectableSource(source: SourceItem) {
+    return source.status !== "Failed" && source.status !== "Syncing";
+  }
+
   function addSource(source: SourceItem) {
-    if (seen.has(source.id)) {
+    if (!isSelectableSource(source) || seen.has(source.id)) {
       return;
     }
     seen.add(source.id);
@@ -50,6 +54,9 @@ export function expandSelectedSources(
   }
 
   for (const source of sources) {
+    if (!isSelectableSource(source)) {
+      continue;
+    }
     if (!selectedSet.has(source.id)) {
       continue;
     }

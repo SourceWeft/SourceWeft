@@ -39,7 +39,17 @@ import {
   Alert,
   AlertDescription,
 } from "@sourceweft/ui-web/components/ui/alert";
-import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@sourceweft/ui-web/components/ui/alert-dialog";
+import { Button, buttonVariants } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
   Collapsible,
@@ -76,7 +86,7 @@ const tabs = [
   "Connectors",
   "Skills",
 ] as const;
-const addTabs = ["File", "Text"] as const;
+const addTabs = ["File", "URL", "Text"] as const;
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -275,6 +285,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 function apiStatusToSourceStatus(status: string): SourceItem["status"] {
   if (status === "indexed") return "Indexed";
   if (status === "processing" || status === "queued") return "Syncing";
+  if (status === "failed") return "Failed";
   return "Needs review";
 }
 
@@ -410,6 +421,8 @@ function StatusDot({ status }: { status: SourceItem["status"] }) {
           ? "bg-emerald-500"
           : status === "Syncing"
             ? "bg-amber-500"
+            : status === "Failed"
+              ? "bg-destructive"
             : "bg-red-400",
       )}
     />
@@ -470,7 +483,7 @@ function SourceRow({
   onEditReadme,
   onMove,
   onPreview,
-  onReindex,
+  onRetry,
 }: {
   source: SourceItem;
   depth?: number;
@@ -492,18 +505,21 @@ function SourceRow({
   onEditReadme: () => void;
   onMove: () => void;
   onPreview: () => void;
-  onReindex: () => void;
+  onRetry: () => void;
 }) {
   const isDirectory = source.sourceType === "directory";
+  const isFailed = source.status === "Failed";
+  const isSelectable = isSelectableSource(source);
   const isSelected = selectionState === true;
   const isPartiallySelected = selectionState === "indeterminate";
+  const canSelect = isSelectable && !isBusy && !isEditing;
   const metaLabel =
     isDirectory && childCount > 0
       ? `${childCount} item${childCount === 1 ? "" : "s"}`
       : source.meta;
 
   function handleRowClick(event: MouseEvent<HTMLDivElement>) {
-    if (isBusy || isEditing) {
+    if (!canSelect) {
       return;
     }
 
@@ -528,8 +544,8 @@ function SourceRow({
     <div
       className={cn(
         "group flex min-h-8 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors",
-        !isBusy && !isEditing && "cursor-pointer",
-        "hover:bg-accent/60",
+        canSelect && "cursor-pointer hover:bg-accent/60",
+        isFailed && "bg-muted/20 opacity-60",
       )}
       onClick={handleRowClick}
       style={{ paddingLeft: `${4 + depth * SOURCE_TREE_INDENT_PX}px` }}
@@ -538,7 +554,7 @@ function SourceRow({
       <Checkbox
         checked={selectionState}
         className={cn(!isDirectory && !isEditing && "mt-0.5")}
-        disabled={isBusy}
+        disabled={!canSelect}
         onCheckedChange={() => onToggle()}
       />
 
@@ -598,9 +614,15 @@ function SourceRow({
               />
               <button
                 className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isBusy}
-                onClick={onToggle}
-                title={isDirectory ? "Select folder" : "Select source"}
+                disabled={isBusy || !isSelectable}
+                onClick={isDirectory ? onToggle : onPreview}
+                title={
+                  isFailed
+                    ? "Retry or delete this failed source"
+                    : isDirectory
+                      ? "Select folder"
+                      : "Open preview"
+                }
                 type="button"
               >
                 {source.title}
@@ -648,7 +670,15 @@ function SourceRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
-            {isDirectory ? (
+            {isFailed ? (
+              <DropdownMenuItem
+                className="whitespace-nowrap"
+                onClick={(event) => handleMenuAction(event, onRetry)}
+              >
+                <RotateCcw className="size-3.5" />
+                Retry
+              </DropdownMenuItem>
+            ) : isDirectory ? (
               <>
                 <DropdownMenuItem
                   className="whitespace-nowrap"
@@ -708,15 +738,6 @@ function SourceRow({
               <MoveRight className="size-3.5" />
               Move to...
             </DropdownMenuItem>
-            {!isDirectory ? (
-              <DropdownMenuItem
-                className="whitespace-nowrap"
-                onClick={(event) => handleMenuAction(event, onReindex)}
-              >
-                <RotateCcw className="size-3.5" />
-                Re-index
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuItem
               className="whitespace-nowrap"
               onClick={(event) => handleMenuAction(event, onDelete)}
@@ -791,11 +812,26 @@ function collectTreeIds(node: SourceTreeNode): string[] {
   ];
 }
 
+function isSelectableSource(source: SourceItem) {
+  return source.status !== "Failed" && source.status !== "Syncing";
+}
+
+function collectSelectableTreeIds(node: SourceTreeNode): string[] {
+  return [
+    ...(isSelectableSource(node.source) ? [node.source.id] : []),
+    ...node.children.flatMap((child) => collectSelectableTreeIds(child)),
+  ];
+}
+
 function getNodeSelectionState(
   node: SourceTreeNode,
   selectedSet: Set<string>,
   ancestorSelected = false,
 ): SourceSelectionState {
+  if (!isSelectableSource(node.source)) {
+    return false;
+  }
+
   if (ancestorSelected || selectedSet.has(node.source.id)) {
     return true;
   }
@@ -849,6 +885,10 @@ function selectSubtreeExcept(
     return [];
   }
 
+  if (!isSelectableSource(node.source)) {
+    return [];
+  }
+
   const childWithExcludedNode = node.children.find((child) =>
     subtreeContainsSource(child, excludedNode.source.id),
   );
@@ -859,7 +899,7 @@ function selectSubtreeExcept(
   return node.children.flatMap((child) =>
     child.source.id === childWithExcludedNode.source.id
       ? selectSubtreeExcept(child, excludedNode)
-      : [child.source.id],
+      : collectSelectableTreeIds(child),
   );
 }
 
@@ -870,6 +910,10 @@ function normalizeSourceSelectionFromTree(
   const selectedSet = new Set(selectedIds);
 
   function normalizeNode(node: SourceTreeNode): string[] {
+    if (!isSelectableSource(node.source)) {
+      return [];
+    }
+
     if (selectedSet.has(node.source.id)) {
       return [node.source.id];
     }
@@ -899,6 +943,10 @@ function toggleSourceSelectionInTree(
   selectedIds: string[],
 ) {
   const selectedSet = new Set(selectedIds);
+  if (!isSelectableSource(node.source)) {
+    return selectedIds.filter((id) => id !== node.source.id);
+  }
+
   const nodePath = findNodePath(fullTree, node.source.id) ?? [node];
   const selectedAncestor = [...nodePath]
     .slice(0, -1)
@@ -909,7 +957,7 @@ function toggleSourceSelectionInTree(
     selectedSet,
     Boolean(selectedAncestor),
   );
-  const idsToRemove = new Set(collectTreeIds(node));
+  const idsToRemove = new Set(collectSelectableTreeIds(node));
 
   if (nodeState === true) {
     if (selectedAncestor) {
@@ -924,6 +972,10 @@ function toggleSourceSelectionInTree(
   }
 
   const next = selectedIds.filter((id) => !idsToRemove.has(id));
+  const selectableIds = collectSelectableTreeIds(node);
+  if (selectableIds.length === 0) {
+    return next;
+  }
   return [...next, node.source.id];
 }
 
@@ -947,7 +999,7 @@ function SourceTreeRow({
   onEditReadme,
   onMove,
   onPreview,
-  onReindex,
+  onRetry,
 }: {
   node: SourceTreeNode;
   depth: number;
@@ -968,7 +1020,7 @@ function SourceTreeRow({
   onEditReadme: (source: SourceItem) => void;
   onMove: (source: SourceItem) => void;
   onPreview: (source: SourceItem) => void;
-  onReindex: (source: SourceItem) => void;
+  onRetry: (source: SourceItem) => void;
 }) {
   const [open, setOpen] = useState(true);
   const source = node.source;
@@ -1006,7 +1058,7 @@ function SourceTreeRow({
         onEditTitleChange={onEditTitleChange}
         onMove={() => onMove(source)}
         onPreview={() => onPreview(source)}
-        onReindex={() => onReindex(source)}
+        onRetry={() => onRetry(source)}
         onStartRename={() => onStartRename(source)}
         onSubmitRename={() => onSubmitRename(source.id)}
         onToggle={() => onToggle(node)}
@@ -1047,7 +1099,7 @@ function SourceTreeRow({
         onEditTitleChange={onEditTitleChange}
         onMove={() => onMove(source)}
         onPreview={() => onPreview(source)}
-        onReindex={() => onReindex(source)}
+        onRetry={() => onRetry(source)}
         onStartRename={() => onStartRename(source)}
         onSubmitRename={() => onSubmitRename(source.id)}
         onToggle={() => onToggle(node)}
@@ -1079,7 +1131,7 @@ function SourceTreeRow({
               onEditTitleChange={onEditTitleChange}
               onMove={onMove}
               onPreview={onPreview}
-              onReindex={onReindex}
+              onRetry={onRetry}
               onStartRename={onStartRename}
               onSubmitRename={onSubmitRename}
               onToggle={onToggle}
@@ -1133,7 +1185,7 @@ function SourcesTab({
   onEditReadme,
   onMove,
   onPreview,
-  onReindex,
+  onRetry,
 }: {
   sources: SourceItem[];
   searchQuery: string;
@@ -1153,7 +1205,7 @@ function SourcesTab({
   onEditReadme: (source: SourceItem) => void;
   onMove: (source: SourceItem) => void;
   onPreview: (source: SourceItem) => void;
-  onReindex: (source: SourceItem) => void;
+  onRetry: (source: SourceItem) => void;
 }) {
   const tree = useMemo(
     () => buildSourceTree(sources, searchQuery),
@@ -1200,7 +1252,7 @@ function SourcesTab({
           onEditTitleChange={onEditTitleChange}
           onMove={onMove}
           onPreview={onPreview}
-          onReindex={onReindex}
+          onRetry={onRetry}
           onStartRename={onStartRename}
           onSubmitRename={onSubmitRename}
           onToggle={onToggle}
@@ -1653,6 +1705,8 @@ export function SourcesHub({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [textTitle, setTextTitle] = useState("");
   const [textContent, setTextContent] = useState("");
+  const [urlValue, setUrlValue] = useState("");
+  const [urlTitle, setUrlTitle] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -1666,6 +1720,7 @@ export function SourcesHub({
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
   const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
   const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
+  const [deleteSource, setDeleteSource] = useState<SourceItem | null>(null);
   const fullSourceTree = useMemo(() => buildSourceTree(sources, ""), [sources]);
   const selectedLibrarySources = useMemo(
     () => expandSelectedSources(sources, selectedIds),
@@ -1850,17 +1905,24 @@ export function SourcesHub({
     [workspaceId, editingTitle, refreshSources],
   );
 
-  const handleDeleteSource = useCallback(
+  const handleRequestDeleteSource = useCallback((source: SourceItem) => {
+    setDeleteSource(source);
+  }, []);
+
+  const handleConfirmDeleteSource = useCallback(
     async (source: SourceItem) => {
       if (!workspaceId) return;
-      const confirmed = window.confirm(`Delete ${source.sourceType === "directory" ? "folder" : "source"} "${source.title}"?`);
-      if (!confirmed) return;
 
       setRowBusy(source.id, true);
       try {
         await contentClient.deleteSource(workspaceId, source.id);
         toast.success("Source deleted.");
-        onSelectionChange(selectedIds.filter((id) => id !== source.id));
+        const deletedNode = findNodePath(fullSourceTree, source.id)?.at(-1);
+        const deletedIds = new Set(
+          deletedNode ? collectTreeIds(deletedNode) : [source.id],
+        );
+        onSelectionChange(selectedIds.filter((id) => !deletedIds.has(id)));
+        setDeleteSource(null);
         await refreshSources();
       } catch (error) {
         toast.error(getErrorMessage(error, "Failed to delete source."));
@@ -1868,24 +1930,25 @@ export function SourcesHub({
         setRowBusy(source.id, false);
       }
     },
-    [workspaceId, refreshSources, onSelectionChange, selectedIds],
+    [workspaceId, fullSourceTree, refreshSources, onSelectionChange, selectedIds],
   );
 
-  const handleReindexSource = useCallback(
+  const handleRetrySource = useCallback(
     async (source: SourceItem) => {
       if (!workspaceId) return;
 
       setRowBusy(source.id, true);
       try {
-        await contentClient.indexSource(workspaceId, source.id, {});
-        toast.success("Re-index queued.");
+        await contentClient.retrySource(workspaceId, source.id, {});
+        toast.success("Source retry queued.");
+        await refreshSources();
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to re-index source."));
+        toast.error(getErrorMessage(error, "Failed to retry source."));
       } finally {
         setRowBusy(source.id, false);
       }
     },
-    [workspaceId],
+    [workspaceId, refreshSources],
   );
 
   const handlePreviewSource = useCallback((source: SourceItem) => {
@@ -2006,6 +2069,8 @@ export function SourcesHub({
   const resetAddForm = useCallback(() => {
     setTextTitle("");
     setTextContent("");
+    setUrlValue("");
+    setUrlTitle("");
     setFiles([]);
     setUploadProgress(0);
     setAddTab("File");
@@ -2131,6 +2196,41 @@ export function SourcesHub({
       setIsSubmitting(false);
     }
   }, [workspaceId, textTitle, textContent, addParentSourceId, resetAddForm, refreshSources]);
+
+  const handleCreateUrlSource = useCallback(async () => {
+    if (!workspaceId) {
+      toast.error("No workspace selected yet.");
+      return;
+    }
+
+    const url = urlValue.trim();
+    if (!url) {
+      toast.error("URL cannot be empty.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const created = await contentClient.createUrlSource(workspaceId, {
+        url,
+        title: urlTitle.trim() || undefined,
+        parentSourceId: addParentSourceId,
+      });
+
+      setPendingSourceIds((prev) =>
+        prev.includes(created.source.id) ? prev : [...prev, created.source.id],
+      );
+
+      toast.success("URL source added. Processing started.");
+      setIsAddOpen(false);
+      resetAddForm();
+      await refreshSources();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to add URL source."));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [workspaceId, urlValue, urlTitle, addParentSourceId, resetAddForm, refreshSources]);
 
   const handleUploadFiles = useCallback(async () => {
     if (!workspaceId) {
@@ -2300,7 +2400,7 @@ export function SourcesHub({
                   editingId={editingSourceId}
                   editingTitle={editingTitle}
                   onCancelRename={handleCancelRename}
-                  onDelete={handleDeleteSource}
+                  onDelete={handleRequestDeleteSource}
                   onDownload={handleDownloadSource}
                   onEditReadme={handleOpenReadmeDialog}
                   onEditTitleChange={setEditingTitle}
@@ -2308,7 +2408,7 @@ export function SourcesHub({
                   onCreateDirectory={handleOpenCreateDirectory}
                   onMove={handleOpenMoveDialog}
                   onPreview={handlePreviewSource}
-                  onReindex={handleReindexSource}
+                  onRetry={handleRetrySource}
                   onStartRename={handleStartRename}
                   onSubmitRename={handleSubmitRename}
                   onToggle={handleToggle}
@@ -2602,7 +2702,7 @@ export function SourcesHub({
           <DialogHeader>
             <DialogTitle>Add source</DialogTitle>
             <DialogDescription>
-              Add text notes or upload files as sources.
+              Add web pages, text notes, or uploaded files as sources.
             </DialogDescription>
           </DialogHeader>
 
@@ -2647,6 +2747,23 @@ export function SourcesHub({
                     placeholder="Paste or write source content..."
                     value={textContent}
                   />
+                </div>
+              ) : addTab === "URL" ? (
+                <div className="flex h-full flex-col gap-2">
+                  <Input
+                    onChange={(e) => setUrlValue(e.target.value)}
+                    placeholder="https://example.com/article"
+                    type="url"
+                    value={urlValue}
+                  />
+                  <Input
+                    onChange={(e) => setUrlTitle(e.target.value)}
+                    placeholder="Title (optional)"
+                    value={urlTitle}
+                  />
+                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-6 text-center text-xs text-muted-foreground">
+                    SourceWeft will fetch the page content and index it for search.
+                  </div>
                 </div>
               ) : (
                 <div className="flex h-full min-h-0 flex-col gap-2">
@@ -2757,11 +2874,14 @@ export function SourcesHub({
               disabled={
                 isSubmitting ||
                 (addTab === "Text" && !textContent.trim()) ||
+                (addTab === "URL" && !urlValue.trim()) ||
                 (addTab === "File" && files.length === 0)
               }
               onClick={() =>
                 addTab === "Text"
                   ? void handleCreateTextSource()
+                  : addTab === "URL"
+                    ? void handleCreateUrlSource()
                   : void handleUploadFiles()
               }
               type="button"
@@ -2772,7 +2892,13 @@ export function SourcesHub({
                   Working...
                 </>
               ) : (
-                <>{addTab === "Text" ? "Create source" : "Upload files"}</>
+                <>
+                  {addTab === "Text"
+                    ? "Create source"
+                    : addTab === "URL"
+                      ? "Add URL"
+                      : "Upload files"}
+                </>
               )}
             </Button>
           </DialogFooter>
@@ -2979,6 +3105,57 @@ export function SourcesHub({
         source={previewSource}
         workspaceId={workspaceId}
       />
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteSource(null);
+          }
+        }}
+        open={Boolean(deleteSource)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {deleteSource?.sourceType === "directory" ? "folder" : "source"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteSource?.sourceType === "directory"
+                ? "This will remove the folder and its sources from this workspace. This action cannot be undone."
+                : "This will remove the source from this workspace. This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteSource ? (
+            <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
+              <span className="line-clamp-2 break-words">{deleteSource.title}</span>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(deleteSource && rowBusyById[deleteSource.id])}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive" })}
+              disabled={Boolean(deleteSource && rowBusyById[deleteSource.id])}
+              onClick={(event) => {
+                event.preventDefault();
+                if (deleteSource) {
+                  void handleConfirmDeleteSource(deleteSource);
+                }
+              }}
+            >
+              {deleteSource && rowBusyById[deleteSource.id] ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <SkillReadmeDialog
         catalogId={previewSkillCatalogId}

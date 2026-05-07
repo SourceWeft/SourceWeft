@@ -58,6 +58,17 @@ export class ContentService {
     return contentSourceService.createSource(input);
   }
 
+  async createUrlSource(input: {
+    workspaceId: string;
+    userId: string;
+    url: string;
+    title?: string;
+    parentSourceId?: string | null;
+    forceRefresh?: boolean;
+  }) {
+    return contentSourceService.createUrlSource(input);
+  }
+
   async listSources(input: { workspaceId: string; userId: string }) {
     return contentSourceService.listSources(input);
   }
@@ -328,15 +339,42 @@ export class ContentService {
     sourceId: string;
     userId: string;
     chunkSize?: number;
+    forceRefresh?: boolean;
   }) {
     return this.sourceParsingService.reparseSource(input);
   }
 
-  async processSourceParseJob(input: SourceParseJobPayload) {
+  async retrySource(input: {
+    workspaceId: string;
+    sourceId: string;
+    userId: string;
+    chunkSize?: number;
+    forceRefresh?: boolean;
+  }) {
+    const result = await this.sourceParsingService.tryQueueSourceReparse(input);
+    if (result) {
+      return {
+        ...result,
+        mode: "reparse" as const,
+      };
+    }
+
+    const indexed = await this.sourceIndexingService.indexSource(input);
+    return {
+      ...indexed,
+      mode: "index" as const,
+    };
+  }
+
+  async processSourceParseJob(
+    input: SourceParseJobPayload & { isFinalAttempt?: boolean },
+  ) {
     return this.sourceParsingService.processSourceParseJob(input);
   }
 
-  async processSourceParsePollJob(input: SourceParsePollJobPayload) {
+  async processSourceParsePollJob(
+    input: SourceParsePollJobPayload & { isFinalAttempt?: boolean },
+  ) {
     return this.sourceParsingService.processSourceParsePollJob(input);
   }
 
