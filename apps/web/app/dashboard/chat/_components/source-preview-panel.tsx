@@ -51,10 +51,11 @@ export function SourcePreviewPanel({
 
   useEffect(() => {
     if (open) {
-      setPreviewMode("preview");
+      const isChunkCitation = Boolean(citation?.chunkId && !citation.externalUri);
+      setPreviewMode(isChunkCitation ? "chunks" : "preview");
       setRawChunkIds(new Set());
     }
-  }, [citation?.chunkId, open, source?.id]);
+  }, [citation?.chunkId, citation?.externalUri, open, source?.id]);
 
   useEffect(() => {
     if (!open || citation?.externalUri || !workspaceId || (!citation && !source)) {
@@ -127,7 +128,7 @@ export function SourcePreviewPanel({
   }, [citation, open, source, workspaceId]);
 
   useEffect(() => {
-    if (!open || !detail || !citation) {
+    if (!open || !detail || !citation || previewMode !== "chunks") {
       return;
     }
 
@@ -163,7 +164,7 @@ export function SourcePreviewPanel({
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [citation, detail, open]);
+  }, [citation, detail, open, previewMode]);
 
   const citedChunk = detail?.chunks.find(
     (chunk) => chunk.id === citation?.chunkId,
