@@ -14,6 +14,14 @@ import type {
 import type { AgentCitationRegistry } from "./citation-registry";
 import { logger } from "../../../shared/logger";
 import {
+  MAX_GLOB_RESULTS,
+  MAX_GREP_RESULTS,
+  compileGrepRegex,
+  formatTimestamp,
+  lineNumberContent,
+  simpleGlobToRegExp,
+} from "./fs-utils";
+import {
   buildChunkFilePath,
   findVirtualSource,
   normalizeVirtualPath,
@@ -30,24 +38,10 @@ import type { VirtualFsSource } from "../virtual-fs/types";
 
 const DEFAULT_READ_CHUNK_LIMIT = 6;
 const MAX_READ_CHUNK_LIMIT = 12;
-const MAX_GLOB_RESULTS = 200;
-const MAX_GREP_RESULTS = 50;
 const MAX_GREP_RECALL_TOP_K = 300;
 const MAX_GREP_REGEX_FALLBACK_CHUNKS = 300;
 const MAX_GREP_FALLBACK_CHUNKS = 120;
 const MAX_GREP_RECALL_TERMS = 8;
-
-function simpleGlobToRegExp(pattern: string) {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*\//g, "::DOUBLE_STAR_SLASH::")
-    .replace(/\*\*/g, "::DOUBLE_STAR::")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\?/g, "[^/]")
-    .replace(/::DOUBLE_STAR_SLASH::/g, "(?:.*/)?")
-    .replace(/::DOUBLE_STAR::/g, ".*");
-  return new RegExp(`^${escaped}$`, "i");
-}
 
 export function normalizeGrepGlobPattern(glob: string | null | undefined, path: string | null | undefined) {
   if (!glob || glob.trim().length === 0) {
@@ -55,6 +49,10 @@ export function normalizeGrepGlobPattern(glob: string | null | undefined, path: 
   }
 
   const trimmed = glob.trim();
+  if (trimmed === "*" || trimmed === "**") {
+    return "**";
+  }
+
   if (trimmed.startsWith("/")) {
     return trimmed.replace(/\/+$/g, "") || "/";
   }
@@ -84,20 +82,6 @@ export function matchesGrepGlob(input: {
   );
 }
 
-function compileGrepRegex(pattern: string) {
-  const normalized = pattern.trim().replace(/^\(\?i\)/, "");
-  if (normalized.length === 0) {
-    return "grep pattern must not be empty";
-  }
-
-  try {
-    return new RegExp(normalized, "i");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Invalid regex pattern '${pattern}': ${message}`;
-  }
-}
-
 function extractSearchTermsForRegex(pattern: string) {
   const normalized = pattern
     .replace(/^\(\?i\)/, " ")
@@ -117,13 +101,6 @@ function extractSearchTermsForRegex(pattern: string) {
   )
     .sort((a, b) => b.length - a.length)
     .slice(0, MAX_GREP_RECALL_TERMS);
-}
-
-function lineNumberContent(content: string) {
-  return content
-    .split(/\r?\n/)
-    .map((line, index) => `${index + 1}: ${line}`)
-    .join("\n");
 }
 
 function buildSourceHeader(source: VirtualFsSource) {
@@ -248,21 +225,6 @@ function buildTreeEntry(source: VirtualFsSource): FileInfo {
 
 function countChunks(sources: VirtualFsSource[]) {
   return sources.reduce((sum, source) => sum + source.chunkCount, 0);
-}
-
-function formatTimestamp(value: Date | string | number | null | undefined) {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value === "string") {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
-  }
-  if (typeof value === "number") {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
-  }
-  return undefined;
 }
 
 export class DatabaseKnowledgeBackend implements BackendProtocolV2 {

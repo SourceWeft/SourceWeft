@@ -255,6 +255,23 @@ export type MessageRecord = {
   createdAt: string;
 };
 
+export type WorkingFilePurpose = "scratch" | "draft" | "note" | "output_candidate";
+
+export type WorkingFileRecord = {
+  id: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  path: string;
+  contentText: string;
+  mimeType: string;
+  sizeBytes: number;
+  purpose: WorkingFilePurpose | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ByokKeyRefRecord = {
   id: string;
   teamId: string;

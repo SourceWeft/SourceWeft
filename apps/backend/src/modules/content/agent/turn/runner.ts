@@ -1,8 +1,10 @@
-import { CompositeBackend } from "deepagents";
 import { buildAgentConfig, createThreadAgent } from "..";
 import { AgentCitationRegistry } from "../citation-registry";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
+import { createDefaultFilesystemMounts } from "../filesystem-capabilities";
+import { MountedAgentFilesystemBackend } from "../mounted-fs-backend";
 import { createRetrievalTool } from "../tools/retrieval-tool";
+import { WorkingFilesBackend } from "../working-files-backend";
 import { createWebTools } from "../tools/web-tools";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { createDefaultWebProvider } from "../../web";
@@ -871,19 +873,32 @@ export async function* invokeDeepAgentTurn(input: {
     sourceIds: input.prepared.sourceIds,
     citationRegistry,
   });
+  const workingFilesBackend = new WorkingFilesBackend({
+    teamId: input.prepared.workspace.organizationId,
+    workspaceId: input.prepared.workspace.id,
+    threadId: input.prepared.thread.id,
+    userId: input.prepared.userId,
+  });
   const skillsBackend =
     input.prepared.enabledSkills.length > 0
       ? new SelectedSkillsBackend(input.prepared.enabledSkills)
       : null;
-  const backend = skillsBackend
-    ? new CompositeBackend(databaseBackend, { "/skills/": skillsBackend })
-    : databaseBackend;
+  const filesystemMounts = createDefaultFilesystemMounts({
+    skillsEnabled: Boolean(skillsBackend),
+  });
+  const backend = new MountedAgentFilesystemBackend({
+    knowledge: databaseBackend,
+    working: workingFilesBackend,
+    skills: skillsBackend,
+    mounts: filesystemMounts,
+  });
 
   const agent = await createThreadAgent({
     modelAlias: input.prepared.modelAlias,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     tools: [retrievalTool, ...webTools],
     backend,
+    filesystemMounts,
     skills: skillsBackend ? ["/skills/"] : undefined,
     runtimePrompt,
     chatProfileConfig: input.prepared.chatProfile.configJson,

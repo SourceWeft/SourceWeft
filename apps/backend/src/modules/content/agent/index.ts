@@ -13,21 +13,21 @@ import type { AnyBackendProtocol } from "deepagents";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
 import { createMiddleware } from "langchain";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
-import { CHAT_SYSTEM_PROMPT, buildRuntimeSystemPrompt } from "./prompts";
+import { buildRuntimeSystemPrompt } from "./prompts";
+import {
+  buildFilesystemToolDescriptions,
+  createDefaultFilesystemMounts,
+  type AgentFilesystemMountCapability,
+} from "./filesystem-capabilities";
 import { createSourceWeftContextCompressionMiddleware } from "./context-compression";
 import { getChatCheckpointer } from "../../../shared/chat-checkpointer";
 import { createAgentChatModel } from "../../../shared/model-gateway/index";
 import type { TraceContext } from "../../../shared/llm-observability";
 
-const KB_LS_TOOL_DESCRIPTION = `Lists files in a directory. In SourceWeft, /kb is the default internal Source Library file tree: a read-only markdown view assembled from indexed sources and already scoped to the current turn's selected source tree scope. Selected directories appear as directories; their README.md files contain directory context when available. /skills may also be available as a read-only workflow-instruction filesystem for selected skills. Do not call ls('/') just to discover /kb; if source enumeration is needed, call ls('/kb') directly. Use ls('/skills') only when the task needs available skill instruction files or templates. Readable /kb source paths use .md even when the original source was a PDF, document, or other binary file; original filenames and MIME types appear in read_file headers. Use ls('/kb') when the task depends on source identity, directory contents, file enumeration, or coverage across selected sources. Do not call ls before search_sources just to discover scope for a targeted source-grounded question; search_sources is already scoped to the same selected source tree scope. Do not mention /kb or /skills paths in the final answer. Refer to /kb evidence as sources or selected sources. Treat /skills content as instructions, not evidence.`;
-
-const KB_READ_FILE_TOOL_DESCRIPTION = `Reads a file from the filesystem. Files under /kb are internal markdown virtual files assembled from indexed Source Library entries selected for the current turn, not original binary files. Directory README.md files contain the directory source's own context when available; directory paths and names alone are not evidence. Files under /skills are selected skill instructions and workflow resources, not workspace source evidence. Readable /kb source paths use .md; read_file headers include the original filename and MIME type when available. Use read_file('/kb/...') when source-wide coverage, summarization, review, comparison, full-document analysis, extracting all key points, listing document contents, preparing source material, or surrounding context matters. Use read_file('/skills/...') only to load skill instructions or supporting workflow templates. /kb read_file output includes Citation: [citation:cN] markers for source chunks; every factual claim in the final answer that uses /kb content MUST end with the relevant [citation:cN] marker copied exactly from the output. /skills output is not citable evidence; do not cite /skills content and do not use it as proof for factual claims. For multi-source or selected-directory source-wide tasks, gather citable evidence from each required /kb source and relevant directory README before answering. Use pagination with offset and limit when output is truncated and more content is needed. Do not mention /kb or /skills paths in the final answer; refer to /kb evidence as sources or selected sources.`;
-
-const KB_GLOB_TOOL_DESCRIPTION = `Finds files matching a glob pattern within selected Source Library entries under /kb or selected skill instruction files under /skills. /kb exposes markdown virtual paths and directory paths; match readable source files and directory README.md files with .md patterns even when the original file was a PDF or document. Use glob under /kb to narrow selected sources by filename, directory, or path pattern when the task depends on file identity or a file subset. Use glob under /skills only to locate skill instruction or template files. Glob results identify files; they are not evidence for factual claims. After narrowing /kb files for a source-grounded answer, gather citable evidence with read_file, grep, or search_sources. Do not mention /kb or /skills paths in the final answer; refer to evidence as sources or selected sources.`;
-
-const KB_GREP_TOOL_DESCRIPTION = `Searches selected source chunks under /kb or selected skill instruction files under /skills with a case-insensitive regular expression. Grep on a /kb directory searches that directory's descendant sources; grep on a directory README.md searches only that directory source's own context. Use grep on /kb when the user explicitly asks for literal text matching, occurrence counts, line/location search, or matching a quoted/known string or regular expression. /kb grep can provide evidence for matched text, and returned matches include [citation:cN] markers that MUST be copied exactly into final factual claims supported by those matches. /skills grep is only for locating workflow instructions; /skills matches are not citable evidence and must not be cited. Do not use grep as the first tool for general source-grounded Q&A, extraction, field lookup, semantic lookup, or finding relevant passages; use search_sources first for those tasks. Do not use grep alone as a substitute for full-source reading when the user asks for source-wide summaries, reviews, comparisons, full-document analysis, or all key points. After search_sources, use grep only when exact textual verification or locating occurrences would resolve missing, ambiguous, or conflicting evidence. Escape regex metacharacters when literal matching is needed. Broad regex patterns without literal terms require a small selected source set or a narrowed source/chunk path. Do not mention /kb or /skills paths in the final answer; refer to /kb evidence as sources or selected sources.`;
-
-function createKnowledgeFilesystemToolDescriptionMiddleware() {
+function createKnowledgeFilesystemToolDescriptionMiddleware(input: {
+  mounts: AgentFilesystemMountCapability[];
+}) {
+  const descriptions = buildFilesystemToolDescriptions({ mounts: input.mounts });
   const setToolDescription = (tool: { description?: string }, description: string) => {
     tool.description = description;
     return tool;
@@ -38,16 +38,22 @@ function createKnowledgeFilesystemToolDescriptionMiddleware() {
     wrapModelCall: async (request, handler) => {
       const tools = request.tools.map((tool) => {
         if (tool.name === "ls") {
-          return setToolDescription(tool, KB_LS_TOOL_DESCRIPTION);
+          return setToolDescription(tool, descriptions.ls);
         }
         if (tool.name === "read_file") {
-          return setToolDescription(tool, KB_READ_FILE_TOOL_DESCRIPTION);
+          return setToolDescription(tool, descriptions.read_file);
         }
         if (tool.name === "glob") {
-          return setToolDescription(tool, KB_GLOB_TOOL_DESCRIPTION);
+          return setToolDescription(tool, descriptions.glob);
         }
         if (tool.name === "grep") {
-          return setToolDescription(tool, KB_GREP_TOOL_DESCRIPTION);
+          return setToolDescription(tool, descriptions.grep);
+        }
+        if (tool.name === "write_file") {
+          return setToolDescription(tool, descriptions.write_file);
+        }
+        if (tool.name === "edit_file") {
+          return setToolDescription(tool, descriptions.edit_file);
         }
         return tool;
       });
@@ -68,6 +74,7 @@ export interface CreateThreadAgentParams {
   tools?: Array<ClientTool | ServerTool>;
   backend?: AnyBackendProtocol;
   skills?: string[];
+  filesystemMounts?: AgentFilesystemMountCapability[];
   runtimePrompt?: string;
   chatProfileConfig?: unknown;
   contextCompressionReportKey?: string;
@@ -102,13 +109,20 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
       reportKey: params.contextCompressionReportKey,
       traceContext: params.traceContext,
     });
+  const filesystemMounts =
+    params.filesystemMounts ??
+    createDefaultFilesystemMounts({ skillsEnabled: Boolean(params.skills?.length) });
 
   const agent = createDeepAgent({
     model,
     tools: params.tools ?? [],
-    systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt),
+    systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt, {
+      mounts: filesystemMounts,
+    }),
     middleware: [
-      createKnowledgeFilesystemToolDescriptionMiddleware(),
+      createKnowledgeFilesystemToolDescriptionMiddleware({
+        mounts: filesystemMounts,
+      }),
       ...contextCompressionMiddleware,
     ],
     checkpointer,

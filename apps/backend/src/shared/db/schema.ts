@@ -105,6 +105,7 @@ type ArtifactType =
   | "infographic";
 type ArtifactStatus = "pending" | "running" | "ready" | "failed" | "archived";
 type ArtifactSourceRole = "input" | "evidence" | "output";
+type WorkingFilePurpose = "scratch" | "draft" | "note" | "output_candidate";
 type ShareTargetType = "thread" | "artifact" | "chat_view";
 type ShareAccessLevel = "viewer" | "editor";
 type JobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
@@ -266,9 +267,7 @@ export const teamAuditLogs = pgTable(
   "team_audit_logs",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     actorUserId: text("actor_user_id"),
     action: text("action").notNull(),
     targetType: text("target_type").notNull(),
@@ -1661,6 +1660,70 @@ export const messages = pgTable(
       table.teamId,
       table.workspaceId,
       desc(table.createdAt),
+    ),
+  ],
+);
+
+export const workingFiles = pgTable(
+  "working_files",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      ,
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    contentText: text("content_text").notNull().default(""),
+    mimeType: text("mime_type").notNull().default("text/plain"),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    purpose: text("purpose").$type<WorkingFilePurpose>(),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "working_files_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "working_files_thread_workspace_team_fk",
+      columns: [table.threadId, table.workspaceId, table.teamId],
+      foreignColumns: [threads.id, threads.workspaceId, threads.teamId],
+    }).onDelete("cascade"),
+    uniqueIndex("working_files_thread_path_uq").on(
+      table.teamId,
+      table.workspaceId,
+      table.threadId,
+      table.path,
+    ),
+    check(
+      "working_files_path_check",
+      sql`${table.path} ~ '^/work/[^[:cntrl:]]+$' and ${table.path} not like '%..%' and ${table.path} not like '%~%' and ${table.path} not like '%//%'`,
+    ),
+    check(
+      "working_files_purpose_check",
+      sql`${table.purpose} is null or ${table.purpose} in ('scratch', 'draft', 'note', 'output_candidate')`,
+    ),
+    check(
+      "working_files_size_bytes_check",
+      sql`${table.sizeBytes} >= 0`,
+    ),
+    index("working_files_thread_updated_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.threadId,
+      desc(table.updatedAt),
     ),
   ],
 );

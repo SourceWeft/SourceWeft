@@ -11,18 +11,14 @@ import {
   contextEditingMiddleware,
   countTokensApproximately,
   createMiddleware,
-  summarizationMiddleware,
   type AgentMiddleware,
   type ContextEdit,
   type TokenCounter,
 } from "langchain";
 import { endSpan, startSpan, type TraceContext } from "../../../shared/llm-observability";
-import { logger } from "../../../shared/logger";
-import { createAgentChatModel } from "../../../shared/model-gateway/index";
 import { ContentError } from "../errors";
 
 const DEFAULT_CONTEXT_LENGTH = 32_768;
-const DEFAULT_SUMMARIZER_ALIAS = "chat-summarizer";
 export const SOURCEWEFT_TOOL_OUTPUT_PLACEHOLDER =
   "[cleared - older tool output trimmed for context]";
 const RECENT_TOOL_RESULTS_TO_KEEP = 5;
@@ -126,7 +122,6 @@ type CompressionSettings = {
   enabled: boolean;
   contextEditingEnabled: boolean;
   traceEnabled: boolean;
-  summarizerAlias: string;
   budget: SourceWeftContextCompressionBudget;
 };
 
@@ -222,9 +217,6 @@ function resolveSettings(
     enabled: readFlag("SOURCEWEFT_AGENT_COMPACTION_ENABLED", true),
     contextEditingEnabled: readFlag("SOURCEWEFT_CONTEXT_EDITING_ENABLED", true),
     traceEnabled: readFlag("SOURCEWEFT_CONTEXT_COMPRESSION_TRACE", true),
-    summarizerAlias:
-      process.env.SOURCEWEFT_SUMMARIZER_PROFILE_ALIAS?.trim() ||
-      DEFAULT_SUMMARIZER_ALIAS,
     budget: resolveSourceWeftContextCompressionBudget(input.chatProfileConfig),
   };
 }
@@ -313,45 +305,6 @@ export function sanitizeSourceWeftSummaryText(text: string) {
     .replace(/\[citation:([^\]\s]+)\]/gi, "old citation marker $1 removed")
     .replace(/\bcitation:([a-z0-9_-]+)\b/gi, "old citation marker $1")
     .replace(/<citation\b[^>]*>.*?<\/citation>/gis, "old citation removed");
-}
-
-function sanitizeMessageContent(content: unknown): unknown {
-  if (typeof content === "string") {
-    return sanitizeSourceWeftSummaryText(content);
-  }
-  if (!Array.isArray(content)) {
-    return content;
-  }
-  return content.map((item) => {
-    const record = toObjectRecord(item);
-    if (!record || typeof record.text !== "string") {
-      return item;
-    }
-    return {
-      ...record,
-      text: sanitizeSourceWeftSummaryText(record.text),
-    };
-  });
-}
-
-function createSanitizingSummaryModel(model: BaseLanguageModel) {
-  return new Proxy(model as object, {
-    get(target, property, receiver) {
-      const value = Reflect.get(target, property, receiver);
-      if (property !== "invoke" || typeof value !== "function") {
-        return value;
-      }
-
-      return async (...args: unknown[]) => {
-        const response = await value.apply(target, args);
-        const record = toObjectRecord(response);
-        if (record && "content" in record) {
-          record.content = sanitizeMessageContent(record.content);
-        }
-        return response;
-      };
-    },
-  }) as BaseLanguageModel;
 }
 
 export function estimateSourceWeftMessageTokens(messages: BaseMessage[]) {
@@ -940,66 +893,6 @@ function createSourceWeftPreSummaryContextEditingMiddleware(input: {
   });
 }
 
-async function createSummarizerModel(input: {
-  summarizerAlias: string;
-  currentModelAlias: string;
-  gatewayConfigId?: string | null;
-  execution?: LangChainModelExecutionConfig;
-}) {
-  const execution: LangChainModelExecutionConfig = {
-    ...input.execution,
-    metadata: {
-      ...input.execution?.metadata,
-      feature: "context_summarization",
-      observationName: "context_summarization",
-      modelAlias: input.summarizerAlias,
-    },
-  };
-
-  try {
-    const model = await createAgentChatModel({
-      modelAlias: input.summarizerAlias,
-      gatewayConfigId: input.gatewayConfigId,
-      execution,
-    });
-    return {
-      model: createSanitizingSummaryModel(model),
-      modelAlias: input.summarizerAlias,
-      fallbackUsed: false,
-    };
-  } catch (error) {
-    if (input.summarizerAlias === input.currentModelAlias) {
-      throw error;
-    }
-    logger.warn("Context summarizer profile unavailable; falling back to current chat model", {
-      summarizerAlias: input.summarizerAlias,
-      currentModelAlias: input.currentModelAlias,
-      error: errorSummary(error),
-    });
-  }
-
-  const fallbackExecution: LangChainModelExecutionConfig = {
-    ...input.execution,
-    metadata: {
-      ...input.execution?.metadata,
-      feature: "context_summarization",
-      observationName: "context_summarization",
-      modelAlias: input.currentModelAlias,
-      fallbackFromModelAlias: input.summarizerAlias,
-    },
-  };
-  const fallbackModel = await createAgentChatModel({
-    modelAlias: input.currentModelAlias,
-    gatewayConfigId: input.gatewayConfigId,
-    execution: fallbackExecution,
-  });
-  return {
-    model: createSanitizingSummaryModel(fallbackModel),
-    modelAlias: input.currentModelAlias,
-    fallbackUsed: true,
-  };
-}
-
 export async function createSourceWeftContextCompressionMiddleware(
   input: SourceWeftContextCompressionMiddlewareInput,
 ): Promise<AgentMiddleware[]> {
@@ -1019,59 +912,7 @@ export async function createSourceWeftContextCompressionMiddleware(
   }
 
   const middleware: AgentMiddleware[] = [];
-  let summaryModelAlias: string | null = null;
-  let summaryMiddleware: AgentMiddleware | null = null;
-
-  try {
-    const summarizer = await createSummarizerModel({
-      summarizerAlias: settings.summarizerAlias,
-      currentModelAlias: input.modelAlias,
-      gatewayConfigId: input.gatewayConfigId,
-      execution: input.execution,
-    });
-    summaryModelAlias = summarizer.modelAlias;
-    summaryMiddleware = summarizationMiddleware({
-      model: summarizer.model,
-      trigger: [
-        { tokens: settings.budget.summarizationTriggerTokens },
-        { messages: settings.budget.summaryMessageTrigger },
-      ],
-      keep: { messages: settings.budget.recentMessagesToKeep },
-      tokenCounter: estimateSourceWeftMessageTokens,
-      summaryPrompt: SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT,
-      summaryPrefix: SOURCEWEFT_SUMMARY_PREFIX,
-      trimTokensToSummarize: Math.max(
-        1_000,
-        Math.floor(settings.budget.usableInputTokens * 0.5),
-      ),
-    });
-
-    if (summarizer.fallbackUsed) {
-      recordCompressionReport(input.reportKey, {
-        enabled: true,
-        contextEditingEnabled: settings.contextEditingEnabled,
-        summaryModelAlias,
-        triggerReason: "summarizer_alias_fallback",
-        contextLength: settings.budget.contextLength,
-        usableInputTokens: settings.budget.usableInputTokens,
-      });
-    }
-  } catch (error) {
-    logger.warn("Context summarization middleware disabled after model setup failure", {
-      summarizerAlias: settings.summarizerAlias,
-      currentModelAlias: input.modelAlias,
-      error: errorSummary(error),
-    });
-    recordCompressionReport(input.reportKey, {
-      enabled: true,
-      contextEditingEnabled: settings.contextEditingEnabled,
-      summaryModelAlias: null,
-      triggerReason: "summarizer_model_unavailable",
-      error: errorSummary(error),
-      contextLength: settings.budget.contextLength,
-      usableInputTokens: settings.budget.usableInputTokens,
-    });
-  }
+  const summaryModelAlias = null;
 
   middleware.push(
     createSourceWeftCompressionTraceMiddleware({
@@ -1092,10 +933,6 @@ export async function createSourceWeftContextCompressionMiddleware(
         modelAlias: input.modelAlias,
       }),
     );
-  }
-
-  if (summaryMiddleware) {
-    middleware.push(summaryMiddleware);
   }
 
   if (settings.contextEditingEnabled) {

@@ -5,6 +5,7 @@ import { registerModelGatewayRoutes } from "./content/model-gateway";
 import { registerSourceRoutes } from "./content/sources";
 import { registerSkillRoutes } from "./content/skills";
 import { registerThreadRoutes } from "./content/threads";
+import { registerWorkingFileRoutes } from "./content/working-files";
 
 export function registerContentRoutes(app: Hono) {
   const workspaceRoutes = new Hono();
@@ -12,6 +13,7 @@ export function registerContentRoutes(app: Hono) {
   registerSourceRoutes(workspaceRoutes);
   registerSkillRoutes(workspaceRoutes);
   registerThreadRoutes(workspaceRoutes);
+  registerWorkingFileRoutes(workspaceRoutes);
   registerByokRoutes(workspaceRoutes);
   registerModelGatewayRoutes(workspaceRoutes);
   registerWorkspaceLlmObservabilityRoutes(workspaceRoutes);

@@ -30,6 +30,23 @@ test("buildGrepGlobMatcher lets source-file globs select chunk-backed content", 
   );
 });
 
+test("buildGrepGlobMatcher treats bare star as the current grep scope", () => {
+  const matcher = buildGrepGlobMatcher("*", "/kb");
+
+  assert.equal(normalizeGrepGlobPattern("*", "/kb"), "**");
+  assert.equal(matcher.test("/kb/invoice__src_12345678.md"), true);
+  assert.equal(matcher.test("/kb/invoice__src_12345678/chunks/0000.md"), true);
+  assert.equal(
+    matchesGrepGlob({
+      glob: "*",
+      globMatcher: matcher,
+      sourceFilePath: "/kb/invoice__src_12345678.md",
+      chunkPath: "/kb/invoice__src_12345678/chunks/0000.md",
+    }),
+    true,
+  );
+});
+
 test("buildGrepGlobMatcher does not expose original source title aliases", () => {
   const matcher = buildGrepGlobMatcher("*.pdf", "/kb");
 

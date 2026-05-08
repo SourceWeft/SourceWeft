@@ -7,6 +7,7 @@ import {
   SOURCEWEFT_SUMMARY_SECTIONS,
   SOURCEWEFT_TOOL_OUTPUT_PLACEHOLDER,
   assertSourceWeftCurrentUserMessageFits,
+  createSourceWeftContextCompressionMiddleware,
   createSourceWeftToolOutputEdit,
   estimateSourceWeftMessageTokens,
   fallbackSourceWeftMessagesToRecentWindow,
@@ -53,6 +54,27 @@ test("context budget uses active chat profile context length", () => {
       historyPathPrefix: "/conversation_history",
     },
   );
+});
+
+test("context compression does not add a second summarization middleware", async () => {
+  const previousCompaction = process.env.SOURCEWEFT_AGENT_COMPACTION_ENABLED;
+  process.env.SOURCEWEFT_AGENT_COMPACTION_ENABLED = "1";
+
+  try {
+    const middleware = await createSourceWeftContextCompressionMiddleware({
+      modelAlias: "chat-default",
+    });
+    const names = middleware.map((item) => item.name);
+
+    assert.ok(names.includes("SourceWeftContextCompressionTrace"));
+    assert.equal(names.includes("SummarizationMiddleware"), false);
+  } finally {
+    if (previousCompaction === undefined) {
+      delete process.env.SOURCEWEFT_AGENT_COMPACTION_ENABLED;
+    } else {
+      process.env.SOURCEWEFT_AGENT_COMPACTION_ENABLED = previousCompaction;
+    }
+  }
 });
 
 test("tool output edit clears old tool outputs and keeps the recent five", async () => {

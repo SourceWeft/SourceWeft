@@ -622,7 +622,12 @@ class ContentThreadStreamService {
     let outcome: DeepAgentTurnOutcome | null = null;
     let assistantContent = "";
     try {
-      yield toSseData({ type: "start", messageId: prepared.userMessage.id });
+      yield toSseData({
+        type: "start",
+        messageId: prepared.userMessage.id,
+        sourceIds: prepared.selectedSourceIds,
+        effectiveSourceIds: prepared.sourceIds,
+      });
       yield toSseData({ type: "text-start", id: textId });
 
       const titleUpdates: Array<{ id: string; title: string }> = [];

@@ -85,6 +85,13 @@
       "when": 1778101200000,
       "tag": "0011_source_library_tree",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778191200000,
+      "tag": "0012_working_files",
+      "breakpoints": true
     }
   ]
 }

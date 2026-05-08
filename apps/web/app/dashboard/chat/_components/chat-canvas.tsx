@@ -92,7 +92,7 @@ import {
   ChainOfThoughtStep,
 } from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import type { SourceItem } from "./source-types";
+import { expandSelectedSources, type SourceItem } from "./source-types";
 import { hasWebPageToolResults, WebToolResults } from "./web-tool-results";
 
 const starterSuggestions = [
@@ -143,6 +143,7 @@ export type MessageVersion = {
   isTextPaused?: boolean;
   isTextInterrupted?: boolean;
   sourceIds?: string[];
+  effectiveSourceIds?: string[];
   sourceAssistantMessageId?: string | null;
   sourceUserMessageId?: string | null;
   toolCalls?: ToolCallRecord[];
@@ -2102,7 +2103,13 @@ export function ChatCanvas({
                         isLatestAssistantGroup &&
                         versionIndex === activeVisibleBranchIndex;
                       const referencedSources = !isAssistant
-                        ? (version.sourceIds ?? [])
+                        ? (
+                            version.effectiveSourceIds ??
+                            expandSelectedSources(
+                              allSources,
+                              version.sourceIds ?? [],
+                            ).map((source) => source.id)
+                          )
                             .map((sourceId) => sourceById.get(sourceId))
                             .filter((source): source is SourceItem =>
                               Boolean(source),

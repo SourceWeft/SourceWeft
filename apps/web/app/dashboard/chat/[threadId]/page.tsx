@@ -82,6 +82,7 @@ const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
 const STREAM_TEXT_INTERRUPTED_KEY = "isTextInterrupted";
 const TITLE_POLL_INTERVAL_MS = 1000;
 const TITLE_POLL_TIMEOUT_MS = 60000;
+const THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS = [300, 1000, 2500] as const;
 
 type PendingLatestVersionSelection = {
   userGroupId?: string;
@@ -221,6 +222,20 @@ function getDisplayErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Failed to send message.";
 }
 
+function shouldRetryThreadMessagesLoad(error: unknown) {
+  if (!(error instanceof HttpClientError)) {
+    return true;
+  }
+
+  return error.status === 408 || error.status === 429 || error.status >= 500;
+}
+
+function waitForThreadMessagesRetry(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
+
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -309,6 +324,17 @@ function resolveMessageSourceIds(message: ChatMessageItem) {
   const rawSourceIds = message.metadata.sourceIds;
   if (!Array.isArray(rawSourceIds)) {
     return [] as string[];
+  }
+
+  return rawSourceIds.filter(
+    (sourceId): sourceId is string => typeof sourceId === "string",
+  );
+}
+
+function resolveMessageEffectiveSourceIds(message: ChatMessageItem) {
+  const rawSourceIds = message.metadata.effectiveSourceIds;
+  if (!Array.isArray(rawSourceIds)) {
+    return undefined;
   }
 
   return rawSourceIds.filter(
@@ -715,6 +741,8 @@ type StreamEventPayload = {
   threadId?: string;
   title?: string;
   jobId?: string;
+  sourceIds?: unknown;
+  effectiveSourceIds?: unknown;
 };
 
 type JobStatusResponse = {
@@ -1089,6 +1117,10 @@ function buildVersionedMessageGroups(
               group.role === "user"
                 ? resolveMessageSourceIds(version)
                 : undefined,
+            effectiveSourceIds:
+              group.role === "user"
+                ? resolveMessageEffectiveSourceIds(version)
+                : undefined,
             sourceAssistantMessageId:
               group.role === "assistant"
                 ? (toNullableString(
@@ -1185,6 +1217,8 @@ export default function DashboardChatThreadPage({
     string | null
   >(null);
   const latestSignatureByGroupRef = useRef<Record<string, string>>({});
+  const loadedThreadMessagesKeyRef = useRef<string | null>(null);
+  const threadMessagesLoadGenerationRef = useRef(0);
   const pendingLatestVersionSelectionRef =
     useRef<PendingLatestVersionSelection | null>(null);
 
@@ -1643,47 +1677,77 @@ export default function DashboardChatThreadPage({
   }, [messageGroups]);
 
   const loadThreadMessages = useCallback(async () => {
+    const loadGeneration = threadMessagesLoadGenerationRef.current + 1;
+    threadMessagesLoadGenerationRef.current = loadGeneration;
+
     if (!workspaceId) {
+      loadedThreadMessagesKeyRef.current = null;
       setMessages([]);
       return;
     }
 
-    try {
-      const result = await contentClient.listThreadMessages(
-        workspaceId,
-        threadId,
-      );
-      const serverMessages = result.items
-        .filter(
-          (
-            message,
-          ): message is ThreadMessageItem & {
-            role: "user" | "assistant";
-          } => message.role === "user" || message.role === "assistant",
-        )
-        .map((message) => ({
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          parentMessageId: message.parentMessageId,
-          metadata: message.metadata,
-          createdAt: message.createdAt,
-        }))
-        .sort(
-          (left, right) =>
-            new Date(left.createdAt).getTime() -
-            new Date(right.createdAt).getTime(),
-        );
+    const threadMessagesKey = `${workspaceId}:${threadId}`;
 
-      setMessages(
-        serverMessages.sort(
-          (left, right) =>
-            new Date(left.createdAt).getTime() -
-            new Date(right.createdAt).getTime(),
-        ),
-      );
-    } catch {
-      setMessages([]);
+    for (
+      let attempt = 0;
+      attempt <= THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS.length;
+      attempt += 1
+    ) {
+      try {
+        const result = await contentClient.listThreadMessages(
+          workspaceId,
+          threadId,
+        );
+        const serverMessages = result.items
+          .filter(
+            (
+              message,
+            ): message is ThreadMessageItem & {
+              role: "user" | "assistant";
+            } => message.role === "user" || message.role === "assistant",
+          )
+          .map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            parentMessageId: message.parentMessageId,
+            metadata: message.metadata,
+            createdAt: message.createdAt,
+          }))
+          .sort(
+            (left, right) =>
+              new Date(left.createdAt).getTime() -
+              new Date(right.createdAt).getTime(),
+          );
+
+        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+          return;
+        }
+
+        loadedThreadMessagesKeyRef.current = threadMessagesKey;
+        setMessages(serverMessages);
+        return;
+      } catch (error) {
+        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+          return;
+        }
+
+        const retryDelay = THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS[attempt];
+        if (
+          retryDelay === undefined ||
+          !shouldRetryThreadMessagesLoad(error)
+        ) {
+          if (loadedThreadMessagesKeyRef.current !== threadMessagesKey) {
+            setMessages([]);
+          }
+          return;
+        }
+
+        await waitForThreadMessagesRetry(retryDelay);
+        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+          return;
+        }
+      }
     }
   }, [threadId, workspaceId]);
 
@@ -1820,6 +1884,10 @@ export default function DashboardChatThreadPage({
 
       if (input.mode === "send" || input.mode === "edit") {
         tempUserId = `temp-user-${now}`;
+        const localEffectiveSourceIds = expandSelectedSources(
+          librarySources,
+          input.sourceIds,
+        ).map((source) => source.id);
         temporaryMessages.push({
           id: tempUserId,
           role: "user",
@@ -1830,6 +1898,9 @@ export default function DashboardChatThreadPage({
               : null,
           metadata: {
             sourceIds: input.sourceIds,
+            ...(localEffectiveSourceIds.length > 0
+              ? { effectiveSourceIds: localEffectiveSourceIds }
+              : {}),
             skillIds: input.skillIds ?? [],
             tools: {
               skillIds: input.skillIds ?? [],
@@ -1883,6 +1954,7 @@ export default function DashboardChatThreadPage({
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
       let streamingAssistantMessageId = tempAssistantId;
+      let preparedEffectiveSourceIds: string[] | null = null;
 
       try {
         const requestBody: Record<string, unknown> = {
@@ -2153,6 +2225,21 @@ export default function DashboardChatThreadPage({
             if (data.type === "start" && typeof data.messageId === "string") {
               const previousUserMessageId = tempUserId;
               const serverUserMessageId = data.messageId;
+              const serverSourceIds = Array.isArray(data.sourceIds)
+                ? data.sourceIds.filter(
+                    (sourceId): sourceId is string =>
+                      typeof sourceId === "string",
+                  )
+                : null;
+              const serverEffectiveSourceIds = Array.isArray(
+                data.effectiveSourceIds,
+              )
+                ? data.effectiveSourceIds.filter(
+                    (sourceId): sourceId is string =>
+                      typeof sourceId === "string",
+                  )
+                : null;
+              preparedEffectiveSourceIds = serverEffectiveSourceIds;
               persistedUserMessageId = serverUserMessageId;
               if (tempUserId && createdUserMessageId === tempUserId) {
                 createdUserMessageId = serverUserMessageId;
@@ -2165,6 +2252,15 @@ export default function DashboardChatThreadPage({
                       ? {
                           ...message,
                           id: serverUserMessageId,
+                          metadata: {
+                            ...message.metadata,
+                            ...(serverSourceIds
+                              ? { sourceIds: serverSourceIds }
+                              : {}),
+                            ...(serverEffectiveSourceIds
+                              ? { effectiveSourceIds: serverEffectiveSourceIds }
+                              : {}),
+                          },
                         }
                       : message.id === streamingAssistantMessageId
                         ? {
@@ -2494,9 +2590,23 @@ export default function DashboardChatThreadPage({
 
         const usedSourceIds = new Set(input.sourceIds);
         messages.forEach((message) => {
-          resolveMessageSourceIds(message).forEach((sourceId) => {
+          const messageSourceIds =
+            resolveMessageEffectiveSourceIds(message) ??
+            expandSelectedSources(
+              librarySources,
+              resolveMessageSourceIds(message),
+            ).map((source) => source.id);
+          messageSourceIds.forEach((sourceId) => {
             usedSourceIds.add(sourceId);
           });
+        });
+        const currentEffectiveSourceIds =
+          preparedEffectiveSourceIds ??
+          expandSelectedSources(librarySources, input.sourceIds).map(
+            (source) => source.id,
+          );
+        currentEffectiveSourceIds.forEach((sourceId) => {
+          usedSourceIds.add(sourceId);
         });
         updateChatSourceCount(threadId, usedSourceIds.size);
 
@@ -2532,6 +2642,7 @@ export default function DashboardChatThreadPage({
       catalogKindEnabled.llm,
       clearEditingState,
       loadThreadMessages,
+      librarySources,
       messages,
       selectedModels,
       searchEnabled,
@@ -2547,11 +2658,11 @@ export default function DashboardChatThreadPage({
   const streamThreadActionRef = useRef(streamThreadAction);
   const loadThreadMessagesRef = useRef(loadThreadMessages);
 
-  useEffect(() => {
+  useBrowserLayoutEffect(() => {
     streamThreadActionRef.current = streamThreadAction;
   }, [streamThreadAction]);
 
-  useEffect(() => {
+  useBrowserLayoutEffect(() => {
     loadThreadMessagesRef.current = loadThreadMessages;
   }, [loadThreadMessages]);
 

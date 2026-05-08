@@ -195,6 +195,7 @@ export async function prepareThreadTurn(
       metadata: {
         source: "api",
         sourceIds: selectedSourceIds,
+        effectiveSourceIds: sourceIds,
         skillIds,
         tools: { skillIds, webSearchEnabled },
         versionOf: input.userMessageParentId ?? null,

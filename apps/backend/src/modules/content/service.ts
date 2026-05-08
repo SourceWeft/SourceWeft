@@ -16,6 +16,7 @@ import {
   type StreamThreadEventInput,
   type ThreadToolsSelection,
 } from "./threads";
+import { workingFilesService } from "./working-files";
 import { type LlmExecutionConfig } from "./model-gateway-audit";
 
 export class ContentService {
@@ -470,6 +471,44 @@ export class ContentService {
     userId: string;
   }) {
     return contentThreadService.listThreadMessages(input);
+  }
+
+  async listWorkingFiles(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }) {
+    return workingFilesService.listWorkingFiles(input);
+  }
+
+  async getWorkingFile(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    path: string;
+  }) {
+    return workingFilesService.getWorkingFile(input);
+  }
+
+  async putWorkingFile(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    path: string;
+    contentText: string;
+    mimeType?: string | null;
+    purpose?: Parameters<typeof workingFilesService.putWorkingFile>[0]["purpose"];
+  }) {
+    return workingFilesService.putWorkingFile(input);
+  }
+
+  async deleteWorkingFile(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    path: string;
+  }) {
+    return workingFilesService.deleteWorkingFile(input);
   }
 
   async refreshThread(input: {

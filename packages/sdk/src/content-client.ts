@@ -17,6 +17,7 @@ import type {
   DeleteCustomSkillVersionFileResponse,
   DeleteSourceResponse,
   DeleteThreadResponse,
+  DeleteWorkingFileResponse,
   DeleteWorkspaceSkillResponse,
   EnableWorkspaceSkillRequest,
   EnableWorkspaceSkillResponse,
@@ -28,14 +29,18 @@ import type {
   GetSkillCatalogDetailResponse,
   IndexSourceRequest,
   IndexSourceResponse,
+  GetWorkingFileResponse,
   ListThreadModelCatalogResponse,
   ListByokKeyRefsResponse,
   ListSkillsCatalogResponse,
   ListThreadsRequest,
   ListSourcesResponse,
   ListWorkspaceSkillsResponse,
+  ListWorkingFilesResponse,
   PutCustomSkillVersionFileRequest,
   PutCustomSkillVersionFileResponse,
+  PutWorkingFileRequest,
+  PutWorkingFileResponse,
   ReparseSourceRequest,
   ReparseSourceResponse,
   RetrySourceRequest,
@@ -193,6 +198,36 @@ export class ContentClient {
   listThreadMessages(workspaceId: string, threadId: string) {
     return this.http.get<ListThreadMessagesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/messages`,
+    );
+  }
+
+  listWorkingFiles(workspaceId: string, threadId: string) {
+    return this.http.get<ListWorkingFilesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files`,
+    );
+  }
+
+  getWorkingFile(workspaceId: string, threadId: string, path: string) {
+    return this.http.get<GetWorkingFileResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files/content?path=${encode(path)}`,
+    );
+  }
+
+  putWorkingFile(
+    workspaceId: string,
+    threadId: string,
+    path: string,
+    input: PutWorkingFileRequest,
+  ) {
+    return this.http.put<PutWorkingFileResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files/content?path=${encode(path)}`,
+      input,
+    );
+  }
+
+  deleteWorkingFile(workspaceId: string, threadId: string, path: string) {
+    return this.http.delete<DeleteWorkingFileResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files?path=${encode(path)}`,
     );
   }
 

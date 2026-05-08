@@ -45,6 +45,8 @@ async function countUsedSourceIdsByThread(input: {
     from messages m
     cross join lateral jsonb_array_elements_text(
       case
+        when jsonb_typeof(m.metadata->'effectiveSourceIds') = 'array'
+        then m.metadata->'effectiveSourceIds'
         when jsonb_typeof(m.metadata->'sourceIds') = 'array'
         then m.metadata->'sourceIds'
         else '[]'::jsonb
