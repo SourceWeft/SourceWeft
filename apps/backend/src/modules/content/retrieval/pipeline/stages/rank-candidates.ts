@@ -10,7 +10,7 @@ export const rankCandidatesStage: RetrievalPipelineStage = {
     const prepared = requirePreparedRetrievalState(state);
     const { input } = prepared;
 
-    if (prepared.sourceIds.length === 0) {
+    if (prepared.retrievalSourceIds.length === 0) {
       return state;
     }
 

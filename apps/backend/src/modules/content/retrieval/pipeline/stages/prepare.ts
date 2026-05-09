@@ -29,9 +29,21 @@ export const prepareRetrievalStage: RetrievalPipelineStage = {
     const profile = await requireDefaultEmbeddingProfile();
     const planner = planRetrievalStrategy(profile);
     const sourceIds = [...new Set(state.input.sourceIds)];
+    const anchorSourceIds = [
+      ...new Set(state.input.anchorSourceIds ?? []),
+    ].filter(
+      (sourceId) => sourceIds.length === 0 || sourceIds.includes(sourceId),
+    );
 
     return {
       ...state,
+      anchorSourceIds,
+      retrievalSourceIds:
+        sourceIds.length > 0
+          ? sourceIds
+          : anchorSourceIds.length > 0
+            ? anchorSourceIds
+            : [],
       sourceIds,
       profile,
       planner,

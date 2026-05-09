@@ -32,6 +32,8 @@ import type {
   GetWorkingFileResponse,
   ListThreadModelCatalogResponse,
   ListByokKeyRefsResponse,
+  ListSourceMentionsRequest,
+  ListSourceMentionsResponse,
   ListSkillsCatalogResponse,
   ListThreadsRequest,
   ListSourcesResponse,
@@ -85,6 +87,27 @@ export class ContentClient {
   listSources(workspaceId: string) {
     return this.http.get<ListSourcesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources`,
+    );
+  }
+
+  listSourceMentions(
+    workspaceId: string,
+    input: ListSourceMentionsRequest = {},
+  ) {
+    const params = new URLSearchParams();
+    if (input.query) {
+      params.set("query", input.query);
+    }
+    if (input.limit) {
+      params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+
+    return this.http.get<ListSourceMentionsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/mentions${suffix}`,
     );
   }
 

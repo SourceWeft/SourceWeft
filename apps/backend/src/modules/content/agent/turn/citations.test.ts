@@ -119,6 +119,23 @@ test("normalizeAssistantCitations removes unsupported citation markers", () => {
   assert.equal(result.validMarkerCount, 1);
 });
 
+test("normalizeAssistantCitations removes non-canonical citation-like markers", () => {
+  const result = normalizeAssistantCitations({
+    assistantText: "Keep [citation:c1]. Remove 【citation: c1】 and [citation: c1] and [citation:c1,c2].",
+    citations: [citation("c1"), citation("c2")],
+  });
+
+  assert.equal(result.text, "Keep [citation:c1]. Remove and and.");
+  assert.deepEqual(
+    result.citations.map((item) => item.citation),
+    ["c1"],
+  );
+  assert.deepEqual(result.invalidKeys, ["c1", "c1,c2"]);
+  assert.equal(result.removedInvalidCitations, true);
+  assert.equal(result.markerCount, 4);
+  assert.equal(result.validMarkerCount, 1);
+});
+
 test("normalizeAssistantCitations removes unsupported citation markers before Chinese punctuation", () => {
   const result = normalizeAssistantCitations({
     assistantText: "支持 [citation:c1]。不支持 [citation:c9]。",

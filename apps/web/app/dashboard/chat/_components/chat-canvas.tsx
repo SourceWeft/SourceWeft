@@ -59,12 +59,15 @@ import {
   PromptInputButton,
   PromptInputFooter,
   PromptInputHeader,
+  PromptInputMentionEditor,
   PromptInputProvider,
   PromptInputSubmit,
-  PromptInputTextarea,
   PromptInputTools,
+  type PromptInputMentionSourceLoader,
   type PromptInputMessage,
 } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
+
+export type { PromptInputMentionSourceLoader };
 import {
   Suggestion,
   Suggestions,
@@ -113,6 +116,21 @@ function toAttachmentData(source: SourceItem) {
   };
 }
 
+function uniqueSourceIds(sourceIds: string[]) {
+  return [...new Set(sourceIds.filter((sourceId) => sourceId.length > 0))];
+}
+
+function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
+  return uniqueSourceIds(
+    sourceIdGroups.flatMap((sourceIds) => sourceIds ?? []),
+  );
+}
+
+export type ChatSendInput = {
+  content: string;
+  mentionedSourceIds?: string[];
+};
+
 function SourceIcon({
   className = "size-3.5",
   source,
@@ -142,6 +160,8 @@ export type MessageVersion = {
   errorCode?: string | null;
   isTextPaused?: boolean;
   isTextInterrupted?: boolean;
+  mentionedSourceIds?: string[];
+  effectiveMentionedSourceIds?: string[];
   sourceIds?: string[];
   effectiveSourceIds?: string[];
   sourceAssistantMessageId?: string | null;
@@ -252,6 +272,57 @@ function getMessageText(version: MessageVersion): string {
 
 const CITATION_PATTERN =
   /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
+const WORKFILE_PATH_PATTERN = /\/work\/[^\s`"'<>()[\]{}，。！？；：、]+/g;
+const WORKFILE_TRAILING_PUNCTUATION_PATTERN = /[.,!?;:]+$/;
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getSourceMentionLabel(title: string) {
+  return `@${title}`;
+}
+
+function getMentionMatchLabels(source: SourceItem) {
+  const labels = [getSourceMentionLabel(source.title)]
+    .map((label) => label.trim())
+    .filter((label) => label.length > 0);
+  return [...new Set(labels)];
+}
+
+function inferMentionSourceType(label: string): SourceItem["type"] {
+  const normalized = label.toLowerCase();
+  if (normalized.endsWith(".pdf")) return "PDF";
+  if (/\.(png|jpe?g|webp|gif|bmp|tiff?)$/.test(normalized)) return "IMG";
+  if (/\.(mp3|mp4|mpeg|m4a|wav|webm|ogg|flac)$/.test(normalized)) {
+    return "AUDIO";
+  }
+  if (normalized.endsWith(".csv")) return "CSV";
+  if (normalized.endsWith(".json")) return "JSON";
+  if (/\.(txt|md|markdown)$/.test(normalized)) return "TEXT";
+  return "DOC";
+}
+
+function createFallbackMentionSource(input: {
+  label: string;
+  sourceId: string;
+}): SourceItem {
+  const title = input.label.startsWith("@")
+    ? input.label.slice(1)
+    : input.label;
+
+  return {
+    id: input.sourceId,
+    title,
+    sourceType: "file_upload",
+    parentSourceId: null,
+    type: inferMentionSourceType(title),
+    status: "Indexed",
+    meta: "Mentioned source",
+    contentText: "",
+    storageKey: null,
+  };
+}
 
 function splitCitationIds(value: string) {
   return value
@@ -330,10 +401,136 @@ function makeCitationNode(input: {
   );
 }
 
+function SourceMentionLink({
+  label,
+  onSourcePreview,
+  source,
+}: {
+  label: string;
+  onSourcePreview?: (source: SourceItem) => void;
+  source: SourceItem;
+}) {
+  return (
+    <button
+      className="inline cursor-pointer bg-transparent p-0 align-baseline font-medium text-primary underline decoration-primary/35 underline-offset-2 transition-colors hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => onSourcePreview?.(source)}
+      title={`Open preview: ${source.title}`}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function WorkfilePathLink({
+  onWorkfileClick,
+  path,
+}: {
+  onWorkfileClick?: (path: string) => void;
+  path: string;
+}) {
+  return (
+    <button
+      className="inline cursor-pointer bg-transparent p-0 align-baseline font-medium text-primary underline decoration-primary/35 underline-offset-2 transition-colors hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={() => onWorkfileClick?.(path)}
+      title={`Open preview: ${path}`}
+      type="button"
+    >
+      {path}
+    </button>
+  );
+}
+
+function UserMessageText({
+  children,
+  onSourcePreview,
+  sources,
+  sourceIds = [],
+}: {
+  children: string;
+  onSourcePreview?: (source: SourceItem) => void;
+  sources: SourceItem[];
+  sourceIds?: string[];
+}) {
+  const mentionSources = sources.filter(
+    (source) => source.sourceType !== "directory" && source.type !== "DIR",
+  );
+
+  if (mentionSources.length === 0 && sourceIds.length === 0) {
+    return <>{children}</>;
+  }
+
+  const labelToSource = new Map<string, SourceItem>();
+  const sourceById = new Map(mentionSources.map((source) => [source.id, source]));
+  for (const source of mentionSources) {
+    for (const label of getMentionMatchLabels(source)) {
+      labelToSource.set(label, source);
+    }
+  }
+
+  let tokenSourceIndex = 0;
+  for (const token of children.match(/@\S+/g) ?? []) {
+    const sourceId = sourceIds[tokenSourceIndex];
+    tokenSourceIndex += 1;
+    if (!sourceId || labelToSource.has(token)) {
+      continue;
+    }
+
+    labelToSource.set(
+      token,
+      sourceById.get(sourceId) ??
+        createFallbackMentionSource({ label: token, sourceId }),
+    );
+  }
+
+  const labels = [...labelToSource.keys()].sort(
+    (left, right) => right.length - left.length,
+  );
+
+  if (labels.length === 0) {
+    return <>{children}</>;
+  }
+
+  const pattern = new RegExp(labels.map(escapeRegExp).join("|"), "g");
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(children)) !== null) {
+    const label = match[0];
+    const source = labelToSource.get(label);
+
+    if (!source) {
+      continue;
+    }
+
+    if (match.index > lastIndex) {
+      parts.push(children.slice(lastIndex, match.index));
+    }
+
+    parts.push(
+      <SourceMentionLink
+        key={`${source.id}-${match.index}`}
+        label={label}
+        onSourcePreview={onSourcePreview}
+        source={source}
+      />,
+    );
+    lastIndex = match.index + label.length;
+  }
+
+  if (lastIndex < children.length) {
+    parts.push(children.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? <>{parts}</> : <>{children}</>;
+}
+
 function parseCitationText(input: {
   citationByChunkId: Map<string, CitationRecord>;
   citationByKey: Map<string, CitationRecord>;
   onCitationClick?: (citation: CitationRecord) => void;
+  onWorkfileClick?: (path: string) => void;
   text: string;
 }) {
   const parts: ReactNode[] = [];
@@ -369,25 +566,82 @@ function parseCitationText(input: {
   return parts.length > 0 ? parts : [input.text];
 }
 
-function processCitationChildren(input: {
+function parseWorkfilePaths(input: {
+  children: ReactNode[];
+  onWorkfileClick?: (path: string) => void;
+}) {
+  if (!input.onWorkfileClick) {
+    return input.children;
+  }
+
+  return input.children.flatMap((child, childIndex) => {
+    if (typeof child !== "string") {
+      return [child];
+    }
+
+    const parts: ReactNode[] = [];
+    let lastIndex = 0;
+    WORKFILE_PATH_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = WORKFILE_PATH_PATTERN.exec(child)) !== null) {
+      const rawPath = match[0];
+      const path = rawPath.replace(WORKFILE_TRAILING_PUNCTUATION_PATTERN, "");
+      if (!path || path === "/work/") {
+        continue;
+      }
+
+      if (match.index > lastIndex) {
+        parts.push(child.slice(lastIndex, match.index));
+      }
+
+      parts.push(
+        <WorkfilePathLink
+          key={`workfile-${childIndex}-${match.index}`}
+          onWorkfileClick={input.onWorkfileClick}
+          path={path}
+        />,
+      );
+
+      const consumedIndex = match.index + path.length;
+      if (consumedIndex < match.index + rawPath.length) {
+        parts.push(child.slice(consumedIndex, match.index + rawPath.length));
+      }
+      lastIndex = match.index + rawPath.length;
+    }
+
+    if (lastIndex < child.length) {
+      parts.push(child.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : [child];
+  });
+}
+
+function processMessageChildren(input: {
   children: ReactNode;
   citationByChunkId: Map<string, CitationRecord>;
   citationByKey: Map<string, CitationRecord>;
   onCitationClick?: (citation: CitationRecord) => void;
+  onWorkfileClick?: (path: string) => void;
 }): ReactNode {
   if (typeof input.children === "string") {
-    return parseCitationText({
-      citationByChunkId: input.citationByChunkId,
-      citationByKey: input.citationByKey,
-      onCitationClick: input.onCitationClick,
-      text: input.children,
+    return parseWorkfilePaths({
+      children: parseCitationText({
+        citationByChunkId: input.citationByChunkId,
+        citationByKey: input.citationByKey,
+        onCitationClick: input.onCitationClick,
+        onWorkfileClick: input.onWorkfileClick,
+        text: input.children,
+      }),
+      onWorkfileClick: input.onWorkfileClick,
     });
   }
 
   if (Array.isArray(input.children)) {
     return input.children.map((child, index) => (
       <span key={index}>
-        {processCitationChildren({
+        {processMessageChildren({
           ...input,
           children: child,
         })}
@@ -401,7 +655,7 @@ function processCitationChildren(input: {
       return child;
     }
     return cloneElement(child, {
-      children: processCitationChildren({
+      children: processMessageChildren({
         ...input,
         children: child.props.children,
       }),
@@ -416,12 +670,14 @@ function CitationAwareMessageResponse({
   citations,
   children,
   onCitationClick,
+  onWorkfileClick,
   showLoading = false,
 }: {
   availableCitations?: CitationRecord[];
   citations: CitationRecord[] | undefined;
   children: string;
   onCitationClick?: (citation: CitationRecord) => void;
+  onWorkfileClick?: (path: string) => void;
   showLoading?: boolean;
 }) {
   const citationByKey = new Map(
@@ -444,11 +700,12 @@ function CitationAwareMessageResponse({
     children?: ReactNode;
   }) => (
     <>
-      {processCitationChildren({
+      {processMessageChildren({
         children: nodeChildren,
         citationByChunkId,
         citationByKey,
         onCitationClick,
+        onWorkfileClick,
       })}
     </>
   );
@@ -1327,6 +1584,8 @@ function Composer({
   className,
   initialInput = "",
   inputKey,
+  allSources = [],
+  sourceMentionLoader,
   selectedSources = [],
   availableSkills = [],
   selectedSkillIds = [],
@@ -1345,6 +1604,8 @@ function Composer({
   className?: string;
   initialInput?: string;
   inputKey?: string | number;
+  allSources?: SourceItem[];
+  sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources?: SourceItem[];
   availableSkills?: ChatSkillItem[];
   selectedSkillIds?: string[];
@@ -1382,6 +1643,16 @@ function Composer({
       : activeThinkingSettings.mode === "effort"
         ? activeThinkingSettings.effort
         : "auto";
+  const mentionSources = allSources
+    .filter(
+      (source) => source.sourceType !== "directory" && source.type !== "DIR",
+    )
+    .map((source) => ({
+      id: source.id,
+      meta: source.meta,
+      title: source.title,
+      type: source.type,
+    }));
 
   function updateThinkingSettings(next: PromptThinkingSettings) {
     if (!supportsThinking) {
@@ -1407,16 +1678,31 @@ function Composer({
     }
 
     const frame = window.requestAnimationFrame(() => {
-      const textarea = rootRef.current?.querySelector(
-        'textarea[name="message"]',
-      ) as HTMLTextAreaElement | null;
-      if (!textarea) {
+      const input = rootRef.current?.querySelector(
+        '[data-chat-prompt-editor="true"], textarea[name="message"]',
+      ) as HTMLElement | HTMLTextAreaElement | null;
+      if (!input) {
         return;
       }
 
-      textarea.focus();
-      const end = textarea.value.length;
-      textarea.setSelectionRange(end, end);
+      input.focus();
+
+      if (input instanceof HTMLTextAreaElement) {
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+        return;
+      }
+
+      const selection = window.getSelection();
+      if (!selection) {
+        return;
+      }
+
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
     });
 
     return () => {
@@ -1477,9 +1763,12 @@ function Composer({
             </PromptInputHeader>
           ) : null}
           <PromptInputBody>
-            <PromptInputTextarea
+            <PromptInputMentionEditor
               autoFocus={isEditing && !disabled}
-              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              data-chat-prompt-editor="true"
+              disabled={disabled}
+              initialValue={initialInput}
+              onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                 if (isEditing && event.key === "Escape") {
                   event.preventDefault();
                   onCancelEditing?.();
@@ -1499,6 +1788,8 @@ function Composer({
                 placeholder ||
                 "Message your documents, links, or connected tools..."
               }
+              sourceLoader={sourceMentionLoader}
+              sources={mentionSources}
             />
           </PromptInputBody>
           <PromptInputFooter className="border-t-0">
@@ -1723,6 +2014,8 @@ function EmptyState({
   onSendMessage,
   composerInitialInput,
   composerResetKey,
+  allSources,
+  sourceMentionLoader,
   selectedSources,
   availableSkills,
   selectedSkillIds,
@@ -1734,9 +2027,11 @@ function EmptyState({
   thinkingSettings,
   onThinkingSettingsChange,
 }: {
-  onSendMessage: (content: string) => void;
+  onSendMessage: (input: ChatSendInput) => void;
   composerInitialInput?: string;
   composerResetKey?: number;
+  allSources: SourceItem[];
+  sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources: SourceItem[];
   availableSkills?: ChatSkillItem[];
   selectedSkillIds?: string[];
@@ -1773,7 +2068,7 @@ function EmptyState({
                   <Suggestion
                     className="h-auto rounded-full border-border/70 bg-background px-4 py-2 text-sm text-muted-foreground whitespace-normal hover:bg-muted hover:text-foreground"
                     key={suggestion}
-                    onClick={onSendMessage}
+                    onClick={(content) => onSendMessage({ content })}
                     suggestion={suggestion}
                     variant="outline"
                   />
@@ -1788,11 +2083,18 @@ function EmptyState({
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           <Composer
             className="w-full"
+            allSources={allSources}
+            sourceMentionLoader={sourceMentionLoader}
             initialInput={composerInitialInput}
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
-            onSubmit={(message) => onSendMessage(message.text.trim())}
+            onSubmit={(message) =>
+              onSendMessage({
+                content: message.text.trim(),
+                mentionedSourceIds: message.mentionedSourceIds,
+              })
+            }
             onSearchEnabledChange={onSearchEnabledChange}
             onThinkingSettingsChange={onThinkingSettingsChange}
             placeholder="Message your documents, links, or connected tools..."
@@ -1823,10 +2125,13 @@ export function ChatCanvas({
   onActiveVersionChange,
   onCancelEditing,
   onCitationClick,
+  onSourcePreview,
+  onWorkfileClick,
   onRestartFromMessage,
   onRefreshLatest,
   onSendMessage,
   allSources = [],
+  sourceMentionLoader,
   selectedSources = [],
   availableSkills = [],
   selectedSkillIds = [],
@@ -1855,6 +2160,8 @@ export function ChatCanvas({
   }) => void;
   onCancelEditing?: () => void;
   onCitationClick?: (citation: CitationRecord) => void;
+  onSourcePreview?: (source: SourceItem) => void;
+  onWorkfileClick?: (path: string) => void;
   onRestartFromMessage?: (input: {
     groupId: string;
     messageId: string;
@@ -1867,8 +2174,9 @@ export function ChatCanvas({
     assistantMessageId: string;
     branchIndex: number;
   }) => void;
-  onSendMessage?: (content: string) => void;
+  onSendMessage?: (input: ChatSendInput) => void;
   allSources?: SourceItem[];
+  sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources?: SourceItem[];
   availableSkills?: ChatSkillItem[];
   selectedSkillIds?: string[];
@@ -1883,12 +2191,12 @@ export function ChatCanvas({
 }) {
   void sourcesVisible;
 
-  function handleSendMessage(content: string) {
+  function handleSendMessage(input: ChatSendInput) {
     if (!workspaceId) {
       toast.error("No workspace selected yet.");
       return;
     }
-    onSendMessage?.(content);
+    onSendMessage?.(input);
   }
 
   if (mode === "new") {
@@ -1896,6 +2204,8 @@ export function ChatCanvas({
       <EmptyState
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
+        allSources={allSources}
+        sourceMentionLoader={sourceMentionLoader}
         onRemoveSource={onRemoveSource ?? (() => undefined)}
         onSkillSelectionChange={onSkillSelectionChange}
         onSearchEnabledChange={onSearchEnabledChange}
@@ -2115,6 +2425,16 @@ export function ChatCanvas({
                               Boolean(source),
                             )
                         : [];
+                      const mentionSources = !isAssistant
+                        ? mergeSourceIds(
+                            version.mentionedSourceIds,
+                            version.effectiveMentionedSourceIds,
+                          )
+                            .map((sourceId) => sourceById.get(sourceId))
+                            .filter((source): source is SourceItem =>
+                              Boolean(source),
+                            )
+                        : [];
 
                       return (
                         <div
@@ -2139,7 +2459,16 @@ export function ChatCanvas({
                             >
                               {!isAssistant ? (
                                 <div className="whitespace-pre-wrap break-words leading-6">
-                                  {messageText}
+                                  <UserMessageText
+                                    onSourcePreview={onSourcePreview}
+                                    sources={mentionSources}
+                                    sourceIds={mergeSourceIds(
+                                      version.mentionedSourceIds,
+                                      version.effectiveMentionedSourceIds,
+                                    )}
+                                  >
+                                    {messageText}
+                                  </UserMessageText>
                                 </div>
                               ) : (
                                 <div className="space-y-3">
@@ -2165,6 +2494,7 @@ export function ChatCanvas({
                                     }
                                     citations={version.citations}
                                     onCitationClick={onCitationClick}
+                                    onWorkfileClick={onWorkfileClick}
                                     showLoading={
                                       isStreamingThisVersion &&
                                       version.isTextPaused === true &&
@@ -2290,6 +2620,8 @@ export function ChatCanvas({
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           <Composer
             className="w-full"
+            allSources={allSources}
+            sourceMentionLoader={sourceMentionLoader}
             disabled={isStreaming}
             initialInput={composerInitialInput}
             isEditing={isEditing}
@@ -2298,7 +2630,12 @@ export function ChatCanvas({
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(message) => handleSendMessage(message.text.trim())}
+            onSubmit={(message) =>
+              handleSendMessage({
+                content: message.text.trim(),
+                mentionedSourceIds: message.mentionedSourceIds,
+              })
+            }
             onThinkingSettingsChange={onThinkingSettingsChange}
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}

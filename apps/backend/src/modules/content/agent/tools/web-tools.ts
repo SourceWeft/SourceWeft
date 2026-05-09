@@ -146,6 +146,7 @@ ${input.results
 export function createWebTools(input: {
   provider: WebProvider;
   citationRegistry: AgentCitationRegistry;
+  searchEnabled?: boolean;
 }) {
   const webSearchTool = tool(
     async (
@@ -289,5 +290,7 @@ export function createWebTools(input: {
     },
   );
 
-  return [webSearchTool, webFetchTool];
+  return input.searchEnabled === true
+    ? [webSearchTool, webFetchTool]
+    : [webFetchTool];
 }

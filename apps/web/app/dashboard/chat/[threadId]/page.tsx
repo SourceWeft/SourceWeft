@@ -12,7 +12,15 @@ import {
 import { flushSync } from "react-dom";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
+import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@sourceweft/ui-web/components/ui/dialog";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import {
   emptyModelCatalog,
@@ -27,10 +35,12 @@ import {
 import {
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
+  type ChatSendInput,
   type ChatSkillItem,
   type CitationRecord,
   type MessageVersion,
   type ModelReasoningSegmentRecord,
+  type PromptInputMentionSourceLoader,
   type PromptThinkingSettings,
   type ThinkingStepRecord,
   type ToolCallRecord,
@@ -61,6 +71,14 @@ const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
 
+function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
+  return [
+    ...new Set(
+      sourceIdGroups.flatMap((sourceIds) => sourceIds ?? []).filter(Boolean),
+    ),
+  ];
+}
+
 function getSearchPreferenceStorageKey(workspaceId: string) {
   return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
 }
@@ -68,6 +86,9 @@ function getSearchPreferenceStorageKey(workspaceId: string) {
 type ThreadMessageItem = Awaited<
   ReturnType<typeof contentClient.listThreadMessages>
 >["items"][number];
+type WorkfileDetail = Awaited<
+  ReturnType<typeof contentClient.getWorkingFile>
+>["file"];
 
 type ChatMessageItem = {
   id: string;
@@ -222,6 +243,25 @@ function getDisplayErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Failed to send message.";
 }
 
+function formatBytes(sizeBytes: number) {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 102.4) / 10} KB`;
+  return `${Math.round(sizeBytes / 1024 / 102.4) / 10} MB`;
+}
+
+function basename(path: string) {
+  const cleaned = path.replace(/\/+$/, "");
+  return cleaned.split("/").pop() || cleaned || path;
+}
+
+function workfilePurposeLabel(purpose: WorkfileDetail["purpose"]) {
+  if (purpose === "scratch") return "Scratch";
+  if (purpose === "draft") return "Draft";
+  if (purpose === "note") return "Note";
+  if (purpose === "output_candidate") return "Candidate";
+  return "Workfile";
+}
+
 function shouldRetryThreadMessagesLoad(error: unknown) {
   if (!(error instanceof HttpClientError)) {
     return true;
@@ -333,6 +373,28 @@ function resolveMessageSourceIds(message: ChatMessageItem) {
 
 function resolveMessageEffectiveSourceIds(message: ChatMessageItem) {
   const rawSourceIds = message.metadata.effectiveSourceIds;
+  if (!Array.isArray(rawSourceIds)) {
+    return undefined;
+  }
+
+  return rawSourceIds.filter(
+    (sourceId): sourceId is string => typeof sourceId === "string",
+  );
+}
+
+function resolveMessageMentionedSourceIds(message: ChatMessageItem) {
+  const rawSourceIds = message.metadata.mentionedSourceIds;
+  if (!Array.isArray(rawSourceIds)) {
+    return [] as string[];
+  }
+
+  return rawSourceIds.filter(
+    (sourceId): sourceId is string => typeof sourceId === "string",
+  );
+}
+
+function resolveMessageEffectiveMentionedSourceIds(message: ChatMessageItem) {
+  const rawSourceIds = message.metadata.effectiveMentionedSourceIds;
   if (!Array.isArray(rawSourceIds)) {
     return undefined;
   }
@@ -741,6 +803,8 @@ type StreamEventPayload = {
   threadId?: string;
   title?: string;
   jobId?: string;
+  mentionedSourceIds?: unknown;
+  effectiveMentionedSourceIds?: unknown;
   sourceIds?: unknown;
   effectiveSourceIds?: unknown;
 };
@@ -906,6 +970,55 @@ function resolveToolCallFromStreamEvent(input: {
     status: normalizedStatus,
     error: normalizedError,
   };
+}
+
+function getToolCallPath(value: Record<string, unknown>) {
+  for (const key of ["path", "file_path", "filePath"]) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+function isWorkPath(value: string | null | undefined) {
+  return value === "/work" || Boolean(value?.startsWith("/work/"));
+}
+
+function outputContainsWorkPath(output: unknown) {
+  const record = toObjectRecord(output);
+  if (!record) {
+    return false;
+  }
+
+  if (isWorkPath(getToolCallPath(record))) {
+    return true;
+  }
+
+  const content = toNullableString(record.content);
+  return Boolean(content?.includes("/work/"));
+}
+
+function isCompletedWorkfileWriteToolCall(
+  toolCall: ToolCallRecord,
+  event: StreamEventPayload & { type: ToolCallEventType },
+) {
+  if (
+    event.type !== "tool-call-result" &&
+    !(event.type === "tool-call-end" && toolCall.status === "completed")
+  ) {
+    return false;
+  }
+
+  if (toolCall.tool !== "write_file" && toolCall.tool !== "edit_file") {
+    return false;
+  }
+
+  return (
+    isWorkPath(getToolCallPath(toolCall.input)) ||
+    outputContainsWorkPath(toolCall.output)
+  );
 }
 
 function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
@@ -1113,6 +1226,14 @@ function buildVersionedMessageGroups(
             isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
             isTextInterrupted:
               version.metadata[STREAM_TEXT_INTERRUPTED_KEY] === true,
+            mentionedSourceIds:
+              group.role === "user"
+                ? resolveMessageMentionedSourceIds(version)
+                : undefined,
+            effectiveMentionedSourceIds:
+              group.role === "user"
+                ? resolveMessageEffectiveMentionedSourceIds(version)
+                : undefined,
             sourceIds:
               group.role === "user"
                 ? resolveMessageSourceIds(version)
@@ -1210,6 +1331,10 @@ export default function DashboardChatThreadPage({
   const [previewCitation, setPreviewCitation] = useState<CitationRecord | null>(
     null,
   );
+  const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
+  const [previewWorkfile, setPreviewWorkfile] =
+    useState<WorkfileDetail | null>(null);
+  const [workfilesRefreshKey, setWorkfilesRefreshKey] = useState(0);
   const [displayedCitations, setDisplayedCitations] = useState<
     CitationRecord[]
   >([]);
@@ -1249,6 +1374,34 @@ export default function DashboardChatThreadPage({
   const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
     string | null
   >(null);
+  const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
+    async ({ cursor, limit, query }) => {
+      if (!workspaceId) {
+        return { items: [], nextCursor: null };
+      }
+
+      const result = await contentClient.listSourceMentions(workspaceId, {
+        cursor: cursor ?? undefined,
+        limit,
+        query: query || undefined,
+      });
+      return {
+        items: result.items.map((source) => ({
+          id: source.id,
+          meta:
+            source.status === "failed"
+              ? "Processing failed"
+              : source.status === "queued" || source.status === "processing"
+                ? "Sync in progress"
+                : new Date(source.updatedAt).toLocaleString(),
+          title: source.title || "Untitled",
+          type: source.mimeType ?? source.sourceType,
+        })),
+        nextCursor: result.nextCursor,
+      };
+    },
+    [workspaceId],
+  );
 
   const clearEditingState = useCallback(() => {
     setEditingMessageId(null);
@@ -1582,6 +1735,8 @@ export default function DashboardChatThreadPage({
         (item) => item.chunkId === citation.chunkId,
       );
       setActiveCitationIndex(citationIndex >= 0 ? citationIndex + 1 : null);
+      setPreviewSource(null);
+      setPreviewWorkfile(null);
       setPreviewCitation(citation);
       if (!sourcesVisible) {
         toggleSourcesVisible();
@@ -1610,6 +1765,8 @@ export default function DashboardChatThreadPage({
 
   const handleSourceHubCitationOpen = useCallback(
     (citation: CitationRecord, context?: { messageId?: string }) => {
+      setPreviewSource(null);
+      setPreviewWorkfile(null);
       setPreviewCitation(citation);
       if (context?.messageId) {
         scrollToMessage(context.messageId);
@@ -1618,9 +1775,42 @@ export default function DashboardChatThreadPage({
     [scrollToMessage],
   );
 
+  const handleSourcePreview = useCallback((source: SourceItem) => {
+    setPreviewCitation(null);
+    setPreviewWorkfile(null);
+    setPreviewSource(source);
+  }, []);
+
+  const handleWorkfilePreview = useCallback(
+    async (path: string) => {
+      if (!workspaceId || !threadId) {
+        toast.error("No thread workspace selected.");
+        return;
+      }
+
+      try {
+        const result = await contentClient.getWorkingFile(
+          workspaceId,
+          threadId,
+          path,
+        );
+        setPreviewCitation(null);
+        setPreviewSource(null);
+        setPreviewWorkfile(result.file);
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to load workfile.",
+        );
+      }
+    },
+    [threadId, workspaceId],
+  );
+
   useEffect(() => {
     setActiveCitationIndex(null);
     setPreviewCitation(null);
+    setPreviewSource(null);
+    setPreviewWorkfile(null);
   }, [activeAssistantVersion?.id]);
 
   useEffect(() => {
@@ -1733,10 +1923,7 @@ export default function DashboardChatThreadPage({
         }
 
         const retryDelay = THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS[attempt];
-        if (
-          retryDelay === undefined ||
-          !shouldRetryThreadMessagesLoad(error)
-        ) {
+        if (retryDelay === undefined || !shouldRetryThreadMessagesLoad(error)) {
           if (loadedThreadMessagesKeyRef.current !== threadMessagesKey) {
             setMessages([]);
           }
@@ -1857,6 +2044,7 @@ export default function DashboardChatThreadPage({
     async (input: {
       mode: "send" | "refresh" | "edit";
       content?: string;
+      mentionedSourceIds?: string[];
       sourceIds: string[];
       skillIds?: string[];
       userMessageId?: string | null;
@@ -1897,6 +2085,12 @@ export default function DashboardChatThreadPage({
               ? (input.userMessageId ?? latestUserMessage?.id ?? null)
               : null,
           metadata: {
+            ...(input.mentionedSourceIds && input.mentionedSourceIds.length > 0
+              ? { mentionedSourceIds: input.mentionedSourceIds }
+              : {}),
+            ...(input.mentionedSourceIds && input.mentionedSourceIds.length > 0
+              ? { effectiveMentionedSourceIds: input.mentionedSourceIds }
+              : {}),
             sourceIds: input.sourceIds,
             ...(localEffectiveSourceIds.length > 0
               ? { effectiveSourceIds: localEffectiveSourceIds }
@@ -1953,12 +2147,16 @@ export default function DashboardChatThreadPage({
       let pendingTitleJobId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
+      const refreshedWorkfileToolIds = new Set<string>();
       let streamingAssistantMessageId = tempAssistantId;
       let preparedEffectiveSourceIds: string[] | null = null;
 
       try {
         const requestBody: Record<string, unknown> = {
           mode: input.mode,
+          ...(input.mentionedSourceIds && input.mentionedSourceIds.length > 0
+            ? { mentionedSourceIds: input.mentionedSourceIds }
+            : {}),
           sourceIds: input.sourceIds,
           timezone: resolveClientTimezone(),
         };
@@ -2231,6 +2429,22 @@ export default function DashboardChatThreadPage({
                       typeof sourceId === "string",
                   )
                 : null;
+              const serverMentionedSourceIds = Array.isArray(
+                data.mentionedSourceIds,
+              )
+                ? data.mentionedSourceIds.filter(
+                    (sourceId): sourceId is string =>
+                      typeof sourceId === "string",
+                  )
+                : null;
+              const serverEffectiveMentionedSourceIds = Array.isArray(
+                data.effectiveMentionedSourceIds,
+              )
+                ? data.effectiveMentionedSourceIds.filter(
+                    (sourceId): sourceId is string =>
+                      typeof sourceId === "string",
+                  )
+                : null;
               const serverEffectiveSourceIds = Array.isArray(
                 data.effectiveSourceIds,
               )
@@ -2257,8 +2471,17 @@ export default function DashboardChatThreadPage({
                             ...(serverSourceIds
                               ? { sourceIds: serverSourceIds }
                               : {}),
+                            ...(serverMentionedSourceIds
+                              ? { mentionedSourceIds: serverMentionedSourceIds }
+                              : {}),
                             ...(serverEffectiveSourceIds
                               ? { effectiveSourceIds: serverEffectiveSourceIds }
+                              : {}),
+                            ...(serverEffectiveMentionedSourceIds
+                              ? {
+                                  effectiveMentionedSourceIds:
+                                    serverEffectiveMentionedSourceIds,
+                                }
                               : {}),
                           },
                         }
@@ -2342,6 +2565,13 @@ export default function DashboardChatThreadPage({
 
               streamToolCallsById.set(nextToolCall.id, nextToolCall);
               syncStreamingToolCalls();
+              if (
+                isCompletedWorkfileWriteToolCall(nextToolCall, data) &&
+                !refreshedWorkfileToolIds.has(nextToolCall.id)
+              ) {
+                refreshedWorkfileToolIds.add(nextToolCall.id);
+                setWorkfilesRefreshKey((value) => value + 1);
+              }
             } else if (data.type === "thinking-step") {
               const nextStep = normalizeThinkingStepRecord(data.step);
               if (nextStep) {
@@ -2613,6 +2843,7 @@ export default function DashboardChatThreadPage({
         window.setTimeout(() => {
           void loadThreadMessages();
         }, 0);
+        setWorkfilesRefreshKey((value) => value + 1);
         if (shouldPollThreadTitle && pendingTitleJobId) {
           void pollThreadTitleJob(pendingTitleJobId);
         }
@@ -2696,6 +2927,7 @@ export default function DashboardChatThreadPage({
       try {
         const {
           content,
+          mentionedSourceIds,
           sourceIds,
           skillIds,
           thinking,
@@ -2704,6 +2936,7 @@ export default function DashboardChatThreadPage({
           modelState: pendingModelState,
         } = JSON.parse(raw) as {
           content: string;
+          mentionedSourceIds?: string[];
           sourceIds: string[];
           skillIds?: string[];
           thinking?: RequestThinkingConfig;
@@ -2717,6 +2950,11 @@ export default function DashboardChatThreadPage({
         };
         const pendingSourceIds = Array.isArray(sourceIds)
           ? sourceIds.filter(
+              (sourceId): sourceId is string => typeof sourceId === "string",
+            )
+          : [];
+        const pendingMentionedSourceIds = Array.isArray(mentionedSourceIds)
+          ? mentionedSourceIds.filter(
               (sourceId): sourceId is string => typeof sourceId === "string",
             )
           : [];
@@ -2749,6 +2987,7 @@ export default function DashboardChatThreadPage({
         void streamThreadActionRef.current({
           mode: "send",
           content,
+          mentionedSourceIds: pendingMentionedSourceIds,
           sourceIds: pendingSourceIds,
           skillIds: pendingSkillIds,
           thinking,
@@ -2834,8 +3073,8 @@ export default function DashboardChatThreadPage({
   );
 
   const handleSendMessage = useCallback(
-    async (content: string) => {
-      const text = content.trim();
+    async (input: ChatSendInput) => {
+      const text = input.content.trim();
       if (!text || isStreaming) {
         return;
       }
@@ -2844,6 +3083,8 @@ export default function DashboardChatThreadPage({
         messages,
         activeSourceIds,
       });
+      const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
+      const sendSourceIds = mergeSourceIds(contextSourceIds);
 
       if (editingMessageId) {
         const editingAssistantGroup = editingAssistantMessageId
@@ -2895,11 +3136,13 @@ export default function DashboardChatThreadPage({
           editingMessageId,
           groups: messageGroups,
         });
+        const mergedEditSourceIds = mergeSourceIds(editSourceIds);
 
         await streamThreadAction({
           mode: "edit",
           content: text,
-          sourceIds: editSourceIds,
+          mentionedSourceIds,
+          sourceIds: mergedEditSourceIds,
           skillIds: activeSkillIds,
           searchEnabled,
           userMessageId: editingMessageId,
@@ -2911,7 +3154,8 @@ export default function DashboardChatThreadPage({
       await streamThreadAction({
         mode: "send",
         content: text,
-        sourceIds: contextSourceIds,
+        mentionedSourceIds,
+        sourceIds: sendSourceIds,
         skillIds: activeSkillIds,
         searchEnabled,
       });
@@ -3065,6 +3309,8 @@ export default function DashboardChatThreadPage({
           onActiveVersionChange={handleActiveVersionChange}
           onCancelEditing={cancelEditing}
           onCitationClick={handleCitationClick}
+          onSourcePreview={handleSourcePreview}
+          onWorkfileClick={handleWorkfilePreview}
           onRemoveSource={(id) =>
             persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
           }
@@ -3074,6 +3320,7 @@ export default function DashboardChatThreadPage({
           onSkillSelectionChange={setActiveSkillIds}
           searchEnabled={searchEnabled}
           onSearchEnabledChange={setSearchEnabled}
+          sourceMentionLoader={loadSourceMentions}
           selectedSources={selectedSources}
           selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
@@ -3100,6 +3347,8 @@ export default function DashboardChatThreadPage({
           selectedIds={activeSourceIds}
           selectedSkillIds={activeSkillIds}
           threadCitations={threadCitations}
+          threadId={threadId}
+          workfilesRefreshKey={workfilesRefreshKey}
           workspaceId={workspaceId}
         />
       ) : null}
@@ -3109,11 +3358,45 @@ export default function DashboardChatThreadPage({
         onOpenChange={(open) => {
           if (!open) {
             setPreviewCitation(null);
+            setPreviewSource(null);
           }
         }}
-        open={Boolean(previewCitation)}
+        open={Boolean(previewCitation || previewSource)}
+        source={previewSource}
         workspaceId={workspaceId}
       />
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewWorkfile(null);
+          }
+        }}
+        open={Boolean(previewWorkfile)}
+      >
+        <DialogContent
+          className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
+          constrainWidth={false}
+        >
+          <DialogHeader className="border-b px-5 py-4 text-left">
+            <DialogTitle>
+              {previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}
+            </DialogTitle>
+            <DialogDescription>
+              {previewWorkfile
+                ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
+                : "Assistant-created working material from this thread."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto px-5 py-5">
+            {previewWorkfile ? (
+              <MessageResponse className="text-sm leading-7 text-foreground [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted/30 [&_pre]:p-3">
+                {previewWorkfile.contentText}
+              </MessageResponse>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

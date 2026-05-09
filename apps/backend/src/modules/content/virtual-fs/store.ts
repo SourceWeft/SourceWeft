@@ -172,6 +172,8 @@ export async function listVirtualFsChunks(input: {
     chunk_id: string;
     chunk_no: number;
     content: string;
+    start_offset: number | null;
+    end_offset: number | null;
     heading_path: string | null;
     language: string | null;
   }>(sql`
@@ -183,6 +185,8 @@ export async function listVirtualFsChunks(input: {
       c.id as chunk_id,
       c.chunk_no,
       c.content,
+      c.start_offset,
+      c.end_offset,
       c.heading_path,
       c.language
     from chunks c
@@ -219,6 +223,91 @@ export async function listVirtualFsChunks(input: {
     chunkId: row.chunk_id,
     chunkNo: Number(row.chunk_no),
     content: row.content,
+    startOffset: row.start_offset,
+    endOffset: row.end_offset,
+    headingPath: row.heading_path,
+    language: row.language,
+  }));
+}
+
+export async function listVirtualFsChunksForSpan(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+  startOffset: number;
+  endOffset: number;
+  limit?: number;
+}): Promise<VirtualFsChunk[]> {
+  const rows = await db.execute<{
+    source_id: string;
+    source_title: string;
+    source_file_name: string | null;
+    document_id: string;
+    chunk_id: string;
+    chunk_no: number;
+    content: string;
+    start_offset: number | null;
+    end_offset: number | null;
+    heading_path: string | null;
+    language: string | null;
+    overlap_chars: number | string;
+  }>(sql`
+    select
+      c.source_id,
+      s.title as source_title,
+      nullif(s.metadata_json->>'fileName', '') as source_file_name,
+      c.document_id,
+      c.id as chunk_id,
+      c.chunk_no,
+      c.content,
+      c.start_offset,
+      c.end_offset,
+      c.heading_path,
+      c.language,
+      greatest(
+        0,
+        least(coalesce(c.end_offset, 0), ${input.endOffset}) -
+        greatest(coalesce(c.start_offset, 0), ${input.startOffset})
+      ) as overlap_chars
+    from chunks c
+    inner join sources s on s.id = c.source_id
+    inner join documents d on d.id = c.document_id
+    where c.team_id = ${input.teamId}
+      and c.workspace_id = ${input.workspaceId}
+      and c.source_id = ${input.sourceId}
+      and s.status = 'indexed'
+      and c.start_offset is not null
+      and c.end_offset is not null
+      and c.start_offset < ${input.endOffset}
+      and c.end_offset > ${input.startOffset}
+      and not exists (
+        select 1
+        from documents newer_documents
+        where newer_documents.team_id = d.team_id
+          and newer_documents.workspace_id = d.workspace_id
+          and newer_documents.source_id = d.source_id
+          and (
+            newer_documents.created_at > d.created_at
+            or (
+              newer_documents.created_at = d.created_at
+              and newer_documents.id > d.id
+            )
+          )
+      )
+    order by overlap_chars desc, c.chunk_no asc
+    limit ${input.limit ?? 50}
+  `);
+
+  return rows.rows.map((row) => ({
+    sourceId: row.source_id,
+    sourceTitle: row.source_title,
+    sourceFileName: row.source_file_name,
+    documentId: row.document_id,
+    chunkId: row.chunk_id,
+    chunkNo: Number(row.chunk_no),
+    content: row.content,
+    startOffset: row.start_offset,
+    endOffset: row.end_offset,
     headingPath: row.heading_path,
     language: row.language,
   }));
@@ -238,6 +327,8 @@ export async function getVirtualFsChunk(input: {
     chunk_id: string;
     chunk_no: number;
     content: string;
+    start_offset: number | null;
+    end_offset: number | null;
     heading_path: string | null;
     language: string | null;
   }>(sql`
@@ -249,6 +340,8 @@ export async function getVirtualFsChunk(input: {
       c.id as chunk_id,
       c.chunk_no,
       c.content,
+      c.start_offset,
+      c.end_offset,
       c.heading_path,
       c.language
     from chunks c
@@ -289,6 +382,8 @@ export async function getVirtualFsChunk(input: {
     chunkId: row.chunk_id,
     chunkNo: Number(row.chunk_no),
     content: row.content,
+    startOffset: row.start_offset,
+    endOffset: row.end_offset,
     headingPath: row.heading_path,
     language: row.language,
   };
@@ -309,6 +404,8 @@ export async function grepVirtualFsChunks(input: {
     chunk_id: string;
     chunk_no: number;
     content: string;
+    start_offset: number | null;
+    end_offset: number | null;
     heading_path: string | null;
     language: string | null;
     score: number | string;
@@ -321,6 +418,8 @@ export async function grepVirtualFsChunks(input: {
       c.id as chunk_id,
       c.chunk_no,
       c.content,
+      c.start_offset,
+      c.end_offset,
       c.heading_path,
       c.language,
       pdb.score(c.id) as score
@@ -358,6 +457,8 @@ export async function grepVirtualFsChunks(input: {
     chunkId: row.chunk_id,
     chunkNo: Number(row.chunk_no),
     content: row.content,
+    startOffset: row.start_offset,
+    endOffset: row.end_offset,
     headingPath: row.heading_path,
     language: row.language,
     score: Number(row.score),
@@ -449,6 +550,8 @@ export async function grepVirtualFsChunksByRegex(input: {
     chunk_id: string;
     chunk_no: number;
     content: string;
+    start_offset: number | null;
+    end_offset: number | null;
     heading_path: string | null;
     language: string | null;
   }>(sql`
@@ -460,6 +563,8 @@ export async function grepVirtualFsChunksByRegex(input: {
       c.id as chunk_id,
       c.chunk_no,
       c.content,
+      c.start_offset,
+      c.end_offset,
       c.heading_path,
       c.language
     from chunks c
@@ -496,6 +601,8 @@ export async function grepVirtualFsChunksByRegex(input: {
     chunkId: row.chunk_id,
     chunkNo: Number(row.chunk_no),
     content: row.content,
+    startOffset: row.start_offset,
+    endOffset: row.end_offset,
     headingPath: row.heading_path,
     language: row.language,
     score: 0,

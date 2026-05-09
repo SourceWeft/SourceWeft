@@ -1,6 +1,8 @@
 import type { AgentCitation } from "../citation-registry";
 
 const CITATION_MARKER_PATTERN = /\[citation:([^\]\s]+)\]/g;
+const CITATION_LIKE_MARKER_PATTERN =
+  /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
 
 export function extractCitationKeys(text: string) {
   return [...text.matchAll(CITATION_MARKER_PATTERN)].map(
@@ -45,9 +47,12 @@ export function normalizeAssistantCitations(input: {
   let validMarkerCount = 0;
 
   const text = input.assistantText
-    .replace(/\s*\[citation:([^\]\s]+)\]/g, (match, key: string) => {
+    .replace(/\s*[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g, (match, keys: string) => {
       markerCount += 1;
-      const citation = allowed.get(key) ?? citationByChunkId.get(key);
+      const trimmed = match.trim();
+      const canonical = /^\[citation:[\w:-]+\]$/.test(trimmed);
+      const key = keys.trim();
+      const citation = canonical ? allowed.get(key) ?? citationByChunkId.get(key) : null;
       if (!citation) {
         invalidKeys.add(key);
         return "";
@@ -55,7 +60,7 @@ export function normalizeAssistantCitations(input: {
 
       validMarkerCount += 1;
       usedKeys.add(citation.citation);
-      return match.replace(`[citation:${key}]`, `[citation:${citation.citation}]`);
+      return match.replace(CITATION_LIKE_MARKER_PATTERN, `[citation:${citation.citation}]`);
     })
     .replace(/[ \t]+([,.;:!?])/g, "$1")
     .replace(/[ \t]+([，。；：！？])/g, "$1")

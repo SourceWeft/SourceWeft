@@ -19,6 +19,8 @@ Before finalizing your answer, verify every sentence, bullet, or source-grounded
 
 If these chunks answer the user's targeted question, answer directly with citations. Do not call search_sources again with a similar query. Use read_file only when surrounding context is needed, or grep only for explicit literal matching or exact textual verification.
 
+If the provided evidence does not directly support the requested value, entity, date, amount, decision, or relationship, state that the selected sources do not contain enough evidence. Do not infer a concrete answer from conditional, generic, templated, or procedural text.
+
 ${chunks
     .map(
       (chunk) =>

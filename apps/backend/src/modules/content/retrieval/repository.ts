@@ -34,6 +34,38 @@ type RetrievalSqlRow = {
   score: number;
 };
 
+type RetrievalDocumentChunkSqlRow = {
+  chunk_id: string;
+  document_id: string;
+  source_id: string;
+  source_title: string;
+  chunk_no: number;
+  content: string;
+};
+
+type RetrievalDocumentChunkStatsSqlRow = {
+  document_id: string;
+  source_id: string;
+  chunk_count: number | string;
+  total_chars: number | string | null;
+};
+
+export type RetrievalDocumentChunk = {
+  chunkId: string;
+  documentId: string;
+  sourceId: string;
+  sourceTitle: string;
+  chunkNo: number;
+  content: string;
+};
+
+export type RetrievalDocumentChunkStats = {
+  documentId: string;
+  sourceId: string;
+  chunkCount: number;
+  totalChars: number;
+};
+
 function mapEmbeddingProfile(row: EmbeddingProfileRow): EmbeddingProfileRecord {
   return {
     id: row.id,
@@ -67,6 +99,23 @@ function mapChunk(row: ChunkRow): ChunkRecord {
     chunkMetadata: row.chunkMetadata ?? {},
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+function mapDocumentChunk(
+  row: RetrievalDocumentChunkSqlRow,
+): RetrievalDocumentChunk {
+  return {
+    chunkId: row.chunk_id,
+    documentId: row.document_id,
+    sourceId: row.source_id,
+    sourceTitle: row.source_title,
+    chunkNo: Number(row.chunk_no),
+    content: row.content,
+  };
+}
+
+function documentPairKey(input: { documentId: string; sourceId: string }) {
+  return `${input.sourceId}:${input.documentId}`;
 }
 
 export async function findDefaultEmbeddingProfile() {
@@ -230,12 +279,12 @@ export async function searchChunksByVectorAnn(input: {
   topK: number;
   sourceIds: string[];
 }) {
-  if (input.sourceIds.length === 0) {
-    return [];
-  }
-
   if (!Number.isInteger(input.dim) || input.dim <= 0 || input.dim > 2000) {
     throw new Error("Invalid vector dimensions for ANN search");
+  }
+
+  if (input.sourceIds.length === 0) {
+    return [];
   }
 
   const dimLiteral = sql.raw(String(input.dim));
@@ -274,6 +323,123 @@ export async function searchChunksByVectorAnn(input: {
     score: Number(row.score),
     stage: "vector" as const,
   }));
+}
+
+export async function listDocumentChunkStats(input: {
+  teamId: string;
+  workspaceId: string;
+  documents: Array<{
+    documentId: string;
+    sourceId: string;
+  }>;
+}) {
+  if (input.documents.length === 0) {
+    return [];
+  }
+
+  const documentIds = [
+    ...new Set(input.documents.map((doc) => doc.documentId)),
+  ];
+  const sourceIds = [...new Set(input.documents.map((doc) => doc.sourceId))];
+  const requestedPairs = new Set(input.documents.map(documentPairKey));
+
+  const rows = await db.execute<RetrievalDocumentChunkStatsSqlRow>(sql`
+    select
+      c.document_id,
+      c.source_id,
+      count(c.id)::int as chunk_count,
+      coalesce(sum(char_length(c.content)), 0)::int as total_chars
+    from chunks c
+    inner join sources s on s.id = c.source_id
+    inner join documents d on d.id = c.document_id
+    where c.workspace_id = ${input.workspaceId}
+      and c.team_id = ${input.teamId}
+      and s.status = 'indexed'
+      and c.document_id = any(${toPostgresTextArray(documentIds)}::text[])
+      and c.source_id = any(${toPostgresTextArray(sourceIds)}::text[])
+      and ${currentDocumentConditionForAlias("d")}
+    group by c.document_id, c.source_id
+  `);
+
+  return rows.rows
+    .filter((row) =>
+      requestedPairs.has(
+        documentPairKey({
+          documentId: row.document_id,
+          sourceId: row.source_id,
+        }),
+      ),
+    )
+    .map((row) => ({
+      documentId: row.document_id,
+      sourceId: row.source_id,
+      chunkCount: Number(row.chunk_count),
+      totalChars: Number(row.total_chars ?? 0),
+    }));
+}
+
+export async function listDocumentChunksInRange(input: {
+  teamId: string;
+  workspaceId: string;
+  documentId: string;
+  sourceId: string;
+  startChunkNo: number;
+  endChunkNo: number;
+}) {
+  const rows = await db.execute<RetrievalDocumentChunkSqlRow>(sql`
+    select
+      c.id as chunk_id,
+      c.document_id,
+      c.source_id,
+      s.title as source_title,
+      c.chunk_no,
+      c.content
+    from chunks c
+    inner join sources s on s.id = c.source_id
+    inner join documents d on d.id = c.document_id
+    where c.workspace_id = ${input.workspaceId}
+      and c.team_id = ${input.teamId}
+      and s.status = 'indexed'
+      and c.document_id = ${input.documentId}
+      and c.source_id = ${input.sourceId}
+      and c.chunk_no >= ${input.startChunkNo}
+      and c.chunk_no <= ${input.endChunkNo}
+      and ${currentDocumentConditionForAlias("d")}
+    order by c.chunk_no asc
+  `);
+
+  return rows.rows.map(mapDocumentChunk);
+}
+
+export async function listDocumentChunksForDocument(input: {
+  teamId: string;
+  workspaceId: string;
+  documentId: string;
+  sourceId: string;
+  limit: number;
+}) {
+  const rows = await db.execute<RetrievalDocumentChunkSqlRow>(sql`
+    select
+      c.id as chunk_id,
+      c.document_id,
+      c.source_id,
+      s.title as source_title,
+      c.chunk_no,
+      c.content
+    from chunks c
+    inner join sources s on s.id = c.source_id
+    inner join documents d on d.id = c.document_id
+    where c.workspace_id = ${input.workspaceId}
+      and c.team_id = ${input.teamId}
+      and s.status = 'indexed'
+      and c.document_id = ${input.documentId}
+      and c.source_id = ${input.sourceId}
+      and ${currentDocumentConditionForAlias("d")}
+    order by c.chunk_no asc
+    limit ${input.limit}
+  `);
+
+  return rows.rows.map(mapDocumentChunk);
 }
 
 export async function createRetrievalRun(input: {

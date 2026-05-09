@@ -24,6 +24,7 @@ class ContentRetrievalService {
         operation: "retrieval.run",
         input: {
           query: input.queryText,
+          anchorSourceIds: input.anchorSourceIds ?? [],
           sourceIds: input.sourceIds,
         },
       });
@@ -51,6 +52,9 @@ class ContentRetrievalService {
           latencyMs: Date.now() - startedAt,
           output: {
             finalResultCount: state.candidates.final.length,
+            anchorSourceIds: prepared.anchorSourceIds,
+            retrievalSourceIds: prepared.retrievalSourceIds,
+            contextAssembly: state.contextAssembly,
             embeddingLatencyMs: state.timings.embeddingLatencyMs,
             bm25LatencyMs: state.timings.bm25LatencyMs,
             vectorLatencyMs: state.timings.vectorLatencyMs,
@@ -64,6 +68,7 @@ class ContentRetrievalService {
         planner: prepared.planner,
         fusedCandidates: state.candidates.final,
         retrievalSummary: buildCitationMetadata(state.candidates.final),
+        contextAssembly: state.contextAssembly,
       };
     } catch (error) {
       if (input.traceContext) {

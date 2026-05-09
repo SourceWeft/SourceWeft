@@ -82,6 +82,9 @@ function buildTraceMetadata(input: {
     agentMode: input.prepared.agentMode,
     sourceCount: input.prepared.selectedSourceIds.length,
     effectiveSourceCount: input.prepared.sourceIds.length,
+    mentionedSourceCount: input.prepared.mentionedSourceIds.length,
+    effectiveMentionedSourceCount:
+      input.prepared.effectiveMentionedSourceIds.length,
     selectedSkillCount: input.prepared.enabledSkills.length,
   };
 }
@@ -111,6 +114,8 @@ function buildTraceInput(
     profileAlias: prepared.profileAlias,
     sourceIds: prepared.selectedSourceIds,
     effectiveSourceIds: prepared.sourceIds,
+    mentionedSourceIds: prepared.mentionedSourceIds,
+    effectiveMentionedSourceIds: prepared.effectiveMentionedSourceIds,
     skillIds: prepared.skillIds,
     threadId: prepared.thread.id,
     userMessageId: prepared.userMessage.id,
@@ -218,6 +223,8 @@ function buildPrepareSpanInput(
     userMessageId: prepared.userMessage.id,
     sourceIds: prepared.selectedSourceIds,
     effectiveSourceIds: prepared.sourceIds,
+    mentionedSourceIds: prepared.mentionedSourceIds,
+    effectiveMentionedSourceIds: prepared.effectiveMentionedSourceIds,
     skillIds: prepared.skillIds,
   };
 }
@@ -232,6 +239,8 @@ function buildPrepareSpanOutput(
     profileAlias: prepared.profileAlias,
     sourceCount: prepared.selectedSourceIds.length,
     effectiveSourceCount: prepared.sourceIds.length,
+    mentionedSourceCount: prepared.mentionedSourceIds.length,
+    effectiveMentionedSourceCount: prepared.effectiveMentionedSourceIds.length,
     selectedSkillCount: prepared.enabledSkills.length,
     isFirstAssistantResponse: prepared.isFirstAssistantResponse,
     assistantMessageParentId: prepared.assistantMessageParentId,
@@ -309,6 +318,7 @@ async function observePrepareFailure(input: {
       feature: "chat",
       input: {
         message: input.request.content,
+        mentionedSourceIds: input.request.mentionedSourceIds ?? [],
         sourceIds: input.request.sourceIds ?? [],
         skillIds: input.request.tools?.skillIds ?? [],
         threadId: input.request.threadId,
@@ -625,6 +635,8 @@ class ContentThreadStreamService {
       yield toSseData({
         type: "start",
         messageId: prepared.userMessage.id,
+        mentionedSourceIds: prepared.mentionedSourceIds,
+        effectiveMentionedSourceIds: prepared.effectiveMentionedSourceIds,
         sourceIds: prepared.selectedSourceIds,
         effectiveSourceIds: prepared.sourceIds,
       });

@@ -34,6 +34,15 @@ export function lineNumberContent(content: string) {
     .join("\n");
 }
 
+export function sanitizeNonCitableCitationMarkers(content: string) {
+  return content
+    .replace(
+      /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/gi,
+      "[non-citable citation marker $1 removed]",
+    )
+    .replace(/\bcitation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\b/gi, "non-citable citation marker $1 removed");
+}
+
 export function formatTimestamp(value: Date | string | number | null | undefined) {
   if (value instanceof Date) {
     return value.toISOString();

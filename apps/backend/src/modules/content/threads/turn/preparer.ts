@@ -45,7 +45,13 @@ function normalizeSupportedParameters(value: unknown) {
     .filter((item) => item.length > 0);
 }
 
-const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const REASONING_EFFORTS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
 const DEFAULT_TIMEZONE = "UTC";
 
 function normalizeSupportedEfforts(value: unknown) {
@@ -59,7 +65,9 @@ function normalizeSupportedEfforts(value: unknown) {
         .filter((item): item is string => typeof item === "string")
         .map((item) => item.trim().toLowerCase())
         .filter((item): item is (typeof REASONING_EFFORTS)[number] =>
-          REASONING_EFFORTS.includes(item as (typeof REASONING_EFFORTS)[number])
+          REASONING_EFFORTS.includes(
+            item as (typeof REASONING_EFFORTS)[number],
+          ),
         ),
     ),
   );
@@ -95,12 +103,17 @@ function resolvePreparedLlmConfig(input: {
     return input.llm;
   }
 
-  const configJson = input.chatProfile.configJson &&
-      typeof input.chatProfile.configJson === "object"
-    ? input.chatProfile.configJson as Record<string, unknown>
-    : {};
-  const supportedParameters = normalizeSupportedParameters(configJson.supportedParameters);
-  const supportedEfforts = normalizeSupportedEfforts(configJson.supportedEfforts);
+  const configJson =
+    input.chatProfile.configJson &&
+    typeof input.chatProfile.configJson === "object"
+      ? (input.chatProfile.configJson as Record<string, unknown>)
+      : {};
+  const supportedParameters = normalizeSupportedParameters(
+    configJson.supportedParameters,
+  );
+  const supportedEfforts = normalizeSupportedEfforts(
+    configJson.supportedEfforts,
+  );
 
   return {
     ...input.llm,
@@ -141,13 +154,22 @@ export async function prepareThreadTurn(
   }
 
   const requestedProfileAlias =
-    typeof input.llm?.profileAlias === "string" ? input.llm.profileAlias.trim() : "";
+    typeof input.llm?.profileAlias === "string"
+      ? input.llm.profileAlias.trim()
+      : "";
 
   const resolvedChatModel = await resolveThreadChatProfile({
     threadModelSettings: normalizeThreadModelSettings(thread.modelSettings),
     requestedProfileAlias: requestedProfileAlias || undefined,
   });
 
+  const mentionedSourceIds = dedupeSourceIds(input.mentionedSourceIds);
+  const mentionedSourceScope = await resolveSourceTreeScope({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    selectedSourceIds: mentionedSourceIds,
+  });
+  const effectiveMentionedSourceIds = mentionedSourceScope.effectiveSourceIds;
   const requestedSourceIds = dedupeSourceIds(input.sourceIds);
   const existingUserMessage = input.existingUserMessage;
   const assistantMessageParentId = input.assistantMessageParentId ?? null;
@@ -158,9 +180,8 @@ export async function prepareThreadTurn(
   });
 
   const fallbackSourceIds = resolveLatestSourceIds(messageRecords);
-  const selectedSourceIds = requestedSourceIds.length > 0
-    ? requestedSourceIds
-    : fallbackSourceIds;
+  const selectedSourceIds =
+    requestedSourceIds.length > 0 ? requestedSourceIds : fallbackSourceIds;
   const sourceScope = await resolveSourceTreeScope({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
@@ -179,7 +200,9 @@ export async function prepareThreadTurn(
   await assertSourcesExist({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
-    sourceIds: selectedSourceIds,
+    sourceIds: Array.from(
+      new Set([...selectedSourceIds, ...mentionedSourceIds]),
+    ),
   });
 
   const userMessage =
@@ -194,6 +217,12 @@ export async function prepareThreadTurn(
       createdBy: input.userId,
       metadata: {
         source: "api",
+        ...(mentionedSourceIds.length > 0
+          ? {
+              mentionedSourceIds,
+              effectiveMentionedSourceIds,
+            }
+          : {}),
         sourceIds: selectedSourceIds,
         effectiveSourceIds: sourceIds,
         skillIds,
@@ -204,7 +233,8 @@ export async function prepareThreadTurn(
   const createdUserMessage = !existingUserMessage;
 
   const isFirstAssistantResponse = !messageRecords.some(
-    (message) => message.role === "assistant" && !isContextExcludedMessage(message),
+    (message) =>
+      message.role === "assistant" && !isContextExcludedMessage(message),
   );
   const initialTitle = thread.title;
 
@@ -212,7 +242,9 @@ export async function prepareThreadTurn(
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);
   const llm = resolvePreparedLlmConfig({ chatProfile, llm: input.llm });
-  const normalizedThreadSettings = normalizeThreadModelSettings(thread.modelSettings);
+  const normalizedThreadSettings = normalizeThreadModelSettings(
+    thread.modelSettings,
+  );
   if (
     normalizedThreadSettings.llmProfileAlias !== profileAlias ||
     normalizedThreadSettings.llmModelAlias !== modelAlias
@@ -221,27 +253,32 @@ export async function prepareThreadTurn(
       threadId: thread.id,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
-      modelSettings: applyResolvedThreadModelSettings(normalizedThreadSettings, {
-        llm: { profileAlias, modelAlias },
-      }),
+      modelSettings: applyResolvedThreadModelSettings(
+        normalizedThreadSettings,
+        {
+          llm: { profileAlias, modelAlias },
+        },
+      ),
     });
     if (updatedThread) {
       thread = updatedThread;
     }
   }
   const agentMode = input.agentMode ?? "continue";
-  const latestAssistantCheckpoint = agentMode === "continue"
-    ? resolveLatestAssistantFinalCheckpoint(messageRecords)
-    : null;
-  const agentBaseCheckpoint = input.agentBaseCheckpoint !== undefined
-    ? input.agentBaseCheckpoint
-    : latestAssistantCheckpoint;
+  const latestAssistantCheckpoint =
+    agentMode === "continue"
+      ? resolveLatestAssistantFinalCheckpoint(messageRecords)
+      : null;
+  const agentBaseCheckpoint =
+    input.agentBaseCheckpoint !== undefined
+      ? input.agentBaseCheckpoint
+      : latestAssistantCheckpoint;
 
   const llmIdempotencyKey =
     input.idempotencyKey ||
     (assistantMessageParentId
-        ? `thread-refresh:${userMessage.id}:${assistantMessageParentId}:${randomUUID()}`
-        : `thread-stream:${userMessage.id}:assistant`);
+      ? `thread-refresh:${userMessage.id}:${assistantMessageParentId}:${randomUUID()}`
+      : `thread-stream:${userMessage.id}:assistant`);
 
   const agentRunThreadId = input.agentRunThreadId ?? thread.id;
   const runTraceId = existingUserMessage
@@ -249,22 +286,27 @@ export async function prepareThreadTurn(
     : userMessage.id;
   const userMessageWithTraceId = existingUserMessage
     ? userMessage
-    : await updateMessageMetadataRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      threadId: thread.id,
-      messageId: userMessage.id,
-      metadata: {
-        ...userMessage.metadata,
-        traceId: runTraceId,
-      },
-    }) ?? { ...userMessage, metadata: { ...userMessage.metadata, traceId: runTraceId } };
+    : ((await updateMessageMetadataRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: thread.id,
+        messageId: userMessage.id,
+        metadata: {
+          ...userMessage.metadata,
+          traceId: runTraceId,
+        },
+      })) ?? {
+        ...userMessage,
+        metadata: { ...userMessage.metadata, traceId: runTraceId },
+      });
 
   return {
     userId: input.userId,
     workspace,
     thread,
     messageContent,
+    mentionedSourceIds,
+    effectiveMentionedSourceIds,
     selectedSourceIds,
     sourceIds,
     sourceScope,
@@ -290,9 +332,12 @@ export async function prepareThreadTurn(
   };
 }
 
-function resolveLatestSourceIds(messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>) {
-  const messages = collapseSupersededMessages(messageRecords)
-    .filter((message) => !isContextExcludedMessage(message));
+function resolveLatestSourceIds(
+  messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>,
+) {
+  const messages = collapseSupersededMessages(messageRecords).filter(
+    (message) => !isContextExcludedMessage(message),
+  );
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -309,9 +354,12 @@ function resolveLatestSourceIds(messageRecords: Awaited<ReturnType<typeof listMe
   return [] as string[];
 }
 
-function resolveLatestAssistantFinalCheckpoint(messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>) {
-  const messages = collapseSupersededMessages(messageRecords)
-    .filter((message) => !isContextExcludedMessage(message));
+function resolveLatestAssistantFinalCheckpoint(
+  messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>,
+) {
+  const messages = collapseSupersededMessages(messageRecords).filter(
+    (message) => !isContextExcludedMessage(message),
+  );
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];

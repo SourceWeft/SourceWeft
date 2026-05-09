@@ -27,6 +27,8 @@ import {
   RotateCcw,
   Search,
   Sparkles,
+  SquareCheckBig,
+  SquareMinus,
   Trash2,
   Upload,
   X,
@@ -81,7 +83,7 @@ import { expandSelectedSources, type SourceItem } from "./source-types";
 
 const tabs = [
   "Sources",
-  "Files",
+  "Workfiles",
   "Artifacts",
   "Connectors",
   "Skills",
@@ -212,6 +214,12 @@ type SourceTreeNode = {
   children: SourceTreeNode[];
 };
 type SourceSelectionState = boolean | "indeterminate";
+type WorkfileListItem = Awaited<
+  ReturnType<typeof contentClient.listWorkingFiles>
+>["items"][number];
+type WorkfileDetail = Awaited<
+  ReturnType<typeof contentClient.getWorkingFile>
+>["file"];
 
 type DisplayCitationItem = {
   id: string;
@@ -244,7 +252,7 @@ type CitationOpenContext = {
 
 const searchPlaceholders: Record<HubTab, string> = {
   Sources: "Search sources...",
-  Files: "Search working files...",
+  Workfiles: "Search workfiles...",
   Artifacts: "Search artifacts...",
   Skills: "Search installed skills...",
   Citations: "Search citations...",
@@ -253,7 +261,7 @@ const searchPlaceholders: Record<HubTab, string> = {
 
 const searchScopeLabels: Record<HubTab, string> = {
   Sources: "Sources",
-  Files: "Files",
+  Workfiles: "Workfiles",
   Artifacts: "Artifacts",
   Skills: "Skills",
   Citations: "Citations",
@@ -350,6 +358,34 @@ function getUploadFileLabel(file: File) {
     return "AUDIO";
   }
   return "TEXT";
+}
+
+function formatBytes(sizeBytes: number) {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 102.4) / 10} KB`;
+  return `${Math.round(sizeBytes / 1024 / 102.4) / 10} MB`;
+}
+
+function basename(path: string) {
+  const cleaned = path.replace(/\/+$/, "");
+  return cleaned.split("/").pop() || cleaned || path;
+}
+
+function workfilePurposeLabel(purpose: WorkfileListItem["purpose"]) {
+  if (purpose === "scratch") return "Scratch";
+  if (purpose === "draft") return "Draft";
+  if (purpose === "note") return "Note";
+  if (purpose === "output_candidate") return "Candidate";
+  return "Workfile";
+}
+
+function workfileMatchesQuery(file: WorkfileListItem, q: string) {
+  return (
+    file.path.toLowerCase().includes(q) ||
+    basename(file.path).toLowerCase().includes(q) ||
+    file.mimeType.toLowerCase().includes(q) ||
+    workfilePurposeLabel(file.purpose).toLowerCase().includes(q)
+  );
 }
 
 function isSupportedUploadFile(file: File) {
@@ -835,6 +871,10 @@ function collectSelectableTreeIds(node: SourceTreeNode): string[] {
   ];
 }
 
+function collectSelectableSourceIds(nodes: SourceTreeNode[]) {
+  return nodes.flatMap((node) => collectSelectableTreeIds(node));
+}
+
 function getNodeSelectionState(
   node: SourceTreeNode,
   selectedSet: Set<string>,
@@ -1179,6 +1219,152 @@ function HubEmptyState({
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         {description}
       </p>
+    </div>
+  );
+}
+
+function WorkfilesTab({
+  files,
+  isLoading,
+  loadingError,
+  onDelete,
+  onOpen,
+  onRefresh,
+  rowBusyByPath,
+  searchQuery,
+}: {
+  files: WorkfileListItem[];
+  isLoading: boolean;
+  loadingError: string | null;
+  onDelete: (file: WorkfileListItem) => void;
+  onOpen: (file: WorkfileListItem) => void;
+  onRefresh: () => void;
+  rowBusyByPath: Record<string, boolean>;
+  searchQuery: string;
+}) {
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (q ? files.filter((file) => workfileMatchesQuery(file, q)) : files),
+    [files, q],
+  );
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
+        <Loader2 className="mr-2 size-3.5 animate-spin" />
+        Loading workfiles...
+      </div>
+    );
+  }
+
+  if (loadingError) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+        <p className="text-xs text-destructive">{loadingError}</p>
+        <Button
+          className="mt-2"
+          onClick={onRefresh}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          <RotateCcw className="size-3.5" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <HubEmptyState
+        description={
+          searchQuery
+            ? "Try a different path, purpose, or file type."
+            : "Assistant-created plans, notes, extraction tables, calculations, drafts, and candidate outputs from complex work will appear here."
+        }
+        icon={FileText}
+        title={
+          searchQuery
+            ? `No workfiles match "${searchQuery}"`
+            : "Workfiles will appear here."
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {filtered.map((file) => {
+        const busy = Boolean(rowBusyByPath[file.path]);
+        return (
+          <article
+            className="group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/60"
+            key={file.id}
+          >
+            <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <button
+                className="block w-full cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                disabled={busy}
+                onClick={() => onOpen(file)}
+                title={file.path}
+                type="button"
+              >
+                {basename(file.path)}
+              </button>
+              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span className="truncate">{file.path}</span>
+                <span>{formatBytes(file.sizeBytes)}</span>
+                <span>{new Date(file.updatedAt).toLocaleString()}</span>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {file.purpose ? (
+                  <TypeBadge label={workfilePurposeLabel(file.purpose)} />
+                ) : null}
+                <TypeBadge label={file.mimeType} />
+              </div>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                  disabled={busy}
+                  onClick={(event) => event.stopPropagation()}
+                  size="icon-xs"
+                  title="Workfile actions"
+                  type="button"
+                  variant="ghost"
+                >
+                  {busy ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <MoreHorizontal className="size-3.5" />
+                  )}
+                  <span className="sr-only">Workfile actions</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem
+                  className="whitespace-nowrap"
+                  onClick={() => onOpen(file)}
+                >
+                  <FileText className="size-3.5" />
+                  Preview
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="whitespace-nowrap"
+                  onClick={() => onDelete(file)}
+                  variant="destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -1647,6 +1833,8 @@ export function SourcesHub({
   selectedIds,
   onSelectionChange,
   threadCitations = [],
+  threadId = null,
+  workfilesRefreshKey = 0,
   workspaceId,
   onSourceLoad,
   installedSkills = [],
@@ -1662,6 +1850,8 @@ export function SourcesHub({
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
   threadCitations?: ThreadCitationRecord[];
+  threadId?: string | null;
+  workfilesRefreshKey?: number;
   workspaceId?: string | null;
   onSourceLoad?: (sources: SourceItem[]) => void;
   installedSkills?: HubSkillItem[];
@@ -1672,7 +1862,7 @@ export function SourcesHub({
   const [citationScope, setCitationScope] = useState<CitationScope>("current");
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
-    Files: "",
+    Workfiles: "",
     Artifacts: "",
     Skills: "",
     Citations: "",
@@ -1682,6 +1872,12 @@ export function SourcesHub({
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
+  const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
+  const [isLoadingWorkfiles, setIsLoadingWorkfiles] = useState(false);
+  const [workfilesLoadingError, setWorkfilesLoadingError] = useState<string | null>(null);
+  const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(null);
+  const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(null);
+  const [workfileBusyByPath, setWorkfileBusyByPath] = useState<Record<string, boolean>>({});
   const currentCitationItems = useMemo(
     () => mapCitationsToUi(citations),
     [citations],
@@ -1708,6 +1904,12 @@ export function SourcesHub({
     () => countFilteredSkills(installedSkills, searchQueries.Skills),
     [installedSkills, searchQueries.Skills],
   );
+  const filteredWorkfileCount = useMemo(() => {
+    const q = searchQueries.Workfiles.trim().toLowerCase();
+    return q
+      ? workfiles.filter((file) => workfileMatchesQuery(file, q)).length
+      : workfiles.length;
+  }, [searchQueries.Workfiles, workfiles]);
   const activeCitationChunkId = activeCitationIndex
     ? citations[activeCitationIndex - 1]?.chunkId
     : null;
@@ -1742,10 +1944,17 @@ export function SourcesHub({
   const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
   const [deleteSource, setDeleteSource] = useState<SourceItem | null>(null);
   const fullSourceTree = useMemo(() => buildSourceTree(sources, ""), [sources]);
+  const selectableSourceIds = useMemo(
+    () => collectSelectableSourceIds(fullSourceTree),
+    [fullSourceTree],
+  );
   const selectedLibrarySources = useMemo(
     () => expandSelectedSources(sources, selectedIds),
     [selectedIds, sources],
   );
+  const allSelectableSourcesSelected =
+    selectableSourceIds.length > 0 &&
+    selectedLibrarySources.length >= selectableSourceIds.length;
 
   function setActiveSearchQuery(value: string) {
     setSearchQueries((current) => ({
@@ -1794,9 +2003,39 @@ export function SourcesHub({
     }
   }, [workspaceId, onSourceLoad]);
 
+  const refreshWorkfiles = useCallback(async () => {
+    if (!workspaceId || !threadId || mode !== "thread") {
+      setWorkfiles([]);
+      setWorkfilesLoadingError(null);
+      return;
+    }
+
+    setIsLoadingWorkfiles(true);
+    setWorkfilesLoadingError(null);
+    try {
+      const result = await contentClient.listWorkingFiles(workspaceId, threadId);
+      setWorkfiles(result.items);
+    } catch (error) {
+      setWorkfiles([]);
+      setWorkfilesLoadingError(getErrorMessage(error, "Failed to load workfiles."));
+    } finally {
+      setIsLoadingWorkfiles(false);
+    }
+  }, [mode, threadId, workspaceId]);
+
   useEffect(() => {
     void refreshSources();
   }, [refreshSources]);
+
+  useEffect(() => {
+    void refreshWorkfiles();
+  }, [refreshWorkfiles]);
+
+  useEffect(() => {
+    if (workfilesRefreshKey > 0) {
+      void refreshWorkfiles();
+    }
+  }, [refreshWorkfiles, workfilesRefreshKey]);
 
   useEffect(() => {
     if (!workspaceId || pendingSourceIds.length === 0) {
@@ -1868,7 +2107,7 @@ export function SourcesHub({
 
   const tabCounts: Partial<Record<HubTab, number>> = {
     Sources: selectedLibrarySources.length,
-    Files: 0,
+    Workfiles: workfiles.length,
     Artifacts: 0,
     Skills: selectedSkillIds.length,
     Citations: citations.length,
@@ -1884,11 +2123,31 @@ export function SourcesHub({
     );
   }
 
+  function handleToggleAllSources() {
+    if (allSelectableSourcesSelected) {
+      onSelectionChange([]);
+      return;
+    }
+
+    onSelectionChange(
+      normalizeSourceSelectionFromTree(fullSourceTree, selectableSourceIds),
+    );
+  }
+
   function setRowBusy(id: string, busy: boolean) {
     setRowBusyById((prev) => {
       if (busy) return { ...prev, [id]: true };
       const next = { ...prev };
       delete next[id];
+      return next;
+    });
+  }
+
+  function setWorkfileBusy(path: string, busy: boolean) {
+    setWorkfileBusyByPath((prev) => {
+      if (busy) return { ...prev, [path]: true };
+      const next = { ...prev };
+      delete next[path];
       return next;
     });
   }
@@ -2103,6 +2362,50 @@ export function SourcesHub({
     },
     [workspaceId],
   );
+
+  const handleOpenWorkfile = useCallback(
+    async (file: WorkfileListItem) => {
+      if (!workspaceId || !threadId) return;
+
+      setWorkfileBusy(file.path, true);
+      try {
+        const result = await contentClient.getWorkingFile(
+          workspaceId,
+          threadId,
+          file.path,
+        );
+        setPreviewWorkfile(result.file);
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to load workfile."));
+      } finally {
+        setWorkfileBusy(file.path, false);
+      }
+    },
+    [threadId, workspaceId],
+  );
+
+  const handleConfirmDeleteWorkfile = useCallback(async () => {
+    if (!workspaceId || !threadId || !deleteWorkfile) return;
+
+    setWorkfileBusy(deleteWorkfile.path, true);
+    try {
+      await contentClient.deleteWorkingFile(
+        workspaceId,
+        threadId,
+        deleteWorkfile.path,
+      );
+      toast.success("Workfile deleted.");
+      setDeleteWorkfile(null);
+      if (previewWorkfile?.path === deleteWorkfile.path) {
+        setPreviewWorkfile(null);
+      }
+      await refreshWorkfiles();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to delete workfile."));
+    } finally {
+      setWorkfileBusy(deleteWorkfile.path, false);
+    }
+  }, [deleteWorkfile, previewWorkfile?.path, refreshWorkfiles, threadId, workspaceId]);
 
   const resetAddForm = useCallback(() => {
     setTextTitle("");
@@ -2353,14 +2656,14 @@ export function SourcesHub({
             )}
           </div>
 
-          <div className="mt-2 flex flex-wrap gap-1 border-t pt-2">
+          <div className="mt-2 flex flex-nowrap gap-1 overflow-x-auto border-t pt-2">
             {tabs.map((tab) => (
               <button
                 className={cn(
-                  "rounded-lg px-2.5 py-1 text-[11px] transition-colors",
+                  "inline-flex shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-[11px] whitespace-nowrap transition-colors",
                   activeTab === tab
-                    ? "bg-secondary text-foreground shadow-xs ring-1 ring-border"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    ? "border-border bg-secondary text-foreground shadow-xs"
+                    : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
                 )}
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -2400,6 +2703,29 @@ export function SourcesHub({
                   ) : null}
                 </div>
                 <div className="flex min-h-8 items-center justify-end gap-1.5">
+                  <Button
+                    disabled={selectableSourceIds.length === 0}
+                    onClick={handleToggleAllSources}
+                    size="icon-xs"
+                    title={
+                      allSelectableSourcesSelected
+                        ? "Unselect all sources"
+                        : "Select all sources"
+                    }
+                    type="button"
+                    variant="ghost"
+                  >
+                    {allSelectableSourcesSelected ? (
+                      <SquareMinus className="size-3.5" />
+                    ) : (
+                      <SquareCheckBig className="size-3.5" />
+                    )}
+                    <span className="sr-only">
+                      {allSelectableSourcesSelected
+                        ? "Unselect all sources"
+                        : "Select all sources"}
+                    </span>
+                  </Button>
                   <Button
                     onClick={() => handleOpenCreateDirectory(null)}
                     size="icon-xs"
@@ -2460,22 +2786,42 @@ export function SourcesHub({
             </section>
           )}
 
-          {activeTab === "Files" && (
-            <section className="space-y-3">
+          {activeTab === "Workfiles" && (
+            <section className="space-y-1">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h3 className="text-xs font-medium text-foreground">
-                    Files
+                    Workfiles
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    0 working files
+                    {workfiles.length} workfiles
                   </span>
+                  {searchQueries.Workfiles ? (
+                    <span className="text-[10px] text-primary">
+                      {filteredWorkfileCount} found
+                    </span>
+                  ) : null}
                 </div>
+                <Button
+                  onClick={() => void refreshWorkfiles()}
+                  size="icon-xs"
+                  title="Refresh workfiles"
+                  type="button"
+                  variant="ghost"
+                >
+                  <RotateCcw className="size-3.5" />
+                  <span className="sr-only">Refresh workfiles</span>
+                </Button>
               </div>
-              <HubEmptyState
-                description="Generated drafts, scratch notes, tables, and intermediate files from the virtual workspace."
-                icon={FileText}
-                title="Working files will appear here."
+              <WorkfilesTab
+                files={workfiles}
+                isLoading={isLoadingWorkfiles}
+                loadingError={workfilesLoadingError}
+                onDelete={setDeleteWorkfile}
+                onOpen={handleOpenWorkfile}
+                onRefresh={() => void refreshWorkfiles()}
+                rowBusyByPath={workfileBusyByPath}
+                searchQuery={searchQuery}
               />
             </section>
           )}
@@ -3145,6 +3491,36 @@ export function SourcesHub({
         workspaceId={workspaceId}
       />
 
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewWorkfile(null);
+          }
+        }}
+        open={Boolean(previewWorkfile)}
+      >
+        <DialogContent
+          className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
+          constrainWidth={false}
+        >
+          <DialogHeader className="border-b px-5 py-4 text-left">
+            <DialogTitle>{previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}</DialogTitle>
+            <DialogDescription>
+              {previewWorkfile
+                ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
+                : "Assistant-created working material from this thread."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto px-5 py-5">
+            {previewWorkfile ? (
+              <MessageResponse className="text-sm leading-7 text-foreground [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted/30 [&_pre]:p-3">
+                {previewWorkfile.contentText}
+              </MessageResponse>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog
         onOpenChange={(open) => {
           if (!open) {
@@ -3184,6 +3560,51 @@ export function SourcesHub({
               }}
             >
               {deleteSource && rowBusyById[deleteSource.id] ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteWorkfile(null);
+          }
+        }}
+        open={Boolean(deleteWorkfile)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete workfile?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the Workfile from this thread. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteWorkfile ? (
+            <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
+              <span className="line-clamp-2 break-words">{deleteWorkfile.path}</span>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(deleteWorkfile && workfileBusyByPath[deleteWorkfile.path])}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive" })}
+              disabled={Boolean(deleteWorkfile && workfileBusyByPath[deleteWorkfile.path])}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleConfirmDeleteWorkfile();
+              }}
+            >
+              {deleteWorkfile && workfileBusyByPath[deleteWorkfile.path] ? (
                 <>
                   <Loader2 className="size-3.5 animate-spin" />
                   Deleting...

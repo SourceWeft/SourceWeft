@@ -10,6 +10,8 @@ export function createInitialRetrievalState(
 ): RetrievalPipelineState {
   return {
     input,
+    anchorSourceIds: [],
+    retrievalSourceIds: [],
     sourceIds: [],
     profile: null,
     planner: null,
@@ -35,6 +37,7 @@ export function createInitialRetrievalState(
       embedding: null,
       rerank: null,
     },
+    contextAssembly: null,
     retrievalRunId: null,
   };
 }

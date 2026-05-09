@@ -1,10 +1,17 @@
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { TraceContext } from "../../../../shared/llm-observability";
 import type { EmbeddingProfileRecord } from "../../types";
-import type {
-  RetrievalCandidate,
-  RetrievalPlannerResult,
-} from "../planner";
+import type { RetrievalCandidate, RetrievalPlannerResult } from "../planner";
+
+export type ContextAssemblyMetadata = {
+  primaryCandidateCount: number;
+  assembledChunkCount: number;
+  expandedNeighborCount: number;
+  smallDocumentCount: number;
+  finalContextChars: number;
+  documentCount: number;
+  contextTruncated: boolean;
+};
 
 export type RetrievalInput = {
   workspaceId: string;
@@ -14,6 +21,7 @@ export type RetrievalInput = {
   userMessageId: string;
   queryText: string;
   sourceIds: string[];
+  anchorSourceIds?: string[];
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
   traceContext?: TraceContext;
@@ -21,6 +29,8 @@ export type RetrievalInput = {
 
 export type RetrievalPipelineState = {
   input: RetrievalInput;
+  anchorSourceIds: string[];
+  retrievalSourceIds: string[];
   sourceIds: string[];
   profile: EmbeddingProfileRecord | null;
   planner: RetrievalPlannerResult | null;
@@ -46,6 +56,7 @@ export type RetrievalPipelineState = {
     embedding: Record<string, unknown> | null;
     rerank: Record<string, unknown> | null;
   };
+  contextAssembly: ContextAssemblyMetadata | null;
   retrievalRunId: string | null;
 };
 

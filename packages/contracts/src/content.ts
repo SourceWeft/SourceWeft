@@ -177,16 +177,18 @@ export const sourceContentResponseSchema = z.object({
 export const createSourceRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   contentText: z.string().max(100000).optional(),
-  sourceType: z.enum([
-    "manual_upload",
-    "file_upload",
-    "web_url",
-    "youtube",
-    "note",
-    "artifact",
-    "connector",
-    "directory",
-  ]).optional(),
+  sourceType: z
+    .enum([
+      "manual_upload",
+      "file_upload",
+      "web_url",
+      "youtube",
+      "note",
+      "artifact",
+      "connector",
+      "directory",
+    ])
+    .optional(),
   parentSourceId: z.string().nullable().optional(),
   estimatedPages: z.number().int().positive().optional(),
   parsedTokens: z.number().int().positive().optional(),
@@ -210,6 +212,28 @@ export const createUrlSourceResponseSchema = z.object({
 
 export const listSourcesResponseSchema = z.object({
   items: z.array(sourceSchema),
+});
+
+const sourceMentionSchema = sourceSchema.pick({
+  id: true,
+  title: true,
+  sourceType: true,
+  parentSourceId: true,
+  mimeType: true,
+  status: true,
+  storageKey: true,
+  updatedAt: true,
+});
+
+export const listSourceMentionsRequestSchema = z.object({
+  query: z.string().trim().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  cursor: z.string().trim().min(1).optional(),
+});
+
+export const listSourceMentionsResponseSchema = z.object({
+  items: z.array(sourceMentionSchema),
+  nextCursor: z.string().nullable(),
 });
 
 export const getSourceResponseSchema = z.object({
@@ -289,11 +313,13 @@ export const threadSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const threadModelSettingsInputSchema = z.object({
-  llmProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
-  imageProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
-  visionProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
-}).strict();
+export const threadModelSettingsInputSchema = z
+  .object({
+    llmProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
+    imageProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
+    visionProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
+  })
+  .strict();
 
 export const threadModelSettingsPatchSchema =
   threadModelSettingsInputSchema.refine(
@@ -359,15 +385,23 @@ const thinkingConfigSchema = z.object({
   includeReasoning: z.boolean().optional(),
 });
 
-const reasoningEffortSchema = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
+const reasoningEffortSchema = z.enum([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
 
-const llmExecutionConfigSchema = z.object({
-  profileAlias: z.string().trim().min(1).max(512).optional(),
-  executionMode: z.enum(["GLOBAL", "BYOK"]).optional(),
-  providerHint: z.string().trim().min(1).max(100).optional(),
-  byok: byokConfigSchema.optional(),
-  thinking: thinkingConfigSchema.optional(),
-}).strict();
+const llmExecutionConfigSchema = z
+  .object({
+    profileAlias: z.string().trim().min(1).max(512).optional(),
+    executionMode: z.enum(["GLOBAL", "BYOK"]).optional(),
+    providerHint: z.string().trim().min(1).max(100).optional(),
+    byok: byokConfigSchema.optional(),
+    thinking: thinkingConfigSchema.optional(),
+  })
+  .strict();
 
 export const streamThreadModeSchema = z.enum(["send", "refresh", "edit"]);
 
@@ -377,15 +411,18 @@ const skillSourceTypeSchema = z.enum([
   "team_custom",
 ]);
 
-const threadToolsRequestSchema = z.object({
-  skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
-  webSearchEnabled: z.boolean().optional(),
-}).strict();
+const threadToolsRequestSchema = z
+  .object({
+    skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
+    webSearchEnabled: z.boolean().optional(),
+  })
+  .strict();
 
 export const streamThreadRequestSchema = z.object({
   mode: streamThreadModeSchema.optional(),
   content: z.string().trim().min(1).max(20000).optional(),
   sourceIds: z.array(z.string()).max(100).optional(),
+  mentionedSourceIds: z.array(z.string()).max(100).optional(),
   tools: threadToolsRequestSchema.optional(),
   stream: z.boolean().optional(),
   timezone: z.string().trim().min(1).max(100).optional(),
@@ -444,11 +481,13 @@ export const getWorkingFileResponseSchema = z.object({
   file: workingFileSchema,
 });
 
-export const putWorkingFileRequestSchema = z.object({
-  contentText: z.string().max(256 * 1024),
-  mimeType: z.string().trim().min(1).max(128).optional(),
-  purpose: workingFilePurposeSchema.nullable().optional(),
-}).strict();
+export const putWorkingFileRequestSchema = z
+  .object({
+    contentText: z.string().max(256 * 1024),
+    mimeType: z.string().trim().min(1).max(128).optional(),
+    purpose: workingFilePurposeSchema.nullable().optional(),
+  })
+  .strict();
 
 export const putWorkingFileResponseSchema = z.object({
   file: workingFileSchema,
@@ -516,20 +555,24 @@ export const getSkillCatalogDetailResponseSchema = z.object({
   skillContent: z.string().nullable(),
 });
 
-export const enableWorkspaceSkillRequestSchema = z.object({
-  skillId: z.string().trim().min(1).max(128),
-  skillVersionId: z.string().trim().min(1).max(128),
-  configJson: z.record(z.string(), z.unknown()).optional(),
-}).strict();
+export const enableWorkspaceSkillRequestSchema = z
+  .object({
+    skillId: z.string().trim().min(1).max(128),
+    skillVersionId: z.string().trim().min(1).max(128),
+    configJson: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
 export const enableWorkspaceSkillResponseSchema = z.object({
   workspaceSkill: workspaceSkillSchema,
 });
 
-export const updateWorkspaceSkillRequestSchema = z.object({
-  enabled: z.boolean().optional(),
-  configJson: z.record(z.string(), z.unknown()).optional(),
-}).strict();
+export const updateWorkspaceSkillRequestSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    configJson: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
 export const updateWorkspaceSkillResponseSchema = z.object({
   workspaceSkill: workspaceSkillSchema,
@@ -540,7 +583,12 @@ export const deleteWorkspaceSkillResponseSchema = z.object({
   workspaceSkillId: z.string(),
 });
 
-const customSkillNameSchema = z.string().trim().min(1).max(64).regex(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/);
+const customSkillNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/);
 const customSkillVersionLabelSchema = z.string().trim().min(1).max(64);
 
 export const customSkillDefinitionSchema = z.object({
@@ -590,26 +638,34 @@ export const customSkillSchema = z.object({
   version: customSkillVersionSchema,
 });
 
-export const createCustomSkillRequestSchema = z.object({
-  name: customSkillNameSchema,
-  displayName: z.string().trim().min(1).max(128).optional(),
-  description: z.string().trim().min(1).max(1024),
-  version: customSkillVersionLabelSchema.optional(),
-}).strict();
+export const createCustomSkillRequestSchema = z
+  .object({
+    name: customSkillNameSchema,
+    displayName: z.string().trim().min(1).max(128).optional(),
+    description: z.string().trim().min(1).max(1024),
+    version: customSkillVersionLabelSchema.optional(),
+  })
+  .strict();
 
-export const createCustomSkillVersionRequestSchema = z.object({
-  version: customSkillVersionLabelSchema,
-}).strict();
+export const createCustomSkillVersionRequestSchema = z
+  .object({
+    version: customSkillVersionLabelSchema,
+  })
+  .strict();
 
-export const updateCustomSkillVersionRequestSchema = z.object({
-  displayName: z.string().trim().min(1).max(128).optional(),
-  description: z.string().trim().min(1).max(1024).optional(),
-}).strict();
+export const updateCustomSkillVersionRequestSchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(128).optional(),
+    description: z.string().trim().min(1).max(1024).optional(),
+  })
+  .strict();
 
-export const putCustomSkillVersionFileRequestSchema = z.object({
-  contentText: z.string().max(256 * 1024),
-  mimeType: z.string().trim().min(1).max(128).optional(),
-}).strict();
+export const putCustomSkillVersionFileRequestSchema = z
+  .object({
+    contentText: z.string().max(256 * 1024),
+    mimeType: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
 
 export const customSkillResponseSchema = z.object({
   customSkill: customSkillSchema,
@@ -643,15 +699,17 @@ export const modelCatalogItemSchema = z.object({
   subtitle: z.string(),
   badges: z.array(z.string()),
   pricing: z.record(z.string(), z.unknown()).nullable(),
-  capabilities: z.object({
-    supportsThinking: z.boolean(),
-    supportedParameters: z.array(z.string()),
-    supportedEfforts: z.array(reasoningEffortSchema),
-    reasoning: z.boolean(),
-    reasoningEffort: z.boolean(),
-    includeReasoning: z.boolean(),
-    supportSources: z.array(z.string()),
-  }).optional(),
+  capabilities: z
+    .object({
+      supportsThinking: z.boolean(),
+      supportedParameters: z.array(z.string()),
+      supportedEfforts: z.array(reasoningEffortSchema),
+      reasoning: z.boolean(),
+      reasoningEffort: z.boolean(),
+      includeReasoning: z.boolean(),
+      supportSources: z.array(z.string()),
+    })
+    .optional(),
 });
 
 export const listThreadModelCatalogResponseSchema = z.object({
@@ -707,9 +765,20 @@ export const billingDashboardResponseSchema = z.object({
 export type Source = z.infer<typeof sourceSchema>;
 export type CreateSourceRequest = z.infer<typeof createSourceRequestSchema>;
 export type CreateSourceResponse = z.infer<typeof createSourceResponseSchema>;
-export type CreateUrlSourceRequest = z.infer<typeof createUrlSourceRequestSchema>;
-export type CreateUrlSourceResponse = z.infer<typeof createUrlSourceResponseSchema>;
+export type CreateUrlSourceRequest = z.infer<
+  typeof createUrlSourceRequestSchema
+>;
+export type CreateUrlSourceResponse = z.infer<
+  typeof createUrlSourceResponseSchema
+>;
 export type ListSourcesResponse = z.infer<typeof listSourcesResponseSchema>;
+export type SourceMention = z.infer<typeof sourceMentionSchema>;
+export type ListSourceMentionsRequest = z.infer<
+  typeof listSourceMentionsRequestSchema
+>;
+export type ListSourceMentionsResponse = z.infer<
+  typeof listSourceMentionsResponseSchema
+>;
 export type GetSourceResponse = z.infer<typeof getSourceResponseSchema>;
 export type GetSourceDocumentResponse = z.infer<
   typeof getSourceDocumentResponseSchema
@@ -752,9 +821,13 @@ export type WorkingFile = z.infer<typeof workingFileSchema>;
 export type ListWorkingFilesResponse = z.infer<
   typeof listWorkingFilesResponseSchema
 >;
-export type GetWorkingFileResponse = z.infer<typeof getWorkingFileResponseSchema>;
+export type GetWorkingFileResponse = z.infer<
+  typeof getWorkingFileResponseSchema
+>;
 export type PutWorkingFileRequest = z.infer<typeof putWorkingFileRequestSchema>;
-export type PutWorkingFileResponse = z.infer<typeof putWorkingFileResponseSchema>;
+export type PutWorkingFileResponse = z.infer<
+  typeof putWorkingFileResponseSchema
+>;
 export type DeleteWorkingFileResponse = z.infer<
   typeof deleteWorkingFileResponseSchema
 >;
@@ -792,7 +865,9 @@ export type DeleteWorkspaceSkillResponse = z.infer<
 >;
 export type CustomSkillDefinition = z.infer<typeof customSkillDefinitionSchema>;
 export type CustomSkillVersion = z.infer<typeof customSkillVersionSchema>;
-export type CustomSkillVersionFile = z.infer<typeof customSkillVersionFileSchema>;
+export type CustomSkillVersionFile = z.infer<
+  typeof customSkillVersionFileSchema
+>;
 export type CustomSkill = z.infer<typeof customSkillSchema>;
 export type CreateCustomSkillRequest = z.infer<
   typeof createCustomSkillRequestSchema
@@ -831,4 +906,6 @@ export type CreateByokKeyRefResponse = z.infer<
 export type DeleteByokKeyRefResponse = z.infer<
   typeof deleteByokKeyRefResponseSchema
 >;
-export type CitationDetailResponse = z.infer<typeof citationDetailResponseSchema>;
+export type CitationDetailResponse = z.infer<
+  typeof citationDetailResponseSchema
+>;

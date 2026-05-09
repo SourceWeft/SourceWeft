@@ -49,6 +49,26 @@ export function resolveSourceIdsFromMessage(
   );
 }
 
+export function resolveMentionedSourceIdsFromMessage(
+  message: MessageRecord | null | undefined,
+): string[] {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          mentionedSourceIds?: unknown;
+        })
+      : undefined;
+  const mentionedSourceIds = metadata?.mentionedSourceIds;
+
+  if (!Array.isArray(mentionedSourceIds)) {
+    return [];
+  }
+
+  return mentionedSourceIds.filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+}
+
 export function resolveSkillIdsFromMessage(
   message: MessageRecord | null | undefined,
 ): string[] {
@@ -60,7 +80,9 @@ export function resolveSkillIdsFromMessage(
         })
       : undefined;
   const tools =
-    metadata?.tools && typeof metadata.tools === "object" && !Array.isArray(metadata.tools)
+    metadata?.tools &&
+    typeof metadata.tools === "object" &&
+    !Array.isArray(metadata.tools)
       ? (metadata.tools as { skillIds?: unknown })
       : undefined;
   const skillIds = Array.isArray(tools?.skillIds)
@@ -86,7 +108,9 @@ export function resolveWebSearchEnabledFromMessage(
         })
       : undefined;
   const tools =
-    metadata?.tools && typeof metadata.tools === "object" && !Array.isArray(metadata.tools)
+    metadata?.tools &&
+    typeof metadata.tools === "object" &&
+    !Array.isArray(metadata.tools)
       ? (metadata.tools as { webSearchEnabled?: unknown })
       : undefined;
 
@@ -100,21 +124,23 @@ function toObjectRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-export function normalizeAgentCheckpointRef(value: unknown): AgentCheckpointRef | null {
+export function normalizeAgentCheckpointRef(
+  value: unknown,
+): AgentCheckpointRef | null {
   const record = toObjectRecord(value);
   if (!record) {
     return null;
   }
 
   const threadId = typeof record.threadId === "string" ? record.threadId : null;
-  const checkpointId = typeof record.checkpointId === "string" ? record.checkpointId : null;
+  const checkpointId =
+    typeof record.checkpointId === "string" ? record.checkpointId : null;
   if (!threadId || !checkpointId) {
     return null;
   }
 
-  const checkpointNs = typeof record.checkpointNs === "string"
-    ? record.checkpointNs
-    : undefined;
+  const checkpointNs =
+    typeof record.checkpointNs === "string" ? record.checkpointNs : undefined;
 
   return checkpointNs === undefined
     ? { threadId, checkpointId }
@@ -307,7 +333,9 @@ export async function resolveThreadTurnContext(input: {
     };
   }
 
-  const messageById = new Map(allMessages.map((message) => [message.id, message]));
+  const messageById = new Map(
+    allMessages.map((message) => [message.id, message]),
+  );
   const requestedUserMessage = input.userMessageId
     ? messageById.get(input.userMessageId)
     : undefined;
@@ -316,11 +344,7 @@ export async function resolveThreadTurnContext(input: {
     : undefined;
 
   if (input.userMessageId && !requestedUserMessage) {
-    throw new ContentError(
-      404,
-      "MESSAGE_NOT_FOUND",
-      "User message not found",
-    );
+    throw new ContentError(404, "MESSAGE_NOT_FOUND", "User message not found");
   }
   if (input.assistantMessageId && !requestedAssistantMessage) {
     throw new ContentError(

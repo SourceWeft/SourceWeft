@@ -4,6 +4,7 @@ import {
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
   resolveWebSearchEnabledFromMessage,
+  resolveMentionedSourceIdsFromMessage,
   resolveSourceIdsFromMessage,
 } from "./context";
 import type { MessageRecord } from "../../types";
@@ -42,6 +43,26 @@ test("resolveSourceIdsFromMessage reads source ids", () => {
 test("resolveSourceIdsFromMessage filters invalid values", () => {
   assert.deepEqual(
     resolveSourceIdsFromMessage(message({ sourceIds: ["source-1", "", 1] })),
+    ["source-1"],
+  );
+});
+
+test("resolveMentionedSourceIdsFromMessage reads mentioned source ids", () => {
+  assert.deepEqual(
+    resolveMentionedSourceIdsFromMessage(
+      message({
+        mentionedSourceIds: ["mentioned-source"],
+      }),
+    ),
+    ["mentioned-source"],
+  );
+});
+
+test("resolveMentionedSourceIdsFromMessage filters invalid values", () => {
+  assert.deepEqual(
+    resolveMentionedSourceIdsFromMessage(
+      message({ mentionedSourceIds: ["source-1", "", 1] }),
+    ),
     ["source-1"],
   );
 });

@@ -51,7 +51,9 @@ export class ContentService {
     userId: string;
     title?: string;
     contentText?: string;
-    sourceType?: Parameters<typeof contentSourceService.createSource>[0]["sourceType"];
+    sourceType?: Parameters<
+      typeof contentSourceService.createSource
+    >[0]["sourceType"];
     parentSourceId?: string | null;
     estimatedPages?: number;
     parsedTokens?: number;
@@ -72,6 +74,16 @@ export class ContentService {
 
   async listSources(input: { workspaceId: string; userId: string }) {
     return contentSourceService.listSources(input);
+  }
+
+  async listSourceMentions(input: {
+    workspaceId: string;
+    userId: string;
+    query?: string;
+    limit?: number;
+    cursor?: string;
+  }) {
+    return contentSourceService.listSourceMentions(input);
   }
 
   async listSkillsCatalog(input: { workspaceId: string; userId: string }) {
@@ -497,7 +509,9 @@ export class ContentService {
     path: string;
     contentText: string;
     mimeType?: string | null;
-    purpose?: Parameters<typeof workingFilesService.putWorkingFile>[0]["purpose"];
+    purpose?: Parameters<
+      typeof workingFilesService.putWorkingFile
+    >[0]["purpose"];
   }) {
     return workingFilesService.putWorkingFile(input);
   }
@@ -515,6 +529,7 @@ export class ContentService {
     workspaceId: string;
     threadId: string;
     userId: string;
+    mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
     timezone?: string;
@@ -530,6 +545,7 @@ export class ContentService {
     workspaceId: string;
     threadId: string;
     userId: string;
+    mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
     timezone?: string;
@@ -546,6 +562,7 @@ export class ContentService {
     threadId: string;
     userId: string;
     content: string;
+    mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
     timezone?: string;
@@ -562,6 +579,7 @@ export class ContentService {
     threadId: string;
     userId: string;
     content: string;
+    mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
     timezone?: string;

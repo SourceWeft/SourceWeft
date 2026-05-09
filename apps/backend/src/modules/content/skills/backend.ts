@@ -13,6 +13,7 @@ import type {
   WriteResult,
 } from "deepagents";
 import type { EnabledSkillDescriptor } from "./types";
+import { sanitizeNonCitableCitationMarkers } from "../agent/fs-utils";
 
 type SkillFileEntry = {
   path: string;
@@ -162,10 +163,14 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     }
 
     if (normalized.endsWith("/SKILL.md")) {
-      return { mimeType: file.mimeType, content: file.contentText };
+      return {
+        mimeType: file.mimeType,
+        content: sanitizeNonCitableCitationMarkers(file.contentText),
+      };
     }
 
-    const lines = file.contentText.split(/\r?\n/);
+    const safeContent = sanitizeNonCitableCitationMarkers(file.contentText);
+    const lines = safeContent.split(/\r?\n/);
     const boundedOffset = Math.max(0, offset);
     const boundedLimit = Math.max(1, Math.min(limit, 1000));
     const selected = lines.slice(boundedOffset, boundedOffset + boundedLimit);
@@ -191,7 +196,7 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       return { error: `ENOENT: no such file, read_file '${normalized}'` };
     }
     const data: FileData = {
-      content: file.contentText,
+      content: sanitizeNonCitableCitationMarkers(file.contentText),
       mimeType: file.mimeType,
       created_at: file.modifiedAt,
       modified_at: file.modifiedAt,
@@ -207,7 +212,7 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       if (file) {
         return {
           path: filePath,
-          content: encoder.encode(file.contentText),
+          content: encoder.encode(sanitizeNonCitableCitationMarkers(file.contentText)),
           error: null,
         };
       }
@@ -268,7 +273,11 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
       const lines = file.contentText.split(/\r?\n/);
       for (const [index, line] of lines.entries()) {
         if (regex.test(line)) {
-          matches.push({ path: file.path, line: index + 1, text: line.trim() });
+          matches.push({
+            path: file.path,
+            line: index + 1,
+            text: sanitizeNonCitableCitationMarkers(line.trim()),
+          });
           if (matches.length >= 50) {
             return { matches };
           }

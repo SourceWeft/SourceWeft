@@ -16,6 +16,7 @@ import {
   getSourceStatusDetail,
   hasSourceChildren,
   listSourceDescendants,
+  listSourceMentionRecords,
   listSourceRecords,
   listSourceRecordsByIds,
   updateSourceRecordAndInvalidateDocuments,
@@ -603,6 +604,23 @@ export class ContentSourceService {
     });
 
     return { items };
+  }
+
+  async listSourceMentions(input: {
+    workspaceId: string;
+    userId: string;
+    query?: string;
+    limit?: number;
+    cursor?: string;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+    return listSourceMentionRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      query: input.query,
+      limit: input.limit ?? 20,
+      cursor: input.cursor,
+    });
   }
 
   async getSource(input: {

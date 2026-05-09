@@ -5,6 +5,7 @@ import {
   collapseSupersededMessages,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
+  resolveMentionedSourceIdsFromMessage,
   resolveSkillIdsFromMessage,
   resolveSourceIdsFromMessage,
   resolveWebSearchEnabledFromMessage,
@@ -65,14 +66,23 @@ export async function resolveRefreshThreadStreamInput(
     );
   }
 
+  const originalMentionedSourceIds =
+    resolveMentionedSourceIdsFromMessage(latestUserMessage);
   const originalSourceIds = resolveSourceIdsFromMessage(latestUserMessage);
-  const sourceIds = originalSourceIds.length > 0
-    ? originalSourceIds
-    : dedupeSourceIds(input.sourceIds);
-  const skillIds = input.tools !== undefined
-    ? normalizeSkillIds(input.tools.skillIds)
-    : resolveSkillIdsFromMessage(latestUserMessage);
-  const webSearchEnabled = input.tools?.webSearchEnabled ??
+  const mentionedSourceIds =
+    originalMentionedSourceIds.length > 0
+      ? originalMentionedSourceIds
+      : dedupeSourceIds(input.mentionedSourceIds);
+  const sourceIds =
+    originalSourceIds.length > 0
+      ? originalSourceIds
+      : dedupeSourceIds(input.sourceIds);
+  const skillIds =
+    input.tools !== undefined
+      ? normalizeSkillIds(input.tools.skillIds)
+      : resolveSkillIdsFromMessage(latestUserMessage);
+  const webSearchEnabled =
+    input.tools?.webSearchEnabled ??
     resolveWebSearchEnabledFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const refreshRunThreadId = `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
@@ -82,6 +92,7 @@ export async function resolveRefreshThreadStreamInput(
     threadId: input.threadId,
     userId: input.userId,
     content: latestUserMessage.content,
+    mentionedSourceIds,
     sourceIds,
     tools: { skillIds, webSearchEnabled },
     timezone: input.timezone,
@@ -110,28 +121,38 @@ export async function resolveEditThreadStreamInput(
     );
   }
 
+  const requestedMentionedSourceIds = dedupeSourceIds(input.mentionedSourceIds);
+  const mentionedSourceIds =
+    requestedMentionedSourceIds.length > 0
+      ? requestedMentionedSourceIds
+      : resolveMentionedSourceIdsFromMessage(latestUserMessage);
   const requestedSourceIds = dedupeSourceIds(input.sourceIds);
-  const sourceIds = requestedSourceIds.length > 0
-    ? requestedSourceIds
-    : resolveSourceIdsFromMessage(latestUserMessage);
-  const skillIds = input.tools !== undefined
-    ? normalizeSkillIds(input.tools.skillIds)
-    : resolveSkillIdsFromMessage(latestUserMessage);
-  const webSearchEnabled = input.tools?.webSearchEnabled ??
+  const sourceIds =
+    requestedSourceIds.length > 0
+      ? requestedSourceIds
+      : resolveSourceIdsFromMessage(latestUserMessage);
+  const skillIds =
+    input.tools !== undefined
+      ? normalizeSkillIds(input.tools.skillIds)
+      : resolveSkillIdsFromMessage(latestUserMessage);
+  const webSearchEnabled =
+    input.tools?.webSearchEnabled ??
     resolveWebSearchEnabledFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
-  const agentBaseCheckpoint = checkpoint?.beforeInput ??
-    await resolveFallbackEditBaseCheckpoint({
+  const agentBaseCheckpoint =
+    checkpoint?.beforeInput ??
+    (await resolveFallbackEditBaseCheckpoint({
       workspace,
       thread,
       latestUserMessageId: latestUserMessage.id,
-    });
+    }));
 
   return {
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     userId: input.userId,
     content: input.content,
+    mentionedSourceIds,
     sourceIds,
     tools: { skillIds, webSearchEnabled },
     timezone: input.timezone,

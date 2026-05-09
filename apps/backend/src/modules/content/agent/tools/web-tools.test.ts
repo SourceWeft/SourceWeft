@@ -45,9 +45,35 @@ function createProvider(): WebProvider {
 function createInvokableWebTools(input: {
   provider: WebProvider;
   citationRegistry: AgentCitationRegistry;
+  searchEnabled?: boolean;
 }) {
   return createWebTools(input) as InvokableTool[];
 }
+
+test("web tools inject web_fetch without web_search by default", () => {
+  const tools = createWebTools({
+    provider: createProvider(),
+    citationRegistry: new AgentCitationRegistry(),
+  });
+
+  assert.deepEqual(
+    tools.map((tool) => tool.name),
+    ["web_fetch"],
+  );
+});
+
+test("web tools inject web_search only when enabled", () => {
+  const tools = createWebTools({
+    provider: createProvider(),
+    citationRegistry: new AgentCitationRegistry(),
+    searchEnabled: true,
+  });
+
+  assert.deepEqual(
+    tools.map((tool) => tool.name),
+    ["web_search", "web_fetch"],
+  );
+});
 
 test("web_search defaults to 10 enriched results and registers citation", async () => {
   let observedLimit = 0;
@@ -67,6 +93,7 @@ test("web_search defaults to 10 enriched results and registers citation", async 
   const [webSearch] = createInvokableWebTools({
     provider: wrappedProvider,
     citationRegistry,
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 
@@ -93,6 +120,7 @@ test("web_search passes fresh flag for time-sensitive searches", async () => {
   const [webSearch] = createInvokableWebTools({
     provider: wrappedProvider,
     citationRegistry: new AgentCitationRegistry(),
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 
@@ -125,6 +153,7 @@ test("web_search returns main content from search results", async () => {
       },
     },
     citationRegistry,
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 
@@ -166,6 +195,7 @@ test("web_search keeps full citation content when main content is long", async (
       },
     },
     citationRegistry,
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 
@@ -187,6 +217,7 @@ test("web_search returns a tool failure result when provider search fails", asyn
       },
     },
     citationRegistry,
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 
@@ -221,6 +252,7 @@ test("web_search uses snippet as citation summary when main content is missing",
       },
     },
     citationRegistry,
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 
@@ -235,6 +267,7 @@ test("web_search rejects overly long queries", async () => {
   const [webSearch] = createInvokableWebTools({
     provider: createProvider(),
     citationRegistry: new AgentCitationRegistry(),
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 
@@ -257,7 +290,7 @@ test("web_fetch accepts up to 5 URLs and registers citations", async () => {
     },
   };
   const citationRegistry = new AgentCitationRegistry();
-  const [, webFetch] = createInvokableWebTools({
+  const [webFetch] = createInvokableWebTools({
     provider: wrappedProvider,
     citationRegistry,
   });
@@ -285,7 +318,7 @@ test("web_fetch passes fresh flag for time-sensitive pages", async () => {
       return provider.fetch(input);
     },
   };
-  const [, webFetch] = createInvokableWebTools({
+  const [webFetch] = createInvokableWebTools({
     provider: wrappedProvider,
     citationRegistry: new AgentCitationRegistry(),
   });
@@ -300,7 +333,7 @@ test("web_fetch passes fresh flag for time-sensitive pages", async () => {
 });
 
 test("web_fetch returns failed pages when provider fetch fails", async () => {
-  const [, webFetch] = createInvokableWebTools({
+  const [webFetch] = createInvokableWebTools({
     provider: {
       ...createProvider(),
       async fetch() {
@@ -342,6 +375,7 @@ test("web tools escape result fields", async () => {
       },
     },
     citationRegistry,
+    searchEnabled: true,
   });
   assert.ok(webSearch);
 

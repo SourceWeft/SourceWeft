@@ -1,7 +1,6 @@
 import type {
   BackendProtocolV2,
   EditResult,
-  FileData,
   FileInfo,
   GlobResult,
   GrepMatch,
@@ -12,6 +11,10 @@ import type {
   WriteResult,
 } from "deepagents";
 import type { AgentCitationRegistry } from "./citation-registry";
+import {
+  KB_READ_FILE_DEFAULT_LINE_LIMIT,
+  KB_READ_FILE_MAX_LINE_LIMIT,
+} from "./filesystem-capabilities";
 import { logger } from "../../../shared/logger";
 import {
   MAX_GLOB_RESULTS,
@@ -28,16 +31,20 @@ import {
   parseVirtualPath,
 } from "../virtual-fs/paths";
 import {
+  getVirtualFsDocument,
   getVirtualFsChunk,
   grepVirtualFsChunksByRecallTerms,
   grepVirtualFsChunksByRegex,
   listVirtualFsChunks,
+  listVirtualFsChunksForSpan,
   listVirtualFsSources,
 } from "../virtual-fs/store";
-import type { VirtualFsSource } from "../virtual-fs/types";
+import type { VirtualFsChunk, VirtualFsSource } from "../virtual-fs/types";
 
-const DEFAULT_READ_CHUNK_LIMIT = 6;
-const MAX_READ_CHUNK_LIMIT = 12;
+const DEFAULT_READ_LINE_LIMIT = KB_READ_FILE_DEFAULT_LINE_LIMIT;
+const MAX_READ_LINE_LIMIT = KB_READ_FILE_MAX_LINE_LIMIT;
+const MAX_READ_OUTPUT_CHARS = 80_000;
+const MAX_READ_VISIBLE_CITATIONS = 24;
 const MAX_GREP_RECALL_TOP_K = 300;
 const MAX_GREP_REGEX_FALLBACK_CHUNKS = 300;
 const MAX_GREP_FALLBACK_CHUNKS = 120;
@@ -186,6 +193,162 @@ function sourceReadablePath(source: VirtualFsSource) {
   return source.filePath ?? source.readmePath ?? source.dirPath;
 }
 
+export type PaginatedSourceContent = {
+  text: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  nextOffset: number | null;
+  pageStartOffset: number;
+  pageEndOffset: number;
+  truncated: boolean;
+};
+
+export function computeLineStartOffsets(content: string) {
+  const offsets = [0];
+  for (let index = 0; index < content.length; index += 1) {
+    const code = content.charCodeAt(index);
+    if (code === 13) {
+      if (content.charCodeAt(index + 1) === 10) {
+        offsets.push(index + 2);
+        index += 1;
+      } else {
+        offsets.push(index + 1);
+      }
+    } else if (code === 10) {
+      offsets.push(index + 1);
+    }
+  }
+  return offsets;
+}
+
+export function lineForOffset(lineStartOffsets: number[], offset: number) {
+  if (lineStartOffsets.length === 0) {
+    return 1;
+  }
+  let low = 0;
+  let high = lineStartOffsets.length - 1;
+  const boundedOffset = Math.max(0, offset);
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const value = lineStartOffsets[middle] ?? 0;
+    if (value <= boundedOffset) {
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return Math.max(1, high + 1);
+}
+
+function boundedReadLineLimit(limit: number) {
+  const requestedLimit = Number.isFinite(limit) ? Math.floor(limit) : DEFAULT_READ_LINE_LIMIT;
+  return Math.max(1, Math.min(requestedLimit, MAX_READ_LINE_LIMIT));
+}
+
+export function paginateSourceContent(
+  content: string,
+  offset = 0,
+  limit = DEFAULT_READ_LINE_LIMIT,
+  maxChars = MAX_READ_OUTPUT_CHARS,
+): PaginatedSourceContent {
+  const lineStartOffsets = computeLineStartOffsets(content);
+  const totalLines = content.length === 0 ? 0 : lineStartOffsets.length;
+  const requestedOffset = Number.isFinite(offset) ? Math.floor(offset) : 0;
+  const boundedOffset = Math.max(0, requestedOffset);
+  const boundedLimit = boundedReadLineLimit(limit);
+
+  if (totalLines === 0) {
+    return {
+      text: "",
+      startLine: 0,
+      endLine: 0,
+      totalLines: 0,
+      nextOffset: null,
+      pageStartOffset: 0,
+      pageEndOffset: 0,
+      truncated: false,
+    };
+  }
+
+  if (boundedOffset >= totalLines) {
+    throw new Error(`Line offset ${offset} exceeds file length (${totalLines} lines)`);
+  }
+
+  const startLineIndex = boundedOffset;
+  let endLineIndexExclusive = Math.min(totalLines, boundedOffset + boundedLimit);
+  const pageStartOffset = lineStartOffsets[startLineIndex] ?? 0;
+  let pageEndOffset = endLineIndexExclusive < totalLines
+    ? (lineStartOffsets[endLineIndexExclusive] ?? content.length)
+    : content.length;
+  let truncated = endLineIndexExclusive < totalLines;
+
+  if (pageEndOffset - pageStartOffset > maxChars) {
+    const maxEndOffset = pageStartOffset + maxChars;
+    let charBoundedEndLine = startLineIndex + 1;
+    while (
+      charBoundedEndLine < endLineIndexExclusive &&
+      (lineStartOffsets[charBoundedEndLine] ?? content.length) <= maxEndOffset
+    ) {
+      charBoundedEndLine += 1;
+    }
+    endLineIndexExclusive = Math.max(startLineIndex + 1, charBoundedEndLine);
+    pageEndOffset = endLineIndexExclusive < totalLines
+      ? (lineStartOffsets[endLineIndexExclusive] ?? content.length)
+      : content.length;
+    truncated = true;
+  }
+
+  return {
+    text: content.slice(pageStartOffset, pageEndOffset).replace(/\r\n?/g, "\n").replace(/\n$/, ""),
+    startLine: startLineIndex + 1,
+    endLine: endLineIndexExclusive,
+    totalLines,
+    nextOffset: truncated ? endLineIndexExclusive : null,
+    pageStartOffset,
+    pageEndOffset,
+    truncated,
+  };
+}
+
+export function addInlineSourceMarkers(input: {
+  text: string;
+  startLine: number;
+  nextOffset: number | null;
+  sourcePath: string;
+  limit: number;
+  citations: Array<{ chunk: VirtualFsChunk; citation: string }>;
+  lineStartOffsets: number[];
+}) {
+  const lines = input.text.split("\n");
+  if (lines.length === 0) {
+    return input.text;
+  }
+
+  const markersByLine = new Map<number, string[]>();
+  for (const item of input.citations) {
+    const offset = typeof item.chunk.startOffset === "number" ? item.chunk.startOffset : 0;
+    const line = Math.max(input.startLine, lineForOffset(input.lineStartOffsets, offset));
+    const lineIndex = Math.min(lines.length - 1, Math.max(0, line - input.startLine));
+    const markers = markersByLine.get(lineIndex) ?? [];
+    markers.push(`[citation:${item.citation}]`);
+    markersByLine.set(lineIndex, markers);
+  }
+
+  for (const [lineIndex, markers] of [...markersByLine.entries()].sort((a, b) => a[0] - b[0])) {
+    lines[lineIndex] = `${lines[lineIndex]} ${Array.from(new Set(markers)).join(" ")}`;
+  }
+
+  if (input.nextOffset !== null) {
+    const lastIndex = lines.length - 1;
+    lines[lastIndex] = `${lines[lastIndex]} [Output truncated. Continue with read_file(file_path: "${input.sourcePath}", offset: ${input.nextOffset}, limit: ${input.limit}).]`;
+  }
+
+  return lines.join("\n");
+}
+
 function listDirectChildren(sources: VirtualFsSource[], parentSourceId: string | null) {
   return sources.filter((source) => source.parentSourceId === parentSourceId);
 }
@@ -301,7 +464,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
     }
   }
 
-  async read(filePath: string, offset = 0, limit = DEFAULT_READ_CHUNK_LIMIT): Promise<ReadResult> {
+  async read(filePath: string, offset = 0, limit = DEFAULT_READ_LINE_LIMIT): Promise<ReadResult> {
     try {
       const sources = await this.sources();
       const target = parseVirtualPath(filePath, sources);
@@ -345,16 +508,13 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
 
       if (target.kind === "sourceFile" || target.kind === "libraryDirectoryReadme") {
         const source = findVirtualSource(sources, target.sourceId);
-        const boundedLimit = Math.max(1, Math.min(limit, MAX_READ_CHUNK_LIMIT));
-        const boundedOffset = Math.max(0, offset);
-        const chunks = await listVirtualFsChunks({
+        const document = await getVirtualFsDocument({
           teamId: this.input.teamId,
           workspaceId: this.input.workspaceId,
           sourceId: target.sourceId,
-          offset: boundedOffset,
-          limit: boundedLimit,
         });
-        if (chunks.length === 0) {
+        const content = document?.content ?? null;
+        if (content === null || content.trim().length === 0) {
           if (target.kind === "libraryDirectoryReadme") {
             return {
               mimeType: "text/markdown",
@@ -367,10 +527,32 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
               ].join("\n"),
             };
           }
-          return { error: `ENOENT: no readable chunks, read_file '${filePath}'` };
+          return { error: `ENOENT: no readable content, read_file '${filePath}'` };
         }
 
-        const sections = chunks.map((chunk) => {
+        let page: PaginatedSourceContent;
+        try {
+          page = paginateSourceContent(content, offset, limit);
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) };
+        }
+
+        const lineStartOffsets = computeLineStartOffsets(content);
+        const visibleChunks = page.pageEndOffset > page.pageStartOffset
+          ? await listVirtualFsChunksForSpan({
+              teamId: this.input.teamId,
+              workspaceId: this.input.workspaceId,
+              sourceId: target.sourceId,
+              startOffset: page.pageStartOffset,
+              endOffset: page.pageEndOffset,
+              limit: MAX_READ_VISIBLE_CITATIONS,
+            })
+          : [];
+        const citations = [...visibleChunks].sort((a, b) => {
+          const left = a.startOffset ?? Number.MAX_SAFE_INTEGER;
+          const right = b.startOffset ?? Number.MAX_SAFE_INTEGER;
+          return left - right || a.chunkNo - b.chunkNo;
+        }).map((chunk) => {
           const chunkPath = buildChunkFilePath(source, chunk.chunkNo);
           const citation = this.input.citationRegistry.addChunk({
             origin: "read_file",
@@ -383,28 +565,23 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
             score: 1,
             path: chunkPath,
           });
-          return [
-            `--- chunk ${String(chunk.chunkNo).padStart(4, "0")} | Path: ${chunkPath} | Citation: [citation:${citation.citation}] ---`,
-            chunk.headingPath ? `Heading: ${chunk.headingPath}` : null,
-            lineNumberContent(chunk.content),
-          ]
-            .filter((line): line is string => line !== null)
-            .join("\n");
+          return {
+            chunk,
+            citation: citation.citation,
+          };
         });
-
-        const more = boundedOffset + chunks.length < source.chunkCount
-          ? `\n\nOutput truncated. Continue with read_file(path: "${sourceReadablePath(source)}", offset: ${boundedOffset + chunks.length}, limit: ${boundedLimit}) or read a specific chunk path.`
-          : "";
+        const pageText = addInlineSourceMarkers({
+          text: page.text,
+          startLine: page.startLine,
+          nextOffset: page.nextOffset,
+          sourcePath: sourceReadablePath(source),
+          limit: boundedReadLineLimit(limit),
+          citations,
+          lineStartOffsets,
+        });
         return {
           mimeType: "text/markdown",
-          content: [
-            `Path: ${sourceReadablePath(source)}`,
-            ...buildSourceHeader(source),
-            "This virtual file is assembled from indexed chunks. Every final-answer claim that uses this content MUST cite the relevant chunk marker shown below using the exact [citation:id] format. In markdown tables, put the marker inside the relevant source-grounded value cell.",
-            "",
-            sections.join("\n\n"),
-            more,
-          ].join("\n"),
+          content: pageText,
         };
       }
 
@@ -415,18 +592,13 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
   }
 
   async readRaw(filePath: string): Promise<ReadRawResult> {
-    const result = await this.read(filePath, 0, MAX_READ_CHUNK_LIMIT);
-    if (result.error || typeof result.content !== "string") {
-      return { error: result.error ?? `Unable to read raw file '${filePath}'` };
+    try {
+      return {
+        error: `EROFS: /kb raw downloads are disabled; use search_sources, /kb read_file, or /kb grep to gather citable evidence for '${normalizeVirtualPath(filePath)}'`,
+      };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
     }
-    const now = new Date().toISOString();
-    const data: FileData = {
-      content: result.content,
-      mimeType: result.mimeType ?? "text/markdown",
-      created_at: now,
-      modified_at: now,
-    };
-    return { data };
   }
 
   async grep(pattern: string, path: string | null = "/kb", glob?: string | null): Promise<GrepResult> {

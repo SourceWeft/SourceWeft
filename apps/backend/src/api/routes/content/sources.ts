@@ -3,6 +3,7 @@ import {
   createSourceRequestSchema,
   createUrlSourceRequestSchema,
   indexSourceRequestSchema,
+  listSourceMentionsRequestSchema,
   reparseSourceRequestSchema,
   retrySourceRequestSchema,
   updateSourceRequestSchema,
@@ -58,6 +59,34 @@ export function registerSourceRoutes(app: Hono) {
     const result = await contentService.listSources({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/sources/mentions", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = listSourceMentionsRequestSchema.safeParse({
+      query: c.req.query("query"),
+      limit: c.req.query("limit"),
+      cursor: c.req.query("cursor"),
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentService.listSourceMentions({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      query: parsed.data.query,
+      limit: parsed.data.limit,
+      cursor: parsed.data.cursor,
     });
 
     return ApiResponse.success(c, result);

@@ -21,6 +21,11 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
@@ -43,6 +48,8 @@ import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
   CornerDownLeftIcon,
+  FileTextIcon,
+  FolderIcon,
   ImageIcon,
   Monitor,
   PlusIcon,
@@ -59,6 +66,7 @@ import type {
   FormEventHandler,
   HTMLAttributes,
   KeyboardEventHandler,
+  MouseEventHandler,
   PropsWithChildren,
   ReactNode,
   RefObject,
@@ -69,6 +77,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -174,6 +183,284 @@ const captureScreenshot = async (): Promise<File | null> => {
   }
 };
 
+const SOURCE_MENTION_TRIGGER_PATTERN = /(?:^|\s)@([^\s@]*)$/;
+const SOURCE_MENTION_PAGE_SIZE = 20;
+
+const getSourceMentionLabel = (title: string) => `@${title}`;
+
+const normalizeText = (value: string) =>
+  value.replaceAll("\u00a0", " ").replace(/\r\n?/g, "\n");
+
+const uniqueStrings = (values: string[]) => [
+  ...new Set(values.map((value) => value.trim()).filter(Boolean)),
+];
+
+const getCaretTextOffset = (root: HTMLElement) => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return root.textContent?.length ?? 0;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.endContainer)) {
+    return root.textContent?.length ?? 0;
+  }
+
+  const clone = range.cloneRange();
+  clone.selectNodeContents(root);
+  clone.setEnd(range.endContainer, range.endOffset);
+  return clone.toString().length;
+};
+
+const findTextPosition = (root: HTMLElement, offset: number) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let currentOffset = 0;
+  let node = walker.nextNode();
+
+  while (node) {
+    const length = node.textContent?.length ?? 0;
+    if (currentOffset + length >= offset) {
+      return {
+        node,
+        offset: Math.max(0, Math.min(offset - currentOffset, length)),
+      };
+    }
+    currentOffset += length;
+    node = walker.nextNode();
+  }
+
+  return {
+    node: root,
+    offset: root.childNodes.length,
+  };
+};
+
+const setCaretTextOffset = (root: HTMLElement, offset: number) => {
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+
+  const position = findTextPosition(root, offset);
+  const range = document.createRange();
+  range.setStart(position.node, position.offset);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+};
+
+const replaceTextRange = (
+  root: HTMLElement,
+  startOffset: number,
+  endOffset: number,
+  fragment: DocumentFragment,
+) => {
+  const start = findTextPosition(root, startOffset);
+  const end = findTextPosition(root, endOffset);
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  range.deleteContents();
+  range.insertNode(fragment);
+};
+
+const insertTextAtCaret = (root: HTMLElement, text: string) => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    root.append(document.createTextNode(text));
+    return;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) {
+    root.append(document.createTextNode(text));
+    return;
+  }
+
+  range.deleteContents();
+  const node = document.createTextNode(text);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+};
+
+const closestSourceMention = (node: Node | null) =>
+  node instanceof HTMLElement
+    ? node.closest<HTMLElement>("[data-source-mention-id]")
+    : (node?.parentElement?.closest<HTMLElement>("[data-source-mention-id]") ??
+      null);
+
+const findPreviousNode = (node: Node | null): Node | null => {
+  if (!node) {
+    return null;
+  }
+
+  if (node.previousSibling) {
+    let previous = node.previousSibling;
+    while (previous.lastChild) {
+      previous = previous.lastChild;
+    }
+    return previous;
+  }
+
+  return node.parentNode;
+};
+
+const findSourceMentionBeforeCaret = (root: HTMLElement) => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.startContainer)) {
+    return null;
+  }
+
+  if (range.startContainer.nodeType === Node.TEXT_NODE) {
+    if (range.startOffset > 0) {
+      return null;
+    }
+    return closestSourceMention(findPreviousNode(range.startContainer));
+  }
+
+  const container = range.startContainer;
+  const candidate = container.childNodes.item(range.startOffset - 1);
+  return closestSourceMention(candidate);
+};
+
+export type PromptInputSegment =
+  | {
+      text: string;
+      type: "text";
+    }
+  | {
+      meta?: string;
+      sourceId: string;
+      title: string;
+      type: "source";
+    };
+
+export type PromptInputMentionSource = {
+  id: string;
+  meta?: string;
+  title: string;
+  type?: string;
+};
+
+export type PromptInputMentionSourcePage = {
+  items: PromptInputMentionSource[];
+  nextCursor?: string | null;
+};
+
+export type PromptInputMentionSourceLoader = (input: {
+  cursor?: string | null;
+  limit: number;
+  query: string;
+}) => Promise<PromptInputMentionSourcePage>;
+
+const pushTextSegment = (segments: PromptInputSegment[], text: string) => {
+  if (!text) {
+    return;
+  }
+
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    return;
+  }
+
+  const previous = segments.at(-1);
+  if (previous?.type === "text") {
+    previous.text += normalized;
+    return;
+  }
+
+  segments.push({ text: normalized, type: "text" });
+};
+
+const readSegmentsFromNode = (node: Node, segments: PromptInputSegment[]) => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    pushTextSegment(segments, node.textContent ?? "");
+    return;
+  }
+
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+
+  const sourceId = node.dataset.sourceMentionId;
+  if (sourceId) {
+    segments.push({
+      meta: node.dataset.sourceMentionMeta,
+      sourceId,
+      title: node.dataset.sourceMentionTitle || node.textContent || sourceId,
+      type: "source",
+    });
+    return;
+  }
+
+  if (node.tagName === "BR") {
+    pushTextSegment(segments, "\n");
+    return;
+  }
+
+  for (const child of node.childNodes) {
+    readSegmentsFromNode(child, segments);
+  }
+};
+
+const readSegmentsFromElement = (root: HTMLElement) => {
+  const segments: PromptInputSegment[] = [];
+  for (const child of root.childNodes) {
+    readSegmentsFromNode(child, segments);
+  }
+  return segments;
+};
+
+const serializePromptSegments = (segments: PromptInputSegment[]) =>
+  segments
+    .map((segment) =>
+      segment.type === "source"
+        ? getSourceMentionLabel(segment.title)
+        : segment.text,
+    )
+    .join("");
+
+const mentionedSourceIdsFromSegments = (segments: PromptInputSegment[]) =>
+  uniqueStrings(
+    segments
+      .filter(
+        (segment): segment is Extract<PromptInputSegment, { type: "source" }> =>
+          segment.type === "source",
+      )
+      .map((segment) => segment.sourceId),
+  );
+
+const createSourceMentionElement = (source: PromptInputMentionSource) => {
+  const element = document.createElement("span");
+  element.contentEditable = "false";
+  element.dataset.sourceMentionId = source.id;
+  element.dataset.sourceMentionTitle = source.title;
+  if (source.meta) {
+    element.dataset.sourceMentionMeta = source.meta;
+  }
+  element.className =
+    "mx-0.5 inline-block h-5 max-w-[180px] select-none overflow-hidden truncate whitespace-nowrap rounded border border-border bg-muted px-1.5 align-middle text-xs font-medium leading-5 text-foreground/80";
+  element.title = getSourceMentionLabel(source.title);
+  element.textContent = getSourceMentionLabel(source.title);
+  return element;
+};
+
+function SourceMentionIcon({ source }: { source: PromptInputMentionSource }) {
+  const type = source.type?.toLowerCase() ?? "";
+  if (type.includes("directory") || type.includes("folder")) {
+    return <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />;
+  }
+  return <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />;
+}
+
 // ============================================================================
 // Provider Context & Types
 // ============================================================================
@@ -199,22 +486,22 @@ export interface PromptInputControllerProps {
   /** INTERNAL: Allows PromptInput to register its file textInput + "open" callback */
   __registerFileInput: (
     ref: RefObject<HTMLInputElement | null>,
-    open: () => void
+    open: () => void,
   ) => void;
 }
 
 const PromptInputController = createContext<PromptInputControllerProps | null>(
-  null
+  null,
 );
 const ProviderAttachmentsContext = createContext<AttachmentsContext | null>(
-  null
+  null,
 );
 
 export const usePromptInputController = () => {
   const ctx = useContext(PromptInputController);
   if (!ctx) {
     throw new Error(
-      "Wrap your component inside <PromptInputProvider> to use usePromptInputController()."
+      "Wrap your component inside <PromptInputProvider> to use usePromptInputController().",
     );
   }
   return ctx;
@@ -228,7 +515,7 @@ export const useProviderAttachments = () => {
   const ctx = useContext(ProviderAttachmentsContext);
   if (!ctx) {
     throw new Error(
-      "Wrap your component inside <PromptInputProvider> to use useProviderAttachments()."
+      "Wrap your component inside <PromptInputProvider> to use useProviderAttachments().",
     );
   }
   return ctx;
@@ -316,7 +603,7 @@ export const PromptInputProvider = ({
         }
       }
     },
-    []
+    [],
   );
 
   const openFileDialog = useCallback(() => {
@@ -332,7 +619,7 @@ export const PromptInputProvider = ({
       openFileDialog,
       remove,
     }),
-    [attachmentFiles, add, remove, clear, openFileDialog]
+    [attachmentFiles, add, remove, clear, openFileDialog],
   );
 
   const __registerFileInput = useCallback(
@@ -340,7 +627,7 @@ export const PromptInputProvider = ({
       fileInputRef.current = ref.current;
       openRef.current = open;
     },
-    []
+    [],
   );
 
   const controller = useMemo<PromptInputControllerProps>(
@@ -353,7 +640,7 @@ export const PromptInputProvider = ({
         value: textInput,
       },
     }),
-    [textInput, clearInput, attachments, __registerFileInput]
+    [textInput, clearInput, attachments, __registerFileInput],
   );
 
   return (
@@ -378,7 +665,7 @@ export const usePromptInputAttachments = () => {
   const context = local ?? provider;
   if (!context) {
     throw new Error(
-      "usePromptInputAttachments must be used within a PromptInput or PromptInputProvider"
+      "usePromptInputAttachments must be used within a PromptInput or PromptInputProvider",
     );
   }
   return context;
@@ -402,7 +689,7 @@ export const usePromptInputReferencedSources = () => {
   const ctx = useContext(LocalReferencedSourcesContext);
   if (!ctx) {
     throw new Error(
-      "usePromptInputReferencedSources must be used within a LocalReferencedSourcesContext.Provider"
+      "usePromptInputReferencedSources must be used within a LocalReferencedSourcesContext.Provider",
     );
   }
   return ctx;
@@ -425,7 +712,7 @@ export const PromptInputActionAddAttachments = ({
       e.preventDefault();
       attachments.openFileDialog();
     },
-    [attachments]
+    [attachments],
   );
 
   return (
@@ -470,7 +757,7 @@ export const PromptInputActionAddScreenshot = ({
         throw error;
       }
     },
-    [onSelect, attachments]
+    [onSelect, attachments],
   );
 
   return (
@@ -484,6 +771,7 @@ export const PromptInputActionAddScreenshot = ({
 export interface PromptInputMessage {
   text: string;
   files: FileUIPart[];
+  mentionedSourceIds?: string[];
 }
 
 export type PromptInputProps = Omit<
@@ -507,7 +795,7 @@ export type PromptInputProps = Omit<
   }) => void;
   onSubmit: (
     message: PromptInputMessage,
-    event: FormEvent<HTMLFormElement>
+    event: FormEvent<HTMLFormElement>,
   ) => void | Promise<void>;
 };
 
@@ -572,7 +860,7 @@ export const PromptInput = ({
         return f.type === pattern;
       });
     },
-    [accept]
+    [accept],
   );
 
   const addLocal = useCallback(
@@ -623,7 +911,7 @@ export const PromptInput = ({
         return [...prev, ...next];
       });
     },
-    [matchesAccept, maxFiles, maxFileSize, onError]
+    [matchesAccept, maxFiles, maxFileSize, onError],
   );
 
   const removeLocal = useCallback(
@@ -635,7 +923,7 @@ export const PromptInput = ({
         }
         return prev.filter((file) => file.id !== id);
       }),
-    []
+    [],
   );
 
   // Wrapper that validates files before calling provider's add
@@ -679,7 +967,7 @@ export const PromptInput = ({
         controller?.attachments.add(capped);
       }
     },
-    [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller]
+    [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller],
   );
 
   const clearAttachments = useCallback(
@@ -694,12 +982,12 @@ export const PromptInput = ({
             }
             return [];
           }),
-    [usingProvider, controller]
+    [usingProvider, controller],
   );
 
   const clearReferencedSources = useCallback(
     () => setReferencedSources([]),
-    []
+    [],
   );
 
   const add = usingProvider ? addWithProviderValidation : addLocal;
@@ -797,7 +1085,7 @@ export const PromptInput = ({
         }
       }
     },
-    [usingProvider]
+    [usingProvider],
   );
 
   const handleChange: ChangeEventHandler<HTMLInputElement> = useCallback(
@@ -808,7 +1096,7 @@ export const PromptInput = ({
       // Reset input value to allow selecting files that were previously removed
       event.currentTarget.value = "";
     },
-    [add]
+    [add],
   );
 
   const attachmentsCtx = useMemo<AttachmentsContext>(
@@ -820,7 +1108,7 @@ export const PromptInput = ({
       openFileDialog,
       remove,
     }),
-    [files, add, remove, clearAttachments, openFileDialog]
+    [files, add, remove, clearAttachments, openFileDialog],
   );
 
   const refsCtx = useMemo<ReferencedSourcesContext>(
@@ -838,7 +1126,7 @@ export const PromptInput = ({
       },
       sources: referencedSources,
     }),
-    [referencedSources, clearReferencedSources]
+    [referencedSources, clearReferencedSources],
   );
 
   const handleSubmit: FormEventHandler<HTMLFormElement> = useCallback(
@@ -846,12 +1134,19 @@ export const PromptInput = ({
       event.preventDefault();
 
       const form = event.currentTarget;
+      const formData = new FormData(form);
       const text = usingProvider
         ? controller.textInput.value
-        : (() => {
-            const formData = new FormData(form);
-            return (formData.get("message") as string) || "";
-          })();
+        : (formData.get("message") as string) || "";
+      const mentionedSourceIds = [
+        ...new Set(
+          formData
+            .getAll("mentionedSourceIds")
+            .filter((value): value is string => typeof value === "string")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      ];
 
       // Reset form immediately after capturing text to avoid race condition
       // where user input during async blob conversion would be lost
@@ -872,10 +1167,13 @@ export const PromptInput = ({
               };
             }
             return item;
-          })
+          }),
         );
 
-        const result = onSubmit({ files: convertedFiles, text }, event);
+        const result = onSubmit(
+          { files: convertedFiles, mentionedSourceIds, text },
+          event,
+        );
 
         // Handle both sync and async onSubmit
         if (result instanceof Promise) {
@@ -899,7 +1197,7 @@ export const PromptInput = ({
         // Don't clear on error - user may want to retry
       }
     },
-    [usingProvider, controller, files, onSubmit, clear]
+    [usingProvider, controller, files, onSubmit, clear],
   );
 
   // Render with or without local provider
@@ -986,7 +1284,7 @@ export const PromptInputTextarea = ({
         // Check if the submit button is disabled before submitting
         const { form } = e.currentTarget;
         const submitButton = form?.querySelector(
-          'button[type="submit"]'
+          'button[type="submit"]',
         ) as HTMLButtonElement | null;
         if (submitButton?.disabled) {
           return;
@@ -1008,7 +1306,7 @@ export const PromptInputTextarea = ({
         }
       }
     },
-    [onKeyDown, isComposing, attachments]
+    [onKeyDown, isComposing, attachments],
   );
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = useCallback(
@@ -1035,7 +1333,7 @@ export const PromptInputTextarea = ({
         attachments.add(files);
       }
     },
-    [attachments]
+    [attachments],
   );
 
   const handleCompositionEnd = useCallback(() => setIsComposing(false), []);
@@ -1065,6 +1363,646 @@ export const PromptInputTextarea = ({
       {...props}
       {...controlledProps}
     />
+  );
+};
+
+export type PromptInputMentionEditorProps = Omit<
+  HTMLAttributes<HTMLDivElement>,
+  "onChange" | "placeholder"
+> & {
+  disabled?: boolean;
+  initialValue?: string;
+  name?: string;
+  onValueChange?: (input: {
+    mentionedSourceIds: string[];
+    segments: PromptInputSegment[];
+    text: string;
+  }) => void;
+  placeholder?: string;
+  sourceLoader?: PromptInputMentionSourceLoader;
+  sources: PromptInputMentionSource[];
+};
+
+export const PromptInputMentionEditor = ({
+  className,
+  disabled,
+  initialValue = "",
+  name = "message",
+  onKeyDown,
+  onPaste,
+  onValueChange,
+  placeholder = "What would you like to know?",
+  sourceLoader,
+  sources,
+  ...props
+}: PromptInputMentionEditorProps) => {
+  const controller = useOptionalPromptInputController();
+  const attachments = usePromptInputAttachments();
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const [isComposing, setIsComposing] = useState(false);
+  const [segments, setSegments] = useState<PromptInputSegment[]>(() =>
+    initialValue ? [{ text: initialValue, type: "text" }] : [],
+  );
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStartOffset, setMentionStartOffset] = useState<number | null>(
+    null,
+  );
+  const [isMentionOpen, setIsMentionOpen] = useState(false);
+  const [mentionResults, setMentionResults] = useState<
+    PromptInputMentionSource[]
+  >([]);
+  const [mentionNextCursor, setMentionNextCursor] = useState<string | null>(
+    null,
+  );
+  const [mentionHighlightedIndex, setMentionHighlightedIndex] = useState(0);
+  const [isMentionLoading, setIsMentionLoading] = useState(false);
+  const [isMentionLoadingMore, setIsMentionLoadingMore] = useState(false);
+  const mentionListRef = useRef<HTMLDivElement | null>(null);
+  const mentionItemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const mentionRequestSeqRef = useRef(0);
+
+  const text = useMemo(() => serializePromptSegments(segments), [segments]);
+  const mentionedSourceIds = useMemo(
+    () => mentionedSourceIdsFromSegments(segments),
+    [segments],
+  );
+
+  const localFilteredSources = useMemo(() => {
+    const query = mentionQuery.trim().toLowerCase();
+    const candidates = sources.filter(
+      (source) => source.title.trim().length > 0,
+    );
+    if (!query) {
+      return candidates.slice(0, SOURCE_MENTION_PAGE_SIZE);
+    }
+
+    return candidates
+      .filter((source) => {
+        const haystack =
+          `${source.title} ${source.meta ?? ""} ${source.type ?? ""}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, SOURCE_MENTION_PAGE_SIZE);
+  }, [mentionQuery, sources]);
+  const filteredSources = sourceLoader ? mentionResults : localFilteredSources;
+  const hasMentionMore = sourceLoader ? Boolean(mentionNextCursor) : false;
+  const isMentionPopoverOpen =
+    isMentionOpen &&
+    (Boolean(sourceLoader) ||
+      filteredSources.length > 0 ||
+      mentionQuery.trim().length > 0);
+
+  const publishSegments = useCallback(
+    (nextSegments: PromptInputSegment[]) => {
+      setSegments(nextSegments);
+      const nextText = serializePromptSegments(nextSegments);
+      const nextMentionedSourceIds =
+        mentionedSourceIdsFromSegments(nextSegments);
+      controller?.textInput.setInput(nextText);
+      onValueChange?.({
+        mentionedSourceIds: nextMentionedSourceIds,
+        segments: nextSegments,
+        text: nextText,
+      });
+    },
+    [controller, onValueChange],
+  );
+
+  const syncFromDom = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    publishSegments(readSegmentsFromElement(editor));
+  }, [publishSegments]);
+
+  const updateMentionState = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor || isComposing) {
+      return;
+    }
+
+    const caretOffset = getCaretTextOffset(editor);
+    const content = editor.textContent ?? "";
+    const beforeCaret = content.slice(0, caretOffset);
+    const match = SOURCE_MENTION_TRIGGER_PATTERN.exec(beforeCaret);
+    if (!match) {
+      setIsMentionOpen(false);
+      setMentionQuery("");
+      setMentionStartOffset(null);
+      return;
+    }
+
+    const query = match[1] ?? "";
+    setMentionStartOffset(caretOffset - query.length - 1);
+    setMentionQuery(query);
+    setIsMentionOpen(true);
+  }, [isComposing]);
+
+  const syncAndUpdateMention = useCallback(() => {
+    syncFromDom();
+    window.requestAnimationFrame(updateMentionState);
+  }, [syncFromDom, updateMentionState]);
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || editor.childNodes.length > 0 || !initialValue) {
+      return;
+    }
+
+    editor.textContent = initialValue;
+    publishSegments([{ text: initialValue, type: "text" }]);
+  }, [initialValue, publishSegments]);
+
+  const closeMention = useCallback(() => {
+    setIsMentionOpen(false);
+    setMentionQuery("");
+    setMentionStartOffset(null);
+    setMentionHighlightedIndex(0);
+  }, []);
+
+  useEffect(() => {
+    if (!isMentionOpen || !sourceLoader) {
+      return;
+    }
+
+    const requestSeq = mentionRequestSeqRef.current + 1;
+    mentionRequestSeqRef.current = requestSeq;
+    setIsMentionLoading(true);
+    setIsMentionLoadingMore(false);
+    setMentionHighlightedIndex(0);
+
+    sourceLoader({
+      limit: SOURCE_MENTION_PAGE_SIZE,
+      query: mentionQuery.trim(),
+    })
+      .then((page) => {
+        if (mentionRequestSeqRef.current !== requestSeq) {
+          return;
+        }
+        setMentionResults(page.items);
+        setMentionNextCursor(page.nextCursor ?? null);
+      })
+      .catch(() => {
+        if (mentionRequestSeqRef.current !== requestSeq) {
+          return;
+        }
+        setMentionResults([]);
+        setMentionNextCursor(null);
+      })
+      .finally(() => {
+        if (mentionRequestSeqRef.current === requestSeq) {
+          setIsMentionLoading(false);
+        }
+      });
+  }, [isMentionOpen, mentionQuery, sourceLoader]);
+
+  const loadMoreMentionSources = useCallback(() => {
+    if (
+      !sourceLoader ||
+      !mentionNextCursor ||
+      isMentionLoading ||
+      isMentionLoadingMore
+    ) {
+      return;
+    }
+
+    setIsMentionLoadingMore(true);
+    sourceLoader({
+      cursor: mentionNextCursor,
+      limit: SOURCE_MENTION_PAGE_SIZE,
+      query: mentionQuery.trim(),
+    })
+      .then((page) => {
+        setMentionResults((current) => {
+          const seen = new Set(current.map((source) => source.id));
+          const next = page.items.filter((source) => !seen.has(source.id));
+          return [...current, ...next];
+        });
+        setMentionNextCursor(page.nextCursor ?? null);
+      })
+      .catch(() => {
+        setMentionNextCursor(null);
+      })
+      .finally(() => {
+        setIsMentionLoadingMore(false);
+      });
+  }, [
+    isMentionLoading,
+    isMentionLoadingMore,
+    mentionNextCursor,
+    mentionQuery,
+    sourceLoader,
+  ]);
+
+  useEffect(() => {
+    if (!isMentionOpen) {
+      return;
+    }
+
+    setMentionHighlightedIndex((index) => {
+      if (filteredSources.length === 0) {
+        return 0;
+      }
+      return Math.min(index, filteredSources.length - 1);
+    });
+  }, [filteredSources.length, isMentionOpen]);
+
+  useEffect(() => {
+    if (!isMentionOpen) {
+      return;
+    }
+
+    const item = mentionItemRefs.current.get(mentionHighlightedIndex);
+    const container = mentionListRef.current;
+    if (!item || !container) {
+      return;
+    }
+
+    const itemRect = item.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const padding = 6;
+    if (itemRect.top < containerRect.top + padding) {
+      container.scrollTop -= containerRect.top + padding - itemRect.top;
+      return;
+    }
+    if (itemRect.bottom > containerRect.bottom - padding) {
+      container.scrollTop += itemRect.bottom - (containerRect.bottom - padding);
+    }
+  }, [isMentionOpen, mentionHighlightedIndex]);
+
+  useEffect(() => {
+    if (!controller || controller.textInput.value !== "" || text === "") {
+      return;
+    }
+
+    const editor = editorRef.current;
+    if (editor) {
+      editor.textContent = "";
+    }
+    setSegments([]);
+    closeMention();
+  }, [closeMention, controller, text]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const form = editor?.closest("form");
+    if (!editor || !form) {
+      return;
+    }
+
+    const handleReset = () => {
+      editor.textContent = "";
+      setSegments([]);
+      closeMention();
+    };
+
+    form.addEventListener("reset", handleReset);
+    return () => {
+      form.removeEventListener("reset", handleReset);
+    };
+  }, [closeMention]);
+
+  useEffect(() => {
+    if (!isMentionOpen || sourceLoader) {
+      return;
+    }
+
+    if (!isMentionLoading && filteredSources.length === 0) {
+      closeMention();
+    }
+  }, [
+    closeMention,
+    filteredSources.length,
+    isMentionLoading,
+    isMentionOpen,
+    sourceLoader,
+  ]);
+
+  const selectSource = useCallback(
+    (source: PromptInputMentionSource) => {
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
+
+      editor.focus();
+      const selection = window.getSelection();
+      const caretOffset =
+        selection &&
+        selection.rangeCount > 0 &&
+        editor.contains(selection.getRangeAt(0).endContainer)
+          ? getCaretTextOffset(editor)
+          : (editor.textContent?.length ?? 0);
+      const startOffset =
+        mentionStartOffset ??
+        Math.max(0, caretOffset - mentionQuery.length - 1);
+      const fragment = document.createDocumentFragment();
+      fragment.append(createSourceMentionElement(source));
+      fragment.append(document.createTextNode(" "));
+      replaceTextRange(editor, startOffset, caretOffset, fragment);
+      closeMention();
+      const nextOffset =
+        startOffset + getSourceMentionLabel(source.title).length + 1;
+      setCaretTextOffset(editor, nextOffset);
+      syncFromDom();
+    },
+    [closeMention, mentionQuery.length, mentionStartOffset, syncFromDom],
+  );
+
+  const handleInput = useCallback(() => {
+    syncAndUpdateMention();
+  }, [syncAndUpdateMention]);
+
+  const handleClick: MouseEventHandler<HTMLDivElement> = useCallback(() => {
+    updateMentionState();
+  }, [updateMentionState]);
+
+  const handleCompositionStart = useCallback(() => setIsComposing(true), []);
+  const handleCompositionEnd = useCallback(() => {
+    setIsComposing(false);
+    window.requestAnimationFrame(syncAndUpdateMention);
+  }, [syncAndUpdateMention]);
+
+  const handlePaste: ClipboardEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      onPaste?.(event);
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      const files: File[] = [];
+      for (const item of event.clipboardData?.items ?? []) {
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) {
+            files.push(file);
+          }
+        }
+      }
+      if (files.length > 0) {
+        event.preventDefault();
+        attachments.add(files);
+        return;
+      }
+
+      const plainText = event.clipboardData?.getData("text/plain");
+      if (plainText) {
+        event.preventDefault();
+        insertTextAtCaret(event.currentTarget, plainText);
+        syncAndUpdateMention();
+      }
+    },
+    [attachments, onPaste, syncAndUpdateMention],
+  );
+
+  const handleKeyDown: KeyboardEventHandler<HTMLDivElement> = useCallback(
+    (e) => {
+      onKeyDown?.(e);
+      if (e.defaultPrevented) {
+        return;
+      }
+
+      if (isMentionOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeMention();
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          if (filteredSources.length > 0) {
+            setMentionHighlightedIndex((index) =>
+              index < filteredSources.length - 1 ? index + 1 : 0,
+            );
+          }
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (filteredSources.length > 0) {
+            setMentionHighlightedIndex((index) =>
+              index > 0 ? index - 1 : filteredSources.length - 1,
+            );
+          }
+          return;
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          const source =
+            filteredSources[mentionHighlightedIndex] ?? filteredSources[0];
+          if (source) {
+            e.preventDefault();
+            selectSource(source);
+            return;
+          }
+        }
+      }
+
+      if (e.key === "Enter") {
+        if (isComposing || e.nativeEvent.isComposing) {
+          return;
+        }
+        if (e.shiftKey) {
+          return;
+        }
+        e.preventDefault();
+
+        const submitButton = e.currentTarget
+          .closest("form")
+          ?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+        if (submitButton?.disabled) {
+          return;
+        }
+
+        e.currentTarget.closest("form")?.requestSubmit();
+        return;
+      }
+
+      if (e.key === "Backspace") {
+        const editor = editorRef.current;
+        if (!editor) {
+          return;
+        }
+
+        const mention = findSourceMentionBeforeCaret(editor);
+        if (mention) {
+          e.preventDefault();
+          mention.remove();
+          syncAndUpdateMention();
+          return;
+        }
+
+        if ((editor.textContent ?? "") === "" && attachments.files.length > 0) {
+          e.preventDefault();
+          const lastAttachment = attachments.files.at(-1);
+          if (lastAttachment) {
+            attachments.remove(lastAttachment.id);
+          }
+        }
+      }
+    },
+    [
+      attachments,
+      closeMention,
+      filteredSources,
+      mentionHighlightedIndex,
+      isComposing,
+      isMentionOpen,
+      onKeyDown,
+      selectSource,
+      syncAndUpdateMention,
+    ],
+  );
+
+  return (
+    <div className="relative w-full">
+      <input name={name} type="hidden" value={text} />
+      {mentionedSourceIds.map((sourceId) => (
+        <input
+          key={sourceId}
+          name="mentionedSourceIds"
+          type="hidden"
+          value={sourceId}
+        />
+      ))}
+      <div
+        aria-disabled={disabled || undefined}
+        aria-label={placeholder}
+        className={cn(
+          "field-sizing-content max-h-48 min-h-16 w-full overflow-y-auto whitespace-pre-wrap break-words rounded-none border-0 bg-transparent px-3 py-2 text-sm shadow-none outline-none ring-0 empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)] focus-visible:ring-0",
+          disabled && "cursor-not-allowed opacity-50",
+          className,
+        )}
+        contentEditable={!disabled}
+        data-placeholder={placeholder}
+        data-slot="input-group-control"
+        onClick={handleClick}
+        onCompositionEnd={handleCompositionEnd}
+        onCompositionStart={handleCompositionStart}
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        ref={editorRef}
+        role="textbox"
+        aria-multiline="true"
+        suppressContentEditableWarning
+        {...props}
+      />
+      <Popover open={isMentionPopoverOpen}>
+        <PopoverAnchor asChild>
+          <span className="pointer-events-none absolute left-3 top-3 size-0" />
+        </PopoverAnchor>
+        <PopoverContent
+          align="start"
+          className="w-[320px] overflow-hidden rounded-lg border-border/80 bg-popover p-0 shadow-xl"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          side="top"
+          sideOffset={8}
+        >
+          <Command
+            onKeyDown={(event) => {
+              if (
+                event.key === "ArrowDown" ||
+                event.key === "ArrowUp" ||
+                event.key === "Enter"
+              ) {
+                event.preventDefault();
+              }
+            }}
+            shouldFilter={false}
+          >
+            <CommandList
+              className="max-h-[280px]"
+              onScroll={(event) => {
+                const target = event.currentTarget;
+                const distanceToBottom =
+                  target.scrollHeight - target.scrollTop - target.clientHeight;
+                if (distanceToBottom < 48) {
+                  loadMoreMentionSources();
+                }
+              }}
+              ref={mentionListRef}
+            >
+              <CommandGroup
+                className="px-2 py-1.5"
+                heading={isMentionLoading ? "Loading sources" : "Sources"}
+              >
+                {isMentionLoading && filteredSources.length === 0 ? (
+                  <div className="space-y-1 px-1 py-1">
+                    {["a", "b", "c", "d"].map((id) => (
+                      <div
+                        className="flex items-center gap-2 rounded-md px-2 py-2"
+                        key={id}
+                      >
+                        <span className="size-4 rounded bg-muted" />
+                        <span className="h-3 flex-1 rounded bg-muted" />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {!isMentionLoading && filteredSources.length === 0 ? (
+                  <CommandEmpty className="px-3 py-3 text-xs text-muted-foreground">
+                    No matching sources
+                  </CommandEmpty>
+                ) : null}
+                {filteredSources.map((source, index) => (
+                  <CommandItem
+                    className={cn(
+                      "min-h-9 cursor-pointer gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted hover:text-foreground data-[highlighted=true]:bg-muted data-[highlighted=true]:text-foreground data-[selected=true]:bg-muted data-[selected=true]:text-foreground",
+                      index === mentionHighlightedIndex &&
+                        "bg-muted text-foreground",
+                    )}
+                    data-highlighted={
+                      index === mentionHighlightedIndex ? "true" : undefined
+                    }
+                    key={source.id}
+                    onMouseEnter={() => setMentionHighlightedIndex(index)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onSelect={() => selectSource(source)}
+                    ref={(node) => {
+                      if (node) {
+                        mentionItemRefs.current.set(index, node);
+                      } else {
+                        mentionItemRefs.current.delete(index);
+                      }
+                    }}
+                    value={source.id}
+                  >
+                    <SourceMentionIcon source={source} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium leading-5">
+                        {source.title}
+                      </div>
+                      {source.meta ? (
+                        <div className="truncate text-xs leading-4 text-muted-foreground">
+                          {source.meta}
+                        </div>
+                      ) : null}
+                    </div>
+                  </CommandItem>
+                ))}
+                {isMentionLoadingMore ? (
+                  <div className="flex items-center justify-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                    <Spinner className="size-3" />
+                    Loading more
+                  </div>
+                ) : hasMentionMore ? (
+                  <button
+                    className="mx-1 my-1 w-[calc(100%-0.5rem)] rounded-md px-2 py-1.5 text-center text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={loadMoreMentionSources}
+                    type="button"
+                  >
+                    Load more
+                  </button>
+                ) : null}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 };
 
@@ -1244,7 +2182,7 @@ export const PromptInputSubmit = ({
       }
       onClick?.(e);
     },
-    [isGenerating, onStop, onClick]
+    [isGenerating, onStop, onClick],
   );
 
   return (
@@ -1280,7 +2218,7 @@ export const PromptInputSelectTrigger = ({
     className={cn(
       "border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors",
       "hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
-      className
+      className,
     )}
     {...props}
   />
@@ -1330,7 +2268,7 @@ export type PromptInputHoverCardTriggerProps = ComponentProps<
 >;
 
 export const PromptInputHoverCardTrigger = (
-  props: PromptInputHoverCardTriggerProps
+  props: PromptInputHoverCardTriggerProps,
 ) => <HoverCardTrigger {...props} />;
 
 export type PromptInputHoverCardContentProps = ComponentProps<
@@ -1369,7 +2307,7 @@ export const PromptInputTabLabel = ({
   <h3
     className={cn(
       "mb-2 px-3 font-medium text-muted-foreground text-xs",
-      className
+      className,
     )}
     {...props}
   />
@@ -1393,7 +2331,7 @@ export const PromptInputTabItem = ({
   <div
     className={cn(
       "flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent",
-      className
+      className,
     )}
     {...props}
   />

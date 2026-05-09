@@ -9,15 +9,18 @@ import { contentService } from "../../../modules/content";
 import { THREAD_TITLE_GENERATE_JOB } from "../../../modules/content/queue";
 import { presentJobState } from "../../../shared/job-status";
 import { jobsQueue } from "../../../shared/queue";
-import { getSessionUserId, requireSession } from "../../middleware/auth-session";
+import {
+  getSessionUserId,
+  requireSession,
+} from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
-import { createSseResponse, ensureObjectBody, requireRouteParam } from "./helpers";
+import {
+  createSseResponse,
+  ensureObjectBody,
+  requireRouteParam,
+} from "./helpers";
 
-function assertJobStringField(
-  data: unknown,
-  field: string,
-  expected: string,
-) {
+function assertJobStringField(data: unknown, field: string, expected: string) {
   const actual =
     data && typeof data === "object"
       ? (data as Record<string, unknown>)[field]
@@ -194,16 +197,19 @@ export function registerThreadRoutes(app: Hono) {
     assertJobStringField(job.data, "threadId", threadId);
     assertJobStringField(job.data, "userId", userId);
 
-    return ApiResponse.success(c, presentJobState({
-      id: String(job.id),
-      type: job.name,
-      state: await job.getState(),
-      createdAtMs: job.timestamp,
-      processedAtMs: job.processedOn,
-      finishedAtMs: job.finishedOn,
-      returnvalue: job.returnvalue,
-      failedReason: job.failedReason,
-    }));
+    return ApiResponse.success(
+      c,
+      presentJobState({
+        id: String(job.id),
+        type: job.name,
+        state: await job.getState(),
+        createdAtMs: job.timestamp,
+        processedAtMs: job.processedOn,
+        finishedAtMs: job.finishedOn,
+        returnvalue: job.returnvalue,
+        failedReason: job.failedReason,
+      }),
+    );
   });
 
   app.post("/threads/:id/stream", async (c) => {
@@ -240,6 +246,7 @@ export function registerThreadRoutes(app: Hono) {
               workspaceId,
               threadId,
               userId,
+              mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
               timezone: parsed.data.timezone,
@@ -254,6 +261,7 @@ export function registerThreadRoutes(app: Hono) {
                 threadId,
                 userId,
                 content: parsed.data.content ?? "",
+                mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
                 timezone: parsed.data.timezone,
@@ -267,6 +275,7 @@ export function registerThreadRoutes(app: Hono) {
                 threadId,
                 userId,
                 content: parsed.data.content ?? "",
+                mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
                 timezone: parsed.data.timezone,
@@ -283,6 +292,7 @@ export function registerThreadRoutes(app: Hono) {
             workspaceId,
             threadId,
             userId,
+            mentionedSourceIds: parsed.data.mentionedSourceIds,
             sourceIds: parsed.data.sourceIds,
             tools: parsed.data.tools,
             timezone: parsed.data.timezone,
@@ -297,6 +307,7 @@ export function registerThreadRoutes(app: Hono) {
               threadId,
               userId,
               content: parsed.data.content ?? "",
+              mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
               timezone: parsed.data.timezone,
@@ -310,6 +321,7 @@ export function registerThreadRoutes(app: Hono) {
               threadId,
               userId,
               content: parsed.data.content ?? "",
+              mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
               timezone: parsed.data.timezone,

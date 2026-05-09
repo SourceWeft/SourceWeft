@@ -20,6 +20,7 @@ export type StreamThreadEventInput = {
   threadId: string;
   userId: string;
   content: string;
+  mentionedSourceIds?: string[];
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
   timezone?: string;
@@ -51,6 +52,8 @@ export type PreparedThreadTurn = {
   workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;
   messageContent: string;
+  mentionedSourceIds: string[];
+  effectiveMentionedSourceIds: string[];
   selectedSourceIds: string[];
   sourceIds: string[];
   sourceScope: {
@@ -126,7 +129,9 @@ export type ModelReasoningSegmentTrace = {
 
 export type FinalizeThreadTurnCommand = {
   prepared: PreparedThreadTurn;
-  retrieval: Awaited<ReturnType<typeof contentRetrievalService.runRetrieval>> | null;
+  retrieval: Awaited<
+    ReturnType<typeof contentRetrievalService.runRetrieval>
+  > | null;
   citations: AgentCitation[];
   availableCitations?: AgentCitation[];
   retrievalCalls: RetrievalCallTrace[];

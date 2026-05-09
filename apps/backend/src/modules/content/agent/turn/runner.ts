@@ -8,6 +8,8 @@ import { WorkingFilesBackend } from "../working-files-backend";
 import { createWebTools } from "../tools/web-tools";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { createDefaultWebProvider } from "../../web";
+import { listVirtualFsSources } from "../../virtual-fs/store";
+import type { VirtualFsSource } from "../../virtual-fs/types";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { TraceContext } from "../../../../shared/llm-observability";
 import { endSpan, startSpan } from "../../../../shared/llm-observability";
@@ -150,6 +152,7 @@ async function runToolRetrieval(input: {
     userId: input.prepared.userId,
     userMessageId: input.prepared.userMessage.id,
     queryText: input.query,
+    anchorSourceIds: input.prepared.effectiveMentionedSourceIds,
     sourceIds: input.prepared.sourceIds,
     idempotencyKey: input.prepared.llmIdempotencyKey,
     llm: input.llm,
@@ -214,31 +217,68 @@ function resolveFilesystemPath(input: Record<string, unknown>) {
   return "";
 }
 
-function filesystemScope(input: Record<string, unknown>) {
-  return resolveFilesystemPath(input).startsWith("/skills")
-    ? "skills"
-    : "sources";
+function resolveFilesystemPattern(input: Record<string, unknown>) {
+  const value = input.pattern;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function scopeFromPath(path: string) {
+  if (path.startsWith("/skills")) {
+    return "skills";
+  }
+  if (path.startsWith("/work")) {
+    return "work";
+  }
+  return null;
+}
+
+function filesystemScope(input: Record<string, unknown>, toolName?: string) {
+  const pathScope = scopeFromPath(resolveFilesystemPath(input));
+  if (pathScope) {
+    return pathScope;
+  }
+  if (toolName === "glob") {
+    const patternScope = scopeFromPath(resolveFilesystemPattern(input));
+    if (patternScope) {
+      return patternScope;
+    }
+  }
+  return "sources";
 }
 
 function getFilesystemToolStartTitle(
   toolName: string,
   input: Record<string, unknown>,
 ) {
-  const skillScoped = filesystemScope(input) === "skills";
+  const scope = filesystemScope(input, toolName);
+  const skillScoped = scope === "skills";
+  const workScoped = scope === "work";
   if (toolName === "ls") {
+    if (workScoped) {
+      return "Listing Workfiles";
+    }
     return skillScoped ? "Listing selected skills" : "Listing selected sources";
   }
   if (toolName === "glob") {
+    if (workScoped) {
+      return "Finding matching Workfiles";
+    }
     return skillScoped
       ? "Finding matching skill files"
       : "Finding matching sources";
   }
   if (toolName === "read_file") {
+    if (workScoped) {
+      return "Reading Workfile";
+    }
     return skillScoped
       ? "Reading skill instructions"
       : "Reading source content";
   }
   if (toolName === "grep") {
+    if (workScoped) {
+      return "Searching Workfiles";
+    }
     return skillScoped
       ? "Searching skill instructions"
       : "Searching exact terms";
@@ -250,19 +290,33 @@ function getFilesystemToolEndTitle(
   toolName: string,
   input: Record<string, unknown>,
 ) {
-  const skillScoped = filesystemScope(input) === "skills";
+  const scope = filesystemScope(input, toolName);
+  const skillScoped = scope === "skills";
+  const workScoped = scope === "work";
   if (toolName === "ls") {
+    if (workScoped) {
+      return "Listed Workfiles";
+    }
     return skillScoped ? "Listed selected skills" : "Listed selected sources";
   }
   if (toolName === "glob") {
+    if (workScoped) {
+      return "Found matching Workfiles";
+    }
     return skillScoped
       ? "Found matching skill files"
       : "Found matching sources";
   }
   if (toolName === "read_file") {
+    if (workScoped) {
+      return "Read Workfile";
+    }
     return skillScoped ? "Read skill instructions" : "Read source content";
   }
   if (toolName === "grep") {
+    if (workScoped) {
+      return "Searched Workfiles";
+    }
     return skillScoped ? "Searched skill instructions" : "Searched exact terms";
   }
   return null;
@@ -384,8 +438,10 @@ function getFilesystemToolDescription(
   metadata: Record<string, unknown>,
   input?: Record<string, unknown>,
 ) {
+  const scope = input ? filesystemScope(input, toolName) : "sources";
   const noun =
-    input && filesystemScope(input) === "skills" ? "skill" : "source";
+    scope === "skills" ? "skill" : scope === "work" ? "Workfile" : "source";
+  const inputLimit = toObjectRecord(input)?.limit;
   if (toolName === "ls" && typeof metadata.resultCount === "number") {
     return `Listed ${metadata.resultCount} entries.`;
   }
@@ -395,11 +451,26 @@ function getFilesystemToolDescription(
   if (toolName === "grep" && typeof metadata.matchCount === "number") {
     return `Found ${metadata.matchCount} text matches.`;
   }
+  if (toolName === "read_file" && scope === "sources") {
+    const lineLimit = typeof inputLimit === "number" && Number.isFinite(inputLimit)
+      ? Math.max(1, Math.floor(inputLimit))
+      : undefined;
+    return lineLimit
+      ? `Read up to ${lineLimit} source lines.`
+      : "Read source content.";
+  }
   if (toolName === "read_file" && typeof metadata.chunkCount === "number") {
     return `Read ${metadata.chunkCount} ${noun} ${metadata.chunkCount === 1 ? "chunk" : "chunks"}.`;
   }
   return undefined;
 }
+
+export const testExports = {
+  buildAgentRuntimePrompt,
+  getFilesystemToolDescription,
+  getFilesystemToolEndTitle,
+  getFilesystemToolStartTitle,
+};
 
 function getWebToolStartTitle(toolName: string) {
   if (toolName === "web_search") {
@@ -621,9 +692,82 @@ function formatDateInTimeZone(date: Date, timeZone: string) {
   }).format(date);
 }
 
+const MAX_RUNTIME_SOURCE_REFERENCES = 50;
+
+function escapeRuntimeValue(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function uniqueNonEmpty(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value?.trim() ?? "")
+        .filter((value) => value.length > 0),
+    ),
+  );
+}
+
+function readableSourcePath(source: VirtualFsSource) {
+  return source.filePath ?? source.readmePath ?? source.dirPath;
+}
+
+function formatRuntimeSourceReference(source: VirtualFsSource) {
+  const mentionLabels = uniqueNonEmpty([source.title, source.fileName])
+    .map((value) => `@${value}`)
+    .join(", ");
+  const originalFile = source.fileName?.trim();
+  const parts = [
+    `title="${escapeRuntimeValue(source.title)}"`,
+    originalFile ? `original_file="${escapeRuntimeValue(originalFile)}"` : null,
+    mentionLabels
+      ? `mention_labels="${escapeRuntimeValue(mentionLabels)}"`
+      : null,
+    `kb_path="${escapeRuntimeValue(readableSourcePath(source))}"`,
+    source.sourceType === "directory"
+      ? `kb_directory="${escapeRuntimeValue(source.dirPath)}"`
+      : null,
+    `type="${escapeRuntimeValue(source.sourceType)}"`,
+    `chunks="${source.chunkCount}"`,
+  ].filter((part): part is string => part !== null);
+
+  return `- ${parts.join(" ")}`;
+}
+
+function buildSelectedSourceManifest(input: {
+  label?: string;
+  sources: VirtualFsSource[];
+  omittedCount: number;
+}) {
+  if (input.sources.length === 0) {
+    return "";
+  }
+
+  const label = input.label ?? "visible";
+  return [
+    "<selected_source_manifest>",
+    `These are the current turn's ${label} Source Library entries visible under /kb.`,
+    "Resolve user @mentions, attachment labels, and filenames against title, original_file, and mention_labels below.",
+    "Do not synthesize /work/<filename> for @mentions or source filenames. /work contains only thread Workfiles.",
+    ...input.sources.map(formatRuntimeSourceReference),
+    input.omittedCount > 0
+      ? `- ${input.omittedCount} additional source entries omitted from this manifest; use ls('/kb') if you need to enumerate them.`
+      : null,
+    "</selected_source_manifest>",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
 function buildAgentRuntimePrompt(input: {
-  webToolsAvailable: boolean;
+  availableWebTools?: string[];
   timezone: string;
+  selectedSources?: VirtualFsSource[];
+  selectedSourcesOmitted?: number;
 }) {
   const timeZone = input.timezone;
   const currentDate = formatDateInTimeZone(new Date(), timeZone);
@@ -631,13 +775,18 @@ function buildAgentRuntimePrompt(input: {
     `Current date: ${currentDate}.`,
     `Current timezone: ${timeZone}.`,
   ];
+  const sourceManifest = buildSelectedSourceManifest({
+    sources: input.selectedSources ?? [],
+    omittedCount: input.selectedSourcesOmitted ?? 0,
+  });
+  if (sourceManifest) {
+    lines.push(sourceManifest);
+  }
 
-  if (input.webToolsAvailable) {
+  const availableWebTools = input.availableWebTools ?? [];
+  if (availableWebTools.length > 0) {
     lines.push(
-      "web_search and web_fetch are available for public web access in this turn.",
-      "Use web_search for real-time, current, or external public web information instead of answering from memory.",
-      "For current, latest, live, today, or otherwise time-sensitive web searches, call web_search with fresh=true. Omit fresh when cached search content is acceptable.",
-      "Use web_fetch for specific webpages, full-page analysis, or when web_search evidence is insufficient or conflicting. Set fresh=true for time-sensitive page content.",
+      `Available public web tools this turn: ${availableWebTools.join(", ")}.`,
       "For workspace-specific or selected-source questions, use selected source tools first. Use web tools only when the user explicitly asks for internet information, asks about current public facts, or selected sources do not contain enough evidence.",
       `When a date qualifier is useful, use the current date/year from this runtime context: ${currentDate}.`,
     );
@@ -856,21 +1005,76 @@ export async function* invokeDeepAgentTurn(input: {
       return buildRetrievalChunks({ retrieval, citationByChunkId });
     },
   });
-  const webProvider = input.prepared.webSearchEnabled
-    ? createDefaultWebProvider()
-    : null;
+  const webProvider = createDefaultWebProvider();
   const webTools = webProvider
-    ? createWebTools({ provider: webProvider, citationRegistry })
+    ? createWebTools({
+        provider: webProvider,
+        citationRegistry,
+        searchEnabled: input.prepared.webSearchEnabled,
+      })
     : [];
+  const runtimeSourceReferences =
+    input.prepared.sourceIds.length > 0
+      ? await listVirtualFsSources({
+          teamId: input.prepared.workspace.organizationId,
+          workspaceId: input.prepared.workspace.id,
+          sourceIds: input.prepared.sourceIds,
+          limit: MAX_RUNTIME_SOURCE_REFERENCES + 1,
+        }).catch((error) => {
+          logger.warn("Failed to build selected source runtime manifest", {
+            teamId: input.prepared.workspace.organizationId,
+            workspaceId: input.prepared.workspace.id,
+            sourceCount: input.prepared.sourceIds.length,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [] as VirtualFsSource[];
+        })
+      : [];
+  const mentionedSourceReferences =
+    input.prepared.effectiveMentionedSourceIds.length > 0
+      ? await listVirtualFsSources({
+          teamId: input.prepared.workspace.organizationId,
+          workspaceId: input.prepared.workspace.id,
+          sourceIds: input.prepared.effectiveMentionedSourceIds,
+          limit: MAX_RUNTIME_SOURCE_REFERENCES + 1,
+        }).catch((error) => {
+          logger.warn("Failed to build mentioned source runtime manifest", {
+            teamId: input.prepared.workspace.organizationId,
+            workspaceId: input.prepared.workspace.id,
+            sourceCount: input.prepared.effectiveMentionedSourceIds.length,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [] as VirtualFsSource[];
+        })
+      : [];
+  const runtimeSourcesById = new Map<string, VirtualFsSource>();
+  for (const source of [
+    ...mentionedSourceReferences,
+    ...runtimeSourceReferences,
+  ]) {
+    runtimeSourcesById.set(source.sourceId, source);
+  }
+  const runtimeSources = Array.from(runtimeSourcesById.values());
+  const visibleSources = runtimeSources.slice(0, MAX_RUNTIME_SOURCE_REFERENCES);
   const runtimePrompt = buildAgentRuntimePrompt({
-    webToolsAvailable: webTools.length > 0,
+    availableWebTools: webTools.map((tool) => tool.name),
     timezone: input.prepared.timezone,
+    selectedSources: visibleSources,
+    selectedSourcesOmitted: Math.max(
+      0,
+      runtimeSources.length - visibleSources.length,
+    ),
   });
 
   const databaseBackend = new DatabaseKnowledgeBackend({
     teamId: input.prepared.workspace.organizationId,
     workspaceId: input.prepared.workspace.id,
-    sourceIds: input.prepared.sourceIds,
+    sourceIds: Array.from(
+      new Set([
+        ...input.prepared.sourceIds,
+        ...input.prepared.effectiveMentionedSourceIds,
+      ]),
+    ),
     citationRegistry,
   });
   const workingFilesBackend = new WorkingFilesBackend({
@@ -878,6 +1082,7 @@ export async function* invokeDeepAgentTurn(input: {
     workspaceId: input.prepared.workspace.id,
     threadId: input.prepared.thread.id,
     userId: input.prepared.userId,
+    citationRegistry,
   });
   const skillsBackend =
     input.prepared.enabledSkills.length > 0

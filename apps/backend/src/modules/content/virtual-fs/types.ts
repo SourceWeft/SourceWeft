@@ -32,6 +32,8 @@ export type VirtualFsChunk = {
   chunkId: string;
   chunkNo: number;
   content: string;
+  startOffset: number | null;
+  endOffset: number | null;
   headingPath: string | null;
   language: string | null;
 };

@@ -2,7 +2,10 @@ import type {
   BackendProtocolV2,
   EditResult,
   FileData,
+  FileDownloadResponse,
   FileInfo,
+  FileOperationError,
+  FileUploadResponse,
   GlobResult,
   GrepMatch,
   GrepResult,
@@ -11,6 +14,7 @@ import type {
   ReadResult,
   WriteResult,
 } from "deepagents";
+import type { AgentCitation, AgentCitationRegistry } from "./citation-registry";
 import type { WorkingFileRecord, WorkingFilePurpose } from "../types";
 import {
   WORK_ROOT,
@@ -25,11 +29,16 @@ import {
   compileGrepRegex,
   lineNumberContent,
   performStringReplacement,
+  sanitizeNonCitableCitationMarkers,
   simpleGlobToRegExp,
 } from "./fs-utils";
 
 const DEFAULT_READ_LINE_LIMIT = 500;
 const DEFAULT_WORKING_FILE_MIME_TYPE = "text/plain";
+const WORKFILE_CITATION_MARKER_PATTERN =
+  /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/gi;
+const FOOTNOTE_DEFINITION_PATTERN = /^\[\^([^\]\n]+)\]:\s*(.+)$/gm;
+const FOOTNOTE_REFERENCE_PATTERN = /\[\^([^\]\n]+)\]/g;
 
 function fileInfo(file: WorkingFileRecord): FileInfo {
   return {
@@ -111,6 +120,224 @@ function toError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function fileOperationErrorFromMessage(error: unknown): FileOperationError {
+  const normalized = toError(error).toLowerCase();
+  if (normalized.includes("enoent") || normalized.includes("not found") || normalized.includes("no such file")) {
+    return "file_not_found";
+  }
+  if (normalized.includes("eisdir") || normalized.includes("directory")) {
+    return "is_directory";
+  }
+  if (
+    normalized.includes("erofs") ||
+    normalized.includes("read-only") ||
+    normalized.includes("not allowed") ||
+    normalized.includes("permission") ||
+    normalized.includes("quota") ||
+    normalized.includes("size")
+  ) {
+    return "permission_denied";
+  }
+  return "invalid_path";
+}
+
+function missingWorkingFileHint(normalizedPath: string) {
+  const name = basename(normalizedPath);
+  if (!name) {
+    return "";
+  }
+
+  return ` If '${name}' is an uploaded, selected, referenced, attached, or @mentioned source, use search_sources or list/read the Source Library under /kb instead of /work Workfiles.`;
+}
+
+function compactWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function trimSentence(value: string) {
+  const compacted = compactWhitespace(value);
+  if (!compacted) {
+    return "";
+  }
+  return /[.!?]$/.test(compacted) ? compacted : `${compacted}.`;
+}
+
+function slugifyFootnoteLabel(value: string, fallback: string) {
+  const slug = value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 72)
+    .replace(/-+$/g, "");
+
+  return slug || fallback;
+}
+
+function uniqueFootnoteLabel(baseLabel: string, usedLabels: Set<string>) {
+  let label = baseLabel;
+  let suffix = 2;
+  while (usedLabels.has(label)) {
+    const suffixText = `-${suffix}`;
+    const trimmedBase = baseLabel
+      .slice(0, Math.max(1, 72 - suffixText.length))
+      .replace(/-+$/g, "");
+    label = `${trimmedBase}${suffixText}`;
+    suffix += 1;
+  }
+  usedLabels.add(label);
+  return label;
+}
+
+function buildWorkfileReferenceText(citation: AgentCitation) {
+  const title = compactWhitespace(citation.sourceTitle || "Untitled source");
+  if (citation.externalUri) {
+    const lead = title ? trimSentence(title) : "Web source.";
+    return `${lead} ${citation.externalUri}`;
+  }
+  return `Source Library: ${title || "Untitled source"}.`;
+}
+
+function buildCitationLookup(citations: AgentCitation[]) {
+  const byKey = new Map<string, AgentCitation>();
+  for (const citation of citations) {
+    byKey.set(citation.citation, citation);
+    byKey.set(citation.chunkId, citation);
+  }
+  return byKey;
+}
+
+function buildExistingFootnoteState(content: string) {
+  const usedLabels = new Set<string>();
+  const labelByReferenceText = new Map<string, string>();
+  const definedLabels = new Set<string>();
+
+  for (const match of content.matchAll(FOOTNOTE_REFERENCE_PATTERN)) {
+    const label = match[1]?.trim();
+    if (label) {
+      usedLabels.add(label);
+    }
+  }
+
+  for (const match of content.matchAll(FOOTNOTE_DEFINITION_PATTERN)) {
+    const label = match[1]?.trim();
+    const referenceText = compactWhitespace(match[2] ?? "");
+    if (!label) {
+      continue;
+    }
+    usedLabels.add(label);
+    definedLabels.add(label);
+    if (referenceText && !labelByReferenceText.has(referenceText)) {
+      labelByReferenceText.set(referenceText, label);
+    }
+  }
+
+  return { usedLabels, labelByReferenceText, definedLabels };
+}
+
+function appendFootnoteDefinitions(
+  content: string,
+  definitions: Array<{ label: string; referenceText: string }>,
+) {
+  if (definitions.length === 0) {
+    return content;
+  }
+
+  const definitionText = definitions
+    .map((definition) => `[^${definition.label}]: ${definition.referenceText}`)
+    .join("\n");
+  const trimmed = content.replace(/\s+$/g, "");
+
+  if (/^## References\s*$/im.test(trimmed)) {
+    return `${trimmed}\n${definitionText}`;
+  }
+
+  return `${trimmed}\n\n## References\n\n${definitionText}`;
+}
+
+export function rewriteWorkfileCitationMarkers(input: {
+  content: string;
+  citations: AgentCitation[];
+}) {
+  WORKFILE_CITATION_MARKER_PATTERN.lastIndex = 0;
+  if (!WORKFILE_CITATION_MARKER_PATTERN.test(input.content)) {
+    return input.content;
+  }
+  WORKFILE_CITATION_MARKER_PATTERN.lastIndex = 0;
+
+  const lookup = buildCitationLookup(input.citations);
+  const state = buildExistingFootnoteState(input.content);
+  const labelByCitationGroup = new Map<string, string>();
+  const pendingDefinitions = new Map<string, string>();
+
+  const rewritten = input.content.replace(
+    WORKFILE_CITATION_MARKER_PATTERN,
+    (_marker, keysText: string) => {
+      const replacementLabels: string[] = [];
+      const removedKeys: string[] = [];
+      const seenLabels = new Set<string>();
+      const keys = keysText
+        .split(",")
+        .map((key) => key.trim())
+        .filter(Boolean);
+
+      for (const key of keys) {
+        const citation = lookup.get(key);
+        if (!citation) {
+          removedKeys.push(key);
+          continue;
+        }
+
+        const groupKey =
+          citation.externalUri ??
+          citation.sourceId ??
+          citation.documentId ??
+          citation.sourceTitle;
+        const referenceText = buildWorkfileReferenceText(citation);
+        let label = labelByCitationGroup.get(groupKey);
+
+        if (!label) {
+          label = state.labelByReferenceText.get(referenceText);
+        }
+        if (!label) {
+          const baseLabel = slugifyFootnoteLabel(
+            citation.sourceTitle || citation.externalUri || "source",
+            citation.externalUri ? "web-source" : "source",
+          );
+          label = uniqueFootnoteLabel(baseLabel, state.usedLabels);
+        }
+
+        labelByCitationGroup.set(groupKey, label);
+        if (!state.definedLabels.has(label)) {
+          pendingDefinitions.set(label, referenceText);
+          state.definedLabels.add(label);
+        }
+        if (!seenLabels.has(label)) {
+          replacementLabels.push(`[^${label}]`);
+          seenLabels.add(label);
+        }
+      }
+
+      if (removedKeys.length > 0) {
+        replacementLabels.push(
+          `[non-citable citation marker ${removedKeys.join(", ")} removed]`,
+        );
+      }
+
+      return replacementLabels.join("");
+    },
+  );
+
+  return appendFootnoteDefinitions(
+    rewritten,
+    [...pendingDefinitions].map(([label, referenceText]) => ({
+      label,
+      referenceText,
+    })),
+  );
+}
+
 export class WorkingFilesBackend implements BackendProtocolV2 {
   constructor(
     private readonly input: {
@@ -118,8 +345,14 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       workspaceId: string;
       threadId: string;
       userId: string;
+      citationRegistry?: AgentCitationRegistry;
     },
   ) {}
+
+  private prepareContentForPersistence(content: string) {
+    const citations = this.input.citationRegistry?.list() ?? [];
+    return rewriteWorkfileCitationMarkers({ content, citations });
+  }
 
   private async files() {
     return workingFilesService.listForBackend({
@@ -203,10 +436,13 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       const normalized = normalizeWorkingFilePath(filePath);
       const file = await this.getFile(normalized);
       if (!file) {
-        return { error: `ENOENT: no such file, read_file '${normalized}'` };
+        return {
+          error: `ENOENT: no such thread working file, read_file '${normalized}'.${missingWorkingFileHint(normalized)}`,
+        };
       }
 
-      const lines = lineNumberContent(file.contentText).split("\n");
+      const safeContent = sanitizeNonCitableCitationMarkers(file.contentText);
+      const lines = lineNumberContent(safeContent).split("\n");
       const boundedOffset = Math.max(0, offset);
       const boundedLimit = Math.max(1, Math.min(limit, DEFAULT_READ_LINE_LIMIT));
       if (boundedOffset >= lines.length && lines.length > 0) {
@@ -221,10 +457,10 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
         mimeType: file.mimeType,
         content: [
           `Path: ${file.path}`,
-          `Working file: ${basename(file.path)}`,
+          `Workfile: ${basename(file.path)}`,
           `MIME: ${file.mimeType}`,
           file.purpose ? `Purpose: ${file.purpose}` : null,
-          "Working files are database-persisted thread working memory, not source evidence. Use them to continue or supplement thread work, but do not cite this file as a source.",
+          "Workfiles are database-persisted thread working memory, not source evidence. Use them to continue or supplement thread work, but do not cite this file as a source.",
           "",
           selected.join("\n"),
           more,
@@ -240,10 +476,12 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       const normalized = normalizeWorkingFilePath(filePath);
       const file = await this.getFile(normalized);
       if (!file) {
-        return { error: `ENOENT: no such file, read_file '${normalized}'` };
+        return {
+          error: `ENOENT: no such thread working file, read_file '${normalized}'.${missingWorkingFileHint(normalized)}`,
+        };
       }
       const data: FileData = {
-        content: file.contentText,
+        content: sanitizeNonCitableCitationMarkers(file.contentText),
         mimeType: file.mimeType,
         created_at: file.createdAt,
         modified_at: file.updatedAt,
@@ -288,7 +526,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
             matches.push({
               path: file.path,
               line: index + 1,
-              text: line.trim(),
+              text: sanitizeNonCitableCitationMarkers(line.trim()),
             });
           }
         }
@@ -307,7 +545,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
         threadId: this.input.threadId,
         userId: this.input.userId,
         path: normalized,
-        contentText: content,
+        contentText: this.prepareContentForPersistence(content),
         mimeType: inferMimeType(normalized),
       });
       return {
@@ -347,7 +585,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
         threadId: this.input.threadId,
         userId: this.input.userId,
         path: normalized,
-        contentText,
+        contentText: this.prepareContentForPersistence(contentText),
         mimeType: file.mimeType,
         purpose: file.purpose as WorkingFilePurpose | null,
       });
@@ -360,5 +598,49 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
     } catch (error) {
       return { error: toError(error) };
     }
+  }
+
+  async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
+    const encoder = new TextEncoder();
+    return Promise.all(
+      paths.map(async (filePath) => {
+        try {
+          const normalized = normalizeWorkingFilePath(filePath);
+          const file = await this.getFile(normalized);
+          if (!file) {
+            return { path: filePath, content: null, error: "file_not_found" as const };
+          }
+          return {
+            path: filePath,
+            content: encoder.encode(sanitizeNonCitableCitationMarkers(file.contentText)),
+            error: null,
+          };
+        } catch {
+          return { path: filePath, content: null, error: "invalid_path" as const };
+        }
+      }),
+    );
+  }
+
+  async uploadFiles(files: Array<[string, Uint8Array]>): Promise<FileUploadResponse[]> {
+    const decoder = new TextDecoder();
+    return Promise.all(
+      files.map(async ([filePath, content]) => {
+        try {
+          const normalized = normalizeWorkingFilePath(filePath);
+          await workingFilesService.putWorkingFile({
+            workspaceId: this.input.workspaceId,
+            threadId: this.input.threadId,
+            userId: this.input.userId,
+            path: normalized,
+            contentText: this.prepareContentForPersistence(decoder.decode(content)),
+            mimeType: inferMimeType(normalized),
+          });
+          return { path: filePath, error: null };
+        } catch (error) {
+          return { path: filePath, error: fileOperationErrorFromMessage(error) };
+        }
+      }),
+    );
   }
 }

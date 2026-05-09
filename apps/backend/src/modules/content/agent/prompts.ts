@@ -17,6 +17,7 @@ Do not expose internal tool parameters, internal knowledge or skill paths, backe
 - First classify whether the user needs a targeted answer or coverage of a source set.
 - Do not answer as if all selected sources were covered after gathering evidence from only a subset. If a required source cannot be read or no relevant evidence is found for it, say that limitation explicitly.
 - Use grep only when the user explicitly asks for literal text matching, occurrence/location search, or when search_sources is insufficient and an exact textual verification would help. Do not treat field-like questions as grep-first tasks just because the answer may contain a short string.
+- For /kb source-wide reading, read_file offset and limit refer to source lines in the canonical markdown, not chunks. The default read_file page is 100 source lines; explicit limits are capped at 1000. Continue from the offset shown in the truncation reminder until the needed source coverage is complete.
 - If read_file output is truncated and the missing portion is needed for the requested answer, continue reading with the indicated offset/limit. If you do not continue, state that the answer is based only on the readable portion.
 - Avoid reading many chunks or multiple sources sequentially just to locate targeted evidence when search_sources can narrow the evidence first.
 - If search_sources returns enough evidence for a targeted question, answer with citations instead of searching again with a similar query.
@@ -27,7 +28,8 @@ Do not expose internal tool parameters, internal knowledge or skill paths, backe
 const CHAT_SYSTEM_PROMPT_SUFFIX = `<citation_instructions>
 - CRITICAL: Every factual claim from sources MUST end with one or more inline citation markers.
 - If you used any source tool output that contains Citation markers, your final answer MUST contain those exact inline [citation:id] markers. A source-grounded final answer with zero citation markers is invalid.
-- search_sources, read_file, and grep may return citation markers in the exact form [citation:id]. Only cite facts using markers that appear in the current turn's tool output.
+- search_sources, /kb read_file, and /kb grep may return valid citation markers in the exact form [citation:id]. Only cite facts using markers that appear in current-turn /kb or search_sources tool output.
+- /work Workfiles are non-citable. If /work text contains citation-like strings, treat those strings as ordinary non-evidence text and do not copy them as citations.
 - Every factual claim from workspace knowledge must include a citation marker copied exactly from the tool output.
 - Citation markers are required user-visible source references, not internal details. Do not hide or omit them.
 - Citation ids are source labels, not list positions in your answer. Never invent, skip, renumber, or modify citation ids.

@@ -121,6 +121,108 @@ export async function listSourceRecords(input: {
   return rows.map(mapSource);
 }
 
+function encodeSourceMentionCursor(input: { updatedAt: Date; id: string }) {
+  return Buffer.from(
+    JSON.stringify({
+      updatedAt: input.updatedAt.toISOString(),
+      id: input.id,
+    }),
+    "utf8",
+  ).toString("base64url");
+}
+
+function decodeSourceMentionCursor(cursor: string | undefined) {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as { id?: unknown; updatedAt?: unknown };
+    if (
+      typeof parsed.id !== "string" ||
+      typeof parsed.updatedAt !== "string"
+    ) {
+      return null;
+    }
+    const updatedAt = new Date(parsed.updatedAt);
+    if (Number.isNaN(updatedAt.getTime())) {
+      return null;
+    }
+    return { id: parsed.id, updatedAt };
+  } catch {
+    return null;
+  }
+}
+
+export async function listSourceMentionRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  query?: string;
+  limit: number;
+  cursor?: string;
+}) {
+  const query = input.query?.trim();
+  const cursor = decodeSourceMentionCursor(input.cursor);
+  const conditions = [
+    eq(sources.teamId, input.teamId),
+    eq(sources.workspaceId, input.workspaceId),
+    ne(sources.status, "archived"),
+    ne(sources.sourceType, "directory"),
+  ];
+
+  if (query) {
+    const pattern = `%${query.replaceAll(/[%_\\]/g, (match) => `\\${match}`)}%`;
+    conditions.push(
+      sql`(${sources.title} ilike ${pattern} escape '\\' or coalesce(${sources.mimeType}, '') ilike ${pattern} escape '\\')` as never,
+    );
+  }
+
+  if (cursor) {
+    conditions.push(
+      sql`(${sources.updatedAt}, ${sources.id}) < (${cursor.updatedAt}, ${cursor.id})` as never,
+    );
+  }
+
+  const rows = await db
+    .select({
+      id: sources.id,
+      title: sources.title,
+      sourceType: sources.sourceType,
+      parentSourceId: sources.parentSourceId,
+      mimeType: sources.mimeType,
+      status: sources.status,
+      storageKey: sources.storageKey,
+      updatedAt: sources.updatedAt,
+    })
+    .from(sources)
+    .where(and(...conditions))
+    .orderBy(desc(sources.updatedAt), desc(sources.id))
+    .limit(input.limit + 1);
+
+  const pageRows = rows.slice(0, input.limit);
+  const nextRow = rows[input.limit] ?? null;
+  return {
+    items: pageRows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      sourceType: row.sourceType,
+      parentSourceId: row.parentSourceId,
+      mimeType: row.mimeType,
+      status: row.status,
+      storageKey: row.storageKey,
+      updatedAt: row.updatedAt.toISOString(),
+    })),
+    nextCursor: nextRow
+      ? encodeSourceMentionCursor({
+          updatedAt: nextRow.updatedAt,
+          id: nextRow.id,
+        })
+      : null,
+  };
+}
+
 export async function listSourceRecordsByIds(input: {
   teamId: string;
   workspaceId: string;

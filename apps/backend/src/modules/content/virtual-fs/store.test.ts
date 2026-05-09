@@ -20,6 +20,8 @@ function candidate(input: {
     chunkId: input.chunkId,
     chunkNo: input.chunkNo,
     content: input.content ?? `chunk ${input.chunkNo}`,
+    startOffset: null,
+    endOffset: null,
     headingPath: null,
     language: "markdown",
     score: input.score,

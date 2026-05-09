@@ -136,3 +136,47 @@ test("SelectedSkillsBackend grep searches instructions without adding citations"
     },
   ]);
 });
+
+test("SelectedSkillsBackend neutralizes citation-like markers in agent-facing output", async () => {
+  const skillWithCitation: EnabledSkillDescriptor = {
+    ...skills[0]!,
+    files: [
+      {
+        path: "SKILL.md",
+        contentText: `---
+name: meeting-summary
+description: Use this skill when preparing meeting summaries.
+---
+
+Do not cite [citation:c1] or citation:c2.`,
+        mimeType: "text/markdown",
+        sizeBytes: 128,
+        contentHash: "hash-citation-skill",
+      },
+      {
+        path: "templates/example.md",
+        contentText: "Do not cite 【citation: c3, c4】.",
+        mimeType: "text/markdown",
+        sizeBytes: 128,
+        contentHash: "hash-citation-template",
+      },
+    ],
+  };
+  const backend = new SelectedSkillsBackend([skillWithCitation]);
+
+  const read = await backend.read("/meeting-summary/SKILL.md");
+  assert.doesNotMatch(String(read.content), /\[citation:c1\]/i);
+  assert.match(String(read.content), /non-citable citation marker c1 removed/i);
+
+  const grep = await backend.grep("cite", "/meeting-summary");
+  assert.doesNotMatch(grep.matches?.[0]?.text ?? "", /\[citation:c1\]/i);
+
+  const [download] = await backend.downloadFiles(["/meeting-summary/SKILL.md"]);
+  const downloaded = download?.content ? new TextDecoder().decode(download.content) : "";
+  assert.doesNotMatch(downloaded, /\[citation:c1\]/i);
+  assert.match(downloaded, /non-citable citation marker c2 removed/i);
+
+  const support = await backend.read("/meeting-summary/templates/example.md");
+  assert.doesNotMatch(String(support.content), /【citation:/i);
+  assert.match(String(support.content), /non-citable citation marker c3, c4 removed/i);
+});

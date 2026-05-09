@@ -6,12 +6,14 @@ import {
 } from "../../../model-gateway-audit";
 import { toContentServiceError } from "../../../model-gateway-error";
 import { vectorSearchProvider } from "../../../vector";
-import { endSpan, startSpan, type TraceContext } from "../../../../../shared/llm-observability";
-import { searchChunksByBm25 } from "../../repository";
 import {
-  DEFAULT_BM25_TOP_K,
-  DEFAULT_VECTOR_TOP_K,
-} from "../constants";
+  endSpan,
+  startSpan,
+  type TraceContext,
+} from "../../../../../shared/llm-observability";
+import { searchChunksByBm25 } from "../../repository";
+import { DEFAULT_BM25_TOP_K, DEFAULT_VECTOR_TOP_K } from "../constants";
+import type { RetrievalCandidate } from "../../planner";
 import { requirePreparedRetrievalState } from "../state";
 import type { RetrievalPipelineStage } from "../types";
 
@@ -44,7 +46,9 @@ async function withRetrievalChildSpan<T>(input: {
       spanId: input.spanId,
       status: "ok",
       latencyMs: Date.now() - startedAt,
-      output: Array.isArray(output) ? { resultCount: output.length } : undefined,
+      output: Array.isArray(output)
+        ? { resultCount: output.length }
+        : undefined,
     });
     return output;
   } catch (error) {
@@ -65,13 +69,45 @@ function buildRetrievalChildSpanId(input: TraceContext, suffix: string) {
   return `${input.parentSpanId ?? "retrieval"}:${suffix}`;
 }
 
+function mergeCandidates(
+  generalCandidates: RetrievalCandidate[],
+  anchorCandidates: RetrievalCandidate[],
+) {
+  const merged = new Map<string, RetrievalCandidate>();
+
+  for (const candidate of generalCandidates) {
+    merged.set(candidate.chunkId, candidate);
+  }
+
+  for (const candidate of anchorCandidates) {
+    const existing = merged.get(candidate.chunkId);
+    if (!existing) {
+      merged.set(candidate.chunkId, candidate);
+      continue;
+    }
+    merged.set(candidate.chunkId, {
+      ...existing,
+      score: Math.max(existing.score, candidate.score),
+    });
+  }
+
+  return Array.from(merged.values());
+}
+
 export const searchCandidatesStage: RetrievalPipelineStage = {
   name: "search-candidates",
   async run(state) {
     const prepared = requirePreparedRetrievalState(state);
-    const { input, planner, profile, sourceIds } = prepared;
+    const {
+      anchorSourceIds,
+      input,
+      planner,
+      profile,
+      retrievalSourceIds,
+      sourceIds,
+    } = prepared;
 
-    if (sourceIds.length === 0) {
+    if (retrievalSourceIds.length === 0) {
       return state;
     }
 
@@ -80,7 +116,9 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
     let embeddingAuditMetadata = state.gateway.embedding;
 
     if (planner.strategy !== "bm25_only") {
-      const embeddingGateway = await getModelGatewayClient(profile.gatewayConfigId);
+      const embeddingGateway = await getModelGatewayClient(
+        profile.gatewayConfigId,
+      );
       const embedStartedAt = Date.now();
       const embedResult = await embeddingGateway.embeddings
         .embed(
@@ -155,12 +193,13 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
     }
 
     const bm25StartedAt = Date.now();
-    const runBm25 = () => searchChunksByBm25({
+    const runBm25 = () =>
+      searchChunksByBm25({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
         queryText: input.queryText,
         topK: DEFAULT_BM25_TOP_K,
-        sourceIds,
+        sourceIds: retrievalSourceIds,
       });
     const bm25Candidates = input.traceContext
       ? await withRetrievalChildSpan({
@@ -172,6 +211,7 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
           metadata: {
             topK: DEFAULT_BM25_TOP_K,
             sourceCount: sourceIds.length,
+            anchorOnly: sourceIds.length === 0 && anchorSourceIds.length > 0,
           },
           execute: runBm25,
         })
@@ -182,49 +222,86 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
     const runVectorSearch = async () =>
       planner.strategy === "ann_hnsw" && planner.requestedDimensions
         ? vectorSearchProvider.searchAnn({
-          teamId: input.teamId,
-          workspaceId: input.workspaceId,
-          embeddingProfileId: profile.id,
-          queryEmbedding,
-          dim: planner.requestedDimensions,
-          topK: DEFAULT_VECTOR_TOP_K,
-          sourceIds,
-        })
-        : planner.strategy !== "bm25_only"
-          ? vectorSearchProvider.searchExact({
             teamId: input.teamId,
             workspaceId: input.workspaceId,
             embeddingProfileId: profile.id,
             queryEmbedding,
+            dim: planner.requestedDimensions,
             topK: DEFAULT_VECTOR_TOP_K,
-            sourceIds,
+            sourceIds: retrievalSourceIds,
           })
+        : planner.strategy !== "bm25_only"
+          ? vectorSearchProvider.searchExact({
+              teamId: input.teamId,
+              workspaceId: input.workspaceId,
+              embeddingProfileId: profile.id,
+              queryEmbedding,
+              topK: DEFAULT_VECTOR_TOP_K,
+              sourceIds: retrievalSourceIds,
+            })
           : [];
-    const vectorCandidates = input.traceContext && planner.strategy !== "bm25_only"
-      ? await withRetrievalChildSpan({
-          traceContext: input.traceContext,
-          spanId: buildRetrievalChildSpanId(input.traceContext, "vector_search"),
-          name: "vector_search",
-          kind: "vector_search",
-          operation: "retrieval.vector_search",
-          metadata: {
-            strategy: planner.strategy,
-            embeddingProfileId: profile.id,
-            topK: DEFAULT_VECTOR_TOP_K,
-            sourceCount: sourceIds.length,
-          },
-          execute: runVectorSearch,
-        })
-      : await runVectorSearch();
+    const vectorCandidates =
+      input.traceContext && planner.strategy !== "bm25_only"
+        ? await withRetrievalChildSpan({
+            traceContext: input.traceContext,
+            spanId: buildRetrievalChildSpanId(
+              input.traceContext,
+              "vector_search",
+            ),
+            name: "vector_search",
+            kind: "vector_search",
+            operation: "retrieval.vector_search",
+            metadata: {
+              strategy: planner.strategy,
+              embeddingProfileId: profile.id,
+              topK: DEFAULT_VECTOR_TOP_K,
+              sourceCount: sourceIds.length,
+              anchorOnly: sourceIds.length === 0 && anchorSourceIds.length > 0,
+            },
+            execute: runVectorSearch,
+          })
+        : await runVectorSearch();
     const vectorLatencyMs = Date.now() - vectorStartedAt;
+    const shouldRunAnchorBranch =
+      sourceIds.length > 0 && anchorSourceIds.length > 0;
+    const anchorBm25Candidates = shouldRunAnchorBranch
+      ? await searchChunksByBm25({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          queryText: input.queryText,
+          topK: DEFAULT_BM25_TOP_K,
+          sourceIds: anchorSourceIds,
+        })
+      : [];
+    const anchorVectorCandidates =
+      shouldRunAnchorBranch && planner.strategy !== "bm25_only"
+        ? planner.strategy === "ann_hnsw" && planner.requestedDimensions
+          ? await vectorSearchProvider.searchAnn({
+              teamId: input.teamId,
+              workspaceId: input.workspaceId,
+              embeddingProfileId: profile.id,
+              queryEmbedding,
+              dim: planner.requestedDimensions,
+              topK: DEFAULT_VECTOR_TOP_K,
+              sourceIds: anchorSourceIds,
+            })
+          : await vectorSearchProvider.searchExact({
+              teamId: input.teamId,
+              workspaceId: input.workspaceId,
+              embeddingProfileId: profile.id,
+              queryEmbedding,
+              topK: DEFAULT_VECTOR_TOP_K,
+              sourceIds: anchorSourceIds,
+            })
+        : [];
 
     return {
       ...state,
       queryEmbedding,
       candidates: {
         ...state.candidates,
-        bm25: bm25Candidates,
-        vector: vectorCandidates,
+        bm25: mergeCandidates(bm25Candidates, anchorBm25Candidates),
+        vector: mergeCandidates(vectorCandidates, anchorVectorCandidates),
       },
       timings: {
         ...state.timings,

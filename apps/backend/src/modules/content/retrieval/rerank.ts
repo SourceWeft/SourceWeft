@@ -23,7 +23,7 @@ export async function rerankCandidates(input: {
   llm?: LlmExecutionConfig;
   traceContext?: TraceContext;
 }) {
-  if (input.candidates.length <= 1) {
+  if (input.candidates.length === 0) {
     return {
       candidates: input.candidates,
       modelAlias: null,
@@ -105,7 +105,10 @@ export async function rerankCandidates(input: {
     modelAlias: rerankProfile.modelAlias,
     llm: input.llm,
     provider: rerankResult.provider,
-    routeDecision: rerankResult.routeDecision as unknown as Record<string, unknown> | null,
+    routeDecision: rerankResult.routeDecision as unknown as Record<
+      string,
+      unknown
+    > | null,
     usage: rerankResult.usage,
     traceId: input.traceContext?.traceId,
     success: true,

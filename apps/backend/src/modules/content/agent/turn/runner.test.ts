@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeToolOutputForObservability } from "./runner";
+import { normalizeToolOutputForObservability, testExports } from "./runner";
 
 test("normalizes read_file ToolMessage output content for observability", () => {
   const output = normalizeToolOutputForObservability("read_file", {
@@ -89,4 +89,81 @@ test("normalizes all-failed web_fetch outputs to display-safe metadata", () => {
     ],
     truncated: false,
   });
+});
+
+test("filesystem tool titles classify glob scope from mounted pattern", () => {
+  assert.equal(
+    testExports.getFilesystemToolStartTitle("glob", { path: "/", pattern: "/work/**/*.md" }),
+    "Finding matching Workfiles",
+  );
+  assert.equal(
+    testExports.getFilesystemToolEndTitle("glob", { path: "/", pattern: "/skills/**/*.md" }),
+    "Found matching skill files",
+  );
+  assert.equal(
+    testExports.getFilesystemToolDescription(
+      "read_file",
+      { chunkCount: 1 },
+      { path: "/work/notes.md" },
+    ),
+    "Read 1 Workfile chunk.",
+  );
+  assert.equal(
+    testExports.getFilesystemToolDescription(
+      "read_file",
+      { chunkCount: 1 },
+      { path: "/kb/source.md", limit: 100 },
+    ),
+    "Read up to 100 source lines.",
+  );
+});
+
+test("runtime prompt maps selected source mention labels to kb paths", () => {
+  const prompt = testExports.buildAgentRuntimePrompt({
+    timezone: "UTC",
+    availableWebTools: [],
+    selectedSources: [
+      {
+        sourceId: "043e27f7-c8e0-438e-a47f-adcf8b06088e",
+        sourceType: "file_upload",
+        parentSourceId: null,
+        title: "043e27f7-c8e0-438e-a47f-adcf8b06088e.pdf",
+        fileName: "043e27f7-c8e0-438e-a47f-adcf8b06088e.pdf",
+        safeName: "043e27f7-c8e0-438e-a47f-adcf8b06088e",
+        shortId: "043e27f7",
+        filePath: "/kb/043e27f7-c8e0-438e-a47f-adcf8b06088e__src_043e27f7.md",
+        dirPath: "/kb/043e27f7-c8e0-438e-a47f-adcf8b06088e__src_043e27f7",
+        readmePath: null,
+        chunkCount: 4,
+        sizeBytes: 12000,
+        mimeType: "application/pdf",
+        updatedAt: "2026-05-09T00:00:00.000Z",
+      },
+    ],
+    selectedSourcesOmitted: 0,
+  });
+
+  assert.match(prompt, /<selected_source_manifest>/);
+  assert.match(prompt, /@043e27f7-c8e0-438e-a47f-adcf8b06088e\.pdf/);
+  assert.match(prompt, /kb_path="\/kb\/043e27f7-c8e0-438e-a47f-adcf8b06088e__src_043e27f7\.md"/);
+  assert.match(prompt, /Do not synthesize \/work\/<filename>/);
+  assert.match(prompt, /\/work contains only thread Workfiles/);
+});
+
+test("runtime prompt lists only available public web tools", () => {
+  const fetchOnlyPrompt = testExports.buildAgentRuntimePrompt({
+    timezone: "UTC",
+    availableWebTools: ["web_fetch"],
+  });
+  assert.match(fetchOnlyPrompt, /Available public web tools this turn: web_fetch\./);
+  assert.doesNotMatch(fetchOnlyPrompt, /web_search and web_fetch/);
+
+  const searchAndFetchPrompt = testExports.buildAgentRuntimePrompt({
+    timezone: "UTC",
+    availableWebTools: ["web_search", "web_fetch"],
+  });
+  assert.match(
+    searchAndFetchPrompt,
+    /Available public web tools this turn: web_search, web_fetch\./,
+  );
 });

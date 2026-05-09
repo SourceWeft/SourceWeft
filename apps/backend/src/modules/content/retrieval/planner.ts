@@ -13,6 +13,9 @@ export type RetrievalCandidate = {
   content: string;
   score: number;
   stage: "bm25" | "vector";
+  stages?: Array<"bm25" | "vector">;
+  contextRole?: "primary" | "neighbor" | "small_document";
+  primaryChunkId?: string;
 };
 
 export type RetrievalPlannerResult = {
@@ -40,9 +43,13 @@ export function reciprocalRankFusion(input: {
   limit: number;
   rrfK: number;
 }) {
+  type RrfCandidate = Omit<RetrievalCandidate, "stages"> & {
+    rrfScore: number;
+    stages: Set<"bm25" | "vector">;
+  };
   const scores = new Map<
     string,
-    RetrievalCandidate & { rrfScore: number; stages: Set<"bm25" | "vector"> }
+    RrfCandidate
   >();
 
   const accumulate = (candidates: RetrievalCandidate[]) => {
@@ -56,8 +63,9 @@ export function reciprocalRankFusion(input: {
         return;
       }
 
+      const { stages: _stages, ...candidateWithoutStages } = candidate;
       scores.set(candidate.chunkId, {
-        ...candidate,
+        ...candidateWithoutStages,
         rrfScore: rankScore,
         stages: new Set([candidate.stage]),
       });

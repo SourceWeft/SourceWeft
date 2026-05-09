@@ -1,6 +1,9 @@
 import type {
   BackendProtocolV2,
   EditResult,
+  FileDownloadResponse,
+  FileOperationError,
+  FileUploadResponse,
   GlobResult,
   GrepResult,
   LsResult,
@@ -42,6 +45,28 @@ function prefixMount(path: string, mount: string) {
   return `${mount}${path === "/" ? "/" : path}`.replace(/\/+/g, "/");
 }
 
+function fileOperationErrorFromMessage(message: string | undefined): FileOperationError {
+  const normalized = message?.toLowerCase() ?? "";
+  if (normalized.includes("enoent") || normalized.includes("not found") || normalized.includes("no such file")) {
+    return "file_not_found";
+  }
+  if (normalized.includes("eisdir") || normalized.includes("directory")) {
+    return "is_directory";
+  }
+  if (normalized.includes("erofs") || normalized.includes("read-only") || normalized.includes("not allowed")) {
+    return "permission_denied";
+  }
+  return "invalid_path";
+}
+
+function downloadError(path: string, error: FileOperationError): FileDownloadResponse {
+  return { path, content: null, error };
+}
+
+function uploadError(path: string, error: FileOperationError): FileUploadResponse {
+  return { path, error };
+}
+
 export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
   private readonly mounts: MountedBackend[];
   private readonly defaultMount: MountedBackend;
@@ -74,11 +99,25 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
 
   private route(path: string | null | undefined) {
     const value = path || this.defaultMount.capability.root;
-    return this.mounts.find((mount) => isMountPath(value, mount.capability.root)) ?? this.defaultMount;
+    return this.mounts.find((mount) => isMountPath(value, mount.capability.root)) ?? null;
+  }
+
+  private defaultRoute() {
+    return this.defaultMount;
+  }
+
+  private routeOrDefault(path: string | null | undefined) {
+    return this.route(path) ?? this.defaultMount;
   }
 
   private writableRoute(path: string) {
     return this.writableMounts.find((mount) => isMountPath(path, mount.capability.root));
+  }
+
+  private delegatePath(path: string, mount: MountedBackend) {
+    return mount.capability.root === SKILLS_MOUNT.root
+      ? stripMount(path, mount.capability.root)
+      : path;
   }
 
   async ls(path = "/"): Promise<LsResult> {
@@ -89,7 +128,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
           .sort((a, b) => a.path.localeCompare(b.path)),
       };
     }
-    const mount = this.route(path);
+    const mount = this.routeOrDefault(path);
     if (mount.capability.root === SKILLS_MOUNT.root) {
       const result = await mount.backend.ls(stripMount(path, mount.capability.root));
       if (result.error) return result;
@@ -104,7 +143,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
   }
 
   async read(filePath: string, offset?: number, limit?: number): Promise<ReadResult> {
-    const mount = this.route(filePath);
+    const mount = this.routeOrDefault(filePath);
     if (mount.capability.root === SKILLS_MOUNT.root) {
       return mount.backend.read(stripMount(filePath, mount.capability.root), offset, limit);
     }
@@ -112,7 +151,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
   }
 
   async readRaw(filePath: string): Promise<ReadRawResult> {
-    const mount = this.route(filePath);
+    const mount = this.routeOrDefault(filePath);
     if (mount.capability.root === SKILLS_MOUNT.root) {
       return mount.backend.readRaw(stripMount(filePath, mount.capability.root));
     }
@@ -127,7 +166,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
     if (path === "/") {
       return this.defaultMount.backend.grep(pattern, this.defaultMount.capability.root, glob);
     }
-    const mount = this.route(path);
+    const mount = this.routeOrDefault(path);
     if (mount.capability.root === SKILLS_MOUNT.root) {
       const result = await mount.backend.grep(
         pattern,
@@ -147,7 +186,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
 
   async glob(pattern: string, path = "/"): Promise<GlobResult> {
     if (path === "/") {
-      const patternMount = this.route(pattern);
+      const patternMount = this.route(pattern) ?? this.defaultRoute();
       if (isMountPath(pattern, patternMount.capability.root)) {
         if (patternMount.capability.root === SKILLS_MOUNT.root) {
           const result = await patternMount.backend.glob(
@@ -166,7 +205,7 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
       }
       return this.defaultMount.backend.glob(pattern, this.defaultMount.capability.root);
     }
-    const mount = this.route(path);
+    const mount = this.routeOrDefault(path);
     if (mount.capability.root === SKILLS_MOUNT.root) {
       const result = await mount.backend.glob(
         pattern,
@@ -206,5 +245,108 @@ export class MountedAgentFilesystemBackend implements BackendProtocolV2 {
       };
     }
     return mount.backend.edit(filePath, oldString, newString, replaceAll);
+  }
+
+  async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {
+    const results = Array.from({ length: paths.length }, () => null as FileDownloadResponse | null);
+    const batches = new Map<BackendProtocolV2, Array<{ index: number; path: string; originalPath: string }>>();
+
+    paths.forEach((path, index) => {
+      const mount = this.route(path);
+      if (!mount) {
+        results[index] = downloadError(path, "invalid_path");
+        return;
+      }
+      const routedPath = this.delegatePath(path, mount);
+      const batch = batches.get(mount.backend) ?? [];
+      batch.push({ index, path: routedPath, originalPath: path });
+      batches.set(mount.backend, batch);
+    });
+
+    const encoder = new TextEncoder();
+    for (const [backend, batch] of batches) {
+      const mount = this.mounts.find((item) => item.backend === backend);
+      if (mount?.capability.citable) {
+        batch.forEach((item) => {
+          results[item.index] = downloadError(item.originalPath, "permission_denied");
+        });
+        continue;
+      }
+
+      if (backend.downloadFiles) {
+        const responses = await backend.downloadFiles(batch.map((item) => item.path));
+        batch.forEach((item, batchIndex) => {
+          const response = responses[batchIndex];
+          results[item.index] = {
+            path: item.originalPath,
+            content: response?.content ?? null,
+            error: response?.error ?? "file_not_found",
+          };
+        });
+        continue;
+      }
+
+      await Promise.all(
+        batch.map(async (item) => {
+          const raw = await backend.readRaw(item.path);
+          if (raw.error || !raw.data) {
+            results[item.index] = downloadError(item.originalPath, fileOperationErrorFromMessage(raw.error));
+            return;
+          }
+          const content = raw.data.content;
+          const text = Array.isArray(content) ? content.join("\n") : content;
+          results[item.index] = {
+            path: item.originalPath,
+            content: typeof text === "string" ? encoder.encode(text) : text,
+            error: null,
+          };
+        }),
+      );
+    }
+
+    return results.map((result, index) => result ?? downloadError(paths[index] ?? "", "invalid_path"));
+  }
+
+  async uploadFiles(files: Array<[string, Uint8Array]>): Promise<FileUploadResponse[]> {
+    const results = Array.from({ length: files.length }, () => null as FileUploadResponse | null);
+    const batches = new Map<BackendProtocolV2, Array<{ index: number; path: string; originalPath: string; content: Uint8Array }>>();
+
+    files.forEach(([path, content], index) => {
+      const mount = this.writableRoute(path);
+      if (!mount) {
+        results[index] = uploadError(path, "permission_denied");
+        return;
+      }
+      const routedPath = this.delegatePath(path, mount);
+      const batch = batches.get(mount.backend) ?? [];
+      batch.push({ index, path: routedPath, originalPath: path, content });
+      batches.set(mount.backend, batch);
+    });
+
+    const decoder = new TextDecoder();
+    for (const [backend, batch] of batches) {
+      if (backend.uploadFiles) {
+        const responses = await backend.uploadFiles(batch.map((item) => [item.path, item.content]));
+        batch.forEach((item, batchIndex) => {
+          const response = responses[batchIndex];
+          results[item.index] = {
+            path: item.originalPath,
+            error: response?.error ?? null,
+          };
+        });
+        continue;
+      }
+
+      await Promise.all(
+        batch.map(async (item) => {
+          const write = await backend.write(item.path, decoder.decode(item.content));
+          results[item.index] = write.error
+            ? uploadError(item.originalPath, fileOperationErrorFromMessage(write.error))
+            : { path: item.originalPath, error: null };
+        }),
+      );
+    }
+
+    return results.map((result, index) => result ?? uploadError(files[index]?.[0] ?? "", "invalid_path"));
   }
 }

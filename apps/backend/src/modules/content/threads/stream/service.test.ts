@@ -246,6 +246,8 @@ const prepared: PreparedThreadTurn = {
     updatedAt: new Date(0).toISOString(),
   },
   messageContent: "What is in this invoice?",
+  mentionedSourceIds: [],
+  effectiveMentionedSourceIds: [],
   selectedSourceIds: [],
   sourceIds: [],
   sourceScope: {

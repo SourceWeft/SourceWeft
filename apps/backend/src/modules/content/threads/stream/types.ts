@@ -5,6 +5,7 @@ export type RefreshThreadInput = {
   workspaceId: string;
   threadId: string;
   userId: string;
+  mentionedSourceIds?: string[];
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
   timezone?: string;

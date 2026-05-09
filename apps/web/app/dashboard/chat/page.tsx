@@ -1,16 +1,8 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  PanelRightClose,
-  PanelRightOpen,
-} from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { useDashboardChatState } from "../_components/dashboard-chat-state";
@@ -27,7 +19,9 @@ import {
 import {
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
+  type ChatSendInput,
   type ChatSkillItem,
+  type PromptInputMentionSourceLoader,
   type PromptThinkingSettings,
 } from "./_components/chat-canvas";
 import { SourcesHub } from "./_components/sources-hub";
@@ -46,11 +40,21 @@ const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
 
+function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
+  return [
+    ...new Set(
+      sourceIdGroups.flatMap((sourceIds) => sourceIds ?? []).filter(Boolean),
+    ),
+  ];
+}
+
 function getSearchPreferenceStorageKey(workspaceId: string) {
   return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
 }
 
-function parseStoredThinkingSettings(value: string | null): PromptThinkingSettings | null {
+function parseStoredThinkingSettings(
+  value: string | null,
+): PromptThinkingSettings | null {
   if (!value) {
     return null;
   }
@@ -94,7 +98,11 @@ function buildPendingThinking(input: {
   }
 
   if (input.settings.mode === "effort") {
-    if (!(input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+    if (
+      !(input.capabilities?.supportedEfforts ?? []).includes(
+        input.settings.effort,
+      )
+    ) {
       return {
         mode: "auto",
       };
@@ -133,7 +141,9 @@ function normalizeThinkingSettingsForModel(input: {
     return input.settings;
   }
 
-  if ((input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)) {
+  if (
+    (input.capabilities?.supportedEfforts ?? []).includes(input.settings.effort)
+  ) {
     return input.settings;
   }
 
@@ -160,20 +170,47 @@ export default function DashboardChatPage() {
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
   );
-  const [availableModels, setAvailableModels] = useState<Record<ModelType, ModelItem[]>>(
-    emptyModelCatalog,
-  );
+  const [availableModels, setAvailableModels] =
+    useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
-  const [thinkingSettings, setThinkingSettings] = useState<PromptThinkingSettings>(
-    DEFAULT_PROMPT_THINKING_SETTINGS,
-  );
-  const [hasSavedThinkingPreference, setHasSavedThinkingPreference] = useState(false);
+  const [thinkingSettings, setThinkingSettings] =
+    useState<PromptThinkingSettings>(DEFAULT_PROMPT_THINKING_SETTINGS);
+  const [hasSavedThinkingPreference, setHasSavedThinkingPreference] =
+    useState(false);
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
     string | null
   >(null);
+  const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
+    async ({ cursor, limit, query }) => {
+      if (!workspaceId) {
+        return { items: [], nextCursor: null };
+      }
+
+      const result = await contentClient.listSourceMentions(workspaceId, {
+        cursor: cursor ?? undefined,
+        limit,
+        query: query || undefined,
+      });
+      return {
+        items: result.items.map((source) => ({
+          id: source.id,
+          meta:
+            source.status === "failed"
+              ? "Processing failed"
+              : source.status === "queued" || source.status === "processing"
+                ? "Sync in progress"
+                : new Date(source.updatedAt).toLocaleString(),
+          title: source.title || "Untitled",
+          type: source.mimeType ?? source.sourceType,
+        })),
+        nextCursor: result.nextCursor,
+      };
+    },
+    [workspaceId],
+  );
 
   useBrowserLayoutEffect(() => {
     startNewChat();
@@ -195,7 +232,8 @@ export default function DashboardChatPage() {
 
     async function loadModelCatalog() {
       try {
-        const catalog = await contentClient.listThreadModelCatalog(activeWorkspaceId);
+        const catalog =
+          await contentClient.listThreadModelCatalog(activeWorkspaceId);
         if (cancelled) {
           return;
         }
@@ -262,7 +300,7 @@ export default function DashboardChatPage() {
             sourceType: skill.sourceType,
             version: skill.version,
             hasReadme: skill.hasReadme,
-        }));
+          }));
         setAvailableSkills(enabledSkills);
 
         const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
@@ -289,7 +327,9 @@ export default function DashboardChatPage() {
       return;
     }
 
-    const raw = window.sessionStorage.getItem(`chat:sources:${workspaceId}:current`);
+    const raw = window.sessionStorage.getItem(
+      `chat:sources:${workspaceId}:current`,
+    );
     if (!raw) {
       setActiveSourceIds([]);
       return;
@@ -375,22 +415,30 @@ export default function DashboardChatPage() {
     );
   }, [hasSavedThinkingPreference, selectedModels.llm]);
 
-  const handleThinkingSettingsChange = useCallback((settings: PromptThinkingSettings) => {
-    setHasSavedThinkingPreference(true);
-    setThinkingSettings(settings);
-  }, []);
+  const handleThinkingSettingsChange = useCallback(
+    (settings: PromptThinkingSettings) => {
+      setHasSavedThinkingPreference(true);
+      setThinkingSettings(settings);
+    },
+    [],
+  );
 
-  const selectedSources = expandSelectedSources(librarySources, activeSourceIds);
+  const selectedSources = expandSelectedSources(
+    librarySources,
+    activeSourceIds,
+  );
 
   const handleSendMessage = useCallback(
-    async (content: string) => {
+    async (input: ChatSendInput) => {
       if (!workspaceId) {
         toast.error("No workspace selected yet.");
         return;
       }
 
-      const text = content.trim();
+      const text = input.content.trim();
       if (!text) return;
+      const sourceIds = mergeSourceIds(activeSourceIds);
+      const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
 
       const modelSettings: ModelAliasSettings = {};
       if (catalogKindEnabled.llm && selectedModels.llm) {
@@ -418,7 +466,8 @@ export default function DashboardChatPage() {
         `chat:pending:${thread.id}`,
         JSON.stringify({
           content: text,
-          sourceIds: activeSourceIds,
+          mentionedSourceIds,
+          sourceIds,
           skillIds: activeSkillIds,
           thinking: buildPendingThinking({
             capabilities: selectedModels.llm?.capabilities,
@@ -511,6 +560,8 @@ export default function DashboardChatPage() {
           onSendMessage={handleSendMessage}
           searchEnabled={searchEnabled}
           onSearchEnabledChange={setSearchEnabled}
+          allSources={librarySources}
+          sourceMentionLoader={loadSourceMentions}
           selectedSources={selectedSources}
           selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
