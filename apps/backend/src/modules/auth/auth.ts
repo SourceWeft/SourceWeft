@@ -5,6 +5,7 @@ import {
   jwt,
   magicLink,
   multiSession,
+  oneTimeToken,
   oneTap,
   organization,
   twoFactor,
@@ -572,6 +573,10 @@ export const auth: any = betterAuth({
           messageType: "auth.magic-link",
         });
       },
+    }),
+    oneTimeToken({
+      expiresIn: 1,
+      storeToken: "hashed",
     }),
     passkey({
       rpID: config.auth.passkey.rpId,

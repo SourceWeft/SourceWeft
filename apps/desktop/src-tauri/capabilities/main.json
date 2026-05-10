@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Main SourceWeft desktop window capability.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-desktop-info",
+    "allow-show-main-window",
+    "allow-get-autostart",
+    "allow-set-autostart",
+    "allow-open-external-url"
+  ]
+}

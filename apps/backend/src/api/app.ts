@@ -12,6 +12,7 @@ import { ApiError, ApiResponse, toApiError } from "./response/api-response";
 import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
+import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
@@ -72,6 +73,7 @@ export function createApp() {
   });
 
   registerAuthMetaRoutes(app);
+  registerDesktopAuthRoutes(app);
   registerWorkspaceRoutes(app);
   registerBillingRoutes(app);
   registerContentRoutes(app);

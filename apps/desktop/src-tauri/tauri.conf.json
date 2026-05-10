@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "identifier": "nicelab.sourceweft",
   "build": {
-    "frontendDist": "../dist"
+    "devUrl": "http://localhost:3000/dashboard",
+    "frontendDist": "../placeholder-dist"
   },
   "bundle": {
     "active": true,
@@ -14,15 +15,35 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   },
   "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": null
+    },
     "windows": [
       {
+        "label": "main",
         "title": "SourceWeft",
         "width": 1200,
-        "height": 800
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "visible": true,
+        "create": false
       }
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["sourceweft"]
+      }
+    }
   }
 }

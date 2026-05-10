@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { useRouter } from "next/navigation";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
@@ -55,6 +56,10 @@ import {
   expandSelectedSources,
   type SourceItem,
 } from "../_components/source-types";
+import {
+  desktopBridge,
+  handleDesktopAuthDeepLink,
+} from "../../../../lib/desktop-bridge";
 import { contentClient } from "../../../../lib/sdk";
 import { HttpClientError } from "@sourceweft/sdk";
 
@@ -1296,6 +1301,7 @@ export default function DashboardChatThreadPage({
 }: {
   params: Promise<{ threadId: string }>;
 }) {
+  const router = useRouter();
   const { threadId } = use(params);
 
   const {
@@ -1417,6 +1423,36 @@ export default function DashboardChatThreadPage({
     setComposerInitialInput("");
     setComposerResetKey((value) => value + 1);
   }, [clearEditingState]);
+
+  useEffect(() => {
+    if (!desktopBridge.isAvailable()) {
+      return;
+    }
+
+    const cleanupTask = desktopBridge.onDeepLink((payload) => {
+      const url = payload.url.trim();
+      if (!url) {
+        return;
+      }
+
+      void handleDesktopAuthDeepLink({
+        url,
+        onSuccess: () => {
+          router.replace("/dashboard");
+          router.refresh();
+        },
+        onError: (message) => toast.error(message),
+      }).then((handled) => {
+        if (handled) {
+          return;
+        }
+      });
+    });
+
+    return () => {
+      cleanupTask.then((cleanup) => void cleanup()).catch(() => {});
+    };
+  }, [router]);
 
   useEffect(() => {
     setThinkingSettings((current) =>

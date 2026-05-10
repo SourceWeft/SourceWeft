@@ -29,6 +29,10 @@ import {
   expandSelectedSources,
   type SourceItem,
 } from "./_components/source-types";
+import {
+  desktopBridge,
+  handleDesktopAuthDeepLink,
+} from "../../../lib/desktop-bridge";
 import { contentClient } from "../../../lib/sdk";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
@@ -274,6 +278,36 @@ export default function DashboardChatPage() {
       cancelled = true;
     };
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (!desktopBridge.isAvailable()) {
+      return;
+    }
+
+    const cleanupTask = desktopBridge.onDeepLink((payload) => {
+      const url = payload.url.trim();
+      if (!url) {
+        return;
+      }
+
+      void handleDesktopAuthDeepLink({
+        url,
+        onSuccess: () => {
+          router.replace("/dashboard");
+          router.refresh();
+        },
+        onError: (message) => toast.error(message),
+      }).then((handled) => {
+        if (handled) {
+          return;
+        }
+      });
+    });
+
+    return () => {
+      cleanupTask.then((cleanup) => void cleanup()).catch(() => {});
+    };
+  }, [router]);
 
   const loadAvailableSkills = useCallback(async () => {
     const loadGeneration = ++skillsLoadGenerationRef.current;

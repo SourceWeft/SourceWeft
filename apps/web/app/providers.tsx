@@ -2,6 +2,7 @@
 
 import { AuthUIProvider } from "@daveyplate/better-auth-ui";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
+import type { SocialProvider } from "better-auth/social-providers";
 import Link from "next/link";
 import { ThemeProvider } from "next-themes";
 import { useRouter } from "next/navigation";
@@ -116,7 +117,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           fields: ["name"],
         }}
         social={{
-          providers: ["google", "github"],
+          providers: ["google", "github"] satisfies SocialProvider[],
         }}
         toast={({ message, variant }) => {
           if (variant === "error" && shouldIgnoreCancelledPasskey(message)) {
