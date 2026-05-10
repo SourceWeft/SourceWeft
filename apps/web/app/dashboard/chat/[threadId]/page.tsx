@@ -1601,6 +1601,8 @@ export default function DashboardChatThreadPage({
           sourceType: skill.sourceType,
           version: skill.version,
           hasReadme: skill.hasReadme,
+          capabilities: skill.capabilities,
+          defaultConfig: skill.defaultConfig,
         }));
       setAvailableSkills(enabledSkills);
 
@@ -2050,6 +2052,7 @@ export default function DashboardChatThreadPage({
       mentionedSourceIds?: string[];
       sourceIds: string[];
       skillIds?: string[];
+      artifact?: ChatSendInput["artifact"];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
       thinking?: RequestThinkingConfig;
@@ -2102,6 +2105,7 @@ export default function DashboardChatThreadPage({
             tools: {
               skillIds: input.skillIds ?? [],
               webSearchEnabled: input.searchEnabled ?? searchEnabled,
+              ...(input.artifact ? { artifact: input.artifact } : {}),
             },
             versionOf:
               input.mode === "edit"
@@ -2146,6 +2150,7 @@ export default function DashboardChatThreadPage({
       let persistedUserMessageId = tempUserId ?? input.userMessageId ?? null;
       let createdUserMessageId: string | null = tempUserId;
       let persistedAssistantMessageId: string | null = null;
+      let hasServerPersistedAssistantMessage = false;
       let shouldPollThreadTitle = false;
       let pendingTitleJobId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
@@ -2153,6 +2158,125 @@ export default function DashboardChatThreadPage({
       const refreshedWorkfileToolIds = new Set<string>();
       let streamingAssistantMessageId = tempAssistantId;
       let preparedEffectiveSourceIds: string[] | null = null;
+      let buffer = "";
+      let assistantText = "";
+      let latestAssistantMessageContent = "";
+      let streamError: Error | null = null;
+      let hasRenderedDelta = false;
+      const deltaQueue: string[] = [];
+      let streamEnded = false;
+      let drainPromise: Promise<void> | null = null;
+
+      const waitForAnimationFrame = () =>
+        new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve());
+        });
+
+      const syncLatestAssistantMessageContent = () => {
+        setMessages((previous) => {
+          const message = previous.find(
+            (item) => item.id === streamingAssistantMessageId,
+          );
+          latestAssistantMessageContent = message?.content ?? assistantText;
+          return previous;
+        });
+      };
+
+      const drainQueuedDeltasNow = () => {
+        if (deltaQueue.length === 0) {
+          syncLatestAssistantMessageContent();
+          return;
+        }
+
+        while (deltaQueue.length > 0) {
+          assistantText += deltaQueue.shift() ?? "";
+        }
+        latestAssistantMessageContent = assistantText;
+        flushSync(() => {
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === streamingAssistantMessageId
+                ? { ...message, content: assistantText }
+                : message,
+            ),
+          );
+        });
+      };
+
+      const markStreamingAssistantAsError = (errorInput: {
+        code?: string | null;
+        error: string;
+        messageId?: string | null;
+        parentMessageId?: string | null;
+        parentMessageIdProvided?: boolean;
+        serverPersisted?: boolean;
+        userMessageId?: string | null;
+      }) => {
+        drainQueuedDeltasNow();
+        if (streamToolCallsById.size > 0) {
+          for (const [toolId, toolCall] of streamToolCallsById.entries()) {
+            if (toolCall.status === "running") {
+              streamToolCallsById.set(toolId, {
+                ...toolCall,
+                status: "error",
+                error: toolCall.error ?? "Tool execution failed.",
+              });
+            }
+          }
+        }
+        if (streamThinkingStepsById.size > 0) {
+          for (const [stepId, step] of streamThinkingStepsById.entries()) {
+            if (step.status === "in_progress") {
+              streamThinkingStepsById.set(stepId, {
+                ...step,
+                status: "completed",
+              });
+            }
+          }
+        }
+
+        const previousAssistantMessageId = streamingAssistantMessageId;
+        const messageId = errorInput.messageId || previousAssistantMessageId;
+        const userMessageId = errorInput.userMessageId ?? persistedUserMessageId;
+        persistedAssistantMessageId = messageId;
+        hasServerPersistedAssistantMessage = errorInput.serverPersisted === true;
+        streamingAssistantMessageId = messageId;
+        flushSync(() => {
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === previousAssistantMessageId
+                ? {
+                    ...message,
+                    id: messageId,
+                    content: latestAssistantMessageContent,
+                    parentMessageId:
+                      errorInput.parentMessageIdProvided === true
+                        ? (errorInput.parentMessageId ?? null)
+                        : message.parentMessageId,
+                    metadata: {
+                      ...message.metadata,
+                      isError: true,
+                      excludeFromContext: true,
+                      error: errorInput.error,
+                      errorCode: errorInput.code ?? null,
+                      userMessageId,
+                      sourceUserMessageId: userMessageId,
+                      [STREAM_TEXT_PAUSED_KEY]: false,
+                      [STREAM_TEXT_INTERRUPTED_KEY]: false,
+                      toolCalls: [...streamToolCallsById.values()].filter(
+                        (toolCall) =>
+                          shouldRenderToolCall(toolCall, [
+                            ...streamThinkingStepsById.values(),
+                          ]),
+                      ),
+                      thinkingSteps: [...streamThinkingStepsById.values()],
+                    },
+                  }
+                : message,
+            ),
+          );
+        });
+      };
 
       try {
         const requestBody: Record<string, unknown> = {
@@ -2167,6 +2291,7 @@ export default function DashboardChatThreadPage({
         requestBody.tools = {
           skillIds: selectedSkillIds,
           webSearchEnabled: input.searchEnabled ?? searchEnabled,
+          ...(input.artifact ? { artifact: input.artifact } : {}),
         };
         const selectedLlmProfileAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
@@ -2223,14 +2348,6 @@ export default function DashboardChatThreadPage({
         }
 
         const decoder = new TextDecoder();
-        let buffer = "";
-        let assistantText = "";
-        let streamError: Error | null = null;
-        let hasRenderedDelta = false;
-        const deltaQueue: string[] = [];
-        let streamEnded = false;
-        let drainPromise: Promise<void> | null = null;
-
         const pollThreadTitleJob = async (jobId: string) => {
           const startedAt = Date.now();
           while (Date.now() - startedAt < TITLE_POLL_TIMEOUT_MS) {
@@ -2261,11 +2378,6 @@ export default function DashboardChatThreadPage({
           }
         };
 
-        const waitForAnimationFrame = () =>
-          new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
-
         const startDeltaDrain = () => {
           if (drainPromise) {
             return;
@@ -2284,6 +2396,7 @@ export default function DashboardChatThreadPage({
               }
 
               assistantText += nextDelta;
+              latestAssistantMessageContent = assistantText;
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
@@ -2666,64 +2779,19 @@ export default function DashboardChatThreadPage({
               pendingTitleJobId =
                 typeof data.jobId === "string" ? data.jobId : null;
             } else if (data.type === "error") {
-              if (streamToolCallsById.size > 0) {
-                for (const [
-                  toolId,
-                  toolCall,
-                ] of streamToolCallsById.entries()) {
-                  if (toolCall.status === "running") {
-                    streamToolCallsById.set(toolId, {
-                      ...toolCall,
-                      status: "error",
-                      error: toolCall.error ?? "Tool execution failed.",
-                    });
-                  }
-                }
-                syncStreamingToolCalls();
-              }
               const errorMessage = data.error ?? "Model error";
-              persistedAssistantMessageId =
-                typeof data.messageId === "string" ? data.messageId : null;
-              const messageId = persistedAssistantMessageId ?? tempAssistantId;
-              const userMessageId =
-                data.userMessageId ?? persistedUserMessageId;
-              const previousAssistantMessageId = streamingAssistantMessageId;
-              streamingAssistantMessageId = messageId;
-              flushSync(() => {
-                setMessages((previous) =>
-                  previous.map((message) =>
-                    message.id === previousAssistantMessageId
-                      ? {
-                          ...message,
-                          id: messageId,
-                          content: assistantText,
-                          parentMessageId:
-                            data.parentMessageId === undefined
-                              ? message.parentMessageId
-                              : data.parentMessageId,
-                          metadata: {
-                            ...message.metadata,
-                            isError: true,
-                            excludeFromContext: true,
-                            error: errorMessage,
-                            errorCode: data.code ?? null,
-                            userMessageId,
-                            sourceUserMessageId: userMessageId,
-                            [STREAM_TEXT_PAUSED_KEY]: false,
-                            toolCalls: [...streamToolCallsById.values()].filter(
-                              (toolCall) =>
-                                shouldRenderToolCall(toolCall, [
-                                  ...streamThinkingStepsById.values(),
-                                ]),
-                            ),
-                            thinkingSteps: [
-                              ...streamThinkingStepsById.values(),
-                            ],
-                          },
-                        }
-                      : message,
-                  ),
-                );
+              markStreamingAssistantAsError({
+                code: data.code ?? null,
+                error: errorMessage,
+                messageId:
+                  typeof data.messageId === "string" ? data.messageId : null,
+                parentMessageId:
+                  data.parentMessageId === undefined
+                    ? null
+                    : data.parentMessageId,
+                parentMessageIdProvided: data.parentMessageId !== undefined,
+                serverPersisted: typeof data.messageId === "string",
+                userMessageId: data.userMessageId ?? persistedUserMessageId,
               });
               streamError = new Error(errorMessage);
               streamEnded = true;
@@ -2853,6 +2921,13 @@ export default function DashboardChatThreadPage({
       } catch (error) {
         const errorMessage = getDisplayErrorMessage(error);
         if (!persistedAssistantMessageId) {
+          markStreamingAssistantAsError({
+            error: errorMessage,
+            userMessageId: persistedUserMessageId,
+          });
+        }
+
+        if (!persistedAssistantMessageId) {
           setMessages((previous) => {
             const withoutFailedTemporaryMessages = previous.filter(
               (message) =>
@@ -2861,7 +2936,7 @@ export default function DashboardChatThreadPage({
             );
             return withoutFailedTemporaryMessages;
           });
-        } else {
+        } else if (hasServerPersistedAssistantMessage) {
           window.setTimeout(() => {
             void loadThreadMessages();
           }, 0);
@@ -2933,6 +3008,7 @@ export default function DashboardChatThreadPage({
           mentionedSourceIds,
           sourceIds,
           skillIds,
+          artifact,
           thinking,
           thinkingSettings: pendingThinkingSettings,
           searchEnabled: pendingSearchEnabled,
@@ -2942,6 +3018,7 @@ export default function DashboardChatThreadPage({
           mentionedSourceIds?: string[];
           sourceIds: string[];
           skillIds?: string[];
+          artifact?: ChatSendInput["artifact"];
           thinking?: RequestThinkingConfig;
           thinkingSettings?: PromptThinkingSettings;
           searchEnabled?: boolean;
@@ -2993,6 +3070,7 @@ export default function DashboardChatThreadPage({
           mentionedSourceIds: pendingMentionedSourceIds,
           sourceIds: pendingSourceIds,
           skillIds: pendingSkillIds,
+          artifact,
           thinking,
           searchEnabled: pendingSearchEnabled === true,
         });
@@ -3147,6 +3225,7 @@ export default function DashboardChatThreadPage({
           mentionedSourceIds,
           sourceIds: mergedEditSourceIds,
           skillIds: activeSkillIds,
+          artifact: input.artifact,
           searchEnabled,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
@@ -3160,6 +3239,7 @@ export default function DashboardChatThreadPage({
         mentionedSourceIds,
         sourceIds: sendSourceIds,
         skillIds: activeSkillIds,
+        artifact: input.artifact,
         searchEnabled,
       });
     },
@@ -3328,6 +3408,8 @@ export default function DashboardChatThreadPage({
           selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
           thinkingCapabilities={selectedModels.llm?.capabilities}
+          imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
+          imageModelAvailable={Boolean(selectedModels.image)}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle={threadTitle}

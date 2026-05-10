@@ -258,6 +258,21 @@ const prepared: PreparedThreadTurn = {
   },
   skillIds: [],
   webSearchEnabled: false,
+  artifact: undefined,
+  artifactIntent: {
+    kind: null,
+    shouldInjectTool: false,
+    source: "none",
+    confidence: 0,
+    reason: "No artifact generation intent detected.",
+    config: {
+      aspectRatio: "auto",
+      quality: "auto",
+      style: "auto",
+    },
+    warnings: [],
+  },
+  imageProfile: null,
   timezone: "UTC",
   enabledSkills: [],
   runTraceId: "user-message-1",
@@ -725,6 +740,7 @@ test("streamThreadEvents persists send errors as assistant error messages", asyn
 
 test("streamThreadEvents preserves partial assistant content for persisted errors", async () => {
   let partialAssistantContent: string | undefined;
+  let partialState: Record<string, unknown> | undefined;
   const turnService = createTurnService();
 
   const service = new ContentThreadStreamService(
@@ -732,6 +748,45 @@ test("streamThreadEvents preserves partial assistant content for persisted error
       typeof ContentThreadStreamService
     >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "reasoning",
+        reasoning: "I found the invoice total.",
+        segment: {
+          id: "model-reasoning-1",
+          text: "I found the invoice total.",
+          sequence: 0,
+        },
+      };
+      yield {
+        type: "thinking-step",
+        step: {
+          id: "step-1",
+          title: "Checking invoice",
+          status: "in_progress",
+          items: ["invoice.pdf"],
+          sequence: 1,
+        },
+      };
+      yield {
+        type: "tool-call-start",
+        id: "tool-1",
+        tool: "search_sources",
+        input: { query: "invoice total" },
+        toolCall: {
+          id: "tool-1",
+          tool: "search_sources",
+          input: { query: "invoice total" },
+          output: null,
+          status: "running",
+          latencyMs: null,
+          error: null,
+          sequence: 2,
+        },
+      };
+      yield {
+        type: "citations",
+        citations: [citation],
+      };
       yield {
         type: "text-delta",
         delta: "Partial answer before failure.",
@@ -741,6 +796,7 @@ test("streamThreadEvents preserves partial assistant content for persisted error
     async () => null,
     async (input) => {
       partialAssistantContent = input.partialAssistantContent;
+      partialState = input.partialState as Record<string, unknown>;
       return {
         id: "assistant-error-1",
         teamId: "team-1",
@@ -773,27 +829,80 @@ test("streamThreadEvents preserves partial assistant content for persisted error
 
   assert.equal(textDeltaEvent?.delta, "Partial answer before failure.");
   assert.equal(partialAssistantContent, "Partial answer before failure.");
+  assert.equal(partialState?.reasoning, "I found the invoice total.");
+  assert.deepEqual(partialState?.reasoningSegments, [
+    {
+      id: "model-reasoning-1",
+      text: "I found the invoice total.",
+      sequence: 0,
+    },
+  ]);
+  assert.deepEqual(partialState?.thinkingSteps, [
+    {
+      id: "step-1",
+      title: "Checking invoice",
+      status: "completed",
+      items: ["invoice.pdf"],
+      sequence: 1,
+    },
+  ]);
+  assert.deepEqual(partialState?.toolCalls, [
+    {
+      id: "tool-1",
+      tool: "search_sources",
+      input: { query: "invoice total" },
+      output: null,
+      status: "error",
+      latencyMs: null,
+      error: "Tool execution failed.",
+      sequence: 2,
+    },
+  ]);
+  assert.deepEqual(partialState?.citations, [citation]);
+  assert.deepEqual(partialState?.availableCitations, [citation]);
   assert.equal(errorEvent?.messageId, "assistant-error-1");
 });
 
-test("streamThreadEvents treats refresh/edit errors as transient", async () => {
-  const transientPrepared = createPrepared({
-    failurePersistence: "transient",
+test("streamThreadEvents persists edit errors as latest assistant versions", async () => {
+  const editPrepared = createPrepared({
+    createdUserMessage: true,
+    assistantMessageParentId: "assistant-error-1",
+    userMessage: {
+      ...prepared.userMessage,
+      id: "user-message-2",
+      parentMessageId: "user-message-1",
+      content: "Edited question",
+    },
+    messageContent: "Edited question",
+    runTraceId: "user-message-2",
   });
-  let createErrorMessageCalled = false;
-  const turnService = createTurnService({ prepared: transientPrepared });
+  let latestErrorMessage = "";
+  const turnService = createTurnService({ prepared: editPrepared });
 
   const service = new ContentThreadStreamService(
     turnService as unknown as ConstructorParameters<
       typeof ContentThreadStreamService
     >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
-      throw new Error("provider exploded");
+      throw new Error("provider exploded again");
     },
     async () => null,
-    async () => {
-      createErrorMessageCalled = true;
-      return null;
+    async (input) => {
+      latestErrorMessage = input.contentError.message;
+      return {
+        id: "assistant-error-2",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        threadId: "thread-1",
+        parentMessageId: "assistant-error-1",
+        role: "assistant",
+        content: "provider exploded again",
+        createdBy: null,
+        model: "test-model",
+        creditsConsumed: 0,
+        metadata: {},
+        createdAt: new Date(0).toISOString(),
+      };
     },
   );
 
@@ -802,15 +911,18 @@ test("streamThreadEvents treats refresh/edit errors as transient", async () => {
     workspaceId: "workspace-1",
     threadId: "thread-1",
     userId: "user-1",
-    content: "What is in this invoice?",
+    content: "Edited question",
   })) {
     events.push(parseSseData(event));
   }
 
   const errorEvent = events.find((event) => event.type === "error");
   assert.ok(errorEvent);
-  assert.equal(errorEvent.messageId, undefined);
-  assert.equal(createErrorMessageCalled, true);
+  assert.equal(latestErrorMessage, "provider exploded again");
+  assert.equal(errorEvent.error, "provider exploded again");
+  assert.equal(errorEvent.userMessageId, "user-message-2");
+  assert.equal(errorEvent.messageId, "assistant-error-2");
+  assert.equal(errorEvent.parentMessageId, "assistant-error-1");
 });
 
 test("streamThreadEvents closes trace as cancelled when stream is abandoned", async (t) => {

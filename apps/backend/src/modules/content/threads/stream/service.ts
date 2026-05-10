@@ -38,6 +38,11 @@ import type {
   ThreadTitleGenerateJobPayload,
   ThreadTitleGenerateJobResult,
 } from "../../queue";
+import type {
+  ModelReasoningSegmentTrace,
+  ThinkingStepTrace,
+  ToolCallTrace,
+} from "../turn/types";
 
 type ThreadTitleJob = Job<Record<string, unknown>, unknown, string>;
 
@@ -157,6 +162,72 @@ function buildCitationObservations(citations: AgentCitation[]) {
   return citations.map((citation, index) =>
     buildCitationObservation(citation, index),
   );
+}
+
+function normalizeToolCallStatusForError(
+  toolCall: ToolCallTrace,
+): ToolCallTrace {
+  return toolCall.status === "running"
+    ? {
+        ...toolCall,
+        status: "error",
+        error: toolCall.error ?? "Tool execution failed.",
+      }
+    : toolCall;
+}
+
+function normalizeThinkingStepStatusForError(
+  step: ThinkingStepTrace,
+): ThinkingStepTrace {
+  return step.status === "in_progress"
+    ? {
+        ...step,
+        status: "completed",
+      }
+    : step;
+}
+
+function upsertToolCallTrace(
+  callsById: Map<string, ToolCallTrace>,
+  toolCall: ToolCallTrace,
+) {
+  callsById.set(toolCall.id, toolCall);
+}
+
+function upsertThinkingStepTrace(
+  stepsById: Map<string, ThinkingStepTrace>,
+  step: ThinkingStepTrace,
+) {
+  const existing = stepsById.get(step.id);
+  if (!existing || step.kind !== "log") {
+    stepsById.set(step.id, step);
+    return;
+  }
+
+  stepsById.set(step.id, {
+    ...existing,
+    status: step.status,
+    description: step.description ?? existing.description,
+    detail: step.detail ?? existing.detail,
+    items: step.items.length > 0 ? step.items : existing.items,
+    metadata: {
+      ...(existing.metadata ?? {}),
+      ...(step.metadata ?? {}),
+    },
+  });
+}
+
+function appendReasoningChunk(current: string | undefined, next: string) {
+  if (!current) {
+    return next;
+  }
+  if (next === current) {
+    return current;
+  }
+  if (next.startsWith(current)) {
+    return next;
+  }
+  return `${current}${next}`;
 }
 
 function buildReasoningSegmentObservations(
@@ -631,6 +702,12 @@ class ContentThreadStreamService {
     let agentSpanCompleted = false;
     let outcome: DeepAgentTurnOutcome | null = null;
     let assistantContent = "";
+    let reasoning: string | undefined;
+    const reasoningSegmentsById = new Map<string, ModelReasoningSegmentTrace>();
+    const toolCallsById = new Map<string, ToolCallTrace>();
+    const thinkingStepsById = new Map<string, ThinkingStepTrace>();
+    let citations: AgentCitation[] = [];
+    let availableCitations: AgentCitation[] = [];
     try {
       yield toSseData({
         type: "start",
@@ -740,6 +817,26 @@ class ContentThreadStreamService {
           if (event.type === "text-delta") {
             assistantContent += event.delta;
           }
+          if (event.type === "reasoning") {
+            reasoning = appendReasoningChunk(reasoning, event.reasoning);
+            reasoningSegmentsById.set(event.segment.id, event.segment);
+          }
+          if (
+            event.type === "tool-call-start" ||
+            event.type === "tool-call-event" ||
+            event.type === "tool-call-result" ||
+            event.type === "tool-call-error" ||
+            event.type === "tool-call-end"
+          ) {
+            upsertToolCallTrace(toolCallsById, event.toolCall);
+          }
+          if (event.type === "thinking-step") {
+            upsertThinkingStepTrace(thinkingStepsById, event.step);
+          }
+          if (event.type === "citations") {
+            citations = event.citations;
+            availableCitations = event.availableCitations ?? event.citations;
+          }
 
           yield mapDeepAgentEventToSse(event, textId);
           yield* emitTitleUpdates();
@@ -843,6 +940,16 @@ class ContentThreadStreamService {
           prepared,
           contentError,
           partialAssistantContent: assistantContent,
+          partialState: {
+            reasoning,
+            reasoningSegments: [...reasoningSegmentsById.values()],
+            toolCalls: [...toolCallsById.values()].map(normalizeToolCallStatusForError),
+            thinkingSteps: [...thinkingStepsById.values()].map(
+              normalizeThinkingStepStatusForError,
+            ),
+            citations,
+            availableCitations,
+          },
         });
         if (
           !errorMessage &&

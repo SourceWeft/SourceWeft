@@ -2,6 +2,7 @@ import {
   recordGatewayOperationEvent,
   type LlmExecutionConfig,
 } from "../../model-gateway-audit";
+import type { AgentCitation } from "../../agent/citation-registry";
 import type { ContentError } from "../../errors";
 import { logger } from "../../../../shared/logger";
 import {
@@ -9,7 +10,21 @@ import {
   deleteMessageRecord,
 } from "../message-repository";
 import { summarizeRetrievalCalls } from "../turn/service";
-import type { PreparedThreadTurn } from "../turn/service";
+import type {
+  ModelReasoningSegmentTrace,
+  PreparedThreadTurn,
+  ThinkingStepTrace,
+  ToolCallTrace,
+} from "../turn/types";
+
+export type ThreadStreamPartialErrorState = {
+  reasoning?: string;
+  reasoningSegments?: ModelReasoningSegmentTrace[];
+  toolCalls?: ToolCallTrace[];
+  thinkingSteps?: ThinkingStepTrace[];
+  citations?: AgentCitation[];
+  availableCitations?: AgentCitation[];
+};
 
 export async function recordThreadStreamFailure(input: {
   prepared: PreparedThreadTurn;
@@ -68,6 +83,7 @@ export async function createThreadStreamErrorMessage(input: {
   prepared: PreparedThreadTurn;
   contentError: ContentError;
   partialAssistantContent?: string;
+  partialState?: ThreadStreamPartialErrorState;
 }) {
   if (input.prepared.failurePersistence !== "persist-error-turn") {
     return null;
@@ -103,6 +119,17 @@ export async function createThreadStreamErrorMessage(input: {
       versionOf: input.prepared.assistantMessageParentId,
       billingSkipped: true,
       billingSkipReason: "model_error",
+      reasoning: input.partialState?.reasoning,
+      reasoningSegments: input.partialState?.reasoningSegments,
+      toolCalls: input.partialState?.toolCalls,
+      thinkingSteps: input.partialState?.thinkingSteps,
+      retrieval: {
+        citations: input.partialState?.citations ?? [],
+        availableCitations:
+          input.partialState?.availableCitations ??
+          input.partialState?.citations ??
+          [],
+      },
     },
   });
 }

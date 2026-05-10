@@ -5,6 +5,7 @@ import {
   collapseSupersededMessages,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
+  resolveArtifactSelectionFromMessage,
   resolveMentionedSourceIdsFromMessage,
   resolveSkillIdsFromMessage,
   resolveSourceIdsFromMessage,
@@ -84,6 +85,9 @@ export async function resolveRefreshThreadStreamInput(
   const webSearchEnabled =
     input.tools?.webSearchEnabled ??
     resolveWebSearchEnabledFromMessage(latestUserMessage);
+  const artifact =
+    input.tools?.artifact ??
+    resolveArtifactSelectionFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const refreshRunThreadId = `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
 
@@ -94,7 +98,7 @@ export async function resolveRefreshThreadStreamInput(
     content: latestUserMessage.content,
     mentionedSourceIds,
     sourceIds,
-    tools: { skillIds, webSearchEnabled },
+    tools: { skillIds, webSearchEnabled, ...(artifact ? { artifact } : {}) },
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
@@ -103,7 +107,7 @@ export async function resolveRefreshThreadStreamInput(
     agentMode: checkpoint?.beforeInput ? "fork" : "continue",
     agentBaseCheckpoint: checkpoint?.beforeInput ?? null,
     agentRunThreadId: refreshRunThreadId,
-    failurePersistence: "transient",
+    failurePersistence: "persist-error-turn",
   };
 }
 
@@ -138,6 +142,9 @@ export async function resolveEditThreadStreamInput(
   const webSearchEnabled =
     input.tools?.webSearchEnabled ??
     resolveWebSearchEnabledFromMessage(latestUserMessage);
+  const artifact =
+    input.tools?.artifact ??
+    resolveArtifactSelectionFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const agentBaseCheckpoint =
     checkpoint?.beforeInput ??
@@ -154,7 +161,7 @@ export async function resolveEditThreadStreamInput(
     content: input.content,
     mentionedSourceIds,
     sourceIds,
-    tools: { skillIds, webSearchEnabled },
+    tools: { skillIds, webSearchEnabled, ...(artifact ? { artifact } : {}) },
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
@@ -163,6 +170,6 @@ export async function resolveEditThreadStreamInput(
     agentMode: "fork",
     agentBaseCheckpoint,
     agentRunThreadId: `thread:${input.threadId}:edit:${latestUserMessage.id}:${input.idempotencyKey ?? randomUUID()}`,
-    failurePersistence: "transient",
+    failurePersistence: "persist-error-turn",
   };
 }
