@@ -1305,6 +1305,7 @@ export default function DashboardChatThreadPage({
     updateChatTitle,
     updateChatSourceCount,
     workspaceId,
+    workspaceName,
   } = useDashboardChatState();
 
   // ── Thread metadata from sidebar list ─────────────────────────────────────
@@ -1352,6 +1353,7 @@ export default function DashboardChatThreadPage({
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const skillsLoadGenerationRef = useRef(0);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
 
   // ── Composer state ─────────────────────────────────────────────────────────
@@ -1570,53 +1572,54 @@ export default function DashboardChatThreadPage({
     );
   }, [currentSearchStorageKey, loadedSearchPreferenceKey, searchEnabled]);
 
-  useEffect(() => {
+  const loadAvailableSkills = useCallback(async () => {
+    const loadGeneration = ++skillsLoadGenerationRef.current;
     if (!workspaceId) {
       setAvailableSkills([]);
       setActiveSkillIds([]);
       return;
     }
 
-    let cancelled = false;
     const activeWorkspaceId = workspaceId;
-    async function loadSkills() {
-      try {
-        const result = await contentClient.listSkillsCatalog(activeWorkspaceId);
-        if (cancelled) {
-          return;
-        }
-        const enabledSkills = result.items
-          .filter((skill) => skill.enabled && skill.enabledWorkspaceSkillId)
-          .map((skill) => ({
-            id: skill.enabledWorkspaceSkillId as string,
-            catalogId: skill.catalogId,
-            slug: skill.slug,
-            name: skill.name,
-            displayName: skill.displayName,
-            description: skill.description,
-            sourceType: skill.sourceType,
-            version: skill.version,
-            hasReadme: skill.hasReadme,
-          }));
-        setAvailableSkills(enabledSkills);
-
-        const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
-        setActiveSkillIds((current) =>
-          current.filter((id) => enabledIds.has(id)).slice(0, 5),
-        );
-      } catch {
-        if (!cancelled) {
-          setAvailableSkills([]);
-          setActiveSkillIds([]);
-        }
+    try {
+      const result = await contentClient.listSkillsCatalog(activeWorkspaceId);
+      if (
+        skillsLoadGenerationRef.current !== loadGeneration ||
+        activeWorkspaceId !== workspaceId
+      ) {
+        return;
       }
-    }
+      const enabledSkills = result.items
+        .filter((skill) => skill.enabled && skill.enabledWorkspaceSkillId)
+        .map((skill) => ({
+          id: skill.enabledWorkspaceSkillId as string,
+          catalogId: skill.catalogId,
+          slug: skill.slug,
+          name: skill.name,
+          displayName: skill.displayName,
+          description: skill.description,
+          sourceType: skill.sourceType,
+          version: skill.version,
+          hasReadme: skill.hasReadme,
+        }));
+      setAvailableSkills(enabledSkills);
 
-    void loadSkills();
-    return () => {
-      cancelled = true;
-    };
+      const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
+      setActiveSkillIds((current) =>
+        current.filter((id) => enabledIds.has(id)).slice(0, 5),
+      );
+    } catch {
+      if (skillsLoadGenerationRef.current !== loadGeneration) {
+        return;
+      }
+      setAvailableSkills([]);
+      setActiveSkillIds([]);
+    }
   }, [workspaceId]);
+
+  useEffect(() => {
+    void loadAvailableSkills();
+  }, [loadAvailableSkills]);
 
   const messageGroups = useMemo(
     () => buildVersionedMessageGroups(messages),
@@ -3343,6 +3346,7 @@ export default function DashboardChatThreadPage({
           onCitationOpen={handleSourceHubCitationOpen}
           onSkillSelectionChange={setActiveSkillIds}
           onSelectionChange={persistActiveSourceIds}
+          onSkillsCatalogChange={loadAvailableSkills}
           onSourceLoad={setLibrarySources}
           selectedIds={activeSourceIds}
           selectedSkillIds={activeSkillIds}
@@ -3350,6 +3354,7 @@ export default function DashboardChatThreadPage({
           threadId={threadId}
           workfilesRefreshKey={workfilesRefreshKey}
           workspaceId={workspaceId}
+          workspaceName={workspaceName}
         />
       ) : null}
 

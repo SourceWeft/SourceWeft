@@ -10,7 +10,6 @@ import {
   useRef,
   useState,
 } from "react";
-import Link from "next/link";
 import {
   ChevronDown,
   ChevronRight,
@@ -77,6 +76,7 @@ import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
+import { SkillsGallery } from "../../skills/_components/skills-gallery";
 import type { CitationRecord } from "./chat-canvas";
 import { SourcePreviewPanel } from "./source-preview-panel";
 import { expandSelectedSources, type SourceItem } from "./source-types";
@@ -1836,7 +1836,9 @@ export function SourcesHub({
   threadId = null,
   workfilesRefreshKey = 0,
   workspaceId,
+  workspaceName,
   onSourceLoad,
+  onSkillsCatalogChange,
   installedSkills = [],
   selectedSkillIds = [],
   onSkillSelectionChange = () => {},
@@ -1853,7 +1855,9 @@ export function SourcesHub({
   threadId?: string | null;
   workfilesRefreshKey?: number;
   workspaceId?: string | null;
+  workspaceName?: string | null;
   onSourceLoad?: (sources: SourceItem[]) => void;
+  onSkillsCatalogChange?: () => void | Promise<void>;
   installedSkills?: HubSkillItem[];
   selectedSkillIds?: string[];
   onSkillSelectionChange?: (ids: string[]) => void;
@@ -1942,6 +1946,7 @@ export function SourcesHub({
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
   const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
   const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
+  const [isSkillsGalleryOpen, setIsSkillsGalleryOpen] = useState(false);
   const [deleteSource, setDeleteSource] = useState<SourceItem | null>(null);
   const fullSourceTree = useMemo(() => buildSourceTree(sources, ""), [sources]);
   const selectableSourceIds = useMemo(
@@ -2867,11 +2872,14 @@ export function SourcesHub({
                     </span>
                   ) : null}
                 </div>
-                <Button asChild size="xs" type="button" variant="outline">
-                  <Link href="/dashboard/skills">
-                    <Sparkles className="size-3.5" />
-                    Skills gallery
-                  </Link>
+                <Button
+                  onClick={() => setIsSkillsGalleryOpen(true)}
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  <Sparkles className="size-3.5" />
+                  Skills gallery
                 </Button>
               </div>
 
@@ -3627,6 +3635,28 @@ export function SourcesHub({
         open={Boolean(previewSkillCatalogId)}
         workspaceId={workspaceId}
       />
+
+      <Dialog onOpenChange={setIsSkillsGalleryOpen} open={isSkillsGalleryOpen}>
+        <DialogContent
+          className="grid h-[min(780px,calc(100svh-2rem))] w-[min(1240px,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
+          constrainWidth={false}
+        >
+          <DialogHeader className="border-b px-5 py-4 text-left">
+            <DialogTitle>Skills gallery</DialogTitle>
+            <DialogDescription>
+              Install reusable skills for {workspaceName || "the current workspace"}.
+            </DialogDescription>
+          </DialogHeader>
+          <SkillsGallery
+            className="min-h-0"
+            lockWorkspace
+            onCatalogChange={onSkillsCatalogChange}
+            variant="modal"
+            workspaceId={workspaceId}
+            workspaceName={workspaceName}
+          />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
