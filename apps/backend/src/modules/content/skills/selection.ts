@@ -88,6 +88,10 @@ export async function resolveSelectedSkills(input: {
       name: bundle.definition.slug,
       version: bundle.version.version,
       description: bundle.definition.description,
+      capabilities: bundle.version.manifestJson.capabilities,
+      models: bundle.version.manifestJson.models,
+      tools: bundle.version.manifestJson.tools,
+      defaultConfig: bundle.version.manifestJson.defaultConfig,
       files,
     });
   }

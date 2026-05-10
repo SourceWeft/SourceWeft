@@ -12,6 +12,7 @@ export type GlobalGatewayEntry = {
     | "openai-compatible"
     | "openrouter"
     | "deepinfra"
+    | "siliconflow-cn"
     | "openai"
     | "anthropic"
     | "gemini"
@@ -54,6 +55,7 @@ export type GlobalModelProfileEntry = {
   pricing?: GlobalProfilePricingEntry | null;
   supportedParameters?: string[];
   supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+  imageGeneration?: Record<string, unknown>;
 };
 
 export type GlobalEmbeddingProfileEntry = {
@@ -120,6 +122,7 @@ type RawGlobalModelProfileEntry = {
   pricing?: unknown;
   supportedParameters?: unknown;
   supportedEfforts?: unknown;
+  imageGeneration?: unknown;
 };
 
 const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
@@ -292,6 +295,7 @@ function asProviderKind(
   | "openai-compatible"
   | "openrouter"
   | "deepinfra"
+  | "siliconflow-cn"
   | "openai"
   | "anthropic"
   | "gemini"
@@ -300,6 +304,7 @@ function asProviderKind(
     value === "openai-compatible" ||
     value === "openrouter" ||
     value === "deepinfra" ||
+    value === "siliconflow-cn" ||
     value === "openai" ||
     value === "anthropic" ||
     value === "gemini" ||
@@ -498,6 +503,12 @@ function parseModelProfileEntry(
       entry.supportedEfforts,
       `${field}[${index}].supportedEfforts`,
     ),
+    imageGeneration:
+      entry.imageGeneration &&
+      typeof entry.imageGeneration === "object" &&
+      !Array.isArray(entry.imageGeneration)
+        ? (entry.imageGeneration as Record<string, unknown>)
+        : undefined,
   };
 }
 

@@ -1,6 +1,5 @@
 import { createHttpGatewayError } from "../errors";
 import { normalizeUsage } from "../normalize/usage";
-import { resolveDeepInfraBaseUrls } from "./deepinfra-url";
 import type { RerankTransport } from "./types";
 
 function normalizeDocument(document: string | Record<string, unknown>) {
@@ -22,11 +21,15 @@ function resolveScores(raw: Record<string, unknown>): number[] {
   return rows.filter((score): score is number => typeof score === "number");
 }
 
+function resolveInferenceBaseUrl(baseUrl: string) {
+  return `${baseUrl.replace(/\/+$/, "")}/inference`;
+}
+
 export class DeepInfraRerankTransport implements RerankTransport {
   readonly kind = "deepinfra" as const;
 
   async execute(input: Parameters<RerankTransport["execute"]>[0]) {
-    const { inferenceBaseUrl } = resolveDeepInfraBaseUrls(input.target.baseUrl);
+    const inferenceBaseUrl = resolveInferenceBaseUrl(input.target.baseUrl);
     const encodedModel = input.target.providerModel
       .split("/")
       .map((part) => encodeURIComponent(part))

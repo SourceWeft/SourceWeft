@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@sourceweft/ui-web/components/ui/sheet";
 import { useDashboardChatState } from "../_components/dashboard-chat-state";
 import {
   emptyModelCatalog,
@@ -17,6 +22,11 @@ import {
   type ModelType,
 } from "./_components/header-model-selector";
 import {
+  applySkillModelPresetState,
+  DEFAULT_MODEL_SELECTION_SOURCES,
+  type ModelSelectionSources,
+} from "./_components/skill-model-presets";
+import {
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
   type ChatSendInput,
@@ -24,7 +34,11 @@ import {
   type PromptInputMentionSourceLoader,
   type PromptThinkingSettings,
 } from "./_components/chat-canvas";
-import { SourcesHub } from "./_components/sources-hub";
+import {
+  ArtifactPreviewPanel,
+  SourcesHub,
+  type ArtifactListItem,
+} from "./_components/sources-hub";
 import {
   expandSelectedSources,
   type SourceItem,
@@ -43,6 +57,20 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
 const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
+}
 
 function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
   return [
@@ -172,10 +200,18 @@ export default function DashboardChatPage() {
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const [previewArtifact, setPreviewArtifact] =
+    useState<ArtifactListItem | null>(null);
+  const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
   const skillsLoadGenerationRef = useRef(0);
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
   );
+  const [baseSelectedModels, setBaseSelectedModels] = useState<SelectedModels>(
+    () => resolveSelectedModels({ availableModels: emptyModelCatalog }),
+  );
+  const [modelSelectionSources, setModelSelectionSources] =
+    useState<ModelSelectionSources>(DEFAULT_MODEL_SELECTION_SOURCES);
   const [availableModels, setAvailableModels] =
     useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
@@ -225,9 +261,12 @@ export default function DashboardChatPage() {
   useEffect(() => {
     if (!workspaceId) {
       setAvailableModels(emptyModelCatalog);
-      setSelectedModels(
-        resolveSelectedModels({ availableModels: emptyModelCatalog }),
-      );
+      const emptySelection = resolveSelectedModels({
+        availableModels: emptyModelCatalog,
+      });
+      setSelectedModels(emptySelection);
+      setBaseSelectedModels(emptySelection);
+      setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       return;
     }
@@ -253,12 +292,13 @@ export default function DashboardChatPage() {
 
         setCatalogKindEnabled(kindEnabled);
         setAvailableModels(catalogModels);
-        setSelectedModels(
-          resolveSelectedModels({
-            availableModels: catalogModels,
-            fallbackAliases: catalog.defaults,
-          }),
-        );
+        const resolvedModels = resolveSelectedModels({
+          availableModels: catalogModels,
+          fallbackAliases: catalog.defaults,
+        });
+        setSelectedModels(resolvedModels);
+        setBaseSelectedModels(resolvedModels);
+        setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       } catch {
         if (cancelled) {
           return;
@@ -266,9 +306,12 @@ export default function DashboardChatPage() {
 
         setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
         setAvailableModels(emptyModelCatalog);
-        setSelectedModels(
-          resolveSelectedModels({ availableModels: emptyModelCatalog }),
-        );
+        const emptySelection = resolveSelectedModels({
+          availableModels: emptyModelCatalog,
+        });
+        setSelectedModels(emptySelection);
+        setBaseSelectedModels(emptySelection);
+        setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       }
     }
 
@@ -338,6 +381,10 @@ export default function DashboardChatPage() {
           sourceType: skill.sourceType,
           version: skill.version,
           hasReadme: skill.hasReadme,
+          capabilities: skill.capabilities,
+          models: skill.models,
+          tools: skill.tools,
+          defaultConfig: skill.defaultConfig,
         }));
       setAvailableSkills(enabledSkills);
 
@@ -452,6 +499,30 @@ export default function DashboardChatPage() {
     );
   }, [hasSavedThinkingPreference, selectedModels.llm]);
 
+  useEffect(() => {
+    const next = applySkillModelPresetState({
+      activeSkillIds,
+      availableModels,
+      availableSkills,
+      baseSelectedModels,
+      selectedModels,
+      selectionSources: modelSelectionSources,
+    });
+    if (next.modelsChanged) {
+      setSelectedModels(next.nextModels);
+    }
+    if (next.sourcesChanged) {
+      setModelSelectionSources(next.nextSources);
+    }
+  }, [
+    activeSkillIds,
+    availableModels,
+    availableSkills,
+    baseSelectedModels,
+    modelSelectionSources,
+    selectedModels,
+  ]);
+
   const handleThinkingSettingsChange = useCallback(
     (settings: PromptThinkingSettings) => {
       setHasSavedThinkingPreference(true);
@@ -506,6 +577,7 @@ export default function DashboardChatPage() {
           mentionedSourceIds,
           sourceIds,
           skillIds: activeSkillIds,
+          artifact: input.artifact,
           thinking: buildPendingThinking({
             capabilities: selectedModels.llm?.capabilities,
             settings: thinkingSettings,
@@ -550,6 +622,10 @@ export default function DashboardChatPage() {
               <HeaderModelSelector
                 availableModels={availableModels}
                 onModelSelect={(input) => {
+                  setModelSelectionSources((current) => ({
+                    ...current,
+                    [input.type]: "user",
+                  }));
                   if (input.type === "llm") {
                     setThinkingSettings((current) =>
                       normalizeThinkingSettingsForModel({
@@ -603,6 +679,9 @@ export default function DashboardChatPage() {
           selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
           thinkingCapabilities={selectedModels.llm?.capabilities}
+          imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
+          imageModelAvailable={Boolean(selectedModels.image)}
+          imageModelAlias={selectedModels.image?.modelAlias ?? null}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle="New chat"
@@ -610,20 +689,56 @@ export default function DashboardChatPage() {
         />
       </div>
 
-      {sourcesVisible ? (
-        <SourcesHub
-          mode="new"
-          installedSkills={availableSkills}
-          onSkillSelectionChange={setActiveSkillIds}
-          onSelectionChange={persistActiveSourceIds}
-          onSkillsCatalogChange={loadAvailableSkills}
-          onSourceLoad={setLibrarySources}
-          selectedIds={activeSourceIds}
-          selectedSkillIds={activeSkillIds}
+      {sourcesVisible && (!previewArtifact || !isDesktopPanel) ? (
+          <SourcesHub
+            mode="new"
+            installedSkills={availableSkills}
+            onArtifactOpen={setPreviewArtifact}
+            onSkillSelectionChange={setActiveSkillIds}
+            onSelectionChange={persistActiveSourceIds}
+            onSkillsCatalogChange={loadAvailableSkills}
+            onSourceLoad={setLibrarySources}
+            selectedIds={activeSourceIds}
+            selectedSkillIds={activeSkillIds}
+            workspaceId={workspaceId}
+            workspaceName={workspaceName}
+          />
+        ) : null}
+
+      {sourcesVisible && previewArtifact && isDesktopPanel ? (
+        <ArtifactPreviewPanel
+          artifact={previewArtifact}
+          className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
+          onClose={() => setPreviewArtifact(null)}
           workspaceId={workspaceId}
-          workspaceName={workspaceName}
         />
       ) : null}
+
+      <Sheet
+        open={Boolean(sourcesVisible && previewArtifact && !isDesktopPanel)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewArtifact(null);
+          }
+        }}
+      >
+        <SheetContent
+          className="h-[90svh] max-h-[90svh] gap-0 overflow-hidden p-0 [&>button]:hidden"
+          side="bottom"
+        >
+          <SheetTitle className="sr-only">
+            {previewArtifact ? "Artifact preview" : "Artifact"}
+          </SheetTitle>
+          {previewArtifact ? (
+            <ArtifactPreviewPanel
+              artifact={previewArtifact}
+              className="border-l-0"
+              onClose={() => setPreviewArtifact(null)}
+              workspaceId={workspaceId}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SkillManifestJson } from "../../../shared/db/schema";
+import { isAgentToolName, isConfigurableAgentTool } from "../agent/tool-registry";
 
 export type SkillBundleFile = {
   path: string;
@@ -38,6 +39,9 @@ type ParsedBuiltinManifest = {
   visibility: "public" | "restricted";
   categories: string[];
   version: string;
+  models?: SkillManifestJson["models"];
+  tools?: string[];
+  defaultConfig?: Record<string, unknown>;
 };
 
 const builtinRoot = path.join(
@@ -52,6 +56,7 @@ const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
   ".yaml": "application/yaml",
   ".yml": "application/yaml",
 };
+const GENERATE_IMAGE_CONFIG_KEYS = new Set(["aspectRatio", "quality", "style"]);
 
 let builtinSkillsCache: BuiltinSkillManifest[] | null = null;
 
@@ -74,6 +79,87 @@ function normalizeCategory(value: unknown) {
   return typeof value === "string" && validateSkillName(value) ? value : null;
 }
 
+function normalizeModelAlias(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 512
+    ? value.trim()
+    : null;
+}
+
+function normalizeModels(value: unknown): SkillManifestJson["models"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const models: NonNullable<SkillManifestJson["models"]> = {};
+  const chat = normalizeModelAlias(record.chat);
+  const image = normalizeModelAlias(record.image);
+  const vision = normalizeModelAlias(record.vision);
+  if (chat) models.chat = chat;
+  if (image) models.image = image;
+  if (vision) models.vision = vision;
+  const knownKeys = new Set(["chat", "image", "vision"]);
+  if (
+    Object.keys(record).some((key) => !knownKeys.has(key)) ||
+    (record.chat !== undefined && !chat) ||
+    (record.image !== undefined && !image) ||
+    (record.vision !== undefined && !vision)
+  ) {
+    throw new Error("skill.json models are invalid");
+  }
+  return Object.keys(models).length > 0 ? models : undefined;
+}
+
+function normalizeTools(value: unknown) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("skill.json tools must be an array");
+  }
+  const tools = value.map((item) =>
+    typeof item === "string" ? item.trim() : "",
+  );
+  if (tools.some((toolName) => !isAgentToolName(toolName))) {
+    throw new Error("skill.json references an unknown tool");
+  }
+  return Array.from(new Set(tools));
+}
+
+function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("skill.json defaultConfig must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!isAgentToolName(key)) {
+      throw new Error("skill.json defaultConfig references an unknown tool");
+    }
+    if (!isConfigurableAgentTool(key)) {
+      throw new Error(`skill.json defaultConfig is not supported for '${key}'`);
+    }
+    if (!tools?.includes(key)) {
+      throw new Error(`skill.json defaultConfig '${key}' must also be declared in tools`);
+    }
+    if (key === "generate_image") {
+      const config = record[key];
+      if (!config || typeof config !== "object" || Array.isArray(config)) {
+        throw new Error("skill.json defaultConfig generate_image is invalid");
+      }
+      if (
+        Object.keys(config as Record<string, unknown>).some(
+          (configKey) => !GENERATE_IMAGE_CONFIG_KEYS.has(configKey),
+        )
+      ) {
+        throw new Error("skill.json defaultConfig generate_image is invalid");
+      }
+    }
+  }
+  return Object.keys(record).length > 0 ? record : undefined;
+}
+
 function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinManifest {
   assertRecord(value, source);
   const slug = value.slug;
@@ -82,6 +168,9 @@ function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinMani
   const visibility = value.visibility;
   const categories = value.categories;
   const version = value.version;
+  const tools = normalizeTools(value.tools);
+  const models = normalizeModels(value.models);
+  const defaultConfig = normalizeDefaultConfig(value.defaultConfig, tools);
 
   if (typeof slug !== "string" || !validateSkillName(slug)) {
     throw new Error(`${source} slug is invalid`);
@@ -107,6 +196,9 @@ function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinMani
   if (typeof version !== "string" || version.trim().length === 0 || version.length > 64) {
     throw new Error(`${source} version is invalid`);
   }
+  if (models?.image && !tools?.includes("generate_image")) {
+    throw new Error(`${source} models.image requires generate_image tool`);
+  }
 
   return {
     slug,
@@ -115,6 +207,9 @@ function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinMani
     visibility,
     categories: Array.from(new Set(normalizedCategories)),
     version: version.trim(),
+    ...(models ? { models } : {}),
+    ...(tools ? { tools } : {}),
+    ...(defaultConfig ? { defaultConfig } : {}),
   };
 }
 
@@ -248,6 +343,15 @@ async function loadBuiltinSkillsFromDisk(): Promise<BuiltinSkillManifest[]> {
           visibility: parsed.visibility,
           categories: parsed.categories,
         };
+        if (parsed.models) {
+          manifestJson.models = parsed.models;
+        }
+        if (parsed.tools) {
+          manifestJson.tools = parsed.tools;
+        }
+        if (parsed.defaultConfig) {
+          manifestJson.defaultConfig = parsed.defaultConfig;
+        }
 
         return {
           slug: parsed.slug,

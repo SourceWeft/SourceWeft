@@ -32,6 +32,44 @@ async function findDefaultModelGatewayProfileRow(kind: ModelGatewayProfileKind) 
   return row ?? null;
 }
 
+async function findActiveModelGatewayProfileRow(input: {
+  kind: ModelGatewayProfileKind;
+  profileAlias: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(modelGatewayProfiles)
+    .where(
+      and(
+        eq(modelGatewayProfiles.kind, input.kind),
+        eq(modelGatewayProfiles.profileAlias, input.profileAlias),
+        eq(modelGatewayProfiles.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
+async function findActiveModelGatewayProfileRowByModelAlias(input: {
+  kind: ModelGatewayProfileKind;
+  modelAlias: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(modelGatewayProfiles)
+    .where(
+      and(
+        eq(modelGatewayProfiles.kind, input.kind),
+        eq(modelGatewayProfiles.modelAlias, input.modelAlias),
+        eq(modelGatewayProfiles.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
 export async function ensureModelConfigAvailable() {
   const deadline = Date.now() + 30_000;
 
@@ -88,4 +126,37 @@ export async function requireDefaultModelGatewayProfile(
   }
 
   return mapModelGatewayProfile(row);
+}
+
+export async function resolveModelGatewayProfile(input: {
+  kind: ModelGatewayProfileKind;
+  requestedProfileAlias?: string | null;
+  requestedModelAlias?: string | null;
+  defaultRequired?: boolean;
+}) {
+  const requestedProfileAlias = input.requestedProfileAlias?.trim();
+  const requestedModelAlias = input.requestedModelAlias?.trim();
+  const row = requestedProfileAlias
+    ? await findActiveModelGatewayProfileRow({
+        kind: input.kind,
+        profileAlias: requestedProfileAlias,
+      })
+    : requestedModelAlias
+      ? await findActiveModelGatewayProfileRowByModelAlias({
+          kind: input.kind,
+          modelAlias: requestedModelAlias,
+        })
+      : await findDefaultModelGatewayProfileRow(input.kind);
+
+  if (!row && input.defaultRequired !== false) {
+    throw new Error(
+      requestedProfileAlias
+        ? `${input.kind} model gateway profile '${requestedProfileAlias}' is not configured`
+        : requestedModelAlias
+          ? `${input.kind} model gateway model '${requestedModelAlias}' is not configured`
+        : `Default ${input.kind} model gateway profile is not configured`,
+    );
+  }
+
+  return row ? mapModelGatewayProfile(row) : null;
 }

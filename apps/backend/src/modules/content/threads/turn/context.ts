@@ -2,6 +2,7 @@ import { ContentError } from "../../errors";
 import { requireContentWorkspace } from "../../content-support";
 import type { MessageRecord } from "../../types";
 import type { AgentCheckpointMetadata, AgentCheckpointRef } from "./types";
+import { normalizeArtifactToolSelection } from "../../artifacts/types";
 import { findThreadRecord } from "../thread/repository";
 import { listMessageRecordsByThread } from "../message-repository";
 
@@ -115,6 +116,25 @@ export function resolveWebSearchEnabledFromMessage(
       : undefined;
 
   return tools?.webSearchEnabled === true;
+}
+
+export function resolveArtifactSelectionFromMessage(
+  message: MessageRecord | null | undefined,
+) {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          tools?: unknown;
+        })
+      : undefined;
+  const tools =
+    metadata?.tools &&
+    typeof metadata.tools === "object" &&
+    !Array.isArray(metadata.tools)
+      ? (metadata.tools as { artifact?: unknown })
+      : undefined;
+
+  return normalizeArtifactToolSelection(tools?.artifact);
 }
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {

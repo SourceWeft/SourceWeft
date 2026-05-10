@@ -86,7 +86,7 @@ test(
 );
 
 test(
-  "embeddings.embed via DeepInfra accepts OpenAI-compatible base URL",
+  "embeddings.embed via DeepInfra uses provider root base URL",
   { skip: !readIntegrationEnv().deepinfra },
   async () => {
     const provider = requireProvider(readIntegrationEnv().deepinfra, "DEEPINFRA_API_KEY");
@@ -96,7 +96,7 @@ test(
         providers: {
           deepinfra: createProviderConfig({
             kind: "deepinfra",
-            baseUrl: "https://api.deepinfra.com/v1/openai",
+            baseUrl: "https://api.deepinfra.com/v1",
             apiKey: provider.apiKey,
           }),
         },
@@ -126,7 +126,7 @@ test("embeddings.embed surfaces normalized timeout errors", async () => {
     providers: {
       deepinfra: {
         kind: "deepinfra",
-        baseUrl: "https://api.deepinfra.com/v1/openai",
+        baseUrl: "https://api.deepinfra.com/v1",
         apiKey: "test-key",
       },
     },
@@ -173,7 +173,7 @@ test("embeddings.embedBatch surfaces explicit provider errors", async () => {
     providers: {
       deepinfra: {
         kind: "deepinfra",
-        baseUrl: "https://api.deepinfra.com/v1/openai",
+        baseUrl: "https://api.deepinfra.com/v1",
         apiKey: "test-key",
       },
     },

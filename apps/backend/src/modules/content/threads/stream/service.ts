@@ -817,6 +817,9 @@ class ContentThreadStreamService {
           if (event.type === "text-delta") {
             assistantContent += event.delta;
           }
+          if (event.type === "text-replace") {
+            assistantContent = event.text;
+          }
           if (event.type === "reasoning") {
             reasoning = appendReasoningChunk(reasoning, event.reasoning);
             reasoningSegmentsById.set(event.segment.id, event.segment);
@@ -943,7 +946,9 @@ class ContentThreadStreamService {
           partialState: {
             reasoning,
             reasoningSegments: [...reasoningSegmentsById.values()],
-            toolCalls: [...toolCallsById.values()].map(normalizeToolCallStatusForError),
+            toolCalls: [...toolCallsById.values()].map(
+              normalizeToolCallStatusForError,
+            ),
             thinkingSteps: [...thinkingStepsById.values()].map(
               normalizeThinkingStepStatusForError,
             ),

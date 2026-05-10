@@ -33,7 +33,8 @@
         "chat",
         "embeddings",
         "rerank",
-        "asr"
+        "asr",
+        "image"
       ],
       "timeoutMs": 30000,
       "maxRetries": 2,
@@ -43,14 +44,16 @@
     },
     {
       "slug": "siliconflow-default",
-      "providerName": "siliconflow",
-      "providerKind": "openai-compatible",
+      "providerName": "SiliconflowCN",
+      "providerKind": "siliconflow-cn",
       "baseUrl": "https://api.siliconflow.cn/v1",
       "apiKeyEnv": "SILICONFLOW_API_KEY",
       "supports": [
         "chat",
         "embeddings",
         "rerank",
+        "asr",
+        "image",
         "tool_calling",
         "json_schema"
       ],
@@ -92,12 +95,98 @@
       "modelAlias": "image-default",
       "gatewaySlug": "openrouter-default",
       "providerName": "openrouter",
-      "targetModel": "openai/gpt-image-1",
+      "targetModel": "google/gemini-3.1-flash-image-preview",
       "routingStrategy": "priority",
       "priority": 1,
       "weight": 100,
       "isDefault": true,
-      "isActive": true
+      "isActive": true,
+      "imageGeneration": {
+        "controls": {
+          "aspectRatio": {
+            "values": [
+              "auto",
+              "1:1",
+              "2:3",
+              "3:2",
+              "3:4",
+              "4:3",
+              "4:5",
+              "5:4",
+              "9:16",
+              "16:9",
+              "21:9",
+              "1:4",
+              "4:1",
+              "1:8",
+              "8:1"
+            ]
+          },
+          "quality": {
+            "values": [
+              "auto",
+              "low",
+              "standard",
+              "higher",
+              "highest"
+            ]
+          },
+          "style": {
+            "values": [
+              "auto",
+              "ghibli",
+              "pixar",
+              "cartoon",
+              "pixel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "profileAlias": "image-deepinfra-flux-2-klein-4b",
+      "modelAlias": "black-forest-labs/FLUX-2-klein-4b",
+      "gatewaySlug": "deepinfra-default",
+      "providerName": "deepinfra",
+      "targetModel": "black-forest-labs/FLUX-2-klein-4b",
+      "routingStrategy": "priority",
+      "priority": 10,
+      "weight": 100,
+      "isDefault": false,
+      "isActive": true,
+      "imageGeneration": {
+        "controls": {
+          "aspectRatio": {
+            "values": [
+              "auto",
+              "1:1",
+              "2:3",
+              "3:2",
+              "3:4",
+              "4:3",
+              "4:5",
+              "5:4",
+              "9:16",
+              "16:9",
+              "21:9"
+            ]
+          },
+          "quality": {
+            "values": [
+              "auto"
+            ]
+          },
+          "style": {
+            "values": [
+              "auto",
+              "ghibli",
+              "pixar",
+              "cartoon",
+              "pixel"
+            ]
+          }
+        }
+      }
     }
   ],
   "visionProfiles": [

@@ -57,6 +57,105 @@ test("validateCustomSkillBundle accepts skill.json manifest", () => {
   assert.deepEqual(bundle.manifestJson.categories, ["review"]);
 });
 
+test("validateCustomSkillBundle accepts models, tools, and tool defaultConfig", () => {
+  const bundle = validateCustomSkillBundle({
+    files: [
+      { path: "SKILL.md", contentText: skillMd },
+      {
+        path: "skill.json",
+        contentText: JSON.stringify({
+          slug: "custom-review",
+          displayName: "Custom Review",
+          version: "1.0.0",
+          description: "Use this skill when reviewing custom material.",
+          visibility: "workspace",
+          categories: ["visual"],
+          models: {
+            chat: "chat-creative",
+            image: "image-default",
+          },
+          tools: ["generate_image"],
+          defaultConfig: {
+            generate_image: {
+              aspectRatio: "16:9",
+              quality: "standard",
+              style: "cartoon",
+            },
+          },
+        }),
+      },
+    ],
+  });
+
+  assert.deepEqual(bundle.manifestJson.models, {
+    chat: "chat-creative",
+    image: "image-default",
+  });
+  assert.deepEqual(bundle.manifestJson.tools, ["generate_image"]);
+  assert.deepEqual(bundle.manifestJson.defaultConfig, {
+    generate_image: {
+      aspectRatio: "16:9",
+      quality: "standard",
+      style: "cartoon",
+    },
+  });
+});
+
+test("validateCustomSkillBundle rejects defaultConfig for undeclared tools", () => {
+  assert.throws(
+    () =>
+      validateCustomSkillBundle({
+        files: [
+          { path: "SKILL.md", contentText: skillMd },
+          {
+            path: "skill.json",
+            contentText: JSON.stringify({
+              slug: "custom-review",
+              displayName: "Custom Review",
+              version: "1.0.0",
+              description: "Use this skill when reviewing custom material.",
+              visibility: "workspace",
+              categories: ["visual"],
+              defaultConfig: {
+                generate_image: {
+                  aspectRatio: "16:9",
+                },
+              },
+            }),
+          },
+        ],
+      }),
+    /defaultConfig requires matching tools/,
+  );
+});
+
+test("validateCustomSkillBundle rejects image model without generate_image tool", () => {
+  assert.throws(
+    () =>
+      validateCustomSkillBundle({
+        files: [
+          { path: "SKILL.md", contentText: skillMd },
+          {
+            path: "skill.json",
+            contentText: JSON.stringify({
+              slug: "custom-review",
+              displayName: "Custom Review",
+              version: "1.0.0",
+              description: "Use this skill when reviewing custom material.",
+              visibility: "workspace",
+              categories: ["visual"],
+              models: {
+                image: "image-default",
+              },
+              tools: ["web_search"],
+            }),
+          },
+        ],
+      }),
+    /models.image requires generate_image tool/,
+  );
+});
+
 test("validateCustomSkillBundle rejects scripts for DB custom skills", () => {
   assert.throws(
     () =>

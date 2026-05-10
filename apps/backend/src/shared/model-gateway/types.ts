@@ -35,6 +35,7 @@ export type RoutedGatewayConfig = {
         | "openai-compatible"
         | "openrouter"
         | "deepinfra"
+        | "siliconflow-cn"
         | "openai"
         | "anthropic"
         | "gemini"

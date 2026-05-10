@@ -3,6 +3,12 @@ import type { AgentCitation } from "../../agent/citation-registry";
 import type { ContentBillingPort } from "../../billing-port";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { EnabledSkillDescriptor } from "../../skills/types";
+import type {
+  ArtifactIntentDecision,
+  ArtifactToolSelection,
+  ImageModelCapabilities,
+} from "../../artifacts/types";
+import type { RuntimeModelGatewayProfile } from "../../../../shared/model-gateway/types";
 import type { TraceContext } from "../../../../shared/llm-observability";
 import { contentRetrievalService } from "../../retrieval/service";
 import type { MessageRecord } from "../../types";
@@ -13,6 +19,7 @@ import type { resolveActiveChatProfileByAlias } from "./model-resolution";
 export type ThreadToolsSelection = {
   skillIds?: string[];
   webSearchEnabled?: boolean;
+  artifact?: ArtifactToolSelection;
 };
 
 export type StreamThreadEventInput = {
@@ -64,6 +71,14 @@ export type PreparedThreadTurn = {
   };
   skillIds: string[];
   webSearchEnabled: boolean;
+  artifact: ArtifactToolSelection | undefined;
+  artifactIntent: ArtifactIntentDecision;
+  imageProfile:
+    | {
+        profile: RuntimeModelGatewayProfile;
+        capabilities: ImageModelCapabilities;
+      }
+    | null;
   timezone: string;
   enabledSkills: EnabledSkillDescriptor[];
   userMessage: MessageRecord;

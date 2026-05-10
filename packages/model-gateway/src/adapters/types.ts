@@ -6,6 +6,8 @@ import type {
   AsrTranscribeResult,
   EmbedBatchInput,
   EmbedInput,
+  ImageGenerateInput,
+  ImageGenerateResult,
   ProviderKind,
   RequestOptions,
   ResolvedRequestTarget,
@@ -54,4 +56,15 @@ export interface AsrTransport {
     options?: RequestOptions;
     fetch: typeof globalThis.fetch;
   }): Promise<AsrTranscribeResult>;
+}
+
+export interface ImageGenerationTransport {
+  readonly kind: ProviderKind;
+
+  execute(input: {
+    target: ResolvedRequestTarget;
+    payload: ImageGenerateInput;
+    options?: RequestOptions;
+    fetch: typeof globalThis.fetch;
+  }): Promise<ImageGenerateResult>;
 }

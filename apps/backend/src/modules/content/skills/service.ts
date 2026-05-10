@@ -77,6 +77,10 @@ export class ContentSkillsService {
         enabledWorkspaceSkillId: row.enabled?.id ?? null,
         enabled: row.enabled?.enabled ?? false,
         hasReadme: false,
+        capabilities: manifest.capabilities,
+        models: manifest.models,
+        tools: manifest.tools,
+        defaultConfig: manifest.defaultConfig,
       };
     });
     await Promise.all(

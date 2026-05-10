@@ -92,6 +92,20 @@
       "when": 1778191200000,
       "tag": "0012_working_files",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778371200000,
+      "tag": "0013_artifact_image_generation",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778457600000,
+      "tag": "0014_siliconflow_cn_provider_kind",
+      "breakpoints": true
     }
   ]
 }

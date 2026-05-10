@@ -5,6 +5,7 @@ import type {
   EmbedBatchInput,
   EmbedInput,
   GatewayOperation,
+  ImageGenerateInput,
   ObserveGenerationEnd,
   ObserveGenerationError,
   ObserveGenerationStart,
@@ -116,7 +117,7 @@ function buildChatLifecycleAttributes(messages: ChatCompleteInput["messages"]) {
 
 function buildLifecycleAttributes(
   operation: GatewayOperation,
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput,
 ) {
   if (operation !== "chat.complete" && operation !== "chat.stream") {
     return {};
@@ -197,7 +198,7 @@ function summarizeToolCalls(
 }
 
 function resolveModelParameters(
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput,
 ) {
   return compactRecord({
     ...("temperature" in payload && payload.temperature !== undefined
@@ -251,12 +252,24 @@ function resolveModelParameters(
     ...("timestampGranularities" in payload && payload.timestampGranularities !== undefined
       ? { timestampGranularities: payload.timestampGranularities }
       : {}),
+    ...("aspectRatio" in payload && payload.aspectRatio !== undefined
+      ? { aspectRatio: payload.aspectRatio }
+      : {}),
+    ...("quality" in payload && payload.quality !== undefined
+      ? { quality: payload.quality }
+      : {}),
+    ...("style" in payload && payload.style !== undefined
+      ? { style: payload.style }
+      : {}),
+    ...("count" in payload && payload.count !== undefined
+      ? { count: payload.count }
+      : {}),
   });
 }
 
 function buildInput(
   operation: GatewayOperation,
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput,
 ) {
   if (operation === "chat.complete" || operation === "chat.stream") {
     const chat = payload as ChatCompleteInput;
@@ -312,6 +325,19 @@ function buildInput(
     };
   }
 
+  if (operation === "images.generate") {
+    const image = payload as ImageGenerateInput;
+    return {
+      prompt: textSummary(image.prompt),
+      negativePrompt: textSummary(image.negativePrompt),
+      aspectRatio: image.aspectRatio,
+      quality: image.quality,
+      style: image.style,
+      count: image.count,
+      responseFormat: image.responseFormat,
+    };
+  }
+
   const rerank = payload as RerankInput;
   return {
     query: textSummary(rerank.query),
@@ -324,7 +350,7 @@ function buildInput(
 
 export function createGenerationObservation(input: {
   operation: GatewayOperation;
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput;
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput;
   options?: RequestOptions;
   target: ResolvedRequestTarget;
 }) {

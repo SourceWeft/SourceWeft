@@ -86,6 +86,51 @@ test("asr.transcribe sends DeepInfra OpenAI-compatible multipart request", async
   });
 });
 
+test("asr.transcribe sends SiliconflowCN multipart request", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return createJsonResponse({ text: "Hello world" });
+    },
+    providers: {
+      SiliconflowCN: {
+        kind: "siliconflow-cn",
+        baseUrl: "https://api.siliconflow.cn/v1",
+        apiKey: "sf-key",
+      },
+    },
+    modelRoutes: {
+      "asr-default": {
+        strategy: "priority",
+        targets: [
+          {
+            provider: "SiliconflowCN",
+            model: "FunAudioLLM/SenseVoiceSmall",
+            priority: 1,
+          },
+        ],
+      },
+    },
+  });
+
+  await gateway.asr.transcribe({
+    model: "asr-default",
+    audio: audioBlob(),
+    fileName: "voice.mp3",
+    mimeType: "audio/mpeg",
+  });
+
+  assert.equal(
+    requests[0]?.url,
+    "https://api.siliconflow.cn/v1/audio/transcriptions",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string>).Authorization,
+    "Bearer sf-key",
+  );
+});
+
 test("asr.transcribe supports word timestamp opt-in", async () => {
   const forms: FormData[] = [];
   const gateway = createModelGateway({

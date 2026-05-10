@@ -33,6 +33,8 @@ import {
 import { assertSourcesExist } from "./source-validation";
 import type { PreparedThreadTurn, StreamThreadEventInput } from "./types";
 import { resolveSourceTreeScope } from "../../sources/service";
+import { normalizeArtifactToolSelection } from "../../artifacts/types";
+import { runArtifactIntentPipeline } from "../../artifacts/intent-pipeline";
 
 function normalizeSupportedParameters(value: unknown) {
   if (!Array.isArray(value)) {
@@ -157,10 +159,15 @@ export async function prepareThreadTurn(
     typeof input.llm?.profileAlias === "string"
       ? input.llm.profileAlias.trim()
       : "";
+  const requestedModelAlias =
+    typeof input.llm?.modelAlias === "string"
+      ? input.llm.modelAlias.trim()
+      : "";
 
   const resolvedChatModel = await resolveThreadChatProfile({
     threadModelSettings: normalizeThreadModelSettings(thread.modelSettings),
     requestedProfileAlias: requestedProfileAlias || undefined,
+    requestedModelAlias: requestedProfileAlias ? undefined : requestedModelAlias || undefined,
   });
 
   const mentionedSourceIds = dedupeSourceIds(input.mentionedSourceIds);
@@ -189,13 +196,17 @@ export async function prepareThreadTurn(
   });
   const sourceIds = sourceScope.effectiveSourceIds;
   const skillIds = normalizeSkillIds(input.tools?.skillIds);
-  const webSearchEnabled = input.tools?.webSearchEnabled === true;
+  const requestedWebSearchEnabled = input.tools?.webSearchEnabled === true;
+  const artifact = normalizeArtifactToolSelection(input.tools?.artifact);
   const timezone = normalizeTimezone(input.timezone);
   const enabledSkills = await resolveSelectedSkills({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
     skillIds,
   });
+  const webSearchEnabled =
+    requestedWebSearchEnabled ||
+    enabledSkills.some((skill) => skill.tools?.includes("web_search"));
 
   await assertSourcesExist({
     teamId: workspace.organizationId,
@@ -203,6 +214,16 @@ export async function prepareThreadTurn(
     sourceIds: Array.from(
       new Set([...selectedSourceIds, ...mentionedSourceIds]),
     ),
+  });
+
+  const normalizedThreadSettings = normalizeThreadModelSettings(
+    thread.modelSettings,
+  );
+  const artifactPipeline = await runArtifactIntentPipeline({
+    content: messageContent,
+    tools: artifact ? { artifact } : undefined,
+    enabledSkills,
+    threadModelSettings: normalizedThreadSettings,
   });
 
   const userMessage =
@@ -226,7 +247,12 @@ export async function prepareThreadTurn(
         sourceIds: selectedSourceIds,
         effectiveSourceIds: sourceIds,
         skillIds,
-        tools: { skillIds, webSearchEnabled },
+        tools: {
+          skillIds,
+          webSearchEnabled,
+          ...(artifact ? { artifact } : {}),
+        },
+        artifactIntent: artifactPipeline.decision,
         versionOf: input.userMessageParentId ?? null,
       },
     }));
@@ -242,9 +268,6 @@ export async function prepareThreadTurn(
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);
   const llm = resolvePreparedLlmConfig({ chatProfile, llm: input.llm });
-  const normalizedThreadSettings = normalizeThreadModelSettings(
-    thread.modelSettings,
-  );
   if (
     normalizedThreadSettings.llmProfileAlias !== profileAlias ||
     normalizedThreadSettings.llmModelAlias !== modelAlias
@@ -312,6 +335,9 @@ export async function prepareThreadTurn(
     sourceScope,
     skillIds,
     webSearchEnabled,
+    artifact,
+    artifactIntent: artifactPipeline.decision,
+    imageProfile: artifactPipeline.imageProfile,
     timezone,
     enabledSkills,
     userMessage: userMessageWithTraceId,

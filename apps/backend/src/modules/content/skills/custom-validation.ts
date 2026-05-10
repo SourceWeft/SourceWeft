@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { SkillManifestJson } from "../../../shared/db/schema";
+import { isAgentToolName, isConfigurableAgentTool } from "../agent/tool-registry";
 
 export const CUSTOM_SKILL_LIMITS = {
   skillMdBytes: 256 * 1024,
@@ -10,6 +11,7 @@ export const CUSTOM_SKILL_LIMITS = {
 };
 
 const ALLOWED_EXTENSIONS = new Set([".md", ".txt", ".json", ".yaml", ".yml"]);
+const GENERATE_IMAGE_CONFIG_KEYS = new Set(["aspectRatio", "quality", "style"]);
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown",
   ".txt": "text/plain",
@@ -78,6 +80,135 @@ function validateDisplayName(name: string) {
 
 function normalizeCategory(value: unknown) {
   return typeof value === "string" && validateSkillName(value) ? value : null;
+}
+
+function normalizeCapability(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return /^[a-z0-9_.:-]{1,128}$/.test(normalized) ? normalized : null;
+}
+
+function normalizeCapabilities(value: unknown): SkillManifestJson["capabilities"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const requiredValue = record.required;
+  const optionalValue = record.optional;
+  const required = Array.isArray(requiredValue)
+    ? requiredValue
+        .map(normalizeCapability)
+        .filter((capability): capability is string => Boolean(capability))
+    : [];
+  const optional = Array.isArray(optionalValue)
+    ? optionalValue
+        .map(normalizeCapability)
+        .filter((capability): capability is string => Boolean(capability))
+    : [];
+
+  if (
+    (Array.isArray(requiredValue) && required.length !== requiredValue.length) ||
+    (Array.isArray(optionalValue) && optional.length !== optionalValue.length)
+  ) {
+    throw new Error("Custom skill manifest capabilities are invalid");
+  }
+
+  const capabilities: NonNullable<SkillManifestJson["capabilities"]> = {};
+  if (required.length > 0) {
+    capabilities.required = Array.from(new Set(required));
+  }
+  if (optional.length > 0) {
+    capabilities.optional = Array.from(new Set(optional));
+  }
+  return Object.keys(capabilities).length > 0 ? capabilities : undefined;
+}
+
+function normalizeModelAlias(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 512
+    ? value.trim()
+    : null;
+}
+
+function normalizeModels(value: unknown): SkillManifestJson["models"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Custom skill manifest models are invalid");
+  }
+  const record = value as Record<string, unknown>;
+  const models: NonNullable<SkillManifestJson["models"]> = {};
+  const chat = normalizeModelAlias(record.chat);
+  const image = normalizeModelAlias(record.image);
+  const vision = normalizeModelAlias(record.vision);
+  if (chat) models.chat = chat;
+  if (image) models.image = image;
+  if (vision) models.vision = vision;
+
+  const knownKeys = new Set(["chat", "image", "vision"]);
+  if (
+    Object.keys(record).some((key) => !knownKeys.has(key)) ||
+    (record.chat !== undefined && !chat) ||
+    (record.image !== undefined && !image) ||
+    (record.vision !== undefined && !vision)
+  ) {
+    throw new Error("Custom skill manifest models are invalid");
+  }
+
+  return Object.keys(models).length > 0 ? models : undefined;
+}
+
+function normalizeTools(value: unknown) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("Custom skill manifest tools are invalid");
+  }
+  const tools = value.map((item) =>
+    typeof item === "string" ? item.trim() : "",
+  );
+  if (tools.some((toolName) => !isAgentToolName(toolName))) {
+    throw new Error("Custom skill manifest tools are invalid");
+  }
+  return Array.from(new Set(tools));
+}
+
+function validateGenerateImageDefaultConfig(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Custom skill manifest defaultConfig is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !GENERATE_IMAGE_CONFIG_KEYS.has(key))) {
+    throw new Error("Custom skill manifest defaultConfig is invalid");
+  }
+}
+
+function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Custom skill manifest defaultConfig is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!isAgentToolName(key)) {
+      throw new Error("Custom skill manifest defaultConfig is invalid");
+    }
+    if (!isConfigurableAgentTool(key)) {
+      throw new Error("Custom skill manifest defaultConfig is invalid");
+    }
+    if (!tools?.includes(key)) {
+      throw new Error("Custom skill manifest defaultConfig requires matching tools");
+    }
+    if (key === "generate_image") {
+      validateGenerateImageDefaultConfig(record[key]);
+    }
+  }
+  return Object.keys(record).length > 0 ? record : undefined;
 }
 
 function firstJsonObject(files: ValidatedCustomSkillFile[]) {
@@ -190,6 +321,10 @@ export function validateCustomSkillBundle(input: {
   const categories = Array.isArray(categoriesValue)
     ? categoriesValue.map(normalizeCategory).filter((category): category is string => Boolean(category))
     : [];
+  const capabilities = normalizeCapabilities(skillJson?.capabilities);
+  const models = normalizeModels(skillJson?.models);
+  const tools = normalizeTools(skillJson?.tools);
+  const defaultConfig = normalizeDefaultConfig(skillJson?.defaultConfig, tools);
 
   if (!validateSkillName(slug)) {
     throw new Error("Custom skill manifest slug is invalid");
@@ -209,6 +344,9 @@ export function validateCustomSkillBundle(input: {
   if (!description || description.length > 1024) {
     throw new Error("Custom skill manifest description is invalid");
   }
+  if (models?.image && !tools?.includes("generate_image")) {
+    throw new Error("Custom skill manifest models.image requires generate_image tool");
+  }
 
   const contentHash = hashCustomSkillFiles(files);
   const manifestJson: SkillManifestJson = {
@@ -219,6 +357,18 @@ export function validateCustomSkillBundle(input: {
     visibility,
     categories: Array.from(new Set(categories)),
   };
+  if (capabilities) {
+    manifestJson.capabilities = capabilities;
+  }
+  if (defaultConfig) {
+    manifestJson.defaultConfig = defaultConfig;
+  }
+  if (models) {
+    manifestJson.models = models;
+  }
+  if (tools) {
+    manifestJson.tools = tools;
+  }
 
   return {
     name: slug,

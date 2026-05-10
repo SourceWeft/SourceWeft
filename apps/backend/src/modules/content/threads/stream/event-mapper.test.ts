@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapDeepAgentEventToSse, normalizeToolOutputForSse } from "./event-mapper";
+import {
+  mapDeepAgentEventToSse,
+  normalizeToolOutputForSse,
+} from "./event-mapper";
 import type { DeepAgentTurnEvent } from "../../agent/turn/runner";
 
 function parseSseData(value: string) {
   assert.equal(value.startsWith("data: "), true);
-  return JSON.parse(value.slice("data: ".length).trim()) as Record<string, unknown>;
+  return JSON.parse(value.slice("data: ".length).trim()) as Record<
+    string,
+    unknown
+  >;
 }
 
 test("normalizeToolOutputForSse renders file listings as display content", () => {
@@ -26,7 +32,11 @@ test("normalizeToolOutputForSse renders grep matches as display content", () => 
   assert.deepEqual(
     normalizeToolOutputForSse({
       matches: [
-        { path: "/kb/invoice/chunks/0000.md", line: 12, text: "Invoice No. 123" },
+        {
+          path: "/kb/invoice/chunks/0000.md",
+          line: 12,
+          text: "Invoice No. 123",
+        },
       ],
     }),
     {
@@ -37,7 +47,9 @@ test("normalizeToolOutputForSse renders grep matches as display content", () => 
 
 test("normalizeToolOutputForSse preserves readable content outputs", () => {
   assert.deepEqual(
-    normalizeToolOutputForSse({ content: "Path: /kb/invoice.md\nSource: Invoice" }),
+    normalizeToolOutputForSse({
+      content: "Path: /kb/invoice.md\nSource: Invoice",
+    }),
     { content: "Path: /kb/invoice.md\nSource: Invoice" },
   );
 });
@@ -83,10 +95,9 @@ test("mapDeepAgentEventToSse sends displayable tool result output", () => {
   const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
 
   assert.deepEqual(data.output, { content: "/kb/invoice.md (83466 bytes)" });
-  assert.deepEqual(
-    (data.toolCall as { output: unknown }).output,
-    { content: "/kb/invoice.md (83466 bytes)" },
-  );
+  assert.deepEqual((data.toolCall as { output: unknown }).output, {
+    content: "/kb/invoice.md (83466 bytes)",
+  });
 });
 
 test("mapDeepAgentEventToSse preserves tool input parameters", () => {
@@ -110,10 +121,10 @@ test("mapDeepAgentEventToSse preserves tool input parameters", () => {
   const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
 
   assert.deepEqual(data.input, { pattern: "DESCRIPTION", path: "/kb" });
-  assert.deepEqual(
-    (data.toolCall as { input: unknown }).input,
-    { pattern: "DESCRIPTION", path: "/kb" },
-  );
+  assert.deepEqual((data.toolCall as { input: unknown }).input, {
+    pattern: "DESCRIPTION",
+    path: "/kb",
+  });
 });
 
 test("mapDeepAgentEventToSse maps text interruption events", () => {
@@ -131,4 +142,17 @@ test("mapDeepAgentEventToSse maps text interruption events", () => {
   assert.equal(data.reason, "tool-call");
   assert.equal(data.toolCallId, "tool-1");
   assert.equal(data.tool, "search_sources");
+});
+
+test("mapDeepAgentEventToSse maps text replacement events", () => {
+  const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
+    type: "text-replace",
+    text: "Final markdown\n\n![Generated](/artifact.png)",
+  };
+
+  const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
+
+  assert.equal(data.type, "text-replace");
+  assert.equal(data.id, "text-1");
+  assert.equal(data.text, "Final markdown\n\n![Generated](/artifact.png)");
 });

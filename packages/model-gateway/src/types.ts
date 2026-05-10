@@ -46,6 +46,7 @@ export type ProviderKind =
   | "openai-compatible"
   | "openrouter"
   | "deepinfra"
+  | "siliconflow-cn"
   | "openai"
   | "anthropic"
   | "gemini"
@@ -283,7 +284,8 @@ export type GatewayOperation =
   | "embeddings.embed"
   | "embeddings.embedBatch"
   | "rerank.rank"
-  | "asr.transcribe";
+  | "asr.transcribe"
+  | "images.generate";
 
 export interface LangChainChatModelLike {
   getName?(): string;
@@ -510,6 +512,59 @@ export interface AsrTranscribeResult {
   raw: Record<string, unknown>;
 }
 
+export type ImageAspectRatio =
+  | "auto"
+  | "1:1"
+  | "2:3"
+  | "3:2"
+  | "3:4"
+  | "4:3"
+  | "4:5"
+  | "5:4"
+  | "9:16"
+  | "16:9"
+  | "21:9"
+  | "1:4"
+  | "4:1"
+  | "1:8"
+  | "8:1";
+export type ImageQuality = "auto" | "low" | "standard" | "higher" | "highest";
+export type ImageStyle = "auto" | "ghibli" | "pixar" | "cartoon" | "pixel";
+export type ImageResponseFormat = "url" | "b64_json";
+
+export interface ImageGenerateInput extends GatewayExecutionInput {
+  model: string;
+  prompt: string;
+  negativePrompt?: string;
+  aspectRatio?: ImageAspectRatio;
+  quality?: ImageQuality;
+  style?: ImageStyle;
+  count?: number;
+  responseFormat?: ImageResponseFormat;
+  metadata?: GatewayRequestMetadata;
+  extraBody?: Record<string, unknown>;
+}
+
+export interface GeneratedImage {
+  mimeType?: string;
+  url?: string;
+  b64Json?: string;
+  revisedPrompt?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface ImageGenerateResult {
+  model: string;
+  images: GeneratedImage[];
+  usage?: UsageInfo;
+  provider?: string;
+  providerModel?: string;
+  routeDecision?: RouteDecision;
+  traceId?: string;
+  raw: Record<string, unknown>;
+}
+
 export interface ModelGateway {
   chat: {
     complete(
@@ -536,6 +591,12 @@ export interface ModelGateway {
       input: AsrTranscribeInput,
       opts?: RequestOptions,
     ): Promise<AsrTranscribeResult>;
+  };
+  images: {
+    generate(
+      input: ImageGenerateInput,
+      opts?: RequestOptions,
+    ): Promise<ImageGenerateResult>;
   };
 }
 

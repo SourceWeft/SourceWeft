@@ -2,6 +2,7 @@ import type { SourceParseJobPayload, SourceParsePollJobPayload } from "./queue";
 import type { ContentBillingPort } from "./billing-port";
 import type { ChunkSpec } from "./types";
 import { contentByokService } from "./byok";
+import { contentArtifactsService } from "./artifacts/service";
 import { requireContentWorkspace } from "./content-support";
 import {
   SourceIndexingService,
@@ -483,6 +484,22 @@ export class ContentService {
     userId: string;
   }) {
     return contentThreadService.listThreadMessages(input);
+  }
+
+  async getArtifactFile(input: {
+    workspaceId: string;
+    artifactId: string;
+    userId: string;
+  }) {
+    return contentArtifactsService.getArtifactFile(input);
+  }
+
+  async listArtifacts(input: {
+    workspaceId: string;
+    userId: string;
+    limit?: number;
+  }) {
+    return contentArtifactsService.listArtifacts(input);
   }
 
   async listWorkingFiles(input: {

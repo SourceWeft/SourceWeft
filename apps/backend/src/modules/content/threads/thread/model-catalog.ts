@@ -13,6 +13,8 @@ import {
   type ModelProfileKind,
   type ThreadModelSettings,
 } from "../model-settings";
+import { resolveImageModelCapabilities } from "../../artifacts/image-capabilities";
+import type { ImageModelCapabilities } from "../../artifacts/types";
 
 type ThreadModelCatalogEntry = {
   kind: "llm" | "image" | "vision";
@@ -35,6 +37,7 @@ type ThreadModelCatalogEntry = {
     reasoningEffort: boolean;
     includeReasoning: boolean;
     supportSources: string[];
+    imageGeneration?: ImageModelCapabilities;
   };
 };
 
@@ -277,9 +280,16 @@ export async function listThreadModelCatalog(input: {
         )
       : [];
     const pricing = resolveCatalogPricing(configJson);
-    const directCapabilities = resolveReasoningCapabilities({
+    const directCapabilities: ThreadModelCapabilities = resolveReasoningCapabilities({
       configJson,
     });
+    if (threadKind === "image") {
+      directCapabilities.imageGeneration = resolveImageModelCapabilities({
+        configJson,
+        providerKind: route.providerKind,
+        modelId: route.targetModel,
+      });
+    }
 
     kinds[threadKind].push({
       kind: threadKind,

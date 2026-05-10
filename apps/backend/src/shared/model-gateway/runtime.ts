@@ -50,6 +50,7 @@ export function withOpenRouterAttributionHeaders(input: {
     | "openai-compatible"
     | "openrouter"
     | "deepinfra"
+    | "siliconflow-cn"
     | "openai"
     | "anthropic"
     | "gemini"

@@ -105,6 +105,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     creditsConsumed: billing.consumedCredits,
     metadata: {
       userMessageId: prepared.userMessage.id,
+      sourceUserMessageId: prepared.userMessage.id,
       traceId: prepared.traceContext?.traceId ?? prepared.userMessage.id,
       providerCostUsd,
       billingSkipped: !providerCostUsd || providerCostUsd <= 0,

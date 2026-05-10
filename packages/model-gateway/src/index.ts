@@ -22,6 +22,7 @@ export { resolveThinkingMode } from "./thinking";
 
 export { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 export { createDeepInfraProvider } from "./providers/deepinfra";
+export { createSiliconflowCNProvider } from "./providers/siliconflow-cn";
 
 export type {
   AsrAudioInput,
@@ -51,6 +52,13 @@ export type {
   LangChainFactories,
   LangChainRerankerLike,
   GatewayRequestMetadata,
+  GeneratedImage,
+  ImageAspectRatio,
+  ImageGenerateInput,
+  ImageGenerateResult,
+  ImageQuality,
+  ImageResponseFormat,
+  ImageStyle,
   MessageRole,
   ModelGateway,
   ModelGatewayConfig,

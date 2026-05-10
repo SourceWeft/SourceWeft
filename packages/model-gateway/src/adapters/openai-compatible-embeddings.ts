@@ -2,7 +2,7 @@ import { OpenAIEmbeddings } from "@langchain/openai";
 import type { EmbeddingsAdapter } from "./types";
 
 export class OpenAICompatibleEmbeddingsAdapter implements EmbeddingsAdapter {
-  readonly kind = "openai-compatible" as const;
+  readonly kind: EmbeddingsAdapter["kind"] = "openai-compatible";
 
   createModel(target: Parameters<EmbeddingsAdapter["createModel"]>[0], input: Parameters<EmbeddingsAdapter["createModel"]>[1]) {
     return new OpenAIEmbeddings({

@@ -214,6 +214,43 @@ export const listSourcesResponseSchema = z.object({
   items: z.array(sourceSchema),
 });
 
+export const artifactSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  workspaceId: z.string(),
+  threadId: z.string().nullable(),
+  artifactType: z.enum([
+    "report",
+    "slides",
+    "mindmap",
+    "podcast",
+    "audio_overview",
+    "video_overview",
+    "flashcards",
+    "quiz",
+    "table",
+    "infographic",
+    "image",
+  ]),
+  status: z.enum(["pending", "running", "ready", "failed", "archived"]),
+  title: z.string().nullable(),
+  promptText: z.string().nullable(),
+  payloadJson: z.record(z.string(), z.unknown()),
+  storageBucket: z.string().nullable(),
+  storageKey: z.string().nullable(),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  createdBy: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  previewUrl: z.string().nullable(),
+});
+
+export const listArtifactsResponseSchema = z.object({
+  items: z.array(artifactSchema),
+});
+
 const sourceMentionSchema = sourceSchema.pick({
   id: true,
   title: true,
@@ -396,6 +433,7 @@ const reasoningEffortSchema = z.enum([
 const llmExecutionConfigSchema = z
   .object({
     profileAlias: z.string().trim().min(1).max(512).optional(),
+    modelAlias: z.string().trim().min(1).max(512).optional(),
     executionMode: z.enum(["GLOBAL", "BYOK"]).optional(),
     providerHint: z.string().trim().min(1).max(100).optional(),
     byok: byokConfigSchema.optional(),
@@ -404,6 +442,57 @@ const llmExecutionConfigSchema = z
   .strict();
 
 export const streamThreadModeSchema = z.enum(["send", "refresh", "edit"]);
+
+export const imageStyleSchema = z.enum([
+  "auto",
+  "ghibli",
+  "pixar",
+  "cartoon",
+  "pixel",
+]);
+
+export const imageAspectRatioSchema = z.enum([
+  "auto",
+  "1:1",
+  "2:3",
+  "3:2",
+  "3:4",
+  "4:3",
+  "4:5",
+  "5:4",
+  "9:16",
+  "16:9",
+  "21:9",
+  "1:4",
+  "4:1",
+  "1:8",
+  "8:1",
+]);
+
+export const imageQualitySchema = z.enum([
+  "auto",
+  "low",
+  "standard",
+  "higher",
+  "highest",
+]);
+
+const imageArtifactConfigSchema = z
+  .object({
+    aspectRatio: imageAspectRatioSchema.optional(),
+    quality: imageQualitySchema.optional(),
+    style: imageStyleSchema.optional(),
+  })
+  .strict();
+
+const artifactToolSelectionSchema = z
+  .object({
+    kind: z.literal("image"),
+    mode: z.enum(["auto", "generate"]).optional(),
+    modelAlias: z.string().trim().min(1).max(512).optional(),
+    image: imageArtifactConfigSchema.optional(),
+  })
+  .strict();
 
 const skillSourceTypeSchema = z.enum([
   "builtin",
@@ -415,6 +504,7 @@ const threadToolsRequestSchema = z
   .object({
     skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
     webSearchEnabled: z.boolean().optional(),
+    artifact: artifactToolSelectionSchema.optional(),
   })
   .strict();
 
@@ -530,6 +620,21 @@ export const skillCatalogItemSchema = z.object({
   enabledWorkspaceSkillId: z.string().nullable(),
   enabled: z.boolean(),
   hasReadme: z.boolean(),
+  capabilities: z
+    .object({
+      required: z.array(z.string()).optional(),
+      optional: z.array(z.string()).optional(),
+    })
+    .optional(),
+  models: z
+    .object({
+      chat: z.string().optional(),
+      image: z.string().optional(),
+      vision: z.string().optional(),
+    })
+    .optional(),
+  tools: z.array(z.string()).optional(),
+  defaultConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const skillManifestJsonSchema = z.object({
@@ -539,6 +644,21 @@ export const skillManifestJsonSchema = z.object({
   description: z.string(),
   visibility: z.enum(["public", "restricted", "workspace", "team"]),
   categories: z.array(z.string()),
+  capabilities: z
+    .object({
+      required: z.array(z.string()).optional(),
+      optional: z.array(z.string()).optional(),
+    })
+    .optional(),
+  models: z
+    .object({
+      chat: z.string().optional(),
+      image: z.string().optional(),
+      vision: z.string().optional(),
+    })
+    .optional(),
+  tools: z.array(z.string()).optional(),
+  defaultConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const listSkillsCatalogResponseSchema = z.object({
@@ -686,6 +806,34 @@ export const updateThreadModelSettingsResponseSchema = z.object({
 
 const modelCatalogKindSchema = z.enum(["llm", "image", "vision"]);
 
+const imageModelCapabilitiesSchema = z
+  .object({
+    supported: z.boolean(),
+    provider: z.string().optional(),
+    supportedParameters: z.array(z.string()).optional(),
+    controls: z
+      .object({
+        aspectRatio: z
+          .object({
+            values: z.array(imageAspectRatioSchema),
+          })
+          .optional(),
+        quality: z
+          .object({
+            values: z.array(imageQualitySchema),
+          })
+          .optional(),
+        style: z
+          .object({
+            values: z.array(imageStyleSchema),
+          })
+          .optional(),
+      })
+      .strict(),
+    maxVariants: z.number().int().positive().optional(),
+  })
+  .strict();
+
 export const modelCatalogItemSchema = z.object({
   kind: modelCatalogKindSchema,
   profileAlias: z.string(),
@@ -708,6 +856,7 @@ export const modelCatalogItemSchema = z.object({
       reasoningEffort: z.boolean(),
       includeReasoning: z.boolean(),
       supportSources: z.array(z.string()),
+      imageGeneration: imageModelCapabilitiesSchema.optional(),
     })
     .optional(),
 });
@@ -772,6 +921,10 @@ export type CreateUrlSourceResponse = z.infer<
   typeof createUrlSourceResponseSchema
 >;
 export type ListSourcesResponse = z.infer<typeof listSourcesResponseSchema>;
+export type Artifact = z.infer<typeof artifactSchema>;
+export type ListArtifactsResponse = z.infer<
+  typeof listArtifactsResponseSchema
+>;
 export type SourceMention = z.infer<typeof sourceMentionSchema>;
 export type ListSourceMentionsRequest = z.infer<
   typeof listSourceMentionsRequestSchema
@@ -807,6 +960,11 @@ export type ListThreadsRequest = z.infer<typeof listThreadsRequestSchema>;
 export type ListThreadsResponse = z.infer<typeof listThreadsResponseSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type StreamThreadMode = z.infer<typeof streamThreadModeSchema>;
+export type ImageStyle = z.infer<typeof imageStyleSchema>;
+export type ImageAspectRatio = z.infer<typeof imageAspectRatioSchema>;
+export type ImageQuality = z.infer<typeof imageQualitySchema>;
+export type ImageArtifactConfig = z.infer<typeof imageArtifactConfigSchema>;
+export type ArtifactToolSelection = z.infer<typeof artifactToolSelectionSchema>;
 export type StreamThreadRequest = z.infer<typeof streamThreadRequestSchema>;
 export type StreamThreadResponse = z.infer<typeof streamThreadResponseSchema>;
 export type RefreshThreadRequest = z.infer<typeof refreshThreadRequestSchema>;

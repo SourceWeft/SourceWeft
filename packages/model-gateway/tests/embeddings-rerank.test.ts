@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDeepInfraProvider, createModelGateway } from "../src/index";
+import {
+  createDeepInfraProvider,
+  createModelGateway,
+  createSiliconflowCNProvider,
+} from "../src/index";
 import { DeepInfraChatAdapter } from "../src/adapters/deepinfra-chat";
 import { DeepInfraEmbeddingsAdapter } from "../src/adapters/deepinfra-embeddings";
-import { resolveDeepInfraBaseUrls } from "../src/adapters/deepinfra-url";
+import { SiliconflowCNChatAdapter } from "../src/adapters/siliconflow-cn-chat";
+import { SiliconflowCNEmbeddingsAdapter } from "../src/adapters/siliconflow-cn-embeddings";
 import { createJsonResponse } from "./helpers";
 
 test("createDeepInfraProvider defaults to provider root URL", () => {
@@ -12,32 +17,38 @@ test("createDeepInfraProvider defaults to provider root URL", () => {
     baseUrl: "https://api.deepinfra.com/v1",
     apiKey: "deepinfra-key",
     defaultHeaders: undefined,
-    supports: ["chat", "embeddings", "rerank", "asr"],
+    supports: ["chat", "embeddings", "rerank", "asr", "image"],
     enabled: true,
-  });
-});
-
-test("resolveDeepInfraBaseUrls accepts root and OpenAI-compatible URLs", () => {
-  assert.deepEqual(resolveDeepInfraBaseUrls("https://api.deepinfra.com/v1"), {
-    rootBaseUrl: "https://api.deepinfra.com/v1",
-    openAICompatibleBaseUrl: "https://api.deepinfra.com/v1/openai",
-    inferenceBaseUrl: "https://api.deepinfra.com/v1/inference",
-  });
-  assert.deepEqual(resolveDeepInfraBaseUrls("https://api.deepinfra.com/v1/openai"), {
-    rootBaseUrl: "https://api.deepinfra.com/v1",
-    openAICompatibleBaseUrl: "https://api.deepinfra.com/v1/openai",
-    inferenceBaseUrl: "https://api.deepinfra.com/v1/inference",
-  });
-  assert.deepEqual(resolveDeepInfraBaseUrls("https://api.deepinfra.com/v1/openai/"), {
-    rootBaseUrl: "https://api.deepinfra.com/v1",
-    openAICompatibleBaseUrl: "https://api.deepinfra.com/v1/openai",
-    inferenceBaseUrl: "https://api.deepinfra.com/v1/inference",
   });
 });
 
 test("DeepInfra chat and embeddings adapters expose provider identity", () => {
   assert.equal(new DeepInfraChatAdapter().kind, "deepinfra");
   assert.equal(new DeepInfraEmbeddingsAdapter().kind, "deepinfra");
+});
+
+test("createSiliconflowCNProvider defaults to SiliconFlow CN API", () => {
+  assert.deepEqual(createSiliconflowCNProvider({ apiKey: "sf-key" }), {
+    kind: "siliconflow-cn",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    apiKey: "sf-key",
+    defaultHeaders: undefined,
+    supports: [
+      "chat",
+      "embeddings",
+      "rerank",
+      "asr",
+      "image",
+      "tool_calling",
+      "json_schema",
+    ],
+    enabled: true,
+  });
+});
+
+test("SiliconflowCN chat and embeddings adapters expose provider identity", () => {
+  assert.equal(new SiliconflowCNChatAdapter().kind, "siliconflow-cn");
+  assert.equal(new SiliconflowCNEmbeddingsAdapter().kind, "siliconflow-cn");
 });
 
 test("DeepInfra embeddings reject base64 encoding format", async () => {
@@ -230,7 +241,7 @@ test("embeddings.embed ignores generation observation failures", async () => {
   assert.equal(warnings[1]?.error, "end observer down");
 });
 
-test("rerank.rank supports siliconflow via openai-compatible provider", async () => {
+test("rerank.rank supports SiliconflowCN provider", async () => {
   const requests: Array<{ url: string; init: RequestInit }> = [];
 
   const gateway = createModelGateway({
@@ -242,8 +253,8 @@ test("rerank.rank supports siliconflow via openai-compatible provider", async ()
       });
     },
     providers: {
-      siliconflow: {
-        kind: "openai-compatible",
+      SiliconflowCN: {
+        kind: "siliconflow-cn",
         baseUrl: "https://api.siliconflow.cn/v1",
         apiKey: "sf-key",
       },
@@ -251,7 +262,7 @@ test("rerank.rank supports siliconflow via openai-compatible provider", async ()
     modelRoutes: {
       "rerank-default": {
         strategy: "priority",
-        targets: [{ provider: "siliconflow", model: "BAAI/bge-reranker-v2-m3", priority: 1 }],
+        targets: [{ provider: "SiliconflowCN", model: "BAAI/bge-reranker-v2-m3", priority: 1 }],
       },
     },
   });
@@ -264,7 +275,7 @@ test("rerank.rank supports siliconflow via openai-compatible provider", async ()
 
   assert.equal(requests[0]?.url, "https://api.siliconflow.cn/v1/rerank");
   assert.equal(result.results[0]?.relevanceScore, 0.77);
-  assert.equal(result.provider, "siliconflow");
+  assert.equal(result.provider, "SiliconflowCN");
 });
 
 test("rerank.rank emits provider-wire generation observation events", async () => {
@@ -276,8 +287,8 @@ test("rerank.rank emits provider-wire generation observation events", async () =
         results: [{ index: 0, score: 0.77 }],
       }),
     providers: {
-      siliconflow: {
-        kind: "openai-compatible",
+      SiliconflowCN: {
+        kind: "siliconflow-cn",
         baseUrl: "https://api.siliconflow.cn/v1",
         apiKey: "sf-key",
       },
@@ -285,7 +296,7 @@ test("rerank.rank emits provider-wire generation observation events", async () =
     modelRoutes: {
       "rerank-default": {
         strategy: "priority",
-        targets: [{ provider: "siliconflow", model: "BAAI/bge-reranker-v2-m3", priority: 1 }],
+        targets: [{ provider: "SiliconflowCN", model: "BAAI/bge-reranker-v2-m3", priority: 1 }],
       },
     },
     observeSink: {

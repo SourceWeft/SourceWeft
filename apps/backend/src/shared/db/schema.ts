@@ -62,6 +62,7 @@ type ModelGatewayProviderKind =
   | "openai-compatible"
   | "openrouter"
   | "deepinfra"
+  | "siliconflow-cn"
   | "openai"
   | "anthropic"
   | "gemini"
@@ -102,7 +103,8 @@ type ArtifactType =
   | "flashcards"
   | "quiz"
   | "table"
-  | "infographic";
+  | "infographic"
+  | "image";
 type ArtifactStatus = "pending" | "running" | "ready" | "failed" | "archived";
 type ArtifactSourceRole = "input" | "evidence" | "output";
 type WorkingFilePurpose = "scratch" | "draft" | "note" | "output_candidate";
@@ -174,6 +176,17 @@ export type SkillManifestJson = {
   description: string;
   visibility: SkillManifestVisibility;
   categories: string[];
+  capabilities?: {
+    required?: string[];
+    optional?: string[];
+  };
+  models?: {
+    chat?: string;
+    image?: string;
+    vision?: string;
+  };
+  tools?: string[];
+  defaultConfig?: Record<string, unknown>;
 };
 
 const emptyJsonObject = sql`'{}'::jsonb`;
@@ -839,7 +852,7 @@ export const modelGatewayProviderConfigs = pgTable(
     ),
     check(
       "model_gateway_provider_configs_kind_check",
-      sql`${table.providerKind} in ('openai-compatible', 'openrouter', 'deepinfra', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
+      sql`${table.providerKind} in ('openai-compatible', 'openrouter', 'deepinfra', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
     ),
     index("model_gateway_provider_configs_active_idx").on(
       table.configVersionId,
@@ -2772,7 +2785,7 @@ export const artifacts = pgTable(
     }).onDelete("cascade"),
     check(
       "artifacts_artifact_type_check",
-      sql`${table.artifactType} in ('report', 'slides', 'mindmap', 'podcast', 'audio_overview', 'video_overview', 'flashcards', 'quiz', 'table', 'infographic')`,
+      sql`${table.artifactType} in ('report', 'slides', 'mindmap', 'podcast', 'audio_overview', 'video_overview', 'flashcards', 'quiz', 'table', 'infographic', 'image')`,
     ),
     check(
       "artifacts_status_check",

@@ -2,7 +2,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 
 export class OpenAICompatibleChatAdapter implements ChatAdapter {
-  readonly kind = "openai-compatible" as const;
+  readonly kind: ChatAdapter["kind"] = "openai-compatible";
 
   createModel(target: Parameters<ChatAdapter["createModel"]>[0], input: Parameters<ChatAdapter["createModel"]>[1]) {
     return new ChatOpenAI({

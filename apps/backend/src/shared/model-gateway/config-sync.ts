@@ -13,6 +13,7 @@ import {
 } from "../db/schema";
 import { logger } from "../logger";
 import {
+  type GlobalGatewayEntry,
   type GlobalProfilePricingEntry,
   loadGlobalModelGatewayConfig,
 } from "./global-config";
@@ -146,6 +147,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     profileId?: string;
     profileAlias: string;
     modelAlias: string;
+    targetModel: string;
     isDefault: boolean;
     isActive: boolean;
     requestedDimensions?: number | null;
@@ -161,6 +163,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     badges?: string[];
     supportedParameters?: string[];
     supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+    imageGeneration?: Record<string, unknown>;
   },
   gatewayConfigId: string,
   now: Date,
@@ -187,6 +190,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     isActive: entry.isActive,
     configJson: {
       ...buildProfilePricingConfigJson(entry.pricing, now),
+      targetModel: entry.targetModel,
       ...(entry.displayName ? { displayName: entry.displayName } : {}),
       ...(entry.subtitle ? { subtitle: entry.subtitle } : {}),
       ...(entry.badges && entry.badges.length > 0 ? { badges: entry.badges } : {}),
@@ -205,6 +209,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
       ...(entry.supportedEfforts && entry.supportedEfforts.length > 0
         ? { supportedEfforts: entry.supportedEfforts }
         : {}),
+      ...(entry.imageGeneration ? { imageGeneration: entry.imageGeneration } : {}),
     },
     updatedAt: now,
   };
@@ -471,28 +476,38 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
       }
 
       gatewayIdBySlug.set(entry.slug, gatewayConfigId);
-      await tx.insert(modelGatewayProviderConfigs).values({
-        id: randomUUID(),
-        configVersionId,
-        providerName: entry.providerName,
-        providerKind: entry.providerKind,
-        gatewayConfigId,
-        baseUrl: entry.baseUrl,
-        apiKeySource: entry.apiKeyEnv ?? null,
-        isActive: entry.isActive,
-        capabilitiesJson: entry.supports,
-        configJson: {
-          timeoutMs: resolveModelGatewayTimeoutMs(entry.timeoutMs),
-          maxRetries: resolveModelGatewayMaxRetries(entry.maxRetries),
-          isBYOK: entry.isBYOK,
-          defaultHeaders: withOpenRouterAttributionHeaders({
-            providerKind: entry.providerKind,
-            defaultHeaders: entry.defaultHeaders,
-          }),
+      const providerConfigs = [
+        {
+          providerName: entry.providerName,
+          providerKind: entry.providerKind,
+          supports: entry.supports,
         },
-        createdAt: now,
-        updatedAt: now,
-      });
+      ];
+
+      for (const providerConfig of providerConfigs) {
+        await tx.insert(modelGatewayProviderConfigs).values({
+          id: randomUUID(),
+          configVersionId,
+          providerName: providerConfig.providerName,
+          providerKind: providerConfig.providerKind,
+          gatewayConfigId,
+          baseUrl: entry.baseUrl,
+          apiKeySource: entry.apiKeyEnv ?? null,
+          isActive: entry.isActive,
+          capabilitiesJson: providerConfig.supports,
+          configJson: {
+            timeoutMs: resolveModelGatewayTimeoutMs(entry.timeoutMs),
+            maxRetries: resolveModelGatewayMaxRetries(entry.maxRetries),
+            isBYOK: entry.isBYOK,
+            defaultHeaders: withOpenRouterAttributionHeaders({
+              providerKind: providerConfig.providerKind,
+              defaultHeaders: entry.defaultHeaders,
+            }),
+          },
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
 
     await tx

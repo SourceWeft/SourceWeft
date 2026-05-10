@@ -38,6 +38,37 @@ export type ModelThinkingCapabilities = {
   reasoningEffort?: boolean;
   includeReasoning?: boolean;
   supportSources?: string[];
+  imageGeneration?: {
+    supported: boolean;
+    provider?: string;
+    controls?: {
+      aspectRatio?: {
+        values: Array<
+          | "auto"
+          | "1:1"
+          | "2:3"
+          | "3:2"
+          | "3:4"
+          | "4:3"
+          | "4:5"
+          | "5:4"
+          | "9:16"
+          | "16:9"
+          | "21:9"
+          | "1:4"
+          | "4:1"
+          | "1:8"
+          | "8:1"
+        >;
+      };
+      quality?: {
+        values: Array<"auto" | "low" | "standard" | "higher" | "highest">;
+      };
+      style?: {
+        values: Array<"auto" | "ghibli" | "pixar" | "cartoon" | "pixel">;
+      };
+    };
+  };
 };
 
 export type ModelItem = {
@@ -154,9 +185,13 @@ function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
       : displayName;
   const itemSubtitle = isGlobalAutoModel ? "Global models" : subtitle;
 
-  const badges = entry.capabilities?.supportsThinking
-    ? Array.from(new Set([...(entry.badges ?? []), "Thinking"]))
-    : entry.badges;
+  const badges = Array.from(
+    new Set([
+      ...(entry.badges ?? []),
+      ...(entry.capabilities?.supportsThinking ? ["Thinking"] : []),
+      ...(entry.capabilities?.imageGeneration?.supported ? ["Image"] : []),
+    ]),
+  );
 
   return {
     chef: providerLabel,
@@ -259,6 +294,22 @@ export function resolveSelectedModels(input: {
       type: "vision",
     }),
   };
+}
+
+export function findModelItemByAlias(input: {
+  availableModels: Record<ModelType, ModelItem[]>;
+  type: ModelType;
+  alias?: string | null;
+}) {
+  const alias = input.alias?.trim();
+  if (!alias) {
+    return null;
+  }
+  return (
+    input.availableModels[input.type].find(
+      (model) => model.id === alias || model.modelAlias === alias,
+    ) ?? null
+  );
 }
 
 const modelTypeLabels: Record<ModelType, string> = {

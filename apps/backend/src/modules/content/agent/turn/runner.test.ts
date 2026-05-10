@@ -93,11 +93,17 @@ test("normalizes all-failed web_fetch outputs to display-safe metadata", () => {
 
 test("filesystem tool titles classify glob scope from mounted pattern", () => {
   assert.equal(
-    testExports.getFilesystemToolStartTitle("glob", { path: "/", pattern: "/work/**/*.md" }),
+    testExports.getFilesystemToolStartTitle("glob", {
+      path: "/",
+      pattern: "/work/**/*.md",
+    }),
     "Finding matching Workfiles",
   );
   assert.equal(
-    testExports.getFilesystemToolEndTitle("glob", { path: "/", pattern: "/skills/**/*.md" }),
+    testExports.getFilesystemToolEndTitle("glob", {
+      path: "/",
+      pattern: "/skills/**/*.md",
+    }),
     "Found matching skill files",
   );
   assert.equal(
@@ -145,7 +151,10 @@ test("runtime prompt maps selected source mention labels to kb paths", () => {
 
   assert.match(prompt, /<selected_source_manifest>/);
   assert.match(prompt, /@043e27f7-c8e0-438e-a47f-adcf8b06088e\.pdf/);
-  assert.match(prompt, /kb_path="\/kb\/043e27f7-c8e0-438e-a47f-adcf8b06088e__src_043e27f7\.md"/);
+  assert.match(
+    prompt,
+    /kb_path="\/kb\/043e27f7-c8e0-438e-a47f-adcf8b06088e__src_043e27f7\.md"/,
+  );
   assert.match(prompt, /Do not synthesize \/work\/<filename>/);
   assert.match(prompt, /\/work contains only thread Workfiles/);
 });
@@ -155,7 +164,10 @@ test("runtime prompt lists only available public web tools", () => {
     timezone: "UTC",
     availableWebTools: ["web_fetch"],
   });
-  assert.match(fetchOnlyPrompt, /Available public web tools this turn: web_fetch\./);
+  assert.match(
+    fetchOnlyPrompt,
+    /Available public web tools this turn: web_fetch\./,
+  );
   assert.doesNotMatch(fetchOnlyPrompt, /web_search and web_fetch/);
 
   const searchAndFetchPrompt = testExports.buildAgentRuntimePrompt({
@@ -166,4 +178,105 @@ test("runtime prompt lists only available public web tools", () => {
     searchAndFetchPrompt,
     /Available public web tools this turn: web_search, web_fetch\./,
   );
+});
+
+test("generated image fallback markdown is inserted after the opening paragraph", () => {
+  const text = testExports.attachGeneratedImageMarkdown({
+    assistantText: "Image created.\n\nDetails stay below the image.",
+    artifacts: [
+      {
+        artifactId: "artifact-1",
+        artifactUrl: "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
+        title: "Concept [draft]",
+      },
+    ],
+  });
+
+  assert.equal(
+    text,
+    "Image created.\n\n![Concept draft](/v1/workspaces/workspace-1/artifacts/artifact-1/file)\n\nDetails stay below the image.",
+  );
+});
+
+test("generated image markdown replaces pending placeholders in order", () => {
+  const text = testExports.attachGeneratedImageMarkdown({
+    assistantText:
+      "Image created.\n\n![Generating image](sourceweft-image-pending://tool-1)\n\nDetails stay below the image.",
+    artifacts: [
+      {
+        artifactId: "artifact-1",
+        artifactUrl: "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
+        title: "Concept [draft]",
+        toolCallId: "tool-1",
+      },
+    ],
+  });
+
+  assert.equal(
+    text,
+    "Image created.\n\n![Concept draft](/v1/workspaces/workspace-1/artifacts/artifact-1/file)\n\nDetails stay below the image.",
+  );
+});
+
+test("generated image markdown skips artifacts already present in content", () => {
+  const text = testExports.attachGeneratedImageMarkdown({
+    assistantText: "Result\n\n![Existing](/artifact.png)",
+    artifacts: [
+      {
+        artifactId: "artifact-1",
+        artifactUrl: "/artifact.png",
+        title: "Existing",
+      },
+    ],
+  });
+
+  assert.equal(text, "Result\n\n![Existing](/artifact.png)");
+});
+
+test("runtime prompt treats image auto mode as available but optional", () => {
+  const prompt = testExports.buildAgentRuntimePrompt({
+    timezone: "UTC",
+    availableArtifactTools: ["generate_image"],
+    artifactIntent: {
+      kind: "image",
+      shouldInjectTool: true,
+      requireToolCall: false,
+      source: "explicit_tool",
+      confidence: 0.55,
+      reason:
+        "User-facing artifact controls enabled image generation tool auto mode.",
+      config: {
+        aspectRatio: "auto",
+        quality: "auto",
+        style: "auto",
+      },
+      warnings: [],
+    },
+  });
+
+  assert.match(prompt, /generate_image is available in auto mode/);
+  assert.doesNotMatch(prompt, /call generate_image\./);
+});
+
+test("runtime prompt treats image generate mode as requiring a tool call", () => {
+  const prompt = testExports.buildAgentRuntimePrompt({
+    timezone: "UTC",
+    availableArtifactTools: ["generate_image"],
+    artifactIntent: {
+      kind: "image",
+      shouldInjectTool: true,
+      requireToolCall: true,
+      source: "explicit_tool",
+      confidence: 1,
+      reason: "User-facing artifact controls requested image generation.",
+      config: {
+        aspectRatio: "auto",
+        quality: "auto",
+        style: "auto",
+      },
+      warnings: [],
+    },
+  });
+
+  assert.match(prompt, /call generate_image\./);
 });

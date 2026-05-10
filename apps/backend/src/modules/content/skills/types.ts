@@ -8,6 +8,17 @@ export type EnabledSkillDescriptor = {
   name: string;
   version: string;
   description: string;
+  capabilities?: {
+    required?: string[];
+    optional?: string[];
+  };
+  models?: {
+    chat?: string;
+    image?: string;
+    vision?: string;
+  };
+  tools?: string[];
+  defaultConfig?: Record<string, unknown>;
   files: SkillBundleFile[];
 };
 
@@ -40,4 +51,15 @@ export type SkillCatalogItem = {
   enabledWorkspaceSkillId: string | null;
   enabled: boolean;
   hasReadme: boolean;
+  capabilities?: {
+    required?: string[];
+    optional?: string[];
+  };
+  models?: {
+    chat?: string;
+    image?: string;
+    vision?: string;
+  };
+  tools?: string[];
+  defaultConfig?: Record<string, unknown>;
 };

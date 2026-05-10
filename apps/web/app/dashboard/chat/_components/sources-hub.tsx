@@ -11,9 +11,11 @@ import {
   useState,
 } from "react";
 import {
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   Download,
+  ExternalLink,
   FileText,
   Folder,
   FolderPlus,
@@ -220,6 +222,9 @@ type WorkfileListItem = Awaited<
 type WorkfileDetail = Awaited<
   ReturnType<typeof contentClient.getWorkingFile>
 >["file"];
+export type ArtifactListItem = Awaited<
+  ReturnType<typeof contentClient.listArtifacts>
+>["items"][number];
 
 type DisplayCitationItem = {
   id: string;
@@ -388,6 +393,58 @@ function workfileMatchesQuery(file: WorkfileListItem, q: string) {
   );
 }
 
+function artifactTypeLabel(type: ArtifactListItem["artifactType"]) {
+  if (type === "audio_overview") return "Audio";
+  if (type === "video_overview") return "Video";
+  return type
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function artifactTitle(artifact: ArtifactListItem) {
+  return artifact.title?.trim() || artifactTypeLabel(artifact.artifactType);
+}
+
+function resolveArtifactFileUrl(input: {
+  artifact: ArtifactListItem;
+  workspaceId?: string | null;
+}) {
+  const { artifact, workspaceId } = input;
+
+  if (artifact.previewUrl) {
+    return artifact.previewUrl.startsWith("/v1/")
+      ? `${apiBaseUrl}${artifact.previewUrl}`
+      : artifact.previewUrl;
+  }
+
+  if (workspaceId && artifact.storageKey) {
+    return `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifact.id)}/file`;
+  }
+
+  return null;
+}
+
+function resolveArtifactDownloadUrl(input: {
+  artifact: ArtifactListItem;
+  workspaceId?: string | null;
+}) {
+  const { artifact, workspaceId } = input;
+  if (!workspaceId || !artifact.storageKey) {
+    return null;
+  }
+
+  return `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifact.id)}/download`;
+}
+
+function artifactMatchesQuery(artifact: ArtifactListItem, q: string) {
+  return (
+    artifactTitle(artifact).toLowerCase().includes(q) ||
+    artifact.artifactType.toLowerCase().includes(q) ||
+    artifact.status.toLowerCase().includes(q) ||
+    (artifact.promptText ?? "").toLowerCase().includes(q)
+  );
+}
+
 function isSupportedUploadFile(file: File) {
   const extension = getUploadFileExtension(file.name);
   if (extension && SOURCE_FILE_EXTENSION_SET.has(extension)) {
@@ -445,6 +502,169 @@ function TypeBadge({ label }: { label: string }) {
     <span className="rounded-md border border-input bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-secondary-foreground">
       {label}
     </span>
+  );
+}
+
+export function ArtifactPreviewPanel({
+  artifact,
+  className,
+  onClose,
+  workspaceId,
+}: {
+  artifact: ArtifactListItem;
+  className?: string;
+  onClose: () => void;
+  workspaceId?: string | null;
+}) {
+  const fileUrl = resolveArtifactFileUrl({ artifact, workspaceId });
+  const downloadUrl = resolveArtifactDownloadUrl({ artifact, workspaceId });
+  const canPreviewImage =
+    artifact.artifactType === "image" &&
+    artifact.status === "ready" &&
+    Boolean(fileUrl);
+
+  const handleOpenExternal = () => {
+    if (!fileUrl) {
+      toast.error("This artifact has no preview file.");
+      return;
+    }
+    window.open(fileUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const handleDownload = () => {
+    if (!downloadUrl) {
+      toast.error("This artifact has no downloadable file.");
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  return (
+    <section
+      className={cn(
+        "flex h-full min-h-0 flex-col border-l bg-background text-foreground",
+        className,
+      )}
+    >
+      <div className="shrink-0 border-b bg-muted/20 px-3 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            className="gap-1.5"
+            onClick={onClose}
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
+            <ArrowLeft className="size-3.5" />
+            Artifacts
+          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              disabled={!fileUrl}
+              onClick={handleOpenExternal}
+              size="icon-xs"
+              title="Open artifact in new tab"
+              type="button"
+              variant="ghost"
+            >
+              <ExternalLink className="size-3.5" />
+              <span className="sr-only">Open artifact in new tab</span>
+            </Button>
+            <Button
+              disabled={!downloadUrl}
+              onClick={handleDownload}
+              size="icon-xs"
+              title="Download artifact"
+              type="button"
+              variant="ghost"
+            >
+              <Download className="size-3.5" />
+              <span className="sr-only">Download artifact</span>
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-2 min-w-0">
+          <h3 className="truncate text-sm font-medium text-foreground">
+            {artifactTitle(artifact)}
+          </h3>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+            <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
+            <TypeBadge label={artifact.status} />
+            <span>{new Date(artifact.createdAt).toLocaleString()}</span>
+            {artifact.completedAt ? (
+              <span>
+                completed {new Date(artifact.completedAt).toLocaleString()}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto bg-muted/10 px-3 py-3">
+        {artifact.status === "pending" || artifact.status === "running" ? (
+          <div className="flex min-h-80 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-background/70 px-5 text-center">
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Artifact is still generating
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Preview will be available when the image is ready.
+              </p>
+            </div>
+          </div>
+        ) : artifact.status === "failed" ? (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-center">
+            <p className="text-sm font-medium text-destructive">
+              Artifact generation failed
+            </p>
+            <p className="mt-2 text-xs leading-5 text-destructive/80">
+              {artifact.errorMessage || "No error details were saved."}
+            </p>
+          </div>
+        ) : canPreviewImage && fileUrl ? (
+          <div className="flex min-h-80 items-center justify-center rounded-xl border bg-background p-2 shadow-xs">
+            {/* eslint-disable-next-line @next/next/no-img-element -- Artifact file URLs are authenticated API resources that should load through the browser session. */}
+            <img
+              alt={artifactTitle(artifact)}
+              className="max-h-[calc(100vh-15rem)] max-w-full rounded-lg object-contain"
+              src={fileUrl}
+            />
+          </div>
+        ) : (
+          <div className="flex min-h-80 items-center justify-center rounded-xl border border-dashed bg-background/70 px-5 text-center">
+            <div>
+              <Sparkles className="mx-auto mb-3 size-5 text-muted-foreground" />
+              <p className="text-sm font-medium text-foreground">
+                Preview is not available
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Image artifacts can be previewed here. This artifact type is kept
+                compatible for future preview renderers.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {artifact.promptText ? (
+          <div className="mt-3 rounded-xl border bg-background/70 p-3">
+            <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Prompt
+            </p>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {artifact.promptText}
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -1369,6 +1589,134 @@ function WorkfilesTab({
   );
 }
 
+function ArtifactsTab({
+  artifacts,
+  isLoading,
+  loadingError,
+  onPreview,
+  onRefresh,
+  searchQuery,
+  workspaceId,
+}: {
+  artifacts: ArtifactListItem[];
+  isLoading: boolean;
+  loadingError: string | null;
+  onPreview: (artifact: ArtifactListItem) => void;
+  onRefresh: () => void;
+  searchQuery: string;
+  workspaceId?: string | null;
+}) {
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      q
+        ? artifacts.filter((artifact) => artifactMatchesQuery(artifact, q))
+        : artifacts,
+    [artifacts, q],
+  );
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
+        <Loader2 className="mr-2 size-3.5 animate-spin" />
+        Loading artifacts...
+      </div>
+    );
+  }
+
+  if (loadingError) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+        <p className="text-xs text-destructive">{loadingError}</p>
+        <Button
+          className="mt-2"
+          onClick={onRefresh}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          <RotateCcw className="size-3.5" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <HubEmptyState
+        description={
+          searchQuery
+            ? "Try a different title, artifact type, or prompt."
+            : "Reports, slides, images, tables, audio briefs, and other finished deliverables will appear here."
+        }
+        icon={Sparkles}
+        title={
+          searchQuery
+            ? `No artifacts match "${searchQuery}"`
+            : "Finished artifacts will appear here."
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {filtered.map((artifact) => {
+        const fileUrl = resolveArtifactFileUrl({ artifact, workspaceId });
+
+        return (
+          <button
+            className="group flex w-full items-start gap-3 rounded-lg border border-border/70 bg-background p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-accent/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            key={artifact.id}
+            onClick={() => onPreview(artifact)}
+            title={`Preview ${artifactTitle(artifact)}`}
+            type="button"
+          >
+            {artifact.artifactType === "image" && fileUrl ? (
+              <span className="block h-14 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
+                {/* eslint-disable-next-line @next/next/no-img-element -- Artifact thumbnails use authenticated API URLs and should not go through Next image optimization. */}
+                <img
+                  alt={artifactTitle(artifact)}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  src={fileUrl}
+                />
+              </span>
+            ) : (
+              <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">
+                <Sparkles className="size-4 text-muted-foreground" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-xs font-medium text-foreground underline-offset-2 group-hover:underline">
+                  {artifactTitle(artifact)}
+                </span>
+              </div>
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span>{new Date(artifact.createdAt).toLocaleString()}</span>
+                {artifact.completedAt ? (
+                  <span>completed {new Date(artifact.completedAt).toLocaleString()}</span>
+                ) : null}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
+                <TypeBadge label={artifact.status} />
+              </div>
+              {artifact.promptText ? (
+                <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+                  {artifact.promptText}
+                </p>
+              ) : null}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SourcesTab({
   sources,
   searchQuery,
@@ -1834,10 +2182,12 @@ export function SourcesHub({
   onSelectionChange,
   threadCitations = [],
   threadId = null,
+  artifactsRefreshKey = 0,
   workfilesRefreshKey = 0,
   workspaceId,
   workspaceName,
   onSourceLoad,
+  onArtifactOpen,
   onSkillsCatalogChange,
   installedSkills = [],
   selectedSkillIds = [],
@@ -1853,10 +2203,12 @@ export function SourcesHub({
   onSelectionChange: (ids: string[]) => void;
   threadCitations?: ThreadCitationRecord[];
   threadId?: string | null;
+  artifactsRefreshKey?: number;
   workfilesRefreshKey?: number;
   workspaceId?: string | null;
   workspaceName?: string | null;
   onSourceLoad?: (sources: SourceItem[]) => void;
+  onArtifactOpen?: (artifact: ArtifactListItem) => void;
   onSkillsCatalogChange?: () => void | Promise<void>;
   installedSkills?: HubSkillItem[];
   selectedSkillIds?: string[];
@@ -1879,6 +2231,9 @@ export function SourcesHub({
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
   const [isLoadingWorkfiles, setIsLoadingWorkfiles] = useState(false);
   const [workfilesLoadingError, setWorkfilesLoadingError] = useState<string | null>(null);
+  const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
+  const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
+  const [artifactsLoadingError, setArtifactsLoadingError] = useState<string | null>(null);
   const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(null);
   const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(null);
   const [workfileBusyByPath, setWorkfileBusyByPath] = useState<Record<string, boolean>>({});
@@ -1914,6 +2269,12 @@ export function SourcesHub({
       ? workfiles.filter((file) => workfileMatchesQuery(file, q)).length
       : workfiles.length;
   }, [searchQueries.Workfiles, workfiles]);
+  const filteredArtifactCount = useMemo(() => {
+    const q = searchQueries.Artifacts.trim().toLowerCase();
+    return q
+      ? artifacts.filter((artifact) => artifactMatchesQuery(artifact, q)).length
+      : artifacts.length;
+  }, [artifacts, searchQueries.Artifacts]);
   const activeCitationChunkId = activeCitationIndex
     ? citations[activeCitationIndex - 1]?.chunkId
     : null;
@@ -2028,6 +2389,30 @@ export function SourcesHub({
     }
   }, [mode, threadId, workspaceId]);
 
+  const refreshArtifacts = useCallback(async () => {
+    if (!workspaceId) {
+      setArtifacts([]);
+      setArtifactsLoadingError(null);
+      return;
+    }
+
+    setIsLoadingArtifacts(true);
+    setArtifactsLoadingError(null);
+    try {
+      const result = await contentClient.listArtifacts(workspaceId, {
+        limit: 100,
+      });
+      setArtifacts(result.items);
+    } catch (error) {
+      setArtifacts([]);
+      setArtifactsLoadingError(
+        getErrorMessage(error, "Failed to load artifacts."),
+      );
+    } finally {
+      setIsLoadingArtifacts(false);
+    }
+  }, [workspaceId]);
+
   useEffect(() => {
     void refreshSources();
   }, [refreshSources]);
@@ -2037,10 +2422,20 @@ export function SourcesHub({
   }, [refreshWorkfiles]);
 
   useEffect(() => {
+    void refreshArtifacts();
+  }, [refreshArtifacts]);
+
+  useEffect(() => {
     if (workfilesRefreshKey > 0) {
       void refreshWorkfiles();
     }
   }, [refreshWorkfiles, workfilesRefreshKey]);
+
+  useEffect(() => {
+    if (artifactsRefreshKey > 0) {
+      void refreshArtifacts();
+    }
+  }, [artifactsRefreshKey, refreshArtifacts]);
 
   useEffect(() => {
     if (!workspaceId || pendingSourceIds.length === 0) {
@@ -2113,7 +2508,7 @@ export function SourcesHub({
   const tabCounts: Partial<Record<HubTab, number>> = {
     Sources: selectedLibrarySources.length,
     Workfiles: workfiles.length,
-    Artifacts: 0,
+    Artifacts: artifacts.length,
     Skills: selectedSkillIds.length,
     Citations: citations.length,
     Connectors: connectors.length,
@@ -2257,6 +2652,10 @@ export function SourcesHub({
     if (source.sourceType === "directory") return;
     setPreviewSource(source);
   }, []);
+
+  const handlePreviewArtifact = useCallback((artifact: ArtifactListItem) => {
+    onArtifactOpen?.(artifact);
+  }, [onArtifactOpen]);
 
   const handleOpenReadmeDialog = useCallback((source: SourceItem) => {
     if (source.sourceType !== "directory") return;
@@ -2839,14 +3238,34 @@ export function SourcesHub({
                     Artifacts
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    0 artifacts
+                    {artifacts.length} artifacts
                   </span>
+                  {searchQueries.Artifacts ? (
+                    <span className="text-[10px] text-primary">
+                      {filteredArtifactCount} found
+                    </span>
+                  ) : null}
                 </div>
+                <Button
+                  className="size-7"
+                  onClick={() => void refreshArtifacts()}
+                  size="icon-xs"
+                  title="Refresh artifacts"
+                  type="button"
+                  variant="ghost"
+                >
+                  <RotateCcw className="size-3.5" />
+                  <span className="sr-only">Refresh artifacts</span>
+                </Button>
               </div>
-              <HubEmptyState
-                description="Reports, slides, mind maps, tables, audio briefs, and other deliverables."
-                icon={Sparkles}
-                title="Finished artifacts will appear here."
+              <ArtifactsTab
+                artifacts={artifacts}
+                isLoading={isLoadingArtifacts}
+                loadingError={artifactsLoadingError}
+                onPreview={handlePreviewArtifact}
+                onRefresh={() => void refreshArtifacts()}
+                searchQuery={searchQuery}
+                workspaceId={workspaceId}
               />
             </section>
           )}

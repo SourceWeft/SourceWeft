@@ -2,6 +2,7 @@ import { resolveModelGatewayConfig } from "./config";
 import { ModelGatewayAsrEndpoint } from "./endpoints/asr";
 import { ModelGatewayChatEndpoint } from "./endpoints/chat";
 import { ModelGatewayEmbeddingsEndpoint } from "./endpoints/embeddings";
+import { ModelGatewayImagesEndpoint } from "./endpoints/images";
 import { ModelGatewayRerankEndpoint } from "./endpoints/rerank";
 import type {
   AsrTranscribeInput,
@@ -14,6 +15,8 @@ import type {
   EmbedBatchResult,
   EmbedInput,
   EmbedResult,
+  ImageGenerateInput,
+  ImageGenerateResult,
   ModelGateway,
   ModelGatewayConfig,
   RequestOptions,
@@ -30,12 +33,15 @@ export class ModelGatewayClient implements ModelGateway {
 
   private readonly asrEndpoint: ModelGatewayAsrEndpoint;
 
+  private readonly imagesEndpoint: ModelGatewayImagesEndpoint;
+
   constructor(config: ModelGatewayConfig) {
     const resolved = resolveModelGatewayConfig(config);
     this.chatEndpoint = new ModelGatewayChatEndpoint(resolved);
     this.embeddingsEndpoint = new ModelGatewayEmbeddingsEndpoint(resolved);
     this.rerankEndpoint = new ModelGatewayRerankEndpoint(resolved);
     this.asrEndpoint = new ModelGatewayAsrEndpoint(resolved);
+    this.imagesEndpoint = new ModelGatewayImagesEndpoint(resolved);
   }
 
   readonly chat = {
@@ -72,6 +78,13 @@ export class ModelGatewayClient implements ModelGateway {
       input: AsrTranscribeInput,
       opts?: RequestOptions,
     ): Promise<AsrTranscribeResult> => this.asrEndpoint.transcribe(input, opts),
+  };
+
+  readonly images = {
+    generate: async (
+      input: ImageGenerateInput,
+      opts?: RequestOptions,
+    ): Promise<ImageGenerateResult> => this.imagesEndpoint.generate(input, opts),
   };
 }
 

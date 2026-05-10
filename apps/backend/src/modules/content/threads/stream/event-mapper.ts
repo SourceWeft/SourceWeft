@@ -117,12 +117,14 @@ export function normalizeToolOutputForSse(output: unknown): unknown {
   if (toolMessageContent !== null) {
     return {
       content: truncateTextForSse(toolMessageContent),
-      status: typeof toObjectRecord(record.kwargs)?.status === "string"
-        ? toObjectRecord(record.kwargs)?.status
-        : undefined,
-      name: typeof toObjectRecord(record.kwargs)?.name === "string"
-        ? toObjectRecord(record.kwargs)?.name
-        : undefined,
+      status:
+        typeof toObjectRecord(record.kwargs)?.status === "string"
+          ? toObjectRecord(record.kwargs)?.status
+          : undefined,
+      name:
+        typeof toObjectRecord(record.kwargs)?.name === "string"
+          ? toObjectRecord(record.kwargs)?.name
+          : undefined,
     };
   }
 
@@ -180,6 +182,14 @@ export function mapDeepAgentEventToSse(
     });
   }
 
+  if (event.type === "text-replace") {
+    return toSseData({
+      type: "text-replace",
+      id: textId,
+      text: event.text,
+    });
+  }
+
   if (event.type === "text-interrupted") {
     return toSseData({
       type: "text-interrupted",
@@ -220,7 +230,9 @@ export function mapDeepAgentEventToSse(
       latencyMs: event.latencyMs,
       toolCall: normalizeToolCallForSse(event.toolCall),
       ...(event.query ? { query: event.query } : {}),
-      ...(typeof event.hitCount === "number" ? { hitCount: event.hitCount } : {}),
+      ...(typeof event.hitCount === "number"
+        ? { hitCount: event.hitCount }
+        : {}),
     });
   }
 
@@ -265,6 +277,8 @@ export function mapDeepAgentEventToSse(
   return toSseData({
     type: "citations",
     citations: event.citations,
-    ...(event.availableCitations ? { availableCitations: event.availableCitations } : {}),
+    ...(event.availableCitations
+      ? { availableCitations: event.availableCitations }
+      : {}),
   });
 }

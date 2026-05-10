@@ -1,4 +1,3 @@
-import { resolveDeepInfraBaseUrls } from "./deepinfra-url";
 import { OpenAICompatibleAsrTransport } from "./openai-compatible-asr";
 import type { AsrTransport } from "./types";
 
@@ -8,6 +7,6 @@ export class DeepInfraAsrTransport extends OpenAICompatibleAsrTransport {
   protected override resolveBaseUrl(
     target: Parameters<AsrTransport["execute"]>[0]["target"],
   ) {
-    return resolveDeepInfraBaseUrls(target.baseUrl).openAICompatibleBaseUrl;
+    return `${target.baseUrl.replace(/\/+$/, "")}/openai`;
   }
 }

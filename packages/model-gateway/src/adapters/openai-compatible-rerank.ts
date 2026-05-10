@@ -12,7 +12,7 @@ function resolveRelevanceScore(
 }
 
 export class OpenAICompatibleRerankTransport implements RerankTransport {
-  readonly kind = "openai-compatible" as const;
+  readonly kind: RerankTransport["kind"] = "openai-compatible";
 
   async execute(input: Parameters<RerankTransport["execute"]>[0]) {
     const response = await input.fetch(

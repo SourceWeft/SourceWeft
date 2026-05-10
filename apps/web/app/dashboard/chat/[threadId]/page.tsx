@@ -22,6 +22,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@sourceweft/ui-web/components/ui/sheet";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import {
   emptyModelCatalog,
@@ -33,6 +38,11 @@ import {
   type SelectedModels,
   type ModelType,
 } from "../_components/header-model-selector";
+import {
+  applySkillModelPresetState,
+  DEFAULT_MODEL_SELECTION_SOURCES,
+  type ModelSelectionSources,
+} from "../_components/skill-model-presets";
 import {
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
@@ -48,7 +58,9 @@ import {
   type VersionedMessageGroup,
 } from "../_components/chat-canvas";
 import {
+  ArtifactPreviewPanel,
   SourcesHub,
+  type ArtifactListItem,
   type ThreadCitationRecord,
 } from "../_components/sources-hub";
 import { SourcePreviewPanel } from "../_components/source-preview-panel";
@@ -75,6 +87,20 @@ const EMPTY_CITATIONS: CitationRecord[] = [];
 const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
+}
 
 function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
   return [
@@ -113,6 +139,7 @@ const THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS = [300, 1000, 2500] as const;
 type PendingLatestVersionSelection = {
   userGroupId?: string;
   assistantGroupId?: string;
+  turnId?: string;
 };
 
 type RequestThinkingConfig = {
@@ -250,7 +277,8 @@ function getDisplayErrorMessage(error: unknown) {
 
 function formatBytes(sizeBytes: number) {
   if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 102.4) / 10} KB`;
+  if (sizeBytes < 1024 * 1024)
+    return `${Math.round(sizeBytes / 102.4) / 10} KB`;
   return `${Math.round(sizeBytes / 1024 / 102.4) / 10} MB`;
 }
 
@@ -801,6 +829,7 @@ type StreamEventPayload = {
   output?: unknown;
   reasoning?: string;
   segment?: unknown;
+  text?: string;
   toolCall?: unknown;
   step?: unknown;
   citations?: unknown;
@@ -1026,6 +1055,17 @@ function isCompletedWorkfileWriteToolCall(
   );
 }
 
+function isCompletedImageArtifactToolCall(
+  toolCall: ToolCallRecord,
+  event: StreamEventPayload & { type: ToolCallEventType },
+) {
+  return (
+    toolCall.tool === "generate_image" &&
+    (event.type === "tool-call-result" ||
+      (event.type === "tool-call-end" && toolCall.status === "completed"))
+  );
+}
+
 function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
   if (!Array.isArray(metadata.toolCalls)) {
     return [] as ToolCallRecord[];
@@ -1171,6 +1211,40 @@ function buildVersionedMessageGroups(
     }
   }
 
+  const assistantRootBySourceUserId = new Map<string, string>();
+  for (const message of sorted) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+
+    const sourceUserMessageId = assistantSourceUserById.get(message.id);
+    if (!sourceUserMessageId || !messageById.has(sourceUserMessageId)) {
+      continue;
+    }
+
+    const sourceUserMessage = messageById.get(sourceUserMessageId);
+    if (!sourceUserMessage) {
+      continue;
+    }
+
+    const sourceUserRootId = resolveRootId(sourceUserMessage);
+    const rootId = resolveRootId(message);
+    const existingRootId = assistantRootBySourceUserId.get(sourceUserRootId);
+    if (!existingRootId) {
+      assistantRootBySourceUserId.set(sourceUserRootId, rootId);
+      continue;
+    }
+
+    const existing = messageById.get(existingRootId);
+    const candidate = messageById.get(rootId);
+    if (
+      existing?.metadata.isError === true &&
+      candidate?.metadata.isError !== true
+    ) {
+      assistantRootBySourceUserId.set(sourceUserRootId, rootId);
+    }
+  }
+
   const grouped = new Map<
     string,
     {
@@ -1181,7 +1255,19 @@ function buildVersionedMessageGroups(
   >();
 
   for (const message of sorted) {
-    const rootId = resolveRootId(message);
+    const sourceUserMessageId =
+      message.role === "assistant"
+        ? assistantSourceUserById.get(message.id)
+        : null;
+    const sourceUserRootId =
+      sourceUserMessageId && messageById.has(sourceUserMessageId)
+        ? resolveRootId(messageById.get(sourceUserMessageId)!)
+        : null;
+    const rootId =
+      message.role === "assistant" && sourceUserRootId
+        ? (assistantRootBySourceUserId.get(sourceUserRootId) ??
+          resolveRootId(message))
+        : resolveRootId(message);
     const turnId =
       message.role === "user"
         ? (userRootToTurnId.get(rootId) ?? `turn:${rootId}`)
@@ -1339,9 +1425,14 @@ export default function DashboardChatThreadPage({
     null,
   );
   const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
-  const [previewWorkfile, setPreviewWorkfile] =
-    useState<WorkfileDetail | null>(null);
+  const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(
+    null,
+  );
+  const [previewArtifact, setPreviewArtifact] =
+    useState<ArtifactListItem | null>(null);
+  const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
   const [workfilesRefreshKey, setWorkfilesRefreshKey] = useState(0);
+  const [artifactsRefreshKey, setArtifactsRefreshKey] = useState(0);
   const [displayedCitations, setDisplayedCitations] = useState<
     CitationRecord[]
   >([]);
@@ -1368,6 +1459,11 @@ export default function DashboardChatThreadPage({
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
   );
+  const [baseSelectedModels, setBaseSelectedModels] = useState<SelectedModels>(
+    () => resolveSelectedModels({ availableModels: emptyModelCatalog }),
+  );
+  const [modelSelectionSources, setModelSelectionSources] =
+    useState<ModelSelectionSources>(DEFAULT_MODEL_SELECTION_SOURCES);
   const [availableModels, setAvailableModels] =
     useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
@@ -1463,6 +1559,40 @@ export default function DashboardChatThreadPage({
       }),
     );
   }, [hasSavedThinkingPreference, selectedModels.llm]);
+
+  useEffect(() => {
+    const next = applySkillModelPresetState({
+      activeSkillIds,
+      availableModels,
+      availableSkills,
+      baseSelectedModels,
+      selectedModels,
+      selectionSources: modelSelectionSources,
+    });
+    if (next.modelsChanged) {
+      setSelectedModels(next.nextModels);
+      if (next.nextSources.llm === "skill" && catalogKindEnabled.llm) {
+        setStreamWithSelectedLlm(true);
+      }
+    }
+    if (next.sourcesChanged) {
+      setModelSelectionSources(next.nextSources);
+      if (
+        next.nextSources.llm === "system" &&
+        modelSelectionSources.llm === "skill"
+      ) {
+        setStreamWithSelectedLlm(catalogKindEnabled.llm);
+      }
+    }
+  }, [
+    activeSkillIds,
+    availableModels,
+    availableSkills,
+    baseSelectedModels,
+    catalogKindEnabled.llm,
+    modelSelectionSources,
+    selectedModels,
+  ]);
 
   // Tracks whether initial bootstrap was already processed for this thread key.
   const bootstrappedThreadKeyRef = useRef<string | null>(null);
@@ -1638,6 +1768,8 @@ export default function DashboardChatThreadPage({
           version: skill.version,
           hasReadme: skill.hasReadme,
           capabilities: skill.capabilities,
+          models: skill.models,
+          tools: skill.tools,
           defaultConfig: skill.defaultConfig,
         }));
       setAvailableSkills(enabledSkills);
@@ -1868,7 +2000,10 @@ export default function DashboardChatThreadPage({
 
         if (
           group.groupId === pendingSelection?.userGroupId ||
-          group.groupId === pendingSelection?.assistantGroupId
+          group.groupId === pendingSelection?.assistantGroupId ||
+          (group.role === "assistant" &&
+            group.turnId &&
+            group.turnId === pendingSelection?.turnId)
         ) {
           next[group.groupId] = maxIndex;
           appliedPendingGroups.add(group.groupId);
@@ -1897,7 +2032,14 @@ export default function DashboardChatThreadPage({
         (!pendingSelection.userGroupId ||
           appliedPendingGroups.has(pendingSelection.userGroupId)) &&
         (!pendingSelection.assistantGroupId ||
-          appliedPendingGroups.has(pendingSelection.assistantGroupId))
+          appliedPendingGroups.has(pendingSelection.assistantGroupId)) &&
+        (!pendingSelection.turnId ||
+          messageGroups.some(
+            (group) =>
+              group.role === "assistant" &&
+              group.turnId === pendingSelection.turnId &&
+              appliedPendingGroups.has(group.groupId),
+          ))
       ) {
         pendingLatestVersionSelectionRef.current = null;
       }
@@ -1982,9 +2124,12 @@ export default function DashboardChatThreadPage({
   const loadThreadModelState = useCallback(async () => {
     if (!workspaceId) {
       setAvailableModels(emptyModelCatalog);
-      setSelectedModels(
-        resolveSelectedModels({ availableModels: emptyModelCatalog }),
-      );
+      const emptySelection = resolveSelectedModels({
+        availableModels: emptyModelCatalog,
+      });
+      setSelectedModels(emptySelection);
+      setBaseSelectedModels(emptySelection);
+      setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       setStreamWithSelectedLlm(false);
       return;
@@ -2007,20 +2152,24 @@ export default function DashboardChatThreadPage({
 
       setCatalogKindEnabled(kindEnabled);
       setAvailableModels(catalogModels);
-      setSelectedModels(
-        resolveSelectedModels({
-          availableModels: catalogModels,
-          threadAliases: threadResponse.thread.modelSettings,
-          fallbackAliases: catalog.defaults,
-        }),
-      );
+      const resolvedModels = resolveSelectedModels({
+        availableModels: catalogModels,
+        threadAliases: threadResponse.thread.modelSettings,
+        fallbackAliases: catalog.defaults,
+      });
+      setSelectedModels(resolvedModels);
+      setBaseSelectedModels(resolvedModels);
+      setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setStreamWithSelectedLlm(kindEnabled.llm);
     } catch {
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       setAvailableModels(emptyModelCatalog);
-      setSelectedModels(
-        resolveSelectedModels({ availableModels: emptyModelCatalog }),
-      );
+      const emptySelection = resolveSelectedModels({
+        availableModels: emptyModelCatalog,
+      });
+      setSelectedModels(emptySelection);
+      setBaseSelectedModels(emptySelection);
+      setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setStreamWithSelectedLlm(false);
     }
   }, [threadId, workspaceId]);
@@ -2031,6 +2180,10 @@ export default function DashboardChatThreadPage({
 
   const handleModelSelect = useCallback(
     async (input: { type: ModelType; model: ModelItem }) => {
+      setModelSelectionSources((current) => ({
+        ...current,
+        [input.type]: "user",
+      }));
       if (!workspaceId || !catalogKindEnabled[input.type]) {
         return;
       }
@@ -2192,6 +2345,7 @@ export default function DashboardChatThreadPage({
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
       const refreshedWorkfileToolIds = new Set<string>();
+      const refreshedArtifactToolIds = new Set<string>();
       let streamingAssistantMessageId = tempAssistantId;
       let preparedEffectiveSourceIds: string[] | null = null;
       let buffer = "";
@@ -2273,9 +2427,11 @@ export default function DashboardChatThreadPage({
 
         const previousAssistantMessageId = streamingAssistantMessageId;
         const messageId = errorInput.messageId || previousAssistantMessageId;
-        const userMessageId = errorInput.userMessageId ?? persistedUserMessageId;
+        const userMessageId =
+          errorInput.userMessageId ?? persistedUserMessageId;
         persistedAssistantMessageId = messageId;
-        hasServerPersistedAssistantMessage = errorInput.serverPersisted === true;
+        hasServerPersistedAssistantMessage =
+          errorInput.serverPersisted === true;
         streamingAssistantMessageId = messageId;
         flushSync(() => {
           setMessages((previous) =>
@@ -2684,6 +2840,30 @@ export default function DashboardChatThreadPage({
               }
               enqueueDelta(data.delta);
               startDeltaDrain();
+            } else if (
+              data.type === "text-replace" &&
+              typeof data.text === "string"
+            ) {
+              deltaQueue.length = 0;
+              assistantText = data.text;
+              latestAssistantMessageContent = assistantText;
+              hasRenderedDelta = assistantText.length > 0;
+              flushSync(() => {
+                setMessages((previous) =>
+                  previous.map((message) =>
+                    message.id === streamingAssistantMessageId
+                      ? {
+                          ...message,
+                          content: assistantText,
+                          metadata: {
+                            ...message.metadata,
+                            [STREAM_TEXT_PAUSED_KEY]: false,
+                          },
+                        }
+                      : message,
+                  ),
+                );
+              });
             } else if (data.type === "text-interrupted") {
               flushSync(() => {
                 setMessages((previous) =>
@@ -2723,6 +2903,13 @@ export default function DashboardChatThreadPage({
               ) {
                 refreshedWorkfileToolIds.add(nextToolCall.id);
                 setWorkfilesRefreshKey((value) => value + 1);
+              }
+              if (
+                isCompletedImageArtifactToolCall(nextToolCall, data) &&
+                !refreshedArtifactToolIds.has(nextToolCall.id)
+              ) {
+                refreshedArtifactToolIds.add(nextToolCall.id);
+                setArtifactsRefreshKey((value) => value + 1);
               }
             } else if (data.type === "thinking-step") {
               const nextStep = normalizeThinkingStepRecord(data.step);
@@ -2951,6 +3138,9 @@ export default function DashboardChatThreadPage({
           void loadThreadMessages();
         }, 0);
         setWorkfilesRefreshKey((value) => value + 1);
+        if (refreshedArtifactToolIds.size > 0) {
+          setArtifactsRefreshKey((value) => value + 1);
+        }
         if (shouldPollThreadTitle && pendingTitleJobId) {
           void pollThreadTitleJob(pendingTitleJobId);
         }
@@ -3099,6 +3289,8 @@ export default function DashboardChatThreadPage({
         }
         if (pendingModelState?.selectedModels) {
           setSelectedModels(pendingModelState.selectedModels);
+          setBaseSelectedModels(pendingModelState.selectedModels);
+          setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
         }
         void streamThreadActionRef.current({
           mode: "send",
@@ -3246,6 +3438,7 @@ export default function DashboardChatThreadPage({
         pendingLatestVersionSelectionRef.current = {
           userGroupId: editingGroupId ?? undefined,
           assistantGroupId: editingAssistantGroup?.groupId,
+          turnId: editingAssistantGroup?.turnId,
         };
 
         const editSourceIds = resolveEditSourceIds({
@@ -3320,6 +3513,7 @@ export default function DashboardChatThreadPage({
       }));
       pendingLatestVersionSelectionRef.current = {
         assistantGroupId: input.groupId,
+        turnId: assistantGroup?.turnId,
       };
 
       const refreshSourceIds = resolveRefreshSourceIds({
@@ -3444,8 +3638,11 @@ export default function DashboardChatThreadPage({
           selectedSkillIds={activeSkillIds}
           sourcesVisible={sourcesVisible}
           thinkingCapabilities={selectedModels.llm?.capabilities}
-          imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
+          imageCapabilities={
+            selectedModels.image?.capabilities?.imageGeneration
+          }
           imageModelAvailable={Boolean(selectedModels.image)}
+          imageModelAlias={selectedModels.image?.modelAlias ?? null}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle={threadTitle}
@@ -3453,13 +3650,15 @@ export default function DashboardChatThreadPage({
         />
       </div>
 
-      {sourcesVisible ? (
+      {sourcesVisible && (!previewArtifact || !isDesktopPanel) ? (
         <SourcesHub
           activeCitationIndex={activeCitationIndex}
+          artifactsRefreshKey={artifactsRefreshKey}
           citations={displayedCitations}
           currentCitationMessageId={activeAssistantVersion?.id ?? null}
           installedSkills={availableSkills}
           mode="thread"
+          onArtifactOpen={setPreviewArtifact}
           onCitationLocate={scrollToMessage}
           onCitationOpen={handleSourceHubCitationOpen}
           onSkillSelectionChange={setActiveSkillIds}
@@ -3475,6 +3674,41 @@ export default function DashboardChatThreadPage({
           workspaceName={workspaceName}
         />
       ) : null}
+
+      {sourcesVisible && previewArtifact && isDesktopPanel ? (
+        <ArtifactPreviewPanel
+          artifact={previewArtifact}
+          className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
+          onClose={() => setPreviewArtifact(null)}
+          workspaceId={workspaceId}
+        />
+      ) : null}
+
+      <Sheet
+        open={Boolean(sourcesVisible && previewArtifact && !isDesktopPanel)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewArtifact(null);
+          }
+        }}
+      >
+        <SheetContent
+          className="h-[90svh] max-h-[90svh] gap-0 overflow-hidden p-0 [&>button]:hidden"
+          side="bottom"
+        >
+          <SheetTitle className="sr-only">
+            {previewArtifact ? "Artifact preview" : "Artifact"}
+          </SheetTitle>
+          {previewArtifact ? (
+            <ArtifactPreviewPanel
+              artifact={previewArtifact}
+              className="border-l-0"
+              onClose={() => setPreviewArtifact(null)}
+              workspaceId={workspaceId}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
 
       <SourcePreviewPanel
         citation={previewCitation}

@@ -30,6 +30,7 @@ import type {
   IndexSourceRequest,
   IndexSourceResponse,
   GetWorkingFileResponse,
+  ListArtifactsResponse,
   ListThreadModelCatalogResponse,
   ListByokKeyRefsResponse,
   ListSourceMentionsRequest,
@@ -87,6 +88,18 @@ export class ContentClient {
   listSources(workspaceId: string) {
     return this.http.get<ListSourcesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources`,
+    );
+  }
+
+  listArtifacts(workspaceId: string, input: { limit?: number } = {}) {
+    const params = new URLSearchParams();
+    if (input.limit) {
+      params.set("limit", String(input.limit));
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+
+    return this.http.get<ListArtifactsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts${suffix}`,
     );
   }
 

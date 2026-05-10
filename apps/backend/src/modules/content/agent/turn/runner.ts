@@ -4,6 +4,7 @@ import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import { createDefaultFilesystemMounts } from "../filesystem-capabilities";
 import { MountedAgentFilesystemBackend } from "../mounted-fs-backend";
 import { createRetrievalTool } from "../tools/retrieval-tool";
+import { createGenerateImageTool } from "../tools/generate-image-tool";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { createWebTools } from "../tools/web-tools";
 import { SelectedSkillsBackend } from "../../skills/backend";
@@ -169,7 +170,7 @@ function compactTraceText(value: string, maxLength = 96) {
 }
 
 function formatToolInputItems(input: Record<string, unknown>) {
-  const entries = ["query", "url", "path", "pattern", "glob"]
+  const entries = ["query", "prompt", "url", "path", "pattern", "glob"]
     .map((key) => {
       const value = input[key];
       return typeof value === "string" && value.trim().length > 0
@@ -250,6 +251,9 @@ function getFilesystemToolStartTitle(
   toolName: string,
   input: Record<string, unknown>,
 ) {
+  if (toolName === "generate_image") {
+    return "Generating image";
+  }
   const scope = filesystemScope(input, toolName);
   const skillScoped = scope === "skills";
   const workScoped = scope === "work";
@@ -290,6 +294,9 @@ function getFilesystemToolEndTitle(
   toolName: string,
   input: Record<string, unknown>,
 ) {
+  if (toolName === "generate_image") {
+    return "Generated image";
+  }
   const scope = filesystemScope(input, toolName);
   const skillScoped = scope === "skills";
   const workScoped = scope === "work";
@@ -411,6 +418,19 @@ function getFilesystemToolMetadata(toolName: string, output: unknown) {
   const record = toObjectRecord(output);
   const metadata: Record<string, unknown> = {};
 
+  if (toolName === "generate_image") {
+    const outputText = extractToolOutputText(output) ?? "";
+    const artifactId = outputText.match(/artifact_id:\s*(\S+)/)?.[1];
+    const artifactUrl = outputText.match(/artifact_url:\s*(\S+)/)?.[1];
+    if (artifactId) {
+      metadata.artifactId = artifactId;
+    }
+    if (artifactUrl) {
+      metadata.artifactUrl = artifactUrl;
+    }
+    return metadata;
+  }
+
   if (record && Array.isArray(record.files)) {
     metadata.resultCount = record.files.length;
   }
@@ -452,9 +472,10 @@ function getFilesystemToolDescription(
     return `Found ${metadata.matchCount} text matches.`;
   }
   if (toolName === "read_file" && scope === "sources") {
-    const lineLimit = typeof inputLimit === "number" && Number.isFinite(inputLimit)
-      ? Math.max(1, Math.floor(inputLimit))
-      : undefined;
+    const lineLimit =
+      typeof inputLimit === "number" && Number.isFinite(inputLimit)
+        ? Math.max(1, Math.floor(inputLimit))
+        : undefined;
     return lineLimit
       ? `Read up to ${lineLimit} source lines.`
       : "Read source content.";
@@ -462,11 +483,170 @@ function getFilesystemToolDescription(
   if (toolName === "read_file" && typeof metadata.chunkCount === "number") {
     return `Read ${metadata.chunkCount} ${noun} ${metadata.chunkCount === 1 ? "chunk" : "chunks"}.`;
   }
+  if (toolName === "generate_image") {
+    return "Created an image artifact.";
+  }
   return undefined;
+}
+
+type GeneratedImageArtifactReference = {
+  artifactId: string | null;
+  title: string;
+  artifactUrl: string;
+  toolCallId?: string;
+};
+
+const PENDING_IMAGE_URL_PREFIX = "sourceweft-image-pending://";
+
+function pendingGeneratedImageMarkdown(toolCallId: string) {
+  return `![Generating image](${PENDING_IMAGE_URL_PREFIX}${encodeURIComponent(toolCallId)})`;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replacePendingGeneratedImageMarkdown(input: {
+  assistantText: string;
+  artifact: GeneratedImageArtifactReference;
+}) {
+  if (!input.artifact.toolCallId) {
+    return input.assistantText;
+  }
+
+  const pendingUrl = `${PENDING_IMAGE_URL_PREFIX}${encodeURIComponent(input.artifact.toolCallId)}`;
+  const alt = escapeMarkdownImageAlt(input.artifact.title) || "Generated image";
+  return input.assistantText.replace(
+    new RegExp(`!\\[[^\\]]*]\\(${escapeRegExp(pendingUrl)}\\)`, "g"),
+    `![${alt}](${input.artifact.artifactUrl})`,
+  );
+}
+
+function extractToolOutputField(output: unknown, key: string) {
+  const outputText = extractToolOutputText(output);
+  if (!outputText) {
+    return null;
+  }
+
+  const match = outputText.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+  return match?.[1]?.trim() ?? null;
+}
+
+function escapeMarkdownImageAlt(value: string) {
+  return value
+    .replace(/[[\]\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractGeneratedImageArtifacts(
+  toolCalls: ToolCallTrace[],
+): GeneratedImageArtifactReference[] {
+  const seen = new Set<string>();
+  return toolCalls
+    .filter(
+      (call) =>
+        call.tool === "generate_image" &&
+        call.status === "completed" &&
+        !call.error,
+    )
+    .map((call): GeneratedImageArtifactReference | null => {
+      const artifactId =
+        extractToolOutputField(call.output, "artifact_id") ?? "";
+      const artifactUrl = extractToolOutputField(call.output, "artifact_url");
+      const title =
+        extractToolOutputField(call.output, "title") || "Generated image";
+
+      return artifactUrl
+        ? {
+            artifactId: artifactId || null,
+            artifactUrl,
+            title,
+            toolCallId: call.id,
+          }
+        : null;
+    })
+    .filter((artifact): artifact is GeneratedImageArtifactReference =>
+      Boolean(artifact),
+    )
+    .filter((artifact) => {
+      const key = artifact.artifactId ?? artifact.artifactUrl;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function attachGeneratedImageMarkdown(input: {
+  assistantText: string;
+  artifacts: GeneratedImageArtifactReference[];
+}) {
+  if (input.artifacts.length === 0) {
+    return input.assistantText;
+  }
+
+  let assistantText = input.assistantText;
+  const fallbackArtifacts: GeneratedImageArtifactReference[] = [];
+  for (const artifact of input.artifacts) {
+    const nextAssistantText = replacePendingGeneratedImageMarkdown({
+      assistantText,
+      artifact,
+    });
+    if (nextAssistantText === assistantText) {
+      fallbackArtifacts.push(artifact);
+      continue;
+    }
+    assistantText = nextAssistantText;
+  }
+
+  if (fallbackArtifacts.length === 0) {
+    return assistantText;
+  }
+
+  const existingUrls = new Set(
+    [...assistantText.matchAll(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)]
+      .map((match) => String(match[1]).trim())
+      .filter(Boolean),
+  );
+  const imageMarkdown = fallbackArtifacts
+    .map((artifact) => {
+      if (existingUrls.has(artifact.artifactUrl)) {
+        return null;
+      }
+      const alt = escapeMarkdownImageAlt(artifact.title) || "Generated image";
+      return `![${alt}](${artifact.artifactUrl})`;
+    })
+    .filter((item): item is string => item !== null)
+    .join("\n\n");
+
+  if (!imageMarkdown) {
+    return assistantText;
+  }
+
+  const trimmedText = assistantText.trim();
+  if (!trimmedText) {
+    return imageMarkdown;
+  }
+
+  const firstParagraphBreak = trimmedText.search(/\n\s*\n/);
+  if (firstParagraphBreak === -1) {
+    return [trimmedText, imageMarkdown]
+      .filter((part) => part.length > 0)
+      .join("\n\n");
+  }
+
+  const firstParagraph = trimmedText.slice(0, firstParagraphBreak).trim();
+  const rest = trimmedText.slice(firstParagraphBreak).trim();
+  return [firstParagraph, imageMarkdown, rest]
+    .filter((part) => part.length > 0)
+    .join("\n\n");
 }
 
 export const testExports = {
   buildAgentRuntimePrompt,
+  attachGeneratedImageMarkdown,
   getFilesystemToolDescription,
   getFilesystemToolEndTitle,
   getFilesystemToolStartTitle,
@@ -765,6 +945,8 @@ function buildSelectedSourceManifest(input: {
 
 function buildAgentRuntimePrompt(input: {
   availableWebTools?: string[];
+  availableArtifactTools?: string[];
+  artifactIntent?: PreparedThreadTurn["artifactIntent"];
   timezone: string;
   selectedSources?: VirtualFsSource[];
   selectedSourcesOmitted?: number;
@@ -789,6 +971,24 @@ function buildAgentRuntimePrompt(input: {
       `Available public web tools this turn: ${availableWebTools.join(", ")}.`,
       "For workspace-specific or selected-source questions, use selected source tools first. Use web tools only when the user explicitly asks for internet information, asks about current public facts, or selected sources do not contain enough evidence.",
       `When a date qualifier is useful, use the current date/year from this runtime context: ${currentDate}.`,
+    );
+  }
+
+  const availableArtifactTools = input.availableArtifactTools ?? [];
+  if (
+    availableArtifactTools.length > 0 &&
+    input.artifactIntent?.kind === "image"
+  ) {
+    const config = input.artifactIntent.config;
+    const imageToolInstruction = input.artifactIntent.requireToolCall
+      ? "The user explicitly enabled image generation for this turn; call generate_image."
+      : "generate_image is available in auto mode. Use it only when the user asks for a created visual artifact; otherwise answer normally.";
+    lines.push(
+      `Available artifact tools this turn: ${availableArtifactTools.join(", ")}.`,
+      `Image generation defaults: aspect_ratio=${config.aspectRatio}, quality=${config.quality}, style=${config.style}.`,
+      imageToolInstruction,
+      "If the prompt is missing essential visual details for a requested image, make a reasonable concise prompt instead of asking a separate confirmation.",
+      "After generate_image succeeds, keep the final answer concise. The application attaches the generated image markdown automatically.",
     );
   }
 
@@ -1013,6 +1213,23 @@ export async function* invokeDeepAgentTurn(input: {
         searchEnabled: input.prepared.webSearchEnabled,
       })
     : [];
+  const artifactTools =
+    input.prepared.artifactIntent.shouldInjectTool &&
+    input.prepared.imageProfile
+      ? [
+          createGenerateImageTool({
+            teamId: input.prepared.workspace.organizationId,
+            workspaceId: input.prepared.workspace.id,
+            threadId: input.prepared.thread.id,
+            userId: input.prepared.userId,
+            userMessageId: input.prepared.userMessage.id,
+            traceId: input.traceContext?.traceId,
+            parentSpanId: input.traceContext?.parentSpanId,
+            profile: input.prepared.imageProfile.profile,
+            config: input.prepared.artifactIntent.config,
+          }),
+        ]
+      : [];
   const runtimeSourceReferences =
     input.prepared.sourceIds.length > 0
       ? await listVirtualFsSources({
@@ -1058,6 +1275,8 @@ export async function* invokeDeepAgentTurn(input: {
   const visibleSources = runtimeSources.slice(0, MAX_RUNTIME_SOURCE_REFERENCES);
   const runtimePrompt = buildAgentRuntimePrompt({
     availableWebTools: webTools.map((tool) => tool.name),
+    availableArtifactTools: artifactTools.map((tool) => tool.name),
+    artifactIntent: input.prepared.artifactIntent,
     timezone: input.prepared.timezone,
     selectedSources: visibleSources,
     selectedSourcesOmitted: Math.max(
@@ -1101,7 +1320,7 @@ export async function* invokeDeepAgentTurn(input: {
   const agent = await createThreadAgent({
     modelAlias: input.prepared.modelAlias,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
-    tools: [retrievalTool, ...webTools],
+    tools: [retrievalTool, ...webTools, ...artifactTools],
     backend,
     filesystemMounts,
     skills: skillsBackend ? ["/skills/"] : undefined,
@@ -1359,6 +1578,15 @@ export async function* invokeDeepAgentTurn(input: {
         };
         hasTextSinceLastToolBoundary = false;
       }
+      if (toolName === "generate_image") {
+        const placeholder = `\n\n${pendingGeneratedImageMarkdown(toolCallId)}\n\n`;
+        assistantContent += placeholder;
+        hasStreamedText = true;
+        yield {
+          type: "text-delta",
+          delta: placeholder,
+        };
+      }
       yield {
         type: "tool-call-start",
         id: toolCallId,
@@ -1525,6 +1753,24 @@ export async function* invokeDeepAgentTurn(input: {
               }
             : {}),
         };
+      }
+      if (toolStatus === "completed" && toolName === "generate_image") {
+        const [generatedImageArtifact] = extractGeneratedImageArtifacts([
+          nextToolCall,
+        ]);
+        if (generatedImageArtifact) {
+          const assistantTextWithImage = replacePendingGeneratedImageMarkdown({
+            assistantText: assistantContent,
+            artifact: generatedImageArtifact,
+          });
+          if (assistantTextWithImage !== assistantContent) {
+            assistantContent = assistantTextWithImage;
+            yield {
+              type: "text-replace",
+              text: sanitizeSseValue(assistantContent),
+            };
+          }
+        }
       }
       if (toolStatus === "error" && outputError) {
         yield {
@@ -1837,6 +2083,18 @@ export async function* invokeDeepAgentTurn(input: {
           (typeof startedAt === "number" ? Date.now() - startedAt : null),
       };
     });
+  const generatedImageArtifacts = extractGeneratedImageArtifacts(toolCalls);
+  const assistantTextWithArtifacts = attachGeneratedImageMarkdown({
+    assistantText,
+    artifacts: generatedImageArtifacts,
+  });
+  if (assistantTextWithArtifacts !== assistantText) {
+    assistantText = assistantTextWithArtifacts;
+    yield {
+      type: "text-replace",
+      text: sanitizeSseValue(assistantText),
+    };
+  }
 
   const finalState = finalCheckpoint
     ? null

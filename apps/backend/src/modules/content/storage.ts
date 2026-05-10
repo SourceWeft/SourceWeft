@@ -12,6 +12,10 @@ function getConfiguredBucket() {
   return bucket;
 }
 
+export function getContentStorageBucketName() {
+  return getConfiguredBucket();
+}
+
 const s3Client = new S3Client({
   region: config.s3.region,
   credentials:
@@ -34,7 +38,31 @@ export function buildSourceStorageKey(input: {
   return `workspaces/${input.workspaceId}/sources/${input.sourceId}/${randomUUID()}-${sanitizedName}`;
 }
 
+export function buildArtifactStorageKey(input: {
+  workspaceId: string;
+  artifactId: string;
+  fileName: string;
+}) {
+  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  return `workspaces/${input.workspaceId}/artifacts/${input.artifactId}/${randomUUID()}-${sanitizedName}`;
+}
+
 export async function uploadSourceObject(input: {
+  key: string;
+  body: Buffer;
+  contentType: string;
+}) {
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: getConfiguredBucket(),
+      Key: input.key,
+      Body: input.body,
+      ContentType: input.contentType,
+    }),
+  );
+}
+
+export async function uploadArtifactObject(input: {
   key: string;
   body: Buffer;
   contentType: string;
@@ -61,6 +89,18 @@ export async function downloadSourceObject(input: { bucket?: string | null; key:
   return Buffer.from(bytes ?? []);
 }
 
+export async function downloadArtifactObject(input: { bucket?: string | null; key: string }) {
+  const response = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+    }),
+  );
+
+  const bytes = await response.Body?.transformToByteArray();
+  return Buffer.from(bytes ?? []);
+}
+
 export function getSourceObjectDownloadUrl(input: {
   bucket?: string | null;
   key: string;
@@ -74,6 +114,25 @@ export function getSourceObjectDownloadUrl(input: {
       Bucket: input.bucket || getConfiguredBucket(),
       Key: input.key,
       ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(input.fileName)}`,
+      ResponseContentType: input.contentType,
+    }),
+    { expiresIn: input.expiresInSeconds ?? 15 * 60 },
+  );
+}
+
+export function getArtifactObjectDownloadUrl(input: {
+  bucket?: string | null;
+  key: string;
+  fileName: string;
+  contentType: string;
+  expiresInSeconds?: number;
+}) {
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+      ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(input.fileName)}`,
       ResponseContentType: input.contentType,
     }),
     { expiresIn: input.expiresInSeconds ?? 15 * 60 },

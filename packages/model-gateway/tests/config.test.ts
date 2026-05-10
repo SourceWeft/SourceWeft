@@ -97,7 +97,7 @@ test("resolveModelGatewayConfig supports explicit providers and model routes", (
       },
       deepinfra: {
         kind: "deepinfra",
-        baseUrl: "https://api.deepinfra.com/v1/openai",
+        baseUrl: "https://api.deepinfra.com/v1",
         apiKey: "di-key",
       },
     },

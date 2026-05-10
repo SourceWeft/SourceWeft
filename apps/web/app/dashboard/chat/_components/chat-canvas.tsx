@@ -3,6 +3,7 @@ import {
   createElement,
   isValidElement,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -15,6 +16,7 @@ import {
   FileText,
   Folder,
   Globe,
+  Image as ImageIcon,
   Loader2,
   Music2,
   Pencil,
@@ -95,6 +97,7 @@ import {
   ChainOfThoughtStep,
 } from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { apiBaseUrl } from "../../../../lib/sdk";
 import { expandSelectedSources, type SourceItem } from "./source-types";
 import { hasWebPageToolResults, WebToolResults } from "./web-tool-results";
 
@@ -104,6 +107,7 @@ const starterSuggestions = [
   "What changed between these reports?",
   "List the strongest supporting evidence",
 ];
+const PENDING_IMAGE_URL_PREFIX = "sourceweft-image-pending://";
 
 function toAttachmentData(source: SourceItem) {
   return {
@@ -129,6 +133,7 @@ function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
 export type ChatSendInput = {
   content: string;
   mentionedSourceIds?: string[];
+  artifact?: ChatArtifactToolSelection;
 };
 
 function SourceIcon({
@@ -188,6 +193,55 @@ export type PromptThinkingCapabilities = {
   reasoningEffort?: boolean;
   includeReasoning?: boolean;
   supportSources?: string[];
+  imageGeneration?: ImageModelCapabilities;
+};
+
+export type ImageAspectRatio =
+  | "auto"
+  | "1:1"
+  | "2:3"
+  | "3:2"
+  | "3:4"
+  | "4:3"
+  | "4:5"
+  | "5:4"
+  | "9:16"
+  | "16:9"
+  | "21:9"
+  | "1:4"
+  | "4:1"
+  | "1:8"
+  | "8:1";
+export type ImageQuality = "auto" | "low" | "standard" | "higher" | "highest";
+export type ImageStyle = "auto" | "ghibli" | "pixar" | "cartoon" | "pixel";
+
+export type ImageModelCapabilities = {
+  supported: boolean;
+  provider?: string;
+  controls?: {
+    aspectRatio?: {
+      values: ImageAspectRatio[];
+    };
+    quality?: {
+      values: ImageQuality[];
+    };
+    style?: {
+      values: ImageStyle[];
+    };
+  };
+};
+
+export type ChatImageArtifactConfig = {
+  aspectRatio: ImageAspectRatio;
+  quality: ImageQuality;
+  style: ImageStyle;
+};
+
+export type ChatArtifactToolSelection = {
+  kind: "image";
+  mode: "auto" | "generate";
+  modelAlias?: string;
+  image: ChatImageArtifactConfig;
 };
 
 export type ChatSkillItem = {
@@ -200,6 +254,17 @@ export type ChatSkillItem = {
   sourceType: "builtin" | "workspace_custom" | "team_custom";
   version: string;
   hasReadme: boolean;
+  capabilities?: {
+    required?: string[];
+    optional?: string[];
+  };
+  models?: {
+    chat?: string;
+    image?: string;
+    vision?: string;
+  };
+  tools?: string[];
+  defaultConfig?: Record<string, unknown>;
 };
 
 const thinkingEffortOptions: Array<{ value: ThinkingEffort; label: string }> = [
@@ -210,9 +275,75 @@ const thinkingEffortOptions: Array<{ value: ThinkingEffort; label: string }> = [
   { value: "xhigh", label: "XHigh" },
 ];
 
+const imageAspectRatioOptions: Array<{
+  value: ImageAspectRatio;
+  label: string;
+}> = [
+  { value: "auto", label: "Auto" },
+  { value: "1:1", label: "1:1" },
+  { value: "2:3", label: "2:3" },
+  { value: "3:2", label: "3:2" },
+  { value: "3:4", label: "3:4" },
+  { value: "4:3", label: "4:3" },
+  { value: "4:5", label: "4:5" },
+  { value: "5:4", label: "5:4" },
+  { value: "9:16", label: "9:16" },
+  { value: "16:9", label: "16:9" },
+  { value: "21:9", label: "21:9" },
+  { value: "1:4", label: "1:4" },
+  { value: "4:1", label: "4:1" },
+  { value: "1:8", label: "1:8" },
+  { value: "8:1", label: "8:1" },
+];
+
+const imageQualityOptions: Array<{ value: ImageQuality; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "low", label: "Low" },
+  { value: "standard", label: "Standard" },
+  { value: "higher", label: "Higher" },
+  { value: "highest", label: "Highest" },
+];
+
+const imageStyleOptions: Array<{ value: ImageStyle; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "ghibli", label: "Ghibli" },
+  { value: "pixar", label: "Pixar" },
+  { value: "cartoon", label: "Cartoon" },
+  { value: "pixel", label: "Pixel" },
+];
+
+function optionLabel<T extends string>(
+  options: Array<{ value: T; label: string }>,
+  value: T,
+) {
+  return options.find((option) => option.value === value)?.label ?? value;
+}
+
+function imageConfigSummary(config: ChatImageArtifactConfig) {
+  const parts = [
+    config.aspectRatio !== "auto"
+      ? optionLabel(imageAspectRatioOptions, config.aspectRatio)
+      : null,
+    config.quality !== "auto"
+      ? optionLabel(imageQualityOptions, config.quality)
+      : null,
+    config.style !== "auto"
+      ? optionLabel(imageStyleOptions, config.style)
+      : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.length > 0 ? parts.join(" · ") : "Auto";
+}
+
 export const DEFAULT_PROMPT_THINKING_SETTINGS: PromptThinkingSettings = {
   mode: "auto",
   effort: "medium",
+};
+
+export const DEFAULT_IMAGE_ARTIFACT_CONFIG: ChatImageArtifactConfig = {
+  aspectRatio: "auto",
+  quality: "auto",
+  style: "auto",
 };
 
 export type CitationRecord = {
@@ -238,6 +369,175 @@ export type ToolCallRecord = {
   error: string | null;
   sequence?: number;
 };
+
+type GeneratedImageArtifact = {
+  artifactId: string | null;
+  artifactUrl: string | null;
+  title: string | null;
+};
+
+function detectsImageIntent(text: string) {
+  const normalized = text.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return [
+    /\b(generate|create|make|draw|render|design)\s+(an?\s+)?(image|picture|illustration|poster|logo|icon|thumbnail|cover|banner)\b/i,
+    /(生成|创建|画|绘制|做)(一张|一个|图片|图像|插画|海报|logo|封面|缩略图)/i,
+    /(生图|出图|文生图|生成图片|生成图像)/i,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function skillSupportsImageGeneration(skill: ChatSkillItem) {
+  if (skill.tools?.includes("generate_image")) {
+    return true;
+  }
+  const capabilities = [
+    ...(skill.capabilities?.required ?? []),
+    ...(skill.capabilities?.optional ?? []),
+  ];
+  if (
+    capabilities.some((capability) =>
+      ["artifacts.image.generate", "image.generate", "generate_image"].includes(
+        capability,
+      ),
+    )
+  ) {
+    return true;
+  }
+
+  const searchable =
+    `${skill.name} ${skill.displayName} ${skill.description}`.toLowerCase();
+  return (
+    /\b(image generation|generate image|image generator|picture generation)\b/.test(
+      searchable,
+    ) ||
+    /\b(illustration|poster|logo|thumbnail|cover|banner)\b/.test(searchable)
+  );
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function skillImageDefaultConfig(skill: ChatSkillItem) {
+  const defaultConfig = readRecord(skill.defaultConfig);
+  if (!defaultConfig) {
+    return null;
+  }
+  const generateImage = readRecord(defaultConfig.generate_image);
+  if (generateImage) {
+    return generateImage;
+  }
+  const artifact = readRecord(defaultConfig.artifact);
+  const artifactImage = readRecord(artifact?.image);
+  if (artifactImage) {
+    return artifactImage;
+  }
+  return readRecord(defaultConfig.image);
+}
+
+function normalizeSkillImageConfig(input: unknown) {
+  const record = readRecord(input);
+  if (!record) {
+    return null;
+  }
+  const config: Partial<ChatImageArtifactConfig> = {};
+  if (
+    typeof record.aspectRatio === "string" &&
+    imageAspectRatioOptions.some((option) => option.value === record.aspectRatio)
+  ) {
+    config.aspectRatio = record.aspectRatio as ImageAspectRatio;
+  }
+  if (
+    typeof record.quality === "string" &&
+    imageQualityOptions.some((option) => option.value === record.quality)
+  ) {
+    config.quality = record.quality as ImageQuality;
+  }
+  if (
+    typeof record.style === "string" &&
+    imageStyleOptions.some((option) => option.value === record.style)
+  ) {
+    config.style = record.style as ImageStyle;
+  }
+  return Object.keys(config).length > 0 ? config : null;
+}
+
+function imageConfigFromSkills(skills: ChatSkillItem[]) {
+  let skillConfig: Partial<ChatImageArtifactConfig> | null = null;
+  for (const skill of skills) {
+    const config = normalizeSkillImageConfig(skillImageDefaultConfig(skill));
+    if (config) {
+      skillConfig = {
+        ...config,
+        ...(skillConfig ?? {}),
+      };
+    }
+  }
+  return {
+    ...DEFAULT_IMAGE_ARTIFACT_CONFIG,
+    ...(skillConfig ?? {}),
+  };
+}
+
+function imageModelAliasFromSkills(skills: ChatSkillItem[]) {
+  return skills.find((skill) => skill.models?.image)?.models?.image ?? null;
+}
+
+function clampImageConfigToCapabilities(input: {
+  config: ChatImageArtifactConfig;
+  capabilities?: ImageModelCapabilities;
+}): ChatImageArtifactConfig {
+  const aspectRatios =
+    input.capabilities?.controls?.aspectRatio?.values ??
+    imageAspectRatioOptions.map((option) => option.value);
+  const qualities =
+    input.capabilities?.controls?.quality?.values ??
+    imageQualityOptions.map((option) => option.value);
+  const styles =
+    input.capabilities?.controls?.style?.values ??
+    imageStyleOptions.map((option) => option.value);
+
+  return {
+    aspectRatio: aspectRatios.includes(input.config.aspectRatio)
+      ? input.config.aspectRatio
+      : "auto",
+    quality: qualities.includes(input.config.quality)
+      ? input.config.quality
+      : "auto",
+    style: styles.includes(input.config.style) ? input.config.style : "auto",
+  };
+}
+
+function buildImageArtifactSelection(input: {
+  draftText: string;
+  enabled: boolean;
+  available: boolean;
+  selectedSkills: ChatSkillItem[];
+  config: ChatImageArtifactConfig;
+  modelAlias?: string | null;
+}): ChatArtifactToolSelection | undefined {
+  if (!input.available) {
+    return undefined;
+  }
+
+  const skillTriggered = input.selectedSkills.some(skillSupportsImageGeneration);
+  const intentTriggered = detectsImageIntent(input.draftText);
+  if (!input.enabled && !skillTriggered && !intentTriggered) {
+    return undefined;
+  }
+
+  return {
+    kind: "image",
+    mode: input.enabled ? "generate" : "auto",
+    ...(input.modelAlias ? { modelAlias: input.modelAlias } : {}),
+    image: input.config,
+  };
+}
 
 export type ThinkingStepRecord = {
   id: string;
@@ -266,8 +566,15 @@ export type VersionedMessageGroup = {
   latestVersionId: string;
 };
 
-function getMessageText(version: MessageVersion): string {
-  return version.content;
+function getMessageText(input: {
+  version: MessageVersion;
+  workspaceId?: string | null;
+}): string {
+  return withGeneratedImageMarkdown({
+    content: input.version.content,
+    toolCalls: input.version.toolCalls,
+    workspaceId: input.workspaceId,
+  });
 }
 
 const CITATION_PATTERN =
@@ -461,7 +768,9 @@ function UserMessageText({
   }
 
   const labelToSource = new Map<string, SourceItem>();
-  const sourceById = new Map(mentionSources.map((source) => [source.id, source]));
+  const sourceById = new Map(
+    mentionSources.map((source) => [source.id, source]),
+  );
   for (const source of mentionSources) {
     for (const label of getMentionMatchLabels(source)) {
       labelToSource.set(label, source);
@@ -776,13 +1085,61 @@ function CitationAwareMessageResponse({
       },
       textComponent({ children: nodeChildren }),
     );
+  const imageComponent = ({
+    alt,
+    className,
+    src,
+    ...props
+  }: {
+    alt?: string;
+    className?: string;
+    src?: string;
+  }) => {
+    if (typeof src === "string" && src.startsWith(PENDING_IMAGE_URL_PREFIX)) {
+      return createElement(
+        "div",
+        {
+          className: cn(
+            "my-3 flex min-h-48 max-w-xl items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-4 py-8 text-muted-foreground",
+            className,
+          ),
+          role: "status",
+        },
+        createElement(
+          "div",
+          { className: "flex items-center gap-2 text-sm" },
+          createElement(Loader2, {
+            className: "size-4 animate-spin",
+            "aria-hidden": true,
+          }),
+          createElement("span", null, alt || "Generating image"),
+        ),
+      );
+    }
+
+    return createElement("img", {
+      ...props,
+      alt: alt ?? "",
+      className: cn(
+        "my-3 max-h-[520px] max-w-full rounded-lg border border-border bg-muted/20 object-contain shadow-sm",
+        className,
+      ),
+      loading: "lazy",
+      src: resolveMessageAssetUrl(src),
+    });
+  };
 
   return (
     <div>
       <MessageResponse
         components={{
-          a: ({ children: nodeChildren, ...props }) => (
-            <a {...props}>{nodeChildren}</a>
+          a: ({ children: nodeChildren, href, ...props }) => (
+            <a
+              {...props}
+              href={resolveMessageAssetUrl(href) as string | undefined}
+            >
+              {nodeChildren}
+            </a>
           ),
           blockquote: blockquoteComponent as never,
           em: emphasisComponent as never,
@@ -792,6 +1149,7 @@ function CitationAwareMessageResponse({
           h4: h4Component as never,
           h5: h5Component as never,
           h6: h6Component as never,
+          img: imageComponent as never,
           li: listItemComponent as never,
           p: paragraphComponent as never,
           strong: strongComponent as never,
@@ -908,6 +1266,158 @@ function compactText(value: string, maxLength = 160) {
   return compacted.length > maxLength
     ? `${compacted.slice(0, maxLength - 1)}…`
     : compacted;
+}
+
+function resolveMessageAssetUrl(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  return value.startsWith("/v1/") ? `${apiBaseUrl}${value}` : value;
+}
+
+function getToolOutputField(output: unknown, key: string) {
+  if (typeof output === "object" && output !== null) {
+    const direct = (output as Record<string, unknown>)[key];
+    if (typeof direct === "string" && direct.trim().length > 0) {
+      return direct.trim();
+    }
+
+    const content = getToolOutputContent(output);
+    if (content) {
+      const match = content.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+      return match?.[1]?.trim() ?? null;
+    }
+
+    return null;
+  }
+
+  if (typeof output !== "string") {
+    return null;
+  }
+
+  const match = output.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+  return match?.[1]?.trim() ?? null;
+}
+
+function resolveGeneratedImageArtifact(
+  toolCall: ToolCallRecord,
+  toolStep?: ThinkingStepRecord,
+): GeneratedImageArtifact | null {
+  if (toolCall.tool !== "generate_image") {
+    return null;
+  }
+
+  const metadata = toolStep?.metadata;
+  const artifactId =
+    (typeof metadata?.artifactId === "string"
+      ? metadata.artifactId.trim()
+      : "") || getToolOutputField(toolCall.output, "artifact_id");
+  const artifactUrl =
+    (typeof metadata?.artifactUrl === "string"
+      ? metadata.artifactUrl.trim()
+      : "") ||
+    getToolOutputField(toolCall.output, "artifact_url") ||
+    getToolOutputField(toolCall.output, "preview_url");
+  const title = getToolOutputField(toolCall.output, "title");
+
+  if (!artifactId && !artifactUrl) {
+    return null;
+  }
+
+  return {
+    artifactId: artifactId || null,
+    artifactUrl: artifactUrl || null,
+    title,
+  };
+}
+
+function resolveArtifactUrl(input: {
+  artifact: GeneratedImageArtifact;
+  workspaceId?: string | null;
+}) {
+  if (input.workspaceId && input.artifact.artifactId) {
+    return `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifact.artifactId)}/file`;
+  }
+
+  if (input.artifact.artifactUrl) {
+    return input.artifact.artifactUrl.startsWith("http")
+      ? input.artifact.artifactUrl
+      : `${apiBaseUrl}${input.artifact.artifactUrl}`;
+  }
+
+  return null;
+}
+
+function escapeMarkdownImageAlt(value: string) {
+  return value.replace(/[[\]\\]/g, "\\$&").trim();
+}
+
+function withGeneratedImageMarkdown(input: {
+  content: string;
+  toolCalls?: ToolCallRecord[];
+  workspaceId?: string | null;
+}) {
+  const imageArtifacts = (input.toolCalls ?? [])
+    .filter((toolCall) => toolCall.status === "completed")
+    .map((toolCall) => resolveGeneratedImageArtifact(toolCall))
+    .filter(
+      (artifact): artifact is GeneratedImageArtifact => artifact !== null,
+    );
+
+  if (imageArtifacts.length === 0) {
+    return input.content;
+  }
+
+  const content = input.content
+    .split("\n")
+    .filter((line) => line.trim() !== "Image not available")
+    .join("\n");
+  const appendedUrls = new Set<string>();
+  const markdown = imageArtifacts
+    .map((artifact) => {
+      const url = resolveArtifactUrl({
+        artifact,
+        workspaceId: input.workspaceId,
+      });
+      if (
+        !url ||
+        content.includes(url) ||
+        (artifact.artifactUrl
+          ? content.includes(artifact.artifactUrl)
+          : false) ||
+        appendedUrls.has(url)
+      ) {
+        return null;
+      }
+      appendedUrls.add(url);
+      const label = escapeMarkdownImageAlt(artifact.title ?? "Generated image");
+      return `![${label}](${url})`;
+    })
+    .filter((line): line is string => line !== null)
+    .join("\n\n");
+
+  if (!markdown) {
+    return content;
+  }
+
+  const trimmedContent = content.trim();
+  if (!trimmedContent) {
+    return markdown;
+  }
+
+  const firstParagraphBreak = trimmedContent.search(/\n\s*\n/);
+  if (firstParagraphBreak === -1) {
+    return [trimmedContent, markdown]
+      .filter((part) => part.length > 0)
+      .join("\n\n");
+  }
+
+  const firstParagraph = trimmedContent.slice(0, firstParagraphBreak).trim();
+  const rest = trimmedContent.slice(firstParagraphBreak).trim();
+  return [firstParagraph, markdown, rest]
+    .filter((part) => part.length > 0)
+    .join("\n\n");
 }
 
 function getToolOutputContent(output: unknown) {
@@ -1227,16 +1737,23 @@ function getToolCallDetailParts(
 function ToolCallDetails({
   toolCall,
   toolStep,
+  workspaceId,
 }: {
   toolCall: ToolCallRecord;
   toolStep?: ThinkingStepRecord;
+  workspaceId?: string | null;
 }) {
   const query = getToolQuery(toolCall, toolStep);
   const shouldShowQuery = Boolean(query && toolCall.tool !== "search_sources");
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
+  const imageArtifact = resolveGeneratedImageArtifact(toolCall, toolStep);
+  const imageUrl = imageArtifact
+    ? resolveArtifactUrl({ artifact: imageArtifact, workspaceId })
+    : null;
   const shouldShowOutputSummary = Boolean(
     outputSummary &&
+      !imageArtifact &&
       toolCall.tool !== "search_sources" &&
       toolCall.tool !== "web_search" &&
       toolCall.tool !== "web_fetch" &&
@@ -1262,6 +1779,19 @@ function ToolCallDetails({
           ))}
         </div>
       ) : null}
+      {imageArtifact && imageUrl ? (
+        <p>
+          <span className="font-medium text-foreground/80">Artifact:</span>{" "}
+          <a
+            className="text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
+            href={imageUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {imageArtifact.title ?? "Open generated image"}
+          </a>
+        </p>
+      ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
       {toolCall.error ? (
         <p className="text-destructive">{toolCall.error}</p>
@@ -1285,12 +1815,14 @@ function ReasoningTrace({
   modelReasoningSegments,
   steps,
   toolCalls,
+  workspaceId,
 }: {
   isStreaming: boolean;
   modelReasoning?: string;
   modelReasoningSegments?: ModelReasoningSegmentRecord[];
   steps: ThinkingStepRecord[] | undefined;
   toolCalls: ToolCallRecord[] | undefined;
+  workspaceId?: string | null;
 }) {
   const safeReasoningSegments = (modelReasoningSegments ?? [])
     .map((segment, index) => ({
@@ -1566,7 +2098,11 @@ function ReasoningTrace({
                       : "complete"
                 }
               >
-                <ToolCallDetails toolCall={toolCall} toolStep={toolStep} />
+                <ToolCallDetails
+                  toolCall={toolCall}
+                  toolStep={toolStep}
+                  workspaceId={workspaceId}
+                />
               </ChainOfThoughtStep>
             );
           })}
@@ -1596,10 +2132,16 @@ function Composer({
   thinkingCapabilities,
   thinkingSettings = DEFAULT_PROMPT_THINKING_SETTINGS,
   onThinkingSettingsChange,
+  imageCapabilities,
+  imageModelAvailable = false,
+  imageModelAlias,
 }: {
   isEditing?: boolean;
   placeholder?: string;
-  onSubmit?: (message: PromptInputMessage) => void;
+  onSubmit?: (
+    message: PromptInputMessage,
+    artifact?: ChatArtifactToolSelection,
+  ) => void;
   onCancelEditing?: () => void;
   className?: string;
   initialInput?: string;
@@ -1617,22 +2159,77 @@ function Composer({
   thinkingCapabilities?: PromptThinkingCapabilities;
   thinkingSettings?: PromptThinkingSettings;
   onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
+  imageCapabilities?: ImageModelCapabilities;
+  imageModelAvailable?: boolean;
+  imageModelAlias?: string | null;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const [draftText, setDraftText] = useState(initialInput);
+  const [imageConfig, setImageConfig] = useState<ChatImageArtifactConfig>(
+    DEFAULT_IMAGE_ARTIFACT_CONFIG,
+  );
+  const [imageConfigPinned, setImageConfigPinned] = useState(false);
   const showSourceCountOnly = selectedSources.length > 2;
   const visible = showSourceCountOnly ? [] : selectedSources;
   const hasSelectedSources = selectedSources.length > 0;
-  const selectedSkillIdSet = new Set(selectedSkillIds);
-  const selectedSkills = availableSkills.filter((skill) =>
-    selectedSkillIdSet.has(skill.id),
+  const selectedSkillIdSet = useMemo(
+    () => new Set(selectedSkillIds),
+    [selectedSkillIds],
   );
+  const selectedSkills = useMemo(
+    () => availableSkills.filter((skill) => selectedSkillIdSet.has(skill.id)),
+    [availableSkills, selectedSkillIdSet],
+  );
+  const skillImageConfig = useMemo(
+    () => imageConfigFromSkills(selectedSkills),
+    [selectedSkills],
+  );
+  const skillImageModelAlias = useMemo(
+    () => imageModelAliasFromSkills(selectedSkills),
+    [selectedSkills],
+  );
+  const effectiveImageModelAlias = imageModelAlias ?? skillImageModelAlias;
   const selectedSkillNames = selectedSkills
     .map((skill) => skill.displayName)
     .join(", ");
+  const effectiveImageCapabilities =
+    imageCapabilities ?? thinkingCapabilities?.imageGeneration;
+  const imageSupported =
+    imageModelAvailable && effectiveImageCapabilities?.supported !== false;
+  const effectiveImageConfig = clampImageConfigToCapabilities({
+    config: imageConfig,
+    capabilities: effectiveImageCapabilities,
+  });
+  const imageOptionsChanged =
+    effectiveImageConfig.aspectRatio !== "auto" ||
+    effectiveImageConfig.quality !== "auto" ||
+    effectiveImageConfig.style !== "auto";
+  const imageOptionSummary = imageConfigSummary(effectiveImageConfig);
+  const filteredAspectRatioOptions = imageAspectRatioOptions.filter((option) =>
+    (
+      effectiveImageCapabilities?.controls?.aspectRatio?.values ??
+      imageAspectRatioOptions.map((item) => item.value)
+    ).includes(option.value),
+  );
+  const filteredImageQualityOptions = imageQualityOptions.filter((option) =>
+    (
+      effectiveImageCapabilities?.controls?.quality?.values ??
+      imageQualityOptions.map((item) => item.value)
+    ).includes(option.value),
+  );
+  const filteredImageStyleOptions = imageStyleOptions.filter((option) =>
+    (
+      effectiveImageCapabilities?.controls?.style?.values ??
+      imageStyleOptions.map((item) => item.value)
+    ).includes(option.value),
+  );
   const supportsThinking = thinkingCapabilities?.supportsThinking === true;
   const activeThinkingSettings = supportsThinking
     ? thinkingSettings
     : DEFAULT_PROMPT_THINKING_SETTINGS;
+  const optionCount =
+    (imageOptionsChanged ? 1 : 0) +
+    (supportsThinking && activeThinkingSettings.mode !== "auto" ? 1 : 0);
   const thinkingEnabled = activeThinkingSettings.mode !== "off";
   const supportedThinkingEfforts = thinkingEffortOptions.filter((option) =>
     (thinkingCapabilities?.supportedEfforts ?? []).includes(option.value),
@@ -1671,6 +2268,32 @@ function Composer({
       mode: activeThinkingSettings.mode === "off" ? "auto" : "off",
     });
   }
+
+  function updateImageConfig(next: Partial<ChatImageArtifactConfig>) {
+    setImageConfig((current) =>
+      clampImageConfigToCapabilities({
+        config: { ...current, ...next },
+        capabilities: effectiveImageCapabilities,
+      }),
+    );
+    setImageConfigPinned(true);
+  }
+
+  useEffect(() => {
+    if (imageConfigPinned) {
+      return;
+    }
+    setImageConfig(
+      clampImageConfigToCapabilities({
+        config: skillImageConfig,
+        capabilities: effectiveImageCapabilities,
+      }),
+    );
+  }, [effectiveImageCapabilities, imageConfigPinned, skillImageConfig]);
+
+  useEffect(() => {
+    setDraftText(initialInput);
+  }, [initialInput, inputKey]);
 
   useEffect(() => {
     if (!isEditing || disabled) {
@@ -1718,7 +2341,19 @@ function Composer({
             if (disabled) {
               return;
             }
-            (onSubmit ?? (() => undefined))(message);
+            const artifact = buildImageArtifactSelection({
+              draftText,
+              enabled: imageConfigPinned,
+              available: imageSupported,
+              selectedSkills,
+              config: effectiveImageConfig,
+              modelAlias: effectiveImageModelAlias,
+            });
+            (onSubmit ?? (() => undefined))(message, artifact);
+            if (artifact?.mode === "generate") {
+              setImageConfigPinned(false);
+              setImageConfig(DEFAULT_IMAGE_ARTIFACT_CONFIG);
+            }
           }}
         >
           {hasSelectedSources ? (
@@ -1788,6 +2423,7 @@ function Composer({
                 placeholder ||
                 "Message your documents, links, or connected tools..."
               }
+              onValueChange={({ text }) => setDraftText(text)}
               sourceLoader={sourceMentionLoader}
               sources={mentionSources}
             />
@@ -1798,94 +2434,206 @@ function Composer({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <PromptInputButton
-                      className="size-8 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                      className={cn(
+                        "relative size-8 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground",
+                        optionCount > 0 &&
+                          "bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background",
+                      )}
                       size="icon-sm"
                       tooltip="Options"
                       type="button"
-                      variant="ghost"
+                      variant={optionCount > 0 ? "secondary" : "ghost"}
                     >
                       <SlidersHorizontal className="size-3.5" />
+                      {optionCount > 0 ? (
+                        <span className="-top-0.5 -right-0.5 absolute flex size-3 items-center justify-center rounded-full bg-primary text-[8px] text-primary-foreground">
+                          {optionCount}
+                        </span>
+                      ) : null}
                       <span className="sr-only">Options</span>
                     </PromptInputButton>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44 p-1">
-                    <DropdownMenuLabel className="px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/80">
+                  <DropdownMenuContent align="start" className="w-64 p-1">
+                    <DropdownMenuLabel className="px-2 py-1.5 text-[11px] text-muted-foreground">
                       Options
                     </DropdownMenuLabel>
-                    {supportsThinking && supportedThinkingEfforts.length > 0 ? (
-                      <>
-                        <DropdownMenuSeparator className="my-1" />
-                        <DropdownMenuSub>
-                          <DropdownMenuSubTrigger className="h-8 rounded-lg px-2 text-xs">
-                            <Brain className="size-3.5 text-muted-foreground" />
-                            Thinking
-                          </DropdownMenuSubTrigger>
-                          <DropdownMenuSubContent className="w-36 p-1">
-                            <DropdownMenuRadioGroup
-                              onValueChange={(value) => {
-                                if (value === "off") {
-                                  updateThinkingSettings({
-                                    ...(activeThinkingSettings ??
-                                      DEFAULT_PROMPT_THINKING_SETTINGS),
-                                    mode: "off",
-                                  });
-                                  return;
-                                }
-
-                                if (value === "auto") {
-                                  updateThinkingSettings({
-                                    ...(activeThinkingSettings ??
-                                      DEFAULT_PROMPT_THINKING_SETTINGS),
-                                    mode: "auto",
-                                  });
-                                  return;
-                                }
-
-                                updateThinkingSettings({
-                                  mode: "effort",
-                                  effort: value as ThinkingEffort,
-                                });
-                              }}
-                              value={selectedThinkingValue}
-                            >
-                              <DropdownMenuRadioItem
-                                className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
-                                value="off"
-                              >
-                                Off
-                              </DropdownMenuRadioItem>
-                              <DropdownMenuRadioItem
-                                className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
-                                value="auto"
-                              >
-                                Auto
-                              </DropdownMenuRadioItem>
-                              {supportedThinkingEfforts.map((option) => (
-                                <DropdownMenuRadioItem
-                                  className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
-                                  key={option.value}
-                                  value={option.value}
-                                >
-                                  {option.label}
-                                </DropdownMenuRadioItem>
-                              ))}
-                            </DropdownMenuRadioGroup>
-                          </DropdownMenuSubContent>
-                        </DropdownMenuSub>
-                      </>
-                    ) : supportsThinking ? (
-                      <DropdownMenuItem
-                        className="h-8 rounded-lg px-2 text-xs"
-                        disabled
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                          <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="shrink-0">Image generation</span>
+                          <span
+                            className={cn(
+                              "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
+                              imageOptionsChanged && "text-primary",
+                            )}
+                          >
+                            {imageOptionSummary}
+                          </span>
+                        </span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent
+                        alignOffset={-6}
+                        className="max-h-[min(520px,var(--radix-dropdown-menu-content-available-height))] w-[340px] overflow-y-auto p-3"
+                        sideOffset={8}
                       >
-                        Thinking effort unavailable
-                      </DropdownMenuItem>
+                        <div className="space-y-3.5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-xs font-medium text-foreground">
+                                Image generation
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                                Auto turns on for image prompts.
+                              </div>
+                            </div>
+                            <div
+                              className={cn(
+                                "shrink-0 rounded-full px-2 py-0.5 text-[10px]",
+                                imageOptionsChanged
+                                  ? "bg-primary/10 text-primary"
+                                  : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {imageOptionSummary}
+                            </div>
+                          </div>
+                          {!imageSupported ? (
+                            <div className="rounded-md bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground">
+                              Select an image model to generate.
+                            </div>
+                          ) : null}
+                          <ImageConfigGroup
+                            disabled={!imageSupported}
+                            label="Aspect ratio"
+                            onValueChange={(value) =>
+                              updateImageConfig({
+                                aspectRatio: value as ImageAspectRatio,
+                              })
+                            }
+                            options={filteredAspectRatioOptions}
+                            value={effectiveImageConfig.aspectRatio}
+                          />
+                          <ImageConfigGroup
+                            disabled={!imageSupported}
+                            label="Image quality"
+                            onValueChange={(value) =>
+                              updateImageConfig({
+                                quality: value as ImageQuality,
+                              })
+                            }
+                            options={filteredImageQualityOptions}
+                            value={effectiveImageConfig.quality}
+                          />
+                          <ImageConfigGroup
+                            disabled={!imageSupported}
+                            label="Style"
+                            onValueChange={(value) =>
+                              updateImageConfig({
+                                style: value as ImageStyle,
+                              })
+                            }
+                            options={filteredImageStyleOptions}
+                            value={effectiveImageConfig.style}
+                          />
+                          <div className="flex items-center justify-between border-border/60 border-t pt-2">
+                            <span className="text-[11px] text-muted-foreground">
+                              Saved for the next image request.
+                            </span>
+                            <button
+                              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              onClick={() => {
+                                setImageConfig(DEFAULT_IMAGE_ARTIFACT_CONFIG);
+                                setImageConfigPinned(false);
+                              }}
+                              type="button"
+                            >
+                              <RotateCcw className="size-3" />
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSeparator />
+                    {supportsThinking && supportedThinkingEfforts.length > 0 ? (
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                          <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                            <Brain className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="shrink-0">Thinking</span>
+                            <span className="ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground">
+                              {selectedThinkingValue === "off"
+                                ? "Off"
+                                : selectedThinkingValue === "auto"
+                                  ? "Auto"
+                                  : thinkingEffortOptions.find(
+                                      (option) =>
+                                        option.value === selectedThinkingValue,
+                                    )?.label}
+                            </span>
+                          </span>
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="w-36 p-1">
+                          <DropdownMenuRadioGroup
+                            onValueChange={(value) => {
+                              if (value === "off") {
+                                updateThinkingSettings({
+                                  ...(activeThinkingSettings ??
+                                    DEFAULT_PROMPT_THINKING_SETTINGS),
+                                  mode: "off",
+                                });
+                                return;
+                              }
+
+                              if (value === "auto") {
+                                updateThinkingSettings({
+                                  ...(activeThinkingSettings ??
+                                    DEFAULT_PROMPT_THINKING_SETTINGS),
+                                  mode: "auto",
+                                });
+                                return;
+                              }
+
+                              updateThinkingSettings({
+                                mode: "effort",
+                                effort: value as ThinkingEffort,
+                              });
+                            }}
+                            value={selectedThinkingValue}
+                          >
+                            <DropdownMenuRadioItem
+                              className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
+                              value="off"
+                            >
+                              Off
+                            </DropdownMenuRadioItem>
+                            <DropdownMenuRadioItem
+                              className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
+                              value="auto"
+                            >
+                              Auto
+                            </DropdownMenuRadioItem>
+                            {supportedThinkingEfforts.map((option) => (
+                              <DropdownMenuRadioItem
+                                className="h-7 rounded-lg py-1.5 pr-7 pl-2 text-xs"
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </DropdownMenuRadioItem>
+                            ))}
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
                     ) : (
                       <DropdownMenuItem
-                        className="h-8 rounded-lg px-2 text-xs"
+                        className="h-9 rounded-lg px-2 text-xs"
                         disabled
                       >
-                        No options available
+                        {supportsThinking
+                          ? "Thinking effort unavailable"
+                          : "No reasoning options available"}
                       </DropdownMenuItem>
                     )}
                   </DropdownMenuContent>
@@ -2010,6 +2758,50 @@ function Composer({
   );
 }
 
+function ImageConfigGroup({
+  disabled,
+  label,
+  onValueChange,
+  options,
+  value,
+}: {
+  disabled?: boolean;
+  label: string;
+  onValueChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  value: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[11px] font-medium text-foreground/85">{label}</div>
+      <div className="flex flex-wrap gap-1">
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              aria-pressed={selected}
+              className={cn(
+                "h-7 rounded-md border px-2 text-xs transition-colors",
+                selected
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                disabled &&
+                  "cursor-not-allowed opacity-45 hover:bg-background hover:text-muted-foreground",
+              )}
+              disabled={disabled}
+              key={option.value}
+              onClick={() => onValueChange(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({
   onSendMessage,
   composerInitialInput,
@@ -2026,6 +2818,9 @@ function EmptyState({
   thinkingCapabilities,
   thinkingSettings,
   onThinkingSettingsChange,
+  imageCapabilities,
+  imageModelAvailable,
+  imageModelAlias,
 }: {
   onSendMessage: (input: ChatSendInput) => void;
   composerInitialInput?: string;
@@ -2042,6 +2837,9 @@ function EmptyState({
   thinkingCapabilities?: PromptThinkingCapabilities;
   thinkingSettings?: PromptThinkingSettings;
   onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
+  imageCapabilities?: ImageModelCapabilities;
+  imageModelAvailable?: boolean;
+  imageModelAlias?: string | null;
 }) {
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -2089,10 +2887,11 @@ function EmptyState({
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
-            onSubmit={(message) =>
+            onSubmit={(message, artifact) =>
               onSendMessage({
                 content: message.text.trim(),
                 mentionedSourceIds: message.mentionedSourceIds,
+                artifact,
               })
             }
             onSearchEnabledChange={onSearchEnabledChange}
@@ -2104,6 +2903,9 @@ function EmptyState({
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}
+            imageCapabilities={imageCapabilities}
+            imageModelAvailable={imageModelAvailable}
+            imageModelAlias={imageModelAlias}
           />
         </div>
       </div>
@@ -2143,6 +2945,9 @@ export function ChatCanvas({
   thinkingCapabilities,
   thinkingSettings,
   onThinkingSettingsChange,
+  imageCapabilities,
+  imageModelAvailable,
+  imageModelAlias,
 }: {
   activeVersionByGroup?: Record<string, number>;
   composerInitialInput?: string;
@@ -2188,6 +2993,9 @@ export function ChatCanvas({
   thinkingCapabilities?: PromptThinkingCapabilities;
   thinkingSettings?: PromptThinkingSettings;
   onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
+  imageCapabilities?: ImageModelCapabilities;
+  imageModelAvailable?: boolean;
+  imageModelAlias?: string | null;
 }) {
   void sourcesVisible;
 
@@ -2217,6 +3025,9 @@ export function ChatCanvas({
         selectedSources={selectedSources}
         thinkingCapabilities={thinkingCapabilities}
         thinkingSettings={thinkingSettings}
+        imageCapabilities={imageCapabilities}
+        imageModelAvailable={imageModelAvailable}
+        imageModelAlias={imageModelAlias}
       />
     );
   }
@@ -2406,7 +3217,10 @@ export function ChatCanvas({
                 >
                   <MessageBranchContent>
                     {versionEntries.map(({ version }, versionIndex) => {
-                      const messageText = getMessageText(version);
+                      const messageText = getMessageText({
+                        version,
+                        workspaceId,
+                      });
                       const isStreamingThisVersion =
                         isStreaming &&
                         isAssistant &&
@@ -2480,6 +3294,7 @@ export function ChatCanvas({
                                     }
                                     steps={version.thinkingSteps}
                                     toolCalls={version.toolCalls}
+                                    workspaceId={workspaceId}
                                   />
                                   <WebToolResults
                                     availableCitations={
@@ -2630,10 +3445,11 @@ export function ChatCanvas({
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(message) =>
+            onSubmit={(message, artifact) =>
               handleSendMessage({
                 content: message.text.trim(),
                 mentionedSourceIds: message.mentionedSourceIds,
+                artifact,
               })
             }
             onThinkingSettingsChange={onThinkingSettingsChange}
@@ -2643,6 +3459,9 @@ export function ChatCanvas({
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}
+            imageCapabilities={imageCapabilities}
+            imageModelAvailable={imageModelAvailable}
+            imageModelAlias={imageModelAlias}
           />
         </div>
       </div>

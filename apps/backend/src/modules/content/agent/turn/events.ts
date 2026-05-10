@@ -11,7 +11,9 @@ import type {
 
 export type DeepAgentTurnOutcome = {
   assistantContent: string;
-  retrieval: Awaited<ReturnType<typeof contentRetrievalService.runRetrieval>> | null;
+  retrieval: Awaited<
+    ReturnType<typeof contentRetrievalService.runRetrieval>
+  > | null;
   citations: AgentCitation[];
   availableCitations: AgentCitation[];
   retrievalCalls: RetrievalCallTrace[];
@@ -28,6 +30,10 @@ export type DeepAgentTurnEvent =
   | {
       type: "text-delta";
       delta: string;
+    }
+  | {
+      type: "text-replace";
+      text: string;
     }
   | {
       type: "text-interrupted";

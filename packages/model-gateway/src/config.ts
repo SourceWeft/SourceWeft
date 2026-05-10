@@ -20,6 +20,7 @@ export const DEFAULT_ALLOWED_MODEL_ALIASES: readonly string[] = [
   "embed-default",
   "rerank-default",
   "asr-default",
+  "image-default",
 ];
 
 function normalizeBaseUrl(baseUrl: string): string {
