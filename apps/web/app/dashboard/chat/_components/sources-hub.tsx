@@ -91,6 +91,7 @@ const tabs = [
   "Skills",
 ] as const;
 const addTabs = ["File", "URL", "Text"] as const;
+const HUB_ACTIVE_TAB_STORAGE_KEY = "chat:sources-hub:active-tab:v1";
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -207,6 +208,36 @@ const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
 
 type HubTab = (typeof tabs)[number] | "Citations";
 type AddTab = (typeof addTabs)[number];
+const hubTabValues = new Set<string>([...tabs, "Citations"]);
+let lastHubActiveTab: HubTab = "Sources";
+
+function readStoredHubTab() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const value = window.sessionStorage.getItem(HUB_ACTIVE_TAB_STORAGE_KEY);
+    return value && hubTabValues.has(value) ? (value as HubTab) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistHubTab(tab: HubTab) {
+  lastHubActiveTab = tab;
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(HUB_ACTIVE_TAB_STORAGE_KEY, tab);
+  } catch {
+    // Ignore storage failures; the in-memory tab state still works.
+  }
+}
+
 type SourceApiRecord = Awaited<
   ReturnType<typeof contentClient.listSources>
 >["items"][number];
@@ -523,6 +554,23 @@ export function ArtifactPreviewPanel({
     artifact.artifactType === "image" &&
     artifact.status === "ready" &&
     Boolean(fileUrl);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+    };
+  }, [onClose]);
 
   const handleOpenExternal = () => {
     if (!fileUrl) {
@@ -2238,7 +2286,7 @@ export function SourcesHub({
   onSkillSelectionChange?: (ids: string[]) => void;
   disabledToolNames?: string[];
 }) {
-  const [activeTab, setActiveTab] = useState<HubTab>("Sources");
+  const [activeTab, setActiveTab] = useState<HubTab>(lastHubActiveTab);
   const [citationScope, setCitationScope] = useState<CitationScope>("current");
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
@@ -2353,8 +2401,20 @@ export function SourcesHub({
     }));
   }
 
+  function handleActiveTabChange(tab: HubTab) {
+    setActiveTab(tab);
+    persistHubTab(tab);
+  }
+
   useEffect(() => {
-    setActiveTab("Sources");
+    const storedTab = readStoredHubTab();
+    if (storedTab) {
+      lastHubActiveTab = storedTab;
+      setActiveTab(storedTab);
+    }
+  }, []);
+
+  useEffect(() => {
     setCitationScope("current");
   }, [mode]);
 
@@ -3094,7 +3154,7 @@ export function SourcesHub({
                     : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
                 )}
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => handleActiveTabChange(tab)}
                 type="button"
               >
                 <span>{tab}</span>
