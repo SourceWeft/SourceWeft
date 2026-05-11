@@ -2,30 +2,20 @@ import type { EnabledSkillDescriptor } from "../skills/types";
 import type { ThreadModelSettings } from "../threads/model-settings";
 import { resolveModelGatewayProfile } from "../../../shared/model-gateway/client";
 import type { RuntimeModelGatewayProfile } from "../../../shared/model-gateway/types";
+import { AGENT_TOOL_NAMES } from "../agent/tool-names";
 import { resolveImageModelCapabilities } from "./image-capabilities";
 import {
   DEFAULT_IMAGE_ARTIFACT_CONFIG,
   mergeImageArtifactConfig,
   normalizeArtifactToolSelection,
+  normalizeGenerateImageToolSelection,
   normalizePartialArtifactImageConfig,
   type ArtifactImageConfig,
   type ArtifactIntentDecision,
   type ArtifactToolSelection,
+  type GenerateImageToolSelection,
   type ImageModelCapabilities,
 } from "./types";
-
-const IMAGE_INTENT_PATTERNS = [
-  /\b(generate|create|make|draw|render|design)\s+(an?\s+)?(image|picture|illustration|poster|logo|icon|thumbnail|cover|banner)\b/i,
-  /\b(image|picture|illustration|poster|logo|icon|thumbnail|cover|banner)\s+(generation|生成|创作|制作)\b/i,
-  /(生成|创建|画|绘制|做)(一张|一个|图片|图像|插画|海报|logo|封面|缩略图)/i,
-  /(生图|出图|文生图|生成图片|生成图像)/i,
-];
-
-const IMAGE_CAPABILITIES = new Set([
-  "artifacts.image.generate",
-  "image.generate",
-  "generate_image",
-]);
 
 export type ResolvedArtifactImageProfile = {
   profile: RuntimeModelGatewayProfile;
@@ -44,23 +34,7 @@ type ResolveImageProfile = (input: {
 }) => Promise<ResolvedArtifactImageProfile | null>;
 
 function skillHasImageCapability(skill: EnabledSkillDescriptor) {
-  if (skill.tools?.includes("generate_image")) {
-    return true;
-  }
-  const capabilities = [
-    ...(skill.capabilities?.required ?? []),
-    ...(skill.capabilities?.optional ?? []),
-  ];
-  if (capabilities.some((capability) => IMAGE_CAPABILITIES.has(capability))) {
-    return true;
-  }
-
-  const searchable = `${skill.name} ${skill.description}`.toLowerCase();
-  return (
-    /\b(image generation|generate image|image generator|picture generation)\b/.test(
-      searchable,
-    ) || /\b(illustration|poster|logo|thumbnail|cover|banner)\b/.test(searchable)
-  );
+  return skill.tools?.includes(AGENT_TOOL_NAMES.generateImage) === true;
 }
 
 function defaultConfigFromSkills(skills: EnabledSkillDescriptor[]) {
@@ -70,23 +44,12 @@ function defaultConfigFromSkills(skills: EnabledSkillDescriptor[]) {
         return current;
       }
       const toolConfig =
-        skill.defaultConfig?.generate_image &&
-        typeof skill.defaultConfig.generate_image === "object" &&
-        !Array.isArray(skill.defaultConfig.generate_image)
-          ? skill.defaultConfig.generate_image
+        skill.defaultConfig?.[AGENT_TOOL_NAMES.generateImage] &&
+        typeof skill.defaultConfig[AGENT_TOOL_NAMES.generateImage] === "object" &&
+        !Array.isArray(skill.defaultConfig[AGENT_TOOL_NAMES.generateImage])
+          ? skill.defaultConfig[AGENT_TOOL_NAMES.generateImage]
           : undefined;
-      const artifactConfig =
-        skill.defaultConfig?.artifact &&
-        typeof skill.defaultConfig.artifact === "object" &&
-        !Array.isArray(skill.defaultConfig.artifact)
-          ? (skill.defaultConfig.artifact as Record<string, unknown>)
-          : null;
-      const imageConfig =
-        toolConfig ??
-        artifactConfig?.image ??
-        skill.defaultConfig?.image ??
-        undefined;
-      const normalized = normalizePartialArtifactImageConfig(imageConfig);
+      const normalized = normalizePartialArtifactImageConfig(toolConfig);
       if (!normalized) {
         return current;
       }
@@ -100,15 +63,11 @@ function defaultConfigFromSkills(skills: EnabledSkillDescriptor[]) {
 }
 
 function modelAliasFromSkills(skills: EnabledSkillDescriptor[]) {
-  return skills.find((skill) => skill.models?.image)?.models?.image ?? null;
-}
-
-function detectImageIntent(content: string) {
-  const normalized = content.trim();
-  if (!normalized) {
-    return false;
-  }
-  return IMAGE_INTENT_PATTERNS.some((pattern) => pattern.test(normalized));
+  return (
+    skills.find(
+      (skill) => skillHasImageCapability(skill) && skill.models?.image,
+    )?.models?.image ?? null
+  );
 }
 
 function clampConfigToCapabilities(input: {
@@ -163,26 +122,33 @@ async function resolveImageProfile(input: {
 }
 
 export async function runArtifactIntentPipeline(input: {
-  content: string;
-  tools?: { artifact?: ArtifactToolSelection };
+  tools?: {
+    artifact?: ArtifactToolSelection;
+    [AGENT_TOOL_NAMES.generateImage]?: GenerateImageToolSelection;
+  };
   enabledSkills: EnabledSkillDescriptor[];
   threadModelSettings: ThreadModelSettings;
   resolveImageProfile?: ResolveImageProfile;
 }): Promise<ArtifactIntentPipelineResult> {
-  const explicitSelection = normalizeArtifactToolSelection(input.tools?.artifact);
-  const explicit = explicitSelection?.kind === "image";
-  const forceGenerate = explicit && explicitSelection.mode === "generate";
+  const legacySelection = normalizeArtifactToolSelection(input.tools?.artifact);
+  const generateImageSelection = normalizeGenerateImageToolSelection(
+    input.tools?.[AGENT_TOOL_NAMES.generateImage],
+  );
+  const explicit =
+    Boolean(generateImageSelection) || legacySelection?.kind === "image";
+  const disabled = generateImageSelection?.enabled === false;
   const requestedImageModelAlias =
-    explicitSelection?.modelAlias ?? modelAliasFromSkills(input.enabledSkills);
+    generateImageSelection?.modelAlias ??
+    legacySelection?.modelAlias ??
+    modelAliasFromSkills(input.enabledSkills);
   const skillTriggered = input.enabledSkills.some(skillHasImageCapability);
-  const intentTriggered = detectImageIntent(input.content);
-  const shouldInjectTool = explicit || skillTriggered || intentTriggered;
-  const source = explicit
-    ? "explicit_tool"
-    : skillTriggered
-      ? "skill"
-      : intentTriggered
-        ? "intent"
+  const shouldInjectTool = !disabled;
+  const source = disabled
+    ? "none"
+    : explicit
+      ? "explicit_tool"
+      : skillTriggered
+        ? "skill"
         : "none";
 
   const imageProfile = shouldInjectTool
@@ -193,7 +159,8 @@ export async function runArtifactIntentPipeline(input: {
       })
     : null;
   const skillConfig = defaultConfigFromSkills(input.enabledSkills);
-  const requestedConfig = explicitSelection?.image;
+  const requestedConfig =
+    generateImageSelection?.config ?? legacySelection?.image;
   const rawConfig = mergeImageArtifactConfig(skillConfig, requestedConfig);
   const config = clampConfigToCapabilities({
     config: rawConfig,
@@ -226,26 +193,21 @@ export async function runArtifactIntentPipeline(input: {
       kind: enabled ? "image" : shouldInjectTool ? "image" : null,
       shouldInjectTool: enabled,
       source,
-      requireToolCall: forceGenerate,
-      confidence: forceGenerate
-        ? 1
+      confidence: disabled
+        ? 0
         : explicit
           ? 0.55
           : skillTriggered
             ? 0.82
-            : intentTriggered
-              ? 0.72
-              : 0,
+            : 0,
       reason:
-        source === "explicit_tool" && forceGenerate
-          ? "User-facing artifact controls requested image generation."
+        disabled
+          ? "The generate_image tool is disabled for this turn."
           : source === "explicit_tool"
-            ? "User-facing artifact controls enabled image generation tool auto mode."
+            ? "User-facing image generation controls configured generate_image."
           : source === "skill"
-            ? "A selected skill declares or implies image generation."
-            : source === "intent"
-              ? "The prompt matches image generation intent."
-              : "No artifact generation intent detected.",
+            ? "A selected skill declares generate_image."
+            : "generate_image is available for this turn when the model decides a visual artifact is needed.",
       config,
       warnings,
     },

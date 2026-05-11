@@ -33,8 +33,14 @@ import {
 import { assertSourcesExist } from "./source-validation";
 import type { PreparedThreadTurn, StreamThreadEventInput } from "./types";
 import { resolveSourceTreeScope } from "../../sources/service";
-import { normalizeArtifactToolSelection } from "../../artifacts/types";
 import { runArtifactIntentPipeline } from "../../artifacts/intent-pipeline";
+import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
+import {
+  assertSelectedSkillsAllowedByTools,
+  buildThreadToolsMetadata,
+  resolveGenerateImageToolSelection,
+  resolveWebSearchEnabled,
+} from "./tool-selection";
 
 function normalizeSupportedParameters(value: unknown) {
   if (!Array.isArray(value)) {
@@ -196,17 +202,21 @@ export async function prepareThreadTurn(
   });
   const sourceIds = sourceScope.effectiveSourceIds;
   const skillIds = normalizeSkillIds(input.tools?.skillIds);
-  const requestedWebSearchEnabled = input.tools?.webSearchEnabled === true;
-  const artifact = normalizeArtifactToolSelection(input.tools?.artifact);
+  const generateImageTool = resolveGenerateImageToolSelection(input.tools);
   const timezone = normalizeTimezone(input.timezone);
   const enabledSkills = await resolveSelectedSkills({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
     skillIds,
   });
-  const webSearchEnabled =
-    requestedWebSearchEnabled ||
-    enabledSkills.some((skill) => skill.tools?.includes("web_search"));
+  assertSelectedSkillsAllowedByTools({
+    enabledSkills,
+    generateImageTool,
+  });
+  const webSearchEnabled = resolveWebSearchEnabled({
+    tools: input.tools,
+    enabledSkills,
+  });
 
   await assertSourcesExist({
     teamId: workspace.organizationId,
@@ -220,8 +230,9 @@ export async function prepareThreadTurn(
     thread.modelSettings,
   );
   const artifactPipeline = await runArtifactIntentPipeline({
-    content: messageContent,
-    tools: artifact ? { artifact } : undefined,
+    tools: generateImageTool
+      ? { [AGENT_TOOL_NAMES.generateImage]: generateImageTool }
+      : undefined,
     enabledSkills,
     threadModelSettings: normalizedThreadSettings,
   });
@@ -247,11 +258,11 @@ export async function prepareThreadTurn(
         sourceIds: selectedSourceIds,
         effectiveSourceIds: sourceIds,
         skillIds,
-        tools: {
+        tools: buildThreadToolsMetadata({
           skillIds,
           webSearchEnabled,
-          ...(artifact ? { artifact } : {}),
-        },
+          generateImageTool,
+        }),
         artifactIntent: artifactPipeline.decision,
         versionOf: input.userMessageParentId ?? null,
       },
@@ -335,7 +346,7 @@ export async function prepareThreadTurn(
     sourceScope,
     skillIds,
     webSearchEnabled,
-    artifact,
+    generateImageTool,
     artifactIntent: artifactPipeline.decision,
     imageProfile: artifactPipeline.imageProfile,
     timezone,

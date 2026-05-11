@@ -494,6 +494,20 @@ const artifactToolSelectionSchema = z
   })
   .strict();
 
+const generateImageToolSelectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    modelAlias: z.string().trim().min(1).max(512).optional(),
+    config: imageArtifactConfigSchema.optional(),
+  })
+  .strict();
+
+const webSearchToolSelectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
 const skillSourceTypeSchema = z.enum([
   "builtin",
   "workspace_custom",
@@ -505,6 +519,8 @@ const threadToolsRequestSchema = z
     skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
     webSearchEnabled: z.boolean().optional(),
     artifact: artifactToolSelectionSchema.optional(),
+    generate_image: generateImageToolSelectionSchema.optional(),
+    web_search: webSearchToolSelectionSchema.optional(),
   })
   .strict();
 
@@ -965,6 +981,12 @@ export type ImageAspectRatio = z.infer<typeof imageAspectRatioSchema>;
 export type ImageQuality = z.infer<typeof imageQualitySchema>;
 export type ImageArtifactConfig = z.infer<typeof imageArtifactConfigSchema>;
 export type ArtifactToolSelection = z.infer<typeof artifactToolSelectionSchema>;
+export type GenerateImageToolSelection = z.infer<
+  typeof generateImageToolSelectionSchema
+>;
+export type WebSearchToolSelection = z.infer<
+  typeof webSearchToolSelectionSchema
+>;
 export type StreamThreadRequest = z.infer<typeof streamThreadRequestSchema>;
 export type StreamThreadResponse = z.infer<typeof streamThreadResponseSchema>;
 export type RefreshThreadRequest = z.infer<typeof refreshThreadRequestSchema>;

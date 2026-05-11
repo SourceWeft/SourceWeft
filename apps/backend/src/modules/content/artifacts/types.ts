@@ -19,6 +19,12 @@ export type ArtifactToolSelection = {
   image?: Partial<ArtifactImageConfig>;
 };
 
+export type GenerateImageToolSelection = {
+  enabled?: boolean;
+  modelAlias?: string;
+  config?: Partial<ArtifactImageConfig>;
+};
+
 export type ImageModelCapabilities = {
   supported: boolean;
   provider?: string;
@@ -40,8 +46,7 @@ export type ImageModelCapabilities = {
 export type ArtifactIntentDecision = {
   kind: ArtifactGenerationKind | null;
   shouldInjectTool: boolean;
-  requireToolCall?: boolean;
-  source: "none" | "explicit_tool" | "skill" | "intent";
+  source: "none" | "explicit_tool" | "skill";
   confidence: number;
   reason: string;
   config: ArtifactImageConfig;
@@ -186,6 +191,33 @@ export function normalizeArtifactToolSelection(
     ...(record.image !== undefined
       ? { image: normalizePartialArtifactImageConfig(record.image) }
       : {}),
+  };
+}
+
+export function normalizeGenerateImageToolSelection(
+  input: unknown,
+): GenerateImageToolSelection | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  const modelAlias =
+    typeof record.modelAlias === "string" && record.modelAlias.trim().length > 0
+      ? record.modelAlias.trim()
+      : undefined;
+  const config = normalizePartialArtifactImageConfig(record.config);
+  const enabled =
+    typeof record.enabled === "boolean" ? record.enabled : undefined;
+
+  if (enabled === undefined && !modelAlias && !config) {
+    return undefined;
+  }
+
+  return {
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(modelAlias ? { modelAlias } : {}),
+    ...(config ? { config } : {}),
   };
 }
 

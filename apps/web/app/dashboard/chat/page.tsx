@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
@@ -27,10 +34,12 @@ import {
   type ModelSelectionSources,
 } from "./_components/skill-model-presets";
 import {
+  buildChatToolsRequest,
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
   type ChatSendInput,
   type ChatSkillItem,
+  type ChatToolName,
   type PromptInputMentionSourceLoader,
   type PromptThinkingSettings,
 } from "./_components/chat-canvas";
@@ -82,6 +91,23 @@ function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
 
 function getSearchPreferenceStorageKey(workspaceId: string) {
   return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
+}
+
+function removeDisabledToolSkills(input: {
+  skillIds: string[];
+  availableSkills: ChatSkillItem[];
+  disabledToolNames: ChatToolName[];
+}) {
+  if (input.disabledToolNames.length === 0) {
+    return input.skillIds;
+  }
+  const disabledToolNameSet = new Set(input.disabledToolNames);
+  return input.skillIds.filter((skillId) => {
+    const skill = input.availableSkills.find((item) => item.id === skillId);
+    return !skill?.tools?.some((toolName) =>
+      disabledToolNameSet.has(toolName as ChatToolName),
+    );
+  });
 }
 
 function parseStoredThinkingSettings(
@@ -200,6 +226,7 @@ export default function DashboardChatPage() {
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
   const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
@@ -499,9 +526,19 @@ export default function DashboardChatPage() {
     );
   }, [hasSavedThinkingPreference, selectedModels.llm]);
 
+  const effectiveActiveSkillIds = useMemo(
+    () =>
+      removeDisabledToolSkills({
+        skillIds: activeSkillIds,
+        availableSkills,
+        disabledToolNames,
+      }),
+    [activeSkillIds, availableSkills, disabledToolNames],
+  );
+
   useEffect(() => {
     const next = applySkillModelPresetState({
-      activeSkillIds,
+      activeSkillIds: effectiveActiveSkillIds,
       availableModels,
       availableSkills,
       baseSelectedModels,
@@ -515,7 +552,7 @@ export default function DashboardChatPage() {
       setModelSelectionSources(next.nextSources);
     }
   }, [
-    activeSkillIds,
+    effectiveActiveSkillIds,
     availableModels,
     availableSkills,
     baseSelectedModels,
@@ -530,7 +567,6 @@ export default function DashboardChatPage() {
     },
     [],
   );
-
   const selectedSources = expandSelectedSources(
     librarySources,
     activeSourceIds,
@@ -576,8 +612,12 @@ export default function DashboardChatPage() {
           content: text,
           mentionedSourceIds,
           sourceIds,
-          skillIds: activeSkillIds,
-          artifact: input.artifact,
+          skillIds: effectiveActiveSkillIds,
+          tools: buildChatToolsRequest({
+            skillIds: effectiveActiveSkillIds,
+            searchEnabled,
+            tools: input.tools,
+          }),
           thinking: buildPendingThinking({
             capabilities: selectedModels.llm?.capabilities,
             settings: thinkingSettings,
@@ -598,7 +638,7 @@ export default function DashboardChatPage() {
       workspaceId,
       createChat,
       activeSourceIds,
-      activeSkillIds,
+      effectiveActiveSkillIds,
       router,
       catalogKindEnabled,
       availableModels,
@@ -682,6 +722,8 @@ export default function DashboardChatPage() {
           imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
           imageModelAvailable={Boolean(selectedModels.image)}
           imageModelAlias={selectedModels.image?.modelAlias ?? null}
+          disabledToolNames={disabledToolNames}
+          onDisabledToolNamesChange={setDisabledToolNames}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle="New chat"
@@ -692,6 +734,7 @@ export default function DashboardChatPage() {
       {sourcesVisible && (!previewArtifact || !isDesktopPanel) ? (
           <SourcesHub
             mode="new"
+            disabledToolNames={disabledToolNames}
             installedSkills={availableSkills}
             onArtifactOpen={setPreviewArtifact}
             onSkillSelectionChange={setActiveSkillIds}

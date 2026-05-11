@@ -38,6 +38,9 @@ export function createSseResponse(stream: AsyncGenerator<string>) {
         controller.close();
       }
     },
+    async cancel() {
+      await stream.return(undefined);
+    },
   });
 
   return bodyStream;

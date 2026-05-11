@@ -258,13 +258,14 @@ const prepared: PreparedThreadTurn = {
   },
   skillIds: [],
   webSearchEnabled: false,
-  artifact: undefined,
+  generateImageTool: undefined,
   artifactIntent: {
     kind: null,
     shouldInjectTool: false,
     source: "none",
     confidence: 0,
-    reason: "No artifact generation intent detected.",
+    reason:
+      "generate_image is available for this turn when the model decides a visual artifact is needed.",
     config: {
       aspectRatio: "auto",
       quality: "auto",
@@ -929,6 +930,12 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
   const startedSpans: StartSpanInput[] = [];
   const endedSpans: EndSpanInput[] = [];
   const endedTraces: EndTraceInput[] = [];
+  let persistedCancelledError:
+    | {
+        errorCode?: string;
+        partialAssistantContent?: string;
+      }
+    | null = null;
   t.mock.method(
     threadStreamObservability,
     "startTrace",
@@ -968,6 +975,13 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
       yield { type: "text-delta", delta: "partial" };
     },
     async () => null,
+    async (input) => {
+      persistedCancelledError = {
+        errorCode: input.contentError.code,
+        partialAssistantContent: input.partialAssistantContent,
+      };
+      return null;
+    },
   );
 
   const iterator = service.streamThreadEvents({
@@ -996,4 +1010,8 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
   assert.ok(cancelledTrace);
   assert.equal(cancelledTrace.traceId, "user-message-1");
   assert.equal(cancelledTrace.errorCode, "CLIENT_CANCELLED");
+  assert.deepEqual(persistedCancelledError, {
+    errorCode: "CLIENT_CANCELLED",
+    partialAssistantContent: "partial",
+  });
 });

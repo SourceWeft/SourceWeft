@@ -88,6 +88,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
+import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -133,7 +134,7 @@ function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
 export type ChatSendInput = {
   content: string;
   mentionedSourceIds?: string[];
-  artifact?: ChatArtifactToolSelection;
+  tools?: ChatToolsSelection;
 };
 
 function SourceIcon({
@@ -237,12 +238,39 @@ export type ChatImageArtifactConfig = {
   style: ImageStyle;
 };
 
-export type ChatArtifactToolSelection = {
-  kind: "image";
-  mode: "auto" | "generate";
+export type ChatGenerateImageToolSelection = {
+  enabled?: boolean;
   modelAlias?: string;
-  image: ChatImageArtifactConfig;
+  config?: ChatImageArtifactConfig;
 };
+
+export const CHAT_TOOL_NAMES = {
+  generateImage: "generate_image",
+  webSearch: "web_search",
+} as const;
+
+export type ChatToolName =
+  (typeof CHAT_TOOL_NAMES)[keyof typeof CHAT_TOOL_NAMES];
+
+export type ChatToolsSelection = {
+  [CHAT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
+};
+
+export function buildChatToolsRequest(input: {
+  skillIds?: string[];
+  searchEnabled?: boolean;
+  tools?: ChatToolsSelection;
+}) {
+  const generateImage = input.tools?.[CHAT_TOOL_NAMES.generateImage];
+
+  return {
+    skillIds: input.skillIds ?? [],
+    [CHAT_TOOL_NAMES.webSearch]: {
+      enabled: input.searchEnabled === true,
+    },
+    ...(generateImage ? { [CHAT_TOOL_NAMES.generateImage]: generateImage } : {}),
+  };
+}
 
 export type ChatSkillItem = {
   id: string;
@@ -376,45 +404,8 @@ type GeneratedImageArtifact = {
   title: string | null;
 };
 
-function detectsImageIntent(text: string) {
-  const normalized = text.trim();
-  if (!normalized) {
-    return false;
-  }
-
-  return [
-    /\b(generate|create|make|draw|render|design)\s+(an?\s+)?(image|picture|illustration|poster|logo|icon|thumbnail|cover|banner)\b/i,
-    /(生成|创建|画|绘制|做)(一张|一个|图片|图像|插画|海报|logo|封面|缩略图)/i,
-    /(生图|出图|文生图|生成图片|生成图像)/i,
-  ].some((pattern) => pattern.test(normalized));
-}
-
 function skillSupportsImageGeneration(skill: ChatSkillItem) {
-  if (skill.tools?.includes("generate_image")) {
-    return true;
-  }
-  const capabilities = [
-    ...(skill.capabilities?.required ?? []),
-    ...(skill.capabilities?.optional ?? []),
-  ];
-  if (
-    capabilities.some((capability) =>
-      ["artifacts.image.generate", "image.generate", "generate_image"].includes(
-        capability,
-      ),
-    )
-  ) {
-    return true;
-  }
-
-  const searchable =
-    `${skill.name} ${skill.displayName} ${skill.description}`.toLowerCase();
-  return (
-    /\b(image generation|generate image|image generator|picture generation)\b/.test(
-      searchable,
-    ) ||
-    /\b(illustration|poster|logo|thumbnail|cover|banner)\b/.test(searchable)
-  );
+  return skill.tools?.includes(CHAT_TOOL_NAMES.generateImage) === true;
 }
 
 function readRecord(value: unknown) {
@@ -428,16 +419,7 @@ function skillImageDefaultConfig(skill: ChatSkillItem) {
   if (!defaultConfig) {
     return null;
   }
-  const generateImage = readRecord(defaultConfig.generate_image);
-  if (generateImage) {
-    return generateImage;
-  }
-  const artifact = readRecord(defaultConfig.artifact);
-  const artifactImage = readRecord(artifact?.image);
-  if (artifactImage) {
-    return artifactImage;
-  }
-  return readRecord(defaultConfig.image);
+  return readRecord(defaultConfig[CHAT_TOOL_NAMES.generateImage]);
 }
 
 function normalizeSkillImageConfig(input: unknown) {
@@ -470,6 +452,9 @@ function normalizeSkillImageConfig(input: unknown) {
 function imageConfigFromSkills(skills: ChatSkillItem[]) {
   let skillConfig: Partial<ChatImageArtifactConfig> | null = null;
   for (const skill of skills) {
+    if (!skillSupportsImageGeneration(skill)) {
+      continue;
+    }
     const config = normalizeSkillImageConfig(skillImageDefaultConfig(skill));
     if (config) {
       skillConfig = {
@@ -485,7 +470,10 @@ function imageConfigFromSkills(skills: ChatSkillItem[]) {
 }
 
 function imageModelAliasFromSkills(skills: ChatSkillItem[]) {
-  return skills.find((skill) => skill.models?.image)?.models?.image ?? null;
+  return (
+    skills.find((skill) => skillSupportsImageGeneration(skill) && skill.models?.image)
+      ?.models?.image ?? null
+  );
 }
 
 function clampImageConfigToCapabilities(input: {
@@ -513,30 +501,58 @@ function clampImageConfigToCapabilities(input: {
   };
 }
 
-function buildImageArtifactSelection(input: {
-  draftText: string;
-  enabled: boolean;
+function buildGenerateImageToolSelection(input: {
   available: boolean;
   selectedSkills: ChatSkillItem[];
   config: ChatImageArtifactConfig;
   modelAlias?: string | null;
-}): ChatArtifactToolSelection | undefined {
+  enabled: boolean;
+}): ChatGenerateImageToolSelection | undefined {
+  if (!input.enabled) {
+    return { enabled: false };
+  }
+
   if (!input.available) {
     return undefined;
   }
 
+  const hasConfig =
+    input.config.aspectRatio !== "auto" ||
+    input.config.quality !== "auto" ||
+    input.config.style !== "auto";
+
   const skillTriggered = input.selectedSkills.some(skillSupportsImageGeneration);
-  const intentTriggered = detectsImageIntent(input.draftText);
-  if (!input.enabled && !skillTriggered && !intentTriggered) {
+  if (!hasConfig && !input.modelAlias && !skillTriggered) {
     return undefined;
   }
 
   return {
-    kind: "image",
-    mode: input.enabled ? "generate" : "auto",
     ...(input.modelAlias ? { modelAlias: input.modelAlias } : {}),
-    image: input.config,
+    ...(hasConfig ? { config: input.config } : {}),
   };
+}
+
+function buildComposerToolsSelection(input: {
+  imageGenerationEnabled: boolean;
+  imageSupported: boolean;
+  selectedSkills: ChatSkillItem[];
+  imageConfig: ChatImageArtifactConfig;
+  imageModelAlias?: string | null;
+}): ChatToolsSelection | undefined {
+  const tools: ChatToolsSelection = {};
+  const generateImage = buildGenerateImageToolSelection({
+    available: input.imageSupported,
+    selectedSkills: input.selectedSkills,
+    config: input.imageConfig,
+    modelAlias: input.imageModelAlias,
+    enabled: input.imageGenerationEnabled,
+  });
+
+  if (generateImage) {
+    tools[CHAT_TOOL_NAMES.generateImage] = generateImage;
+  }
+
+  return Object.keys(tools).length > 0 ? tools : undefined;
 }
 
 export type ThinkingStepRecord = {
@@ -1304,7 +1320,7 @@ function resolveGeneratedImageArtifact(
   toolCall: ToolCallRecord,
   toolStep?: ThinkingStepRecord,
 ): GeneratedImageArtifact | null {
-  if (toolCall.tool !== "generate_image") {
+  if (toolCall.tool !== CHAT_TOOL_NAMES.generateImage) {
     return null;
   }
 
@@ -1576,7 +1592,7 @@ function getToolDisplayLabel(toolCall: ToolCallRecord) {
       : "Search sources";
   }
 
-  if (toolCall.tool === "web_search") {
+  if (toolCall.tool === CHAT_TOOL_NAMES.webSearch) {
     const query = getToolQuery(toolCall);
     const verb =
       toolCall.status === "running"
@@ -1706,7 +1722,7 @@ function getToolCallDetailParts(
 ) {
   const hitCount = getToolHitCount(toolCall, toolStep);
   const resultCount =
-    toolCall.tool === "web_search"
+    toolCall.tool === CHAT_TOOL_NAMES.webSearch
       ? getToolResultCount(toolCall, toolStep)
       : null;
   const fetchCount =
@@ -1755,7 +1771,7 @@ function ToolCallDetails({
     outputSummary &&
       !imageArtifact &&
       toolCall.tool !== "search_sources" &&
-      toolCall.tool !== "web_search" &&
+      toolCall.tool !== CHAT_TOOL_NAMES.webSearch &&
       toolCall.tool !== "web_fetch" &&
       outputSummary !== "{}",
   );
@@ -2126,6 +2142,7 @@ function Composer({
   availableSkills = [],
   selectedSkillIds = [],
   onRemoveSource,
+  onSkillSelectionChange,
   disabled,
   searchEnabled = false,
   onSearchEnabledChange,
@@ -2135,12 +2152,14 @@ function Composer({
   imageCapabilities,
   imageModelAvailable = false,
   imageModelAlias,
+  disabledToolNames = [],
+  onDisabledToolNamesChange,
 }: {
   isEditing?: boolean;
   placeholder?: string;
   onSubmit?: (
     message: PromptInputMessage,
-    artifact?: ChatArtifactToolSelection,
+    tools?: ChatToolsSelection,
   ) => void;
   onCancelEditing?: () => void;
   className?: string;
@@ -2162,6 +2181,8 @@ function Composer({
   imageCapabilities?: ImageModelCapabilities;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
+  disabledToolNames?: ChatToolName[];
+  onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [draftText, setDraftText] = useState(initialInput);
@@ -2169,27 +2190,45 @@ function Composer({
     DEFAULT_IMAGE_ARTIFACT_CONFIG,
   );
   const [imageConfigPinned, setImageConfigPinned] = useState(false);
+  const disabledToolNameSet = useMemo(
+    () => new Set(disabledToolNames),
+    [disabledToolNames],
+  );
   const showSourceCountOnly = selectedSources.length > 2;
   const visible = showSourceCountOnly ? [] : selectedSources;
   const hasSelectedSources = selectedSources.length > 0;
-  const selectedSkillIdSet = useMemo(
-    () => new Set(selectedSkillIds),
-    [selectedSkillIds],
+  const imageGenerationEnabled = !disabledToolNameSet.has(
+    CHAT_TOOL_NAMES.generateImage,
   );
-  const selectedSkills = useMemo(
-    () => availableSkills.filter((skill) => selectedSkillIdSet.has(skill.id)),
-    [availableSkills, selectedSkillIdSet],
+  const effectiveSelectedSkillIds = useMemo(
+    () =>
+      imageGenerationEnabled
+        ? selectedSkillIds
+        : selectedSkillIds.filter((skillId) => {
+            const skill = availableSkills.find((item) => item.id === skillId);
+            return !skill?.tools?.includes(CHAT_TOOL_NAMES.generateImage);
+          }),
+    [availableSkills, imageGenerationEnabled, selectedSkillIds],
+  );
+  const effectiveSelectedSkillIdSet = useMemo(
+    () => new Set(effectiveSelectedSkillIds),
+    [effectiveSelectedSkillIds],
+  );
+  const effectiveSelectedSkills = useMemo(
+    () =>
+      availableSkills.filter((skill) => effectiveSelectedSkillIdSet.has(skill.id)),
+    [availableSkills, effectiveSelectedSkillIdSet],
   );
   const skillImageConfig = useMemo(
-    () => imageConfigFromSkills(selectedSkills),
-    [selectedSkills],
+    () => imageConfigFromSkills(effectiveSelectedSkills),
+    [effectiveSelectedSkills],
   );
   const skillImageModelAlias = useMemo(
-    () => imageModelAliasFromSkills(selectedSkills),
-    [selectedSkills],
+    () => imageModelAliasFromSkills(effectiveSelectedSkills),
+    [effectiveSelectedSkills],
   );
   const effectiveImageModelAlias = imageModelAlias ?? skillImageModelAlias;
-  const selectedSkillNames = selectedSkills
+  const selectedSkillNames = effectiveSelectedSkills
     .map((skill) => skill.displayName)
     .join(", ");
   const effectiveImageCapabilities =
@@ -2204,6 +2243,7 @@ function Composer({
     effectiveImageConfig.aspectRatio !== "auto" ||
     effectiveImageConfig.quality !== "auto" ||
     effectiveImageConfig.style !== "auto";
+  const imageToolChanged = imageOptionsChanged || !imageGenerationEnabled;
   const imageOptionSummary = imageConfigSummary(effectiveImageConfig);
   const filteredAspectRatioOptions = imageAspectRatioOptions.filter((option) =>
     (
@@ -2228,7 +2268,7 @@ function Composer({
     ? thinkingSettings
     : DEFAULT_PROMPT_THINKING_SETTINGS;
   const optionCount =
-    (imageOptionsChanged ? 1 : 0) +
+    (imageToolChanged ? 1 : 0) +
     (supportsThinking && activeThinkingSettings.mode !== "auto" ? 1 : 0);
   const thinkingEnabled = activeThinkingSettings.mode !== "off";
   const supportedThinkingEfforts = thinkingEffortOptions.filter((option) =>
@@ -2277,6 +2317,26 @@ function Composer({
       }),
     );
     setImageConfigPinned(true);
+  }
+
+  function updateImageGenerationEnabled(next: boolean) {
+    const nextDisabledTools = next
+      ? disabledToolNames.filter(
+          (toolName) => toolName !== CHAT_TOOL_NAMES.generateImage,
+        )
+      : Array.from(
+          new Set([...disabledToolNames, CHAT_TOOL_NAMES.generateImage]),
+        );
+    onDisabledToolNamesChange?.(nextDisabledTools);
+    if (!next) {
+      const remainingSkillIds = selectedSkillIds.filter((skillId) => {
+        const skill = availableSkills.find((item) => item.id === skillId);
+        return !skill?.tools?.includes(CHAT_TOOL_NAMES.generateImage);
+      });
+      if (remainingSkillIds.length !== selectedSkillIds.length) {
+        onSkillSelectionChange?.(remainingSkillIds);
+      }
+    }
   }
 
   useEffect(() => {
@@ -2341,19 +2401,14 @@ function Composer({
             if (disabled) {
               return;
             }
-            const artifact = buildImageArtifactSelection({
-              draftText,
-              enabled: imageConfigPinned,
-              available: imageSupported,
-              selectedSkills,
-              config: effectiveImageConfig,
-              modelAlias: effectiveImageModelAlias,
+            const tools = buildComposerToolsSelection({
+              imageGenerationEnabled,
+              imageSupported,
+              selectedSkills: effectiveSelectedSkills,
+              imageConfig: effectiveImageConfig,
+              imageModelAlias: effectiveImageModelAlias,
             });
-            (onSubmit ?? (() => undefined))(message, artifact);
-            if (artifact?.mode === "generate") {
-              setImageConfigPinned(false);
-              setImageConfig(DEFAULT_IMAGE_ARTIFACT_CONFIG);
-            }
+            (onSubmit ?? (() => undefined))(message, tools);
           }}
         >
           {hasSelectedSources ? (
@@ -2465,10 +2520,10 @@ function Composer({
                           <span
                             className={cn(
                               "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
-                              imageOptionsChanged && "text-primary",
+                              imageToolChanged && "text-primary",
                             )}
                           >
-                            {imageOptionSummary}
+                            {imageGenerationEnabled ? imageOptionSummary : "Off"}
                           </span>
                         </span>
                       </DropdownMenuSubTrigger>
@@ -2478,25 +2533,19 @@ function Composer({
                         sideOffset={8}
                       >
                         <div className="space-y-3.5">
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
                               <div className="text-xs font-medium text-foreground">
                                 Image generation
                               </div>
-                              <div className="mt-0.5 text-[11px] text-muted-foreground">
-                                Auto turns on for image prompts.
-                              </div>
                             </div>
-                            <div
-                              className={cn(
-                                "shrink-0 rounded-full px-2 py-0.5 text-[10px]",
-                                imageOptionsChanged
-                                  ? "bg-primary/10 text-primary"
-                                  : "bg-muted text-muted-foreground",
-                              )}
-                            >
-                              {imageOptionSummary}
-                            </div>
+                            <Switch
+                              checked={imageGenerationEnabled}
+                              onCheckedChange={(checked) =>
+                                updateImageGenerationEnabled(Boolean(checked))
+                              }
+                              size="sm"
+                            />
                           </div>
                           {!imageSupported ? (
                             <div className="rounded-md bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground">
@@ -2504,7 +2553,7 @@ function Composer({
                             </div>
                           ) : null}
                           <ImageConfigGroup
-                            disabled={!imageSupported}
+                            disabled={!imageSupported || !imageGenerationEnabled}
                             label="Aspect ratio"
                             onValueChange={(value) =>
                               updateImageConfig({
@@ -2515,7 +2564,7 @@ function Composer({
                             value={effectiveImageConfig.aspectRatio}
                           />
                           <ImageConfigGroup
-                            disabled={!imageSupported}
+                            disabled={!imageSupported || !imageGenerationEnabled}
                             label="Image quality"
                             onValueChange={(value) =>
                               updateImageConfig({
@@ -2526,7 +2575,7 @@ function Composer({
                             value={effectiveImageConfig.quality}
                           />
                           <ImageConfigGroup
-                            disabled={!imageSupported}
+                            disabled={!imageSupported || !imageGenerationEnabled}
                             label="Style"
                             onValueChange={(value) =>
                               updateImageConfig({
@@ -2538,13 +2587,14 @@ function Composer({
                           />
                           <div className="flex items-center justify-between border-border/60 border-t pt-2">
                             <span className="text-[11px] text-muted-foreground">
-                              Saved for the next image request.
+                              {imageGenerationEnabled ? imageOptionSummary : "Off"}
                             </span>
                             <button
                               className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               onClick={() => {
                                 setImageConfig(DEFAULT_IMAGE_ARTIFACT_CONFIG);
                                 setImageConfigPinned(false);
+                                updateImageGenerationEnabled(true);
                               }}
                               type="button"
                             >
@@ -2639,7 +2689,7 @@ function Composer({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                {selectedSkillIds.length > 0 ? (
+                {effectiveSelectedSkillIds.length > 0 ? (
                   <PromptInputButton
                     aria-pressed
                     className="rounded-xl bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
@@ -2821,6 +2871,8 @@ function EmptyState({
   imageCapabilities,
   imageModelAvailable,
   imageModelAlias,
+  disabledToolNames = [],
+  onDisabledToolNamesChange,
 }: {
   onSendMessage: (input: ChatSendInput) => void;
   composerInitialInput?: string;
@@ -2840,6 +2892,8 @@ function EmptyState({
   imageCapabilities?: ImageModelCapabilities;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
+  disabledToolNames?: ChatToolName[];
+  onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -2887,11 +2941,11 @@ function EmptyState({
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
-            onSubmit={(message, artifact) =>
+            onSubmit={(message, tools) =>
               onSendMessage({
                 content: message.text.trim(),
                 mentionedSourceIds: message.mentionedSourceIds,
-                artifact,
+                tools,
               })
             }
             onSearchEnabledChange={onSearchEnabledChange}
@@ -2906,6 +2960,8 @@ function EmptyState({
             imageCapabilities={imageCapabilities}
             imageModelAvailable={imageModelAvailable}
             imageModelAlias={imageModelAlias}
+            disabledToolNames={disabledToolNames}
+            onDisabledToolNamesChange={onDisabledToolNamesChange}
           />
         </div>
       </div>
@@ -2948,6 +3004,8 @@ export function ChatCanvas({
   imageCapabilities,
   imageModelAvailable,
   imageModelAlias,
+  disabledToolNames = [],
+  onDisabledToolNamesChange,
 }: {
   activeVersionByGroup?: Record<string, number>;
   composerInitialInput?: string;
@@ -2996,6 +3054,8 @@ export function ChatCanvas({
   imageCapabilities?: ImageModelCapabilities;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
+  disabledToolNames?: ChatToolName[];
+  onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
   void sourcesVisible;
 
@@ -3028,6 +3088,8 @@ export function ChatCanvas({
         imageCapabilities={imageCapabilities}
         imageModelAvailable={imageModelAvailable}
         imageModelAlias={imageModelAlias}
+        disabledToolNames={disabledToolNames}
+        onDisabledToolNamesChange={onDisabledToolNamesChange}
       />
     );
   }
@@ -3445,11 +3507,11 @@ export function ChatCanvas({
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(message, artifact) =>
+            onSubmit={(message, tools) =>
               handleSendMessage({
                 content: message.text.trim(),
                 mentionedSourceIds: message.mentionedSourceIds,
-                artifact,
+                tools,
               })
             }
             onThinkingSettingsChange={onThinkingSettingsChange}
@@ -3462,6 +3524,8 @@ export function ChatCanvas({
             imageCapabilities={imageCapabilities}
             imageModelAvailable={imageModelAvailable}
             imageModelAlias={imageModelAlias}
+            disabledToolNames={disabledToolNames}
+            onDisabledToolNamesChange={onDisabledToolNamesChange}
           />
         </div>
       </div>

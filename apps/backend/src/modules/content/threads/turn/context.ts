@@ -2,9 +2,12 @@ import { ContentError } from "../../errors";
 import { requireContentWorkspace } from "../../content-support";
 import type { MessageRecord } from "../../types";
 import type { AgentCheckpointMetadata, AgentCheckpointRef } from "./types";
-import { normalizeArtifactToolSelection } from "../../artifacts/types";
 import { findThreadRecord } from "../thread/repository";
 import { listMessageRecordsByThread } from "../message-repository";
+import {
+  resolveGenerateImageToolFromToolsMetadata,
+  resolveWebSearchEnabledFromToolsMetadata,
+} from "./tool-selection";
 
 export function collapseSupersededMessages(items: MessageRecord[]) {
   const supersededIds = new Set(
@@ -108,17 +111,10 @@ export function resolveWebSearchEnabledFromMessage(
           tools?: unknown;
         })
       : undefined;
-  const tools =
-    metadata?.tools &&
-    typeof metadata.tools === "object" &&
-    !Array.isArray(metadata.tools)
-      ? (metadata.tools as { webSearchEnabled?: unknown })
-      : undefined;
-
-  return tools?.webSearchEnabled === true;
+  return resolveWebSearchEnabledFromToolsMetadata(metadata?.tools);
 }
 
-export function resolveArtifactSelectionFromMessage(
+export function resolveGenerateImageToolFromMessage(
   message: MessageRecord | null | undefined,
 ) {
   const metadata =
@@ -127,14 +123,7 @@ export function resolveArtifactSelectionFromMessage(
           tools?: unknown;
         })
       : undefined;
-  const tools =
-    metadata?.tools &&
-    typeof metadata.tools === "object" &&
-    !Array.isArray(metadata.tools)
-      ? (metadata.tools as { artifact?: unknown })
-      : undefined;
-
-  return normalizeArtifactToolSelection(tools?.artifact);
+  return resolveGenerateImageToolFromToolsMetadata(metadata?.tools);
 }
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {

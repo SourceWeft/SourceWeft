@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Archive,
   ChevronDown,
   Clock3,
+  Gauge,
   MoreHorizontal,
   PanelsTopLeft,
   PenSquare,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import {
   Dialog,
   DialogClose,
@@ -42,10 +44,161 @@ import {
 } from "@sourceweft/ui-web/components/ui/sidebar";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { authClient } from "../../../lib/auth-client";
+import { billingClient } from "../../../lib/sdk";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
+import {
+  getPersonalOrganization,
+} from "./dashboard-team-selector-shared";
 import type { ChatItem } from "./dashboard-chat-types";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
+type BillingOrg = {
+  id: string;
+  metadata?: unknown;
+  name: string;
+  slug?: string;
+};
+
+function resolveSidebarBillingTeamId(input: {
+  activeOrg?: BillingOrg | null;
+  orgs?: BillingOrg[] | null;
+}) {
+  if (input.activeOrg?.id) {
+    return input.activeOrg.id;
+  }
+
+  return getPersonalOrganization(input.orgs ?? [])?.id ?? null;
+}
+
+function formatUsageNumber(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+    notation: "compact",
+  }).format(value);
+}
+
+function formatUsageDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "--";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+  }).format(date);
+}
+
+function SidebarUsageSummary() {
+  const { data: orgs } = authClient.useListOrganizations();
+  const { data: activeOrg } = authClient.useActiveOrganization();
+  const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
+  const orgList = (orgs ?? []) as BillingOrg[];
+  const teamId = resolveSidebarBillingTeamId({
+    activeOrg: activeOrgRecord,
+    orgs: orgList,
+  });
+  const resolvingTeamId = !activeOrgRecord && orgs === undefined;
+  const [summary, setSummary] = useState<BillingSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummary() {
+      if (!teamId) {
+        setSummary(null);
+        setLoading(resolvingTeamId);
+        setHasError(false);
+        return;
+      }
+
+      setLoading(true);
+      setHasError(false);
+
+      try {
+        const nextSummary = await billingClient.getSummary(teamId);
+
+        if (!cancelled) {
+          setSummary(nextSummary);
+        }
+      } catch {
+        if (!cancelled) {
+          setSummary(null);
+          setHasError(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvingTeamId, teamId]);
+
+  const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
+  const creditsLimit = summary?.credits.monthlyGrant ?? 0;
+  const creditsPercent =
+    creditsLimit > 0 ? Math.min(100, (creditsUsed / creditsLimit) * 100) : 0;
+  const creditsLabel = summary
+    ? `${formatUsageNumber(creditsUsed)} / ${formatUsageNumber(creditsLimit)}`
+    : loading
+      ? "Loading"
+      : "-- / --";
+  const pagesAvailable = summary?.pages.available ?? 0;
+  const cycleEndsAt = summary ? formatUsageDate(summary.cycleEndAt) : "--";
+
+  return (
+    <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Gauge className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-[10px] font-medium text-sidebar-foreground">
+            Usage
+          </span>
+        </div>
+        <span className="shrink-0 text-[10px] font-medium text-sidebar-foreground">
+          {summary ? `${Math.round(creditsPercent)}%` : loading ? "..." : "--"}
+        </span>
+      </div>
+
+      <div className="mt-2">
+        <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
+          <span className="text-muted-foreground">Credits</span>
+          <span className="truncate text-right font-medium text-sidebar-foreground">
+            {creditsLabel}
+          </span>
+        </div>
+        <Progress className="h-1 bg-sidebar-border/70" value={creditsPercent} />
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
+        <div className="min-w-0">
+          <p className="truncate text-muted-foreground">Pages left</p>
+          <p className="truncate font-medium text-sidebar-foreground">
+            {summary ? formatUsageNumber(pagesAvailable) : loading ? "..." : "--"}
+          </p>
+        </div>
+        <div className="min-w-0 text-right">
+          <p className="truncate text-muted-foreground">Cycle ends</p>
+          <p className="truncate font-medium text-sidebar-foreground">
+            {hasError ? "Unavailable" : cycleEndsAt}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function WorkspaceSwitcher({
   workspaceId,
@@ -606,6 +759,10 @@ export function DashboardSidebarChatPanel({
           </span>
         </div>
       </SidebarFooter>
+
+      <div className="border-t border-sidebar-border px-3.5 py-2.5">
+        <SidebarUsageSummary />
+      </div>
     </div>
   );
 }

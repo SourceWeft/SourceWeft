@@ -980,14 +980,13 @@ function buildAgentRuntimePrompt(input: {
     input.artifactIntent?.kind === "image"
   ) {
     const config = input.artifactIntent.config;
-    const imageToolInstruction = input.artifactIntent.requireToolCall
-      ? "The user explicitly enabled image generation for this turn; call generate_image."
-      : "generate_image is available in auto mode. Use it only when the user asks for a created visual artifact; otherwise answer normally.";
     lines.push(
       `Available artifact tools this turn: ${availableArtifactTools.join(", ")}.`,
       `Image generation defaults: aspect_ratio=${config.aspectRatio}, quality=${config.quality}, style=${config.style}.`,
-      imageToolInstruction,
+      "generate_image is available in auto mode. Use it when the user asks you to create a new visual artifact or deliverable; otherwise answer normally.",
+      "For ambiguous requests, decide semantically from the user's goal rather than matching literal keywords. If the user expects a kept visual output, call generate_image.",
       "If the prompt is missing essential visual details for a requested image, make a reasonable concise prompt instead of asking a separate confirmation.",
+      "Never claim an image was created unless generate_image completed successfully.",
       "After generate_image succeeds, keep the final answer concise. The application attaches the generated image markdown automatically.",
     );
   }

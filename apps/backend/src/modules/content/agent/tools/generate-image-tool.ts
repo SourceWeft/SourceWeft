@@ -204,7 +204,7 @@ export function createGenerateImageTool(input: {
     {
       name: "generate_image",
       description:
-        "Generate one image artifact from a visual prompt. Use this when the user asks to create, draw, render, design, or generate an image, illustration, poster, logo, thumbnail, cover, or other visual asset. The tool persists the generated image as a SourceWeft artifact and returns a stable backend artifact URL.",
+        "Generate one persisted SourceWeft image artifact from a visual prompt. Use this when the user's goal is to create a new visual artifact or deliverable, not when they only want to discuss, analyze, or summarize an existing image. Expand vague visual requests into a concise, concrete prompt with subject, composition, style, and mood. The tool returns a stable backend artifact URL.",
       schema: z.object({
         prompt: z.string().trim().min(1).max(4000),
         title: z.string().trim().min(1).max(160).optional(),

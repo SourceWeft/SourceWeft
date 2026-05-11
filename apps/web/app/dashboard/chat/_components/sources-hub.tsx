@@ -283,6 +283,7 @@ export type HubSkillItem = {
   sourceType: "builtin" | "workspace_custom" | "team_custom";
   version: string;
   hasReadme: boolean;
+  tools?: string[];
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -1996,15 +1997,20 @@ function DirectoryPicker({
 function SkillRow({
   skill,
   selected,
+  disabled,
   onToggle,
   onOpenSkill,
 }: {
   skill: HubSkillItem;
   selected: boolean;
+  disabled?: boolean;
   onToggle: (id: string) => void;
   onOpenSkill: (catalogId: string) => void;
 }) {
   function handleRowClick(event: MouseEvent<HTMLElement>) {
+    if (disabled) {
+      return;
+    }
     const target = event.target as HTMLElement;
     if (target.closest("button,input,textarea,select,a,[role='button']")) {
       return;
@@ -2018,12 +2024,14 @@ function SkillRow({
       className={cn(
         "group flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
         selected ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-accent/60",
+        disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
       )}
       onClick={handleRowClick}
     >
       <Checkbox
         checked={selected}
         className="mt-0.5"
+        disabled={disabled}
         onCheckedChange={() => onToggle(skill.id)}
       />
 
@@ -2049,6 +2057,7 @@ function SkillRow({
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           <TypeBadge label={skillSourceLabel(skill.sourceType)} />
+          {disabled ? <TypeBadge label="Tool off" /> : null}
         </div>
       </div>
     </article>
@@ -2061,15 +2070,21 @@ function SkillsTab({
   selectedSkillIds,
   onSkillSelectionChange,
   onOpenSkill,
+  disabledToolNames = [],
 }: {
   skills: HubSkillItem[];
   searchQuery: string;
   selectedSkillIds: string[];
   onSkillSelectionChange: (ids: string[]) => void;
   onOpenSkill: (catalogId: string) => void;
+  disabledToolNames?: string[];
 }) {
   const q = searchQuery.trim().toLowerCase();
   const selectedSet = useMemo(() => new Set(selectedSkillIds), [selectedSkillIds]);
+  const disabledToolSet = useMemo(
+    () => new Set(disabledToolNames),
+    [disabledToolNames],
+  );
   const filtered = useMemo(
     () =>
       q
@@ -2084,6 +2099,10 @@ function SkillsTab({
   );
 
   function toggleSkill(skillId: string) {
+    const skill = skills.find((item) => item.id === skillId);
+    if (skill?.tools?.some((toolName) => disabledToolSet.has(toolName))) {
+      return;
+    }
     if (selectedSet.has(skillId)) {
       onSkillSelectionChange(selectedSkillIds.filter((id) => id !== skillId));
       return;
@@ -2113,6 +2132,9 @@ function SkillsTab({
     <div className="space-y-0.5">
       {filtered.map((skill) => (
         <SkillRow
+          disabled={skill.tools?.some((toolName) =>
+            disabledToolSet.has(toolName),
+          )}
           key={skill.id}
           onOpenSkill={onOpenSkill}
           onToggle={toggleSkill}
@@ -2192,6 +2214,7 @@ export function SourcesHub({
   installedSkills = [],
   selectedSkillIds = [],
   onSkillSelectionChange = () => {},
+  disabledToolNames = [],
 }: {
   activeCitationIndex?: number | null;
   citations?: CitationRecord[];
@@ -2213,6 +2236,7 @@ export function SourcesHub({
   installedSkills?: HubSkillItem[];
   selectedSkillIds?: string[];
   onSkillSelectionChange?: (ids: string[]) => void;
+  disabledToolNames?: string[];
 }) {
   const [activeTab, setActiveTab] = useState<HubTab>("Sources");
   const [citationScope, setCitationScope] = useState<CitationScope>("current");
@@ -3303,6 +3327,7 @@ export function SourcesHub({
               </div>
 
               <SkillsTab
+                disabledToolNames={disabledToolNames}
                 onOpenSkill={setPreviewSkillCatalogId}
                 onSkillSelectionChange={onSkillSelectionChange}
                 searchQuery={searchQuery}

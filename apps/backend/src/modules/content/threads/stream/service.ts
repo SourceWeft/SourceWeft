@@ -27,6 +27,7 @@ import {
   createThreadStreamErrorMessage,
   recordThreadStreamFailure,
   rollbackCreatedUserMessage,
+  type ThreadStreamPartialErrorState,
 } from "./error";
 import { toSseData } from "./helpers";
 import {
@@ -262,6 +263,28 @@ function buildTraceOutput(outcome: DeepAgentTurnOutcome) {
     availableCitationCount: outcome.availableCitations.length,
     citations: buildCitationObservations(outcome.citations),
     availableCitations: buildCitationObservations(outcome.availableCitations),
+  };
+}
+
+function buildPartialErrorState(input: {
+  reasoning?: string;
+  reasoningSegmentsById: Map<string, ModelReasoningSegmentTrace>;
+  toolCallsById: Map<string, ToolCallTrace>;
+  thinkingStepsById: Map<string, ThinkingStepTrace>;
+  citations: AgentCitation[];
+  availableCitations: AgentCitation[];
+}): ThreadStreamPartialErrorState {
+  return {
+    reasoning: input.reasoning,
+    reasoningSegments: [...input.reasoningSegmentsById.values()],
+    toolCalls: [...input.toolCallsById.values()].map(
+      normalizeToolCallStatusForError,
+    ),
+    thinkingSteps: [...input.thinkingStepsById.values()].map(
+      normalizeThinkingStepStatusForError,
+    ),
+    citations: input.citations,
+    availableCitations: input.availableCitations,
   };
 }
 
@@ -708,6 +731,8 @@ class ContentThreadStreamService {
     const thinkingStepsById = new Map<string, ThinkingStepTrace>();
     let citations: AgentCitation[] = [];
     let availableCitations: AgentCitation[] = [];
+    let responseFinished = false;
+    let persistedErrorMessage = false;
     try {
       yield toSseData({
         type: "start",
@@ -943,19 +968,16 @@ class ContentThreadStreamService {
           prepared,
           contentError,
           partialAssistantContent: assistantContent,
-          partialState: {
+          partialState: buildPartialErrorState({
             reasoning,
-            reasoningSegments: [...reasoningSegmentsById.values()],
-            toolCalls: [...toolCallsById.values()].map(
-              normalizeToolCallStatusForError,
-            ),
-            thinkingSteps: [...thinkingStepsById.values()].map(
-              normalizeThinkingStepStatusForError,
-            ),
+            reasoningSegmentsById,
+            toolCallsById,
+            thinkingStepsById,
             citations,
             availableCitations,
-          },
+          }),
         });
+        persistedErrorMessage = Boolean(errorMessage);
         if (
           !errorMessage &&
           prepared.failurePersistence === "persist-error-turn"
@@ -1007,16 +1029,46 @@ class ContentThreadStreamService {
           })) || traceEnded;
       }
       yield toSseData({ type: "finish" });
+      responseFinished = true;
     } finally {
       if (!traceEnded) {
+        const contentError = new ContentError(
+          499,
+          "CLIENT_CANCELLED",
+          "Client closed the stream before completion",
+        );
+        if (
+          !persistedErrorMessage &&
+          !responseFinished &&
+          (assistantContent.trimEnd().length > 0 ||
+            toolCallsById.size > 0 ||
+            thinkingStepsById.size > 0 ||
+            reasoningSegmentsById.size > 0 ||
+            citations.length > 0)
+        ) {
+          const errorMessage = await this.createErrorMessage({
+            prepared,
+            contentError,
+            partialAssistantContent: assistantContent,
+            partialState: buildPartialErrorState({
+              reasoning,
+              reasoningSegmentsById,
+              toolCallsById,
+              thinkingStepsById,
+              citations,
+              availableCitations,
+            }),
+          });
+          persistedErrorMessage = Boolean(errorMessage);
+        }
         await endAgentRunSpanIfOpen({
           prepared,
           started: agentSpanStarted,
           completed: agentSpanCompleted,
           status: "cancelled",
           latencyMs: Date.now() - chatStartedAt,
-          errorCode: "CLIENT_CANCELLED",
-          errorMessage: "Client closed the stream before completion",
+          errorCode: contentError.code,
+          errorMessage: contentError.message,
         });
         agentSpanCompleted = agentSpanCompleted || agentSpanStarted;
         traceEnded =
@@ -1026,8 +1078,8 @@ class ContentThreadStreamService {
             operation: "chat.stream",
             status: "cancelled",
             latencyMs: Date.now() - chatStartedAt,
-            errorCode: "CLIENT_CANCELLED",
-            errorMessage: "Client closed the stream before completion",
+            errorCode: contentError.code,
+            errorMessage: contentError.message,
           })) || traceEnded;
       }
     }

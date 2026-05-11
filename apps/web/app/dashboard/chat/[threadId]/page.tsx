@@ -44,10 +44,13 @@ import {
   type ModelSelectionSources,
 } from "../_components/skill-model-presets";
 import {
+  buildChatToolsRequest,
+  CHAT_TOOL_NAMES,
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
   type ChatSendInput,
   type ChatSkillItem,
+  type ChatToolName,
   type CitationRecord,
   type MessageVersion,
   type ModelReasoningSegmentRecord,
@@ -112,6 +115,23 @@ function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
 
 function getSearchPreferenceStorageKey(workspaceId: string) {
   return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
+}
+
+function removeDisabledToolSkills(input: {
+  skillIds: string[];
+  availableSkills: ChatSkillItem[];
+  disabledToolNames: ChatToolName[];
+}) {
+  if (input.disabledToolNames.length === 0) {
+    return input.skillIds;
+  }
+  const disabledToolNameSet = new Set(input.disabledToolNames);
+  return input.skillIds.filter((skillId) => {
+    const skill = input.availableSkills.find((item) => item.id === skillId);
+    return !skill?.tools?.some((toolName) =>
+      disabledToolNameSet.has(toolName as ChatToolName),
+    );
+  });
 }
 
 type ThreadMessageItem = Awaited<
@@ -1060,7 +1080,7 @@ function isCompletedImageArtifactToolCall(
   event: StreamEventPayload & { type: ToolCallEventType },
 ) {
   return (
-    toolCall.tool === "generate_image" &&
+    toolCall.tool === CHAT_TOOL_NAMES.generateImage &&
     (event.type === "tool-call-result" ||
       (event.type === "tool-call-end" && toolCall.status === "completed"))
   );
@@ -1450,6 +1470,7 @@ export default function DashboardChatThreadPage({
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
   const skillsLoadGenerationRef = useRef(0);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
 
@@ -1560,9 +1581,19 @@ export default function DashboardChatThreadPage({
     );
   }, [hasSavedThinkingPreference, selectedModels.llm]);
 
+  const effectiveActiveSkillIds = useMemo(
+    () =>
+      removeDisabledToolSkills({
+        skillIds: activeSkillIds,
+        availableSkills,
+        disabledToolNames,
+      }),
+    [activeSkillIds, availableSkills, disabledToolNames],
+  );
+
   useEffect(() => {
     const next = applySkillModelPresetState({
-      activeSkillIds,
+      activeSkillIds: effectiveActiveSkillIds,
       availableModels,
       availableSkills,
       baseSelectedModels,
@@ -1585,7 +1616,7 @@ export default function DashboardChatThreadPage({
       }
     }
   }, [
-    activeSkillIds,
+    effectiveActiveSkillIds,
     availableModels,
     availableSkills,
     baseSelectedModels,
@@ -2241,7 +2272,7 @@ export default function DashboardChatThreadPage({
       mentionedSourceIds?: string[];
       sourceIds: string[];
       skillIds?: string[];
-      artifact?: ChatSendInput["artifact"];
+      tools?: ChatSendInput["tools"];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
       thinking?: RequestThinkingConfig;
@@ -2291,11 +2322,11 @@ export default function DashboardChatThreadPage({
               ? { effectiveSourceIds: localEffectiveSourceIds }
               : {}),
             skillIds: input.skillIds ?? [],
-            tools: {
+            tools: buildChatToolsRequest({
               skillIds: input.skillIds ?? [],
-              webSearchEnabled: input.searchEnabled ?? searchEnabled,
-              ...(input.artifact ? { artifact: input.artifact } : {}),
-            },
+              searchEnabled: input.searchEnabled ?? searchEnabled,
+              tools: input.tools,
+            }),
             versionOf:
               input.mode === "edit"
                 ? (input.userMessageId ?? latestUserMessage?.id ?? null)
@@ -2480,11 +2511,11 @@ export default function DashboardChatThreadPage({
           timezone: resolveClientTimezone(),
         };
         const selectedSkillIds = input.skillIds ?? [];
-        requestBody.tools = {
+        requestBody.tools = buildChatToolsRequest({
           skillIds: selectedSkillIds,
-          webSearchEnabled: input.searchEnabled ?? searchEnabled,
-          ...(input.artifact ? { artifact: input.artifact } : {}),
-        };
+          searchEnabled: input.searchEnabled ?? searchEnabled,
+          tools: input.tools,
+        });
         const selectedLlmProfileAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
             ? selectedModels.llm?.id
@@ -3154,14 +3185,24 @@ export default function DashboardChatThreadPage({
         }
 
         if (!persistedAssistantMessageId) {
-          setMessages((previous) => {
-            const withoutFailedTemporaryMessages = previous.filter(
-              (message) =>
-                message.id !== streamingAssistantMessageId &&
-                (!createdUserMessageId || message.id !== createdUserMessageId),
-            );
-            return withoutFailedTemporaryMessages;
-          });
+          const hasServerUserMessage =
+            persistedUserMessageId &&
+            !persistedUserMessageId.startsWith("temp-user-");
+          if (hasServerUserMessage) {
+            window.setTimeout(() => {
+              void loadThreadMessages();
+            }, 750);
+          } else {
+            setMessages((previous) => {
+              const withoutFailedTemporaryMessages = previous.filter(
+                (message) =>
+                  message.id !== streamingAssistantMessageId &&
+                  (!createdUserMessageId ||
+                    message.id !== createdUserMessageId),
+              );
+              return withoutFailedTemporaryMessages;
+            });
+          }
         } else if (hasServerPersistedAssistantMessage) {
           window.setTimeout(() => {
             void loadThreadMessages();
@@ -3234,7 +3275,7 @@ export default function DashboardChatThreadPage({
           mentionedSourceIds,
           sourceIds,
           skillIds,
-          artifact,
+          tools,
           thinking,
           thinkingSettings: pendingThinkingSettings,
           searchEnabled: pendingSearchEnabled,
@@ -3244,7 +3285,7 @@ export default function DashboardChatThreadPage({
           mentionedSourceIds?: string[];
           sourceIds: string[];
           skillIds?: string[];
-          artifact?: ChatSendInput["artifact"];
+          tools?: ChatSendInput["tools"];
           thinking?: RequestThinkingConfig;
           thinkingSettings?: PromptThinkingSettings;
           searchEnabled?: boolean;
@@ -3298,7 +3339,7 @@ export default function DashboardChatThreadPage({
           mentionedSourceIds: pendingMentionedSourceIds,
           sourceIds: pendingSourceIds,
           skillIds: pendingSkillIds,
-          artifact,
+          tools,
           thinking,
           searchEnabled: pendingSearchEnabled === true,
         });
@@ -3453,8 +3494,8 @@ export default function DashboardChatThreadPage({
           content: text,
           mentionedSourceIds,
           sourceIds: mergedEditSourceIds,
-          skillIds: activeSkillIds,
-          artifact: input.artifact,
+          skillIds: effectiveActiveSkillIds,
+          tools: input.tools,
           searchEnabled,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
@@ -3467,8 +3508,8 @@ export default function DashboardChatThreadPage({
         content: text,
         mentionedSourceIds,
         sourceIds: sendSourceIds,
-        skillIds: activeSkillIds,
-        artifact: input.artifact,
+        skillIds: effectiveActiveSkillIds,
+        tools: input.tools,
         searchEnabled,
       });
     },
@@ -3481,7 +3522,7 @@ export default function DashboardChatThreadPage({
       messageGroups,
       messages,
       activeSourceIds,
-      activeSkillIds,
+      effectiveActiveSkillIds,
       searchEnabled,
       streamThreadAction,
     ],
@@ -3525,14 +3566,14 @@ export default function DashboardChatThreadPage({
       await streamThreadAction({
         mode: "refresh",
         sourceIds: refreshSourceIds,
-        skillIds: activeSkillIds,
+        skillIds: effectiveActiveSkillIds,
         searchEnabled,
         assistantMessageId: input.assistantMessageId,
       });
     },
     [
       activeSourceIds,
-      activeSkillIds,
+      effectiveActiveSkillIds,
       isStreaming,
       messageGroups,
       searchEnabled,
@@ -3643,6 +3684,8 @@ export default function DashboardChatThreadPage({
           }
           imageModelAvailable={Boolean(selectedModels.image)}
           imageModelAlias={selectedModels.image?.modelAlias ?? null}
+          disabledToolNames={disabledToolNames}
+          onDisabledToolNamesChange={setDisabledToolNames}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle={threadTitle}
@@ -3656,6 +3699,7 @@ export default function DashboardChatThreadPage({
           artifactsRefreshKey={artifactsRefreshKey}
           citations={displayedCitations}
           currentCitationMessageId={activeAssistantVersion?.id ?? null}
+          disabledToolNames={disabledToolNames}
           installedSkills={availableSkills}
           mode="thread"
           onArtifactOpen={setPreviewArtifact}

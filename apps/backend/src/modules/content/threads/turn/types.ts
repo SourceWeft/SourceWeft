@@ -1,11 +1,12 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
+import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
 import type { AgentCitation } from "../../agent/citation-registry";
 import type { ContentBillingPort } from "../../billing-port";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import type {
   ArtifactIntentDecision,
-  ArtifactToolSelection,
+  GenerateImageToolSelection,
   ImageModelCapabilities,
 } from "../../artifacts/types";
 import type { RuntimeModelGatewayProfile } from "../../../../shared/model-gateway/types";
@@ -19,7 +20,11 @@ import type { resolveActiveChatProfileByAlias } from "./model-resolution";
 export type ThreadToolsSelection = {
   skillIds?: string[];
   webSearchEnabled?: boolean;
-  artifact?: ArtifactToolSelection;
+  artifact?: unknown;
+  [AGENT_TOOL_NAMES.generateImage]?: GenerateImageToolSelection;
+  [AGENT_TOOL_NAMES.webSearch]?: {
+    enabled?: boolean;
+  };
 };
 
 export type StreamThreadEventInput = {
@@ -71,7 +76,7 @@ export type PreparedThreadTurn = {
   };
   skillIds: string[];
   webSearchEnabled: boolean;
-  artifact: ArtifactToolSelection | undefined;
+  generateImageTool: GenerateImageToolSelection | undefined;
   artifactIntent: ArtifactIntentDecision;
   imageProfile:
     | {

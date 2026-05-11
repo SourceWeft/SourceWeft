@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
+  resolveGenerateImageToolFromMessage,
   resolveWebSearchEnabledFromMessage,
   resolveMentionedSourceIdsFromMessage,
   resolveSourceIdsFromMessage,
@@ -70,6 +71,12 @@ test("resolveMentionedSourceIdsFromMessage filters invalid values", () => {
 test("resolveWebSearchEnabledFromMessage reads tools schema flag only", () => {
   assert.equal(
     resolveWebSearchEnabledFromMessage(
+      message({ tools: { web_search: { enabled: true } } }),
+    ),
+    true,
+  );
+  assert.equal(
+    resolveWebSearchEnabledFromMessage(
       message({ tools: { webSearchEnabled: true } }),
     ),
     true,
@@ -77,6 +84,44 @@ test("resolveWebSearchEnabledFromMessage reads tools schema flag only", () => {
   assert.equal(
     resolveWebSearchEnabledFromMessage(message({ webSearchEnabled: true })),
     false,
+  );
+});
+
+test("resolveGenerateImageToolFromMessage reads new and legacy image tool metadata", () => {
+  assert.deepEqual(
+    resolveGenerateImageToolFromMessage(
+      message({
+        tools: {
+          generate_image: {
+            enabled: false,
+            modelAlias: "image-model",
+            config: { aspectRatio: "1:1", quality: "standard" },
+          },
+        },
+      }),
+    ),
+    {
+      enabled: false,
+      modelAlias: "image-model",
+      config: { aspectRatio: "1:1", quality: "standard" },
+    },
+  );
+  assert.deepEqual(
+    resolveGenerateImageToolFromMessage(
+      message({
+        tools: {
+          artifact: {
+            kind: "image",
+            modelAlias: "legacy-image",
+            image: { style: "cartoon" },
+          },
+        },
+      }),
+    ),
+    {
+      modelAlias: "legacy-image",
+      config: { style: "cartoon" },
+    },
   );
 });
 

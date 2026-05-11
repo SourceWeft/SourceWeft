@@ -5,7 +5,7 @@ import {
   collapseSupersededMessages,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
-  resolveArtifactSelectionFromMessage,
+  resolveGenerateImageToolFromMessage,
   resolveMentionedSourceIdsFromMessage,
   resolveSkillIdsFromMessage,
   resolveSourceIdsFromMessage,
@@ -13,6 +13,8 @@ import {
   resolveThreadTurnContext,
 } from "../turn/context";
 import { normalizeSkillIds } from "../../skills/selection";
+import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
+import { buildThreadToolsMetadata } from "../turn/tool-selection";
 import { listMessageRecordsByThread } from "../message-repository";
 import type { StreamThreadEventInput } from "../turn/service";
 import type { AgentCheckpointRef } from "../turn/types";
@@ -83,11 +85,12 @@ export async function resolveRefreshThreadStreamInput(
       ? normalizeSkillIds(input.tools.skillIds)
       : resolveSkillIdsFromMessage(latestUserMessage);
   const webSearchEnabled =
+    input.tools?.[AGENT_TOOL_NAMES.webSearch]?.enabled ??
     input.tools?.webSearchEnabled ??
     resolveWebSearchEnabledFromMessage(latestUserMessage);
-  const artifact =
-    input.tools?.artifact ??
-    resolveArtifactSelectionFromMessage(latestUserMessage);
+  const generateImageTool =
+    input.tools?.[AGENT_TOOL_NAMES.generateImage] ??
+    resolveGenerateImageToolFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const refreshRunThreadId = `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
 
@@ -98,7 +101,11 @@ export async function resolveRefreshThreadStreamInput(
     content: latestUserMessage.content,
     mentionedSourceIds,
     sourceIds,
-    tools: { skillIds, webSearchEnabled, ...(artifact ? { artifact } : {}) },
+    tools: buildThreadToolsMetadata({
+      skillIds,
+      webSearchEnabled,
+      generateImageTool,
+    }),
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
@@ -140,11 +147,12 @@ export async function resolveEditThreadStreamInput(
       ? normalizeSkillIds(input.tools.skillIds)
       : resolveSkillIdsFromMessage(latestUserMessage);
   const webSearchEnabled =
+    input.tools?.[AGENT_TOOL_NAMES.webSearch]?.enabled ??
     input.tools?.webSearchEnabled ??
     resolveWebSearchEnabledFromMessage(latestUserMessage);
-  const artifact =
-    input.tools?.artifact ??
-    resolveArtifactSelectionFromMessage(latestUserMessage);
+  const generateImageTool =
+    input.tools?.[AGENT_TOOL_NAMES.generateImage] ??
+    resolveGenerateImageToolFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const agentBaseCheckpoint =
     checkpoint?.beforeInput ??
@@ -161,7 +169,11 @@ export async function resolveEditThreadStreamInput(
     content: input.content,
     mentionedSourceIds,
     sourceIds,
-    tools: { skillIds, webSearchEnabled, ...(artifact ? { artifact } : {}) },
+    tools: buildThreadToolsMetadata({
+      skillIds,
+      webSearchEnabled,
+      generateImageTool,
+    }),
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,

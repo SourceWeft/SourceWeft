@@ -240,11 +240,9 @@ test("runtime prompt treats image auto mode as available but optional", () => {
     artifactIntent: {
       kind: "image",
       shouldInjectTool: true,
-      requireToolCall: false,
       source: "explicit_tool",
       confidence: 0.55,
-      reason:
-        "User-facing artifact controls enabled image generation tool auto mode.",
+      reason: "User-facing image generation controls configured generate_image.",
       config: {
         aspectRatio: "auto",
         quality: "auto",
@@ -255,28 +253,7 @@ test("runtime prompt treats image auto mode as available but optional", () => {
   });
 
   assert.match(prompt, /generate_image is available in auto mode/);
-  assert.doesNotMatch(prompt, /call generate_image\./);
-});
-
-test("runtime prompt treats image generate mode as requiring a tool call", () => {
-  const prompt = testExports.buildAgentRuntimePrompt({
-    timezone: "UTC",
-    availableArtifactTools: ["generate_image"],
-    artifactIntent: {
-      kind: "image",
-      shouldInjectTool: true,
-      requireToolCall: true,
-      source: "explicit_tool",
-      confidence: 1,
-      reason: "User-facing artifact controls requested image generation.",
-      config: {
-        aspectRatio: "auto",
-        quality: "auto",
-        style: "auto",
-      },
-      warnings: [],
-    },
-  });
-
-  assert.match(prompt, /call generate_image\./);
+  assert.match(prompt, /decide semantically from the user's goal/);
+  assert.match(prompt, /Never claim an image was created/);
+  assert.match(prompt, /otherwise answer normally/);
 });
