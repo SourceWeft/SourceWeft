@@ -286,6 +286,18 @@ export class BillingUsageService {
             idempotencyKey,
             metadata: {
               creditUnitUsd: this.runtimeConfig.creditUnitUsd,
+              ...(input.modelKind ? { modelKind: input.modelKind } : {}),
+              ...(input.operation ? { operation: input.operation } : {}),
+              ...(input.providerCostUsd !== undefined
+                ? { providerCostUsd: input.providerCostUsd }
+                : {}),
+              ...(input.platformCostUsd !== undefined
+                ? { platformCostUsd: input.platformCostUsd }
+                : {}),
+              ...(input.markupRate !== undefined
+                ? { markupRate: input.markupRate }
+                : {}),
+              ...(input.metadata ?? {}),
             },
           },
         });

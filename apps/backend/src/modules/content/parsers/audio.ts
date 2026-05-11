@@ -6,6 +6,7 @@ import {
   buildGatewayRequestMetadata,
   recordGatewayOperationEvent,
 } from "../model-gateway-audit";
+import { meterBillableModelUsage } from "../model-billing";
 import { toContentServiceError } from "../model-gateway-error";
 import {
   ensureModelConfigAvailable,
@@ -216,6 +217,42 @@ export class AudioSourceParser extends BaseSourceParser {
           fileName: input.fileName,
           mimeType: input.mimeType,
           fileSize: input.fileSize,
+          segmentCount: result.segments?.length ?? 0,
+          wordTimestampCount: result.words?.length ?? 0,
+        },
+      });
+    }
+    if (input.teamId && input.workspaceId && input.userId && input.billing) {
+      await meterBillableModelUsage({
+        billing: input.billing,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        actorUserId: input.userId,
+        feature: "ingestion.asr",
+        operation: "asr.transcribe",
+        modelKind: "asr",
+        gatewayConfigId: profile.gatewayConfigId,
+        profileAlias: profile.profileAlias,
+        modelAlias: profile.modelAlias,
+        referenceId: input.sourceId
+          ? `source:${input.sourceId}:asr`
+          : `source-file:${input.fileName}:asr`,
+        idempotencyKey:
+          input.idempotencyKey ||
+          `source-asr:${input.sourceId ?? input.fileName}:${input.fileSize}:credits`,
+        usage: result.usage,
+        metadata: {
+          traceId: input.sourceId,
+          sourceId: input.sourceId,
+          sourceRevisionId: input.sourceRevisionId,
+          fileName: input.fileName,
+          mimeType: input.mimeType,
+          fileSize: input.fileSize,
+          provider: result.provider,
+          providerModel: result.providerModel,
+          routeDecision: result.routeDecision,
+          duration: result.duration,
+          inputLengthMs: result.inputLengthMs,
           segmentCount: result.segments?.length ?? 0,
           wordTimestampCount: result.words?.length ?? 0,
         },

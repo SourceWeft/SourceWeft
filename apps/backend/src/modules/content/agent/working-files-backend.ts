@@ -32,6 +32,7 @@ import {
   sanitizeNonCitableCitationMarkers,
   simpleGlobToRegExp,
 } from "./fs-utils";
+import { AGENT_TOOL_NAMES } from "./tool-registry";
 
 const DEFAULT_READ_LINE_LIMIT = 500;
 const DEFAULT_WORKING_FILE_MIME_TYPE = "text/plain";
@@ -147,7 +148,7 @@ function missingWorkingFileHint(normalizedPath: string) {
     return "";
   }
 
-  return ` If '${name}' is an uploaded, selected, referenced, attached, or @mentioned source, use search_sources or list/read the Source Library under /kb instead of /work Workfiles.`;
+  return ` If '${name}' is an uploaded, selected, referenced, attached, or @mentioned source, use ${AGENT_TOOL_NAMES.searchSources} or list/read the Source Library under /kb instead of /work Workfiles.`;
 }
 
 function compactWhitespace(value: string) {
@@ -437,7 +438,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       const file = await this.getFile(normalized);
       if (!file) {
         return {
-          error: `ENOENT: no such thread working file, read_file '${normalized}'.${missingWorkingFileHint(normalized)}`,
+          error: `ENOENT: no such thread working file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'.${missingWorkingFileHint(normalized)}`,
         };
       }
 
@@ -450,7 +451,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       }
       const selected = lines.slice(boundedOffset, boundedOffset + boundedLimit);
       const more = boundedOffset + selected.length < lines.length
-        ? `\n\nOutput truncated. Continue with read_file(path: "${normalized}", offset: ${boundedOffset + selected.length}, limit: ${boundedLimit}).`
+        ? `\n\nOutput truncated. Continue with ${AGENT_TOOL_NAMES.readFile}(path: "${normalized}", offset: ${boundedOffset + selected.length}, limit: ${boundedLimit}).`
         : "";
 
       return {
@@ -477,7 +478,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       const file = await this.getFile(normalized);
       if (!file) {
         return {
-          error: `ENOENT: no such thread working file, read_file '${normalized}'.${missingWorkingFileHint(normalized)}`,
+          error: `ENOENT: no such thread working file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'.${missingWorkingFileHint(normalized)}`,
         };
       }
       const data: FileData = {

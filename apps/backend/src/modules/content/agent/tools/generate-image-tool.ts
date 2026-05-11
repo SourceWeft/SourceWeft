@@ -11,6 +11,9 @@ import {
 } from "../../storage";
 import { createImageArtifactRecord } from "../../artifacts/repository";
 import type { ArtifactImageConfig } from "../../artifacts/types";
+import type { ContentBillingPort } from "../../billing-port";
+import { meterBillableModelUsage } from "../../model-billing";
+import { AGENT_TOOL_NAMES } from "../tool-names";
 
 function compactText(value: string, maxLength = 120) {
   const compacted = value.replace(/\s+/g, " ").trim();
@@ -82,7 +85,7 @@ function formatToolResult(input: {
     `style: ${input.config.style}`,
     input.provider ? `provider: ${input.provider}` : null,
     input.providerModel ? `provider_model: ${input.providerModel}` : null,
-    "The application will attach the generated image to the final answer. Do not repeat raw URLs.",
+    "The application will display the generated image below the final answer. Do not include image markdown or repeat raw URLs.",
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -98,6 +101,7 @@ export function createGenerateImageTool(input: {
   parentSpanId?: string;
   profile: RuntimeModelGatewayProfile;
   config: ArtifactImageConfig;
+  billing: ContentBillingPort;
 }) {
   return tool(
     async (
@@ -191,6 +195,37 @@ export function createGenerateImageTool(input: {
 
       const artifactUrl = `/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/file`;
 
+      await meterBillableModelUsage({
+        billing: input.billing,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        actorUserId: input.userId,
+        feature: "artifact.image",
+        operation: "images.generate",
+        modelKind: "image",
+        gatewayConfigId: input.profile.gatewayConfigId,
+        profileAlias: input.profile.profileAlias,
+        modelAlias: input.profile.modelAlias,
+        referenceId: `artifact:${artifactId}`,
+        idempotencyKey: `artifact-image:${artifactId}`,
+        usage: result.usage,
+        metadata: {
+          traceId: input.traceId,
+          threadId: input.threadId,
+          messageId: input.userMessageId,
+          toolCallId: runtime.toolCallId,
+          artifactId,
+          versionId,
+          provider: result.provider,
+          providerModel: result.providerModel,
+          routeDecision: result.routeDecision,
+          imageCount: result.images.length,
+          aspectRatio: input.config.aspectRatio,
+          quality: input.config.quality,
+          style: input.config.style,
+        },
+      });
+
       return formatToolResult({
         artifactId,
         versionId,
@@ -202,7 +237,7 @@ export function createGenerateImageTool(input: {
       });
     },
     {
-      name: "generate_image",
+      name: AGENT_TOOL_NAMES.generateImage,
       description:
         "Generate one persisted SourceWeft image artifact from a visual prompt. Use this when the user's goal is to create a new visual artifact or deliverable, not when they only want to discuss, analyze, or summarize an existing image. Expand vague visual requests into a concise, concrete prompt with subject, composition, style, and mood. The tool returns a stable backend artifact URL.",
       schema: z.object({

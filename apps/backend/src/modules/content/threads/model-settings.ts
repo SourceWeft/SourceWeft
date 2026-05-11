@@ -4,7 +4,15 @@ import { modelGatewayProfiles } from "../../../shared/db/schema";
 import { ContentError } from "../errors";
 
 export type ThreadModelKind = "llm" | "image" | "vision";
-export type ModelProfileKind = "chat" | "image" | "vision";
+export type ModelProfileKind =
+  | "chat"
+  | "image"
+  | "vision"
+  | "video"
+  | "asr"
+  | "tts"
+  | "embedding"
+  | "rerank";
 
 export type ThreadModelSettings = {
   llmProfileAlias: string | null;
@@ -31,7 +39,7 @@ export const MODEL_KIND_BY_THREAD_KIND: Record<
 };
 
 export const THREAD_KIND_BY_MODEL_KIND: Record<
-  ModelProfileKind,
+  "chat" | "image" | "vision",
   ThreadModelKind
 > = {
   chat: "llm",

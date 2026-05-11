@@ -3,7 +3,12 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SkillManifestJson } from "../../../shared/db/schema";
-import { isAgentToolName, isConfigurableAgentTool } from "../agent/tool-registry";
+import {
+  agentToolRequiredForModelKind,
+  getAgentToolConfigKeys,
+  isConfigurableAgentTool,
+  isSkillDeclarableAgentTool,
+} from "../agent/tool-registry";
 
 export type SkillBundleFile = {
   path: string;
@@ -56,7 +61,6 @@ const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
   ".yaml": "application/yaml",
   ".yml": "application/yaml",
 };
-const GENERATE_IMAGE_CONFIG_KEYS = new Set(["aspectRatio", "quality", "style"]);
 
 let builtinSkillsCache: BuiltinSkillManifest[] | null = null;
 
@@ -119,7 +123,7 @@ function normalizeTools(value: unknown) {
   const tools = value.map((item) =>
     typeof item === "string" ? item.trim() : "",
   );
-  if (tools.some((toolName) => !isAgentToolName(toolName))) {
+  if (tools.some((toolName) => !isSkillDeclarableAgentTool(toolName))) {
     throw new Error("skill.json references an unknown tool");
   }
   return Array.from(new Set(tools));
@@ -134,7 +138,7 @@ function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    if (!isAgentToolName(key)) {
+    if (!isSkillDeclarableAgentTool(key)) {
       throw new Error("skill.json defaultConfig references an unknown tool");
     }
     if (!isConfigurableAgentTool(key)) {
@@ -143,17 +147,18 @@ function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
     if (!tools?.includes(key)) {
       throw new Error(`skill.json defaultConfig '${key}' must also be declared in tools`);
     }
-    if (key === "generate_image") {
+    const configKeys = getAgentToolConfigKeys(key);
+    if (configKeys.length > 0) {
       const config = record[key];
       if (!config || typeof config !== "object" || Array.isArray(config)) {
-        throw new Error("skill.json defaultConfig generate_image is invalid");
+        throw new Error(`skill.json defaultConfig ${key} is invalid`);
       }
       if (
         Object.keys(config as Record<string, unknown>).some(
-          (configKey) => !GENERATE_IMAGE_CONFIG_KEYS.has(configKey),
+          (configKey) => !configKeys.includes(configKey),
         )
       ) {
-        throw new Error("skill.json defaultConfig generate_image is invalid");
+        throw new Error(`skill.json defaultConfig ${key} is invalid`);
       }
     }
   }
@@ -196,8 +201,9 @@ function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinMani
   if (typeof version !== "string" || version.trim().length === 0 || version.length > 64) {
     throw new Error(`${source} version is invalid`);
   }
-  if (models?.image && !tools?.includes("generate_image")) {
-    throw new Error(`${source} models.image requires generate_image tool`);
+  const imageTool = agentToolRequiredForModelKind("image");
+  if (models?.image && imageTool && !tools?.includes(imageTool)) {
+    throw new Error(`${source} models.image requires ${imageTool} tool`);
   }
 
   return {

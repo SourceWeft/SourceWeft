@@ -16,6 +16,7 @@ import {
   KB_READ_FILE_MAX_LINE_LIMIT,
 } from "./filesystem-capabilities";
 import { logger } from "../../../shared/logger";
+import { AGENT_TOOL_NAMES } from "./tool-registry";
 import {
   MAX_GLOB_RESULTS,
   MAX_GREP_RESULTS,
@@ -170,7 +171,7 @@ function appendRegexMatches(input: {
     }
     if (input.regex.test(line)) {
       const citation = input.citationRegistry.addChunk({
-        origin: "grep",
+        origin: AGENT_TOOL_NAMES.grep,
         sourceId: input.source.sourceId,
         sourceTitle: input.source.title,
         documentId: input.documentId,
@@ -343,7 +344,7 @@ export function addInlineSourceMarkers(input: {
 
   if (input.nextOffset !== null) {
     const lastIndex = lines.length - 1;
-    lines[lastIndex] = `${lines[lastIndex]} [Output truncated. Continue with read_file(file_path: "${input.sourcePath}", offset: ${input.nextOffset}, limit: ${input.limit}).]`;
+    lines[lastIndex] = `${lines[lastIndex]} [Output truncated. Continue with ${AGENT_TOOL_NAMES.readFile}(file_path: "${input.sourcePath}", offset: ${input.nextOffset}, limit: ${input.limit}).]`;
   }
 
   return lines.join("\n");
@@ -477,10 +478,10 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
           chunkNo: target.chunkNo,
         });
         if (!chunk) {
-          return { error: `ENOENT: no such chunk, read_file '${filePath}'` };
+          return { error: `ENOENT: no such chunk, ${AGENT_TOOL_NAMES.readFile} '${filePath}'` };
         }
         const citation = this.input.citationRegistry.addChunk({
-          origin: "read_file",
+          origin: AGENT_TOOL_NAMES.readFile,
           sourceId: chunk.sourceId,
           sourceTitle: chunk.sourceTitle,
           documentId: chunk.documentId,
@@ -527,7 +528,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
               ].join("\n"),
             };
           }
-          return { error: `ENOENT: no readable content, read_file '${filePath}'` };
+          return { error: `ENOENT: no readable content, ${AGENT_TOOL_NAMES.readFile} '${filePath}'` };
         }
 
         let page: PaginatedSourceContent;
@@ -555,7 +556,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         }).map((chunk) => {
           const chunkPath = buildChunkFilePath(source, chunk.chunkNo);
           const citation = this.input.citationRegistry.addChunk({
-            origin: "read_file",
+            origin: AGENT_TOOL_NAMES.readFile,
             sourceId: chunk.sourceId,
             sourceTitle: chunk.sourceTitle,
             documentId: chunk.documentId,
@@ -585,7 +586,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
         };
       }
 
-      return { error: `EISDIR: is a directory, read_file '${normalizeVirtualPath(filePath)}'` };
+      return { error: `EISDIR: is a directory, ${AGENT_TOOL_NAMES.readFile} '${normalizeVirtualPath(filePath)}'` };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }
@@ -594,7 +595,7 @@ export class DatabaseKnowledgeBackend implements BackendProtocolV2 {
   async readRaw(filePath: string): Promise<ReadRawResult> {
     try {
       return {
-        error: `EROFS: /kb raw downloads are disabled; use search_sources, /kb read_file, or /kb grep to gather citable evidence for '${normalizeVirtualPath(filePath)}'`,
+        error: `EROFS: /kb raw downloads are disabled; use ${AGENT_TOOL_NAMES.searchSources}, /kb ${AGENT_TOOL_NAMES.readFile}, or /kb ${AGENT_TOOL_NAMES.grep} to gather citable evidence for '${normalizeVirtualPath(filePath)}'`,
       };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };

@@ -10,7 +10,6 @@ import {
 import { requireContentWorkspace } from "../../content-support";
 import {
   THREAD_KIND_BY_MODEL_KIND,
-  type ModelProfileKind,
   type ThreadModelSettings,
 } from "../model-settings";
 import { resolveImageModelCapabilities } from "../../artifacts/image-capabilities";
@@ -44,6 +43,7 @@ type ThreadModelCatalogEntry = {
 type ThreadModelCapabilities = NonNullable<ThreadModelCatalogEntry["capabilities"]>;
 
 type CatalogPricing = NonNullable<ThreadModelCatalogEntry["pricing"]>;
+type CatalogModelProfileKind = "chat" | "image" | "vision";
 
 const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
@@ -125,7 +125,7 @@ export async function listThreadModelCatalog(input: {
     userId: input.userId,
   });
 
-  const profileKinds: ModelProfileKind[] = ["chat", "image", "vision"];
+  const profileKinds: CatalogModelProfileKind[] = ["chat", "image", "vision"];
   const profileRows = await db
     .select({
       kind: modelGatewayProfiles.kind,
@@ -247,7 +247,7 @@ export async function listThreadModelCatalog(input: {
   };
 
   for (const row of profileRows) {
-    const profileKind = row.kind as ModelProfileKind;
+    const profileKind = row.kind as CatalogModelProfileKind;
     const threadKind = THREAD_KIND_BY_MODEL_KIND[profileKind];
     const route = routeByKindAlias.get(`${profileKind}:${row.profileAlias}`);
     if (!route?.hasGlobalApiKey) {

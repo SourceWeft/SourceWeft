@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { config } from "../../../shared/config";
 import { logger } from "../../../shared/logger";
+import type { ContentBillingPort } from "../billing-port";
 import { ContentError } from "../errors";
 import { getSourceParser, type ParsedDocument } from "../parsers";
 import { webFetchSourceParser, WEB_FETCH_SOURCE_MIME_TYPE } from "../parsers/web-fetch";
@@ -75,7 +76,10 @@ function nextProviderPollDelay(attempt: number) {
 }
 
 export class SourceParsingService {
-  constructor(private readonly sourceIndexingService: SourceIndexingService) {}
+  constructor(
+    private readonly sourceIndexingService: SourceIndexingService,
+    private readonly billing: ContentBillingPort,
+  ) {}
 
   async tryQueueSourceReparse(input: {
     workspaceId: string;
@@ -261,9 +265,10 @@ export class SourceParsingService {
         sourceRevisionId: input.sourceRevisionId,
         teamId: input.teamId,
         workspaceId: input.workspaceId,
-        userId: input.userId,
-        idempotencyKey: input.idempotencyKey,
-      };
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      billing: this.billing,
+    };
       const providerOutcome = isDocumentProviderMimeType(source.mimeType)
         ? await startDocumentParse({
             ...parseInput,

@@ -45,7 +45,6 @@ import {
 } from "../_components/skill-model-presets";
 import {
   buildChatToolsRequest,
-  CHAT_TOOL_NAMES,
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
   type ChatSendInput,
@@ -60,6 +59,10 @@ import {
   type ToolCallRecord,
   type VersionedMessageGroup,
 } from "../_components/chat-canvas";
+import {
+  isGeneratedImageArtifactToolName,
+  isWorkfileWriteToolName,
+} from "@sourceweft/sdk";
 import {
   ArtifactPreviewPanel,
   SourcesHub,
@@ -1065,7 +1068,7 @@ function isCompletedWorkfileWriteToolCall(
     return false;
   }
 
-  if (toolCall.tool !== "write_file" && toolCall.tool !== "edit_file") {
+  if (!isWorkfileWriteToolName(toolCall.tool)) {
     return false;
   }
 
@@ -1080,7 +1083,7 @@ function isCompletedImageArtifactToolCall(
   event: StreamEventPayload & { type: ToolCallEventType },
 ) {
   return (
-    toolCall.tool === CHAT_TOOL_NAMES.generateImage &&
+    isGeneratedImageArtifactToolName(toolCall.tool) &&
     (event.type === "tool-call-result" ||
       (event.type === "tool-call-end" && toolCall.status === "completed"))
   );

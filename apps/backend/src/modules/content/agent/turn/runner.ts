@@ -7,11 +7,22 @@ import { createRetrievalTool } from "../tools/retrieval-tool";
 import { createGenerateImageTool } from "../tools/generate-image-tool";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { createWebTools } from "../tools/web-tools";
+import {
+  AGENT_TOOL_NAMES,
+  isGeneratedImageArtifactToolName,
+  isPatternScopeToolName,
+  isReadToolOutputToolName,
+  isRetrievalToolName,
+  isWebFetchToolName,
+  isWebSearchToolName,
+  isWebToolName,
+} from "../tool-registry";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { createDefaultWebProvider } from "../../web";
 import { listVirtualFsSources } from "../../virtual-fs/store";
 import type { VirtualFsSource } from "../../virtual-fs/types";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
+import type { ContentBillingPort } from "../../billing-port";
 import type { TraceContext } from "../../../../shared/llm-observability";
 import { endSpan, startSpan } from "../../../../shared/llm-observability";
 import { contentRetrievalService } from "../../retrieval/service";
@@ -169,8 +180,19 @@ function compactTraceText(value: string, maxLength = 96) {
   return `${compacted.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
+const TOOL_INPUT_PREVIEW_FIELDS = [
+  "query",
+  "prompt",
+  "url",
+  "path",
+  "pattern",
+  "glob",
+] as const;
+
+const GENERATED_IMAGE_ALT = "Generated image";
+
 function formatToolInputItems(input: Record<string, unknown>) {
-  const entries = ["query", "prompt", "url", "path", "pattern", "glob"]
+  const entries = TOOL_INPUT_PREVIEW_FIELDS
     .map((key) => {
       const value = input[key];
       return typeof value === "string" && value.trim().length > 0
@@ -238,7 +260,7 @@ function filesystemScope(input: Record<string, unknown>, toolName?: string) {
   if (pathScope) {
     return pathScope;
   }
-  if (toolName === "glob") {
+  if (toolName && isPatternScopeToolName(toolName)) {
     const patternScope = scopeFromPath(resolveFilesystemPattern(input));
     if (patternScope) {
       return patternScope;
@@ -247,86 +269,118 @@ function filesystemScope(input: Record<string, unknown>, toolName?: string) {
   return "sources";
 }
 
+const FILESYSTEM_TOOL_PRESENTERS = {
+  [AGENT_TOOL_NAMES.ls]: {
+    start: {
+      work: "Listing Workfiles",
+      skills: "Listing selected skills",
+      sources: "Listing selected sources",
+    },
+    end: {
+      work: "Listed Workfiles",
+      skills: "Listed selected skills",
+      sources: "Listed selected sources",
+    },
+    describe: (input: { metadata: Record<string, unknown> }) =>
+      typeof input.metadata.resultCount === "number"
+        ? `Listed ${input.metadata.resultCount} entries.`
+        : undefined,
+  },
+  [AGENT_TOOL_NAMES.glob]: {
+    start: {
+      work: "Finding matching Workfiles",
+      skills: "Finding matching skill files",
+      sources: "Finding matching sources",
+    },
+    end: {
+      work: "Found matching Workfiles",
+      skills: "Found matching skill files",
+      sources: "Found matching sources",
+    },
+    describe: (input: { metadata: Record<string, unknown> }) =>
+      typeof input.metadata.resultCount === "number"
+        ? `Found ${input.metadata.resultCount} matching paths.`
+        : undefined,
+  },
+  [AGENT_TOOL_NAMES.grep]: {
+    start: {
+      work: "Searching Workfiles",
+      skills: "Searching skill instructions",
+      sources: "Searching exact terms",
+    },
+    end: {
+      work: "Searched Workfiles",
+      skills: "Searched skill instructions",
+      sources: "Searched exact terms",
+    },
+    describe: (input: { metadata: Record<string, unknown> }) =>
+      typeof input.metadata.matchCount === "number"
+        ? `Found ${input.metadata.matchCount} text matches.`
+        : undefined,
+  },
+  [AGENT_TOOL_NAMES.readFile]: {
+    start: {
+      work: "Reading Workfile",
+      skills: "Reading skill instructions",
+      sources: "Reading source content",
+    },
+    end: {
+      work: "Read Workfile",
+      skills: "Read skill instructions",
+      sources: "Read source content",
+    },
+    describe: (input: {
+      metadata: Record<string, unknown>;
+      scope: ReturnType<typeof filesystemScope>;
+      input?: Record<string, unknown>;
+    }) => {
+      const inputLimit = toObjectRecord(input.input)?.limit;
+      if (input.scope === "sources") {
+        const lineLimit =
+          typeof inputLimit === "number" && Number.isFinite(inputLimit)
+            ? Math.max(1, Math.floor(inputLimit))
+            : undefined;
+        return lineLimit
+          ? `Read up to ${lineLimit} source lines.`
+          : "Read source content.";
+      }
+      if (typeof input.metadata.chunkCount === "number") {
+        const noun = input.scope === "skills" ? "skill" : "Workfile";
+        return `Read ${input.metadata.chunkCount} ${noun} ${
+          input.metadata.chunkCount === 1 ? "chunk" : "chunks"
+        }.`;
+      }
+      return undefined;
+    },
+  },
+} as const;
+
+function getFilesystemToolPresenter(toolName: string) {
+  return FILESYSTEM_TOOL_PRESENTERS[
+    toolName as keyof typeof FILESYSTEM_TOOL_PRESENTERS
+  ];
+}
+
 function getFilesystemToolStartTitle(
   toolName: string,
   input: Record<string, unknown>,
 ) {
-  if (toolName === "generate_image") {
+  if (isGeneratedImageArtifactToolName(toolName)) {
     return "Generating image";
   }
   const scope = filesystemScope(input, toolName);
-  const skillScoped = scope === "skills";
-  const workScoped = scope === "work";
-  if (toolName === "ls") {
-    if (workScoped) {
-      return "Listing Workfiles";
-    }
-    return skillScoped ? "Listing selected skills" : "Listing selected sources";
-  }
-  if (toolName === "glob") {
-    if (workScoped) {
-      return "Finding matching Workfiles";
-    }
-    return skillScoped
-      ? "Finding matching skill files"
-      : "Finding matching sources";
-  }
-  if (toolName === "read_file") {
-    if (workScoped) {
-      return "Reading Workfile";
-    }
-    return skillScoped
-      ? "Reading skill instructions"
-      : "Reading source content";
-  }
-  if (toolName === "grep") {
-    if (workScoped) {
-      return "Searching Workfiles";
-    }
-    return skillScoped
-      ? "Searching skill instructions"
-      : "Searching exact terms";
-  }
-  return null;
+  return getFilesystemToolPresenter(toolName)?.start[scope] ?? null;
 }
 
 function getFilesystemToolEndTitle(
   toolName: string,
   input: Record<string, unknown>,
 ) {
-  if (toolName === "generate_image") {
+  if (isGeneratedImageArtifactToolName(toolName)) {
     return "Generated image";
   }
   const scope = filesystemScope(input, toolName);
-  const skillScoped = scope === "skills";
-  const workScoped = scope === "work";
-  if (toolName === "ls") {
-    if (workScoped) {
-      return "Listed Workfiles";
-    }
-    return skillScoped ? "Listed selected skills" : "Listed selected sources";
-  }
-  if (toolName === "glob") {
-    if (workScoped) {
-      return "Found matching Workfiles";
-    }
-    return skillScoped
-      ? "Found matching skill files"
-      : "Found matching sources";
-  }
-  if (toolName === "read_file") {
-    if (workScoped) {
-      return "Read Workfile";
-    }
-    return skillScoped ? "Read skill instructions" : "Read source content";
-  }
-  if (toolName === "grep") {
-    if (workScoped) {
-      return "Searched Workfiles";
-    }
-    return skillScoped ? "Searched skill instructions" : "Searched exact terms";
-  }
-  return null;
+  return getFilesystemToolPresenter(toolName)?.end[scope] ?? null;
 }
 
 function extractToolOutputText(output: unknown) {
@@ -370,11 +424,11 @@ export function normalizeToolOutputForObservability(
   toolName: string,
   output: unknown,
 ) {
-  if (toolName === "web_search" || toolName === "web_fetch") {
+  if (isWebToolName(toolName)) {
     return normalizeWebToolOutput(toolName, output);
   }
 
-  if (toolName !== "read_file") {
+  if (!isReadToolOutputToolName(toolName)) {
     return output;
   }
 
@@ -418,7 +472,7 @@ function getFilesystemToolMetadata(toolName: string, output: unknown) {
   const record = toObjectRecord(output);
   const metadata: Record<string, unknown> = {};
 
-  if (toolName === "generate_image") {
+  if (isGeneratedImageArtifactToolName(toolName)) {
     const outputText = extractToolOutputText(output) ?? "";
     const artifactId = outputText.match(/artifact_id:\s*(\S+)/)?.[1];
     const artifactUrl = outputText.match(/artifact_url:\s*(\S+)/)?.[1];
@@ -446,7 +500,7 @@ function getFilesystemToolMetadata(toolName: string, output: unknown) {
     metadata.truncated = outputText.includes("Output truncated.");
   }
 
-  if (toolName === "read_file" && metadata.chunkCount === undefined) {
+  if (isReadToolOutputToolName(toolName) && metadata.chunkCount === undefined) {
     metadata.chunkCount = 1;
   }
 
@@ -459,34 +513,14 @@ function getFilesystemToolDescription(
   input?: Record<string, unknown>,
 ) {
   const scope = input ? filesystemScope(input, toolName) : "sources";
-  const noun =
-    scope === "skills" ? "skill" : scope === "work" ? "Workfile" : "source";
-  const inputLimit = toObjectRecord(input)?.limit;
-  if (toolName === "ls" && typeof metadata.resultCount === "number") {
-    return `Listed ${metadata.resultCount} entries.`;
-  }
-  if (toolName === "glob" && typeof metadata.resultCount === "number") {
-    return `Found ${metadata.resultCount} matching paths.`;
-  }
-  if (toolName === "grep" && typeof metadata.matchCount === "number") {
-    return `Found ${metadata.matchCount} text matches.`;
-  }
-  if (toolName === "read_file" && scope === "sources") {
-    const lineLimit =
-      typeof inputLimit === "number" && Number.isFinite(inputLimit)
-        ? Math.max(1, Math.floor(inputLimit))
-        : undefined;
-    return lineLimit
-      ? `Read up to ${lineLimit} source lines.`
-      : "Read source content.";
-  }
-  if (toolName === "read_file" && typeof metadata.chunkCount === "number") {
-    return `Read ${metadata.chunkCount} ${noun} ${metadata.chunkCount === 1 ? "chunk" : "chunks"}.`;
-  }
-  if (toolName === "generate_image") {
+  if (isGeneratedImageArtifactToolName(toolName)) {
     return "Created an image artifact.";
   }
-  return undefined;
+  return getFilesystemToolPresenter(toolName)?.describe({
+    metadata,
+    scope,
+    input,
+  });
 }
 
 type GeneratedImageArtifactReference = {
@@ -495,32 +529,6 @@ type GeneratedImageArtifactReference = {
   artifactUrl: string;
   toolCallId?: string;
 };
-
-const PENDING_IMAGE_URL_PREFIX = "sourceweft-image-pending://";
-
-function pendingGeneratedImageMarkdown(toolCallId: string) {
-  return `![Generating image](${PENDING_IMAGE_URL_PREFIX}${encodeURIComponent(toolCallId)})`;
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function replacePendingGeneratedImageMarkdown(input: {
-  assistantText: string;
-  artifact: GeneratedImageArtifactReference;
-}) {
-  if (!input.artifact.toolCallId) {
-    return input.assistantText;
-  }
-
-  const pendingUrl = `${PENDING_IMAGE_URL_PREFIX}${encodeURIComponent(input.artifact.toolCallId)}`;
-  const alt = escapeMarkdownImageAlt(input.artifact.title) || "Generated image";
-  return input.assistantText.replace(
-    new RegExp(`!\\[[^\\]]*]\\(${escapeRegExp(pendingUrl)}\\)`, "g"),
-    `![${alt}](${input.artifact.artifactUrl})`,
-  );
-}
 
 function extractToolOutputField(output: unknown, key: string) {
   const outputText = extractToolOutputText(output);
@@ -532,13 +540,6 @@ function extractToolOutputField(output: unknown, key: string) {
   return match?.[1]?.trim() ?? null;
 }
 
-function escapeMarkdownImageAlt(value: string) {
-  return value
-    .replace(/[[\]\\]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function extractGeneratedImageArtifacts(
   toolCalls: ToolCallTrace[],
 ): GeneratedImageArtifactReference[] {
@@ -546,7 +547,7 @@ function extractGeneratedImageArtifacts(
   return toolCalls
     .filter(
       (call) =>
-        call.tool === "generate_image" &&
+        isGeneratedImageArtifactToolName(call.tool) &&
         call.status === "completed" &&
         !call.error,
     )
@@ -555,7 +556,8 @@ function extractGeneratedImageArtifacts(
         extractToolOutputField(call.output, "artifact_id") ?? "";
       const artifactUrl = extractToolOutputField(call.output, "artifact_url");
       const title =
-        extractToolOutputField(call.output, "title") || "Generated image";
+        extractToolOutputField(call.output, "title") ||
+        GENERATED_IMAGE_ALT;
 
       return artifactUrl
         ? {
@@ -579,94 +581,29 @@ function extractGeneratedImageArtifacts(
     });
 }
 
-function attachGeneratedImageMarkdown(input: {
-  assistantText: string;
-  artifacts: GeneratedImageArtifactReference[];
-}) {
-  if (input.artifacts.length === 0) {
-    return input.assistantText;
-  }
-
-  let assistantText = input.assistantText;
-  const fallbackArtifacts: GeneratedImageArtifactReference[] = [];
-  for (const artifact of input.artifacts) {
-    const nextAssistantText = replacePendingGeneratedImageMarkdown({
-      assistantText,
-      artifact,
-    });
-    if (nextAssistantText === assistantText) {
-      fallbackArtifacts.push(artifact);
-      continue;
-    }
-    assistantText = nextAssistantText;
-  }
-
-  if (fallbackArtifacts.length === 0) {
-    return assistantText;
-  }
-
-  const existingUrls = new Set(
-    [...assistantText.matchAll(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)]
-      .map((match) => String(match[1]).trim())
-      .filter(Boolean),
-  );
-  const imageMarkdown = fallbackArtifacts
-    .map((artifact) => {
-      if (existingUrls.has(artifact.artifactUrl)) {
-        return null;
-      }
-      const alt = escapeMarkdownImageAlt(artifact.title) || "Generated image";
-      return `![${alt}](${artifact.artifactUrl})`;
-    })
-    .filter((item): item is string => item !== null)
-    .join("\n\n");
-
-  if (!imageMarkdown) {
-    return assistantText;
-  }
-
-  const trimmedText = assistantText.trim();
-  if (!trimmedText) {
-    return imageMarkdown;
-  }
-
-  const firstParagraphBreak = trimmedText.search(/\n\s*\n/);
-  if (firstParagraphBreak === -1) {
-    return [trimmedText, imageMarkdown]
-      .filter((part) => part.length > 0)
-      .join("\n\n");
-  }
-
-  const firstParagraph = trimmedText.slice(0, firstParagraphBreak).trim();
-  const rest = trimmedText.slice(firstParagraphBreak).trim();
-  return [firstParagraph, imageMarkdown, rest]
-    .filter((part) => part.length > 0)
-    .join("\n\n");
-}
-
 export const testExports = {
   buildAgentRuntimePrompt,
-  attachGeneratedImageMarkdown,
+  extractGeneratedImageArtifacts,
   getFilesystemToolDescription,
   getFilesystemToolEndTitle,
   getFilesystemToolStartTitle,
 };
 
 function getWebToolStartTitle(toolName: string) {
-  if (toolName === "web_search") {
+  if (isWebSearchToolName(toolName)) {
     return "Searching the web";
   }
-  if (toolName === "web_fetch") {
+  if (isWebFetchToolName(toolName)) {
     return "Fetching web pages";
   }
   return null;
 }
 
 function getWebToolEndTitle(toolName: string) {
-  if (toolName === "web_search") {
+  if (isWebSearchToolName(toolName)) {
     return "Searched the web";
   }
-  if (toolName === "web_fetch") {
+  if (isWebFetchToolName(toolName)) {
     return "Fetched web pages";
   }
   return null;
@@ -676,7 +613,7 @@ function getWebToolInputMetadata(
   toolName: string,
   input: Record<string, unknown>,
 ) {
-  if (toolName === "web_search") {
+  if (isWebSearchToolName(toolName)) {
     const query = typeof input.query === "string" ? input.query.trim() : "";
     const fresh = input.fresh === true;
     return {
@@ -685,7 +622,7 @@ function getWebToolInputMetadata(
     };
   }
 
-  if (toolName === "web_fetch") {
+  if (isWebFetchToolName(toolName)) {
     const urls = extractWebFetchUrls(input);
     const fresh = input.fresh === true;
     return {
@@ -730,7 +667,7 @@ function getWebToolMetadata(output: unknown) {
 }
 
 function normalizeWebToolOutput(toolName: string, output: unknown) {
-  if (toolName !== "web_search" && toolName !== "web_fetch") {
+  if (!isWebToolName(toolName)) {
     return output;
   }
 
@@ -983,11 +920,11 @@ function buildAgentRuntimePrompt(input: {
     lines.push(
       `Available artifact tools this turn: ${availableArtifactTools.join(", ")}.`,
       `Image generation defaults: aspect_ratio=${config.aspectRatio}, quality=${config.quality}, style=${config.style}.`,
-      "generate_image is available in auto mode. Use it when the user asks you to create a new visual artifact or deliverable; otherwise answer normally.",
-      "For ambiguous requests, decide semantically from the user's goal rather than matching literal keywords. If the user expects a kept visual output, call generate_image.",
+      `${AGENT_TOOL_NAMES.generateImage} is available in auto mode. Use it when the user asks you to create a new visual artifact or deliverable; otherwise answer normally.`,
+      `For ambiguous requests, decide semantically from the user's goal rather than matching literal keywords. If the user expects a kept visual output, call ${AGENT_TOOL_NAMES.generateImage}.`,
       "If the prompt is missing essential visual details for a requested image, make a reasonable concise prompt instead of asking a separate confirmation.",
-      "Never claim an image was created unless generate_image completed successfully.",
-      "After generate_image succeeds, keep the final answer concise. The application attaches the generated image markdown automatically.",
+      `Never claim an image was created unless ${AGENT_TOOL_NAMES.generateImage} completed successfully.`,
+      `After ${AGENT_TOOL_NAMES.generateImage} succeeds, keep the final answer concise. The application displays the generated image automatically below the answer; do not include image markdown or raw artifact URLs.`,
     );
   }
 
@@ -1034,6 +971,7 @@ function extractReasoningSummaryFromProviderFields(
 
 export async function* invokeDeepAgentTurn(input: {
   prepared: PreparedThreadTurn;
+  billing: ContentBillingPort;
   llm?: LlmExecutionConfig;
   traceContext?: TraceContext;
 }): AsyncGenerator<DeepAgentTurnEvent> {
@@ -1139,7 +1077,7 @@ export async function* invokeDeepAgentTurn(input: {
 
     const retrievalCall: RetrievalCallTrace = {
       id: input.callId,
-      tool: "search_sources",
+      tool: AGENT_TOOL_NAMES.searchSources,
       query: input.query,
       hitCount: input.retrieval.fusedCandidates.length,
       latencyMs: input.latencyMs,
@@ -1184,7 +1122,7 @@ export async function* invokeDeepAgentTurn(input: {
                 ...input.traceContext,
                 parentSpanId: resolveToolCallId({
                   toolCallId: runtime.toolCallId,
-                  toolName: "search_sources",
+                  toolName: AGENT_TOOL_NAMES.searchSources,
                   fallbackIndex: retrievalCallOrder.length + 1,
                 }),
               }
@@ -1192,7 +1130,7 @@ export async function* invokeDeepAgentTurn(input: {
       });
       const callId = resolveToolCallId({
         toolCallId: runtime?.toolCallId,
-        toolName: "search_sources",
+        toolName: AGENT_TOOL_NAMES.searchSources,
         fallbackIndex: retrievalCallOrder.length + 1,
       });
       const citationByChunkId = recordRetrieval({
@@ -1226,6 +1164,7 @@ export async function* invokeDeepAgentTurn(input: {
             parentSpanId: input.traceContext?.parentSpanId,
             profile: input.prepared.imageProfile.profile,
             config: input.prepared.artifactIntent.config,
+            billing: input.billing,
           }),
         ]
       : [];
@@ -1577,15 +1516,6 @@ export async function* invokeDeepAgentTurn(input: {
         };
         hasTextSinceLastToolBoundary = false;
       }
-      if (toolName === "generate_image") {
-        const placeholder = `\n\n${pendingGeneratedImageMarkdown(toolCallId)}\n\n`;
-        assistantContent += placeholder;
-        hasStreamedText = true;
-        yield {
-          type: "text-delta",
-          delta: placeholder,
-        };
-      }
       yield {
         type: "tool-call-start",
         id: toolCallId,
@@ -1593,7 +1523,7 @@ export async function* invokeDeepAgentTurn(input: {
         input: normalizedInput,
         toolCall: nextToolCall,
       };
-      if (toolName === "search_sources") {
+      if (isRetrievalToolName(toolName)) {
         const query =
           typeof normalizedInput.query === "string"
             ? normalizedInput.query.trim()
@@ -1601,7 +1531,7 @@ export async function* invokeDeepAgentTurn(input: {
         yield {
           type: "thinking-step",
           step: setThinkingStep({
-            id: `search_sources:${toolCallId}`,
+            id: `${toolName}:${toolCallId}`,
             kind: "state",
             title: "Searching sources",
             status: "in_progress",
@@ -1616,7 +1546,7 @@ export async function* invokeDeepAgentTurn(input: {
             },
           }),
         };
-      } else if (toolName === "web_search" || toolName === "web_fetch") {
+      } else if (isWebToolName(toolName)) {
         const title = getWebToolStartTitle(toolName);
         if (title) {
           const metadata = {
@@ -1701,7 +1631,7 @@ export async function* invokeDeepAgentTurn(input: {
           }
         : normalizeToolOutputForObservability(toolName, toolPayload.output);
       const outputError =
-        toolName === "web_search" || toolName === "web_fetch"
+        isWebToolName(toolName)
           ? getWebToolOutputError(output)
           : null;
       const toolStatus: ToolCallStatus = outputError ? "error" : "completed";
@@ -1753,24 +1683,6 @@ export async function* invokeDeepAgentTurn(input: {
             : {}),
         };
       }
-      if (toolStatus === "completed" && toolName === "generate_image") {
-        const [generatedImageArtifact] = extractGeneratedImageArtifacts([
-          nextToolCall,
-        ]);
-        if (generatedImageArtifact) {
-          const assistantTextWithImage = replacePendingGeneratedImageMarkdown({
-            assistantText: assistantContent,
-            artifact: generatedImageArtifact,
-          });
-          if (assistantTextWithImage !== assistantContent) {
-            assistantContent = assistantTextWithImage;
-            yield {
-              type: "text-replace",
-              text: sanitizeSseValue(assistantContent),
-            };
-          }
-        }
-      }
       if (toolStatus === "error" && outputError) {
         yield {
           type: "tool-call-error",
@@ -1790,12 +1702,12 @@ export async function* invokeDeepAgentTurn(input: {
         status: toolStatus,
         toolCall: nextToolCall,
       };
-      if (toolName === "search_sources") {
+      if (isRetrievalToolName(toolName)) {
         const query = retrievalCall?.query ?? "";
         yield {
           type: "thinking-step",
           step: setThinkingStep({
-            id: `search_sources:${toolCallId}`,
+            id: `${toolName}:${toolCallId}`,
             kind: "state",
             title: "Searching sources",
             status: "completed",
@@ -1813,7 +1725,7 @@ export async function* invokeDeepAgentTurn(input: {
             },
           }),
         };
-      } else if (toolName === "web_search" || toolName === "web_fetch") {
+      } else if (isWebToolName(toolName)) {
         const title = getWebToolEndTitle(toolName);
         if (title) {
           const metadata: Record<string, unknown> = {
@@ -2082,19 +1994,6 @@ export async function* invokeDeepAgentTurn(input: {
           (typeof startedAt === "number" ? Date.now() - startedAt : null),
       };
     });
-  const generatedImageArtifacts = extractGeneratedImageArtifacts(toolCalls);
-  const assistantTextWithArtifacts = attachGeneratedImageMarkdown({
-    assistantText,
-    artifacts: generatedImageArtifacts,
-  });
-  if (assistantTextWithArtifacts !== assistantText) {
-    assistantText = assistantTextWithArtifacts;
-    yield {
-      type: "text-replace",
-      text: sanitizeSseValue(assistantText),
-    };
-  }
-
   const finalState = finalCheckpoint
     ? null
     : await getAgentStateOrNull(agent, runConfig);

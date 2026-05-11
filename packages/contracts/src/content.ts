@@ -4,6 +4,7 @@ import {
   meterConsumeResponseSchema,
   meterIngestionResponseSchema,
 } from "./billing";
+import { AGENT_TOOL_NAMES } from "./agent-tools";
 
 const retrievalVectorStrategySchema = z.enum([
   "ann_hnsw",
@@ -519,8 +520,8 @@ const threadToolsRequestSchema = z
     skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
     webSearchEnabled: z.boolean().optional(),
     artifact: artifactToolSelectionSchema.optional(),
-    generate_image: generateImageToolSelectionSchema.optional(),
-    web_search: webSearchToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.generateImage]: generateImageToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.webSearch]: webSearchToolSelectionSchema.optional(),
   })
   .strict();
 

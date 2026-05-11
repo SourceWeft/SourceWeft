@@ -1,5 +1,11 @@
 import { ContentError } from "../../errors";
 import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
+import {
+  isAgentToolEnabledByDefault,
+  isGeneratedImageArtifactToolName,
+  isSkillActivatedAgentTool,
+  isWebSearchToolName,
+} from "../../agent/tool-registry";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import {
   normalizeArtifactToolSelection,
@@ -14,6 +20,15 @@ function toRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function skillActivatesTool(
+  skill: EnabledSkillDescriptor,
+  predicate: (toolName: string) => boolean,
+) {
+  return skill.tools?.some(
+    (toolName) => isSkillActivatedAgentTool(toolName) && predicate(toolName),
+  ) === true;
+}
+
 export function resolveWebSearchEnabled(input: {
   tools?: ThreadToolsSelection;
   enabledSkills: EnabledSkillDescriptor[];
@@ -25,8 +40,11 @@ export function resolveWebSearchEnabled(input: {
     return explicitEnabled;
   }
 
-  return input.enabledSkills.some((skill) =>
-    skill.tools?.includes(AGENT_TOOL_NAMES.webSearch),
+  return (
+    isAgentToolEnabledByDefault(AGENT_TOOL_NAMES.webSearch) ||
+    input.enabledSkills.some((skill) =>
+      skillActivatesTool(skill, isWebSearchToolName),
+    )
   );
 }
 
@@ -77,7 +95,7 @@ export function assertSelectedSkillsAllowedByTools(input: {
   }
 
   const blockedSkill = input.enabledSkills.find((skill) =>
-    skill.tools?.includes(AGENT_TOOL_NAMES.generateImage),
+    skillActivatesTool(skill, isGeneratedImageArtifactToolName),
   );
   if (!blockedSkill) {
     return;

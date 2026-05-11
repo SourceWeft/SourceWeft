@@ -56,6 +56,7 @@ class ContentThreadTurnService {
         gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
         llm: input.llm,
         parentSpanId: input.prepared.traceContext?.parentSpanId,
+        billing: this.billing,
       });
     } catch (error) {
       logger.debug("Automatic thread title generation failed", {

@@ -17,6 +17,11 @@ import {
 } from "langchain";
 import { endSpan, startSpan, type TraceContext } from "../../../shared/llm-observability";
 import { ContentError } from "../errors";
+import {
+  agentToolNamesByCapability,
+  isOversizedCurrentTurnToolName,
+  isReadToolOutputToolName,
+} from "./tool-registry";
 
 const DEFAULT_CONTEXT_LENGTH = 32_768;
 export const SOURCEWEFT_TOOL_OUTPUT_PLACEHOLDER =
@@ -25,13 +30,11 @@ const RECENT_TOOL_RESULTS_TO_KEEP = 5;
 const RECENT_MESSAGES_TO_KEEP = 20;
 const SUMMARY_MESSAGE_TRIGGER = 40;
 const MAX_RESERVED_OUTPUT_TOKENS = 8_192;
-const OVERSIZED_CURRENT_TURN_TOOL_NAMES = new Set([
-  "read_file",
-  "grep",
-  "search_sources",
-  "web_search",
-  "web_fetch",
-]);
+const OVERSIZED_CURRENT_TURN_TOOL_NAMES = new Set(
+  agentToolNamesByCapability("oversized_current_turn").filter(
+    isOversizedCurrentTurnToolName,
+  ),
+);
 
 export const SOURCEWEFT_HISTORY_PATH_PREFIX = "/conversation_history";
 
@@ -370,7 +373,7 @@ function assertCurrentTurnToolResultsFit(
       continue;
     }
     const toolName = ToolMessage.isInstance(message) ? message.name : null;
-    if (toolName === "read_file") {
+    if (toolName && isReadToolOutputToolName(toolName)) {
       throw new ContentError(
         413,
         "SOURCE_CONTEXT_TOO_LARGE",

@@ -29,9 +29,14 @@ export class ContentService {
     this.sourceIndexingService = new SourceIndexingService(billing);
     this.sourceParsingService = new SourceParsingService(
       this.sourceIndexingService,
+      billing,
     );
     this.threadStreamService = new ContentThreadStreamService(
       new ContentThreadTurnService(billing),
+      undefined,
+      undefined,
+      undefined,
+      billing,
     );
   }
 

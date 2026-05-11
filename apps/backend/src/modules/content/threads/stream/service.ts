@@ -6,6 +6,7 @@ import {
   type DeepAgentTurnOutcome,
 } from "../../agent/turn/runner";
 import type { AgentCitation } from "../../agent/citation-registry";
+import type { ContentBillingPort } from "../../billing-port";
 import { ContentError } from "../../errors";
 import { requireContentWorkspace } from "../../content-support";
 import { toContentServiceError } from "../../model-gateway-error";
@@ -644,12 +645,71 @@ async function enqueueAutomaticThreadTitleJob(input: {
 }
 
 class ContentThreadStreamService {
+  private readonly billing: ContentBillingPort;
+
   constructor(
     private readonly turnService: ContentThreadTurnService,
     private readonly invokeAgentTurn = invokeDeepAgentTurn,
     private readonly enqueueTitleJob = enqueueAutomaticThreadTitleJob,
     private readonly createErrorMessage = createThreadStreamErrorMessage,
-  ) {}
+    billing?: ContentBillingPort,
+  ) {
+    this.billing =
+      billing ??
+      (turnService as unknown as { billing?: ContentBillingPort }).billing ??
+      {
+        getSummary: async (teamId: string) => ({
+          teamId,
+          planFamily: "individual_free",
+          billingMode: "disabled",
+          cycleAnchorAt: new Date(0).toISOString(),
+          cycleSource: "free_account",
+          cycleStartAt: new Date(0).toISOString(),
+          cycleEndAt: new Date(0).toISOString(),
+          pages: {
+            limit: 0,
+            used: 0,
+            remaining: 0,
+            monthlyGrant: 0,
+            monthlyBalance: 0,
+            addOnBalance: 0,
+            consumedThisCycle: 0,
+            available: 0,
+          },
+          credits: {
+            monthlyGrant: 0,
+            monthlyBalance: 0,
+            addOnBalance: 0,
+            reserved: 0,
+            consumedThisCycle: 0,
+            available: 0,
+          },
+          seats: {
+            used: 0,
+            limit: 0,
+            remaining: 0,
+          },
+          spendLimits: {
+            softCapUsd: null,
+            hardCapUsd: null,
+          },
+        }),
+        meterConsume: async (teamId: string) => ({
+          teamId,
+          consumedCredits: 0,
+          availableCredits: 0,
+          consumedThisCycle: 0,
+          idempotencyReplayed: false,
+        }),
+        meterIngestion: async (teamId: string) => ({
+          teamId,
+          pagesConsumed: 0,
+          pagesUsed: 0,
+          pagesRemaining: 0,
+          idempotencyReplayed: false,
+        }),
+      };
+  }
 
   async refreshThread(input: RefreshThreadInput) {
     return this.streamThread(await resolveRefreshThreadStreamInput(input));
@@ -764,6 +824,7 @@ class ContentThreadStreamService {
       try {
         const agentEvents = this.invokeAgentTurn({
           prepared,
+          billing: this.billing,
           llm: prepared.llm,
           traceContext: {
             ...prepared.traceContext,
@@ -1156,6 +1217,7 @@ class ContentThreadStreamService {
         let doneOutcome: DeepAgentTurnOutcome | null = null;
         for await (const event of this.invokeAgentTurn({
           prepared,
+          billing: this.billing,
           llm: prepared.llm,
           traceContext: {
             ...prepared.traceContext!,

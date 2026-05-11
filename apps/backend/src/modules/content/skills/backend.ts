@@ -14,6 +14,7 @@ import type {
 } from "deepagents";
 import type { EnabledSkillDescriptor } from "./types";
 import { sanitizeNonCitableCitationMarkers } from "../agent/fs-utils";
+import { AGENT_TOOL_NAMES } from "../agent/tool-names";
 
 type SkillFileEntry = {
   path: string;
@@ -157,9 +158,9 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     const file = this.filesByPath.get(normalized);
     if (!file) {
       if (this.directoryPaths.has(normalized) || this.directoryPaths.has(`${normalized}/`)) {
-        return { error: `EISDIR: is a directory, read_file '${normalized}'` };
+        return { error: `EISDIR: is a directory, ${AGENT_TOOL_NAMES.readFile} '${normalized}'` };
       }
-      return { error: `ENOENT: no such file, read_file '${normalized}'` };
+      return { error: `ENOENT: no such file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'` };
     }
 
     if (normalized.endsWith("/SKILL.md")) {
@@ -175,7 +176,7 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     const boundedLimit = Math.max(1, Math.min(limit, 1000));
     const selected = lines.slice(boundedOffset, boundedOffset + boundedLimit);
     const more = boundedOffset + selected.length < lines.length
-      ? `\n\nOutput truncated. Continue with read_file(path: "${normalized}", offset: ${boundedOffset + selected.length}, limit: ${boundedLimit}).`
+      ? `\n\nOutput truncated. Continue with ${AGENT_TOOL_NAMES.readFile}(path: "${normalized}", offset: ${boundedOffset + selected.length}, limit: ${boundedLimit}).`
       : "";
     return {
       mimeType: file.mimeType,
@@ -193,7 +194,7 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     const normalized = normalizePath(filePath);
     const file = this.filesByPath.get(normalized);
     if (!file) {
-      return { error: `ENOENT: no such file, read_file '${normalized}'` };
+      return { error: `ENOENT: no such file, ${AGENT_TOOL_NAMES.readFile} '${normalized}'` };
     }
     const data: FileData = {
       content: sanitizeNonCitableCitationMarkers(file.contentText),

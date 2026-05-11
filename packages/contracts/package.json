@@ -9,6 +9,7 @@
     "./jobs": "./src/jobs.ts",
     "./billing": "./src/billing.ts",
     "./content": "./src/content.ts",
+    "./agent-tools": "./src/agent-tools.ts",
     "./workspace": "./src/workspace.ts",
     "./api-response": "./src/api-response.ts"
   },

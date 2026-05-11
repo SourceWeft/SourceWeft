@@ -5,6 +5,8 @@ import {
   buildGatewayRequestMetadata,
   type LlmExecutionConfig,
 } from "../../model-gateway-audit";
+import type { ContentBillingPort } from "../../billing-port";
+import { meterBillableModelUsage } from "../../model-billing";
 import { updateThreadTitleIfMatches } from "./repository";
 import {
   normalizeChatTitle,
@@ -25,6 +27,7 @@ export type GenerateThreadTitleInput = {
   gatewayConfigId: string;
   llm?: LlmExecutionConfig;
   parentSpanId?: string | null;
+  billing?: ContentBillingPort;
 };
 
 export type ApplyGeneratedThreadTitleInput = GenerateThreadTitleInput & {
@@ -85,6 +88,29 @@ export async function generateThreadTitle(input: GenerateThreadTitleInput) {
   const title = normalizeGeneratedChatTitle(
     resolveAssistantContent({ raw: completion.raw }),
   );
+  if (input.billing) {
+    await meterBillableModelUsage({
+      billing: input.billing,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      actorUserId: input.userId,
+      feature: "chat",
+      operation: "chat.title",
+      modelKind: "chat",
+      gatewayConfigId: input.gatewayConfigId,
+      profileAlias: input.profileAlias,
+      modelAlias: input.modelAlias,
+      referenceId: `thread:${input.threadId}:title:${input.userMessageId}`,
+      idempotencyKey: `thread-title:${input.userMessageId}`,
+      usage: completion.usage,
+      llm: input.llm,
+      metadata: {
+        traceId: input.traceId ?? input.userMessageId,
+        threadId: input.threadId,
+        messageId: input.userMessageId,
+      },
+    });
+  }
   logger.debug("Generated automatic thread title candidate", {
     threadId: input.threadId,
     userMessageId: input.userMessageId,

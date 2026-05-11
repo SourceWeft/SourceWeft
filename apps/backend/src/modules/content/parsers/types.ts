@@ -1,4 +1,5 @@
 import type { ChunkSpec, ParsingConfig, SourceMetadata } from "../types";
+import type { ContentBillingPort } from "../billing-port";
 
 export type ParseInput = {
   fileName: string;
@@ -15,6 +16,7 @@ export type ParseInput = {
   workspaceId?: string;
   userId?: string;
   idempotencyKey?: string;
+  billing?: ContentBillingPort;
 };
 
 export type ParsedPage = {

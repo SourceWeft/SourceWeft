@@ -2,7 +2,12 @@ import type { EnabledSkillDescriptor } from "../skills/types";
 import type { ThreadModelSettings } from "../threads/model-settings";
 import { resolveModelGatewayProfile } from "../../../shared/model-gateway/client";
 import type { RuntimeModelGatewayProfile } from "../../../shared/model-gateway/types";
-import { AGENT_TOOL_NAMES } from "../agent/tool-names";
+import {
+  AGENT_TOOL_NAMES,
+  isAgentToolEnabledByDefault,
+  isGeneratedImageArtifactToolName,
+  isSkillActivatedAgentTool,
+} from "../agent/tool-registry";
 import { resolveImageModelCapabilities } from "./image-capabilities";
 import {
   DEFAULT_IMAGE_ARTIFACT_CONFIG,
@@ -34,7 +39,11 @@ type ResolveImageProfile = (input: {
 }) => Promise<ResolvedArtifactImageProfile | null>;
 
 function skillHasImageCapability(skill: EnabledSkillDescriptor) {
-  return skill.tools?.includes(AGENT_TOOL_NAMES.generateImage) === true;
+  return skill.tools?.some(
+    (toolName) =>
+      isSkillActivatedAgentTool(toolName) &&
+      isGeneratedImageArtifactToolName(toolName),
+  ) === true;
 }
 
 function defaultConfigFromSkills(skills: EnabledSkillDescriptor[]) {
@@ -142,7 +151,11 @@ export async function runArtifactIntentPipeline(input: {
     legacySelection?.modelAlias ??
     modelAliasFromSkills(input.enabledSkills);
   const skillTriggered = input.enabledSkills.some(skillHasImageCapability);
-  const shouldInjectTool = !disabled;
+  const shouldInjectTool =
+    !disabled &&
+    (explicit ||
+      skillTriggered ||
+      isAgentToolEnabledByDefault(AGENT_TOOL_NAMES.generateImage));
   const source = disabled
     ? "none"
     : explicit
@@ -202,12 +215,12 @@ export async function runArtifactIntentPipeline(input: {
             : 0,
       reason:
         disabled
-          ? "The generate_image tool is disabled for this turn."
+          ? `The ${AGENT_TOOL_NAMES.generateImage} tool is disabled for this turn.`
           : source === "explicit_tool"
-            ? "User-facing image generation controls configured generate_image."
+            ? `User-facing image generation controls configured ${AGENT_TOOL_NAMES.generateImage}.`
           : source === "skill"
-            ? "A selected skill declares generate_image."
-            : "generate_image is available for this turn when the model decides a visual artifact is needed.",
+            ? `A selected skill declares ${AGENT_TOOL_NAMES.generateImage}.`
+            : `${AGENT_TOOL_NAMES.generateImage} is available for this turn when the model decides a visual artifact is needed.`,
       config,
       warnings,
     },

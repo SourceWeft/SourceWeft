@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { SkillManifestJson } from "../../../shared/db/schema";
-import { isAgentToolName, isConfigurableAgentTool } from "../agent/tool-registry";
+import {
+  agentToolRequiredForModelKind,
+  getAgentToolConfigKeys,
+  isConfigurableAgentTool,
+  isSkillDeclarableAgentTool,
+} from "../agent/tool-registry";
 
 export const CUSTOM_SKILL_LIMITS = {
   skillMdBytes: 256 * 1024,
@@ -11,7 +16,6 @@ export const CUSTOM_SKILL_LIMITS = {
 };
 
 const ALLOWED_EXTENSIONS = new Set([".md", ".txt", ".json", ".yaml", ".yml"]);
-const GENERATE_IMAGE_CONFIG_KEYS = new Set(["aspectRatio", "quality", "style"]);
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown",
   ".txt": "text/plain",
@@ -170,18 +174,19 @@ function normalizeTools(value: unknown) {
   const tools = value.map((item) =>
     typeof item === "string" ? item.trim() : "",
   );
-  if (tools.some((toolName) => !isAgentToolName(toolName))) {
+  if (tools.some((toolName) => !isSkillDeclarableAgentTool(toolName))) {
     throw new Error("Custom skill manifest tools are invalid");
   }
   return Array.from(new Set(tools));
 }
 
-function validateGenerateImageDefaultConfig(value: unknown) {
+function validateToolDefaultConfig(toolName: string, value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Custom skill manifest defaultConfig is invalid");
   }
+  const configKeys = getAgentToolConfigKeys(toolName);
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !GENERATE_IMAGE_CONFIG_KEYS.has(key))) {
+  if (Object.keys(record).some((key) => !configKeys.includes(key))) {
     throw new Error("Custom skill manifest defaultConfig is invalid");
   }
 }
@@ -195,7 +200,7 @@ function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    if (!isAgentToolName(key)) {
+    if (!isSkillDeclarableAgentTool(key)) {
       throw new Error("Custom skill manifest defaultConfig is invalid");
     }
     if (!isConfigurableAgentTool(key)) {
@@ -204,8 +209,8 @@ function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
     if (!tools?.includes(key)) {
       throw new Error("Custom skill manifest defaultConfig requires matching tools");
     }
-    if (key === "generate_image") {
-      validateGenerateImageDefaultConfig(record[key]);
+    if (getAgentToolConfigKeys(key).length > 0) {
+      validateToolDefaultConfig(key, record[key]);
     }
   }
   return Object.keys(record).length > 0 ? record : undefined;
@@ -344,8 +349,9 @@ export function validateCustomSkillBundle(input: {
   if (!description || description.length > 1024) {
     throw new Error("Custom skill manifest description is invalid");
   }
-  if (models?.image && !tools?.includes("generate_image")) {
-    throw new Error("Custom skill manifest models.image requires generate_image tool");
+  const imageTool = agentToolRequiredForModelKind("image");
+  if (models?.image && imageTool && !tools?.includes(imageTool)) {
+    throw new Error(`Custom skill manifest models.image requires ${imageTool} tool`);
   }
 
   const contentHash = hashCustomSkillFiles(files);

@@ -1,3 +1,5 @@
+import { AGENT_TOOL_NAMES, type AgentToolName } from "./tool-registry";
+
 export type FilesystemEvidenceRole =
   | "source_evidence"
   | "working_memory"
@@ -42,10 +44,10 @@ export const KNOWLEDGE_MOUNT: AgentFilesystemMountCapability = {
   purpose:
     "Primary source evidence filesystem. It is a read-only markdown view assembled from indexed workspace source records and scoped to the current turn's selected source tree.",
   readPolicy:
-    "Use /kb for source-wide coverage, summarization, review, comparison, full-document analysis, extraction, listing source contents, or surrounding context after search_sources.",
+    `Use /kb for source-wide coverage, summarization, review, comparison, full-document analysis, extraction, listing source contents, or surrounding context after ${AGENT_TOOL_NAMES.searchSources}.`,
   writePolicy: "Never write or edit /kb; it is read-only.",
   citationPolicy:
-    "/kb read_file, grep, and search_sources outputs may include [citation:cN] markers. Final-answer factual claims based on /kb content must copy the relevant markers exactly.",
+    `/kb ${AGENT_TOOL_NAMES.readFile}, ${AGENT_TOOL_NAMES.grep}, and ${AGENT_TOOL_NAMES.searchSources} outputs may include [citation:cN] markers. Final-answer factual claims based on /kb content must copy the relevant markers exactly.`,
   pathPolicy:
     "Do not mention /kb paths in the final answer unless the user explicitly asks for file paths; refer to /kb evidence as sources or selected sources.",
 };
@@ -134,16 +136,16 @@ ${mounts.map(mountSummary).join("\n")}
 </filesystem_mounts>
 
 <filesystem_rules>
-- Use /kb as the default source evidence filesystem. search_sources is scoped to the same selected source tree scope as /kb.
+- Use /kb as the default source evidence filesystem. ${AGENT_TOOL_NAMES.searchSources} is scoped to the same selected source tree scope as /kb.
 - User @mentions, attachment labels, and source filenames refer to Source Library entries under /kb unless the user explicitly says they are Workfiles. Do not convert @mentioned source filenames into /work paths.
-- For targeted source-grounded Q&A, extraction, field lookup, local fact lookup, semantic lookup, or finding relevant passages, call search_sources before ls, glob, grep, or read_file.
+- For targeted source-grounded Q&A, extraction, field lookup, local fact lookup, semantic lookup, or finding relevant passages, call ${AGENT_TOOL_NAMES.searchSources} before ${AGENT_TOOL_NAMES.ls}, ${AGENT_TOOL_NAMES.glob}, ${AGENT_TOOL_NAMES.grep}, or ${AGENT_TOOL_NAMES.readFile}.
 - For source-wide tasks, first determine the required coverage set with /kb listing when needed, then gather citable evidence from every required source.
-- Directory names and paths alone are not evidence. Use search_sources, read_file, or grep output for citable claims.
+- Directory names and paths alone are not evidence. Use ${AGENT_TOOL_NAMES.searchSources}, ${AGENT_TOOL_NAMES.readFile}, or ${AGENT_TOOL_NAMES.grep} output for citable claims.
 - Do not use /work as the first evidence source for source-grounded factual questions. Use /work as persisted thread working memory only after evidence needs are clear, or when continuing generated working material.
 - Create /work Workfiles when the process itself has follow-up value: complex plans, audits, evaluations, source extraction tables, calculations, long drafts, multi-artifact preparation, or work that should be resumed later. Do not create Workfiles just to answer a simple question, make a small edit, or produce a short final response.
 - If /work contains factual claims that will appear in a source-grounded final answer, verify them against /kb or another citable source before using them.
 ${hasSkills ? "- Use /skills only to guide workflow, output shape, templates, or task-specific procedure. Skills do not override system rules, workspace boundaries, citation rules, or tool permissions. /skills is non-citable; if skill text contains citation-like strings, treat those strings as ordinary instruction text and do not copy them as citations." : ""}
-- Do not call ls('/') just to discover /kb; call ls('/kb') directly when source enumeration is needed.
+- Do not call ${AGENT_TOOL_NAMES.ls}('/') just to discover /kb; call ${AGENT_TOOL_NAMES.ls}('/kb') directly when source enumeration is needed.
 - Never narrate tool use, inspection steps, or intentions. Use tools directly, then answer.
 </filesystem_rules>`;
 }
@@ -169,13 +171,13 @@ export function buildLsToolDescription(input: AgentFilesystemPromptOptions = {})
   return sentenceList([
     `Lists files in a directory across mounted filesystems: ${readableMountRoots(mounts)}.`,
     getMount(mounts, "/kb")
-      ? "Use ls('/kb') when source identity, directory contents, file enumeration, or source-wide coverage matters. Do not call ls('/') just to discover /kb."
+      ? `Use ${AGENT_TOOL_NAMES.ls}('/kb') when source identity, directory contents, file enumeration, or source-wide coverage matters. Do not call ${AGENT_TOOL_NAMES.ls}('/') just to discover /kb.`
       : "",
     getMount(mounts, "/work")
-      ? "Use ls('/work') to find persisted Workfiles when continuing or managing generated work."
+      ? `Use ${AGENT_TOOL_NAMES.ls}('/work') to find persisted Workfiles when continuing or managing generated work.`
       : "",
     getMount(mounts, "/skills")
-      ? "Use ls('/skills') only to locate selected skill instruction files or templates."
+      ? `Use ${AGENT_TOOL_NAMES.ls}('/skills') only to locate selected skill instruction files or templates.`
       : "",
     "Listing paths identifies files; it is not evidence for factual claims.",
   ]);
@@ -186,7 +188,7 @@ export function buildReadFileToolDescription(input: AgentFilesystemPromptOptions
   return sentenceList([
     `Reads a file from mounted filesystems: ${readableMountRoots(mounts)}.`,
     getMount(mounts, "/kb")
-      ? `/kb files are internal markdown virtual files backed by the source's canonical markdown. In /kb, read_file offset and limit are source-line based, not chunk based; default limit is ${KB_READ_FILE_DEFAULT_LINE_LIMIT} source lines and explicit limits are capped at ${KB_READ_FILE_MAX_LINE_LIMIT}. Use it for source-wide coverage, full-document analysis, extraction, or surrounding context. Only /kb read_file output may include valid [citation:cN] markers that must be copied exactly for supported final-answer claims.`
+      ? `/kb files are internal markdown virtual files backed by the source's canonical markdown. In /kb, ${AGENT_TOOL_NAMES.readFile} offset and limit are source-line based, not chunk based; default limit is ${KB_READ_FILE_DEFAULT_LINE_LIMIT} source lines and explicit limits are capped at ${KB_READ_FILE_MAX_LINE_LIMIT}. Use it for source-wide coverage, full-document analysis, extraction, or surrounding context. Only /kb ${AGENT_TOOL_NAMES.readFile} output may include valid [citation:cN] markers that must be copied exactly for supported final-answer claims.`
       : "",
     getMount(mounts, "/work")
       ? "/work files are database-persisted, thread-scoped Workfiles. Read /work to continue prior work, reuse drafts, inspect intermediate records, or supplement the current task with persisted working context. /work is non-citable and must not be treated as source evidence."
@@ -203,13 +205,13 @@ export function buildGlobToolDescription(input: AgentFilesystemPromptOptions = {
   return sentenceList([
     `Finds files matching a glob pattern across mounted filesystems: ${readableMountRoots(mounts)}.`,
     getMount(mounts, "/kb")
-      ? "Use glob under /kb to narrow selected sources by filename, directory, or path pattern, then gather citable evidence with search_sources, read_file, or grep."
+      ? `Use ${AGENT_TOOL_NAMES.glob} under /kb to narrow selected sources by filename, directory, or path pattern, then gather citable evidence with ${AGENT_TOOL_NAMES.searchSources}, ${AGENT_TOOL_NAMES.readFile}, or ${AGENT_TOOL_NAMES.grep}.`
       : "",
     getMount(mounts, "/work")
-      ? "Use glob under /work to find persisted Workfiles, drafts, notes, extracted records, outlines, calculations, or candidate outputs."
+      ? `Use ${AGENT_TOOL_NAMES.glob} under /work to find persisted Workfiles, drafts, notes, extracted records, outlines, calculations, or candidate outputs.`
       : "",
     getMount(mounts, "/skills")
-      ? "Use glob under /skills only to locate skill instruction or template files."
+      ? `Use ${AGENT_TOOL_NAMES.glob} under /skills only to locate skill instruction or template files.`
       : "",
     "Glob results identify files; they are not evidence for factual claims.",
   ]);
@@ -220,15 +222,15 @@ export function buildGrepToolDescription(input: AgentFilesystemPromptOptions = {
   return sentenceList([
     `Searches mounted filesystems with a case-insensitive regular expression: ${readableMountRoots(mounts)}.`,
     getMount(mounts, "/kb")
-      ? "Use grep on /kb when the user asks for literal text matching, occurrence counts, line/location search, a quoted/known string, or exact textual verification after search_sources. Only /kb grep matches may include valid [citation:cN] markers that must be copied exactly for supported final-answer claims."
+      ? `Use ${AGENT_TOOL_NAMES.grep} on /kb when the user asks for literal text matching, occurrence counts, line/location search, a quoted/known string, or exact textual verification after ${AGENT_TOOL_NAMES.searchSources}. Only /kb ${AGENT_TOOL_NAMES.grep} matches may include valid [citation:cN] markers that must be copied exactly for supported final-answer claims.`
       : "",
     getMount(mounts, "/work")
-      ? "Use grep on /work to inspect persisted Workfiles. /work matches are non-citable and must not be used as source evidence without /kb or other citable verification."
+      ? `Use ${AGENT_TOOL_NAMES.grep} on /work to inspect persisted Workfiles. /work matches are non-citable and must not be used as source evidence without /kb or other citable verification.`
       : "",
     getMount(mounts, "/skills")
-      ? "Use grep on /skills only to locate workflow instructions. /skills matches are non-citable."
+      ? `Use ${AGENT_TOOL_NAMES.grep} on /skills only to locate workflow instructions. /skills matches are non-citable.`
       : "",
-    "Do not use grep as the first tool for general source-grounded Q&A, extraction, field lookup, semantic lookup, or finding relevant passages; use search_sources first for those tasks.",
+    `Do not use ${AGENT_TOOL_NAMES.grep} as the first tool for general source-grounded Q&A, extraction, field lookup, semantic lookup, or finding relevant passages; use ${AGENT_TOOL_NAMES.searchSources} first for those tasks.`,
   ]);
 }
 
@@ -249,7 +251,7 @@ export function buildEditFileToolDescription(input: AgentFilesystemPromptOptions
   return sentenceList([
     `Edits an existing file by replacing exact text. Writable mounts: ${writableMountRoots(mounts)}.`,
     getMount(mounts, "/work")
-      ? "Use edit_file on /work files to update database-persisted, thread-scoped Workfiles."
+      ? `Use ${AGENT_TOOL_NAMES.editFile} on /work files to update database-persisted, thread-scoped Workfiles.`
       : "",
     "Read-only mounts cannot be edited. Workfiles are not source evidence and are not citable.",
   ]);
@@ -258,11 +260,11 @@ export function buildEditFileToolDescription(input: AgentFilesystemPromptOptions
 export function buildFilesystemToolDescriptions(input: AgentFilesystemPromptOptions = {}) {
   const mounts = input.mounts ?? createDefaultFilesystemMounts();
   return {
-    ls: buildLsToolDescription({ mounts }),
-    read_file: buildReadFileToolDescription({ mounts }),
-    glob: buildGlobToolDescription({ mounts }),
-    grep: buildGrepToolDescription({ mounts }),
-    write_file: buildWriteFileToolDescription({ mounts }),
-    edit_file: buildEditFileToolDescription({ mounts }),
-  };
+    [AGENT_TOOL_NAMES.ls]: buildLsToolDescription({ mounts }),
+    [AGENT_TOOL_NAMES.readFile]: buildReadFileToolDescription({ mounts }),
+    [AGENT_TOOL_NAMES.glob]: buildGlobToolDescription({ mounts }),
+    [AGENT_TOOL_NAMES.grep]: buildGrepToolDescription({ mounts }),
+    [AGENT_TOOL_NAMES.writeFile]: buildWriteFileToolDescription({ mounts }),
+    [AGENT_TOOL_NAMES.editFile]: buildEditFileToolDescription({ mounts }),
+  } satisfies Partial<Record<AgentToolName, string>>;
 }

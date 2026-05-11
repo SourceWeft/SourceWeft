@@ -1,6 +1,7 @@
 import { tool, type ToolRuntime } from "langchain";
 import { z } from "zod";
 import type { AgentCitationRegistry } from "../citation-registry";
+import { AGENT_TOOL_NAMES } from "../tool-names";
 import type {
   WebFetchResultItem,
   WebProvider,
@@ -45,7 +46,7 @@ function addSearchCitation(input: {
   result: WebSearchResultItem;
 }) {
   return input.citationRegistry.addExternal({
-    origin: "web_search",
+    origin: AGENT_TOOL_NAMES.webSearch,
     externalUri: input.result.url,
     sourceTitle: input.result.title,
     content:
@@ -64,7 +65,7 @@ function addFetchCitation(input: {
   result: WebFetchResultItem;
 }) {
   return input.citationRegistry.addExternal({
-    origin: "web_fetch",
+    origin: AGENT_TOOL_NAMES.webFetch,
     externalUri: input.result.url,
     sourceTitle: input.result.title,
     content:
@@ -84,32 +85,32 @@ function formatWebSearchResults(input: {
     return `No web search results found for query: ${input.query}`;
   }
 
-  return `Use these web search results internally. Results may include extracted main page content in addition to titles and snippets. Every factual claim from these results MUST cite the exact citation id in the form [citation:cN]. Use web_fetch only for a specific page or when the search result content is insufficient or conflicting.
+  return `Use these web search results internally. Results may include extracted main page content in addition to titles and snippets. Every factual claim from these results MUST cite the exact citation id in the form [citation:cN]. Use ${AGENT_TOOL_NAMES.webFetch} only for a specific page or when the search result content is insufficient or conflicting.
 
 ${input.results
-  .map((result, index) => {
-    const snippet = compactWhitespace(result.snippet ?? "").slice(0, 1200);
-    const markdown = compactWhitespace(result.markdown ?? "").slice(0, 6000);
-    const attributes = [
-      `id='${result.citation}'`,
-      `rank='${index + 1}'`,
-      `url='${escapeAttribute(result.url)}'`,
-      `title='${escapeAttribute(result.title)}'`,
-      ...(result.wordCount !== undefined
-        ? [`word_count='${result.wordCount}'`]
-        : []),
-      ...(result.truncated !== undefined
-        ? [`truncated='${result.truncated}'`]
-        : []),
-    ].join(" ");
-    return `<web_result ${attributes}>${[
-      snippet ? `<snippet>${escapeText(snippet)}</snippet>` : "",
-      markdown ? `<main_content>${escapeText(markdown)}</main_content>` : "",
-    ]
-      .filter(Boolean)
-      .join("\n")}</web_result>`;
-  })
-  .join("\n\n")}`;
+      .map((result, index) => {
+        const snippet = compactWhitespace(result.snippet ?? "").slice(0, 1200);
+        const markdown = compactWhitespace(result.markdown ?? "").slice(0, 6000);
+        const attributes = [
+          `id='${result.citation}'`,
+          `rank='${index + 1}'`,
+          `url='${escapeAttribute(result.url)}'`,
+          `title='${escapeAttribute(result.title)}'`,
+          ...(result.wordCount !== undefined
+            ? [`word_count='${result.wordCount}'`]
+            : []),
+          ...(result.truncated !== undefined
+            ? [`truncated='${result.truncated}'`]
+            : []),
+        ].join(" ");
+        return `<web_result ${attributes}>${[
+          snippet ? `<snippet>${escapeText(snippet)}</snippet>` : "",
+          markdown ? `<main_content>${escapeText(markdown)}</main_content>` : "",
+        ]
+          .filter(Boolean)
+          .join("\n")}</web_result>`;
+      })
+      .join("\n\n")}`;
 }
 
 function formatWebSearchFailure(input: {
@@ -117,9 +118,9 @@ function formatWebSearchFailure(input: {
   query: string;
   error: string;
 }) {
-  return `web_search failed. Continue without web evidence if possible, or explain that live web search is currently unavailable.
+  return `${AGENT_TOOL_NAMES.webSearch} failed. Continue without web evidence if possible, or explain that live web search is currently unavailable.
 
-<web_tool_error tool='web_search' provider='${escapeAttribute(input.provider)}' query='${escapeAttribute(input.query)}' error='${escapeAttribute(input.error)}'></web_tool_error>`;
+<web_tool_error tool='${AGENT_TOOL_NAMES.webSearch}' provider='${escapeAttribute(input.provider)}' query='${escapeAttribute(input.query)}' error='${escapeAttribute(input.error)}'></web_tool_error>`;
 }
 
 function formatWebFetchResults(input: {
@@ -133,14 +134,14 @@ function formatWebFetchResults(input: {
   return `Use these fetched web pages internally. Every factual claim from these pages MUST cite the exact citation id in the form [citation:cN].
 
 ${input.results
-  .map((result, index) => {
-    if (result.error) {
-      return `<web_page rank='${index + 1}' url='${escapeAttribute(result.url)}' error='${escapeAttribute(result.error)}'></web_page>`;
-    }
+      .map((result, index) => {
+        if (result.error) {
+          return `<web_page rank='${index + 1}' url='${escapeAttribute(result.url)}' error='${escapeAttribute(result.error)}'></web_page>`;
+        }
 
-    return `<web_page id='${result.citation}' rank='${index + 1}' url='${escapeAttribute(result.url)}' title='${escapeAttribute(result.title ?? result.url)}' truncated='${result.truncated}'>${escapeText(result.markdown)}</web_page>`;
-  })
-  .join("\n\n")}`;
+        return `<web_page id='${result.citation}' rank='${index + 1}' url='${escapeAttribute(result.url)}' title='${escapeAttribute(result.title ?? result.url)}' truncated='${result.truncated}'>${escapeText(result.markdown)}</web_page>`;
+      })
+      .join("\n\n")}`;
 }
 
 export function createWebTools(input: {
@@ -203,9 +204,9 @@ export function createWebTools(input: {
       });
     },
     {
-      name: "web_search",
+      name: AGENT_TOOL_NAMES.webSearch,
       description:
-        "Search the public web for real-time, current, or external information. Use specific, descriptive search terms. Search results include titles, snippets, URLs, citations, and may include extracted main page content. Set fresh=true for current, latest, live, today, or otherwise time-sensitive searches; omit it when cached search content is acceptable. Use web_fetch only when search result content is insufficient, conflicting, or the user needs a specific page read in full.",
+        `Search the public web for real-time, current, or external information. Use specific, descriptive search terms. Search results include titles, snippets, URLs, citations, and may include extracted main page content. Set fresh=true for current, latest, live, today, or otherwise time-sensitive searches; omit it when cached search content is acceptable. Use ${AGENT_TOOL_NAMES.webFetch} only when search result content is insufficient, conflicting, or the user needs a specific page read in full.`,
       schema: z.object({
         query: z.string().min(1).max(WEB_SEARCH_QUERY_MAX_CHARS),
         fresh: z.boolean().optional(),
@@ -272,9 +273,9 @@ export function createWebTools(input: {
       });
     },
     {
-      name: "web_fetch",
+      name: AGENT_TOOL_NAMES.webFetch,
       description:
-        "Fetch and read full web page content from URLs. Use when the user provides a URL, asks for full-page analysis, or web_search evidence is insufficient or conflicting. Set fresh=true when the page content is current, latest, live, today, or otherwise time-sensitive; omit it when cached page content is acceptable.",
+        `Fetch and read full web page content from URLs. Use when the user provides a URL, asks for full-page analysis, or ${AGENT_TOOL_NAMES.webSearch} evidence is insufficient or conflicting. Set fresh=true when the page content is current, latest, live, today, or otherwise time-sensitive; omit it when cached page content is acceptable.`,
       schema: z.object({
         fresh: z.boolean().optional(),
         items: z

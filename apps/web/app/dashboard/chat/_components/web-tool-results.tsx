@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, FileText, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { isWebToolName } from "@sourceweft/sdk";
 import type { CitationRecord, ToolCallRecord } from "./chat-canvas";
 
 type WebPageToolResult = {
@@ -104,7 +105,7 @@ function getFaviconUrl(url: string) {
 
 export function hasWebPageToolResults(toolCalls: ToolCallRecord[] | undefined) {
   return (toolCalls ?? []).some((toolCall) =>
-    (toolCall.tool === "web_search" || toolCall.tool === "web_fetch") &&
+    isWebToolName(toolCall.tool) &&
     getWebPageToolResults(toolCall).length > 0
   );
 }
@@ -130,7 +131,7 @@ export function WebToolResults({
   toolCalls: ToolCallRecord[] | undefined;
 }) {
   const webToolCalls = (toolCalls ?? []).filter((toolCall) =>
-    toolCall.tool === "web_search" || toolCall.tool === "web_fetch"
+    isWebToolName(toolCall.tool)
   );
   const pages = webToolCalls.flatMap((toolCall) => getWebPageToolResults(toolCall));
   const [isOpen, setIsOpen] = useState(false);

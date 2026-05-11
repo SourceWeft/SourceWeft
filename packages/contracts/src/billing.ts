@@ -241,6 +241,9 @@ export const meterConsumeRequestSchema = z
     providerCostUsd: z.number().nonnegative().optional(),
     platformCostUsd: z.number().nonnegative().optional(),
     markupRate: z.number().nonnegative().optional(),
+    modelKind: z.string().optional(),
+    operation: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .refine(
     (value) =>

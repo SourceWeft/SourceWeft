@@ -61,6 +61,7 @@ type UsageActivityRow = {
   change: string;
   unitType: UsageActivityFilter | "seat";
 };
+type UsageActivityKind = "image" | "vision" | "chat" | "video" | "other";
 
 const USAGE_ACTIVITY_PAGE_SIZE = 20;
 const USAGE_ACTIVITY_FETCH_LIMIT = 200;
@@ -220,7 +221,7 @@ function formatPlanName(planFamily: string, personal: boolean) {
 
 function formatFeatureName(feature: string) {
   const label = feature
-    .replace(/[_-]+/g, " ")
+    .replace(/[._-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (char) => char.toUpperCase());
@@ -230,8 +231,11 @@ function formatFeatureName(feature: string) {
 
 function formatUsageDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
     month: "short",
     day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
@@ -278,74 +282,108 @@ function formatLedgerActivityChange(entry: BillingLedgerEntry) {
   )} · ${formatNumber(Math.max(entry.balanceAfter, 0))} left`;
 }
 
+function getUsageActivityKind(entry: BillingLedgerEntry): UsageActivityKind {
+  const feature = entry.feature.toLowerCase();
+  const modelKind = entry.metadata.modelKind;
+
+  if (modelKind === "image" || feature.includes("image")) {
+    return "image";
+  }
+
+  if (modelKind === "vision" || feature.includes("vision")) {
+    return "vision";
+  }
+
+  if (modelKind === "video" || feature.includes("video")) {
+    return "video";
+  }
+
+  if (modelKind === "chat" || feature.includes("chat")) {
+    return "chat";
+  }
+
+  return "other";
+}
+
+function formatUsageActivityDetail(
+  kind: UsageActivityKind,
+  detail: string,
+) {
+  return `${kind} · ${detail}`;
+}
+
 function formatLedgerDetail(entry: BillingLedgerEntry) {
   const feature = formatFeatureName(entry.feature);
+  const kind = getUsageActivityKind(entry);
+  const detail = (() => {
+    if (entry.eventType === "consume") {
+      if (entry.unitType === "page" && entry.feature === "ingestion") {
+        return "Pages indexed";
+      }
 
-  if (entry.eventType === "consume") {
-    if (entry.unitType === "page" && entry.feature === "ingestion") {
-      return "Pages indexed";
+      if (entry.unitType === "credit") {
+        return `${feature} credits used`;
+      }
+
+      return `${feature} pages used`;
     }
 
-    if (entry.unitType === "credit") {
-      return `${feature} credits used`;
+    if (entry.eventType === "grant") {
+      if (entry.feature === "cycle_grant") {
+        return entry.unitType === "page"
+          ? "Monthly pages granted"
+          : "Monthly credits granted";
+      }
+
+      if (entry.feature === "seat_quota_grant") {
+        return entry.unitType === "page"
+          ? "Seat pages granted"
+          : "Seat credits granted";
+      }
+
+      if (entry.feature === "plan_upgrade_grant") {
+        return entry.unitType === "page"
+          ? "Plan pages granted"
+          : "Plan credits granted";
+      }
+
+      if (entry.unitType === "page" && entry.feature === "shadow_auto_grant") {
+        return "Add-on pages granted";
+      }
+
+      return `${feature} granted`;
     }
 
-    return `${feature} pages used`;
-  }
-
-  if (entry.eventType === "grant") {
-    if (entry.feature === "cycle_grant") {
+    if (entry.eventType === "expire") {
       return entry.unitType === "page"
-        ? "Monthly pages granted"
-        : "Monthly credits granted";
+        ? "Monthly pages expired"
+        : "Unused credits expired";
     }
 
-    if (entry.feature === "seat_quota_grant") {
-      return entry.unitType === "page"
-        ? "Seat pages granted"
-        : "Seat credits granted";
+    if (entry.eventType === "adjust") {
+      if (entry.feature === "seat_quota_change") {
+        return "Seat page quota adjusted";
+      }
+
+      return `${feature} adjusted`;
     }
 
-    if (entry.feature === "plan_upgrade_grant") {
-      return entry.unitType === "page"
-        ? "Plan pages granted"
-        : "Plan credits granted";
+    if (entry.eventType === "refund") {
+      return `${feature} refunded`;
     }
 
-    if (entry.unitType === "page" && entry.feature === "shadow_auto_grant") {
-      return "Add-on pages granted";
+    if (entry.eventType === "reserve") {
+      return `${feature} reserved`;
     }
 
-    return `${feature} granted`;
-  }
-
-  if (entry.eventType === "expire") {
-    return entry.unitType === "page"
-      ? "Monthly pages expired"
-      : "Unused credits expired";
-  }
-
-  if (entry.eventType === "adjust") {
-    if (entry.feature === "seat_quota_change") {
-      return "Seat page quota adjusted";
+    if (entry.eventType === "release") {
+      return `${feature} released`;
     }
 
-    return `${feature} adjusted`;
-  }
+    return feature;
+  })();
 
-  if (entry.eventType === "refund") {
-    return `${feature} refunded`;
-  }
-
-  if (entry.eventType === "reserve") {
-    return `${feature} reserved`;
-  }
-
-  if (entry.eventType === "release") {
-    return `${feature} released`;
-  }
-
-  return feature;
+  return formatUsageActivityDetail(kind, detail);
 }
 
 function isLedgerEntryInCycle(
@@ -1245,7 +1283,7 @@ function UsagePanel() {
   const seatActivityRow: UsageActivityRow | null =
     summary && !isPersonal && activityFilter === "all"
       ? {
-          detail: "Seats occupied",
+          detail: formatUsageActivityDetail("other", "Seats occupied"),
           date: formatUsageDate(new Date().toISOString()),
           change: `${formatNumber(summary.seats.used)} used / ${formatNumber(
             summary.seats.remaining,

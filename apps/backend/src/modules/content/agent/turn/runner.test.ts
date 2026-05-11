@@ -180,57 +180,31 @@ test("runtime prompt lists only available public web tools", () => {
   );
 });
 
-test("generated image fallback markdown is inserted after the opening paragraph", () => {
-  const text = testExports.attachGeneratedImageMarkdown({
-    assistantText: "Image created.\n\nDetails stay below the image.",
-    artifacts: [
-      {
-        artifactId: "artifact-1",
-        artifactUrl: "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
-        title: "Concept [draft]",
+test("extracts generated image artifacts from completed tool calls", () => {
+  const artifacts = testExports.extractGeneratedImageArtifacts([
+    {
+      id: "tool-1",
+      tool: "generate_image",
+      input: {},
+      output: {
+        content:
+          "Image artifact created.\nartifact_id: artifact-1\ntitle: Concept [draft]\nartifact_url: /v1/workspaces/workspace-1/artifacts/artifact-1/file",
       },
-    ],
-  });
+      sequence: 1,
+      status: "completed",
+      latencyMs: 100,
+      error: null,
+    },
+  ]);
 
-  assert.equal(
-    text,
-    "Image created.\n\n![Concept draft](/v1/workspaces/workspace-1/artifacts/artifact-1/file)\n\nDetails stay below the image.",
-  );
-});
-
-test("generated image markdown replaces pending placeholders in order", () => {
-  const text = testExports.attachGeneratedImageMarkdown({
-    assistantText:
-      "Image created.\n\n![Generating image](sourceweft-image-pending://tool-1)\n\nDetails stay below the image.",
-    artifacts: [
-      {
-        artifactId: "artifact-1",
-        artifactUrl: "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
-        title: "Concept [draft]",
-        toolCallId: "tool-1",
-      },
-    ],
-  });
-
-  assert.equal(
-    text,
-    "Image created.\n\n![Concept draft](/v1/workspaces/workspace-1/artifacts/artifact-1/file)\n\nDetails stay below the image.",
-  );
-});
-
-test("generated image markdown skips artifacts already present in content", () => {
-  const text = testExports.attachGeneratedImageMarkdown({
-    assistantText: "Result\n\n![Existing](/artifact.png)",
-    artifacts: [
-      {
-        artifactId: "artifact-1",
-        artifactUrl: "/artifact.png",
-        title: "Existing",
-      },
-    ],
-  });
-
-  assert.equal(text, "Result\n\n![Existing](/artifact.png)");
+  assert.deepEqual(artifacts, [
+    {
+      artifactId: "artifact-1",
+      artifactUrl: "/v1/workspaces/workspace-1/artifacts/artifact-1/file",
+      title: "Concept [draft]",
+      toolCallId: "tool-1",
+    },
+  ]);
 });
 
 test("runtime prompt treats image auto mode as available but optional", () => {
@@ -255,5 +229,6 @@ test("runtime prompt treats image auto mode as available but optional", () => {
   assert.match(prompt, /generate_image is available in auto mode/);
   assert.match(prompt, /decide semantically from the user's goal/);
   assert.match(prompt, /Never claim an image was created/);
+  assert.match(prompt, /do not include image markdown or raw artifact URLs/);
   assert.match(prompt, /otherwise answer normally/);
 });

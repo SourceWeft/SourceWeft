@@ -90,6 +90,16 @@ import {
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import {
+  AGENT_TOOL_NAMES,
+  isGeneratedImageArtifactToolName,
+  isSkillActivatedAgentTool,
+  isRetrievalToolName,
+  isWebFetchToolName,
+  isWebSearchToolName,
+  isWebToolName,
+  type AgentToolName,
+} from "@sourceweft/sdk";
+import {
   ChainOfThought,
   ChainOfThoughtContent,
   ChainOfThoughtHeader,
@@ -108,8 +118,6 @@ const starterSuggestions = [
   "What changed between these reports?",
   "List the strongest supporting evidence",
 ];
-const PENDING_IMAGE_URL_PREFIX = "sourceweft-image-pending://";
-
 function toAttachmentData(source: SourceItem) {
   return {
     id: source.id,
@@ -244,16 +252,10 @@ export type ChatGenerateImageToolSelection = {
   config?: ChatImageArtifactConfig;
 };
 
-export const CHAT_TOOL_NAMES = {
-  generateImage: "generate_image",
-  webSearch: "web_search",
-} as const;
-
-export type ChatToolName =
-  (typeof CHAT_TOOL_NAMES)[keyof typeof CHAT_TOOL_NAMES];
+export type ChatToolName = AgentToolName;
 
 export type ChatToolsSelection = {
-  [CHAT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
+  [AGENT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
 };
 
 export function buildChatToolsRequest(input: {
@@ -261,14 +263,14 @@ export function buildChatToolsRequest(input: {
   searchEnabled?: boolean;
   tools?: ChatToolsSelection;
 }) {
-  const generateImage = input.tools?.[CHAT_TOOL_NAMES.generateImage];
+  const generateImage = input.tools?.[AGENT_TOOL_NAMES.generateImage];
 
   return {
     skillIds: input.skillIds ?? [],
-    [CHAT_TOOL_NAMES.webSearch]: {
+    [AGENT_TOOL_NAMES.webSearch]: {
       enabled: input.searchEnabled === true,
     },
-    ...(generateImage ? { [CHAT_TOOL_NAMES.generateImage]: generateImage } : {}),
+    ...(generateImage ? { [AGENT_TOOL_NAMES.generateImage]: generateImage } : {}),
   };
 }
 
@@ -405,7 +407,11 @@ type GeneratedImageArtifact = {
 };
 
 function skillSupportsImageGeneration(skill: ChatSkillItem) {
-  return skill.tools?.includes(CHAT_TOOL_NAMES.generateImage) === true;
+  return skill.tools?.some(
+    (toolName) =>
+      isSkillActivatedAgentTool(toolName) &&
+      isGeneratedImageArtifactToolName(toolName),
+  ) === true;
 }
 
 function readRecord(value: unknown) {
@@ -419,7 +425,7 @@ function skillImageDefaultConfig(skill: ChatSkillItem) {
   if (!defaultConfig) {
     return null;
   }
-  return readRecord(defaultConfig[CHAT_TOOL_NAMES.generateImage]);
+  return readRecord(defaultConfig[AGENT_TOOL_NAMES.generateImage]);
 }
 
 function normalizeSkillImageConfig(input: unknown) {
@@ -549,7 +555,7 @@ function buildComposerToolsSelection(input: {
   });
 
   if (generateImage) {
-    tools[CHAT_TOOL_NAMES.generateImage] = generateImage;
+    tools[AGENT_TOOL_NAMES.generateImage] = generateImage;
   }
 
   return Object.keys(tools).length > 0 ? tools : undefined;
@@ -582,11 +588,87 @@ export type VersionedMessageGroup = {
   latestVersionId: string;
 };
 
+function extractArtifactIdFromUrl(value: string) {
+  const match = value.match(/\/artifacts\/([^/?#]+)\/file(?:[?#].*)?$/);
+  return match ? decodeURIComponent(match[1] ?? "") : null;
+}
+
+function getGeneratedImageArtifactRefs(input: {
+  toolCalls?: ToolCallRecord[];
+  workspaceId?: string | null;
+}) {
+  const artifactIds = new Set<string>();
+  const artifactUrls = new Set<string>();
+
+  for (const toolCall of input.toolCalls ?? []) {
+    if (!isGeneratedImageArtifactToolName(toolCall.tool)) {
+      continue;
+    }
+
+    const artifact = resolveGeneratedImageArtifact(toolCall);
+    if (!artifact) {
+      continue;
+    }
+
+    if (artifact.artifactId) {
+      artifactIds.add(artifact.artifactId);
+    }
+
+    const urls = [
+      artifact.artifactUrl,
+      resolveArtifactUrl({ artifact, workspaceId: input.workspaceId }),
+    ];
+    for (const url of urls) {
+      if (!url) {
+        continue;
+      }
+      artifactUrls.add(normalizeAssetUrl(url));
+      const artifactId = extractArtifactIdFromUrl(url);
+      if (artifactId) {
+        artifactIds.add(artifactId);
+      }
+    }
+  }
+
+  return { artifactIds, artifactUrls };
+}
+
+function stripGeneratedImageMarkdown(input: {
+  content: string;
+  toolCalls?: ToolCallRecord[];
+  workspaceId?: string | null;
+}) {
+  const artifactRefs = getGeneratedImageArtifactRefs({
+    toolCalls: input.toolCalls,
+    workspaceId: input.workspaceId,
+  });
+
+  if (artifactRefs.artifactIds.size === 0 && artifactRefs.artifactUrls.size === 0) {
+    return input.content;
+  }
+
+  return input.content
+    .replace(
+      /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
+      (markdown: string, url: string) => {
+        const rawUrl = String(url).trim();
+        const normalizedUrl = normalizeAssetUrl(rawUrl);
+        const artifactId = extractArtifactIdFromUrl(rawUrl);
+        const isGeneratedImage =
+          artifactRefs.artifactUrls.has(normalizedUrl) ||
+          (artifactId ? artifactRefs.artifactIds.has(artifactId) : false);
+        return isGeneratedImage ? "" : markdown;
+      },
+    )
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function getMessageText(input: {
   version: MessageVersion;
   workspaceId?: string | null;
 }): string {
-  return withGeneratedImageMarkdown({
+  return stripGeneratedImageMarkdown({
     content: input.version.content,
     toolCalls: input.version.toolCalls,
     workspaceId: input.workspaceId,
@@ -1111,28 +1193,6 @@ function CitationAwareMessageResponse({
     className?: string;
     src?: string;
   }) => {
-    if (typeof src === "string" && src.startsWith(PENDING_IMAGE_URL_PREFIX)) {
-      return createElement(
-        "div",
-        {
-          className: cn(
-            "my-3 flex min-h-48 max-w-xl items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-4 py-8 text-muted-foreground",
-            className,
-          ),
-          role: "status",
-        },
-        createElement(
-          "div",
-          { className: "flex items-center gap-2 text-sm" },
-          createElement(Loader2, {
-            className: "size-4 animate-spin",
-            "aria-hidden": true,
-          }),
-          createElement("span", null, alt || "Generating image"),
-        ),
-      );
-    }
-
     return createElement("img", {
       ...props,
       alt: alt ?? "",
@@ -1284,12 +1344,16 @@ function compactText(value: string, maxLength = 160) {
     : compacted;
 }
 
+function normalizeAssetUrl(value: string) {
+  return value.startsWith("/v1/") ? `${apiBaseUrl}${value}` : value;
+}
+
 function resolveMessageAssetUrl(value: unknown) {
   if (typeof value !== "string") {
     return value;
   }
 
-  return value.startsWith("/v1/") ? `${apiBaseUrl}${value}` : value;
+  return normalizeAssetUrl(value);
 }
 
 function getToolOutputField(output: unknown, key: string) {
@@ -1320,7 +1384,7 @@ function resolveGeneratedImageArtifact(
   toolCall: ToolCallRecord,
   toolStep?: ThinkingStepRecord,
 ): GeneratedImageArtifact | null {
-  if (toolCall.tool !== CHAT_TOOL_NAMES.generateImage) {
+  if (!isGeneratedImageArtifactToolName(toolCall.tool)) {
     return null;
   }
 
@@ -1363,77 +1427,6 @@ function resolveArtifactUrl(input: {
   }
 
   return null;
-}
-
-function escapeMarkdownImageAlt(value: string) {
-  return value.replace(/[[\]\\]/g, "\\$&").trim();
-}
-
-function withGeneratedImageMarkdown(input: {
-  content: string;
-  toolCalls?: ToolCallRecord[];
-  workspaceId?: string | null;
-}) {
-  const imageArtifacts = (input.toolCalls ?? [])
-    .filter((toolCall) => toolCall.status === "completed")
-    .map((toolCall) => resolveGeneratedImageArtifact(toolCall))
-    .filter(
-      (artifact): artifact is GeneratedImageArtifact => artifact !== null,
-    );
-
-  if (imageArtifacts.length === 0) {
-    return input.content;
-  }
-
-  const content = input.content
-    .split("\n")
-    .filter((line) => line.trim() !== "Image not available")
-    .join("\n");
-  const appendedUrls = new Set<string>();
-  const markdown = imageArtifacts
-    .map((artifact) => {
-      const url = resolveArtifactUrl({
-        artifact,
-        workspaceId: input.workspaceId,
-      });
-      if (
-        !url ||
-        content.includes(url) ||
-        (artifact.artifactUrl
-          ? content.includes(artifact.artifactUrl)
-          : false) ||
-        appendedUrls.has(url)
-      ) {
-        return null;
-      }
-      appendedUrls.add(url);
-      const label = escapeMarkdownImageAlt(artifact.title ?? "Generated image");
-      return `![${label}](${url})`;
-    })
-    .filter((line): line is string => line !== null)
-    .join("\n\n");
-
-  if (!markdown) {
-    return content;
-  }
-
-  const trimmedContent = content.trim();
-  if (!trimmedContent) {
-    return markdown;
-  }
-
-  const firstParagraphBreak = trimmedContent.search(/\n\s*\n/);
-  if (firstParagraphBreak === -1) {
-    return [trimmedContent, markdown]
-      .filter((part) => part.length > 0)
-      .join("\n\n");
-  }
-
-  const firstParagraph = trimmedContent.slice(0, firstParagraphBreak).trim();
-  const rest = trimmedContent.slice(firstParagraphBreak).trim();
-  return [firstParagraph, markdown, rest]
-    .filter((part) => part.length > 0)
-    .join("\n\n");
 }
 
 function getToolOutputContent(output: unknown) {
@@ -1584,35 +1577,45 @@ function formatToolName(toolName: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+function getWebSearchStatusLabel(status: ToolCallRecord["status"]) {
+  if (status === "running") {
+    return "Searching web";
+  }
+  if (status === "error") {
+    return "Web search failed";
+  }
+  return "Searched web";
+}
+
+function getWebFetchStatusLabel(status: ToolCallRecord["status"]) {
+  if (status === "running") {
+    return "Fetching pages";
+  }
+  if (status === "error") {
+    return "Page fetch failed";
+  }
+  return "Fetched pages";
+}
+
 function getToolDisplayLabel(toolCall: ToolCallRecord) {
-  if (toolCall.tool === "search_sources") {
+  if (isRetrievalToolName(toolCall.tool)) {
     const query = getToolQuery(toolCall);
     return query
       ? `Search sources: ${compactText(query, 72)}`
       : "Search sources";
   }
 
-  if (toolCall.tool === CHAT_TOOL_NAMES.webSearch) {
+  if (isWebSearchToolName(toolCall.tool)) {
     const query = getToolQuery(toolCall);
-    const verb =
-      toolCall.status === "running"
-        ? "Searching web"
-        : toolCall.status === "error"
-          ? "Web search failed"
-          : "Searched web";
+    const verb = getWebSearchStatusLabel(toolCall.status);
     return query ? `${verb}: ${compactText(query, 72)}` : verb;
   }
 
-  if (toolCall.tool === "web_fetch") {
+  if (isWebFetchToolName(toolCall.tool)) {
     const urls = getToolFetchUrls(toolCall);
     const count = urls.length;
     const firstUrl = urls[0] ? compactText(urls[0], 56) : null;
-    const verb =
-      toolCall.status === "running"
-        ? "Fetching pages"
-        : toolCall.status === "error"
-          ? "Page fetch failed"
-          : "Fetched pages";
+    const verb = getWebFetchStatusLabel(toolCall.status);
     if (count > 0 && firstUrl) {
       const suffix = count > 1 ? ` +${count - 1}` : "";
       return `${verb}: ${firstUrl}${suffix}`;
@@ -1722,15 +1725,15 @@ function getToolCallDetailParts(
 ) {
   const hitCount = getToolHitCount(toolCall, toolStep);
   const resultCount =
-    toolCall.tool === CHAT_TOOL_NAMES.webSearch
+    isWebSearchToolName(toolCall.tool)
       ? getToolResultCount(toolCall, toolStep)
       : null;
   const fetchCount =
-    toolCall.tool === "web_fetch"
+    isWebFetchToolName(toolCall.tool)
       ? getToolFetchCount(toolCall, toolStep)
       : null;
   const concurrency =
-    toolCall.tool === "web_fetch" ? getToolConcurrency(toolStep) : null;
+    isWebFetchToolName(toolCall.tool) ? getToolConcurrency(toolStep) : null;
   const latencyMs =
     toolCall.latencyMs ??
     (typeof toolStep?.metadata?.latencyMs === "number"
@@ -1760,7 +1763,7 @@ function ToolCallDetails({
   workspaceId?: string | null;
 }) {
   const query = getToolQuery(toolCall, toolStep);
-  const shouldShowQuery = Boolean(query && toolCall.tool !== "search_sources");
+  const shouldShowQuery = Boolean(query && !isRetrievalToolName(toolCall.tool));
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
   const imageArtifact = resolveGeneratedImageArtifact(toolCall, toolStep);
@@ -1770,9 +1773,8 @@ function ToolCallDetails({
   const shouldShowOutputSummary = Boolean(
     outputSummary &&
       !imageArtifact &&
-      toolCall.tool !== "search_sources" &&
-      toolCall.tool !== CHAT_TOOL_NAMES.webSearch &&
-      toolCall.tool !== "web_fetch" &&
+      !isRetrievalToolName(toolCall.tool) &&
+      !isWebToolName(toolCall.tool) &&
       outputSummary !== "{}",
   );
 
@@ -1812,6 +1814,114 @@ function ToolCallDetails({
       {toolCall.error ? (
         <p className="text-destructive">{toolCall.error}</p>
       ) : null}
+    </div>
+  );
+}
+
+function GeneratedImageArtifacts({
+  toolCalls,
+  workspaceId,
+}: {
+  toolCalls: ToolCallRecord[] | undefined;
+  workspaceId?: string | null;
+}) {
+  const imageItems = (toolCalls ?? [])
+    .filter((toolCall) => isGeneratedImageArtifactToolName(toolCall.tool))
+    .map((toolCall) => {
+      const artifact = resolveGeneratedImageArtifact(toolCall);
+      const imageUrl = artifact
+        ? resolveArtifactUrl({ artifact, workspaceId })
+        : null;
+      return {
+        artifact,
+        imageUrl,
+        toolCall,
+      };
+    })
+    .filter(({ imageUrl, toolCall }) => {
+      if (toolCall.status === "running" || toolCall.status === "error") {
+        return true;
+      }
+      return Boolean(imageUrl);
+    });
+
+  if (imageItems.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3">
+      {imageItems.map(({ artifact, imageUrl, toolCall }) => {
+        const title =
+          artifact?.title ||
+          (typeof toolCall.input.title === "string"
+            ? toolCall.input.title
+            : null) ||
+          "Generated image";
+
+        if (toolCall.status === "running") {
+          return (
+            <div
+              aria-label="Generating image"
+              className="relative isolate aspect-[4/3] max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-border bg-muted shadow-sm"
+              key={toolCall.id}
+              role="status"
+            >
+              <div className="absolute inset-0 bg-[linear-gradient(135deg,hsl(var(--muted))_0%,hsl(var(--background))_42%,hsl(var(--muted))_100%)]" />
+              <div className="absolute inset-0 opacity-70 [background-image:radial-gradient(circle_at_24%_18%,hsl(var(--primary)/0.18),transparent_30%),radial-gradient(circle_at_78%_64%,hsl(var(--foreground)/0.08),transparent_28%)]" />
+              <div className="absolute inset-0 animate-pulse bg-[linear-gradient(100deg,transparent_0%,hsl(var(--foreground)/0.04)_34%,hsl(var(--foreground)/0.12)_50%,hsl(var(--foreground)/0.04)_66%,transparent_100%)]" />
+              <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-background/85 via-background/45 to-transparent" />
+              <div className="absolute inset-4 rounded-md border border-background/50 bg-background/10 shadow-inner" />
+              <div className="absolute right-4 bottom-4 left-4 flex items-center justify-between gap-3 rounded-md border border-border/70 bg-background/80 px-3 py-2 shadow-sm backdrop-blur-md">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {title}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Generating image
+                  </p>
+                </div>
+                <Loader2
+                  className="size-4 shrink-0 animate-spin text-muted-foreground"
+                  aria-hidden
+                />
+              </div>
+            </div>
+          );
+        }
+
+        if (toolCall.status === "error") {
+          return (
+            <div
+              className="max-w-xl rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              key={toolCall.id}
+            >
+              {toolCall.error ?? "Image generation failed."}
+            </div>
+          );
+        }
+
+        if (!imageUrl) {
+          return null;
+        }
+
+        return (
+          <a
+            className="block max-w-xl"
+            href={imageUrl}
+            key={toolCall.id}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <img
+              alt={title}
+              className="max-h-[520px] max-w-full rounded-lg border border-border bg-muted/20 object-contain shadow-sm"
+              loading="lazy"
+              src={imageUrl}
+            />
+          </a>
+        );
+      })}
     </div>
   );
 }
@@ -2198,7 +2308,7 @@ function Composer({
   const visible = showSourceCountOnly ? [] : selectedSources;
   const hasSelectedSources = selectedSources.length > 0;
   const imageGenerationEnabled = !disabledToolNameSet.has(
-    CHAT_TOOL_NAMES.generateImage,
+    AGENT_TOOL_NAMES.generateImage,
   );
   const effectiveSelectedSkillIds = useMemo(
     () =>
@@ -2206,7 +2316,7 @@ function Composer({
         ? selectedSkillIds
         : selectedSkillIds.filter((skillId) => {
             const skill = availableSkills.find((item) => item.id === skillId);
-            return !skill?.tools?.includes(CHAT_TOOL_NAMES.generateImage);
+            return !skill || !skillSupportsImageGeneration(skill);
           }),
     [availableSkills, imageGenerationEnabled, selectedSkillIds],
   );
@@ -2322,16 +2432,16 @@ function Composer({
   function updateImageGenerationEnabled(next: boolean) {
     const nextDisabledTools = next
       ? disabledToolNames.filter(
-          (toolName) => toolName !== CHAT_TOOL_NAMES.generateImage,
+          (toolName) => !isGeneratedImageArtifactToolName(toolName),
         )
       : Array.from(
-          new Set([...disabledToolNames, CHAT_TOOL_NAMES.generateImage]),
+          new Set([...disabledToolNames, AGENT_TOOL_NAMES.generateImage]),
         );
     onDisabledToolNamesChange?.(nextDisabledTools);
     if (!next) {
       const remainingSkillIds = selectedSkillIds.filter((skillId) => {
         const skill = availableSkills.find((item) => item.id === skillId);
-        return !skill?.tools?.includes(CHAT_TOOL_NAMES.generateImage);
+        return !skill || !skillSupportsImageGeneration(skill);
       });
       if (remainingSkillIds.length !== selectedSkillIds.length) {
         onSkillSelectionChange?.(remainingSkillIds);
@@ -3380,6 +3490,10 @@ export function ChatCanvas({
                                   >
                                     {messageText}
                                   </CitationAwareMessageResponse>
+                                  <GeneratedImageArtifacts
+                                    toolCalls={version.toolCalls}
+                                    workspaceId={workspaceId}
+                                  />
                                   {version.isError ? (
                                     <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                                       <p className="font-medium">

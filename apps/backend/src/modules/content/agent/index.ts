@@ -37,25 +37,9 @@ function createKnowledgeFilesystemToolDescriptionMiddleware(input: {
     name: "SourceWeftKnowledgeFilesystemDescriptions",
     wrapModelCall: async (request, handler) => {
       const tools = request.tools.map((tool) => {
-        if (tool.name === "ls") {
-          return setToolDescription(tool, descriptions.ls);
-        }
-        if (tool.name === "read_file") {
-          return setToolDescription(tool, descriptions.read_file);
-        }
-        if (tool.name === "glob") {
-          return setToolDescription(tool, descriptions.glob);
-        }
-        if (tool.name === "grep") {
-          return setToolDescription(tool, descriptions.grep);
-        }
-        if (tool.name === "write_file") {
-          return setToolDescription(tool, descriptions.write_file);
-        }
-        if (tool.name === "edit_file") {
-          return setToolDescription(tool, descriptions.edit_file);
-        }
-        return tool;
+        const description =
+          descriptions[tool.name as keyof typeof descriptions];
+        return description ? setToolDescription(tool, description) : tool;
       });
 
       return handler({

@@ -106,7 +106,7 @@ export type PreparedThreadTurn = {
 
 export type RetrievalCallTrace = {
   id: string;
-  tool: "search_sources";
+  tool: typeof AGENT_TOOL_NAMES.searchSources;
   query: string;
   hitCount: number;
   latencyMs: number;

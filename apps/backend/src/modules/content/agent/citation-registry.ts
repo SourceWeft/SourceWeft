@@ -1,4 +1,14 @@
 import type { RetrievalCandidate } from "../retrieval/planner";
+import { AGENT_TOOL_NAMES } from "./tool-registry";
+
+type SourceCitationOrigin =
+  | typeof AGENT_TOOL_NAMES.searchSources
+  | typeof AGENT_TOOL_NAMES.readFile
+  | typeof AGENT_TOOL_NAMES.grep;
+type ExternalCitationOrigin =
+  | typeof AGENT_TOOL_NAMES.webSearch
+  | typeof AGENT_TOOL_NAMES.webFetch;
+type AgentCitationOrigin = SourceCitationOrigin | ExternalCitationOrigin;
 
 export type AgentCitation = {
   citation: string;
@@ -11,7 +21,7 @@ export type AgentCitation = {
   excerpt: string;
   quoteText: string;
   content?: string;
-  origin: "search_sources" | "read_file" | "grep" | "web_search" | "web_fetch";
+  origin: AgentCitationOrigin;
   externalUri?: string;
   path?: string;
 };
@@ -63,7 +73,7 @@ export class AgentCitationRegistry {
   }
 
   addChunk(input: {
-    origin: "search_sources" | "read_file" | "grep";
+    origin: SourceCitationOrigin;
     sourceId: string;
     sourceTitle?: string | null;
     documentId: string;
@@ -99,7 +109,7 @@ export class AgentCitationRegistry {
 
   addRetrievalCandidate(candidate: RetrievalCandidate) {
     return this.addChunk({
-      origin: "search_sources",
+      origin: AGENT_TOOL_NAMES.searchSources,
       sourceId: candidate.sourceId,
       sourceTitle: candidate.sourceTitle,
       documentId: candidate.documentId,
@@ -111,7 +121,7 @@ export class AgentCitationRegistry {
   }
 
   addExternal(input: {
-    origin: "web_search" | "web_fetch";
+    origin: ExternalCitationOrigin;
     externalUri: string;
     sourceTitle?: string | null;
     content: string;
