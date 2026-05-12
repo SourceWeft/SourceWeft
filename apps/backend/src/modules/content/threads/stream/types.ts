@@ -1,5 +1,5 @@
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
-import type { ThreadToolsSelection } from "../turn/types";
+import type { ChatInputImage, ThreadToolsSelection } from "../turn/types";
 
 export type RefreshThreadInput = {
   workspaceId: string;
@@ -13,8 +13,11 @@ export type RefreshThreadInput = {
   assistantMessageId?: string;
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
+  visionProfileAlias?: string | null;
 };
 
 export type EditThreadInput = RefreshThreadInput & {
   content: string;
+  imagesProvided?: boolean;
+  images?: ChatInputImage[];
 };

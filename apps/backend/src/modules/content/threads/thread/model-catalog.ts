@@ -30,6 +30,7 @@ type ThreadModelCatalogEntry = {
   pricing: Record<string, unknown> | null;
   capabilities?: {
     supportsThinking: boolean;
+    supportsImageInput?: boolean;
     supportedParameters: string[];
     supportedEfforts: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
     reasoning: boolean;
@@ -66,6 +67,7 @@ function normalizeSupportedEfforts(value: unknown) {
 
 function resolveReasoningCapabilities(input: {
   configJson: Record<string, unknown>;
+  profileKind?: CatalogModelProfileKind;
 }): ThreadModelCapabilities {
   const { configJson } = input;
   const supportedParameters = Array.isArray(configJson.supportedParameters)
@@ -88,6 +90,8 @@ function resolveReasoningCapabilities(input: {
   ];
   return {
     supportsThinking: reasoning || reasoningEffort || includeReasoning,
+    supportsImageInput:
+      configJson.supportsImageInput === true || input.profileKind === "vision",
     supportedParameters,
     supportedEfforts,
     reasoning,
@@ -282,6 +286,7 @@ export async function listThreadModelCatalog(input: {
     const pricing = resolveCatalogPricing(configJson);
     const directCapabilities: ThreadModelCapabilities = resolveReasoningCapabilities({
       configJson,
+      profileKind,
     });
     if (threadKind === "image") {
       directCapabilities.imageGeneration = resolveImageModelCapabilities({

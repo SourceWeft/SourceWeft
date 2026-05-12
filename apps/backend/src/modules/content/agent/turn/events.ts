@@ -3,6 +3,7 @@ import type { AgentCitation } from "../citation-registry";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
   AgentCheckpointMetadata,
+  MessageRenderBlock,
   RetrievalCallTrace,
   ModelReasoningSegmentTrace,
   ThinkingStepTrace,
@@ -19,6 +20,7 @@ export type DeepAgentTurnOutcome = {
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
+  renderBlocks?: MessageRenderBlock[];
   reasoningSegments: ModelReasoningSegmentTrace[];
   usage?: UsageInfo;
   finishReason?: string;

@@ -17,8 +17,78 @@ import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
 import { buildThreadToolsMetadata } from "../turn/tool-selection";
 import { listMessageRecordsByThread } from "../message-repository";
 import type { StreamThreadEventInput } from "../turn/service";
-import type { AgentCheckpointRef } from "../turn/types";
+import type { AgentCheckpointRef, ChatMessageImagePart } from "../turn/types";
 import type { EditThreadInput, RefreshThreadInput } from "./types";
+
+function extractImagePartsFromContentJson(value: unknown) {
+  const contentJson =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as { parts?: unknown })
+      : {};
+  if (!Array.isArray(contentJson.parts)) {
+    return [] as ChatMessageImagePart[];
+  }
+
+  return contentJson.parts
+    .map((part): ChatMessageImagePart | null => {
+      if (!part || typeof part !== "object" || Array.isArray(part)) {
+        return null;
+      }
+      const record = part as Record<string, unknown>;
+      if (
+        record.type !== "image" ||
+        typeof record.id !== "string" ||
+        typeof record.fileName !== "string" ||
+        typeof record.mimeType !== "string" ||
+        typeof record.storageKey !== "string" ||
+        typeof record.url !== "string"
+      ) {
+        return null;
+      }
+      return {
+        type: "image" as const,
+        id: record.id,
+        fileName: record.fileName,
+        mimeType: record.mimeType,
+        sizeBytes:
+          typeof record.sizeBytes === "number" &&
+          Number.isFinite(record.sizeBytes)
+            ? record.sizeBytes
+            : 0,
+        width:
+          typeof record.width === "number" && Number.isFinite(record.width)
+            ? record.width
+            : null,
+        height:
+          typeof record.height === "number" && Number.isFinite(record.height)
+            ? record.height
+            : null,
+        storageBucket:
+          typeof record.storageBucket === "string"
+            ? record.storageBucket
+            : null,
+        storageKey: record.storageKey,
+        url: record.url,
+        ...(typeof record.visionDescription === "string"
+          ? { visionDescription: record.visionDescription }
+          : {}),
+        ...(typeof record.visionModelAlias === "string"
+          ? { visionModelAlias: record.visionModelAlias }
+          : {}),
+        ...(typeof record.visionProfileAlias === "string"
+          ? { visionProfileAlias: record.visionProfileAlias }
+          : {}),
+      };
+    })
+    .filter((part): part is ChatMessageImagePart => part !== null);
+}
+
+function shouldUseSubmittedEditImages(input: {
+  images?: EditThreadInput["images"];
+  imagesProvided?: boolean;
+}) {
+  return input.imagesProvided === true;
+}
 
 async function resolveFallbackEditBaseCheckpoint(input: {
   workspace: Awaited<ReturnType<typeof resolveThreadTurnContext>>["workspace"];
@@ -99,6 +169,9 @@ export async function resolveRefreshThreadStreamInput(
     threadId: input.threadId,
     userId: input.userId,
     content: latestUserMessage.content,
+    existingImageParts: extractImagePartsFromContentJson(
+      latestUserMessage.contentJson,
+    ),
     mentionedSourceIds,
     sourceIds,
     tools: buildThreadToolsMetadata({
@@ -109,6 +182,7 @@ export async function resolveRefreshThreadStreamInput(
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
+    visionProfileAlias: input.visionProfileAlias,
     existingUserMessage: latestUserMessage,
     assistantMessageParentId: latestAssistantMessage.id,
     agentMode: checkpoint?.beforeInput ? "fork" : "continue",
@@ -167,6 +241,13 @@ export async function resolveEditThreadStreamInput(
     threadId: input.threadId,
     userId: input.userId,
     content: input.content,
+    ...(shouldUseSubmittedEditImages(input)
+      ? { images: input.images }
+      : {}),
+    existingImageParts:
+      !shouldUseSubmittedEditImages(input)
+        ? extractImagePartsFromContentJson(latestUserMessage.contentJson)
+        : undefined,
     mentionedSourceIds,
     sourceIds,
     tools: buildThreadToolsMetadata({
@@ -177,6 +258,7 @@ export async function resolveEditThreadStreamInput(
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
+    visionProfileAlias: input.visionProfileAlias,
     userMessageParentId: latestUserMessage.id,
     assistantMessageParentId: latestAssistantMessage?.id ?? null,
     agentMode: "fork",
@@ -185,3 +267,7 @@ export async function resolveEditThreadStreamInput(
     failurePersistence: "persist-error-turn",
   };
 }
+
+export const testExports = {
+  shouldUseSubmittedEditImages,
+};

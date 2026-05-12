@@ -26,6 +26,7 @@ function message(
     createdBy: overrides.createdBy ?? "user-1",
     model: overrides.model ?? null,
     creditsConsumed: overrides.creditsConsumed ?? null,
+    contentJson: overrides.contentJson ?? {},
     createdAt: overrides.createdAt ?? new Date().toISOString(),
   };
 }

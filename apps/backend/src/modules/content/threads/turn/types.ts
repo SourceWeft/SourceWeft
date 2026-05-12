@@ -17,6 +17,41 @@ import type { requireContentWorkspace } from "../../content-support";
 import type { findThreadRecord } from "../thread/repository";
 import type { resolveActiveChatProfileByAlias } from "./model-resolution";
 
+export type ChatInputImage = {
+  dataUrl: string;
+  fileName?: string;
+  mimeType?: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+};
+
+export type ChatMessageTextPart = {
+  type: "text";
+  text: string;
+};
+
+export type ChatMessageImagePart = {
+  type: "image";
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
+  storageBucket?: string | null;
+  storageKey: string;
+  url: string;
+  visionDescription?: string;
+  visionModelAlias?: string;
+  visionProfileAlias?: string;
+};
+
+export type MessageContentJson = {
+  version: 1;
+  parts: Array<ChatMessageTextPart | ChatMessageImagePart>;
+};
+
 export type ThreadToolsSelection = {
   skillIds?: string[];
   webSearchEnabled?: boolean;
@@ -32,12 +67,15 @@ export type StreamThreadEventInput = {
   threadId: string;
   userId: string;
   content: string;
+  images?: ChatInputImage[];
+  existingImageParts?: ChatMessageImagePart[];
   mentionedSourceIds?: string[];
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
   timezone?: string;
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
+  visionProfileAlias?: string | null;
   userMessageParentId?: string | null;
   assistantMessageParentId?: string | null;
   agentMode?: "continue" | "replay" | "fork";
@@ -45,6 +83,7 @@ export type StreamThreadEventInput = {
   agentRunThreadId?: string;
   existingUserMessage?: MessageRecord;
   failurePersistence?: "persist-error-turn" | "transient";
+  onPreflightThinkingStep?: (step: ThinkingStepTrace) => void;
 };
 
 export type AgentCheckpointRef = {
@@ -64,6 +103,11 @@ export type PreparedThreadTurn = {
   workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
   thread: NonNullable<Awaited<ReturnType<typeof findThreadRecord>>>;
   messageContent: string;
+  messageContentJson: MessageContentJson;
+  imageParts: ChatMessageImagePart[];
+  preflightBilling: PreflightBillingTrace[];
+  preflightThinkingSteps: ThinkingStepTrace[];
+  agentMessageContent: string | AgentMultimodalContentPart[];
   mentionedSourceIds: string[];
   effectiveMentionedSourceIds: string[];
   selectedSourceIds: string[];
@@ -104,6 +148,31 @@ export type PreparedThreadTurn = {
   failurePersistence: "persist-error-turn" | "transient";
 };
 
+export type PreflightBillingTrace = {
+  id: string;
+  operation: string;
+  modelKind: string;
+  modelAlias: string | null;
+  profileAlias: string;
+  consumedCredits: number;
+  billedBy: "provider_cost" | "minimum_credit" | "skipped";
+  skipReason: string | null;
+  usage?: UsageInfo;
+  metadata?: Record<string, unknown>;
+};
+
+export type AgentMultimodalContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image_url";
+      image_url: {
+        url: string;
+      };
+    };
+
 export type RetrievalCallTrace = {
   id: string;
   tool: typeof AGENT_TOOL_NAMES.searchSources;
@@ -124,6 +193,18 @@ export type ToolCallTrace = {
   error: string | null;
   sequence: number;
 };
+
+export type MessageRenderBlock =
+  | {
+      id: string;
+      type: "text";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "generated_image";
+      toolCallId: string;
+    };
 
 export type ThinkingStepTrace = {
   id: string;
@@ -157,6 +238,7 @@ export type FinalizeThreadTurnCommand = {
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
+  renderBlocks?: MessageRenderBlock[];
   reasoningSegments?: ModelReasoningSegmentTrace[];
   llm?: LlmExecutionConfig;
   operation: "chat.stream" | "chat.complete";

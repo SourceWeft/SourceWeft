@@ -154,8 +154,33 @@ function readMetadataString(metadata: Record<string, unknown>, keys: string[]) {
   return undefined;
 }
 
-function textSummary(value: string | undefined) {
+function textSummary(value: unknown) {
   if (value === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const text = value
+      .map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return "";
+        }
+        const record = item as Record<string, unknown>;
+        return record.type === "text" && typeof record.text === "string"
+          ? record.text
+          : record.type === "image_url"
+            ? "[image]"
+            : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+    return {
+      length: text.length,
+      preview: text.slice(0, OBSERVE_TEXT_PREVIEW_CHARS),
+      truncated: text.length > OBSERVE_TEXT_PREVIEW_CHARS,
+      contentPartCount: value.length,
+    };
+  }
+  if (typeof value !== "string") {
     return undefined;
   }
   return {

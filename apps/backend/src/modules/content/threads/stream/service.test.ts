@@ -121,6 +121,7 @@ test("buildAgentRunSpanOutput includes reasoning and usage", () => {
       citations: [],
       availableCitations: [],
       thinkingStepCount: 1,
+      renderBlockCount: 0,
       reasoningSegmentCount: 1,
     },
   );
@@ -246,6 +247,14 @@ const prepared: PreparedThreadTurn = {
     updatedAt: new Date(0).toISOString(),
   },
   messageContent: "What is in this invoice?",
+  messageContentJson: {
+    version: 1,
+    parts: [{ type: "text", text: "What is in this invoice?" }],
+  },
+  imageParts: [],
+  preflightBilling: [],
+  preflightThinkingSteps: [],
+  agentMessageContent: "What is in this invoice?",
   mentionedSourceIds: [],
   effectiveMentionedSourceIds: [],
   selectedSourceIds: [],
@@ -285,6 +294,7 @@ const prepared: PreparedThreadTurn = {
     parentMessageId: null,
     role: "user",
     content: "What is in this invoice?",
+    contentJson: {},
     metadata: {},
     createdAt: new Date(0).toISOString(),
     createdBy: "user-1",
@@ -634,6 +644,185 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
   );
 });
 
+test("streamThreadEvents emits preflight thinking steps while preparing", async () => {
+  const preflightSteps = [
+    {
+      id: "vision-capability-check",
+      kind: "state" as const,
+      title: "Checking chat model vision support",
+      status: "completed" as const,
+      items: ["1 image(s)"],
+      sequence: -2,
+    },
+    {
+      id: "vision-fallback-describe",
+      kind: "state" as const,
+      title: "Preparing image descriptions with vision model",
+      status: "in_progress" as const,
+      items: ["1 image(s)"],
+      sequence: -1,
+    },
+    {
+      id: "vision-fallback-describe",
+      kind: "state" as const,
+      title: "Prepared image descriptions with vision model",
+      status: "completed" as const,
+      items: ["receipt.png"],
+      sequence: -1,
+    },
+  ];
+  let resolvePrepare: (() => void) | undefined;
+  const turnService = {
+    prepareThreadTurn: async (input: {
+      onPreflightThinkingStep?: (step: (typeof preflightSteps)[number]) => void;
+    }) => {
+      for (const step of preflightSteps) {
+        input.onPreflightThinkingStep?.(step);
+      }
+      await new Promise<void>((resolve) => {
+        resolvePrepare = resolve;
+      });
+      return createPrepared({
+        preflightThinkingSteps: preflightSteps,
+      });
+    },
+    finalizeThreadTurn: async () => ({
+      assistantMessage: {
+        id: "assistant-message-1",
+        parentMessageId: null,
+      },
+    }),
+  };
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "done",
+        outcome,
+      };
+    },
+    async () => null,
+  );
+
+  const iterator = service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this image?",
+  });
+
+  const first = parseSseData((await iterator.next()).value);
+  const second = parseSseData((await iterator.next()).value);
+  const third = parseSseData((await iterator.next()).value);
+
+  assert.deepEqual(
+    [first, second, third].map((event) => [
+      event.type,
+      (event.step as { title?: string; status?: string }).title,
+      (event.step as { title?: string; status?: string }).status,
+    ]),
+    [
+      ["thinking-step", "Checking chat model vision support", "completed"],
+      [
+        "thinking-step",
+        "Preparing image descriptions with vision model",
+        "in_progress",
+      ],
+      [
+        "thinking-step",
+        "Prepared image descriptions with vision model",
+        "completed",
+      ],
+    ],
+  );
+
+  resolvePrepare?.();
+
+  const remainingEvents: Record<string, unknown>[] = [];
+  for await (const event of iterator) {
+    remainingEvents.push(parseSseData(event));
+  }
+
+  assert.equal(remainingEvents[0]?.type, "start");
+  assert.equal(
+    remainingEvents.filter((event) => event.type === "thinking-step").length,
+    0,
+  );
+});
+
+test("streamThreadEvents preserves preflight billing for finalization", async () => {
+  let finalizedPrepared: PreparedThreadTurn | undefined;
+  const preparedWithPreflightBilling = createPrepared({
+    preflightBilling: [
+      {
+        id: "image-1",
+        operation: "chat.vision_fallback",
+        modelKind: "vision",
+        modelAlias: "vision-default",
+        profileAlias: "vision-profile",
+        consumedCredits: 2,
+        billedBy: "provider_cost",
+        skipReason: null,
+        usage: {
+          inputTokens: 120,
+          outputTokens: 30,
+          totalTokens: 150,
+        },
+        metadata: {
+          imageFileName: "image.png",
+        },
+      },
+    ],
+  });
+  const turnService = createTurnService({
+    prepared: preparedWithPreflightBilling,
+    finalize: async (input) => {
+      finalizedPrepared = (input as { prepared: PreparedThreadTurn }).prepared;
+      return {
+        assistantMessage: {
+          id: "assistant-message-1",
+          parentMessageId: null,
+        },
+        billing: {
+          teamId: "team-1",
+          consumedCredits: 1,
+          availableCredits: 97,
+          consumedThisCycle: 3,
+          idempotencyReplayed: false,
+        },
+      };
+    },
+  });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "Answer" };
+      yield { type: "done", outcome };
+    },
+    async () => null,
+  );
+
+  for await (const _event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this image?",
+  })) {
+    // Drain stream.
+  }
+
+  assert.deepEqual(
+    finalizedPrepared?.preflightBilling,
+    preparedWithPreflightBilling.preflightBilling,
+  );
+});
+
 test("streamThreadEvents sends available citations when final text uses none", async () => {
   const citation = {
     citation: "c1",
@@ -704,6 +893,7 @@ test("streamThreadEvents persists send errors as assistant error messages", asyn
     createdBy: null,
     model: "test-model",
     creditsConsumed: 0,
+    contentJson: {},
     metadata: {},
     createdAt: new Date(0).toISOString(),
   };
@@ -737,6 +927,70 @@ test("streamThreadEvents persists send errors as assistant error messages", asyn
   assert.equal(errorEvent.userMessageId, "user-message-1");
   assert.equal(errorEvent.messageId, "assistant-error-1");
   assert.equal(errorEvent.parentMessageId, null);
+});
+
+test("streamThreadEvents preserves preflight billing on persisted errors", async () => {
+  let errorPrepared: PreparedThreadTurn | undefined;
+  const preparedWithPreflightBilling = createPrepared({
+    preflightBilling: [
+      {
+        id: "image-1",
+        operation: "chat.vision_fallback",
+        modelKind: "vision",
+        modelAlias: "vision-default",
+        profileAlias: "vision-profile",
+        consumedCredits: 2,
+        billedBy: "minimum_credit",
+        skipReason: null,
+      },
+    ],
+  });
+  const turnService = createTurnService({ prepared: preparedWithPreflightBilling });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      throw new Error("provider exploded");
+    },
+    async () => null,
+    async (input) => {
+      errorPrepared = input.prepared;
+      return {
+        id: "assistant-error-1",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        threadId: "thread-1",
+        parentMessageId: null,
+        role: "assistant",
+        content: "provider exploded",
+        createdBy: null,
+        model: "test-model",
+        creditsConsumed: 2,
+        contentJson: {},
+        metadata: {
+          preflightBilling: input.prepared.preflightBilling,
+          preflightCreditsConsumed: 2,
+        },
+        createdAt: new Date(0).toISOString(),
+      };
+    },
+  );
+
+  for await (const _event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this image?",
+  })) {
+    // Drain stream.
+  }
+
+  assert.deepEqual(
+    errorPrepared?.preflightBilling,
+    preparedWithPreflightBilling.preflightBilling,
+  );
 });
 
 test("streamThreadEvents preserves partial assistant content for persisted errors", async () => {
@@ -809,6 +1063,7 @@ test("streamThreadEvents preserves partial assistant content for persisted error
         createdBy: null,
         model: "test-model",
         creditsConsumed: 0,
+        contentJson: {},
         metadata: {},
         createdAt: new Date(0).toISOString(),
       };
@@ -901,6 +1156,7 @@ test("streamThreadEvents persists edit errors as latest assistant versions", asy
         createdBy: null,
         model: "test-model",
         creditsConsumed: 0,
+        contentJson: {},
         metadata: {},
         createdAt: new Date(0).toISOString(),
       };

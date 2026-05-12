@@ -251,6 +251,7 @@ export type MessageRecord = {
   createdBy: string | null;
   model: string | null;
   creditsConsumed: number | null;
+  contentJson: Record<string, unknown>;
   metadata: Record<string, unknown>;
   createdAt: string;
 };

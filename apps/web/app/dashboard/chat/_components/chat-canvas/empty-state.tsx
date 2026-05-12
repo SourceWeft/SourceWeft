@@ -8,6 +8,7 @@ import {
   Suggestions,
 } from "@sourceweft/ui-web/components/ai-elements/suggestion";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
+import type { FileUIPart } from "ai";
 import type { SourceItem } from "../source-types";
 import { Composer } from "./composer";
 import type {
@@ -25,6 +26,27 @@ const starterSuggestions = [
   "What changed between these reports?",
   "List the strongest supporting evidence",
 ];
+
+function promptFilesToImages(files: FileUIPart[] | undefined) {
+  return (files ?? [])
+    .filter(
+      (file) =>
+        file.type === "file" &&
+        file.mediaType?.startsWith("image/") &&
+        typeof file.url === "string" &&
+        file.url.startsWith("data:"),
+    )
+    .map((file) => ({
+      dataUrl: file.url,
+      fileName: file.filename,
+      mimeType: file.mediaType as
+        | "image/png"
+        | "image/jpeg"
+        | "image/webp"
+        | "image/gif"
+        | undefined,
+    }));
+}
 
 export function EmptyState({
   onSendMessage,
@@ -118,6 +140,7 @@ export function EmptyState({
             onSubmit={(message, tools) =>
               onSendMessage({
                 content: message.text.trim(),
+                images: promptFilesToImages(message.files),
                 mentionedSourceIds: message.mentionedSourceIds,
                 tools,
               })

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeToolOutputForObservability, testExports } from "./runner";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { testExports as agentTestExports } from "..";
+import {
+  normalizeGeneratedImageProgressEvent,
+  normalizeToolOutputForObservability,
+  testExports,
+} from "./runner";
 
 test("normalizes read_file ToolMessage output content for observability", () => {
   const output = normalizeToolOutputForObservability("read_file", {
@@ -23,6 +29,37 @@ test("preserves non-read_file tool outputs", () => {
     normalizeToolOutputForObservability("search_sources", output),
     output,
   );
+});
+
+test("sanitizes image blocks from persisted agent history", () => {
+  const textOnly = new HumanMessage("hello");
+  const imageMessage = new HumanMessage({
+    content: [
+      { type: "text", text: "what is this?" },
+      {
+        type: "image_url",
+        image_url: { url: "data:image/png;base64,abcd" },
+      },
+    ],
+  });
+  const assistant = new AIMessage("answer");
+
+  const result = agentTestExports.sanitizeMessagesForHistory([
+    textOnly,
+    imageMessage,
+    assistant,
+  ]);
+
+  assert.equal(result.changed, true);
+  assert.equal(result.messages[0], textOnly);
+  assert.equal(result.messages[2], assistant);
+  assert.deepEqual((result.messages[1] as HumanMessage).content, [
+    { type: "text", text: "what is this?" },
+    {
+      type: "text",
+      text: "[attached image 1: image, omitted from conversation history]",
+    },
+  ]);
 });
 
 test("normalizes web tool outputs to display-safe metadata", () => {
@@ -205,6 +242,82 @@ test("extracts generated image artifacts from completed tool calls", () => {
       toolCallId: "tool-1",
     },
   ]);
+});
+
+test("normalizes generated image custom progress events", () => {
+  assert.deepEqual(
+    normalizeGeneratedImageProgressEvent({
+      type: "generate_image_progress",
+      toolCallId: "tool-1",
+      tool: "web_search",
+      stage: "generating",
+    }),
+    {
+      toolCallId: "tool-1",
+      tool: "generate_image",
+      data: {
+        type: "generate_image_progress",
+        toolCallId: "tool-1",
+        tool: "generate_image",
+        stage: "generating",
+      },
+    },
+  );
+
+  assert.equal(
+    normalizeGeneratedImageProgressEvent({
+      type: "other_event",
+      toolCallId: "tool-1",
+    }),
+    null,
+  );
+});
+
+test("builds generated image render blocks in event order", () => {
+  const builder = testExports.createMessageRenderBlockBuilder();
+
+  builder.appendText("Intro\n");
+  builder.appendGeneratedImage("tool-1");
+  builder.appendText("\nDetails");
+
+  assert.deepEqual(
+    testExports.finalizeMessageRenderBlocks({
+      blocks: builder.list(),
+      finalText: "Intro\n\nDetails",
+    }),
+    [
+      {
+        id: "text-1",
+        type: "text",
+        text: "Intro\n",
+      },
+      {
+        id: "generated-image-tool-1",
+        type: "generated_image",
+        toolCallId: "tool-1",
+      },
+      {
+        id: "text-2",
+        type: "text",
+        text: "\nDetails",
+      },
+    ],
+  );
+});
+
+test("drops render blocks when final text diverges", () => {
+  const builder = testExports.createMessageRenderBlockBuilder();
+
+  builder.appendText("Before citation [citation:missing]");
+  builder.appendGeneratedImage("tool-1");
+
+  assert.deepEqual(
+    testExports.finalizeMessageRenderBlocks({
+      blocks: builder.list(),
+      finalText: "Before citation",
+    }),
+    [],
+  );
 });
 
 test("runtime prompt treats image auto mode as available but optional", () => {

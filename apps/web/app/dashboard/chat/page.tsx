@@ -37,6 +37,7 @@ import {
   buildChatToolsRequest,
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
+  type ArtifactPreviewRecord,
   type ChatSendInput,
   type ChatSkillItem,
   type ChatToolName,
@@ -252,6 +253,15 @@ export default function DashboardChatPage() {
   const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
     string | null
   >(null);
+  const handleArtifactPreview = useCallback(
+    (artifact: ArtifactPreviewRecord) => {
+      setPreviewArtifact(artifact);
+      if (!sourcesVisible) {
+        toggleSourcesVisible();
+      }
+    },
+    [sourcesVisible, toggleSourcesVisible],
+  );
   const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
     async ({ cursor, limit, query }) => {
       if (!workspaceId) {
@@ -580,7 +590,8 @@ export default function DashboardChatPage() {
       }
 
       const text = input.content.trim();
-      if (!text) return;
+      const images = input.images ?? [];
+      if (!text && images.length === 0) return;
       const sourceIds = mergeSourceIds(activeSourceIds);
       const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
 
@@ -610,6 +621,7 @@ export default function DashboardChatPage() {
         `chat:pending:${thread.id}`,
         JSON.stringify({
           content: text,
+          images,
           mentionedSourceIds,
           sourceIds,
           skillIds: effectiveActiveSkillIds,
@@ -706,6 +718,7 @@ export default function DashboardChatPage() {
           isStreaming={false}
           mode="new"
           availableSkills={availableSkills}
+          onArtifactPreview={handleArtifactPreview}
           onRemoveSource={(id) =>
             persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
           }

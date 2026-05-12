@@ -216,7 +216,6 @@ export function mapDeepAgentEventToSse(
       id: event.id,
       tool: event.tool,
       data: event.data,
-      toolCall: normalizeToolCallForSse(event.toolCall),
     });
   }
 
@@ -255,7 +254,6 @@ export function mapDeepAgentEventToSse(
       tool: event.tool,
       status: event.status,
       latencyMs: event.latencyMs,
-      toolCall: normalizeToolCallForSse(event.toolCall),
     });
   }
 

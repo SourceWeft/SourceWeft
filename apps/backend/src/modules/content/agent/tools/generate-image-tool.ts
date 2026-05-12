@@ -15,6 +15,8 @@ import type { ContentBillingPort } from "../../billing-port";
 import { meterBillableModelUsage } from "../../model-billing";
 import { AGENT_TOOL_NAMES } from "../tool-names";
 
+export const GENERATED_IMAGE_PROGRESS_EVENT_TYPE = "generate_image_progress";
+
 function compactText(value: string, maxLength = 120) {
   const compacted = value.replace(/\s+/g, " ").trim();
   if (compacted.length <= maxLength) {
@@ -29,6 +31,21 @@ function sanitizeFileName(value: string) {
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return normalized.length > 0 ? normalized : "generated-image";
+}
+
+function resolveToolRuntimeCallId(runtime: ToolRuntime) {
+  const runtimeRecord = runtime as ToolRuntime & {
+    config?: { toolCall?: { id?: unknown } };
+    toolCall?: { id?: unknown };
+    toolCallId?: unknown;
+  };
+  const candidate =
+    runtimeRecord.toolCallId ??
+    runtimeRecord.toolCall?.id ??
+    runtimeRecord.config?.toolCall?.id;
+  return typeof candidate === "string" && candidate.length > 0
+    ? candidate
+    : undefined;
 }
 
 async function decodeGeneratedImage(image: {
@@ -71,8 +88,10 @@ function formatToolResult(input: {
   title: string;
   artifactUrl: string;
   config: ArtifactImageConfig;
+  height?: number;
   provider?: string;
   providerModel?: string;
+  width?: number;
 }) {
   return [
     "Image artifact created.",
@@ -81,11 +100,13 @@ function formatToolResult(input: {
     `title: ${input.title}`,
     `artifact_url: ${input.artifactUrl}`,
     `aspect_ratio: ${input.config.aspectRatio}`,
+    typeof input.width === "number" ? `width: ${input.width}` : null,
+    typeof input.height === "number" ? `height: ${input.height}` : null,
     `quality: ${input.config.quality}`,
     `style: ${input.config.style}`,
     input.provider ? `provider: ${input.provider}` : null,
     input.providerModel ? `provider_model: ${input.providerModel}` : null,
-    "The application will display the generated image below the final answer. Do not include image markdown or repeat raw URLs.",
+    "The application will display the generated image automatically. Do not include image markdown or repeat raw URLs.",
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -113,6 +134,30 @@ export function createGenerateImageTool(input: {
     ) => {
       const prompt = args.prompt.trim();
       const title = (args.title?.trim() || compactText(prompt, 80)).slice(0, 160);
+      const toolCallId = resolveToolRuntimeCallId(runtime);
+      const emitProgress = (
+        stage: "preparing" | "generating" | "saving" | "billing" | "ready",
+        metadata?: Record<string, unknown>,
+      ) => {
+        if (!toolCallId) {
+          return;
+        }
+
+        runtime.writer?.({
+          type: GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
+          toolCallId,
+          tool: AGENT_TOOL_NAMES.generateImage,
+          stage,
+          title,
+          ...metadata,
+        });
+      };
+
+      emitProgress("preparing", {
+        aspectRatio: input.config.aspectRatio,
+        quality: input.config.quality,
+        style: input.config.style,
+      });
       const gateway = await getModelGatewayClient(input.profile.gatewayConfigId);
       const request: ImageGenerateInput = {
         model: input.profile.profileAlias,
@@ -132,18 +177,21 @@ export function createGenerateImageTool(input: {
           userId: input.userId,
           threadId: input.threadId,
           messageId: input.userMessageId,
-          toolCallId: runtime.toolCallId,
+          toolCallId,
           observationName: "image_generation",
           feature: "artifact.image",
           modelKind: "image",
         },
       };
 
+      emitProgress("generating", {
+        providerModel: input.profile.modelAlias,
+      });
       const result = await gateway.images.generate(request, {
         traceId: input.traceId,
         metadata: {
           parentSpanId: input.parentSpanId,
-          toolCallId: runtime.toolCallId,
+          toolCallId,
         },
       });
       const image = result.images[0];
@@ -151,6 +199,10 @@ export function createGenerateImageTool(input: {
         throw new Error("Image generation did not return an image.");
       }
 
+      emitProgress("saving", {
+        provider: result.provider,
+        providerModel: result.providerModel,
+      });
       const decoded = await decodeGeneratedImage(image);
       const artifactIdForPath = randomUUID();
       const fileName = `${sanitizeFileName(title)}.png`;
@@ -195,6 +247,11 @@ export function createGenerateImageTool(input: {
 
       const artifactUrl = `/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/file`;
 
+      emitProgress("billing", {
+        artifactId,
+        artifactUrl,
+        versionId,
+      });
       await meterBillableModelUsage({
         billing: input.billing,
         teamId: input.teamId,
@@ -213,7 +270,7 @@ export function createGenerateImageTool(input: {
           traceId: input.traceId,
           threadId: input.threadId,
           messageId: input.userMessageId,
-          toolCallId: runtime.toolCallId,
+          toolCallId,
           artifactId,
           versionId,
           provider: result.provider,
@@ -226,14 +283,26 @@ export function createGenerateImageTool(input: {
         },
       });
 
+      emitProgress("ready", {
+        artifactId,
+        artifactUrl,
+        height: image.height,
+        versionId,
+        provider: result.provider,
+        providerModel: result.providerModel,
+        width: image.width,
+      });
+
       return formatToolResult({
         artifactId,
         versionId,
         title,
         artifactUrl,
         config: input.config,
+        height: image.height,
         provider: result.provider,
         providerModel: result.providerModel,
+        width: image.width,
       });
     },
     {

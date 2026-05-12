@@ -1,6 +1,7 @@
 import { isGeneratedImageArtifactToolName } from "@sourceweft/sdk";
 import { apiBaseUrl } from "../../../../../lib/sdk";
 import type {
+  ChatMessageImagePart,
   MessageVersion,
   ThinkingStepRecord,
   ToolCallRecord,
@@ -57,9 +58,10 @@ function getGeneratedImageArtifactRefs(input: {
   return { artifactIds, artifactUrls };
 }
 
-function stripGeneratedImageMarkdown(input: {
+export function stripGeneratedImageMarkdown(input: {
   content: string;
   toolCalls?: ToolCallRecord[];
+  trim?: boolean;
   workspaceId?: string | null;
 }) {
   const artifactRefs = getGeneratedImageArtifactRefs({
@@ -74,7 +76,7 @@ function stripGeneratedImageMarkdown(input: {
     return input.content;
   }
 
-  return input.content
+  const content = input.content
     .replace(
       /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
       (markdown: string, url: string) => {
@@ -87,8 +89,9 @@ function stripGeneratedImageMarkdown(input: {
         return isGeneratedImage ? "" : markdown;
       },
     )
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/\n{3,}/g, "\n\n");
+
+  return input.trim === false ? content : content.trim();
 }
 
 export function getMessageText(input: {
@@ -100,6 +103,21 @@ export function getMessageText(input: {
     toolCalls: input.version.toolCalls,
     workspaceId: input.workspaceId,
   });
+}
+
+export function getMessageImageParts(version: MessageVersion) {
+  const parts = version.contentJson?.parts;
+  if (!Array.isArray(parts)) {
+    return [] as ChatMessageImagePart[];
+  }
+
+  return parts.filter(
+    (part): part is ChatMessageImagePart =>
+      part.type === "image" &&
+      typeof part.id === "string" &&
+      typeof part.url === "string" &&
+      typeof part.fileName === "string",
+  );
 }
 
 export function compactText(value: string, maxLength = 160) {
@@ -192,6 +210,17 @@ export function resolveArtifactUrl(input: {
   }
 
   return null;
+}
+
+export function resolveArtifactDownloadUrl(input: {
+  artifact: GeneratedImageArtifact;
+  workspaceId?: string | null;
+}) {
+  if (!input.workspaceId || !input.artifact.artifactId) {
+    return null;
+  }
+
+  return `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifact.artifactId)}/download`;
 }
 
 export function getToolOutputContent(output: unknown) {

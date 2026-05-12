@@ -1,11 +1,16 @@
+import { useMemo } from "react";
 import { toast } from "sonner";
+import type { FileUIPart } from "ai";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import type { SourceItem } from "../source-types";
 import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
 import { MessageList } from "./message-list";
+import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import type {
+  ArtifactPreviewRecord,
   ChatSendInput,
+  ChatMessageImagePart,
   ChatSkillItem,
   ChatToolName,
   CitationRecord,
@@ -15,10 +20,57 @@ import type {
   VersionedMessageGroup,
 } from "./types";
 
+type PromptImageMimeType = NonNullable<
+  NonNullable<ChatSendInput["images"]>[number]["mimeType"]
+>;
+
+function normalizePromptImageMediaType(
+  value: string | undefined,
+): PromptImageMimeType | undefined {
+  if (
+    value === "image/png" ||
+    value === "image/jpeg" ||
+    value === "image/webp" ||
+    value === "image/gif"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function promptFilesToImages(files: FileUIPart[] | undefined) {
+  return (files ?? [])
+    .filter(
+      (file) =>
+        file.type === "file" &&
+        file.mediaType?.startsWith("image/") &&
+        typeof file.url === "string" &&
+        file.url.startsWith("data:"),
+    )
+    .map((file) => ({
+      dataUrl: file.url,
+      fileName: file.filename,
+      mimeType: normalizePromptImageMediaType(file.mediaType),
+    }));
+}
+
+function messageImagesToInitialAttachments(
+  images: ChatMessageImagePart[],
+): (FileUIPart & { id: string })[] {
+  return images.map((image) => ({
+    filename: image.fileName,
+    id: image.id,
+    mediaType: image.mimeType,
+    type: "file" as const,
+    url: normalizeAssetUrl(image.url),
+  }));
+}
+
 export function ChatCanvas({
   activeVersionByGroup = {},
   composerInitialInput,
   composerResetKey,
+  editingMessageId = null,
   highlightedMessageId = null,
   isEditing = false,
   isStreaming = false,
@@ -27,6 +79,7 @@ export function ChatCanvas({
   sourcesVisible,
   threadTitle,
   onActiveVersionChange,
+  onArtifactPreview,
   onCancelEditing,
   onCitationClick,
   onSourcePreview,
@@ -56,6 +109,7 @@ export function ChatCanvas({
   activeVersionByGroup?: Record<string, number>;
   composerInitialInput?: string;
   composerResetKey?: number;
+  editingMessageId?: string | null;
   highlightedMessageId?: string | null;
   isEditing?: boolean;
   isStreaming?: boolean;
@@ -67,6 +121,7 @@ export function ChatCanvas({
     groupId: string;
     branchIndex: number;
   }) => void;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCancelEditing?: () => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onSourcePreview?: (source: SourceItem) => void;
@@ -104,6 +159,31 @@ export function ChatCanvas({
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
   void sourcesVisible;
+  const editingInitialAttachments = useMemo(() => {
+    if (!isEditing || !editingMessageId) {
+      return [];
+    }
+
+    for (const group of messageGroups) {
+      if (group.role !== "user") {
+        continue;
+      }
+
+      const matchingVersion = group.versions.find(
+        (version) => version.id === editingMessageId,
+      );
+      if (!matchingVersion) {
+        continue;
+      }
+
+      const images = getMessageImageParts(matchingVersion);
+      if (images.length > 0) {
+        return messageImagesToInitialAttachments(images);
+      }
+    }
+
+    return [];
+  }, [editingMessageId, isEditing, messageGroups]);
 
   function handleSendMessage(input: ChatSendInput) {
     if (!workspaceId) {
@@ -149,6 +229,7 @@ export function ChatCanvas({
         isStreaming={isStreaming}
         messageGroups={messageGroups}
         onActiveVersionChange={onActiveVersionChange}
+        onArtifactPreview={onArtifactPreview}
         onCitationClick={onCitationClick}
         onRefreshLatest={onRefreshLatest}
         onRestartFromMessage={onRestartFromMessage}
@@ -164,6 +245,7 @@ export function ChatCanvas({
             allSources={allSources}
             sourceMentionLoader={sourceMentionLoader}
             disabled={isStreaming}
+            initialAttachments={editingInitialAttachments}
             initialInput={composerInitialInput}
             isEditing={isEditing}
             inputKey={threadTitle + "-" + (composerResetKey ?? 0)}
@@ -174,6 +256,7 @@ export function ChatCanvas({
             onSubmit={(message, tools) =>
               handleSendMessage({
                 content: message.text.trim(),
+                images: promptFilesToImages(message.files),
                 mentionedSourceIds: message.mentionedSourceIds,
                 tools,
               })

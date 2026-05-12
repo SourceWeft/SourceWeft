@@ -87,9 +87,9 @@ import {
 // Helpers
 // ============================================================================
 
-const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
+const convertFileUrlToDataUrl = async (url: string): Promise<string | null> => {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { credentials: "include" });
     const blob = await response.blob();
     // FileReader uses callback-based API, wrapping in Promise is necessary
     // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
@@ -105,6 +105,10 @@ const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
     return null;
   }
 };
+
+const shouldConvertFileUrlToDataUrl = (file: FileUIPart) =>
+  !file.url.startsWith("data:") &&
+  (file.url.startsWith("blob:") || file.mediaType.startsWith("image/"));
 
 const captureScreenshot = async (): Promise<File | null> => {
   if (
@@ -524,7 +528,18 @@ export const useProviderAttachments = () => {
 const useOptionalProviderAttachments = () =>
   useContext(ProviderAttachmentsContext);
 
+type PromptInputInitialAttachment = FileUIPart & { id?: string };
+
+const normalizeInitialAttachmentFiles = (
+  files: PromptInputInitialAttachment[] | undefined,
+) =>
+  (files ?? []).map((file) => ({
+    ...file,
+    id: file.id ?? nanoid(),
+  }));
+
 export type PromptInputProviderProps = PropsWithChildren<{
+  initialAttachments?: PromptInputInitialAttachment[];
   initialInput?: string;
 }>;
 
@@ -533,6 +548,7 @@ export type PromptInputProviderProps = PropsWithChildren<{
  * If you don't use it, PromptInput stays fully self-managed.
  */
 export const PromptInputProvider = ({
+  initialAttachments,
   initialInput: initialTextInput = "",
   children,
 }: PromptInputProviderProps) => {
@@ -543,7 +559,7 @@ export const PromptInputProvider = ({
   // ----- attachments state (global when wrapped)
   const [attachmentFiles, setAttachmentFiles] = useState<
     (FileUIPart & { id: string })[]
-  >([]);
+  >(() => normalizeInitialAttachmentFiles(initialAttachments));
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // oxlint-disable-next-line eslint(no-empty-function)
   const openRef = useRef<() => void>(() => {});
@@ -1155,15 +1171,17 @@ export const PromptInput = ({
       }
 
       try {
-        // Convert blob URLs to data URLs asynchronously
+        // Convert local blobs and editable hosted images to data URLs.
         const convertedFiles: FileUIPart[] = await Promise.all(
           files.map(async ({ id: _id, ...item }) => {
-            if (item.url?.startsWith("blob:")) {
-              const dataUrl = await convertBlobUrlToDataUrl(item.url);
-              // If conversion failed, keep the original blob URL
+            if (shouldConvertFileUrlToDataUrl(item)) {
+              const dataUrl = await convertFileUrlToDataUrl(item.url);
+              if (!dataUrl) {
+                throw new Error("Unable to read attachment.");
+              }
               return {
                 ...item,
-                url: dataUrl ?? item.url,
+                url: dataUrl,
               };
             }
             return item;

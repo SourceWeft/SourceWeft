@@ -16,7 +16,10 @@ import {
   listThreadRecordsByWorkspace,
   updateThreadModelSettingsRecord,
 } from "./thread/repository";
-import { listMessageRecordsByThread } from "./message-repository";
+import {
+  findMessageRecord,
+  listMessageRecordsByThread,
+} from "./message-repository";
 import {
   mergeThreadModelSettings,
   normalizeThreadModelSettings,
@@ -26,8 +29,45 @@ import {
 } from "./model-settings";
 import { decodeThreadsCursor, encodeThreadsCursor } from "./thread/cursor";
 import { listThreadModelCatalog } from "./thread/model-catalog";
+import { downloadChatImageObject } from "../storage";
 
 const DEFAULT_THREAD_PAGE_LIMIT = 20;
+
+function findImagePart(input: { contentJson: unknown; imageId: string }) {
+  const contentJson =
+    input.contentJson && typeof input.contentJson === "object"
+      ? (input.contentJson as { parts?: unknown })
+      : {};
+  if (!Array.isArray(contentJson.parts)) {
+    return null;
+  }
+
+  for (const part of contentJson.parts) {
+    if (!part || typeof part !== "object" || Array.isArray(part)) {
+      continue;
+    }
+    const record = part as Record<string, unknown>;
+    if (
+      record.type === "image" &&
+      record.id === input.imageId &&
+      typeof record.storageKey === "string" &&
+      typeof record.mimeType === "string" &&
+      typeof record.fileName === "string"
+    ) {
+      return {
+        fileName: record.fileName,
+        mimeType: record.mimeType,
+        storageBucket:
+          typeof record.storageBucket === "string"
+            ? record.storageBucket
+            : null,
+        storageKey: record.storageKey,
+      };
+    }
+  }
+
+  return null;
+}
 
 class ContentThreadService {
   async listThreads(input: {
@@ -293,6 +333,48 @@ class ContentThreadService {
     });
 
     return { items };
+  }
+
+  async getMessageImageFile(input: {
+    workspaceId: string;
+    messageId: string;
+    imageId: string;
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const message = await findMessageRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      messageId: input.messageId,
+    });
+    if (!message) {
+      throw new ContentError(404, "MESSAGE_NOT_FOUND", "Message not found");
+    }
+
+    const image = findImagePart({
+      contentJson: message.contentJson,
+      imageId: input.imageId,
+    });
+    if (!image) {
+      throw new ContentError(
+        404,
+        "CHAT_IMAGE_NOT_FOUND",
+        "Message image not found",
+      );
+    }
+
+    return {
+      body: await downloadChatImageObject({
+        bucket: image.storageBucket,
+        key: image.storageKey,
+      }),
+      contentType: image.mimeType,
+      fileName: image.fileName,
+    };
   }
 }
 

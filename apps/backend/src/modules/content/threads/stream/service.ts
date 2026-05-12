@@ -21,6 +21,7 @@ import {
 } from "../../../../shared/llm-observability";
 import {
   type ContentThreadTurnService,
+  type PreparedThreadTurn,
   type StreamThreadEventInput,
 } from "../turn/service";
 import { mapDeepAgentEventToSse } from "./event-mapper";
@@ -41,6 +42,7 @@ import type {
   ThreadTitleGenerateJobResult,
 } from "../../queue";
 import type {
+  MessageRenderBlock,
   ModelReasoningSegmentTrace,
   ThinkingStepTrace,
   ToolCallTrace,
@@ -93,6 +95,7 @@ function buildTraceMetadata(input: {
     effectiveMentionedSourceCount:
       input.prepared.effectiveMentionedSourceIds.length,
     selectedSkillCount: input.prepared.enabledSkills.length,
+    preflightThinkingStepCount: input.prepared.preflightThinkingSteps.length,
   };
 }
 
@@ -219,6 +222,94 @@ function upsertThinkingStepTrace(
   });
 }
 
+function mergeThinkingSteps(
+  preflightSteps: ThinkingStepTrace[],
+  runtimeSteps: ThinkingStepTrace[],
+) {
+  const stepsById = new Map<string, ThinkingStepTrace>();
+  for (const step of preflightSteps) {
+    stepsById.set(step.id, step);
+  }
+  for (const step of runtimeSteps) {
+    upsertThinkingStepTrace(stepsById, step);
+  }
+  return [...stepsById.values()].sort(
+    (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0),
+  );
+}
+
+function getThinkingStepStreamKey(step: ThinkingStepTrace) {
+  return `${step.id}:${step.status}:${step.title}`;
+}
+
+function createPreflightThinkingStepQueue() {
+  const queuedSteps: ThinkingStepTrace[] = [];
+  const waitingResolvers: Array<
+    (result: IteratorResult<ThinkingStepTrace>) => void
+  > = [];
+  let closed = false;
+
+  return {
+    close() {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      while (waitingResolvers.length > 0) {
+        waitingResolvers.shift()?.({
+          done: true,
+          value: undefined,
+        });
+      }
+    },
+    next(): Promise<IteratorResult<ThinkingStepTrace>> {
+      const step = queuedSteps.shift();
+      if (step) {
+        return Promise.resolve({ done: false, value: step });
+      }
+      if (closed) {
+        return Promise.resolve({
+          done: true,
+          value: undefined,
+        });
+      }
+      return new Promise((resolve) => {
+        waitingResolvers.push(resolve);
+      });
+    },
+    push(step: ThinkingStepTrace) {
+      if (closed) {
+        return;
+      }
+      const resolve = waitingResolvers.shift();
+      if (resolve) {
+        resolve({ done: false, value: step });
+        return;
+      }
+      queuedSteps.push(step);
+    },
+  };
+}
+
+function waitForPrepareOrPreflightStep(input: {
+  preparePromise: Promise<PreparedThreadTurn>;
+  preflightStepQueue: ReturnType<typeof createPreflightThinkingStepQueue>;
+}): Promise<
+  | { type: "prepared"; prepared: PreparedThreadTurn }
+  | { type: "preflight-step"; result: IteratorResult<ThinkingStepTrace> }
+> {
+  return Promise.race([
+    input.preparePromise.then((prepared) => ({
+      type: "prepared" as const,
+      prepared,
+    })),
+    input.preflightStepQueue.next().then((result) => ({
+      type: "preflight-step" as const,
+      result,
+    })),
+  ]);
+}
+
 function appendReasoningChunk(current: string | undefined, next: string) {
   if (!current) {
     return next;
@@ -260,6 +351,7 @@ function buildTraceOutput(outcome: DeepAgentTurnOutcome) {
     ),
     toolCalls: outcome.toolCalls,
     retrievalCalls: outcome.retrievalCalls,
+    renderBlockCount: outcome.renderBlocks?.length ?? 0,
     citationCount: outcome.citations.length,
     availableCitationCount: outcome.availableCitations.length,
     citations: buildCitationObservations(outcome.citations),
@@ -268,10 +360,12 @@ function buildTraceOutput(outcome: DeepAgentTurnOutcome) {
 }
 
 function buildPartialErrorState(input: {
+  preflightThinkingSteps?: ThinkingStepTrace[];
   reasoning?: string;
   reasoningSegmentsById: Map<string, ModelReasoningSegmentTrace>;
   toolCallsById: Map<string, ToolCallTrace>;
   thinkingStepsById: Map<string, ThinkingStepTrace>;
+  renderBlocks?: MessageRenderBlock[];
   citations: AgentCitation[];
   availableCitations: AgentCitation[];
 }): ThreadStreamPartialErrorState {
@@ -281,9 +375,13 @@ function buildPartialErrorState(input: {
     toolCalls: [...input.toolCallsById.values()].map(
       normalizeToolCallStatusForError,
     ),
-    thinkingSteps: [...input.thinkingStepsById.values()].map(
-      normalizeThinkingStepStatusForError,
+    thinkingSteps: mergeThinkingSteps(
+      input.preflightThinkingSteps ?? [],
+      [...input.thinkingStepsById.values()].map(
+        normalizeThinkingStepStatusForError,
+      ),
     ),
+    renderBlocks: input.renderBlocks,
     citations: input.citations,
     availableCitations: input.availableCitations,
   };
@@ -305,6 +403,7 @@ export function buildAgentRunSpanOutput(outcome: DeepAgentTurnOutcome) {
     citations: buildCitationObservations(outcome.citations),
     availableCitations: buildCitationObservations(outcome.availableCitations),
     thinkingStepCount: outcome.thinkingSteps.length,
+    renderBlockCount: outcome.renderBlocks?.length ?? 0,
     reasoningSegmentCount: outcome.reasoningSegments.length,
   };
 }
@@ -327,6 +426,11 @@ function buildPrepareSpanInput(
 function buildPrepareSpanOutput(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
 ) {
+  const preflightCreditsConsumed = prepared.preflightBilling.reduce(
+    (sum, item) => sum + item.consumedCredits,
+    0,
+  );
+
   return {
     createdUserMessage: prepared.createdUserMessage,
     agentMode: prepared.agentMode,
@@ -339,6 +443,9 @@ function buildPrepareSpanOutput(
     selectedSkillCount: prepared.enabledSkills.length,
     isFirstAssistantResponse: prepared.isFirstAssistantResponse,
     assistantMessageParentId: prepared.assistantMessageParentId,
+    preflightThinkingStepCount: prepared.preflightThinkingSteps.length,
+    preflightBillingCount: prepared.preflightBilling.length,
+    preflightCreditsConsumed,
   };
 }
 
@@ -369,6 +476,7 @@ function buildFinalizeSpanInput(input: {
     toolCallCount: input.outcome.toolCalls.length,
     retrievalCallCount: input.outcome.retrievalCalls.length,
     thinkingStepCount: input.outcome.thinkingSteps.length,
+    renderBlockCount: input.outcome.renderBlocks?.length ?? 0,
     reasoningSegmentCount: input.outcome.reasoningSegments.length,
     latencyMs: input.latencyMs,
   };
@@ -735,8 +843,16 @@ class ContentThreadStreamService {
     input: StreamThreadEventInput,
   ): AsyncGenerator<string> {
     const prepareStartedAt = new Date();
-    const prepared = await this.turnService
-      .prepareThreadTurn(input)
+    const preflightStepQueue = createPreflightThinkingStepQueue();
+    const emittedPreflightStepKeys = new Set<string>();
+    const preparePromise = this.turnService
+      .prepareThreadTurn({
+        ...input,
+        onPreflightThinkingStep: (step) => {
+          input.onPreflightThinkingStep?.(step);
+          preflightStepQueue.push(step);
+        },
+      })
       .catch(async (error: unknown) => {
         await observePrepareFailure({
           request: input,
@@ -745,7 +861,29 @@ class ContentThreadStreamService {
           error,
         });
         throw error;
+      })
+      .finally(() => {
+        preflightStepQueue.close();
       });
+    let prepareResult = await waitForPrepareOrPreflightStep({
+      preparePromise,
+      preflightStepQueue,
+    });
+    while (prepareResult.type !== "prepared") {
+      if (!prepareResult.result.done) {
+        const step = prepareResult.result.value;
+        emittedPreflightStepKeys.add(getThinkingStepStreamKey(step));
+        yield toSseData({
+          type: "thinking-step",
+          step,
+        });
+      }
+      prepareResult = await waitForPrepareOrPreflightStep({
+        preparePromise,
+        preflightStepQueue,
+      });
+    }
+    const prepared = prepareResult.prepared;
     const prepareEndedAt = new Date();
     prepared.traceContext = buildThreadTraceContext(prepared);
     await startThreadTrace({
@@ -789,6 +927,9 @@ class ContentThreadStreamService {
     const reasoningSegmentsById = new Map<string, ModelReasoningSegmentTrace>();
     const toolCallsById = new Map<string, ToolCallTrace>();
     const thinkingStepsById = new Map<string, ThinkingStepTrace>();
+    for (const step of prepared.preflightThinkingSteps) {
+      upsertThinkingStepTrace(thinkingStepsById, step);
+    }
     let citations: AgentCitation[] = [];
     let availableCitations: AgentCitation[] = [];
     let responseFinished = false;
@@ -801,8 +942,20 @@ class ContentThreadStreamService {
         effectiveMentionedSourceIds: prepared.effectiveMentionedSourceIds,
         sourceIds: prepared.selectedSourceIds,
         effectiveSourceIds: prepared.sourceIds,
+        contentJson: prepared.userMessage.contentJson,
       });
       yield toSseData({ type: "text-start", id: textId });
+      for (const step of prepared.preflightThinkingSteps) {
+        const stepKey = getThinkingStepStreamKey(step);
+        if (emittedPreflightStepKeys.has(stepKey)) {
+          continue;
+        }
+        emittedPreflightStepKeys.add(stepKey);
+        yield toSseData({
+          type: "thinking-step",
+          step,
+        });
+      }
 
       const titleUpdates: Array<{ id: string; title: string }> = [];
       let titleUpdateEmitted = false;
@@ -981,7 +1134,11 @@ class ContentThreadStreamService {
               availableCitations: completedOutcome.availableCitations,
               retrievalCalls: completedOutcome.retrievalCalls,
               toolCalls: completedOutcome.toolCalls,
-              thinkingSteps: completedOutcome.thinkingSteps,
+              thinkingSteps: mergeThinkingSteps(
+                prepared.preflightThinkingSteps,
+                completedOutcome.thinkingSteps,
+              ),
+              renderBlocks: completedOutcome.renderBlocks,
               reasoningSegments: completedOutcome.reasoningSegments,
               llm: prepared.llm,
               operation: "chat.stream",
@@ -1030,10 +1187,12 @@ class ContentThreadStreamService {
           contentError,
           partialAssistantContent: assistantContent,
           partialState: buildPartialErrorState({
+            preflightThinkingSteps: prepared.preflightThinkingSteps,
             reasoning,
             reasoningSegmentsById,
             toolCallsById,
             thinkingStepsById,
+            renderBlocks: outcome?.renderBlocks,
             citations,
             availableCitations,
           }),
@@ -1112,10 +1271,12 @@ class ContentThreadStreamService {
             contentError,
             partialAssistantContent: assistantContent,
             partialState: buildPartialErrorState({
+              preflightThinkingSteps: prepared.preflightThinkingSteps,
               reasoning,
               reasoningSegmentsById,
               toolCallsById,
               thinkingStepsById,
+              renderBlocks: outcome?.renderBlocks,
               citations,
               availableCitations,
             }),
@@ -1249,6 +1410,9 @@ class ContentThreadStreamService {
         const errorMessage = await this.createErrorMessage({
           prepared,
           contentError,
+          partialState: {
+            thinkingSteps: prepared.preflightThinkingSteps,
+          },
         });
         if (
           !errorMessage &&
@@ -1321,7 +1485,11 @@ class ContentThreadStreamService {
             availableCitations: completedOutcome.availableCitations,
             retrievalCalls: completedOutcome.retrievalCalls,
             toolCalls: completedOutcome.toolCalls,
-            thinkingSteps: completedOutcome.thinkingSteps,
+            thinkingSteps: mergeThinkingSteps(
+              prepared.preflightThinkingSteps,
+              completedOutcome.thinkingSteps,
+            ),
+            renderBlocks: completedOutcome.renderBlocks,
             reasoningSegments: completedOutcome.reasoningSegments,
             llm: prepared.llm,
             operation: "chat.complete",

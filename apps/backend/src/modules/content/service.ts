@@ -491,6 +491,15 @@ export class ContentService {
     return contentThreadService.listThreadMessages(input);
   }
 
+  async getMessageImageFile(input: {
+    workspaceId: string;
+    messageId: string;
+    imageId: string;
+    userId: string;
+  }) {
+    return contentThreadService.getMessageImageFile(input);
+  }
+
   async getArtifactFile(input: {
     workspaceId: string;
     artifactId: string;
@@ -559,6 +568,7 @@ export class ContentService {
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    visionProfileAlias?: string | null;
   }) {
     return this.threadStreamService.refreshThread(input);
   }
@@ -575,6 +585,7 @@ export class ContentService {
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    visionProfileAlias?: string | null;
   }): AsyncGenerator<string> {
     yield* this.threadStreamService.refreshThreadEvents(input);
   }
@@ -584,6 +595,8 @@ export class ContentService {
     threadId: string;
     userId: string;
     content: string;
+    imagesProvided?: boolean;
+    images?: StreamThreadEventInput["images"];
     mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
@@ -592,6 +605,7 @@ export class ContentService {
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    visionProfileAlias?: string | null;
   }) {
     return this.threadStreamService.editThread(input);
   }
@@ -601,6 +615,8 @@ export class ContentService {
     threadId: string;
     userId: string;
     content: string;
+    imagesProvided?: boolean;
+    images?: StreamThreadEventInput["images"];
     mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
@@ -609,6 +625,7 @@ export class ContentService {
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    visionProfileAlias?: string | null;
   }): AsyncGenerator<string> {
     yield* this.threadStreamService.editThreadEvents(input);
   }

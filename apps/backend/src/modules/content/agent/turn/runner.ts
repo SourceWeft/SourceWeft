@@ -4,7 +4,10 @@ import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import { createDefaultFilesystemMounts } from "../filesystem-capabilities";
 import { MountedAgentFilesystemBackend } from "../mounted-fs-backend";
 import { createRetrievalTool } from "../tools/retrieval-tool";
-import { createGenerateImageTool } from "../tools/generate-image-tool";
+import {
+  createGenerateImageTool,
+  GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
+} from "../tools/generate-image-tool";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { createWebTools } from "../tools/web-tools";
 import {
@@ -28,11 +31,16 @@ import { endSpan, startSpan } from "../../../../shared/llm-observability";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
   AgentCheckpointRef,
+  MessageRenderBlock,
   PreparedThreadTurn,
   RetrievalCallTrace,
   ThinkingStepTrace,
   ToolCallTrace,
 } from "../../threads";
+import {
+  createMessageRenderBlockBuilder,
+  finalizeMessageRenderBlocks,
+} from "../../threads/turn/render-blocks";
 import {
   extractTextDeltasFromMessageChunk,
   extractFinishReasonFromMessageChunk,
@@ -583,11 +591,46 @@ function extractGeneratedImageArtifacts(
 
 export const testExports = {
   buildAgentRuntimePrompt,
+  createMessageRenderBlockBuilder,
   extractGeneratedImageArtifacts,
+  finalizeMessageRenderBlocks,
   getFilesystemToolDescription,
   getFilesystemToolEndTitle,
   getFilesystemToolStartTitle,
 };
+
+export function normalizeGeneratedImageProgressEvent(
+  payload: unknown,
+): {
+  toolCallId: string;
+  tool: string;
+  data: Record<string, unknown>;
+} | null {
+  const record = toObjectRecord(payload);
+  if (!record || record.type !== GENERATED_IMAGE_PROGRESS_EVENT_TYPE) {
+    return null;
+  }
+
+  const toolCallId =
+    typeof record.toolCallId === "string" && record.toolCallId.length > 0
+      ? record.toolCallId
+      : null;
+  if (!toolCallId) {
+    return null;
+  }
+
+  const tool = AGENT_TOOL_NAMES.generateImage;
+
+  return {
+    toolCallId,
+    tool,
+    data: {
+      ...record,
+      tool,
+      toolCallId,
+    },
+  };
+}
 
 function getWebToolStartTitle(toolName: string) {
   if (isWebSearchToolName(toolName)) {
@@ -924,7 +967,7 @@ function buildAgentRuntimePrompt(input: {
       `For ambiguous requests, decide semantically from the user's goal rather than matching literal keywords. If the user expects a kept visual output, call ${AGENT_TOOL_NAMES.generateImage}.`,
       "If the prompt is missing essential visual details for a requested image, make a reasonable concise prompt instead of asking a separate confirmation.",
       `Never claim an image was created unless ${AGENT_TOOL_NAMES.generateImage} completed successfully.`,
-      `After ${AGENT_TOOL_NAMES.generateImage} succeeds, keep the final answer concise. The application displays the generated image automatically below the answer; do not include image markdown or raw artifact URLs.`,
+      `After ${AGENT_TOOL_NAMES.generateImage} succeeds, keep the final answer concise. The application displays the generated image automatically; do not include image markdown or raw artifact URLs.`,
     );
   }
 
@@ -987,6 +1030,7 @@ export async function* invokeDeepAgentTurn(input: {
   const thinkingStepsById = new Map<string, ThinkingStepTrace>();
   const thinkingStepOrder: string[] = [];
   const reasoningSegments: DeepAgentTurnOutcome["reasoningSegments"] = [];
+  const renderBlocks = createMessageRenderBlockBuilder();
   const runStartedAt = Date.now();
   const citationRegistry = new AgentCitationRegistry();
   let latestToolRetrieval: Awaited<ReturnType<typeof runToolRetrieval>> | null =
@@ -1297,7 +1341,7 @@ export async function* invokeDeepAgentTurn(input: {
   const agentMessages = [
     {
       role: "user" as const,
-      content: input.prepared.messageContent,
+      content: input.prepared.agentMessageContent,
     },
   ];
 
@@ -1332,7 +1376,7 @@ export async function* invokeDeepAgentTurn(input: {
       selected_skill_ids: input.prepared.skillIds,
       selected_skill_count: input.prepared.enabledSkills.length,
     },
-    streamMode: ["messages", "tools", "updates", "checkpoints"],
+    streamMode: ["messages", "tools", "updates", "checkpoints", "custom"],
   } satisfies AgentRunnableConfig;
 
   if (input.prepared.enabledSkills.length > 0) {
@@ -1413,6 +1457,7 @@ export async function* invokeDeepAgentTurn(input: {
           continue;
         }
         assistantContent += delta;
+        renderBlocks.appendText(delta);
         hasStreamedText = true;
         hasTextSinceLastToolBoundary = true;
         yield {
@@ -1429,6 +1474,35 @@ export async function* invokeDeepAgentTurn(input: {
       if (assistantFromUpdates && assistantFromUpdates.trim().length > 0) {
         fallbackAssistantContent = assistantFromUpdates.trim();
       }
+      continue;
+    }
+
+    if (mode === "custom") {
+      const progressEvent = normalizeGeneratedImageProgressEvent(payload);
+      if (!progressEvent) {
+        continue;
+      }
+
+      const currentToolCall = toolCallsById.get(progressEvent.toolCallId);
+      if (!currentToolCall) {
+        continue;
+      }
+
+      const nextToolCall: ToolCallTrace = {
+        ...currentToolCall,
+        tool: progressEvent.tool,
+        output: progressEvent.data,
+        status: "running",
+        error: null,
+      };
+      toolCallsById.set(progressEvent.toolCallId, nextToolCall);
+      yield {
+        type: "tool-call-event",
+        id: progressEvent.toolCallId,
+        tool: progressEvent.tool,
+        data: progressEvent.data,
+        toolCall: nextToolCall,
+      };
       continue;
     }
 
@@ -1502,6 +1576,39 @@ export async function* invokeDeepAgentTurn(input: {
         error: null,
       };
       toolCallsById.set(toolCallId, nextToolCall);
+      if (isGeneratedImageArtifactToolName(toolName)) {
+        const progressEvent = normalizeGeneratedImageProgressEvent({
+          type: GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
+          toolCallId,
+          tool: toolName,
+          stage: "preparing",
+          ...(typeof normalizedInput.title === "string" &&
+          normalizedInput.title.trim().length > 0
+            ? { title: normalizedInput.title.trim() }
+            : {}),
+          ...(input.prepared.artifactIntent?.kind === "image"
+            ? {
+                aspectRatio: input.prepared.artifactIntent.config.aspectRatio,
+                quality: input.prepared.artifactIntent.config.quality,
+                style: input.prepared.artifactIntent.config.style,
+              }
+            : {}),
+        });
+        if (progressEvent) {
+          const progressToolCall: ToolCallTrace = {
+            ...nextToolCall,
+            output: progressEvent.data,
+          };
+          toolCallsById.set(toolCallId, progressToolCall);
+          yield {
+            type: "tool-call-event",
+            id: toolCallId,
+            tool: toolName,
+            data: progressEvent.data,
+            toolCall: progressToolCall,
+          };
+        }
+      }
       if (hasTextSinceLastToolBoundary) {
         yield {
           type: "text-interrupted",
@@ -1510,11 +1617,15 @@ export async function* invokeDeepAgentTurn(input: {
           tool: toolName,
         };
         assistantContent += "\n";
+        renderBlocks.appendText("\n");
         yield {
           type: "text-delta",
           delta: "\n",
         };
         hasTextSinceLastToolBoundary = false;
+      }
+      if (isGeneratedImageArtifactToolName(toolName)) {
+        renderBlocks.appendGeneratedImage(toolCallId);
       }
       yield {
         type: "tool-call-start",
@@ -1967,6 +2078,7 @@ export async function* invokeDeepAgentTurn(input: {
   };
 
   if (!hasStreamedText) {
+    renderBlocks.appendText(assistantText);
     yield {
       type: "text-delta",
       delta: sanitizeSseValue(assistantText),
@@ -2000,6 +2112,10 @@ export async function* invokeDeepAgentTurn(input: {
   finalCheckpoint ??= checkpointRefFromConfig(
     (finalState as { config?: unknown } | null)?.config,
   );
+  const finalRenderBlocks: MessageRenderBlock[] = finalizeMessageRenderBlocks({
+    blocks: renderBlocks.list(),
+    finalText: assistantText,
+  });
 
   yield {
     type: "done",
@@ -2013,6 +2129,9 @@ export async function* invokeDeepAgentTurn(input: {
       availableCitations: finalCitations,
       retrievalCalls,
       toolCalls,
+      ...(finalRenderBlocks.length > 0
+        ? { renderBlocks: finalRenderBlocks }
+        : {}),
       thinkingSteps: listThinkingSteps({
         stepsById: thinkingStepsById,
         stepOrder: thinkingStepOrder,

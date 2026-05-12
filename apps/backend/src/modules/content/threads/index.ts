@@ -8,6 +8,7 @@ export type {
   AgentCheckpointMetadata,
   AgentCheckpointRef,
   FinalizeThreadTurnCommand,
+  MessageRenderBlock,
   ModelReasoningSegmentTrace,
   PreparedThreadTurn,
   RetrievalCallTrace,

@@ -189,13 +189,27 @@ export interface ToolCall {
 
 export interface GatewayMessage {
   role: MessageRole;
-  content: string;
+  content: GatewayMessageContent;
   name?: string;
   toolCallId?: string;
   toolCalls?: ToolCall[];
   reasoningContent?: string;
   providerFields?: Record<string, unknown>;
 }
+
+export type GatewayMessageContent = string | GatewayMessageContentPart[];
+
+export type GatewayMessageContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image_url";
+      image_url: {
+        url: string;
+      };
+    };
 
 export interface GatewayRequestMetadata {
   teamId?: string;

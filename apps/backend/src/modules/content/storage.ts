@@ -47,6 +47,16 @@ export function buildArtifactStorageKey(input: {
   return `workspaces/${input.workspaceId}/artifacts/${input.artifactId}/${randomUUID()}-${sanitizedName}`;
 }
 
+export function buildChatImageStorageKey(input: {
+  workspaceId: string;
+  messageId: string;
+  imageId: string;
+  fileName: string;
+}) {
+  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  return `workspaces/${input.workspaceId}/chat-images/${input.messageId}/${input.imageId}-${randomUUID()}-${sanitizedName}`;
+}
+
 export async function uploadSourceObject(input: {
   key: string;
   body: Buffer;
@@ -77,6 +87,21 @@ export async function uploadArtifactObject(input: {
   );
 }
 
+export async function uploadChatImageObject(input: {
+  key: string;
+  body: Buffer;
+  contentType: string;
+}) {
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: getConfiguredBucket(),
+      Key: input.key,
+      Body: input.body,
+      ContentType: input.contentType,
+    }),
+  );
+}
+
 export async function downloadSourceObject(input: { bucket?: string | null; key: string }) {
   const response = await s3Client.send(
     new GetObjectCommand({
@@ -90,6 +115,21 @@ export async function downloadSourceObject(input: { bucket?: string | null; key:
 }
 
 export async function downloadArtifactObject(input: { bucket?: string | null; key: string }) {
+  const response = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+    }),
+  );
+
+  const bytes = await response.Body?.transformToByteArray();
+  return Buffer.from(bytes ?? []);
+}
+
+export async function downloadChatImageObject(input: {
+  bucket?: string | null;
+  key: string;
+}) {
   const response = await s3Client.send(
     new GetObjectCommand({
       Bucket: input.bucket || getConfiguredBucket(),

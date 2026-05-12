@@ -40,11 +40,11 @@ import { normalizeUsage } from "../normalize/usage";
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
   return messages.map((message) => {
     if (message.role === "system") {
-      return new SystemMessage(message.content);
+      return new SystemMessage(gatewayContentToText(message.content));
     }
     if (message.role === "assistant") {
       return new AIMessage({
-        content: message.content,
+        content: gatewayContentToText(message.content),
         tool_calls: message.toolCalls?.map((toolCall) => ({
           id: toolCall.id,
           name: toolCall.name,
@@ -55,12 +55,22 @@ export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
     }
     if (message.role === "tool") {
       return new ToolMessage({
-        content: message.content,
+        content: gatewayContentToText(message.content),
         tool_call_id: message.toolCallId ?? "tool_call",
       });
     }
     return new HumanMessage(message.content);
   });
+}
+
+function gatewayContentToText(content: GatewayMessage["content"]) {
+  if (typeof content === "string") {
+    return content;
+  }
+  return content
+    .map((part) => (part.type === "text" ? part.text : "[image]"))
+    .join("\n")
+    .trim();
 }
 
 export function createChatModel(input: {

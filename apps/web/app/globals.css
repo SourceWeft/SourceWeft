@@ -187,3 +187,13 @@ html:lang(he) .font-brand {
     cursor: pointer;
   }
 }
+
+@keyframes image-sheen {
+  0% {
+    background-position: 140% 0;
+  }
+  55%,
+  100% {
+    background-position: -80% 0;
+  }
+}

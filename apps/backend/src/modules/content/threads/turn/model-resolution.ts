@@ -90,6 +90,7 @@ export async function resolveActiveChatProfileByModelAlias(modelAlias: string) {
       gatewayConfigId: modelGatewayProfiles.gatewayConfigId,
       modelAlias: modelGatewayProfiles.modelAlias,
       profileAlias: modelGatewayProfiles.profileAlias,
+      kind: modelGatewayProfiles.kind,
       providerKind: modelGatewayProviderConfigs.providerKind,
     })
     .from(modelGatewayProfiles)
@@ -124,6 +125,7 @@ export async function resolveActiveChatProfileByAlias(profileAlias: string) {
       gatewayConfigId: modelGatewayProfiles.gatewayConfigId,
       modelAlias: modelGatewayProfiles.modelAlias,
       profileAlias: modelGatewayProfiles.profileAlias,
+      kind: modelGatewayProfiles.kind,
       providerKind: modelGatewayProviderConfigs.providerKind,
     })
     .from(modelGatewayProfiles)

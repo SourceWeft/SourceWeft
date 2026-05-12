@@ -100,6 +100,67 @@ test("mapDeepAgentEventToSse sends displayable tool result output", () => {
   });
 });
 
+test("mapDeepAgentEventToSse sends slim tool progress events", () => {
+  const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
+    type: "tool-call-event",
+    id: "image-1",
+    tool: "generate_image",
+    data: {
+      type: "generate_image_progress",
+      toolCallId: "image-1",
+      stage: "generating",
+      title: "Concept map",
+    },
+    toolCall: {
+      id: "image-1",
+      tool: "generate_image",
+      input: { prompt: "long prompt", title: "Concept map" },
+      output: { stage: "generating" },
+      status: "running",
+      latencyMs: null,
+      error: null,
+      sequence: 1,
+    },
+  };
+
+  const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
+
+  assert.equal(data.type, "tool-call-event");
+  assert.equal(data.id, "image-1");
+  assert.deepEqual(data.data, event.data);
+  assert.equal("toolCall" in data, false);
+});
+
+test("mapDeepAgentEventToSse sends slim tool end events", () => {
+  const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
+    type: "tool-call-end",
+    id: "image-1",
+    tool: "generate_image",
+    status: "completed",
+    latencyMs: 1234,
+    toolCall: {
+      id: "image-1",
+      tool: "generate_image",
+      input: { prompt: "long prompt", title: "Concept map" },
+      output: { artifactUrl: "/artifact.png" },
+      status: "completed",
+      latencyMs: 1234,
+      error: null,
+      sequence: 1,
+    },
+  };
+
+  const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
+
+  assert.deepEqual(data, {
+    type: "tool-call-end",
+    id: "image-1",
+    tool: "generate_image",
+    status: "completed",
+    latencyMs: 1234,
+  });
+});
+
 test("mapDeepAgentEventToSse preserves tool input parameters", () => {
   const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
     type: "tool-call-start",

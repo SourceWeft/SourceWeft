@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
+import type { FileUIPart } from "ai";
 import {
   ArrowUp,
   Brain,
@@ -17,13 +18,18 @@ import {
 } from "lucide-react";
 import {
   Attachment,
+  AttachmentHoverCard,
+  AttachmentHoverCardContent,
+  AttachmentHoverCardTrigger,
   AttachmentInfo,
   AttachmentPreview,
   AttachmentRemove,
   Attachments,
+  getAttachmentLabel,
 } from "@sourceweft/ui-web/components/ai-elements/attachments";
 import {
   PromptInput,
+  PromptInputActionAddAttachments,
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
@@ -32,6 +38,7 @@ import {
   PromptInputProvider,
   PromptInputSubmit,
   PromptInputTools,
+  usePromptInputAttachments,
   type PromptInputMentionSourceLoader,
   type PromptInputMessage,
 } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
@@ -90,6 +97,7 @@ export function Composer({
   onSubmit,
   onCancelEditing,
   className,
+  initialAttachments = [],
   initialInput = "",
   inputKey,
   allSources = [],
@@ -116,6 +124,7 @@ export function Composer({
   onSubmit?: (message: PromptInputMessage, tools?: ChatToolsSelection) => void;
   onCancelEditing?: () => void;
   className?: string;
+  initialAttachments?: (FileUIPart & { id: string })[];
   initialInput?: string;
   inputKey?: string | number;
   allSources?: SourceItem[];
@@ -139,6 +148,8 @@ export function Composer({
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [, setDraftText] = useState(initialInput);
+  const [composerSessionKey, setComposerSessionKey] = useState(0);
+  const previousEditingRef = useRef(isEditing);
   const [imageConfig, setImageConfig] = useState<ChatImageArtifactConfig>(
     DEFAULT_IMAGE_ARTIFACT_CONFIG,
   );
@@ -147,9 +158,6 @@ export function Composer({
     () => new Set(disabledToolNames),
     [disabledToolNames],
   );
-  const showSourceCountOnly = selectedSources.length > 2;
-  const visible = showSourceCountOnly ? [] : selectedSources;
-  const hasSelectedSources = selectedSources.length > 0;
   const imageGenerationEnabled = !disabledToolNameSet.has(
     AGENT_TOOL_NAMES.generateImage,
   );
@@ -235,6 +243,12 @@ export function Composer({
       : activeThinkingSettings.mode === "effort"
         ? activeThinkingSettings.effort
         : "auto";
+  const initialAttachmentsKey = initialAttachments
+    .map(
+      (attachment) =>
+        `${attachment.id}:${attachment.url}:${attachment.filename ?? ""}`,
+    )
+    .join("|");
   const mentionSources = allSources
     .filter(
       (source) => source.sourceType !== "directory" && source.type !== "DIR",
@@ -311,6 +325,13 @@ export function Composer({
   }, [initialInput, inputKey]);
 
   useEffect(() => {
+    if (previousEditingRef.current !== isEditing) {
+      previousEditingRef.current = isEditing;
+      setComposerSessionKey((value) => value + 1);
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
     if (!isEditing || disabled) {
       return;
     }
@@ -350,8 +371,16 @@ export function Composer({
 
   return (
     <div className={className} ref={rootRef}>
-      <PromptInputProvider initialInput={initialInput} key={inputKey}>
+      <PromptInputProvider
+        initialAttachments={initialAttachments}
+        initialInput={initialInput}
+        key={`${String(inputKey ?? "composer")}:${composerSessionKey}:${initialAttachmentsKey}`}
+      >
         <PromptInput
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          maxFileSize={10 * 1024 * 1024}
+          maxFiles={8}
+          multiple
           onSubmit={(message) => {
             if (disabled) {
               return;
@@ -364,49 +393,13 @@ export function Composer({
               imageModelAlias: effectiveImageModelAlias,
             });
             (onSubmit ?? (() => undefined))(message, tools);
+            setComposerSessionKey((value) => value + 1);
           }}
         >
-          {hasSelectedSources ? (
-            <PromptInputHeader>
-              <Attachments className="gap-2.5 pt-0.5" variant="inline">
-                {showSourceCountOnly ? (
-                  <Attachment
-                    className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
-                    data={{
-                      id: "source-count",
-                      mediaType: "text/plain",
-                      sourceId: "source-count",
-                      title: `${selectedSources.length} selected sources`,
-                      type: "source-document",
-                    }}
-                  >
-                    {selectedSources.length} selected sources
-                  </Attachment>
-                ) : (
-                  visible.map((source) => (
-                    <Attachment
-                      className="rounded-2xl bg-muted/55 px-3.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
-                      data={toAttachmentData(source)}
-                      key={source.id}
-                      onRemove={() => onRemoveSource?.(source.id)}
-                    >
-                      <AttachmentPreview
-                        className="text-foreground/75"
-                        fallbackIcon={
-                          <SourceIcon className="size-4" source={source} />
-                        }
-                      />
-                      <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
-                      <AttachmentRemove
-                        className="text-foreground/55 hover:bg-background/60"
-                        label={`Remove ${source.title}`}
-                      />
-                    </Attachment>
-                  ))
-                )}
-              </Attachments>
-            </PromptInputHeader>
-          ) : null}
+          <ComposerAttachmentsHeader
+            onRemoveSource={onRemoveSource}
+            selectedSources={selectedSources}
+          />
           <PromptInputBody>
             <PromptInputMentionEditor
               autoFocus={isEditing && !disabled}
@@ -467,6 +460,11 @@ export function Composer({
                     <DropdownMenuLabel className="px-2 py-1.5 text-[11px] text-muted-foreground">
                       Options
                     </DropdownMenuLabel>
+                    <PromptInputActionAddAttachments
+                      className="h-9 rounded-lg px-2 text-xs"
+                      label="Add image"
+                    />
+                    <DropdownMenuSeparator />
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
                         <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -740,6 +738,8 @@ export function Composer({
                   </PromptInputButton>
                 ) : null}
 
+                <ComposerAddImageButton disabled={disabled} />
+
                 <div
                   className={cn(
                     "transition-opacity",
@@ -770,6 +770,156 @@ export function Composer({
         </PromptInput>
       </PromptInputProvider>
     </div>
+  );
+}
+
+function ComposerAttachmentsHeader({
+  onRemoveSource,
+  selectedSources,
+}: {
+  onRemoveSource?: (id: string) => void;
+  selectedSources: SourceItem[];
+}) {
+  const attachments = usePromptInputAttachments();
+  const images = attachments.files.filter((file) =>
+    file.mediaType?.startsWith("image/"),
+  );
+  const showSourceCountOnly = selectedSources.length > 2;
+  const visibleSources = showSourceCountOnly ? [] : selectedSources;
+
+  if (selectedSources.length === 0 && images.length === 0) {
+    return null;
+  }
+
+  return (
+    <PromptInputHeader className="items-start">
+      <Attachments className="gap-2.5 pt-0.5" variant="inline">
+        {showSourceCountOnly ? (
+          <Attachment
+            className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
+            data={{
+              id: "source-count",
+              mediaType: "text/plain",
+              sourceId: "source-count",
+              title: `${selectedSources.length} selected sources`,
+              type: "source-document",
+            }}
+          >
+            {selectedSources.length} selected sources
+          </Attachment>
+        ) : (
+          visibleSources.map((source) => (
+            <Attachment
+              className="rounded-2xl bg-muted/55 px-3.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
+              data={toAttachmentData(source)}
+              key={source.id}
+              onRemove={() => onRemoveSource?.(source.id)}
+            >
+              <AttachmentPreview
+                className="text-foreground/75"
+                fallbackIcon={<SourceIcon className="size-4" source={source} />}
+              />
+              <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
+              <AttachmentRemove
+                className="text-foreground/55 hover:bg-background/60"
+                label={`Remove ${source.title}`}
+              />
+            </Attachment>
+          ))
+        )}
+        {images.map((file) => (
+          <ComposerImageAttachment
+            attachment={file}
+            key={file.id}
+            onRemove={() => attachments.remove(file.id)}
+          />
+        ))}
+      </Attachments>
+    </PromptInputHeader>
+  );
+}
+
+function ComposerImageAttachment({
+  attachment,
+  onRemove,
+}: {
+  attachment: ReturnType<typeof usePromptInputAttachments>["files"][number];
+  onRemove: () => void;
+}) {
+  const label = getAttachmentLabel(attachment);
+
+  return (
+    <AttachmentHoverCard>
+      <AttachmentHoverCardTrigger asChild>
+        <div className="w-fit">
+          <Attachment
+            className="rounded-2xl bg-muted/55 px-2.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
+            data={attachment}
+            onRemove={onRemove}
+          >
+            <div className="relative size-5 shrink-0">
+              <div className="absolute inset-0 transition-opacity group-hover:opacity-0">
+                <AttachmentPreview />
+              </div>
+              <AttachmentRemove
+                className="absolute inset-0 text-foreground/55 hover:bg-background/60"
+                label={`Remove ${label}`}
+              />
+            </div>
+            <AttachmentInfo className="max-w-[180px] text-[13px] font-medium" />
+          </Attachment>
+        </div>
+      </AttachmentHoverCardTrigger>
+      <AttachmentHoverCardContent>
+        <div className="space-y-3">
+          {attachment.url ? (
+            <div className="flex max-h-96 w-80 items-center justify-center overflow-hidden rounded-md border bg-muted/30">
+              <img
+                alt={label}
+                className="max-h-full max-w-full object-contain"
+                height={384}
+                src={attachment.url}
+                width={320}
+              />
+            </div>
+          ) : null}
+          <div className="space-y-1 px-0.5">
+            <h4 className="font-semibold text-sm leading-none">{label}</h4>
+            {attachment.mediaType ? (
+              <p className="font-mono text-muted-foreground text-xs">
+                {attachment.mediaType}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </AttachmentHoverCardContent>
+    </AttachmentHoverCard>
+  );
+}
+
+function ComposerAddImageButton({ disabled }: { disabled?: boolean }) {
+  const attachments = usePromptInputAttachments();
+
+  return (
+    <PromptInputButton
+      aria-disabled={disabled || undefined}
+      className={cn(
+        "size-8 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground",
+        disabled && "pointer-events-none opacity-50",
+      )}
+      onClick={() => {
+        if (!disabled) {
+          attachments.openFileDialog();
+        }
+      }}
+      size="icon-sm"
+      tooltip="Add image"
+      type="button"
+      variant="ghost"
+    >
+      <ImageIcon className="size-4" />
+      <span className="sr-only">Add image</span>
+    </PromptInputButton>
   );
 }
 

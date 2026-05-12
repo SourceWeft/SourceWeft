@@ -35,7 +35,7 @@ class ContentThreadTurnService {
   constructor(private readonly billing: ContentBillingPort) {}
 
   async prepareThreadTurn(input: StreamThreadEventInput): Promise<PreparedThreadTurn> {
-    return prepareThreadTurn(input);
+    return prepareThreadTurn(input, { billing: this.billing });
   }
 
   async generateChatTitle(input: {

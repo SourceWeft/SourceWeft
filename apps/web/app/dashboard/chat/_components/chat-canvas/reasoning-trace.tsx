@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, WrenchIcon } from "lucide-react";
+import { ImageIcon, Loader2, WrenchIcon } from "lucide-react";
 import {
   isGeneratedImageArtifactToolName,
   isRetrievalToolName,
@@ -11,23 +11,31 @@ import {
   ChainOfThought,
   ChainOfThoughtContent,
   ChainOfThoughtHeader,
+  ChainOfThoughtImage,
   ChainOfThoughtSearchResult,
   ChainOfThoughtSearchResults,
   ChainOfThoughtStep,
 } from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
+import { cn } from "@sourceweft/ui-web/lib/utils";
 import { hasWebPageToolResults } from "../web-tool-results";
 import {
   compactText,
   getToolOutputContent,
+  normalizeAssetUrl,
+  resolveArtifactDownloadUrl,
   resolveArtifactUrl,
   resolveGeneratedImageArtifact,
 } from "./message-assets";
+import { GeneratedImagePreview } from "./generated-image-preview";
 import type {
+  ArtifactPreviewRecord,
   ModelReasoningSegmentRecord,
   ThinkingStepRecord,
   ToolCallRecord,
 } from "./types";
+
+const GENERATED_IMAGE_DEFAULT_ASPECT_RATIO = "4 / 3";
 
 function getRecordValue(
   record: Record<string, unknown> | undefined,
@@ -148,6 +156,25 @@ function summarizeToolOutput(output: unknown) {
   return content ? compactText(content) : null;
 }
 
+function parseAspectRatio(value: unknown) {
+  if (typeof value !== "string" || value === "auto") {
+    return null;
+  }
+
+  const match = value.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+  if (!match) {
+    return null;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || height <= 0) {
+    return null;
+  }
+
+  return `${width} / ${height}`;
+}
+
 function formatToolName(toolName: string) {
   return toolName
     .replace(/[_-]+/g, " ")
@@ -174,7 +201,105 @@ function getWebFetchStatusLabel(status: ToolCallRecord["status"]) {
   return "Fetched pages";
 }
 
+const GENERATED_IMAGE_STAGE_LABELS: Record<string, string> = {
+  billing: "Finalizing",
+  generating: "Rendering",
+  preparing: "Composing",
+  ready: "Ready",
+  saving: "Polishing",
+};
+
+const GENERATED_IMAGE_STAGE_INDEX: Record<string, number> = {
+  preparing: 0,
+  generating: 1,
+  saving: 2,
+  billing: 3,
+  ready: 4,
+};
+
+function getGeneratedImageStatus(toolCall: ToolCallRecord) {
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
+  const input = toolCall.input;
+  const stage = getRecordValue(output, "stage");
+  const normalizedStage =
+    typeof stage === "string" && stage.trim().length > 0
+      ? stage.trim()
+      : null;
+  const outputWidth = getRecordValue(output, "width");
+  const outputHeight = getRecordValue(output, "height");
+  const width =
+    typeof outputWidth === "number" && Number.isFinite(outputWidth)
+      ? outputWidth
+      : null;
+  const height =
+    typeof outputHeight === "number" && Number.isFinite(outputHeight)
+      ? outputHeight
+      : null;
+  const aspectRatio =
+    width && height && height > 0
+      ? `${width} / ${height}`
+      : parseAspectRatio(getRecordValue(output, "aspectRatio")) ??
+        parseAspectRatio(getRecordValue(input, "aspectRatio")) ??
+        GENERATED_IMAGE_DEFAULT_ASPECT_RATIO;
+
+  return {
+    aspectRatio,
+    label: normalizedStage
+      ? (GENERATED_IMAGE_STAGE_LABELS[normalizedStage] ??
+        formatToolName(normalizedStage))
+      : null,
+    progress:
+      normalizedStage && normalizedStage in GENERATED_IMAGE_STAGE_INDEX
+        ? GENERATED_IMAGE_STAGE_INDEX[normalizedStage]
+        : null,
+    stage: normalizedStage,
+  };
+}
+
+function getGeneratedImageTitle(toolCall: ToolCallRecord) {
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
+  const outputTitle = getRecordValue(output, "title");
+  if (typeof outputTitle === "string" && outputTitle.trim().length > 0) {
+    return outputTitle.trim();
+  }
+
+  const inputTitle = getRecordValue(toolCall.input, "title");
+  if (typeof inputTitle === "string" && inputTitle.trim().length > 0) {
+    return inputTitle.trim();
+  }
+
+  const prompt = getRecordValue(toolCall.input, "prompt");
+  return typeof prompt === "string" && prompt.trim().length > 0
+    ? compactText(prompt, 72)
+    : null;
+}
+
+function getGeneratedImagePrompt(toolCall: ToolCallRecord) {
+  const prompt = getRecordValue(toolCall.input, "prompt");
+  return typeof prompt === "string" && prompt.trim().length > 0
+    ? prompt.trim()
+    : null;
+}
+
 function getToolDisplayLabel(toolCall: ToolCallRecord) {
+  if (isGeneratedImageArtifactToolName(toolCall.tool)) {
+    const title = getGeneratedImageTitle(toolCall);
+    const imageStatus = getGeneratedImageStatus(toolCall);
+    const verb =
+      toolCall.status === "running"
+        ? (imageStatus.label ?? "Generating image")
+        : toolCall.status === "error"
+          ? "Image generation failed"
+          : "Generated image";
+    return title ? `${verb}: ${compactText(title, 72)}` : verb;
+  }
+
   if (isRetrievalToolName(toolCall.tool)) {
     const query = getToolQuery(toolCall);
     return query
@@ -277,6 +402,141 @@ function getThinkingMetadataParts(
     .filter((item): item is string => item !== null);
 }
 
+type VisionFallbackImageTrace = {
+  description: string;
+  fileName: string;
+  imageId: string;
+  mimeType: string | null;
+  url: string;
+};
+
+function getMetadataString(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const value = getRecordValue(metadata, key);
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function getVisionFallbackImages(
+  metadata: Record<string, unknown> | undefined,
+) {
+  const images = getRecordValue(metadata, "images");
+  if (!Array.isArray(images)) {
+    return [] as VisionFallbackImageTrace[];
+  }
+
+  return images
+    .map((item): VisionFallbackImageTrace | null => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const record = item as Record<string, unknown>;
+      const fileName =
+        typeof record.fileName === "string" && record.fileName.trim()
+          ? record.fileName.trim()
+          : "image";
+      const imageId =
+        typeof record.imageId === "string" && record.imageId.trim()
+          ? record.imageId.trim()
+          : fileName;
+      const url =
+        typeof record.url === "string" && record.url.trim()
+          ? normalizeAssetUrl(record.url.trim())
+          : null;
+      if (!url) {
+        return null;
+      }
+
+      return {
+        description:
+          typeof record.description === "string"
+            ? record.description.trim()
+            : "",
+        fileName,
+        imageId,
+        mimeType:
+          typeof record.mimeType === "string" && record.mimeType.trim()
+            ? record.mimeType.trim()
+            : null,
+        url,
+      };
+    })
+    .filter((item): item is VisionFallbackImageTrace => item !== null);
+}
+
+function isVisionFallbackStep(step: ThinkingStepRecord) {
+  return step.metadata?.strategy === "vision_fallback";
+}
+
+function VisionFallbackStepDetails({ step }: { step: ThinkingStepRecord }) {
+  const images = getVisionFallbackImages(step.metadata);
+  const visionModelAlias = getMetadataString(step.metadata, "visionModelAlias");
+  const chatModelAlias = getMetadataString(step.metadata, "chatModelAlias");
+
+  return (
+    <div className="space-y-3 text-muted-foreground text-xs leading-5">
+      {visionModelAlias || chatModelAlias ? (
+        <p>
+          {visionModelAlias ? (
+            <>
+              <span className="font-medium text-foreground/80">
+                Vision model:
+              </span>{" "}
+              {visionModelAlias}
+            </>
+          ) : null}
+          {visionModelAlias && chatModelAlias ? " · " : null}
+          {chatModelAlias ? (
+            <>
+              <span className="font-medium text-foreground/80">
+                Chat model:
+              </span>{" "}
+              {chatModelAlias}
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      {images.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {images.map((image) => (
+            <ChainOfThoughtImage
+              caption={
+                image.description
+                  ? compactText(image.description, 220)
+                  : image.fileName
+              }
+              className="mt-0"
+              key={image.imageId}
+            >
+              <img
+                alt={image.fileName}
+                className="max-h-40 w-full object-contain"
+                height={160}
+                src={image.url}
+                width={240}
+              />
+            </ChainOfThoughtImage>
+          ))}
+        </div>
+      ) : step.items.length > 0 ? (
+        <ChainOfThoughtSearchResults>
+          {step.items.map((result) => (
+            <ChainOfThoughtSearchResult
+              key={`${step.id}:${result}`}
+              title={result}
+            >
+              <span className="max-w-[220px] truncate">{result}</span>
+            </ChainOfThoughtSearchResult>
+          ))}
+        </ChainOfThoughtSearchResults>
+      ) : null}
+    </div>
+  );
+}
+
 function getToolStepMetadataParts(
   metadata: Record<string, unknown> | undefined,
 ) {
@@ -315,8 +575,12 @@ function getToolCallDetailParts(
     (typeof toolStep?.metadata?.latencyMs === "number"
       ? toolStep.metadata.latencyMs
       : null);
+  const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
+    ? getGeneratedImageStatus(toolCall)
+    : null;
   return [
     `status: ${toolCall.status}`,
+    imageStatus?.stage ? `stage: ${imageStatus.stage}` : null,
     hitCount !== null ? `hits: ${hitCount}` : null,
     resultCount !== null
       ? `${resultCount} ${pluralize(resultCount, "result")}`
@@ -330,10 +594,12 @@ function getToolCallDetailParts(
 }
 
 function ToolCallDetails({
+  onArtifactPreview,
   toolCall,
   toolStep,
   workspaceId,
 }: {
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   toolCall: ToolCallRecord;
   toolStep?: ThinkingStepRecord;
   workspaceId?: string | null;
@@ -343,9 +609,35 @@ function ToolCallDetails({
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
   const imageArtifact = resolveGeneratedImageArtifact(toolCall, toolStep);
+  const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
+    ? getGeneratedImageStatus(toolCall)
+    : null;
   const imageUrl = imageArtifact
     ? resolveArtifactUrl({ artifact: imageArtifact, workspaceId })
     : null;
+  const previewArtifact =
+    imageArtifact?.artifactId && workspaceId && imageUrl
+      ? ({
+          id: imageArtifact.artifactId,
+          teamId: "",
+          workspaceId,
+          threadId: null,
+          artifactType: "image",
+          status: "ready",
+          title: imageArtifact.title ?? getGeneratedImageTitle(toolCall),
+          promptText: getGeneratedImagePrompt(toolCall),
+          payloadJson: {},
+          storageBucket: null,
+          storageKey: imageArtifact.artifactId,
+          errorCode: null,
+          errorMessage: null,
+          createdBy: null,
+          completedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          previewUrl: imageUrl,
+        } satisfies ArtifactPreviewRecord)
+      : null;
   const shouldShowOutputSummary = Boolean(
     outputSummary &&
       !imageArtifact &&
@@ -362,6 +654,12 @@ function ToolCallDetails({
         </p>
       ) : null}
       {toolStep?.detail ? <p>{toolStep.detail}</p> : null}
+      {imageStatus?.label ? (
+        <p>
+          <span className="font-medium text-foreground/80">Stage:</span>{" "}
+          {imageStatus.label}
+        </p>
+      ) : null}
       {fetchUrls.length > 0 && !hasWebPageToolResults([toolCall]) ? (
         <div>
           <span className="font-medium text-foreground/80">URLs:</span>{" "}
@@ -376,20 +674,152 @@ function ToolCallDetails({
       {imageArtifact && imageUrl ? (
         <p>
           <span className="font-medium text-foreground/80">Artifact:</span>{" "}
-          <a
-            className="text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
-            href={imageUrl}
-            rel="noreferrer"
-            target="_blank"
+          <button
+            className="text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            onClick={() => {
+              if (previewArtifact && onArtifactPreview) {
+                onArtifactPreview(previewArtifact);
+                return;
+              }
+              window.open(imageUrl, "_blank", "noopener,noreferrer");
+            }}
+            type="button"
           >
             {imageArtifact.title ?? "Open generated image"}
-          </a>
+          </button>
         </p>
       ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
       {toolCall.error ? (
         <p className="text-destructive">{toolCall.error}</p>
       ) : null}
+    </div>
+  );
+}
+
+function GeneratedImageLoadingMask({
+  isVisible,
+  stageIndex,
+  stageLabel,
+  title,
+}: {
+  isVisible: boolean;
+  stageIndex: number | null;
+  stageLabel: string;
+  title: string;
+}) {
+  return (
+    <div
+      aria-hidden={!isVisible}
+      aria-label="Generating image"
+      className={cn(
+        "absolute inset-0 z-10 overflow-hidden rounded-lg transition-opacity duration-500",
+        isVisible ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+      role={isVisible ? "status" : undefined}
+    >
+      <div className="absolute inset-0 bg-[linear-gradient(145deg,hsl(var(--background))_0%,hsl(var(--muted))_44%,hsl(var(--background))_100%)]" />
+      <div className="absolute inset-0 opacity-80 [background-image:radial-gradient(circle_at_18%_18%,hsl(var(--primary)/0.18),transparent_30%),radial-gradient(circle_at_82%_72%,hsl(var(--foreground)/0.10),transparent_30%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(105deg,transparent_0%,hsl(var(--foreground)/0.04)_30%,hsl(var(--foreground)/0.14)_48%,hsl(var(--foreground)/0.05)_66%,transparent_100%)] bg-[length:220%_100%] animate-[image-sheen_2.2s_ease-in-out_infinite]" />
+      <div className="absolute inset-0 opacity-35 [background-image:linear-gradient(hsl(var(--foreground)/0.08)_1px,transparent_1px),linear-gradient(90deg,hsl(var(--foreground)/0.08)_1px,transparent_1px)] [background-size:40px_40px]" />
+      <div className="absolute inset-5 rounded-md border border-background/60 bg-background/10 shadow-[inset_0_1px_0_hsl(var(--background)/0.65)]" />
+      <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-background/90 via-background/45 to-transparent" />
+      <div className="absolute right-4 bottom-4 left-4">
+        <div className="rounded-md border border-border/70 bg-background/80 px-3 py-2 shadow-lg backdrop-blur-md">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-foreground">
+                {title}
+              </p>
+              <p className="text-[11px] text-muted-foreground">{stageLabel}</p>
+            </div>
+            <div className="grid size-6 shrink-0 place-items-center rounded-full border border-border/70 bg-background/70">
+              <div className="size-2 rounded-full bg-primary shadow-[0_0_18px_hsl(var(--primary)/0.55)]" />
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-5 gap-1">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div
+                className={cn(
+                  "h-1 rounded-full transition-colors duration-300",
+                  stageIndex !== null && index <= stageIndex
+                    ? "bg-primary"
+                    : "bg-muted-foreground/20",
+                )}
+                key={index}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GeneratedImageArtifactItem({
+  aspectRatio,
+  downloadUrl,
+  imageUrl,
+  stageLabel,
+  stageProgress,
+  status,
+  title,
+}: {
+  aspectRatio: string;
+  downloadUrl?: string | null;
+  imageUrl?: string | null;
+  stageLabel: string;
+  stageProgress: number | null;
+  status: ToolCallRecord["status"];
+  title: string;
+}) {
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
+  const showMask = status === "running" || Boolean(imageUrl && !isImageLoaded);
+
+  useEffect(() => {
+    setIsImageLoaded(false);
+  }, [imageUrl]);
+
+  if (!imageUrl) {
+    return (
+      <div
+        className="relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-border bg-muted shadow-sm"
+        style={{ aspectRatio }}
+      >
+        <GeneratedImageLoadingMask
+          isVisible={status === "running"}
+          stageIndex={stageProgress}
+          stageLabel={stageLabel}
+          title={title}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-border bg-muted shadow-sm",
+        isImageLoaded && "bg-transparent",
+      )}
+      style={{ aspectRatio }}
+    >
+      <GeneratedImagePreview
+        className={cn(
+          "size-full transition-opacity duration-200 [&>img]:h-full [&>img]:w-full [&>img]:object-contain",
+          isImageLoaded ? "opacity-100" : "opacity-0",
+        )}
+        downloadUrl={downloadUrl ?? imageUrl}
+        imageUrl={imageUrl}
+        onImageLoad={() => setIsImageLoaded(true)}
+        title={title}
+      />
+      <GeneratedImageLoadingMask
+        isVisible={showMask}
+        stageIndex={stageProgress}
+        stageLabel={stageLabel}
+        title={title}
+      />
     </div>
   );
 }
@@ -408,8 +838,12 @@ export function GeneratedImageArtifacts({
       const imageUrl = artifact
         ? resolveArtifactUrl({ artifact, workspaceId })
         : null;
+      const downloadUrl = artifact
+        ? resolveArtifactDownloadUrl({ artifact, workspaceId })
+        : null;
       return {
         artifact,
+        downloadUrl,
         imageUrl,
         toolCall,
       };
@@ -427,44 +861,13 @@ export function GeneratedImageArtifacts({
 
   return (
     <div className="space-y-3">
-      {imageItems.map(({ artifact, imageUrl, toolCall }) => {
+      {imageItems.map(({ artifact, downloadUrl, imageUrl, toolCall }) => {
         const title =
           artifact?.title ||
-          (typeof toolCall.input.title === "string"
-            ? toolCall.input.title
-            : null) ||
+          getGeneratedImageTitle(toolCall) ||
           "Generated image";
-
-        if (toolCall.status === "running") {
-          return (
-            <div
-              aria-label="Generating image"
-              className="relative isolate aspect-[4/3] max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-border bg-muted shadow-sm"
-              key={toolCall.id}
-              role="status"
-            >
-              <div className="absolute inset-0 bg-[linear-gradient(135deg,hsl(var(--muted))_0%,hsl(var(--background))_42%,hsl(var(--muted))_100%)]" />
-              <div className="absolute inset-0 opacity-70 [background-image:radial-gradient(circle_at_24%_18%,hsl(var(--primary)/0.18),transparent_30%),radial-gradient(circle_at_78%_64%,hsl(var(--foreground)/0.08),transparent_28%)]" />
-              <div className="absolute inset-0 animate-pulse bg-[linear-gradient(100deg,transparent_0%,hsl(var(--foreground)/0.04)_34%,hsl(var(--foreground)/0.12)_50%,hsl(var(--foreground)/0.04)_66%,transparent_100%)]" />
-              <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-background/85 via-background/45 to-transparent" />
-              <div className="absolute inset-4 rounded-md border border-background/50 bg-background/10 shadow-inner" />
-              <div className="absolute right-4 bottom-4 left-4 flex items-center justify-between gap-3 rounded-md border border-border/70 bg-background/80 px-3 py-2 shadow-sm backdrop-blur-md">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-foreground">
-                    {title}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Generating image
-                  </p>
-                </div>
-                <Loader2
-                  className="size-4 shrink-0 animate-spin text-muted-foreground"
-                  aria-hidden
-                />
-              </div>
-            </div>
-          );
-        }
+        const imageStatus = getGeneratedImageStatus(toolCall);
+        const stageLabel = imageStatus.label ?? "Rendering";
 
         if (toolCall.status === "error") {
           return (
@@ -477,29 +880,35 @@ export function GeneratedImageArtifacts({
           );
         }
 
-        if (!imageUrl) {
-          return null;
-        }
-
         return (
-          <a
-            className="block max-w-xl"
-            href={imageUrl}
+          <GeneratedImageArtifactItem
+            aspectRatio={imageStatus.aspectRatio}
+            downloadUrl={downloadUrl ?? imageUrl}
+            imageUrl={imageUrl}
             key={toolCall.id}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element -- Generated artifact URLs can be API-backed and are already rendered lazily. */}
-            <img
-              alt={title}
-              className="max-h-[520px] max-w-full rounded-lg border border-border bg-muted/20 object-contain shadow-sm"
-              loading="lazy"
-              src={imageUrl}
-            />
-          </a>
+            stageLabel={stageLabel}
+            stageProgress={imageStatus.progress ?? null}
+            status={toolCall.status}
+            title={title}
+          />
         );
       })}
     </div>
+  );
+}
+
+export function GeneratedImageArtifactBlock({
+  toolCall,
+  workspaceId,
+}: {
+  toolCall: ToolCallRecord | undefined;
+  workspaceId?: string | null;
+}) {
+  return (
+    <GeneratedImageArtifacts
+      toolCalls={toolCall ? [toolCall] : []}
+      workspaceId={workspaceId}
+    />
   );
 }
 
@@ -512,10 +921,46 @@ function formatThoughtDuration(durationMs: number | undefined) {
   return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
 }
 
+function getReasoningTraceTitle(input: {
+  activeStep?: ThinkingStepRecord;
+  duration?: number;
+  hasModelReasoning: boolean;
+  isStreaming: boolean;
+  latestDisplayStep?: ThinkingStepRecord;
+  reasoningDurationMs?: number;
+}) {
+  if (input.activeStep) {
+    return `Thinking · ${input.activeStep.title}`;
+  }
+
+  if (input.isStreaming) {
+    if (input.hasModelReasoning) {
+      return "Thinking · Chat model reasoning";
+    }
+
+    if (
+      input.latestDisplayStep &&
+      input.latestDisplayStep.status !== "completed" &&
+      !isVisionFallbackStep(input.latestDisplayStep)
+    ) {
+      return input.latestDisplayStep.title;
+    }
+
+    return "Thinking...";
+  }
+
+  if (input.hasModelReasoning) {
+    return formatThoughtDuration(input.reasoningDurationMs ?? input.duration);
+  }
+
+  return "Thinking...";
+}
+
 export function ReasoningTrace({
   isStreaming,
   modelReasoning,
   modelReasoningSegments,
+  onArtifactPreview,
   steps,
   toolCalls,
   workspaceId,
@@ -523,6 +968,7 @@ export function ReasoningTrace({
   isStreaming: boolean;
   modelReasoning?: string;
   modelReasoningSegments?: ModelReasoningSegmentRecord[];
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   steps: ThinkingStepRecord[] | undefined;
   toolCalls: ToolCallRecord[] | undefined;
   workspaceId?: string | null;
@@ -575,6 +1021,14 @@ export function ReasoningTrace({
     return !(typeof toolCallId === "string" && toolCallIds.has(toolCallId));
   });
   const activeStep = safeSteps.find((step) => step.status === "in_progress");
+  const latestDisplayStep = displaySteps
+    .map((step, index) => ({ index, step }))
+    .sort((left, right) => {
+      const sequenceDelta =
+        (left.step.sequence ?? left.index) - (right.step.sequence ?? right.index);
+      return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
+    })
+    .at(-1)?.step;
   const hasRunningToolCall = safeToolCalls.some(
     (toolCall) => toolCall.status === "running",
   );
@@ -663,15 +1117,24 @@ export function ReasoningTrace({
     }
   }, [isStreaming]);
 
+  useEffect(() => {
+    if (activeStep) {
+      setIsOpen(true);
+    }
+  }, [activeStep?.id, activeStep?.status, activeStep?.title]);
+
   if (!hasTraceItems && !isStreaming) {
     return null;
   }
 
-  const title = activeStep
-    ? `Thinking · ${activeStep.title}`
-    : hasModelReasoning && !isStreaming
-      ? formatThoughtDuration(reasoningDurationMs ?? duration)
-      : "Thinking...";
+  const title = getReasoningTraceTitle({
+    activeStep,
+    duration,
+    hasModelReasoning,
+    isStreaming,
+    latestDisplayStep,
+    reasoningDurationMs,
+  });
 
   return (
     <ChainOfThought
@@ -685,15 +1148,10 @@ export function ReasoningTrace({
           isThinking ? <Loader2 className="size-4 animate-spin" /> : undefined
         }
       >
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="block min-w-0 truncate">
           <span className="truncate">
             {isThinking ? <Shimmer duration={1}>{title}</Shimmer> : title}
           </span>
-          {isThinking ? (
-            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
-              Running
-            </span>
-          ) : null}
         </span>
       </ChainOfThoughtHeader>
       {isOpen && timelineItems.length > 0 ? (
@@ -706,7 +1164,7 @@ export function ReasoningTrace({
               return (
                 <ChainOfThoughtStep
                   key={item.key}
-                  label="Model reasoning"
+                  label="Chat model reasoning"
                   status={isStreaming ? "active" : "complete"}
                 >
                   <div className="whitespace-pre-wrap break-words text-muted-foreground text-xs leading-5">
@@ -718,6 +1176,7 @@ export function ReasoningTrace({
 
             if (item.kind === "step") {
               const { step } = item;
+              const isVisionFallback = isVisionFallbackStep(step);
               const metadataParts = getThinkingMetadataParts(step.metadata);
               const stepDescription =
                 [
@@ -743,6 +1202,7 @@ export function ReasoningTrace({
               );
               return (
                 <ChainOfThoughtStep
+                  icon={isVisionFallback ? ImageIcon : undefined}
                   key={item.key}
                   label={stepLabel}
                   status={
@@ -758,7 +1218,9 @@ export function ReasoningTrace({
                       {step.detail}
                     </p>
                   ) : null}
-                  {step.items.length > 0 ? (
+                  {isVisionFallback ? (
+                    <VisionFallbackStepDetails step={step} />
+                  ) : step.items.length > 0 ? (
                     <ChainOfThoughtSearchResults>
                       {step.items.map((result) => (
                         <ChainOfThoughtSearchResult
@@ -802,6 +1264,7 @@ export function ReasoningTrace({
                 }
               >
                 <ToolCallDetails
+                  onArtifactPreview={onArtifactPreview}
                   toolCall={toolCall}
                   toolStep={toolStep}
                   workspaceId={workspaceId}

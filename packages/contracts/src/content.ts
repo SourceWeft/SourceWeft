@@ -396,6 +396,39 @@ export const listThreadsResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+export const chatMessageTextPartSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+});
+
+export const chatMessageImagePartSchema = z.object({
+  type: z.literal("image"),
+  id: z.string(),
+  fileName: z.string(),
+  mimeType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  width: z.number().int().positive().nullable().optional(),
+  height: z.number().int().positive().nullable().optional(),
+  storageBucket: z.string().nullable().optional(),
+  storageKey: z.string().optional(),
+  url: z.string(),
+  visionDescription: z.string().optional(),
+  visionModelAlias: z.string().optional(),
+  visionProfileAlias: z.string().optional(),
+});
+
+export const chatMessagePartSchema = z.discriminatedUnion("type", [
+  chatMessageTextPartSchema,
+  chatMessageImagePartSchema,
+]);
+
+export const messageContentJsonSchema = z
+  .object({
+    version: z.literal(1).optional(),
+    parts: z.array(chatMessagePartSchema).optional(),
+  })
+  .catchall(z.unknown());
+
 export const messageSchema = z.object({
   id: z.string(),
   teamId: z.string(),
@@ -404,6 +437,7 @@ export const messageSchema = z.object({
   parentMessageId: z.string().nullable(),
   role: z.enum(["user", "assistant", "system", "tool"]),
   content: z.string(),
+  contentJson: messageContentJsonSchema,
   createdBy: z.string().nullable(),
   model: z.string().nullable(),
   creditsConsumed: z.number().int().nonnegative().nullable(),
@@ -509,6 +543,24 @@ const webSearchToolSelectionSchema = z
   })
   .strict();
 
+export const chatInputImageSchema = z
+  .object({
+    dataUrl: z
+      .string()
+      .trim()
+      .min(1)
+      .max(16 * 1024 * 1024)
+      .regex(/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,/i),
+    fileName: z.string().trim().min(1).max(255).optional(),
+    mimeType: z
+      .enum(["image/png", "image/jpeg", "image/webp", "image/gif"])
+      .optional(),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const skillSourceTypeSchema = z.enum([
   "builtin",
   "workspace_custom",
@@ -527,7 +579,8 @@ const threadToolsRequestSchema = z
 
 export const streamThreadRequestSchema = z.object({
   mode: streamThreadModeSchema.optional(),
-  content: z.string().trim().min(1).max(20000).optional(),
+  content: z.string().trim().max(20000).optional(),
+  images: z.array(chatInputImageSchema).max(8).optional(),
   sourceIds: z.array(z.string()).max(100).optional(),
   mentionedSourceIds: z.array(z.string()).max(100).optional(),
   tools: threadToolsRequestSchema.optional(),
@@ -537,6 +590,7 @@ export const streamThreadRequestSchema = z.object({
   assistantMessageId: z.string().trim().min(1).max(128).optional(),
   idempotencyKey: z.string().trim().min(1).max(256).optional(),
   llm: llmExecutionConfigSchema.optional(),
+  modelSettings: threadModelSettingsInputSchema.optional(),
 });
 
 export const refreshThreadRequestSchema = streamThreadRequestSchema;
@@ -867,6 +921,7 @@ export const modelCatalogItemSchema = z.object({
   capabilities: z
     .object({
       supportsThinking: z.boolean(),
+      supportsImageInput: z.boolean().optional(),
       supportedParameters: z.array(z.string()),
       supportedEfforts: z.array(reasoningEffortSchema),
       reasoning: z.boolean(),
@@ -975,7 +1030,12 @@ export type GetThreadResponse = z.infer<typeof getThreadResponseSchema>;
 export type DeleteThreadResponse = z.infer<typeof deleteThreadResponseSchema>;
 export type ListThreadsRequest = z.infer<typeof listThreadsRequestSchema>;
 export type ListThreadsResponse = z.infer<typeof listThreadsResponseSchema>;
+export type ChatMessageTextPart = z.infer<typeof chatMessageTextPartSchema>;
+export type ChatMessageImagePart = z.infer<typeof chatMessageImagePartSchema>;
+export type ChatMessagePart = z.infer<typeof chatMessagePartSchema>;
+export type MessageContentJson = z.infer<typeof messageContentJsonSchema>;
 export type Message = z.infer<typeof messageSchema>;
+export type ChatInputImage = z.infer<typeof chatInputImageSchema>;
 export type StreamThreadMode = z.infer<typeof streamThreadModeSchema>;
 export type ImageStyle = z.infer<typeof imageStyleSchema>;
 export type ImageAspectRatio = z.infer<typeof imageAspectRatioSchema>;

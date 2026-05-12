@@ -92,6 +92,7 @@ function applyOpenRouterFacts<T extends {
   maxCompletionTokens?: number | null;
   pricing?: GlobalProfilePricingEntry | null;
   providerCatalogSource?: string;
+  supportsImageInput?: boolean;
   supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
   supportedParameters?: string[];
   targetModel: string;
@@ -121,6 +122,10 @@ function applyOpenRouterFacts<T extends {
     maxCompletionTokens: entry.maxCompletionTokens ?? facts.maxCompletionTokens,
     pricing: entry.pricing ?? facts.pricing,
     providerCatalogSource: entry.providerCatalogSource ?? "openrouter-models",
+    supportsImageInput:
+      entry.supportsImageInput ??
+      (Array.isArray(facts.architecture.input_modalities) &&
+        facts.architecture.input_modalities.includes("image")),
     supportedEfforts: entry.supportedEfforts && entry.supportedEfforts.length > 0
       ? entry.supportedEfforts
       : facts.supportedEfforts,
@@ -155,6 +160,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     pricing?: GlobalProfilePricingEntry | null;
     providerCatalogSource?: string;
     architecture?: Record<string, unknown>;
+    supportsImageInput?: boolean;
     contextLength?: number | null;
     defaultParameters?: Record<string, unknown> | null;
     displayName?: string;
@@ -198,6 +204,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
         ? { providerCatalogSource: entry.providerCatalogSource }
         : {}),
       ...(entry.architecture ? { architecture: entry.architecture } : {}),
+      ...(entry.supportsImageInput ? { supportsImageInput: true } : {}),
       ...(entry.contextLength ? { contextLength: entry.contextLength } : {}),
       ...(entry.defaultParameters ? { defaultParameters: entry.defaultParameters } : {}),
       ...(entry.maxCompletionTokens

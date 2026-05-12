@@ -13,6 +13,10 @@ import type { FinalizeThreadTurnInput } from "./types";
 
 export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   const { prepared, retrieval } = input;
+  const preflightCreditsConsumed = prepared.preflightBilling.reduce(
+    (sum, item) => sum + item.consumedCredits,
+    0,
+  );
   const contextCompression =
     consumeSourceWeftContextCompressionReport(prepared.userMessage.id) ?? {
       enabled: false,
@@ -84,6 +88,8 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     },
   });
   const billing = billedUsage.billing;
+  const totalCreditsConsumed =
+    billing.consumedCredits + preflightCreditsConsumed;
 
   const assistantMessage = await createMessageRecord({
     teamId: prepared.workspace.organizationId,
@@ -94,7 +100,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     content: input.assistantContent,
     createdBy: null,
     model: input.modelForMessage || prepared.modelAlias,
-    creditsConsumed: billing.consumedCredits,
+    creditsConsumed: totalCreditsConsumed,
     metadata: {
       userMessageId: prepared.userMessage.id,
       sourceUserMessageId: prepared.userMessage.id,
@@ -103,6 +109,8 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       billingSkipped: billedUsage.billedBy === "skipped",
       billingSkipReason: billedUsage.skipReason,
       billedBy: billedUsage.billedBy,
+      preflightBilling: prepared.preflightBilling,
+      preflightCreditsConsumed,
       modelAlias: prepared.modelAlias,
       profileAlias: prepared.profileAlias,
       agentMode: prepared.agentMode,
@@ -132,6 +140,9 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
         error: call.error,
         sequence: call.sequence,
       })),
+      ...(input.renderBlocks && input.renderBlocks.length > 0
+        ? { renderBlocks: input.renderBlocks }
+        : {}),
       thinkingSteps: input.thinkingSteps,
       retrieval: {
         embeddingProfileId: retrieval?.profile.id ?? null,

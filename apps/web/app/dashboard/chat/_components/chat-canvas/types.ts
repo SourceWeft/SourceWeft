@@ -1,14 +1,24 @@
-import { AGENT_TOOL_NAMES, type AgentToolName } from "@sourceweft/sdk";
+import {
+  AGENT_TOOL_NAMES,
+  type AgentToolName,
+  type ChatInputImage,
+  type ChatMessageImagePart,
+} from "@sourceweft/sdk";
+
+export type { ChatMessageImagePart };
 
 export type ChatSendInput = {
   content: string;
+  images?: ChatInputImage[];
   mentionedSourceIds?: string[];
   tools?: ChatToolsSelection;
 };
 
 export type MessageVersion = {
   id: string;
+  renderKey?: string;
   content: string;
+  contentJson?: Record<string, unknown>;
   citations?: CitationRecord[];
   availableCitations?: CitationRecord[];
   isError?: boolean;
@@ -24,6 +34,7 @@ export type MessageVersion = {
   sourceUserMessageId?: string | null;
   toolCalls?: ToolCallRecord[];
   thinkingSteps?: ThinkingStepRecord[];
+  renderBlocks?: MessageRenderBlock[];
   modelReasoning?: string;
   modelReasoningSegments?: ModelReasoningSegmentRecord[];
 };
@@ -136,6 +147,38 @@ export type CitationRecord = {
   externalUri?: string;
 };
 
+export type ArtifactPreviewRecord = {
+  id: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string | null;
+  artifactType:
+    | "report"
+    | "slides"
+    | "mindmap"
+    | "podcast"
+    | "audio_overview"
+    | "video_overview"
+    | "flashcards"
+    | "quiz"
+    | "table"
+    | "infographic"
+    | "image";
+  status: "pending" | "running" | "ready" | "failed" | "archived";
+  title: string | null;
+  promptText: string | null;
+  payloadJson: Record<string, unknown>;
+  storageBucket: string | null;
+  storageKey: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdBy: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  previewUrl: string | null;
+};
+
 export type ToolCallRecord = {
   id: string;
   tool: string;
@@ -146,6 +189,18 @@ export type ToolCallRecord = {
   error: string | null;
   sequence?: number;
 };
+
+export type MessageRenderBlock =
+  | {
+      id: string;
+      type: "text";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "generated_image";
+      toolCallId: string;
+    };
 
 export type ThinkingStepRecord = {
   id: string;

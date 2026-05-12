@@ -11,6 +11,7 @@ import {
 } from "../message-repository";
 import { summarizeRetrievalCalls } from "../turn/service";
 import type {
+  MessageRenderBlock,
   ModelReasoningSegmentTrace,
   PreparedThreadTurn,
   ThinkingStepTrace,
@@ -22,6 +23,7 @@ export type ThreadStreamPartialErrorState = {
   reasoningSegments?: ModelReasoningSegmentTrace[];
   toolCalls?: ToolCallTrace[];
   thinkingSteps?: ThinkingStepTrace[];
+  renderBlocks?: MessageRenderBlock[];
   citations?: AgentCitation[];
   availableCitations?: AgentCitation[];
 };
@@ -93,6 +95,10 @@ export async function createThreadStreamErrorMessage(input: {
     input.partialAssistantContent === undefined
       ? input.contentError.message
       : input.partialAssistantContent.trimEnd();
+  const preflightCreditsConsumed = input.prepared.preflightBilling.reduce(
+    (sum, item) => sum + item.consumedCredits,
+    0,
+  );
 
   return createMessageRecord({
     teamId: input.prepared.workspace.organizationId,
@@ -103,7 +109,7 @@ export async function createThreadStreamErrorMessage(input: {
     content: assistantContent,
     createdBy: null,
     model: input.prepared.modelAlias,
-    creditsConsumed: 0,
+    creditsConsumed: preflightCreditsConsumed,
     metadata: {
       isError: true,
       excludeFromContext: true,
@@ -119,9 +125,12 @@ export async function createThreadStreamErrorMessage(input: {
       versionOf: input.prepared.assistantMessageParentId,
       billingSkipped: true,
       billingSkipReason: "model_error",
+      preflightBilling: input.prepared.preflightBilling,
+      preflightCreditsConsumed,
       reasoning: input.partialState?.reasoning,
       reasoningSegments: input.partialState?.reasoningSegments,
       toolCalls: input.partialState?.toolCalls,
+      renderBlocks: input.partialState?.renderBlocks,
       thinkingSteps: input.partialState?.thinkingSteps,
       retrieval: {
         citations: input.partialState?.citations ?? [],

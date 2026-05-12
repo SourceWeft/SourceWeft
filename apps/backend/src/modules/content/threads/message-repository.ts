@@ -18,24 +18,27 @@ function mapMessage(row: MessageRow): MessageRecord {
     createdBy: row.createdBy,
     model: row.model,
     creditsConsumed: row.creditsConsumed,
+    contentJson: row.contentJson ?? {},
     metadata: row.metadata ?? {},
     createdAt: row.createdAt.toISOString(),
   };
 }
 
 export async function createMessageRecord(input: {
+  id?: string;
   teamId: string;
   workspaceId: string;
   threadId: string;
   parentMessageId?: string | null;
   role: MessageRole;
   content: string;
+  contentJson?: Record<string, unknown>;
   createdBy?: string | null;
   model?: string | null;
   creditsConsumed?: number | null;
   metadata?: Record<string, unknown>;
 }) {
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   const createdAt = new Date();
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -48,6 +51,7 @@ export async function createMessageRecord(input: {
         parentMessageId: input.parentMessageId ?? null,
         role: input.role,
         content: input.content,
+        contentJson: input.contentJson ?? {},
         createdBy: input.createdBy ?? null,
         model: input.model ?? null,
         creditsConsumed: input.creditsConsumed ?? null,
@@ -96,6 +100,26 @@ export async function listMessageRecordsByThread(input: {
     .orderBy(asc(messages.createdAt));
 
   return rows.map(mapMessage);
+}
+
+export async function findMessageRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  messageId: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.id, input.messageId),
+        eq(messages.teamId, input.teamId),
+        eq(messages.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapMessage(row) : null;
 }
 
 export async function updateMessageMetadataRecord(input: {

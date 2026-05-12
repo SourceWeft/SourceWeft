@@ -47,11 +47,13 @@ import {
   buildChatToolsRequest,
   ChatCanvas,
   DEFAULT_PROMPT_THINKING_SETTINGS,
+  type ArtifactPreviewRecord,
   type ChatSendInput,
   type ChatSkillItem,
   type ChatToolName,
   type CitationRecord,
   type MessageVersion,
+  type MessageRenderBlock,
   type ModelReasoningSegmentRecord,
   type PromptInputMentionSourceLoader,
   type PromptThinkingSettings,
@@ -148,6 +150,7 @@ type ChatMessageItem = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  contentJson: Record<string, unknown>;
   parentMessageId: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -155,6 +158,7 @@ type ChatMessageItem = {
 
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
 const STREAM_TEXT_INTERRUPTED_KEY = "isTextInterrupted";
+const STREAM_RENDER_KEY = "renderKey";
 const TITLE_POLL_INTERVAL_MS = 1000;
 const TITLE_POLL_TIMEOUT_MS = 60000;
 const THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS = [300, 1000, 2500] as const;
@@ -864,6 +868,7 @@ type StreamEventPayload = {
   effectiveMentionedSourceIds?: unknown;
   sourceIds?: unknown;
   effectiveSourceIds?: unknown;
+  contentJson?: unknown;
 };
 
 type JobStatusResponse = {
@@ -957,6 +962,15 @@ function resolveToolCallFromStreamEvent(input: {
     const normalizedToolOutputRecord = toObjectRecord(normalizedToolOutput);
     const eventOutputRecord = toObjectRecord(eventOutput);
     if (
+      input.event.type === "tool-call-end" &&
+      eventOutput === null &&
+      normalizedToolOutput === null &&
+      existing?.status === "completed"
+    ) {
+      return existing?.output ?? null;
+    }
+
+    if (
       existingOutput ||
       normalizedToolOutputRecord ||
       eventOutputRecord ||
@@ -997,7 +1011,7 @@ function resolveToolCallFromStreamEvent(input: {
       );
     }
 
-    if (normalizedToolCall) {
+    if (normalizedToolCall && input.event.type !== "tool-call-event") {
       return normalizedToolCall.status;
     }
 
@@ -1102,6 +1116,54 @@ function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
     );
 }
 
+function normalizeMessageRenderBlock(
+  value: unknown,
+): MessageRenderBlock | null {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const id = toNullableString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  if (record.type === "text") {
+    const text = toNullableString(record.text);
+    return text && text.length > 0
+      ? {
+          id,
+          type: "text",
+          text,
+        }
+      : null;
+  }
+
+  if (record.type === "generated_image") {
+    const toolCallId = toNullableString(record.toolCallId);
+    return toolCallId
+      ? {
+          id,
+          type: "generated_image",
+          toolCallId,
+        }
+      : null;
+  }
+
+  return null;
+}
+
+function resolveRenderBlocksFromMetadata(metadata: Record<string, unknown>) {
+  if (!Array.isArray(metadata.renderBlocks)) {
+    return [] as MessageRenderBlock[];
+  }
+
+  return metadata.renderBlocks
+    .map((item) => normalizeMessageRenderBlock(item))
+    .filter((item): item is MessageRenderBlock => item !== null);
+}
+
 function resolveAssistantSourceUserMessageId(
   message: ChatMessageItem,
   fallbackUserMessageId: string | null,
@@ -1128,6 +1190,9 @@ function buildVersionedMessageGroups(
   const messageById = new Map(sorted.map((message) => [message.id, message]));
   const rootIdCache = new Map<string, string>();
 
+  const resolveMessageRenderKey = (message: ChatMessageItem) =>
+    toNullableString(message.metadata[STREAM_RENDER_KEY]) ?? message.id;
+
   const resolveRootId = (message: ChatMessageItem) => {
     const cached = rootIdCache.get(message.id);
     if (cached) {
@@ -1142,7 +1207,7 @@ function buildVersionedMessageGroups(
       }
       current = parent;
     }
-    const rootId = current?.id ?? message.id;
+    const rootId = current ? resolveMessageRenderKey(current) : message.id;
     rootIdCache.set(message.id, rootId);
     return rootId;
   };
@@ -1331,7 +1396,11 @@ function buildVersionedMessageGroups(
 
           return {
             id: version.id,
+            renderKey:
+              toNullableString(version.metadata[STREAM_RENDER_KEY]) ??
+              undefined,
             content: version.content,
+            contentJson: version.contentJson,
             citations: citationMetadata?.citations,
             availableCitations: citationMetadata?.availableCitations,
             isError: version.metadata.isError === true,
@@ -1367,6 +1436,10 @@ function buildVersionedMessageGroups(
                 ? (assistantSourceUserById.get(version.id) ?? null)
                 : undefined,
             toolCalls: resolveToolCallsFromMetadata(version.metadata),
+            renderBlocks:
+              group.role === "assistant"
+                ? resolveRenderBlocksFromMetadata(version.metadata)
+                : undefined,
             thinkingSteps:
               group.role === "assistant"
                 ? resolveThinkingStepsFromMetadata(version.metadata)
@@ -1952,6 +2025,19 @@ export default function DashboardChatThreadPage({
     [displayedCitations, sourcesVisible, toggleSourcesVisible],
   );
 
+  const handleArtifactPreview = useCallback(
+    (artifact: ArtifactPreviewRecord) => {
+      setPreviewSource(null);
+      setPreviewWorkfile(null);
+      setPreviewCitation(null);
+      setPreviewArtifact(artifact);
+      if (!sourcesVisible) {
+        toggleSourcesVisible();
+      }
+    },
+    [sourcesVisible, toggleSourcesVisible],
+  );
+
   const scrollToMessage = useCallback((messageId: string) => {
     const selector = `[data-chat-message-id="${CSS.escape(messageId)}"]`;
     setHighlightedMessageId(messageId);
@@ -2117,6 +2203,7 @@ export default function DashboardChatThreadPage({
             id: message.id,
             role: message.role,
             content: message.content,
+            contentJson: message.contentJson,
             parentMessageId: message.parentMessageId,
             metadata: message.metadata,
             createdAt: message.createdAt,
@@ -2276,6 +2363,7 @@ export default function DashboardChatThreadPage({
       sourceIds: string[];
       skillIds?: string[];
       tools?: ChatSendInput["tools"];
+      images?: ChatSendInput["images"];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
       thinking?: RequestThinkingConfig;
@@ -2298,6 +2386,17 @@ export default function DashboardChatThreadPage({
 
       const temporaryMessages: ChatMessageItem[] = [];
       let tempUserId: string | null = null;
+      const temporaryImageParts =
+        input.images?.map((image, index) => ({
+          type: "image" as const,
+          id: `temp-image-${now}-${index}`,
+          fileName: image.fileName ?? `image-${index + 1}`,
+          mimeType: image.mimeType ?? "image/png",
+          sizeBytes: image.sizeBytes ?? 0,
+          width: image.width ?? null,
+          height: image.height ?? null,
+          url: image.dataUrl,
+        })) ?? [];
 
       if (input.mode === "send" || input.mode === "edit") {
         tempUserId = `temp-user-${now}`;
@@ -2309,6 +2408,15 @@ export default function DashboardChatThreadPage({
           id: tempUserId,
           role: "user",
           content: input.content ?? "",
+          contentJson: {
+            version: 1,
+            parts: [
+              ...(input.content?.trim()
+                ? [{ type: "text" as const, text: input.content }]
+                : []),
+              ...temporaryImageParts,
+            ],
+          },
           parentMessageId:
             input.mode === "edit"
               ? (input.userMessageId ?? latestUserMessage?.id ?? null)
@@ -2340,10 +2448,12 @@ export default function DashboardChatThreadPage({
       }
 
       const tempAssistantId = `temp-assistant-${now + 1}`;
+      const tempAssistantRenderKey = tempAssistantId;
       temporaryMessages.push({
         id: tempAssistantId,
         role: "assistant",
         content: "",
+        contentJson: {},
         parentMessageId:
           input.mode === "send"
             ? null
@@ -2359,6 +2469,8 @@ export default function DashboardChatThreadPage({
                 null),
           toolCalls: [],
           thinkingSteps: [],
+          renderBlocks: [],
+          [STREAM_RENDER_KEY]: tempAssistantRenderKey,
         },
         createdAt: new Date(now + 1).toISOString(),
       });
@@ -2378,6 +2490,8 @@ export default function DashboardChatThreadPage({
       let pendingTitleJobId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
+      const streamRenderBlocks: MessageRenderBlock[] = [];
+      let nextStreamTextBlockId = 1;
       const refreshedWorkfileToolIds = new Set<string>();
       const refreshedArtifactToolIds = new Set<string>();
       let streamingAssistantMessageId = tempAssistantId;
@@ -2396,6 +2510,45 @@ export default function DashboardChatThreadPage({
           window.requestAnimationFrame(() => resolve());
         });
 
+      function appendStreamRenderText(text: string) {
+        if (!text) {
+          return;
+        }
+        const last = streamRenderBlocks[streamRenderBlocks.length - 1];
+        if (last?.type === "text") {
+          last.text += text;
+          return;
+        }
+        streamRenderBlocks.push({
+          id: `stream-text-${nextStreamTextBlockId}`,
+          type: "text",
+          text,
+        });
+        nextStreamTextBlockId += 1;
+      }
+
+      function appendStreamGeneratedImageBlock(toolCallId: string) {
+        if (
+          streamRenderBlocks.some(
+            (block) =>
+              block.type === "generated_image" &&
+              block.toolCallId === toolCallId,
+          )
+        ) {
+          return;
+        }
+
+        streamRenderBlocks.push({
+          id: `stream-generated-image-${toolCallId}`,
+          type: "generated_image",
+          toolCallId,
+        });
+      }
+
+      function snapshotStreamRenderBlocks() {
+        return streamRenderBlocks.map((block) => ({ ...block }));
+      }
+
       const syncLatestAssistantMessageContent = () => {
         setMessages((previous) => {
           const message = previous.find(
@@ -2413,14 +2566,23 @@ export default function DashboardChatThreadPage({
         }
 
         while (deltaQueue.length > 0) {
-          assistantText += deltaQueue.shift() ?? "";
+          const nextDelta = deltaQueue.shift() ?? "";
+          assistantText += nextDelta;
+          appendStreamRenderText(nextDelta);
         }
         latestAssistantMessageContent = assistantText;
         flushSync(() => {
           setMessages((previous) =>
             previous.map((message) =>
               message.id === streamingAssistantMessageId
-                ? { ...message, content: assistantText }
+                ? {
+                    ...message,
+                    content: assistantText,
+                    metadata: {
+                      ...message.metadata,
+                      renderBlocks: snapshotStreamRenderBlocks(),
+                    },
+                  }
                 : message,
             ),
           );
@@ -2496,6 +2658,7 @@ export default function DashboardChatThreadPage({
                           ]),
                       ),
                       thinkingSteps: [...streamThinkingStepsById.values()],
+                      renderBlocks: snapshotStreamRenderBlocks(),
                     },
                   }
                 : message,
@@ -2544,6 +2707,17 @@ export default function DashboardChatThreadPage({
         }
         if (input.mode === "send" || input.mode === "edit") {
           requestBody.content = input.content ?? "";
+          if (
+            input.mode === "edit" ||
+            (input.images && input.images.length > 0)
+          ) {
+            requestBody.images = input.images;
+          }
+        }
+        if (catalogKindEnabled.vision && selectedModels.vision) {
+          requestBody.modelSettings = {
+            visionProfileAlias: selectedModels.vision.id,
+          };
         }
         if (input.mode === "refresh" || input.mode === "edit") {
           if (input.userMessageId) {
@@ -2622,12 +2796,20 @@ export default function DashboardChatThreadPage({
               }
 
               assistantText += nextDelta;
+              appendStreamRenderText(nextDelta);
               latestAssistantMessageContent = assistantText;
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
                     message.id === streamingAssistantMessageId
-                      ? { ...message, content: assistantText }
+                      ? {
+                          ...message,
+                          content: assistantText,
+                          metadata: {
+                            ...message.metadata,
+                            renderBlocks: snapshotStreamRenderBlocks(),
+                          },
+                        }
                       : message,
                   ),
                 );
@@ -2655,7 +2837,8 @@ export default function DashboardChatThreadPage({
           }
 
           for (let index = 0; index < chars.length; index += maxChunkSize) {
-            deltaQueue.push(chars.slice(index, index + maxChunkSize).join(""));
+            const chunk = chars.slice(index, index + maxChunkSize).join("");
+            deltaQueue.push(chunk);
           }
         };
 
@@ -2677,6 +2860,7 @@ export default function DashboardChatThreadPage({
                         ...message.metadata,
                         [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
                         toolCalls,
+                        renderBlocks: snapshotStreamRenderBlocks(),
                       },
                     }
                   : message,
@@ -2705,6 +2889,7 @@ export default function DashboardChatThreadPage({
                         [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
                         thinkingSteps,
                         toolCalls,
+                        renderBlocks: snapshotStreamRenderBlocks(),
                       },
                     }
                   : message,
@@ -2795,6 +2980,7 @@ export default function DashboardChatThreadPage({
                       typeof sourceId === "string",
                   )
                 : null;
+              const serverContentJson = toObjectRecord(data.contentJson);
               preparedEffectiveSourceIds = serverEffectiveSourceIds;
               persistedUserMessageId = serverUserMessageId;
               if (tempUserId && createdUserMessageId === tempUserId) {
@@ -2808,6 +2994,9 @@ export default function DashboardChatThreadPage({
                       ? {
                           ...message,
                           id: serverUserMessageId,
+                          contentJson: serverContentJson
+                            ? serverContentJson
+                            : message.contentJson,
                           metadata: {
                             ...message.metadata,
                             ...(serverSourceIds
@@ -2865,6 +3054,7 @@ export default function DashboardChatThreadPage({
                             metadata: {
                               ...message.metadata,
                               [STREAM_TEXT_PAUSED_KEY]: false,
+                              renderBlocks: snapshotStreamRenderBlocks(),
                             },
                           }
                         : message,
@@ -2882,6 +3072,7 @@ export default function DashboardChatThreadPage({
               assistantText = data.text;
               latestAssistantMessageContent = assistantText;
               hasRenderedDelta = assistantText.length > 0;
+              streamRenderBlocks.length = 0;
               flushSync(() => {
                 setMessages((previous) =>
                   previous.map((message) =>
@@ -2892,6 +3083,7 @@ export default function DashboardChatThreadPage({
                           metadata: {
                             ...message.metadata,
                             [STREAM_TEXT_PAUSED_KEY]: false,
+                            renderBlocks: [],
                           },
                         }
                       : message,
@@ -2930,6 +3122,13 @@ export default function DashboardChatThreadPage({
               }
 
               streamToolCallsById.set(nextToolCall.id, nextToolCall);
+              if (
+                data.type === "tool-call-start" &&
+                isGeneratedImageArtifactToolName(nextToolCall.tool)
+              ) {
+                drainQueuedDeltasNow();
+                appendStreamGeneratedImageBlock(nextToolCall.id);
+              }
               syncStreamingToolCalls();
               if (
                 isCompletedWorkfileWriteToolCall(nextToolCall, data) &&
@@ -3081,6 +3280,7 @@ export default function DashboardChatThreadPage({
                             userMessageId,
                             sourceUserMessageId: userMessageId,
                             [STREAM_TEXT_PAUSED_KEY]: false,
+                            renderBlocks: snapshotStreamRenderBlocks(),
                           },
                         }
                       : message,
@@ -3126,6 +3326,7 @@ export default function DashboardChatThreadPage({
                           metadata: {
                             ...message.metadata,
                             [STREAM_TEXT_PAUSED_KEY]: false,
+                            renderBlocks: snapshotStreamRenderBlocks(),
                           },
                         }
                       : message,
@@ -3168,9 +3369,6 @@ export default function DashboardChatThreadPage({
         });
         updateChatSourceCount(threadId, usedSourceIds.size);
 
-        window.setTimeout(() => {
-          void loadThreadMessages();
-        }, 0);
         setWorkfilesRefreshKey((value) => value + 1);
         if (refreshedArtifactToolIds.size > 0) {
           setArtifactsRefreshKey((value) => value + 1);
@@ -3275,6 +3473,7 @@ export default function DashboardChatThreadPage({
       try {
         const {
           content,
+          images,
           mentionedSourceIds,
           sourceIds,
           skillIds,
@@ -3285,6 +3484,7 @@ export default function DashboardChatThreadPage({
           modelState: pendingModelState,
         } = JSON.parse(raw) as {
           content: string;
+          images?: ChatSendInput["images"];
           mentionedSourceIds?: string[];
           sourceIds: string[];
           skillIds?: string[];
@@ -3339,6 +3539,7 @@ export default function DashboardChatThreadPage({
         void streamThreadActionRef.current({
           mode: "send",
           content,
+          images: Array.isArray(images) ? images : undefined,
           mentionedSourceIds: pendingMentionedSourceIds,
           sourceIds: pendingSourceIds,
           skillIds: pendingSkillIds,
@@ -3428,7 +3629,8 @@ export default function DashboardChatThreadPage({
   const handleSendMessage = useCallback(
     async (input: ChatSendInput) => {
       const text = input.content.trim();
-      if (!text || isStreaming) {
+      const images = input.images ?? [];
+      if ((!text && images.length === 0) || isStreaming) {
         return;
       }
 
@@ -3495,6 +3697,7 @@ export default function DashboardChatThreadPage({
         await streamThreadAction({
           mode: "edit",
           content: text,
+          images,
           mentionedSourceIds,
           sourceIds: mergedEditSourceIds,
           skillIds: effectiveActiveSkillIds,
@@ -3509,6 +3712,7 @@ export default function DashboardChatThreadPage({
       await streamThreadAction({
         mode: "send",
         content: text,
+        images,
         mentionedSourceIds,
         sourceIds: sendSourceIds,
         skillIds: effectiveActiveSkillIds,
@@ -3658,12 +3862,14 @@ export default function DashboardChatThreadPage({
           availableSkills={availableSkills}
           composerInitialInput={composerInitialInput}
           composerResetKey={composerResetKey}
+          editingMessageId={editingMessageId}
           highlightedMessageId={highlightedMessageId}
           isEditing={Boolean(editingMessageId && editingGroupId)}
           isStreaming={isStreaming}
           messageGroups={messageGroups}
           mode="thread"
           onActiveVersionChange={handleActiveVersionChange}
+          onArtifactPreview={handleArtifactPreview}
           onCancelEditing={cancelEditing}
           onCitationClick={handleCitationClick}
           onSourcePreview={handleSourcePreview}

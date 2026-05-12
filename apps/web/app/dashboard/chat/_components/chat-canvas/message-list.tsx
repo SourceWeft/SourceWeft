@@ -18,18 +18,290 @@ import {
   MessageContent,
   MessageToolbar,
 } from "@sourceweft/ui-web/components/ai-elements/message";
+import {
+  Attachment,
+  AttachmentHoverCard,
+  AttachmentHoverCardContent,
+  AttachmentHoverCardTrigger,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
+  getAttachmentLabel,
+} from "@sourceweft/ui-web/components/ai-elements/attachments";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import { WebToolResults } from "../web-tool-results";
-import { getMessageText } from "./message-assets";
+import {
+  getMessageImageParts,
+  getMessageText,
+  normalizeAssetUrl,
+  stripGeneratedImageMarkdown,
+} from "./message-assets";
 import { CitationAwareMessageResponse } from "./message-response";
-import { GeneratedImageArtifacts, ReasoningTrace } from "./reasoning-trace";
+import {
+  GeneratedImageArtifactBlock,
+  GeneratedImageArtifacts,
+  ReasoningTrace,
+} from "./reasoning-trace";
 import {
   mergeSourceIds,
-  ReferencedFiles,
+  SourceIcon,
+  toAttachmentData,
   UserMessageText,
 } from "./source-rendering";
-import type { CitationRecord, VersionedMessageGroup } from "./types";
+import type {
+  ArtifactPreviewRecord,
+  CitationRecord,
+  ChatMessageImagePart,
+  MessageRenderBlock,
+  MessageVersion,
+  ToolCallRecord,
+  VersionedMessageGroup,
+} from "./types";
+
+function hasRenderBlocks(blocks: MessageRenderBlock[] | undefined) {
+  return blocks !== undefined && blocks.length > 0;
+}
+
+function getToolCallById(toolCalls: ToolCallRecord[] | undefined) {
+  return new Map((toolCalls ?? []).map((toolCall) => [toolCall.id, toolCall]));
+}
+
+function getInlineGeneratedImageToolIds(input: {
+  blocks: MessageRenderBlock[] | undefined;
+  toolCallById: Map<string, ToolCallRecord>;
+}) {
+  return new Set(
+    (input.blocks ?? [])
+      .filter(
+        (
+          block,
+        ): block is Extract<MessageRenderBlock, { type: "generated_image" }> =>
+          block.type === "generated_image",
+      )
+      .filter((block) => input.toolCallById.has(block.toolCallId))
+      .map((block) => block.toolCallId),
+  );
+}
+
+function getTrailingGeneratedImageToolCalls(input: {
+  inlineToolIds: Set<string>;
+  toolCalls?: ToolCallRecord[];
+}) {
+  return (input.toolCalls ?? []).filter(
+    (toolCall) => !input.inlineToolIds.has(toolCall.id),
+  );
+}
+
+function toImageAttachmentData(image: ChatMessageImagePart) {
+  return {
+    filename: image.fileName,
+    id: image.id,
+    mediaType: image.mimeType,
+    type: "file" as const,
+    url: normalizeAssetUrl(image.url),
+  };
+}
+
+function UserMessageImageReference({ image }: { image: ChatMessageImagePart }) {
+  const attachment = toImageAttachmentData(image);
+  const label = getAttachmentLabel(attachment);
+
+  return (
+    <AttachmentHoverCard>
+      <AttachmentHoverCardTrigger asChild>
+        <div className="w-fit">
+          <Attachment
+            className="rounded-2xl bg-muted/55 px-2.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
+            data={attachment}
+          >
+            <AttachmentPreview />
+            <AttachmentInfo className="max-w-[180px] text-[13px] font-medium" />
+          </Attachment>
+        </div>
+      </AttachmentHoverCardTrigger>
+      <AttachmentHoverCardContent>
+        <div className="space-y-3">
+          <div className="flex max-h-96 w-80 items-center justify-center overflow-hidden rounded-md border bg-muted/30">
+            <img
+              alt={label}
+              className="max-h-full max-w-full object-contain"
+              height={384}
+              src={attachment.url}
+              width={320}
+            />
+          </div>
+          <div className="space-y-1 px-0.5">
+            <h4 className="font-semibold text-sm leading-none">{label}</h4>
+            {attachment.mediaType ? (
+              <p className="font-mono text-muted-foreground text-xs">
+                {attachment.mediaType}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </AttachmentHoverCardContent>
+    </AttachmentHoverCard>
+  );
+}
+
+function UserMessageReferences({
+  images,
+  sources,
+}: {
+  images: ChatMessageImagePart[];
+  sources: SourceItem[];
+}) {
+  if (sources.length === 0 && images.length === 0) {
+    return null;
+  }
+
+  const showSourceCountOnly = sources.length > 2;
+  const visibleSources = showSourceCountOnly ? [] : sources;
+
+  return (
+    <div className="ml-auto flex max-w-[85%] flex-wrap justify-end gap-2 pb-1 text-xs text-muted-foreground">
+      <span className="inline-flex h-8 items-center px-1 font-medium text-foreground/70">
+        Referenced
+      </span>
+      <Attachments className="gap-2" variant="inline">
+        {showSourceCountOnly ? (
+          <Attachment
+            className="rounded-2xl bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
+            data={{
+              id: "source-count",
+              mediaType: "text/plain",
+              sourceId: "source-count",
+              title: `${sources.length} sources`,
+              type: "source-document",
+            }}
+          >
+            {sources.length} sources
+          </Attachment>
+        ) : (
+          visibleSources.map((source) => (
+            <Attachment
+              className="rounded-2xl bg-muted/55 px-3.5 py-2 shadow-[inset_0_0_0_1px_hsl(var(--border)/0.45)]"
+              data={toAttachmentData(source)}
+              key={source.id}
+              title={source.title}
+            >
+              <AttachmentPreview
+                className="text-foreground/75"
+                fallbackIcon={<SourceIcon className="size-4" source={source} />}
+              />
+              <AttachmentInfo className="max-w-[220px] text-[13px] font-medium" />
+            </Attachment>
+          ))
+        )}
+        {images.map((image) => (
+          <UserMessageImageReference image={image} key={image.id} />
+        ))}
+      </Attachments>
+    </div>
+  );
+}
+
+function AssistantMessageBody({
+  isStreaming,
+  messageText,
+  onCitationClick,
+  onWorkfileClick,
+  version,
+  workspaceId,
+}: {
+  isStreaming: boolean;
+  messageText: string;
+  onCitationClick?: (citation: CitationRecord) => void;
+  onWorkfileClick?: (path: string) => void;
+  version: MessageVersion;
+  workspaceId?: string | null;
+}) {
+  const renderBlocks = hasRenderBlocks(version.renderBlocks)
+    ? (version.renderBlocks ?? [])
+    : null;
+  const toolCallById = getToolCallById(version.toolCalls);
+  const inlineToolIds = getInlineGeneratedImageToolIds({
+    blocks: renderBlocks ?? [],
+    toolCallById,
+  });
+  const trailingImageToolCalls = getTrailingGeneratedImageToolCalls({
+    inlineToolIds,
+    toolCalls: version.toolCalls,
+  });
+
+  if (!renderBlocks) {
+    return (
+      <>
+        <CitationAwareMessageResponse
+          availableCitations={version.availableCitations}
+          citations={version.citations}
+          onCitationClick={onCitationClick}
+          onWorkfileClick={onWorkfileClick}
+          showLoading={
+            isStreaming &&
+            version.isTextPaused === true &&
+            messageText.length > 0
+          }
+        >
+          {messageText}
+        </CitationAwareMessageResponse>
+        <GeneratedImageArtifacts
+          toolCalls={version.toolCalls}
+          workspaceId={workspaceId}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {renderBlocks.map((block) => {
+        if (block.type === "generated_image") {
+          return (
+            <GeneratedImageArtifactBlock
+              key={block.id}
+              toolCall={toolCallById.get(block.toolCallId)}
+              workspaceId={workspaceId}
+            />
+          );
+        }
+
+        const blockText = stripGeneratedImageMarkdown({
+          content: block.text,
+          toolCalls: version.toolCalls,
+          trim: false,
+          workspaceId,
+        });
+        if (blockText.length === 0) {
+          return null;
+        }
+
+        return (
+          <CitationAwareMessageResponse
+            availableCitations={version.availableCitations}
+            citations={version.citations}
+            key={block.id}
+            onCitationClick={onCitationClick}
+            onWorkfileClick={onWorkfileClick}
+            showLoading={
+              isStreaming &&
+              version.isTextPaused === true &&
+              version.renderBlocks?.at(-1)?.id === block.id &&
+              blockText.length > 0
+            }
+          >
+            {blockText}
+          </CitationAwareMessageResponse>
+        );
+      })}
+      <GeneratedImageArtifacts
+        toolCalls={trailingImageToolCalls}
+        workspaceId={workspaceId}
+      />
+    </>
+  );
+}
 
 type MessageListProps = {
   activeVersionByGroup?: Record<string, number>;
@@ -41,6 +313,7 @@ type MessageListProps = {
     groupId: string;
     branchIndex: number;
   }) => void;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onSourcePreview?: (source: SourceItem) => void;
   onWorkfileClick?: (path: string) => void;
@@ -66,6 +339,7 @@ export function MessageList({
   isStreaming = false,
   messageGroups = [],
   onActiveVersionChange,
+  onArtifactPreview,
   onCitationClick,
   onSourcePreview,
   onWorkfileClick,
@@ -255,6 +529,9 @@ export function MessageList({
                       version,
                       workspaceId,
                     });
+                    const userMessageImages = !isAssistant
+                      ? getMessageImageParts(version)
+                      : [];
                     const isStreamingThisVersion =
                       isStreaming &&
                       isAssistant &&
@@ -292,10 +569,13 @@ export function MessageList({
                             "bg-primary/10 ring-1 ring-primary/25",
                         )}
                         data-chat-message-id={version.id}
-                        key={version.id}
+                        key={version.renderKey ?? version.id}
                       >
-                        {!isAssistant && referencedSources.length > 0 ? (
-                          <ReferencedFiles sources={referencedSources} />
+                        {!isAssistant ? (
+                          <UserMessageReferences
+                            images={userMessageImages}
+                            sources={referencedSources}
+                          />
                         ) : null}
                         <Message from={group.role}>
                           <MessageContent
@@ -306,17 +586,21 @@ export function MessageList({
                             }
                           >
                             {!isAssistant ? (
-                              <div className="whitespace-pre-wrap break-words leading-6">
-                                <UserMessageText
-                                  onSourcePreview={onSourcePreview}
-                                  sources={mentionSources}
-                                  sourceIds={mergeSourceIds(
-                                    version.mentionedSourceIds,
-                                    version.effectiveMentionedSourceIds,
-                                  )}
-                                >
-                                  {messageText}
-                                </UserMessageText>
+                              <div>
+                                {messageText.length > 0 ? (
+                                  <div className="whitespace-pre-wrap break-words leading-6">
+                                    <UserMessageText
+                                      onSourcePreview={onSourcePreview}
+                                      sources={mentionSources}
+                                      sourceIds={mergeSourceIds(
+                                        version.mentionedSourceIds,
+                                        version.effectiveMentionedSourceIds,
+                                      )}
+                                    >
+                                      {messageText}
+                                    </UserMessageText>
+                                  </div>
+                                ) : null}
                               </div>
                             ) : (
                               <div className="space-y-3">
@@ -326,6 +610,7 @@ export function MessageList({
                                   modelReasoningSegments={
                                     version.modelReasoningSegments
                                   }
+                                  onArtifactPreview={onArtifactPreview}
                                   steps={version.thinkingSteps}
                                   toolCalls={version.toolCalls}
                                   workspaceId={workspaceId}
@@ -337,23 +622,12 @@ export function MessageList({
                                   onCitationClick={onCitationClick}
                                   toolCalls={version.toolCalls}
                                 />
-                                <CitationAwareMessageResponse
-                                  availableCitations={
-                                    version.availableCitations
-                                  }
-                                  citations={version.citations}
+                                <AssistantMessageBody
+                                  isStreaming={isStreamingThisVersion}
+                                  messageText={messageText}
                                   onCitationClick={onCitationClick}
                                   onWorkfileClick={onWorkfileClick}
-                                  showLoading={
-                                    isStreamingThisVersion &&
-                                    version.isTextPaused === true &&
-                                    messageText.length > 0
-                                  }
-                                >
-                                  {messageText}
-                                </CitationAwareMessageResponse>
-                                <GeneratedImageArtifacts
-                                  toolCalls={version.toolCalls}
+                                  version={version}
                                   workspaceId={workspaceId}
                                 />
                                 {version.isError ? (

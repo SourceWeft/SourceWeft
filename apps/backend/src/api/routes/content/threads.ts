@@ -164,6 +164,28 @@ export function registerThreadRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get("/messages/:messageId/images/:imageId/file", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.getMessageImageFile({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      messageId: requireRouteParam(c, "messageId"),
+      imageId: requireRouteParam(c, "imageId"),
+      userId: getSessionUserId(session),
+    });
+
+    c.header("Content-Type", result.contentType);
+    c.header(
+      "Content-Disposition",
+      `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
+    );
+    c.header("Cache-Control", "private, max-age=60");
+    return c.body(result.body);
+  });
+
   app.get("/threads/:id/messages", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -230,12 +252,18 @@ export function registerThreadRoutes(app: Hono) {
     const threadId = requireRouteParam(c, "id");
     const userId = getSessionUserId(session);
     const mode = parsed.data.mode ?? "send";
+    const imagesProvided = Object.hasOwn(body, "images");
+    const images = parsed.data.images ?? [];
 
-    if ((mode === "send" || mode === "edit") && !parsed.data.content) {
+    if (
+      (mode === "send" || mode === "edit") &&
+      !parsed.data.content &&
+      images.length === 0
+    ) {
       throw new ApiError(
         400,
         "VALIDATION_ERROR",
-        "content is required for send/edit mode",
+        "content or images is required for send/edit mode",
       );
     }
 
@@ -254,6 +282,8 @@ export function registerThreadRoutes(app: Hono) {
               assistantMessageId: parsed.data.assistantMessageId,
               idempotencyKey: parsed.data.idempotencyKey,
               llm: parsed.data.llm,
+              visionProfileAlias:
+                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
             })
           : mode === "edit"
             ? await contentService.editThread({
@@ -261,6 +291,8 @@ export function registerThreadRoutes(app: Hono) {
                 threadId,
                 userId,
                 content: parsed.data.content ?? "",
+                imagesProvided,
+                images,
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
@@ -269,18 +301,23 @@ export function registerThreadRoutes(app: Hono) {
                 assistantMessageId: parsed.data.assistantMessageId,
                 idempotencyKey: parsed.data.idempotencyKey,
                 llm: parsed.data.llm,
+                visionProfileAlias:
+                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
               })
             : await contentService.streamThread({
                 workspaceId,
                 threadId,
                 userId,
                 content: parsed.data.content ?? "",
+                images,
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
                 timezone: parsed.data.timezone,
                 idempotencyKey: parsed.data.idempotencyKey,
                 llm: parsed.data.llm,
+                visionProfileAlias:
+                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
               });
 
       return ApiResponse.success(c, result);
@@ -300,6 +337,8 @@ export function registerThreadRoutes(app: Hono) {
             assistantMessageId: parsed.data.assistantMessageId,
             idempotencyKey: parsed.data.idempotencyKey,
             llm: parsed.data.llm,
+            visionProfileAlias:
+              parsed.data.modelSettings?.visionProfileAlias ?? undefined,
           })
         : mode === "edit"
           ? contentService.editThreadEvents({
@@ -307,6 +346,8 @@ export function registerThreadRoutes(app: Hono) {
               threadId,
               userId,
               content: parsed.data.content ?? "",
+              imagesProvided,
+              images,
               mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
@@ -315,18 +356,23 @@ export function registerThreadRoutes(app: Hono) {
               assistantMessageId: parsed.data.assistantMessageId,
               idempotencyKey: parsed.data.idempotencyKey,
               llm: parsed.data.llm,
+              visionProfileAlias:
+                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
             })
           : contentService.streamThreadEvents({
               workspaceId,
               threadId,
               userId,
               content: parsed.data.content ?? "",
+              images,
               mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
               timezone: parsed.data.timezone,
               idempotencyKey: parsed.data.idempotencyKey,
               llm: parsed.data.llm,
+              visionProfileAlias:
+                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
             });
 
     c.header("Content-Type", "text/event-stream");
