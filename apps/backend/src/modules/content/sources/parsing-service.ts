@@ -7,6 +7,7 @@ import { getSourceParser, type ParsedDocument } from "../parsers";
 import { webFetchSourceParser, WEB_FETCH_SOURCE_MIME_TYPE } from "../parsers/web-fetch";
 import { startDocumentParse } from "../parsers/providers/document-parse-orchestrator";
 import { getDocumentProviderForResume } from "../parsers/providers/registry";
+import { isSupportedImageMimeType } from "../parsers/providers/utils";
 import type { DocumentParseProviderId, ParsingConfig, SourceRecord, SourceStatusDetail } from "../types";
 import { downloadSourceObject } from "../storage";
 import {
@@ -67,6 +68,21 @@ function isDocumentProviderMimeType(mimeType: string) {
     "image/bmp",
     "image/gif",
   ].includes(mimeType);
+}
+
+function resolveParsedPageCount(input: {
+  mimeType?: string | null;
+  parsed: ParsedDocument;
+}) {
+  if (input.mimeType && isSupportedImageMimeType(input.mimeType)) {
+    return 1;
+  }
+
+  return input.parsed.metadata.pageCount ?? input.parsed.pages.length;
+}
+
+function isImageSourceMimeType(mimeType?: string | null) {
+  return Boolean(mimeType && isSupportedImageMimeType(mimeType));
 }
 
 function nextProviderPollDelay(attempt: number) {
@@ -504,8 +520,14 @@ export class SourceParsingService {
 
     const contentHash = computeContentHash(input.parsed.content);
     const parsedTokens = estimateTokens(input.parsed.content);
-    const parsedPages = input.parsed.pages.length;
-    const billablePages = input.parsed.metadata.pageCount ?? parsedPages;
+    const parsedPages = resolveParsedPageCount({
+      mimeType: input.source.mimeType,
+      parsed: input.parsed,
+    });
+    const billablePages = parsedPages;
+    const imagePageMetadata = isImageSourceMimeType(input.source.mimeType)
+      ? { pageCount: parsedPages }
+      : {};
     const parsedSource = await updateSourceRecordForLatestRevision({
       teamId: input.input.teamId,
       workspaceId: input.input.workspaceId,
@@ -517,13 +539,14 @@ export class SourceParsingService {
       sizeBytes: Buffer.byteLength(input.parsed.content, "utf8"),
       parserVersion: input.parsingConfig.parserVersion,
       parsingConfig: input.parsingConfig,
-      estimatedPages: input.parsed.metadata.pageCount ?? input.source.estimatedPages,
+      estimatedPages: parsedPages || input.source.estimatedPages,
       parsedTokens,
       metadata: {
         ...(input.source.metadata ?? {}),
         ...input.parsed.metadata,
-        parsedPages: input.parsed.pages.length,
-        totalPages: billablePages || input.parsed.pages.length,
+        ...imagePageMetadata,
+        parsedPages,
+        totalPages: billablePages || parsedPages,
         progress: 60,
         currentStep: "chunking",
         error: null,
@@ -539,7 +562,7 @@ export class SourceParsingService {
       sourceId: input.input.sourceId,
       userId: input.input.userId,
       sourceRevisionId: input.input.sourceRevisionId,
-      estimatedPages: input.parsed.metadata.pageCount,
+      estimatedPages: parsedPages,
       parsedPages: billablePages || parsedPages,
       parsedTokens,
       idempotencyKey: input.input.idempotencyKey,
@@ -560,8 +583,8 @@ export class SourceParsingService {
       sourceId: input.input.sourceId,
       sourceRevisionId: input.input.sourceRevisionId,
       metadata: mergeStatusMetadata(result.source, {
-        parsedPages: input.parsed.pages.length,
-        totalPages: billablePages || input.parsed.pages.length,
+        parsedPages,
+        totalPages: billablePages || parsedPages,
         progress: 100,
         currentStep: "completed",
         error: null,

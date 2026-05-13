@@ -19,6 +19,7 @@ export class DeepInfraChatAdapter implements ChatAdapter {
         baseURL: resolveOpenAICompatibleBaseUrl(target.baseUrl),
         defaultHeaders: target.defaultHeaders,
       },
+      __includeRawResponse: true,
       maxTokens: input.maxTokens,
       streaming: input.stream ?? false,
     });

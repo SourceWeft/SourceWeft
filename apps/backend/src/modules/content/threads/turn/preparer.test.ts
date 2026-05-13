@@ -150,6 +150,8 @@ test("meterVisionFallbackBilling records traceable vision fallback credit usage"
         cost: {
           providerCostUsd: 0,
           pricingSnapshot: null,
+          costSource: "missing_or_zero_price",
+          missingPriceComponents: [],
         },
         billedBy: "minimum_credit",
         skipReason: null,
@@ -276,6 +278,46 @@ test("edit stream input distinguishes omitted images from explicit images", () =
     inputTestExports.shouldUseSubmittedEditImages({
       images: [{ dataUrl: "data:image/png;base64,aW1hZ2U=" }],
       imagesProvided: true,
+    }),
+    true,
+  );
+});
+
+test("empty thread message validation allows submitted images", () => {
+  assert.equal(
+    testExports.shouldRejectEmptyThreadMessage({
+      messageContent: "",
+      images: [{ dataUrl: "data:image/png;base64,aW1hZ2U=" }],
+    }),
+    false,
+  );
+});
+
+test("empty thread message validation allows existing image parts", () => {
+  assert.equal(
+    testExports.shouldRejectEmptyThreadMessage({
+      messageContent: "",
+      existingImageParts: [
+        {
+          type: "image",
+          id: "image-1",
+          fileName: "image.png",
+          mimeType: "image/png",
+          sizeBytes: 5,
+          storageKey: "workspaces/workspace-1/images/image-1.png",
+          url: "https://example.com/image.png",
+        },
+      ],
+    }),
+    false,
+  );
+});
+
+test("empty thread message validation rejects textless imageless messages", () => {
+  assert.equal(
+    testExports.shouldRejectEmptyThreadMessage({
+      messageContent: "",
+      images: [],
     }),
     true,
   );

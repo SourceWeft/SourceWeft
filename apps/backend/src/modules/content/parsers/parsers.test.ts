@@ -1,4 +1,6 @@
 process.env.S3_BUCKET = process.env.S3_BUCKET || "test-bucket";
+process.env.PDF2MARKDOWN_API_KEY =
+  process.env.PDF2MARKDOWN_API_KEY || "test-pdf2markdown-key";
 process.env.MODEL_GATEWAY_ENCRYPTION_SECRET =
   process.env.MODEL_GATEWAY_ENCRYPTION_SECRET || "test-encryption-secret";
 process.env.DOCUMENT_PARSE_STRATEGY = "explicit";
@@ -19,6 +21,8 @@ import { srtSourceParser } from "./srt";
 import { textSourceParser } from "./text";
 import { getSourceParser, listSupportedSourceMimeTypes } from "./index";
 import { extractPdf2MarkdownResult } from "./providers/pdf2markdown-result";
+import { startDocumentParse, testExports as documentParseTestExports } from "./providers/document-parse-orchestrator";
+import { testExports as imageVisionTestExports } from "./providers/image-vision-provider";
 import { classifySourceFile } from "../source-file-classifier";
 import { buildSourceStorageKey } from "../storage";
 
@@ -123,6 +127,134 @@ test("pdf parser extracts content, metadata, and page count", async () => {
   assert.equal(result.content, "");
   assert.equal(result.pages.length, 0);
   assert.equal(result.chunks.length, 0);
+});
+test("image document parse uses vision markdown when vision succeeds", async () => {
+  const restoreVisionParser = documentParseTestExports.setImageVisionParserForTest(
+    async (input) => ({
+      kind: "completed",
+      outcome: {
+        kind: "completed",
+        document: {
+          title: input.fileName,
+          content: "A chart showing revenue growth.\n\nVisible text: Q1 Revenue",
+          metadata: {
+            fileName: input.fileName,
+            fileSize: input.fileSize,
+            mimeType: input.mimeType,
+            pageCount: 1,
+            documentParseBackend: "vision",
+            documentParseProvider: "vision",
+            documentParseProviderResolved: "vision",
+            documentParseMode: "image_vision",
+            visionModelAlias: "vision-default",
+            visionProfileAlias: "vision-default",
+          },
+          pages: [
+            {
+              pageNumber: 1,
+              content: "A chart showing revenue growth.\n\nVisible text: Q1 Revenue",
+            },
+          ],
+          chunks: [
+            {
+              text: "A chart showing revenue growth.\n\nVisible text: Q1 Revenue",
+              startIndex: 0,
+              endIndex: 58,
+              tokenCount: 15,
+            },
+          ],
+        },
+      },
+    }),
+  );
+  try {
+    const result = await startDocumentParse({
+      fileName: "chart.png",
+      mimeType: "image/png",
+      fileSize: 4,
+      content: Buffer.from([1, 2, 3, 4]),
+      config: {
+        chunkSize: 512,
+        parserVersion: "v1",
+      },
+      sourceId: "source-1",
+      sourceRevisionId: "revision-1",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      userId: "user-1",
+    });
+
+    assert.equal(result.kind, "completed");
+    assert.equal(result.document.content.includes("revenue growth"), true);
+    assert.equal(result.document.metadata.documentParseMode, "image_vision");
+    assert.equal(result.document.metadata.documentParseBackend, "vision");
+    assert.equal(result.document.metadata.pageCount, 1);
+    assert.equal(result.document.pages.length, 1);
+    assert.equal(result.document.chunks.length, 1);
+  } finally {
+    restoreVisionParser();
+  }
+});
+test("image vision parser strips a wrapping markdown code fence", () => {
+  const content = imageVisionTestExports.stripWrappingMarkdownFence(`\`\`\`markdown
+# Image Description
+
+The image features a stylized lightning bolt silhouette.
+
+## Text
+There is no visible text in the image.
+\`\`\``);
+
+  assert.equal(content.startsWith("```markdown"), false);
+  assert.equal(content.endsWith("```"), false);
+  assert.equal(content.includes("# Image Description"), true);
+});
+test("image document parse falls back to OCR with one-page metadata when vision fails", async (t) => {
+  const restoreVisionParser = documentParseTestExports.setImageVisionParserForTest(
+    async () => ({
+      kind: "fallback",
+      reason: "Default vision model gateway profile is not configured",
+    }),
+  );
+  const fetchMock = t.mock.method(globalThis, "fetch", async () =>
+    new Response(
+      JSON.stringify({
+        code: "ok",
+        data: {
+          task_id: "task-1",
+          status: "queued",
+          page_count: 9,
+        },
+      }),
+      { status: 200 },
+    ),
+  );
+  try {
+    const result = await startDocumentParse({
+      fileName: "receipt.png",
+      mimeType: "image/png",
+      fileSize: 4,
+      content: Buffer.from([1, 2, 3, 4]),
+      config: {
+        chunkSize: 512,
+        parserVersion: "v1",
+      },
+      sourceId: "source-1",
+      sourceRevisionId: "revision-1",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      userId: "user-1",
+    });
+
+    assert.equal(result.kind, "pending");
+    assert.equal(result.diagnostics?.metadata?.documentParseMode, "image_ocr");
+    assert.equal(result.diagnostics?.metadata?.visionFallbackReason, "Default vision model gateway profile is not configured");
+    assert.equal(result.diagnostics?.metadata?.pageCount, 1);
+    assert.equal(result.diagnostics?.metadata?.documentParseProviderResolved, "pdf2markdown");
+    assert.equal(fetchMock.mock.callCount(), 1);
+  } finally {
+    restoreVisionParser();
+  }
 });
 test("docx parser extracts content, metadata, and chunks", async () => {
   const content = Buffer.from(docxBase64, "base64");

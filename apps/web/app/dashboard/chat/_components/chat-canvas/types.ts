@@ -22,6 +22,7 @@ export type MessageVersion = {
   citations?: CitationRecord[];
   availableCitations?: CitationRecord[];
   isError?: boolean;
+  isCancelled?: boolean;
   error?: string | null;
   errorCode?: string | null;
   isTextPaused?: boolean;

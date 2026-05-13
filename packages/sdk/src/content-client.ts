@@ -237,6 +237,21 @@ export class ContentClient {
     );
   }
 
+  getActiveThreadRun(workspaceId: string, threadId: string) {
+    return this.http.get<{
+      threadRun: {
+        id: string;
+        idempotencyKey: string;
+        status: "queued" | "running" | "cancel_requested";
+        mode: "send" | "refresh" | "edit";
+        userMessageId: string | null;
+        assistantMessageId: string | null;
+      } | null;
+    }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/active-run`,
+    );
+  }
+
   listWorkingFiles(workspaceId: string, threadId: string) {
     return this.http.get<ListWorkingFilesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/working-files`,

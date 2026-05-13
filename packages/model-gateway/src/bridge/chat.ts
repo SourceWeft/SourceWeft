@@ -1,6 +1,6 @@
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import { normalizeGatewayError, toGatewayErrorData } from "../errors";
-import { normalizeUsage } from "../normalize/usage";
+import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
 import { createChatModel, toLangChainMessages } from "./utils";
 import type {
   ChatCompleteInput,
@@ -23,6 +23,34 @@ function extractObjectRecord(value: unknown): Record<string, unknown> | undefine
     : undefined;
 }
 
+function cloneRecord<T extends Record<string, unknown> | undefined>(value: T): T {
+  return value ? ({ ...value } as T) : value;
+}
+
+function extractRawResponseUsage(value: unknown): unknown {
+  const record = extractObjectRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const rawResponse = extractObjectRecord(record.__raw_response);
+  if (rawResponse?.usage && typeof rawResponse.usage === "object") {
+    return rawResponse.usage;
+  }
+
+  const choices = Array.isArray(rawResponse?.choices) ? rawResponse.choices : [];
+  for (const choice of choices) {
+    const choiceRecord = extractObjectRecord(choice);
+    const message = extractObjectRecord(choiceRecord?.message);
+    const messageRawResponse = extractObjectRecord(message?.__raw_response);
+    if (messageRawResponse?.usage && typeof messageRawResponse.usage === "object") {
+      return messageRawResponse.usage;
+    }
+  }
+
+  return undefined;
+}
+
 export function extractFinishReason(responseMetadata: Record<string, unknown> | undefined) {
   if (typeof responseMetadata?.finish_reason === "string") {
     return responseMetadata.finish_reason;
@@ -36,9 +64,15 @@ export function extractFinishReason(responseMetadata: Record<string, unknown> | 
 }
 
 export function extractUsage(input: {
+  raw?: unknown;
   usageMetadata?: unknown;
   responseMetadata: Record<string, unknown> | undefined;
 }) {
+  const rawResponseUsage = extractRawResponseUsage(input.raw);
+  if (rawResponseUsage) {
+    return rawResponseUsage;
+  }
+
   if (input.usageMetadata) {
     return input.usageMetadata;
   }
@@ -161,15 +195,18 @@ export async function runBridgeChatComplete(input: {
         typeof responseMetadata?.model === "string"
           ? responseMetadata.model
           : input.target.providerModel,
-      usage: normalizeUsage(
-        extractUsage({
-          usageMetadata: rawMessage.usage_metadata,
-          responseMetadata,
-        }),
-      ),
+      usage:
+        normalizeProviderUsage(rawMessage) ??
+        normalizeUsage(
+          extractUsage({
+            raw: rawMessage,
+            usageMetadata: rawMessage.usage_metadata,
+            responseMetadata,
+          }),
+        ),
       finishReason: extractFinishReason(responseMetadata),
       reasoning: extractReasoning(rawMessage),
-      providerFields: responseMetadata,
+      providerFields: cloneRecord(responseMetadata),
       provider: input.target.provider,
       providerModel: input.target.providerModel,
       routeDecision: input.target.routeDecision,
@@ -208,15 +245,18 @@ export async function* runBridgeChatStream(input: {
     for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
       const responseMetadata = extractResponseMetadata(chunk);
       usage =
+        normalizeProviderUsage(chunk) ??
         normalizeUsage(
           extractUsage({
+            raw: chunk,
             usageMetadata: chunk.usage_metadata,
             responseMetadata,
           }),
-        ) ?? usage;
+        ) ??
+        usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
       reasoning = appendText(reasoning, extractReasoning(chunk));
-      providerFields = responseMetadata ?? providerFields;
+      providerFields = cloneRecord(responseMetadata) ?? providerFields;
 
       yield { type: "chunk", chunk };
     }

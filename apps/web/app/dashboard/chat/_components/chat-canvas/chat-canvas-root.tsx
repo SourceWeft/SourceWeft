@@ -74,6 +74,7 @@ export function ChatCanvas({
   highlightedMessageId = null,
   isEditing = false,
   isStreaming = false,
+  isStopping = false,
   messageGroups = [],
   mode,
   sourcesVisible,
@@ -87,6 +88,7 @@ export function ChatCanvas({
   onRestartFromMessage,
   onRefreshLatest,
   onSendMessage,
+  onStopStreaming,
   allSources = [],
   sourceMentionLoader,
   selectedSources = [],
@@ -113,6 +115,7 @@ export function ChatCanvas({
   highlightedMessageId?: string | null;
   isEditing?: boolean;
   isStreaming?: boolean;
+  isStopping?: boolean;
   messageGroups?: VersionedMessageGroup[];
   mode: "thread" | "new";
   sourcesVisible: boolean;
@@ -139,6 +142,7 @@ export function ChatCanvas({
     branchIndex: number;
   }) => void;
   onSendMessage?: (input: ChatSendInput) => void;
+  onStopStreaming?: () => void;
   allSources?: SourceItem[];
   sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources?: SourceItem[];
@@ -245,6 +249,7 @@ export function ChatCanvas({
             allSources={allSources}
             sourceMentionLoader={sourceMentionLoader}
             disabled={isStreaming}
+            isStopping={isStopping}
             initialAttachments={editingInitialAttachments}
             initialInput={composerInitialInput}
             isEditing={isEditing}
@@ -261,6 +266,7 @@ export function ChatCanvas({
                 tools,
               })
             }
+            onStopStreaming={onStopStreaming}
             onThinkingSettingsChange={onThinkingSettingsChange}
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}

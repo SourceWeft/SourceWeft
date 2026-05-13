@@ -54,6 +54,21 @@ export async function createCitationRecords(input: {
   );
 }
 
+export async function replaceCitationRecords(input: Parameters<typeof createCitationRecords>[0]) {
+  await db
+    .delete(citations)
+    .where(
+      and(
+        eq(citations.teamId, input.teamId),
+        eq(citations.workspaceId, input.workspaceId),
+        eq(citations.threadId, input.threadId),
+        eq(citations.messageId, input.messageId),
+      ),
+    );
+
+  await createCitationRecords(input);
+}
+
 export async function findCitationByMessageRank(input: {
   teamId: string;
   workspaceId: string;

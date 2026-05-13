@@ -51,6 +51,51 @@ test("SiliconflowCN chat and embeddings adapters expose provider identity", () =
   assert.equal(new SiliconflowCNEmbeddingsAdapter().kind, "siliconflow-cn");
 });
 
+test("DeepInfra rerank preserves inference_status cost", async () => {
+  const gateway = createModelGateway({
+    fetch: async () =>
+      createJsonResponse({
+        request_id: "request-1",
+        inference_status: {
+          runtime_ms: 118,
+          cost: 0.000089,
+          tokens_input: 89,
+        },
+        scores: [0.9948431253433228],
+        input_tokens: 89,
+      }),
+    providers: {
+      deepinfra: {
+        kind: "deepinfra",
+        baseUrl: "https://api.deepinfra.com/v1",
+        apiKey: "deepinfra-key",
+      },
+    },
+    modelRoutes: {
+      "rerank-default": {
+        strategy: "priority",
+        targets: [
+          {
+            provider: "deepinfra",
+            model: "Qwen/Qwen3-Reranker-0.6B",
+            priority: 1,
+          },
+        ],
+      },
+    },
+  });
+
+  const result = await gateway.rerank.rank({
+    model: "rerank-default",
+    query: "What is the capital of United States of America?",
+    documents: ["The capital of USA is Washington DC."],
+  });
+
+  assert.equal(result.usage?.inputTokens, 89);
+  assert.equal(result.usage?.providerCostUsd, 0.000089);
+  assert.equal(result.usage?.providerCostSource, "inference_status.cost");
+});
+
 test("DeepInfra embeddings reject base64 encoding format", async () => {
   const gateway = createModelGateway({
     allowedModelAliases: ["embed-default"],

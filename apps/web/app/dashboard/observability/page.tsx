@@ -110,6 +110,9 @@ function statusClassName(status: string | null | undefined) {
   if (status === "running") {
     return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300";
   }
+  if (status === "cancelled") {
+    return "border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-300";
+  }
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
 }
 

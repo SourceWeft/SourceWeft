@@ -1,14 +1,8 @@
-import type { UsageInfo } from "@sourceweft/model-gateway";
-
-function asNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function readNumber(record: Record<string, unknown> | null, key: string) {
-  return record ? asNumber(record[key]) : undefined;
-}
+import {
+  normalizeProviderUsage,
+  normalizeUsage,
+  type UsageInfo,
+} from "@sourceweft/model-gateway";
 
 export function extractTextDeltas(content: unknown): string[] {
   if (typeof content === "string") {
@@ -82,6 +76,11 @@ export function toObjectRecord(value: unknown): Record<string, unknown> | null {
 }
 
 export function extractUsageFromMessageChunk(chunk: unknown): UsageInfo | undefined {
+  const providerUsage = normalizeProviderUsage(chunk);
+  if (providerUsage) {
+    return providerUsage;
+  }
+
   const record = toObjectRecord(chunk);
   if (!record) {
     return undefined;
@@ -96,22 +95,7 @@ export function extractUsageFromMessageChunk(chunk: unknown): UsageInfo | undefi
     return undefined;
   }
 
-  const promptDetails =
-    toObjectRecord(usageSource.prompt_tokens_details) ??
-    toObjectRecord(usageSource.input_tokens_details);
-  return {
-    inputTokens:
-      readNumber(usageSource, "prompt_tokens") ??
-      readNumber(usageSource, "input_tokens"),
-    outputTokens:
-      readNumber(usageSource, "completion_tokens") ??
-      readNumber(usageSource, "output_tokens"),
-    totalTokens: readNumber(usageSource, "total_tokens"),
-    cacheReadTokens: readNumber(promptDetails, "cached_tokens"),
-    cacheWriteTokens:
-      readNumber(promptDetails, "cache_write_tokens") ??
-      readNumber(promptDetails, "cache_creation_tokens"),
-  };
+  return normalizeUsage(usageSource);
 }
 
 export function extractFinishReasonFromMessageChunk(chunk: unknown) {

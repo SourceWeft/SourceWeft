@@ -11,4 +11,8 @@ export type {
   ChatMessageTextPart,
   MessageContentJson,
 } from "@sourceweft/contracts";
+export {
+  SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,
+  SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
+} from "@sourceweft/contracts";
 export * from "@sourceweft/contracts/agent-tools";

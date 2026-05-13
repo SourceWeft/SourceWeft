@@ -80,6 +80,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
 import { SkillsGallery } from "../../skills/_components/skills-gallery";
 import type { CitationRecord } from "./chat-canvas";
+import { GeneratedImagePreview } from "./chat-canvas/generated-image-preview";
 import { SourcePreviewPanel } from "./source-preview-panel";
 import { expandSelectedSources, type SourceItem } from "./source-types";
 
@@ -550,6 +551,7 @@ export function ArtifactPreviewPanel({
 }) {
   const fileUrl = resolveArtifactFileUrl({ artifact, workspaceId });
   const downloadUrl = resolveArtifactDownloadUrl({ artifact, workspaceId });
+  const title = artifactTitle(artifact);
   const canPreviewImage =
     artifact.artifactType === "image" &&
     artifact.status === "ready" &&
@@ -641,7 +643,7 @@ export function ArtifactPreviewPanel({
 
         <div className="mt-2 min-w-0">
           <h3 className="truncate text-sm font-medium text-foreground">
-            {artifactTitle(artifact)}
+            {title}
           </h3>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
             <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
@@ -679,12 +681,12 @@ export function ArtifactPreviewPanel({
             </p>
           </div>
         ) : canPreviewImage && fileUrl ? (
-          <div className="flex min-h-80 items-center justify-center rounded-xl border bg-background p-2 shadow-xs">
-            {/* eslint-disable-next-line @next/next/no-img-element -- Artifact file URLs are authenticated API resources that should load through the browser session. */}
-            <img
-              alt={artifactTitle(artifact)}
-              className="max-h-[calc(100vh-15rem)] max-w-full rounded-lg object-contain"
-              src={fileUrl}
+          <div className="flex min-h-80 items-center justify-center rounded-xl bg-background p-2">
+            <GeneratedImagePreview
+              className="w-full [&>span]:mx-auto [&>span]:grid [&>span]:min-h-80 [&>span]:w-full [&>span]:max-w-full [&>span]:place-items-center [&>span>img]:max-h-[calc(100vh-15rem)] [&>span>img]:max-w-full"
+              downloadUrl={downloadUrl ?? fileUrl}
+              imageUrl={fileUrl}
+              title={title}
             />
           </div>
         ) : (

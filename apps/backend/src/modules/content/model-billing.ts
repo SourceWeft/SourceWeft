@@ -46,7 +46,12 @@ export async function meterBillableModelUsage(input: {
   if (NON_USER_BILLED_MODEL_KINDS.has(input.modelKind)) {
     return {
       billing: zeroBilling,
-      cost: { providerCostUsd: 0, pricingSnapshot: null },
+      cost: {
+        providerCostUsd: 0,
+        pricingSnapshot: null,
+        costSource: "missing_or_zero_price",
+        missingPriceComponents: [],
+      },
       billedBy: "skipped",
       skipReason: "model_kind_not_user_billed",
     };
@@ -74,9 +79,14 @@ export async function meterBillableModelUsage(input: {
         operation: input.operation,
         metadata: {
           billedBy: "provider_cost",
+          costSource: cost.costSource,
+          missingPriceComponents: cost.missingPriceComponents,
           modelAlias: input.modelAlias ?? null,
           profileAlias: input.profileAlias,
           pricingSnapshot: cost.pricingSnapshot,
+          providerActualCostUsd: input.usage?.providerCostUsd ?? null,
+          providerCostSource: input.usage?.providerCostSource ?? null,
+          providerCostDetails: input.usage?.costDetails ?? null,
           ...(input.metadata ?? {}),
         },
       },
@@ -112,13 +122,22 @@ export async function meterBillableModelUsage(input: {
       operation: input.operation,
       metadata: {
         billedBy: "minimum_credit",
+        costSource: cost.costSource,
+        missingPriceComponents: cost.missingPriceComponents,
         minimumCredits: MIN_BILLABLE_MODEL_CREDITS,
         modelAlias: input.modelAlias ?? null,
         profileAlias: input.profileAlias,
         pricingSnapshot: cost.pricingSnapshot,
         providerCostUsd: cost.providerCostUsd,
         minimumCreditReason:
-          cost.providerCostUsd === null ? "missing_usage" : "missing_or_zero_price",
+          cost.costSource === "missing_price_components"
+            ? "missing_price_components"
+            : cost.providerCostUsd === null
+              ? "missing_usage"
+              : "missing_or_zero_price",
+        providerActualCostUsd: input.usage?.providerCostUsd ?? null,
+        providerCostSource: input.usage?.providerCostSource ?? null,
+        providerCostDetails: input.usage?.costDetails ?? null,
         ...(input.metadata ?? {}),
       },
     },

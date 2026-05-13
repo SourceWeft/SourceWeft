@@ -4,6 +4,12 @@ export interface ModelPricing {
   cache_read_input_token_cost: number | null;
   cache_creation_input_token_cost: number | null;
   output_cost_per_reasoning_token: number | null;
+  input_cost_per_image_token?: number | null;
+  output_cost_per_image_token?: number | null;
+  input_cost_per_audio_token?: number | null;
+  output_cost_per_audio_token?: number | null;
+  input_cost_per_image?: number | null;
+  output_cost_per_image?: number | null;
   price_source: "litellm" | "manual" | "openrouter" | "unknown";
   litellm_key: string | null;
   price_updated_at: string | null;

@@ -35,7 +35,7 @@ import {
   extractResponseMetadata,
   extractUsage,
 } from "./chat";
-import { normalizeUsage } from "../normalize/usage";
+import { normalizeProviderUsage, normalizeUsage } from "../normalize/usage";
 
 export function toLangChainMessages(messages: GatewayMessage[]): BaseMessage[] {
   return messages.map((message) => {
@@ -155,11 +155,14 @@ function createObservedLangChainChatModel(input: {
             : undefined,
           finishReason: extractFinishReason(responseMetadata),
           reasoningText: reasoning,
-          providerFields: responseMetadata,
-          usage: normalizeUsage(extractUsage({
-            usageMetadata: (result as { usage_metadata?: unknown }).usage_metadata,
-            responseMetadata,
-          })),
+          providerFields: cloneRecord(responseMetadata),
+          usage:
+            normalizeProviderUsage(result) ??
+            normalizeUsage(extractUsage({
+              raw: result,
+              usageMetadata: (result as { usage_metadata?: unknown }).usage_metadata,
+              responseMetadata,
+            })),
           rawCaptureMode: "sdk_metadata",
           providerResponse: toProviderResponse(responseMetadata),
           attributes: generation.start.attributes,
@@ -212,16 +215,20 @@ async function* observeStream(input: {
   try {
     for await (const chunk of input.stream) {
       const responseMetadata = extractResponseMetadata(chunk as { response_metadata?: unknown });
-      usage = normalizeUsage(extractUsage({
-        usageMetadata: (chunk as { usage_metadata?: unknown }).usage_metadata,
-        responseMetadata,
-      })) ?? usage;
+      usage =
+        normalizeProviderUsage(chunk) ??
+        normalizeUsage(extractUsage({
+          raw: chunk,
+          usageMetadata: (chunk as { usage_metadata?: unknown }).usage_metadata,
+          responseMetadata,
+        })) ??
+        usage;
       finishReason = extractFinishReason(responseMetadata) ?? finishReason;
       const nextReasoning = extractReasoning(
         chunk as Parameters<typeof extractReasoning>[0],
       );
       reasoning = appendText(reasoning, nextReasoning);
-      providerFields = responseMetadata ?? providerFields;
+      providerFields = cloneRecord(responseMetadata) ?? providerFields;
       const content = (chunk as { content?: unknown }).content;
       if (typeof content === "string") outputText += content;
       yield chunk;
@@ -297,6 +304,10 @@ function appendText(current: string | undefined, next: string | undefined) {
     return current;
   }
   return current ? `${current}${next}` : next;
+}
+
+function cloneRecord<T extends Record<string, unknown> | undefined>(value: T): T {
+  return value ? ({ ...value } as T) : value;
 }
 
 function toRecord(value: unknown) {

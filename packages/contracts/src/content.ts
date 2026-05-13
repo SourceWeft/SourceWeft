@@ -6,6 +6,9 @@ import {
 } from "./billing";
 import { AGENT_TOOL_NAMES } from "./agent-tools";
 
+export const SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX = "sourceweft-web-run:";
+export const SOURCEWEFT_WEB_RUN_STOP_SUFFIX = ":stop";
+
 const retrievalVectorStrategySchema = z.enum([
   "ann_hnsw",
   "exact_vector",
@@ -98,6 +101,8 @@ export const sourceSchema = z.object({
   contentHash: z.string().nullable(),
   storageBucket: z.string().nullable(),
   storageKey: z.string().nullable(),
+  previewUrl: z.string().nullable(),
+  downloadUrl: z.string().nullable(),
   status: z.enum([
     "created",
     "queued",

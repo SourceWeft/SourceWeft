@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { MeterConsumeResponse } from "@sourceweft/contracts";
 import type { Job } from "bullmq";
 import { getJobsQueueEvents } from "../../../../shared/queue";
 import {
@@ -6,6 +7,7 @@ import {
   type DeepAgentTurnOutcome,
 } from "../../agent/turn/runner";
 import type { AgentCitation } from "../../agent/citation-registry";
+import type { EmbeddingVectorStrategy, MessageRecord } from "../../types";
 import type { ContentBillingPort } from "../../billing-port";
 import { ContentError } from "../../errors";
 import { requireContentWorkspace } from "../../content-support";
@@ -55,6 +57,31 @@ type ThreadTitleJobCompletion = {
   result: ThreadTitleGenerateJobResult | null;
 };
 
+export type ThreadStreamRunOptions = {
+  onPrepared?: (
+    prepared: PreparedThreadTurn,
+  ) => Promise<
+    | {
+        assistantMessageId?: string | null;
+        assistantMetadata?: Record<string, unknown>;
+      }
+    | void
+  >;
+  shouldCancel?: () => Promise<boolean>;
+  createErrorMessage?: typeof createThreadStreamErrorMessage;
+  onFinalized?: (result: {
+    assistantMessage: MessageRecord;
+    billing: MeterConsumeResponse;
+    retrieval: {
+      embeddingProfileId: string | null;
+      vectorStrategy: EmbeddingVectorStrategy | null;
+      annIndexUsed: string | null;
+      citations: AgentCitation[];
+      availableCitations: AgentCitation[];
+    };
+  }) => Promise<void> | void;
+};
+
 const OBSERVE_CITATION_EXCERPT_CHARS = 320;
 const OBSERVE_CITATION_QUOTE_CHARS = 400;
 
@@ -101,6 +128,18 @@ function buildTraceMetadata(input: {
 
 function toObservationError(error: unknown) {
   return error instanceof ContentError ? error : toContentServiceError(error);
+}
+
+function isClientCancelledError(error: ContentError) {
+  return error.code === "CLIENT_CANCELLED";
+}
+
+async function throwIfClientCancelled(
+  shouldCancel: ThreadStreamRunOptions["shouldCancel"],
+) {
+  if (await shouldCancel?.()) {
+    throw new ContentError(499, "CLIENT_CANCELLED", "Chat run was cancelled");
+  }
 }
 
 export function buildAgentRunSpanMetadata(
@@ -561,10 +600,11 @@ async function endAgentRunSpanIfOpen(input: {
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
   started: boolean;
   completed: boolean;
-  status: "error" | "cancelled";
+  status: "ok" | "error" | "cancelled";
   latencyMs: number;
   errorCode?: string | null;
   errorMessage?: string | null;
+  metadata?: Record<string, unknown>;
 }) {
   if (!input.started || input.completed) {
     return;
@@ -578,6 +618,7 @@ async function endAgentRunSpanIfOpen(input: {
     latencyMs: input.latencyMs,
     errorCode: input.errorCode,
     errorMessage: input.errorMessage,
+    metadata: input.metadata,
   });
 }
 
@@ -590,6 +631,7 @@ async function endThreadTraceIfOpen(input: {
   outcome?: DeepAgentTurnOutcome | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  metadata?: Record<string, unknown>;
 }) {
   if (input.ended) {
     return false;
@@ -606,10 +648,13 @@ async function endThreadTraceIfOpen(input: {
       input.status === "ok" && input.outcome
         ? buildTraceOutput(input.outcome)
         : undefined,
-    metadata: buildTraceMetadata({
-      prepared: input.prepared,
-      operation: input.operation,
-    }),
+    metadata: {
+      ...buildTraceMetadata({
+        prepared: input.prepared,
+        operation: input.operation,
+      }),
+      ...(input.metadata ?? {}),
+    },
   });
   return true;
 }
@@ -666,7 +711,7 @@ async function withObservedSpan<T>(input: {
 function shouldGenerateAutomaticThreadTitle(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
 ) {
-  return prepared.isFirstAssistantResponse;
+  return prepared.isFirstAssistantResponse && prepared.isFirstAssistantAttempt;
 }
 
 function isThreadTitleGenerateJobResult(
@@ -825,9 +870,11 @@ class ContentThreadStreamService {
 
   async *refreshThreadEvents(
     input: RefreshThreadInput,
+    options?: ThreadStreamRunOptions,
   ): AsyncGenerator<string> {
     yield* this.streamThreadEvents(
       await resolveRefreshThreadStreamInput(input),
+      options,
     );
   }
 
@@ -835,12 +882,19 @@ class ContentThreadStreamService {
     return this.streamThread(await resolveEditThreadStreamInput(input));
   }
 
-  async *editThreadEvents(input: EditThreadInput): AsyncGenerator<string> {
-    yield* this.streamThreadEvents(await resolveEditThreadStreamInput(input));
+  async *editThreadEvents(
+    input: EditThreadInput,
+    options?: ThreadStreamRunOptions,
+  ): AsyncGenerator<string> {
+    yield* this.streamThreadEvents(
+      await resolveEditThreadStreamInput(input),
+      options,
+    );
   }
 
   async *streamThreadEvents(
     input: StreamThreadEventInput,
+    options: ThreadStreamRunOptions = {},
   ): AsyncGenerator<string> {
     const prepareStartedAt = new Date();
     const preflightStepQueue = createPreflightThinkingStepQueue();
@@ -884,6 +938,9 @@ class ContentThreadStreamService {
       });
     }
     const prepared = prepareResult.prepared;
+    const preparedOptions = await options.onPrepared?.(prepared);
+    const assistantMessageId = preparedOptions?.assistantMessageId ?? undefined;
+    const assistantMetadata = preparedOptions?.assistantMetadata;
     const prepareEndedAt = new Date();
     prepared.traceContext = buildThreadTraceContext(prepared);
     await startThreadTrace({
@@ -959,7 +1016,9 @@ class ContentThreadStreamService {
 
       const titleUpdates: Array<{ id: string; title: string }> = [];
       let titleUpdateEmitted = false;
-      const titleJob = await this.enqueueTitleJob({ prepared });
+      const titleJob = shouldGenerateAutomaticThreadTitle(prepared)
+        ? await this.enqueueTitleJob({ prepared })
+        : null;
       const titleJobId = titleJob?.id ? String(titleJob.id) : undefined;
 
       const emitTitleUpdates = function* () {
@@ -1032,6 +1091,7 @@ class ContentThreadStreamService {
           ]);
 
           if (result.type === "title") {
+            await throwIfClientCancelled(options.shouldCancel);
             nextTitleEvent = null;
             const update = titleCompletionToUpdate(result.value);
             if (update) {
@@ -1048,6 +1108,7 @@ class ContentThreadStreamService {
           }
 
           nextAgentEvent = agentEvents.next();
+          await throwIfClientCancelled(options.shouldCancel);
           if (event.type === "done") {
             outcome = event.outcome;
             continue;
@@ -1084,6 +1145,7 @@ class ContentThreadStreamService {
           yield* emitTitleUpdates();
         }
 
+        await throwIfClientCancelled(options.shouldCancel);
         if (!outcome) {
           throw new ContentError(
             502,
@@ -1104,7 +1166,8 @@ class ContentThreadStreamService {
         });
         agentSpanCompleted = true;
 
-        const { assistantMessage } = await withObservedSpan({
+        await throwIfClientCancelled(options.shouldCancel);
+        const finalized = await withObservedSpan({
           trace: prepared.traceContext,
           spanId: "finalize_thread_turn",
           name: "finalize_thread_turn",
@@ -1148,8 +1211,22 @@ class ContentThreadStreamService {
               reasoning: completedOutcome.reasoning,
               agentCheckpoint: completedOutcome.agentCheckpoint,
               latencyMs: Date.now() - chatStartedAt,
+              assistantMessageId,
+              assistantMetadata,
             }),
         });
+        await options.onFinalized?.({
+          ...finalized,
+          retrieval: {
+            embeddingProfileId: completedOutcome.retrieval?.profile.id ?? null,
+            vectorStrategy: completedOutcome.retrieval?.planner.strategy ?? null,
+            annIndexUsed:
+              completedOutcome.retrieval?.planner.annIndexUsed ?? null,
+            citations: completedOutcome.citations,
+            availableCitations: completedOutcome.availableCitations,
+          },
+        });
+        const { assistantMessage } = finalized;
 
         yield toSseData({ type: "text-end", id: textId });
         yield toSseData({
@@ -1175,14 +1252,19 @@ class ContentThreadStreamService {
         }
       } catch (error) {
         const contentError = toObservationError(error);
+        const isClientCancelled = isClientCancelledError(contentError);
 
-        await recordThreadStreamFailure({
-          prepared,
-          contentError,
-          operation: "chat.stream",
-          llm: prepared.llm,
-        });
-        const errorMessage = await this.createErrorMessage({
+        if (!isClientCancelled) {
+          await recordThreadStreamFailure({
+            prepared,
+            contentError,
+            operation: "chat.stream",
+            llm: prepared.llm,
+          });
+        }
+        const createErrorMessage =
+          options.createErrorMessage ?? this.createErrorMessage;
+        const errorMessage = await createErrorMessage({
           prepared,
           contentError,
           partialAssistantContent: assistantContent,
@@ -1208,10 +1290,17 @@ class ContentThreadStreamService {
           prepared,
           started: agentSpanStarted,
           completed: agentSpanCompleted,
-          status: "error",
+          status: isClientCancelled ? "cancelled" : "error",
           latencyMs: Date.now() - chatStartedAt,
           errorCode: contentError.code,
           errorMessage: contentError.message,
+          metadata: isClientCancelled
+            ? {
+                cancelled: true,
+                cancelReason: "client_requested",
+                finishReason: "cancelled",
+              }
+            : undefined,
         });
         agentSpanCompleted = agentSpanCompleted || agentSpanStarted;
         traceEnded =
@@ -1219,10 +1308,17 @@ class ContentThreadStreamService {
             prepared,
             ended: traceEnded,
             operation: "chat.stream",
-            status: "error",
+            status: isClientCancelled ? "cancelled" : "error",
             latencyMs: Date.now() - chatStartedAt,
             errorCode: contentError.code,
             errorMessage: contentError.message,
+            metadata: isClientCancelled
+              ? {
+                  cancelled: true,
+                  cancelReason: "client_requested",
+                  finishReason: "cancelled",
+                }
+              : undefined,
           })) || traceEnded;
 
         yield toSseData({ type: "text-end", id: textId });
@@ -1266,7 +1362,9 @@ class ContentThreadStreamService {
             reasoningSegmentsById.size > 0 ||
             citations.length > 0)
         ) {
-          const errorMessage = await this.createErrorMessage({
+          const createErrorMessage =
+            options.createErrorMessage ?? this.createErrorMessage;
+          const errorMessage = await createErrorMessage({
             prepared,
             contentError,
             partialAssistantContent: assistantContent,
@@ -1291,6 +1389,11 @@ class ContentThreadStreamService {
           latencyMs: Date.now() - chatStartedAt,
           errorCode: contentError.code,
           errorMessage: contentError.message,
+          metadata: {
+            cancelled: true,
+            cancelReason: "stream_abandoned",
+            finishReason: "cancelled",
+          },
         });
         agentSpanCompleted = agentSpanCompleted || agentSpanStarted;
         traceEnded =
@@ -1302,6 +1405,11 @@ class ContentThreadStreamService {
             latencyMs: Date.now() - chatStartedAt,
             errorCode: contentError.code,
             errorMessage: contentError.message,
+            metadata: {
+              cancelled: true,
+              cancelReason: "stream_abandoned",
+              finishReason: "cancelled",
+            },
           })) || traceEnded;
       }
     }
@@ -1500,10 +1608,13 @@ class ContentThreadStreamService {
             agentCheckpoint: completedOutcome.agentCheckpoint,
             latencyMs: Date.now() - chatStartedAt,
             modelForMessage: prepared.modelAlias,
+            assistantMessageId: undefined,
           }),
       });
 
-      const titleJob = await this.enqueueTitleJob({ prepared });
+      const titleJob = shouldGenerateAutomaticThreadTitle(prepared)
+        ? await this.enqueueTitleJob({ prepared })
+        : null;
       if (titleJob) {
         await waitForThreadTitleJob({ job: titleJob, prepared });
       }

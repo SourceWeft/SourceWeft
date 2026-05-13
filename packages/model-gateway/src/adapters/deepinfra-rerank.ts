@@ -1,5 +1,5 @@
 import { createHttpGatewayError } from "../errors";
-import { normalizeUsage } from "../normalize/usage";
+import { normalizeProviderUsage } from "../normalize/usage";
 import type { RerankTransport } from "./types";
 
 function normalizeDocument(document: string | Record<string, unknown>) {
@@ -76,7 +76,7 @@ export class DeepInfraRerankTransport implements RerankTransport {
     return {
       model: typeof raw.model === "string" ? raw.model : input.target.providerModel,
       results,
-      usage: normalizeUsage(raw.usage),
+      usage: normalizeProviderUsage(raw),
       provider: input.target.provider,
       providerModel: input.target.providerModel,
       routeDecision: input.target.routeDecision,

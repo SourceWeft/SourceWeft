@@ -325,6 +325,19 @@ function extractImagePartsFromContentJson(value: unknown) {
     .filter((part): part is ChatMessageImagePart => part !== null);
 }
 
+function shouldRejectEmptyThreadMessage(input: {
+  messageContent: string;
+  images?: ChatInputImage[];
+  existingUserMessageContentJson?: unknown;
+  existingImageParts?: ChatMessageImagePart[];
+}) {
+  const hasInputImages = (input.images?.length ?? 0) > 0;
+  const hasExistingImages =
+    extractImagePartsFromContentJson(input.existingUserMessageContentJson)
+      .length > 0 || (input.existingImageParts?.length ?? 0) > 0;
+  return !input.messageContent && !hasInputImages && !hasExistingImages;
+}
+
 function cloneImagePartsForMessage(input: {
   workspaceId: string;
   messageId: string;
@@ -809,6 +822,7 @@ export const testExports = {
   buildVisionFallbackDescriptionPrompt,
   buildVisionFallbackGatewayMetadata,
   meterVisionFallbackBilling,
+  shouldRejectEmptyThreadMessage,
 };
 
 function normalizeSupportedParameters(value: unknown) {
@@ -908,11 +922,14 @@ export async function prepareThreadTurn(
 ): Promise<PreparedThreadTurn> {
   const messageContent =
     input.existingUserMessage?.content.trim() ?? input.content.trim();
-  const hasInputImages = (input.images?.length ?? 0) > 0;
-  const hasExistingImages =
-    extractImagePartsFromContentJson(input.existingUserMessage?.contentJson)
-      .length > 0 || (input.existingImageParts?.length ?? 0) > 0;
-  if (!messageContent && !hasInputImages && !hasExistingImages) {
+  if (
+    shouldRejectEmptyThreadMessage({
+      messageContent,
+      images: input.images,
+      existingUserMessageContentJson: input.existingUserMessage?.contentJson,
+      existingImageParts: input.existingImageParts,
+    })
+  ) {
     throw new ContentError(
       400,
       "EMPTY_MESSAGE",
@@ -1146,6 +1163,9 @@ export async function prepareThreadTurn(
     (message) =>
       message.role === "assistant" && !isContextExcludedMessage(message),
   );
+  const isFirstAssistantAttempt = !messageRecords.some(
+    (message) => message.role === "assistant",
+  );
   const initialTitle = thread.title;
 
   if (
@@ -1255,6 +1275,7 @@ export async function prepareThreadTurn(
     agentBaseCheckpoint,
     agentRunThreadId,
     isFirstAssistantResponse,
+    isFirstAssistantAttempt,
     initialTitle,
     failurePersistence: input.failurePersistence ?? "persist-error-turn",
   };

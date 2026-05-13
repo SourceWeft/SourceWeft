@@ -41,6 +41,8 @@ export function mapSource(row: SourceRow): SourceRecord {
     contentHash: row.contentHash,
     storageBucket: row.storageBucket,
     storageKey: row.storageKey,
+    previewUrl: null,
+    downloadUrl: null,
     status: row.status,
     estimatedPages: row.estimatedPages,
     parsedTokens: row.parsedTokens,

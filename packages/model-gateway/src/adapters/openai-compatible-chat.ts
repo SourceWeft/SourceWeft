@@ -18,6 +18,7 @@ export class OpenAICompatibleChatAdapter implements ChatAdapter {
       modelKwargs: {
         ...(input.extraBody ?? {}),
       },
+      __includeRawResponse: true,
       maxTokens: input.maxTokens,
       streaming: input.stream ?? false,
     });

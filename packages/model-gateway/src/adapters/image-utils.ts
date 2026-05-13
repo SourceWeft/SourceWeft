@@ -1,5 +1,5 @@
 import { createHttpGatewayError, ModelGatewayError } from "../errors";
-import { normalizeUsage } from "../normalize/usage";
+import { normalizeProviderUsage } from "../normalize/usage";
 import type {
   GeneratedImage,
   ImageAspectRatio,
@@ -287,13 +287,22 @@ export function buildImageGenerateResult(input: {
   usage?: UsageInfo;
   traceId?: string;
 }): ImageGenerateResult {
+  const usage = input.usage ?? normalizeProviderUsage(input.raw);
+  const imageUsage =
+    usage || input.images.length > 0
+      ? {
+          ...usage,
+          outputImageCount: usage?.outputImageCount ?? input.images.length,
+        }
+      : usage;
+
   return {
     model:
       typeof input.raw.model === "string"
         ? input.raw.model
         : input.target.providerModel,
     images: input.images,
-    usage: input.usage ?? normalizeUsage(input.raw.usage),
+    usage: imageUsage,
     provider: input.target.provider,
     providerModel: input.target.providerModel,
     routeDecision: input.target.routeDecision,

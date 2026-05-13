@@ -229,23 +229,29 @@ function AssistantMessageBody({
     inlineToolIds,
     toolCalls: version.toolCalls,
   });
+  const cancelledNotice = version.isCancelled ? "已由用户停止生成。" : null;
 
   if (!renderBlocks) {
     return (
       <>
-        <CitationAwareMessageResponse
-          availableCitations={version.availableCitations}
-          citations={version.citations}
-          onCitationClick={onCitationClick}
-          onWorkfileClick={onWorkfileClick}
-          showLoading={
-            isStreaming &&
-            version.isTextPaused === true &&
-            messageText.length > 0
-          }
-        >
-          {messageText}
-        </CitationAwareMessageResponse>
+        {messageText.length > 0 ? (
+          <CitationAwareMessageResponse
+            availableCitations={version.availableCitations}
+            citations={version.citations}
+            onCitationClick={onCitationClick}
+            onWorkfileClick={onWorkfileClick}
+            showLoading={
+              isStreaming &&
+              version.isTextPaused === true &&
+              messageText.length > 0
+            }
+          >
+            {messageText}
+          </CitationAwareMessageResponse>
+        ) : null}
+        {cancelledNotice ? (
+          <p className="text-sm text-muted-foreground">{cancelledNotice}</p>
+        ) : null}
         <GeneratedImageArtifacts
           toolCalls={version.toolCalls}
           workspaceId={workspaceId}
@@ -295,6 +301,9 @@ function AssistantMessageBody({
           </CitationAwareMessageResponse>
         );
       })}
+      {cancelledNotice ? (
+        <p className="text-sm text-muted-foreground">{cancelledNotice}</p>
+      ) : null}
       <GeneratedImageArtifacts
         toolCalls={trailingImageToolCalls}
         workspaceId={workspaceId}
@@ -605,6 +614,7 @@ export function MessageList({
                             ) : (
                               <div className="space-y-3">
                                 <ReasoningTrace
+                                  isCancelled={version.isCancelled === true}
                                   isStreaming={isStreamingThisVersion}
                                   modelReasoning={version.modelReasoning}
                                   modelReasoningSegments={
@@ -630,7 +640,7 @@ export function MessageList({
                                   version={version}
                                   workspaceId={workspaceId}
                                 />
-                                {version.isError ? (
+                                {version.isError && !version.isCancelled ? (
                                   <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                                     <p className="font-medium">
                                       Message failed

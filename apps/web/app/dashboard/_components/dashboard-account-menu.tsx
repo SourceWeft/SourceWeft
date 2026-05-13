@@ -48,7 +48,11 @@ function getInitials(name?: string, email?: string) {
     .join("");
 }
 
-export function DashboardAccountMenu() {
+export function DashboardAccountMenu({
+  settingsRequest,
+}: {
+  settingsRequest?: { id: number; tab: SettingsCenterTab } | null;
+}) {
   const { isMobile } = useSidebar();
   const authState = useAuthenticate();
   const sessionState = authState.data as
@@ -72,10 +76,18 @@ export function DashboardAccountMenu() {
   const userImage = sessionState?.user?.image;
   const initials = getInitials(userName, userEmail);
 
-  function openSettings(tab: SettingsCenterTab) {
+  const openSettings = React.useCallback((tab: SettingsCenterTab) => {
     setInitialTab(tab);
     setSettingsOpen(true);
-  }
+  }, []);
+
+  React.useEffect(() => {
+    if (!settingsRequest) {
+      return;
+    }
+
+    openSettings(settingsRequest.tab);
+  }, [openSettings, settingsRequest]);
 
   async function handleSwitchTeam(item: DashboardTeamItem) {
     try {

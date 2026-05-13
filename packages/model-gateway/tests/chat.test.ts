@@ -132,6 +132,55 @@ test("chat.complete normalizes LangChain message output into gateway result", as
   assert.equal(Array.isArray(capture.boundTools), true);
 });
 
+test("chat.complete keeps top-level cache tokens out of input token totals", async () => {
+  const gateway = createModelGateway({
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({
+          invokeResult: {
+            id: "msg_1",
+            content: "Hello world",
+            usage_metadata: {
+              input_tokens: 100,
+              output_tokens: 20,
+              total_tokens: 120,
+              cache_read_input_tokens: 40,
+              cache_creation_input_tokens: 10,
+            },
+          },
+        }),
+    },
+  });
+
+  const result = await gateway.chat.complete({
+    model: "chat-default",
+    messages: [{ role: "user", content: "Hi" }],
+  });
+
+  assert.deepEqual(result.usage, {
+    inputTokens: 100,
+    outputTokens: 20,
+    totalTokens: 120,
+    cacheReadTokens: 40,
+    cacheWriteTokens: 10,
+  });
+});
+
 test("chat.complete emits generation observation events", async () => {
   const events: Array<{ type: string; event: Record<string, unknown> }> = [];
   const gateway = createModelGateway({

@@ -484,6 +484,11 @@ export interface TextInputContext {
   clear: () => void;
 }
 
+export type PromptInputFormState = {
+  canSubmit: boolean;
+  setTextInput: (value: string) => void;
+};
+
 export interface PromptInputControllerProps {
   textInput: TextInputContext;
   attachments: AttachmentsContext;
@@ -500,6 +505,9 @@ const PromptInputController = createContext<PromptInputControllerProps | null>(
 const ProviderAttachmentsContext = createContext<AttachmentsContext | null>(
   null,
 );
+const PromptInputFormStateContext = createContext<PromptInputFormState | null>(
+  null,
+);
 
 export const usePromptInputController = () => {
   const ctx = useContext(PromptInputController);
@@ -514,6 +522,12 @@ export const usePromptInputController = () => {
 // Optional variants (do NOT throw). Useful for dual-mode components.
 const useOptionalPromptInputController = () =>
   useContext(PromptInputController);
+
+export const usePromptInputFormState = () =>
+  useContext(PromptInputFormStateContext) ?? {
+    canSubmit: false,
+    setTextInput: () => undefined,
+  };
 
 export const useProviderAttachments = () => {
   const ctx = useContext(ProviderAttachmentsContext);
@@ -838,7 +852,9 @@ export const PromptInput = ({
 
   // ----- Local attachments (only used when no provider)
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
+  const [localTextInput, setLocalTextInput] = useState("");
   const files = usingProvider ? controller.attachments.files : items;
+  const textInput = usingProvider ? controller.textInput.value : localTextInput;
 
   // ----- Local referenced sources (always local to PromptInput)
   const [referencedSources, setReferencedSources] = useState<
@@ -1126,6 +1142,15 @@ export const PromptInput = ({
     }),
     [files, add, remove, clearAttachments, openFileDialog],
   );
+  const formState = useMemo<PromptInputFormState>(
+    () => ({
+      canSubmit: textInput.trim().length > 0 || files.length > 0,
+      setTextInput: usingProvider
+        ? controller.textInput.setInput
+        : setLocalTextInput,
+    }),
+    [usingProvider, controller, textInput, files.length],
+  );
 
   const refsCtx = useMemo<ReferencedSourcesContext>(
     () => ({
@@ -1187,6 +1212,10 @@ export const PromptInput = ({
             return item;
           }),
         );
+
+        if (text.trim().length === 0 && convertedFiles.length === 0) {
+          return;
+        }
 
         const result = onSubmit(
           { files: convertedFiles, mentionedSourceIds, text },
@@ -1251,7 +1280,9 @@ export const PromptInput = ({
   // Always provide LocalAttachmentsContext so children get validated add function
   return (
     <LocalAttachmentsContext.Provider value={attachmentsCtx}>
-      {withReferencedSources}
+      <PromptInputFormStateContext.Provider value={formState}>
+        {withReferencedSources}
+      </PromptInputFormStateContext.Provider>
     </LocalAttachmentsContext.Provider>
   );
 };
@@ -1278,6 +1309,7 @@ export const PromptInputTextarea = ({
 }: PromptInputTextareaProps) => {
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
+  const formState = usePromptInputFormState();
   const [isComposing, setIsComposing] = useState(false);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = useCallback(
@@ -1299,12 +1331,15 @@ export const PromptInputTextarea = ({
         }
         e.preventDefault();
 
-        // Check if the submit button is disabled before submitting
+        // Check if the submit button is unavailable before submitting
         const { form } = e.currentTarget;
         const submitButton = form?.querySelector(
           'button[type="submit"]',
         ) as HTMLButtonElement | null;
-        if (submitButton?.disabled) {
+        if (
+          submitButton?.disabled ||
+          submitButton?.getAttribute("aria-disabled") === "true"
+        ) {
           return;
         }
 
@@ -1366,7 +1401,10 @@ export const PromptInputTextarea = ({
         value: controller.textInput.value,
       }
     : {
-        onChange,
+        onChange: (e: ChangeEvent<HTMLTextAreaElement>) => {
+          formState.setTextInput(e.currentTarget.value);
+          onChange?.(e);
+        },
       };
 
   return (
@@ -1415,6 +1453,7 @@ export const PromptInputMentionEditor = ({
   ...props
 }: PromptInputMentionEditorProps) => {
   const controller = useOptionalPromptInputController();
+  const formState = usePromptInputFormState();
   const attachments = usePromptInputAttachments();
   const editorRef = useRef<HTMLDivElement | null>(null);
   const [isComposing, setIsComposing] = useState(false);
@@ -1476,14 +1515,14 @@ export const PromptInputMentionEditor = ({
       const nextText = serializePromptSegments(nextSegments);
       const nextMentionedSourceIds =
         mentionedSourceIdsFromSegments(nextSegments);
-      controller?.textInput.setInput(nextText);
+      formState.setTextInput(nextText);
       onValueChange?.({
         mentionedSourceIds: nextMentionedSourceIds,
         segments: nextSegments,
         text: nextText,
       });
     },
-    [controller, onValueChange],
+    [formState, onValueChange],
   );
 
   const syncFromDom = useCallback(() => {
@@ -1829,7 +1868,10 @@ export const PromptInputMentionEditor = ({
         const submitButton = e.currentTarget
           .closest("form")
           ?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
-        if (submitButton?.disabled) {
+        if (
+          submitButton?.disabled ||
+          submitButton?.getAttribute("aria-disabled") === "true"
+        ) {
           return;
         }
 
@@ -2180,6 +2222,10 @@ export const PromptInputSubmit = ({
   ...props
 }: PromptInputSubmitProps) => {
   const isGenerating = status === "submitted" || status === "streaming";
+  const { canSubmit } = usePromptInputFormState();
+  const disabled = props.disabled || (!isGenerating && !canSubmit);
+  const disabledBecauseEmpty = !isGenerating && !canSubmit;
+  const ariaDisabled = disabled ? true : props["aria-disabled"];
 
   let Icon = <CornerDownLeftIcon className="size-4" />;
 
@@ -2193,6 +2239,11 @@ export const PromptInputSubmit = ({
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (disabled) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (isGenerating && onStop) {
         e.preventDefault();
         onStop();
@@ -2200,18 +2251,24 @@ export const PromptInputSubmit = ({
       }
       onClick?.(e);
     },
-    [isGenerating, onStop, onClick],
+    [disabled, isGenerating, onStop, onClick],
   );
 
   return (
     <InputGroupButton
+      aria-disabled={ariaDisabled}
       aria-label={isGenerating ? "Stop" : "Submit"}
-      className={cn(className)}
+      className={cn(
+        disabledBecauseEmpty &&
+          "cursor-not-allowed opacity-50 active:translate-y-0",
+        className,
+      )}
       onClick={handleClick}
       size={size}
       type={isGenerating && onStop ? "button" : "submit"}
       variant={variant}
       {...props}
+      disabled={props.disabled}
     >
       {children ?? Icon}
     </InputGroupButton>

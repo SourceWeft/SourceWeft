@@ -2,6 +2,25 @@ import type { ModelPricing } from "../db/schema-types";
 import type { GlobalProfilePricingEntry } from "./global-config";
 import type { RuntimeModelGatewayProfile } from "./types";
 
+function emptyExtendedPricingFields(): Pick<
+  ModelPricing,
+  | "input_cost_per_image_token"
+  | "output_cost_per_image_token"
+  | "input_cost_per_audio_token"
+  | "output_cost_per_audio_token"
+  | "input_cost_per_image"
+  | "output_cost_per_image"
+> {
+  return {
+    input_cost_per_image_token: null,
+    output_cost_per_image_token: null,
+    input_cost_per_audio_token: null,
+    output_cost_per_audio_token: null,
+    input_cost_per_image: null,
+    output_cost_per_image: null,
+  };
+}
+
 export function buildProfilePricingConfigJson(
   pricing: GlobalProfilePricingEntry | null | undefined,
   now: Date,
@@ -20,6 +39,7 @@ export function buildProfilePricingConfigJson(
       cache_read_input_token_cost: pricing?.cacheReadInputTokenCost ?? null,
       cache_creation_input_token_cost: pricing?.cacheCreationInputTokenCost ?? null,
       output_cost_per_reasoning_token: pricing?.outputCostPerReasoningToken ?? null,
+      ...emptyExtendedPricingFields(),
       price_source: pricing?.source ?? "manual",
       litellm_key: pricing?.litellmKey ?? null,
       price_updated_at: now.toISOString(),
@@ -34,6 +54,7 @@ export function buildProfilePricingConfigJson(
       cache_read_input_token_cost: null,
       cache_creation_input_token_cost: null,
       output_cost_per_reasoning_token: null,
+      ...emptyExtendedPricingFields(),
       price_source: "litellm",
       litellm_key: pricing.litellmKey,
       price_updated_at: null,
@@ -47,6 +68,7 @@ export function buildProfilePricingConfigJson(
     cache_read_input_token_cost: null,
     cache_creation_input_token_cost: null,
     output_cost_per_reasoning_token: null,
+    ...emptyExtendedPricingFields(),
     price_source: "unknown",
     litellm_key: null,
     price_updated_at: null,

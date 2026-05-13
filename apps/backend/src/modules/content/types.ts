@@ -57,6 +57,7 @@ export type ParsingConfig = {
 export type DocumentParseProviderId =
   | "langchain"
   | "pdf2markdown"
+  | "vision"
   | "docling"
   | "llamaparse"
   | "unstructured";
@@ -71,6 +72,7 @@ export type DocumentParseMode =
   | "pure_text_pdf"
   | "ocr_pdf"
   | "image_ocr"
+  | "image_vision"
   | "generic";
 
 export type ChunkSpec = {
@@ -165,6 +167,8 @@ export type SourceRecord = {
   contentHash: string | null;
   storageBucket: string | null;
   storageKey: string | null;
+  previewUrl: string | null;
+  downloadUrl: string | null;
   status: SourceStatus;
   estimatedPages: number | null;
   parsedTokens: number | null;

@@ -160,6 +160,25 @@ export function getSourceObjectDownloadUrl(input: {
   );
 }
 
+export function getSourceObjectPreviewUrl(input: {
+  bucket?: string | null;
+  key: string;
+  fileName: string;
+  contentType: string;
+  expiresInSeconds?: number;
+}) {
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: input.bucket || getConfiguredBucket(),
+      Key: input.key,
+      ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(input.fileName)}`,
+      ResponseContentType: input.contentType,
+    }),
+    { expiresIn: input.expiresInSeconds ?? 15 * 60 },
+  );
+}
+
 export function getArtifactObjectDownloadUrl(input: {
   bucket?: string | null;
   key: string;

@@ -12,7 +12,7 @@ export const Logo = ({
     )}
   >
     <img
-      src="/logo.svg"
+      src="/logo-white-bg.svg"
       alt="SourceWeft logo"
       className="h-[90%] w-[90%] object-contain"
     />

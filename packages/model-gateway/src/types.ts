@@ -90,6 +90,20 @@ export interface UsageInfo {
   totalTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  inputImageTokens?: number;
+  outputImageTokens?: number;
+  inputImageCount?: number;
+  outputImageCount?: number;
+  inputAudioTokens?: number;
+  outputAudioTokens?: number;
+  providerCostUsd?: number;
+  providerCostSource?:
+    | "usage.cost"
+    | "usage.cost_details.upstream_inference_cost"
+    | "usage.estimated_cost"
+    | "inference_status.cost";
+  costDetails?: Record<string, number>;
 }
 
 export interface ObserveSpan {

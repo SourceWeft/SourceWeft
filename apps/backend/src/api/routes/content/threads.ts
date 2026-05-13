@@ -19,6 +19,17 @@ import {
   ensureObjectBody,
   requireRouteParam,
 } from "./helpers";
+import { parseDurableChatRunKey } from "../../../modules/content/threads/durable/constants";
+import type {
+  EditThreadInput,
+  RefreshThreadInput,
+  StreamThreadEventInput,
+} from "../../../modules/content/threads";
+
+type DurableThreadRequestInput =
+  | StreamThreadEventInput
+  | RefreshThreadInput
+  | EditThreadInput;
 
 function assertJobStringField(data: unknown, field: string, expected: string) {
   const actual =
@@ -201,6 +212,32 @@ export function registerThreadRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get("/threads/:id/active-run", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const run = await contentService.findActiveDurableThreadRun({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, {
+      threadRun: run
+        ? {
+            id: run.id,
+            idempotencyKey: run.idempotencyKey,
+            status: run.status,
+            mode: run.mode,
+            userMessageId: run.userMessageId,
+            assistantMessageId: run.assistantMessageId,
+          }
+        : null,
+    });
+  });
+
   app.get("/threads/:id/title-job/:jobId", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -241,6 +278,36 @@ export function registerThreadRoutes(app: Hono) {
     }
 
     const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const threadId = requireRouteParam(c, "id");
+    const userId = getSessionUserId(session);
+    const bodyRecord = body as Record<string, unknown>;
+    const rawIdempotencyKey =
+      typeof bodyRecord.idempotencyKey === "string"
+        ? bodyRecord.idempotencyKey.trim()
+        : "";
+    const durableKey = parseDurableChatRunKey(rawIdempotencyKey);
+    if (durableKey?.kind === "stop") {
+      const result = await contentService.stopDurableThreadRun({
+        workspaceId,
+        threadId,
+        userId,
+        idempotencyKeyWithStopSuffix: rawIdempotencyKey,
+      });
+
+      return ApiResponse.success(c, result);
+    }
+
+    const existingDurableRun =
+      durableKey?.kind === "run"
+        ? await contentService.findDurableThreadRun({
+            workspaceId,
+            threadId,
+            userId,
+            idempotencyKey: durableKey.idempotencyKey,
+          })
+        : null;
+
     const parsed = streamThreadRequestSchema.safeParse(body);
     if (!parsed.success) {
       throw ApiError.validation(
@@ -248,14 +315,12 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
-    const workspaceId = requireRouteParam(c, "workspaceId");
-    const threadId = requireRouteParam(c, "id");
-    const userId = getSessionUserId(session);
     const mode = parsed.data.mode ?? "send";
     const imagesProvided = Object.hasOwn(body, "images");
     const images = parsed.data.images ?? [];
 
     if (
+      !existingDurableRun &&
       (mode === "send" || mode === "edit") &&
       !parsed.data.content &&
       images.length === 0
@@ -265,6 +330,115 @@ export function registerThreadRoutes(app: Hono) {
         "VALIDATION_ERROR",
         "content or images is required for send/edit mode",
       );
+    }
+
+    if (durableKey?.kind === "run") {
+      if (existingDurableRun) {
+        if (parsed.data.stream === false) {
+          const result = await contentService.getDurableThreadRunResult({
+            workspaceId,
+            threadId,
+            userId,
+            idempotencyKey: durableKey.idempotencyKey,
+          });
+          return ApiResponse.success(c, result);
+        }
+
+        const stream = contentService.attachDurableThreadRunEvents({
+          workspaceId,
+          threadId,
+          userId,
+          idempotencyKey: durableKey.idempotencyKey,
+        });
+        c.header("Content-Type", "text/event-stream");
+        c.header("Cache-Control", "no-cache, no-transform");
+        c.header("Connection", "keep-alive");
+        c.header("X-Accel-Buffering", "no");
+        return c.body(createSseResponse(stream, { cancel: "detach" }));
+      }
+
+      const request: DurableThreadRequestInput =
+        mode === "refresh"
+          ? {
+              workspaceId,
+              threadId,
+              userId,
+              content: "",
+              mentionedSourceIds: parsed.data.mentionedSourceIds,
+              sourceIds: parsed.data.sourceIds,
+              tools: parsed.data.tools,
+              timezone: parsed.data.timezone,
+              userMessageId: parsed.data.userMessageId,
+              assistantMessageId: parsed.data.assistantMessageId,
+              idempotencyKey: durableKey.idempotencyKey,
+              llm: parsed.data.llm,
+              visionProfileAlias:
+                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+            }
+          : mode === "edit"
+            ? {
+                workspaceId,
+                threadId,
+                userId,
+                content: parsed.data.content ?? "",
+                imagesProvided,
+                images,
+                mentionedSourceIds: parsed.data.mentionedSourceIds,
+                sourceIds: parsed.data.sourceIds,
+                tools: parsed.data.tools,
+                timezone: parsed.data.timezone,
+                userMessageId: parsed.data.userMessageId,
+                assistantMessageId: parsed.data.assistantMessageId,
+                idempotencyKey: durableKey.idempotencyKey,
+                llm: parsed.data.llm,
+                visionProfileAlias:
+                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+              }
+            : {
+                workspaceId,
+                threadId,
+                userId,
+                content: parsed.data.content ?? "",
+                images,
+                mentionedSourceIds: parsed.data.mentionedSourceIds,
+                sourceIds: parsed.data.sourceIds,
+                tools: parsed.data.tools,
+                timezone: parsed.data.timezone,
+                idempotencyKey: durableKey.idempotencyKey,
+                llm: parsed.data.llm,
+                visionProfileAlias:
+                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+              };
+      await contentService.getOrCreateDurableThreadRun({
+        workspaceId,
+        threadId,
+        userId,
+        idempotencyKey: durableKey.idempotencyKey,
+        mode,
+        request,
+      });
+
+      if (parsed.data.stream === false) {
+        const result = await contentService.getDurableThreadRunResult({
+          workspaceId,
+          threadId,
+          userId,
+          idempotencyKey: durableKey.idempotencyKey,
+        });
+        return ApiResponse.success(c, result);
+      }
+
+      const stream = contentService.attachDurableThreadRunEvents({
+        workspaceId,
+        threadId,
+        userId,
+        idempotencyKey: durableKey.idempotencyKey,
+      });
+      c.header("Content-Type", "text/event-stream");
+      c.header("Cache-Control", "no-cache, no-transform");
+      c.header("Connection", "keep-alive");
+      c.header("X-Accel-Buffering", "no");
+      return c.body(createSseResponse(stream, { cancel: "detach" }));
     }
 
     if (parsed.data.stream === false) {

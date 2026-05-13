@@ -15,6 +15,7 @@ import {
   setStoredDashboardWorkspaceId,
 } from "../../../lib/dashboard-workspace-context";
 import { contentClient, workspaceClient } from "../../../lib/sdk";
+import { clearStoredSourceSelection } from "../chat/_components/source-selection-storage";
 import type { ChatItem } from "./dashboard-chat-types";
 
 type ThreadModelSettingsInput = {
@@ -560,6 +561,7 @@ export function DashboardChatStateProvider({
       if (!workspaceId) return;
 
       await contentClient.deleteThread(workspaceId, id);
+      clearStoredSourceSelection(workspaceId, id);
       removeChatFromState(id);
     },
     [workspaceId, removeChatFromState],
@@ -579,6 +581,7 @@ export function DashboardChatStateProvider({
     );
 
     privateIds.forEach(removeChatFromState);
+    privateIds.forEach((id) => clearStoredSourceSelection(workspaceId, id));
 
     setActiveChatId((value) => {
       if (!privateIds.has(value)) return value;
@@ -627,6 +630,7 @@ export function DashboardChatStateProvider({
     );
 
     archivedIds.forEach(removeChatFromState);
+    archivedIds.forEach((id) => clearStoredSourceSelection(workspaceId, id));
 
     setActiveChatId((value) => {
       if (!archivedIds.has(value)) return value;

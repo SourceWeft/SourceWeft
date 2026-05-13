@@ -11,9 +11,11 @@ import {
   Brain,
   Globe,
   Image as ImageIcon,
+  Loader2,
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
+  Square,
   X,
 } from "lucide-react";
 import {
@@ -118,6 +120,8 @@ export function Composer({
   imageModelAlias,
   disabledToolNames = [],
   onDisabledToolNamesChange,
+  onStopStreaming,
+  isStopping = false,
 }: {
   isEditing?: boolean;
   placeholder?: string;
@@ -145,6 +149,8 @@ export function Composer({
   imageModelAlias?: string | null;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
+  onStopStreaming?: () => void;
+  isStopping?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [, setDraftText] = useState(initialInput);
@@ -740,29 +746,45 @@ export function Composer({
 
                 <ComposerAddImageButton disabled={disabled} />
 
-                <div
-                  className={cn(
-                    "transition-opacity",
-                    disabled && "cursor-not-allowed opacity-50",
+                <div>
+                  {disabled && onStopStreaming ? (
+                    <PromptInputButton
+                      className="size-9 shrink-0 rounded-full px-0 shadow-xs"
+                      disabled={isStopping}
+                      onClick={onStopStreaming}
+                      size="icon-sm"
+                      tooltip={isStopping ? "Stopping" : "Stop"}
+                      type="button"
+                      variant="default"
+                    >
+                      {isStopping ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Square className="size-3.5 fill-current" />
+                      )}
+                      <span className="sr-only">
+                        {isStopping ? "Stopping" : "Stop"}
+                      </span>
+                    </PromptInputButton>
+                  ) : (
+                    <PromptInputSubmit
+                      aria-disabled={disabled || undefined}
+                      className="size-9 shrink-0 rounded-full px-0 shadow-xs"
+                      onClick={
+                        disabled
+                          ? (event) => {
+                              event.preventDefault();
+                            }
+                          : undefined
+                      }
+                      status={disabled ? "streaming" : undefined}
+                      tabIndex={disabled ? -1 : undefined}
+                      type={disabled ? "button" : "submit"}
+                    >
+                      <ArrowUp className="size-4" />
+                      <span className="sr-only">Send</span>
+                    </PromptInputSubmit>
                   )}
-                >
-                  <PromptInputSubmit
-                    aria-disabled={disabled || undefined}
-                    className="size-9 shrink-0 rounded-full px-0 shadow-xs"
-                    onClick={
-                      disabled
-                        ? (event) => {
-                            event.preventDefault();
-                          }
-                        : undefined
-                    }
-                    status={disabled ? "streaming" : undefined}
-                    tabIndex={disabled ? -1 : undefined}
-                    type={disabled ? "button" : "submit"}
-                  >
-                    <ArrowUp className="size-4" />
-                    <span className="sr-only">Send</span>
-                  </PromptInputSubmit>
                 </div>
               </div>
             </PromptInputTools>

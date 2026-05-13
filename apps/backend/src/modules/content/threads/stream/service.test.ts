@@ -17,6 +17,7 @@ import type {
   DeepAgentTurnEvent,
   DeepAgentTurnOutcome,
 } from "../../agent/turn/runner";
+import type { MessageRecord } from "../../types";
 import type { PreparedThreadTurn } from "../turn/types";
 
 after(async () => {
@@ -29,6 +30,27 @@ function parseSseData(value: string) {
     string,
     unknown
   >;
+}
+
+function createAssistantMessageRecord(
+  overrides: Partial<MessageRecord> = {},
+): MessageRecord {
+  return {
+    id: "assistant-message-1",
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    parentMessageId: null,
+    role: "assistant",
+    content: "",
+    createdBy: null,
+    model: null,
+    creditsConsumed: null,
+    contentJson: {},
+    metadata: {},
+    createdAt: "2024-01-01T00:00:00.000Z",
+    ...overrides,
+  };
 }
 
 const outcome: DeepAgentTurnOutcome = {
@@ -314,6 +336,7 @@ const prepared: PreparedThreadTurn = {
   agentBaseCheckpoint: null,
   agentRunThreadId: "thread-1",
   isFirstAssistantResponse: true,
+  isFirstAssistantAttempt: true,
   initialTitle: "New chat",
   failurePersistence: "persist-error-turn",
 };
@@ -331,7 +354,25 @@ function createTurnService(input?: {
       (async () => ({
         assistantMessage: {
           id: "assistant-message-1",
+          teamId: "team-1",
+          workspaceId: "workspace-1",
+          threadId: "thread-1",
           parentMessageId: null,
+          role: "assistant",
+          content: "Answer",
+          contentJson: {},
+          createdBy: null,
+          model: "test-model",
+          creditsConsumed: 1,
+          metadata: {},
+          createdAt: new Date(0).toISOString(),
+        },
+        billing: {
+          teamId: "team-1",
+          consumedCredits: 1,
+          availableCredits: 99,
+          consumedThisCycle: 1,
+          idempotencyReplayed: false,
         },
       })),
   };
@@ -339,7 +380,7 @@ function createTurnService(input?: {
 
 function createTitleJob(input: { resolve?: boolean; title?: string }) {
   return {
-    id: "thread-title:thread-1:user-message-1",
+    id: "thread-title_thread-1_user-message-1",
     waitUntilFinished: async () => {
       if (input.resolve === false) {
         await new Promise(() => undefined);
@@ -373,12 +414,7 @@ test("streamThreadEvents waits for delayed title update before finish", async ()
     ...turnService,
     finalizeThreadTurn: async (input: { prepared: PreparedThreadTurn }) => {
       finalizedTraceId = input.prepared.traceContext?.traceId;
-      return {
-        assistantMessage: {
-          id: "assistant-message-1",
-          parentMessageId: null,
-        },
-      };
+      return turnService.finalizeThreadTurn(input as never);
     },
   };
 
@@ -528,10 +564,156 @@ test("streamThreadEvents emits pending when title is still generating", async ()
   assert.equal(events[pendingIndex]?.threadId, "thread-1");
   assert.equal(
     events[pendingIndex]?.jobId,
-    "thread-title:thread-1:user-message-1",
+    "thread-title_thread-1_user-message-1",
   );
   assert.equal(pendingIndex < finishIndex, true);
   assert.equal(Date.now() - startedAt < 3400, true);
+});
+
+test("streamThreadEvents skips title after a cancelled assistant attempt", async () => {
+  const continuedAfterCancelPrepared = createPrepared({
+    messageContent: "继续",
+    messageContentJson: {
+      version: 1,
+      parts: [{ type: "text", text: "继续" }],
+    },
+    agentMessageContent: "继续",
+    isFirstAssistantResponse: true,
+    isFirstAssistantAttempt: false,
+  });
+  const turnService = createTurnService({
+    prepared: continuedAfterCancelPrepared,
+  });
+  let titleJobEnqueued = false;
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "Answer" };
+      yield { type: "done", outcome };
+    },
+    async () => {
+      titleJobEnqueued = true;
+      return createTitleJob({ title: "继续对话" });
+    },
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "继续",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  assert.equal(titleJobEnqueued, false);
+  assert.equal(
+    events.some((event) => event.type === "thread-title-update"),
+    false,
+  );
+  assert.equal(
+    events.some((event) => event.type === "thread-title-pending"),
+    false,
+  );
+});
+
+test("streamThreadEvents calls onFinalized with assistant message and billing", async () => {
+  const turnService = createTurnService();
+  const finalizedResults: unknown[] = [];
+  const retrievalOutcome: DeepAgentTurnOutcome = {
+    ...outcome,
+    retrieval: {
+      profile: {
+        id: "embedding-profile-1",
+        kind: "embedding",
+        profileAlias: "embedding-default",
+        gatewayConfigId: "gateway-1",
+        modelAlias: "embed-model",
+        requestedDimensions: 1024,
+        vectorStrategy: "auto",
+        isDefault: true,
+        isActive: true,
+        configJson: {},
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+      planner: {
+        strategy: "ann_hnsw",
+        annIndexUsed: "sources_embedding_hnsw_idx",
+        requestedDimensions: 1024,
+      },
+      fusedCandidates: [],
+      retrievalSummary: [],
+      contextAssembly: null,
+    } as DeepAgentTurnOutcome["retrieval"],
+    citations: [citation],
+    availableCitations: [citation],
+  };
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "Answer" };
+      yield { type: "done", outcome: retrievalOutcome };
+    },
+    async () => null,
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents(
+    {
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      content: "What is in this invoice?",
+    },
+    {
+      onFinalized: async (result) => {
+        finalizedResults.push(result);
+      },
+    },
+  )) {
+    events.push(parseSseData(event));
+  }
+
+  assert.equal(finalizedResults.length, 1);
+  assert.deepEqual(finalizedResults[0], {
+    assistantMessage: {
+      id: "assistant-message-1",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      parentMessageId: null,
+      role: "assistant",
+      content: "Answer",
+      contentJson: {},
+      createdBy: null,
+      model: "test-model",
+      creditsConsumed: 1,
+      metadata: {},
+      createdAt: new Date(0).toISOString(),
+    },
+    billing: {
+      teamId: "team-1",
+      consumedCredits: 1,
+      availableCredits: 99,
+      consumedThisCycle: 1,
+      idempotencyReplayed: false,
+    },
+    retrieval: {
+      embeddingProfileId: "embedding-profile-1",
+      vectorStrategy: "ann_hnsw",
+      annIndexUsed: "sources_embedding_hnsw_idx",
+      citations: [citation],
+      availableCitations: [citation],
+    },
+  });
+  assert.equal(events.some((event) => event.type === "finish"), true);
 });
 
 test("streamThreadEvents generates title when retrying after first failed assistant", async () => {
@@ -686,12 +868,7 @@ test("streamThreadEvents emits preflight thinking steps while preparing", async 
         preflightThinkingSteps: preflightSteps,
       });
     },
-    finalizeThreadTurn: async () => ({
-      assistantMessage: {
-        id: "assistant-message-1",
-        parentMessageId: null,
-      },
-    }),
+    finalizeThreadTurn: createTurnService().finalizeThreadTurn,
   };
 
   const service = new ContentThreadStreamService(
@@ -1236,7 +1413,10 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
         errorCode: input.contentError.code,
         partialAssistantContent: input.partialAssistantContent,
       };
-      return null;
+      return createAssistantMessageRecord({
+        id: "assistant-message-cancelled",
+        parentMessageId: null,
+      });
     },
   );
 
@@ -1270,4 +1450,192 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
     errorCode: "CLIENT_CANCELLED",
     partialAssistantContent: "partial",
   });
+});
+
+test("streamThreadEvents observes requested cancellation as cancelled, not error", async (t) => {
+  const endedSpans: EndSpanInput[] = [];
+  const endedTraces: EndTraceInput[] = [];
+  let persistedCancelledError:
+    | {
+        errorCode?: string;
+        partialAssistantContent?: string;
+      }
+    | null = null;
+  t.mock.method(
+    threadStreamObservability,
+    "startTrace",
+    async (input: StartTraceInput) => ({
+      id: "trace-row",
+      traceId: input.traceId ?? "trace",
+    }),
+  );
+  t.mock.method(
+    threadStreamObservability,
+    "startSpan",
+    async (input: StartSpanInput) => ({
+      id: "span-row",
+      spanId: input.spanId ?? "span",
+    }),
+  );
+  t.mock.method(
+    threadStreamObservability,
+    "endSpan",
+    async (input: EndSpanInput) => {
+      endedSpans.push(input);
+    },
+  );
+  t.mock.method(
+    threadStreamObservability,
+    "endTrace",
+    async (input: EndTraceInput) => {
+      endedTraces.push(input);
+    },
+  );
+
+  let cancelChecks = 0;
+  const service = new ContentThreadStreamService(
+    createTurnService() as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "partial" };
+      yield { type: "text-delta", delta: " after cancel" };
+    },
+    async () => null,
+    async (input) => {
+      persistedCancelledError = {
+        errorCode: input.contentError.code,
+        partialAssistantContent: input.partialAssistantContent,
+      };
+      return null;
+    },
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents(
+    {
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      content: "What is in this invoice?",
+    },
+    {
+      shouldCancel: async () => {
+        cancelChecks += 1;
+        return cancelChecks > 1;
+      },
+      createErrorMessage: async (input) => {
+        persistedCancelledError = {
+          errorCode: input.contentError.code,
+          partialAssistantContent: input.partialAssistantContent,
+        };
+        return createAssistantMessageRecord({
+          id: "assistant-message-cancelled",
+          parentMessageId: null,
+        });
+      },
+    },
+  )) {
+    events.push(parseSseData(event));
+  }
+
+  const cancelledAgentSpan = endedSpans.find(
+    (span) => span.spanId === "agent_run" && span.status === "cancelled",
+  );
+  assert.ok(cancelledAgentSpan);
+  assert.deepEqual(cancelledAgentSpan.metadata, {
+    cancelled: true,
+    cancelReason: "client_requested",
+    finishReason: "cancelled",
+  });
+  assert.equal(
+    endedSpans.some((span) => span.spanId === "agent_run" && span.status === "error"),
+    false,
+  );
+  const cancelledTrace = endedTraces.find(
+    (trace) => trace.status === "cancelled",
+  );
+  assert.ok(cancelledTrace);
+  assert.equal(cancelledTrace.errorCode, "CLIENT_CANCELLED");
+  assert.deepEqual(cancelledTrace.metadata, {
+    operation: "chat.stream",
+    modelAlias: "test-model",
+    profileAlias: "test-profile",
+    agentMode: "continue",
+    sourceCount: 0,
+    effectiveSourceCount: 0,
+    mentionedSourceCount: 0,
+    effectiveMentionedSourceCount: 0,
+    selectedSkillCount: 0,
+    preflightThinkingStepCount: 0,
+    cancelled: true,
+    cancelReason: "client_requested",
+    finishReason: "cancelled",
+  });
+  assert.equal(
+    endedTraces.some((trace) => trace.status === "error"),
+    false,
+  );
+  assert.deepEqual(persistedCancelledError, {
+    errorCode: "CLIENT_CANCELLED",
+    partialAssistantContent: "partial",
+  });
+  assert.equal(events.find((event) => event.type === "error")?.code, "CLIENT_CANCELLED");
+});
+
+test("streamThreadEvents honors cancellation after agent outcome before finalization", async () => {
+  let finalizeCalled = false;
+  let cancelChecks = 0;
+  const turnService = createTurnService({
+    finalize: async () => {
+      finalizeCalled = true;
+      return {
+        assistantMessage: createAssistantMessageRecord(),
+        billing: {
+          teamId: "team-1",
+          consumedCredits: 1,
+          availableCredits: 99,
+          consumedThisCycle: 1,
+          idempotencyReplayed: false,
+        },
+      };
+    },
+  });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "Answer" };
+      yield { type: "done", outcome };
+    },
+    async () => null,
+    async () => createAssistantMessageRecord({ id: "assistant-cancelled-1" }),
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents(
+    {
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      content: "What is in this invoice?",
+    },
+    {
+      shouldCancel: async () => {
+        cancelChecks += 1;
+        return cancelChecks > 1;
+      },
+    },
+  )) {
+    events.push(parseSseData(event));
+  }
+
+  assert.equal(finalizeCalled, false);
+  assert.equal(events.find((event) => event.type === "error")?.code, "CLIENT_CANCELLED");
+  assert.equal(
+    events.some((event) => event.type === "assistant-message"),
+    false,
+  );
 });

@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   type ReactNode,
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -9,6 +10,7 @@ import {
   Download,
   FlipHorizontal,
   FlipVertical,
+  ImageIcon,
   Maximize2,
   Minimize2,
   RefreshCcw,
@@ -84,6 +86,34 @@ function PreviewToolbarButton({
   );
 }
 
+function ImageLoadingPlaceholder({
+  className,
+  title,
+}: {
+  className?: string;
+  title: string;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute inset-0 overflow-hidden rounded-lg border border-border/60 bg-muted/50",
+        className,
+      )}
+    >
+      <div className="absolute inset-0 bg-[linear-gradient(145deg,hsl(var(--muted))_0%,hsl(var(--background))_48%,hsl(var(--muted))_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(105deg,transparent_0%,hsl(var(--foreground)/0.04)_30%,hsl(var(--foreground)/0.12)_48%,hsl(var(--foreground)/0.04)_66%,transparent_100%)] bg-[length:220%_100%] animate-[image-sheen_2.2s_ease-in-out_infinite]" />
+      <div className="absolute inset-0 opacity-25 [background-image:linear-gradient(hsl(var(--foreground)/0.07)_1px,transparent_1px),linear-gradient(90deg,hsl(var(--foreground)/0.07)_1px,transparent_1px)] [background-size:32px_32px]" />
+      <div className="absolute inset-0 grid place-items-center p-4">
+        <div className="flex max-w-full items-center gap-2 rounded-md border border-border/70 bg-background/75 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
+          <ImageIcon className="size-4 shrink-0" />
+          <span className="truncate">Loading {title}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function GeneratedImagePreview({
   className,
   downloadUrl,
@@ -101,6 +131,7 @@ export function GeneratedImagePreview({
   const [flipX, setFlipX] = useState(false);
   const [flipY, setFlipY] = useState(false);
   const [open, setOpen] = useState(false);
+  const [previewLoaded, setPreviewLoaded] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [scale, setScale] = useState(1);
 
@@ -120,6 +151,15 @@ export function GeneratedImagePreview({
     setRotation(0);
     setScale(1);
   }, []);
+
+  useEffect(() => {
+    setPreviewLoaded(false);
+  }, [imageUrl]);
+
+  const handlePreviewLoad = useCallback(() => {
+    setPreviewLoaded(true);
+    onImageLoad?.();
+  }, [onImageLoad]);
 
   const handleDownload = useCallback(async () => {
     const targetUrl = downloadUrl || imageUrl;
@@ -162,14 +202,26 @@ export function GeneratedImagePreview({
           )}
           type="button"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- Generated artifact URLs can be API-backed and are already rendered lazily. */}
-          <img
-            alt={title}
-            className="max-h-[520px] max-w-full rounded-lg border border-border bg-muted/20 object-contain shadow-sm transition duration-150 group-hover:border-foreground/25 group-hover:shadow-md"
-            loading="lazy"
-            onLoad={onImageLoad}
-            src={imageUrl}
-          />
+          <span className="relative block min-h-48 min-w-64 max-w-full overflow-hidden rounded-lg bg-muted/40">
+            <ImageLoadingPlaceholder
+              className={cn(
+                "transition-opacity duration-200",
+                previewLoaded ? "opacity-0" : "opacity-100",
+              )}
+              title={title}
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element -- Generated artifact URLs can be API-backed and are already rendered lazily. */}
+            <img
+              alt={title}
+              className={cn(
+                "max-h-[520px] max-w-full rounded-lg object-contain transition duration-150 group-hover:shadow-md",
+                previewLoaded ? "opacity-100" : "opacity-0",
+              )}
+              loading="lazy"
+              onLoad={handlePreviewLoad}
+              src={imageUrl}
+            />
+          </span>
         </button>
       </DialogTrigger>
       <DialogContent

@@ -24,6 +24,7 @@ import {
 } from "./repository";
 import {
   buildSourceStorageKey,
+  getSourceObjectPreviewUrl,
   getSourceObjectDownloadUrl,
   uploadSourceObject,
 } from "../storage";
@@ -214,6 +215,35 @@ export async function resolveSourceTreeScope(input: {
 }
 
 export class ContentSourceService {
+  private async attachSourceUrls(source: SourceRecord) {
+    if (!source.storageKey) {
+      return source;
+    }
+
+    const fileName = String(source.metadata.fileName || source.title || "source");
+    const contentType = source.mimeType || "application/octet-stream";
+    const [previewUrl, downloadUrl] = await Promise.all([
+      getSourceObjectPreviewUrl({
+        bucket: source.storageBucket ?? config.s3.bucket,
+        key: source.storageKey,
+        fileName,
+        contentType,
+      }),
+      getSourceObjectDownloadUrl({
+        bucket: source.storageBucket ?? config.s3.bucket,
+        key: source.storageKey,
+        fileName,
+        contentType,
+      }),
+    ]);
+
+    return {
+      ...source,
+      previewUrl,
+      downloadUrl,
+    };
+  }
+
   async uploadSource(input: {
     workspaceId: string;
     userId: string;
@@ -639,7 +669,10 @@ export class ContentSourceService {
       throw new ContentError(404, "SOURCE_NOT_FOUND", "Source not found");
     }
 
-    return detail;
+    return {
+      ...detail,
+      source: await this.attachSourceUrls(detail.source),
+    };
   }
 
   async getSourceDocument(input: {
@@ -664,7 +697,10 @@ export class ContentSourceService {
       );
     }
 
-    return detail;
+    return {
+      ...detail,
+      source: await this.attachSourceUrls(detail.source),
+    };
   }
 
   async getSourceStatus(input: {

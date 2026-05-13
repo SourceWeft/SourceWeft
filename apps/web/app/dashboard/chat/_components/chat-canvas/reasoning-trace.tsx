@@ -783,7 +783,7 @@ function GeneratedImageArtifactItem({
   if (!imageUrl) {
     return (
       <div
-        className="relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-border bg-muted shadow-sm"
+        className="relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-dashed border-border bg-muted"
         style={{ aspectRatio }}
       >
         <GeneratedImageLoadingMask
@@ -799,14 +799,14 @@ function GeneratedImageArtifactItem({
   return (
     <div
       className={cn(
-        "relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-border bg-muted shadow-sm",
+        "relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg bg-muted",
         isImageLoaded && "bg-transparent",
       )}
       style={{ aspectRatio }}
     >
       <GeneratedImagePreview
         className={cn(
-          "size-full transition-opacity duration-200 [&>img]:h-full [&>img]:w-full [&>img]:object-contain",
+          "size-full transition-opacity duration-200 [&>span]:size-full [&>span]:min-h-0 [&>span]:min-w-0 [&>span>img]:h-full [&>span>img]:w-full [&>span>img]:object-contain",
           isImageLoaded ? "opacity-100" : "opacity-0",
         )}
         downloadUrl={downloadUrl ?? imageUrl}
@@ -925,10 +925,15 @@ function getReasoningTraceTitle(input: {
   activeStep?: ThinkingStepRecord;
   duration?: number;
   hasModelReasoning: boolean;
+  isCancelled?: boolean;
   isStreaming: boolean;
   latestDisplayStep?: ThinkingStepRecord;
   reasoningDurationMs?: number;
 }) {
+  if (input.isCancelled) {
+    return formatThoughtDuration(input.reasoningDurationMs ?? input.duration);
+  }
+
   if (input.activeStep) {
     return `Thinking · ${input.activeStep.title}`;
   }
@@ -957,6 +962,7 @@ function getReasoningTraceTitle(input: {
 }
 
 export function ReasoningTrace({
+  isCancelled = false,
   isStreaming,
   modelReasoning,
   modelReasoningSegments,
@@ -965,6 +971,7 @@ export function ReasoningTrace({
   toolCalls,
   workspaceId,
 }: {
+  isCancelled?: boolean;
   isStreaming: boolean;
   modelReasoning?: string;
   modelReasoningSegments?: ModelReasoningSegmentRecord[];
@@ -1020,7 +1027,9 @@ export function ReasoningTrace({
     const toolCallId = step.metadata?.toolCallId;
     return !(typeof toolCallId === "string" && toolCallIds.has(toolCallId));
   });
-  const activeStep = safeSteps.find((step) => step.status === "in_progress");
+  const activeStep = isCancelled
+    ? undefined
+    : safeSteps.find((step) => step.status === "in_progress");
   const latestDisplayStep = displaySteps
     .map((step, index) => ({ index, step }))
     .sort((left, right) => {
@@ -1029,10 +1038,11 @@ export function ReasoningTrace({
       return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
     })
     .at(-1)?.step;
-  const hasRunningToolCall = safeToolCalls.some(
-    (toolCall) => toolCall.status === "running",
-  );
-  const isThinking = isStreaming || Boolean(activeStep) || hasRunningToolCall;
+  const hasRunningToolCall =
+    !isCancelled &&
+    safeToolCalls.some((toolCall) => toolCall.status === "running");
+  const isThinking =
+    !isCancelled && (isStreaming || Boolean(activeStep) || hasRunningToolCall);
   const hasTraceItems =
     safeSteps.length + safeToolCalls.length + (hasModelReasoning ? 1 : 0) > 0;
   const allComplete =
@@ -1131,6 +1141,7 @@ export function ReasoningTrace({
     activeStep,
     duration,
     hasModelReasoning,
+    isCancelled,
     isStreaming,
     latestDisplayStep,
     reasoningDurationMs,
@@ -1165,7 +1176,7 @@ export function ReasoningTrace({
                 <ChainOfThoughtStep
                   key={item.key}
                   label="Chat model reasoning"
-                  status={isStreaming ? "active" : "complete"}
+                  status={isStreaming && !isCancelled ? "active" : "complete"}
                 >
                   <div className="whitespace-pre-wrap break-words text-muted-foreground text-xs leading-5">
                     {item.text}
@@ -1194,24 +1205,33 @@ export function ReasoningTrace({
                     </span>
                   ) : null}
                   {step.status === "in_progress" ? (
-                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[11px] text-primary">
-                      Running
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full px-2 py-0.5 font-medium text-[11px]",
+                        isCancelled
+                          ? "bg-muted text-muted-foreground"
+                          : "bg-primary/10 text-primary",
+                      )}
+                    >
+                      {isCancelled ? "Stopped" : "Running"}
                     </span>
                   ) : null}
                 </span>
               );
+              const stepStatus =
+                step.status === "in_progress"
+                  ? isCancelled
+                    ? "pending"
+                    : "active"
+                  : step.status === "pending"
+                    ? "pending"
+                    : "complete";
               return (
                 <ChainOfThoughtStep
                   icon={isVisionFallback ? ImageIcon : undefined}
                   key={item.key}
                   label={stepLabel}
-                  status={
-                    step.status === "in_progress"
-                      ? "active"
-                      : step.status === "pending"
-                        ? "pending"
-                        : "complete"
-                  }
+                  status={stepStatus}
                 >
                   {step.detail ? (
                     <p className="text-muted-foreground text-xs leading-5">
@@ -1249,19 +1269,21 @@ export function ReasoningTrace({
               ]
                 .filter((part): part is string => Boolean(part))
                 .join(" · ") || undefined;
+            const toolStatus =
+              toolCall.status === "running"
+                ? isCancelled
+                  ? "pending"
+                  : "active"
+                : toolCall.status === "error"
+                  ? "pending"
+                  : "complete";
             return (
               <ChainOfThoughtStep
                 description={summary}
                 icon={WrenchIcon}
                 key={item.key}
                 label={getToolDisplayLabel(toolCall)}
-                status={
-                  toolCall.status === "running"
-                    ? "active"
-                    : toolCall.status === "error"
-                      ? "pending"
-                      : "complete"
-                }
+                status={toolStatus}
               >
                 <ToolCallDetails
                   onArtifactPreview={onArtifactPreview}

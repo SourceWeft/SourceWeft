@@ -5,6 +5,11 @@ import { classifyPdf } from "./pdf-classifier";
 import { langChainPdfProvider } from "./langchain-pdf-provider";
 import { getDocumentProvider } from "./registry";
 import { isSupportedImageMimeType, summarizeNumbers } from "./utils";
+import { tryParseImageWithVision } from "./image-vision-provider";
+
+type ImageVisionParser = typeof tryParseImageWithVision;
+
+let imageVisionParser: ImageVisionParser = tryParseImageWithVision;
 
 const providerIds = new Set<DocumentParseProviderId>([
   "langchain",
@@ -99,15 +104,28 @@ export async function startDocumentParse(
   const requestedProvider = getConfiguredProviderId();
 
   if (isSupportedImageMimeType(input.mimeType)) {
+    const visionOutcome = await imageVisionParser(input);
+    if (visionOutcome.kind === "completed") {
+      return withDecisionMetadata({
+        outcome: visionOutcome.outcome,
+        strategy,
+        requestedProvider,
+        resolvedProvider: "vision",
+      });
+    }
+
     return startWithProvider({
       providerId: "pdf2markdown",
       parseInput: input,
       strategy,
       requestedProvider,
-      extraMetadata:
-        requestedProvider === "pdf2markdown"
-          ? undefined
-          : { documentParseProviderFallbackReason: "image_requires_ocr" },
+      extraMetadata: {
+        ...(requestedProvider === "pdf2markdown"
+          ? {}
+          : { documentParseProviderFallbackReason: "image_requires_ocr" }),
+        visionFallbackReason: visionOutcome.reason,
+        pageCount: 1,
+      },
     });
   }
 
@@ -182,3 +200,12 @@ export async function startDocumentParse(
     });
   }
 }
+
+export const testExports = {
+  setImageVisionParserForTest(parser: ImageVisionParser) {
+    imageVisionParser = parser;
+    return () => {
+      imageVisionParser = tryParseImageWithVision;
+    };
+  },
+};

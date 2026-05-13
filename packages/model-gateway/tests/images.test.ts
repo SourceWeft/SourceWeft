@@ -99,3 +99,64 @@ test("images.generate sends DeepInfra image requests through OpenAI-compatible U
     "https://api.deepinfra.com/v1/openai/images/generations",
   );
 });
+
+test("images.generate preserves OpenRouter provider cost from usage", async () => {
+  const gateway = createModelGateway({
+    fetch: async () =>
+      createJsonResponse({
+        model: "google/gemini-3.1-flash-image-preview",
+        choices: [
+          {
+            message: {
+              images: [{ url: "https://cdn.example.com/image.png" }],
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 200,
+          completion_tokens: 1120,
+          total_tokens: 1320,
+          cost: 0.0673,
+          cost_details: {
+            upstream_inference_cost: 0.0673,
+          },
+          completion_tokens_details: {
+            image_tokens: 1120,
+          },
+        },
+      }),
+    providers: {
+      openrouter: {
+        kind: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        apiKey: "openrouter-key",
+      },
+    },
+    modelRoutes: {
+      "image-default": {
+        strategy: "priority",
+        targets: [
+          {
+            provider: "openrouter",
+            model: "google/gemini-3.1-flash-image-preview",
+            priority: 1,
+          },
+        ],
+      },
+    },
+  });
+
+  const result = await gateway.images.generate({
+    model: "image-default",
+    prompt: "draw a favicon for google",
+  });
+
+  assert.equal(result.usage?.inputTokens, 200);
+  assert.equal(result.usage?.outputTokens, 1120);
+  assert.equal(result.usage?.outputImageTokens, 1120);
+  assert.equal(result.usage?.providerCostUsd, 0.0673);
+  assert.equal(
+    result.usage?.providerCostSource,
+    "usage.cost",
+  );
+});

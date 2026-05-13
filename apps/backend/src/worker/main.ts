@@ -11,6 +11,7 @@ import {
 } from "./processors/source-parse";
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
+import { processThreadChatRunJob } from "./processors/thread-chat-run";
 
 await ensureModelConfigAvailable();
 
@@ -21,6 +22,7 @@ const processors: Record<string, (job: Job<JobPayload>) => Promise<unknown>> = {
   "source-parse": processSourceParseJob,
   "source-parse-poll": processSourceParsePollJob,
   "sync-model-pricing": processSyncModelPricingJob,
+  "thread-chat-run": processThreadChatRunJob,
   "thread-title-generate": processThreadTitleGenerateJob,
 };
 

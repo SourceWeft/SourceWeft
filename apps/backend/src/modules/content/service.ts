@@ -14,9 +14,13 @@ import {
   ContentThreadStreamService,
   ContentThreadTurnService,
   contentThreadService,
+  type EditThreadInput,
+  type RefreshThreadInput,
   type StreamThreadEventInput,
   type ThreadToolsSelection,
 } from "./threads";
+import { durableChatRunService } from "./threads/durable/service";
+import type { ChatThreadRunMode } from "./threads/durable/types";
 import { workingFilesService } from "./working-files";
 import { type LlmExecutionConfig } from "./model-gateway-audit";
 
@@ -637,5 +641,60 @@ export class ContentService {
   }
   async streamThread(input: StreamThreadEventInput) {
     return this.threadStreamService.streamThread(input);
+  }
+
+  async getOrCreateDurableThreadRun(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    idempotencyKey: string;
+    mode: ChatThreadRunMode;
+    request: StreamThreadEventInput | RefreshThreadInput | EditThreadInput;
+  }) {
+    return durableChatRunService.getOrCreateRun(input);
+  }
+
+  async stopDurableThreadRun(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    idempotencyKeyWithStopSuffix: string;
+  }) {
+    return durableChatRunService.stopRunAndReturn(input);
+  }
+
+  async getDurableThreadRunResult(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    idempotencyKey: string;
+  }) {
+    return durableChatRunService.getRunResult(input);
+  }
+
+  async findDurableThreadRun(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    idempotencyKey: string;
+  }) {
+    return durableChatRunService.findRun(input);
+  }
+
+  async findActiveDurableThreadRun(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+  }) {
+    return durableChatRunService.findActiveRun(input);
+  }
+
+  async *attachDurableThreadRunEvents(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    idempotencyKey: string;
+  }): AsyncGenerator<string> {
+    yield* durableChatRunService.attachRunEvents(input);
   }
 }

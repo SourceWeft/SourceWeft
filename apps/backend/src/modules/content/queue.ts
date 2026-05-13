@@ -4,6 +4,7 @@ import { jobsQueue } from "../../shared/queue";
 export const SOURCE_PARSE_JOB = "source-parse";
 export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
 export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
+export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
 export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
 const SOURCE_PARSE_JOB_BACKOFF_MS = 5_000;
 
@@ -56,6 +57,28 @@ export type ThreadTitleGenerateJobResult =
       reason: "missing-thread" | "renamed-thread" | "empty-title";
     };
 
+export type ThreadChatRunJobPayload = {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+};
+
+export type ThreadChatRunJobResult =
+  | {
+      status: "completed";
+      runId: string;
+      assistantMessageId: string;
+    }
+  | {
+      status: "cancelled" | "failed";
+      runId: string;
+      assistantMessageId: string | null;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+    };
+
 export async function enqueueSourceParseJob(payload: SourceParseJobPayload) {
   return jobsQueue.add(SOURCE_PARSE_JOB, payload, {
     jobId: payload.idempotencyKey,
@@ -83,7 +106,7 @@ export async function enqueueSourceParsePollJob(
 export async function enqueueThreadTitleGenerateJob(
   payload: ThreadTitleGenerateJobPayload,
 ) {
-  const jobId = `thread-title:${payload.threadId}:${payload.userMessageId}`;
+  const jobId = `thread-title_${payload.threadId}_${payload.userMessageId}`;
   const existing = await jobsQueue.getJob(jobId);
   if (existing) {
     return existing;
@@ -94,6 +117,29 @@ export async function enqueueThreadTitleGenerateJob(
       jobId,
       attempts: 5,
       backoff: { type: "exponential", delay: 2000 },
+      removeOnComplete: 100,
+      removeOnFail: 100,
+    });
+  } catch (error) {
+    const duplicate = await jobsQueue.getJob(jobId);
+    if (duplicate) {
+      return duplicate;
+    }
+    throw error;
+  }
+}
+
+export async function enqueueThreadChatRunJob(payload: ThreadChatRunJobPayload) {
+  const jobId = `${THREAD_CHAT_RUN_JOB}_${payload.runId}`;
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    return await jobsQueue.add(THREAD_CHAT_RUN_JOB, payload, {
+      jobId,
+      attempts: 1,
       removeOnComplete: 100,
       removeOnFail: 100,
     });

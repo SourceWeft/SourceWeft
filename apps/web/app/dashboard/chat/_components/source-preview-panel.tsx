@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Code2,
+  Download,
   ExternalLink,
   FileText,
   Hash,
+  ImageIcon,
   Loader2,
+  PanelTopOpen,
   Sparkles,
 } from "lucide-react";
 import {
@@ -25,7 +28,31 @@ import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./source-types";
 
 type SourceDetail = Awaited<ReturnType<typeof contentClient.getSource>>;
-type PreviewMode = "chunks" | "preview" | "raw";
+type PreviewMode = "chunks" | "preview" | "raw" | "source-file";
+
+const SOURCE_FILE_TEXT_MIME_TYPES = new Set([
+  "application/json",
+  "application/xml",
+  "application/yaml",
+  "application/x-yaml",
+  "application/toml",
+  "text/plain",
+  "text/markdown",
+  "text/x-markdown",
+  "text/html",
+  "text/xml",
+  "text/css",
+  "text/javascript",
+  "text/yaml",
+]);
+
+function isTextSourceMimeType(mimeType: string | null | undefined) {
+  if (!mimeType) {
+    return false;
+  }
+
+  return mimeType.startsWith("text/") || SOURCE_FILE_TEXT_MIME_TYPES.has(mimeType);
+}
 
 export function SourcePreviewPanel({
   citation,
@@ -171,6 +198,10 @@ export function SourcePreviewPanel({
   );
   const rawMarkdown =
     detail?.documents[0]?.contentText ?? detail?.source.contentText ?? "";
+  const sourceMimeType = detail?.source.mimeType?.trim().toLowerCase() ?? null;
+  const sourcePreviewUrl = detail?.source.previewUrl ?? null;
+  const sourceDownloadUrl = detail?.source.downloadUrl ?? null;
+  const sourceFileContent = detail?.source.contentText ?? "";
   const title =
     detail?.source.title ?? citation?.sourceTitle ?? source?.title ?? "Source";
   const isExternalCitation = Boolean(citation?.externalUri);
@@ -263,6 +294,18 @@ export function SourcePreviewPanel({
                     type="button"
                   >
                     Raw MD
+                  </button>
+                  <button
+                    className={cn(
+                      "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                      previewMode === "source-file"
+                        ? "bg-secondary text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setPreviewMode("source-file")}
+                    type="button"
+                  >
+                    Source File
                   </button>
                 </div>
               ) : null}
@@ -382,7 +425,68 @@ export function SourcePreviewPanel({
             {error}
           </div>
         ) : detail ? (
-          previewMode === "raw" ? (
+          previewMode === "source-file" ? (
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="mx-auto flex min-h-full max-w-5xl flex-col px-5 py-6 lg:px-8">
+                {sourceMimeType?.startsWith("image/") && sourcePreviewUrl ? (
+                  <div className="flex flex-1 items-center justify-center overflow-hidden rounded-2xl border bg-muted/10 p-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      alt={title}
+                      className="max-h-[70vh] max-w-full rounded-lg object-contain shadow-sm"
+                      src={sourcePreviewUrl}
+                    />
+                  </div>
+                ) : sourceMimeType === "application/pdf" && sourcePreviewUrl ? (
+                  <div className="overflow-hidden rounded-2xl border bg-background shadow-xs">
+                    <iframe
+                      className="h-[70vh] w-full"
+                      src={sourcePreviewUrl}
+                      title={`${title} source file`}
+                    />
+                  </div>
+                ) : isTextSourceMimeType(sourceMimeType) && sourceFileContent ? (
+                  <div className="overflow-hidden rounded-2xl border bg-background shadow-xs">
+                    <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-xs leading-6 text-foreground">
+                      {sourceFileContent}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed bg-muted/20 px-6 py-12 text-center">
+                    <PanelTopOpen className="mb-3 size-6 text-muted-foreground" />
+                    <p className="text-sm font-medium text-foreground">暂不支持预览</p>
+                    <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                      该文件格式暂不支持在线预览，可下载源文件查看。
+                    </p>
+                    {sourceDownloadUrl ? (
+                      <Button
+                        asChild
+                        className="mt-4 gap-1.5"
+                        size="sm"
+                        variant="outline"
+                      >
+                        <a href={sourceDownloadUrl} rel="noreferrer" target="_blank">
+                          <Download className="size-3.5" />
+                          Download source file
+                        </a>
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+
+                {sourceDownloadUrl ? (
+                  <div className="mt-4 flex justify-end">
+                    <Button asChild className="gap-1.5" size="sm" variant="outline">
+                      <a href={sourceDownloadUrl} rel="noreferrer" target="_blank">
+                        <Download className="size-3.5" />
+                        Download source file
+                      </a>
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            </ScrollArea>
+          ) : previewMode === "raw" ? (
             <ScrollArea className="min-h-0 flex-1">
               <pre className="mx-auto min-h-full max-w-5xl whitespace-pre-wrap break-words px-5 py-6 font-mono text-xs leading-6 text-foreground lg:px-8">
                 {rawMarkdown || "No markdown content available."}

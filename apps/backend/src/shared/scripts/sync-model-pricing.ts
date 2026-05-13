@@ -17,6 +17,12 @@ type LiteLLMEntry = {
   cache_read_input_token_cost?: number | null;
   cache_creation_input_token_cost?: number | null;
   output_cost_per_reasoning_token?: number | null;
+  input_cost_per_image_token?: number | null;
+  output_cost_per_image_token?: number | null;
+  input_cost_per_audio_token?: number | null;
+  output_cost_per_audio_token?: number | null;
+  input_cost_per_image?: number | null;
+  output_cost_per_image?: number | null;
   litellm_provider?: string;
   mode?: string;
 };
@@ -189,34 +195,32 @@ function hasManualPriceConfigured(pricing: Partial<ModelPricing> | undefined): b
   if (!pricing) {
     return false;
   }
-  return (
-    pricing.input_cost_per_token !== undefined ||
-    pricing.output_cost_per_token !== undefined ||
-    pricing.cache_read_input_token_cost !== undefined ||
-    pricing.cache_creation_input_token_cost !== undefined ||
-    pricing.output_cost_per_reasoning_token !== undefined
-  );
+  return PRICING_VALUE_KEYS.some((key) => pricing[key] !== undefined);
 }
 
 function hasAnyManualPriceValue(pricing: Partial<ModelPricing> | undefined): boolean {
   if (!pricing) {
     return false;
   }
-  return (
-    pricing.input_cost_per_token !== null ||
-    pricing.output_cost_per_token !== null ||
-    pricing.cache_read_input_token_cost !== null ||
-    pricing.cache_creation_input_token_cost !== null ||
-    pricing.output_cost_per_reasoning_token !== null
-  );
+  return PRICING_VALUE_KEYS.some((key) => pricing[key] !== null);
 }
 
-const PRICING_CONFIG_KEYS = new Set([
+const PRICING_VALUE_KEYS = [
   "input_cost_per_token",
   "output_cost_per_token",
   "cache_read_input_token_cost",
   "cache_creation_input_token_cost",
   "output_cost_per_reasoning_token",
+  "input_cost_per_image_token",
+  "output_cost_per_image_token",
+  "input_cost_per_audio_token",
+  "output_cost_per_audio_token",
+  "input_cost_per_image",
+  "output_cost_per_image",
+] as const satisfies ReadonlyArray<keyof ModelPricing>;
+
+const PRICING_CONFIG_KEYS = new Set([
+  ...PRICING_VALUE_KEYS,
   "price_source",
   "litellm_key",
   "price_updated_at",
@@ -343,17 +347,21 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
         cache_read_input_token_cost: normalizePriceNumber(litellmEntry.cache_read_input_token_cost),
         cache_creation_input_token_cost: normalizePriceNumber(litellmEntry.cache_creation_input_token_cost),
         output_cost_per_reasoning_token: normalizePriceNumber(litellmEntry.output_cost_per_reasoning_token),
+        input_cost_per_image_token: normalizePriceNumber(litellmEntry.input_cost_per_image_token),
+        output_cost_per_image_token: normalizePriceNumber(litellmEntry.output_cost_per_image_token),
+        input_cost_per_audio_token: normalizePriceNumber(litellmEntry.input_cost_per_audio_token),
+        output_cost_per_audio_token: normalizePriceNumber(litellmEntry.output_cost_per_audio_token),
+        input_cost_per_image: normalizePriceNumber(litellmEntry.input_cost_per_image),
+        output_cost_per_image: normalizePriceNumber(litellmEntry.output_cost_per_image),
         price_source: "litellm",
         litellm_key: match.key,
         price_updated_at: new Date().toISOString(),
       };
 
       if (
-        existingPricing?.input_cost_per_token !== newPricing.input_cost_per_token ||
-        existingPricing?.output_cost_per_token !== newPricing.output_cost_per_token ||
-        existingPricing?.cache_read_input_token_cost !== newPricing.cache_read_input_token_cost ||
-        existingPricing?.cache_creation_input_token_cost !== newPricing.cache_creation_input_token_cost ||
-        existingPricing?.output_cost_per_reasoning_token !== newPricing.output_cost_per_reasoning_token ||
+        PRICING_VALUE_KEYS.some(
+          (key) => existingPricing?.[key] !== newPricing[key],
+        ) ||
         existingPricing?.price_source !== newPricing.price_source ||
         existingPricing?.litellm_key !== newPricing.litellm_key
       ) {
@@ -395,6 +403,12 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
           cache_read_input_token_cost: null,
           cache_creation_input_token_cost: null,
           output_cost_per_reasoning_token: null,
+          input_cost_per_image_token: null,
+          output_cost_per_image_token: null,
+          input_cost_per_audio_token: null,
+          output_cost_per_audio_token: null,
+          input_cost_per_image: null,
+          output_cost_per_image: null,
           price_source: "unknown",
           litellm_key: null,
           price_updated_at: new Date().toISOString(),

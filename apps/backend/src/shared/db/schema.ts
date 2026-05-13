@@ -146,6 +146,14 @@ type BillingWebhookStatus = "received" | "processed" | "ignored" | "failed";
 type OpsAlertLevel = "warn" | "error" | "critical";
 type OpsAlertStatus = "open" | "resolved";
 type LlmObservationStatus = "running" | "ok" | "error" | "cancelled";
+type ChatThreadRunStatus =
+  | "queued"
+  | "running"
+  | "cancel_requested"
+  | "completed"
+  | "failed"
+  | "cancelled";
+type ChatThreadRunMode = "send" | "refresh" | "edit";
 type LlmSpanKind =
   | "agent"
   | "tool"
@@ -1674,6 +1682,100 @@ export const messages = pgTable(
       table.workspaceId,
       desc(table.createdAt),
     ),
+  ],
+);
+
+export const chatThreadRuns = pgTable(
+  "chat_thread_runs",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      ,
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    userMessageId: text("user_message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    assistantMessageId: text("assistant_message_id").references(
+      () => messages.id,
+      { onDelete: "set null" },
+    ),
+    idempotencyKey: text("idempotency_key").notNull(),
+    mode: text("mode").$type<ChatThreadRunMode>().notNull(),
+    jobId: text("job_id"),
+    streamKey: text("stream_key").notNull(),
+    status: text("status")
+      .$type<ChatThreadRunStatus>()
+      .notNull()
+      .default("queued"),
+    eventOffset: integer("event_offset").notNull().default(0),
+    requestJson: jsonb("request_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    snapshotJson: jsonb("snapshot_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true, mode: "date" }),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "chat_thread_runs_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "chat_thread_runs_thread_workspace_team_fk",
+      columns: [table.threadId, table.workspaceId, table.teamId],
+      foreignColumns: [threads.id, threads.workspaceId, threads.teamId],
+    }).onDelete("cascade"),
+    check(
+      "chat_thread_runs_status_check",
+      sql`${table.status} in ('queued', 'running', 'cancel_requested', 'completed', 'failed', 'cancelled')`,
+    ),
+    check(
+      "chat_thread_runs_mode_check",
+      sql`${table.mode} in ('send', 'refresh', 'edit')`,
+    ),
+    check(
+      "chat_thread_runs_event_offset_check",
+      sql`${table.eventOffset} >= 0`,
+    ),
+    uniqueIndex("chat_thread_runs_idempotency_uq").on(
+      table.teamId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    uniqueIndex("chat_thread_runs_thread_active_uq")
+      .on(table.teamId, table.workspaceId, table.threadId)
+      .where(
+        sql`${table.status} in ('queued', 'running', 'cancel_requested')`,
+      ),
+    index("chat_thread_runs_thread_status_created_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.threadId,
+      table.status,
+      desc(table.createdAt),
+    ),
+    index("chat_thread_runs_job_idx").on(table.jobId),
   ],
 );
 

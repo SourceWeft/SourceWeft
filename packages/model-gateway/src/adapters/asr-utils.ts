@@ -1,4 +1,5 @@
 import { ModelGatewayError } from "../errors";
+import { normalizeProviderUsage } from "../normalize/usage";
 import type {
   AsrResponseFormat,
   AsrSegment,
@@ -226,47 +227,5 @@ export function normalizeAsrWords(raw: unknown): AsrWord[] | undefined {
 }
 
 export function normalizeAsrUsage(raw: Record<string, unknown>): UsageInfo | undefined {
-  const usage = toRecord(raw.usage);
-  if (usage) {
-    const inputTokens = typeof usage.prompt_tokens === "number"
-      ? usage.prompt_tokens
-      : typeof usage.input_tokens === "number"
-        ? usage.input_tokens
-        : undefined;
-    const outputTokens = typeof usage.completion_tokens === "number"
-      ? usage.completion_tokens
-      : typeof usage.output_tokens === "number"
-        ? usage.output_tokens
-        : undefined;
-    const totalTokens = typeof usage.total_tokens === "number"
-      ? usage.total_tokens
-      : undefined;
-    return inputTokens !== undefined ||
-      outputTokens !== undefined ||
-      totalTokens !== undefined
-      ? { inputTokens, outputTokens, totalTokens }
-      : undefined;
-  }
-
-  const inferenceStatus = toRecord(raw.inference_status);
-  if (!inferenceStatus) {
-    return undefined;
-  }
-
-  const inputTokens = typeof inferenceStatus.tokens_input === "number"
-    ? inferenceStatus.tokens_input
-    : undefined;
-  const outputTokens = typeof inferenceStatus.tokens_generated === "number"
-    ? inferenceStatus.tokens_generated
-    : undefined;
-  return inputTokens !== undefined || outputTokens !== undefined
-    ? {
-        inputTokens,
-        outputTokens,
-        totalTokens:
-          inputTokens !== undefined && outputTokens !== undefined
-            ? inputTokens + outputTokens
-            : undefined,
-      }
-    : undefined;
+  return normalizeProviderUsage(raw);
 }

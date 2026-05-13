@@ -90,6 +90,10 @@ export function DashboardSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const hasChatPanel = pathname.startsWith("/dashboard/chat");
+  const [settingsRequest, setSettingsRequest] = React.useState<{
+    id: number;
+    tab: "account" | "team" | "usage" | "billing";
+  } | null>(null);
 
   // Pattern: /dashboard/chat/[threadId]. While a newly created chat is
   // navigating from /dashboard/chat to /dashboard/chat/[threadId], context has
@@ -204,7 +208,7 @@ export function DashboardSidebar() {
           </div>
         </div>
 
-        <DashboardAccountMenu />
+        <DashboardAccountMenu settingsRequest={settingsRequest} />
       </div>
 
       {hasChatPanel ? (
@@ -222,6 +226,9 @@ export function DashboardSidebar() {
             onCreateWorkspace={handleCreateWorkspace}
             onDeleteChat={handleDeleteChat}
             onLoadMoreChats={() => void loadMorePrivateChats()}
+            onOpenUsage={() =>
+              setSettingsRequest({ id: Date.now(), tab: "usage" })
+            }
             onOpenChat={(id) => router.push(`/dashboard/chat/${id}`)}
             onRenameWorkspace={handleRenameWorkspace}
             hasMorePrivateChats={hasMorePrivateChats}

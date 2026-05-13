@@ -93,7 +93,7 @@ function formatUsageDate(value: string) {
   }).format(date);
 }
 
-function SidebarUsageSummary() {
+function SidebarUsageSummary({ onOpenUsage }: { onOpenUsage?: () => void }) {
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
   const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
@@ -159,7 +159,12 @@ function SidebarUsageSummary() {
   const cycleEndsAt = summary ? formatUsageDate(summary.cycleEndAt) : "--";
 
   return (
-    <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-2.5">
+    <button
+      aria-label="Open usage"
+      className="w-full rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-2.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={onOpenUsage}
+      type="button"
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
           <Gauge className="size-3.5 shrink-0 text-muted-foreground" />
@@ -196,7 +201,7 @@ function SidebarUsageSummary() {
           </p>
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -631,6 +636,7 @@ export function DashboardSidebarChatPanel({
   onCreateChat,
   onDeleteChat,
   onLoadMoreChats,
+  onOpenUsage,
   onOpenChat,
   onCreateWorkspace,
   onRenameWorkspace,
@@ -652,6 +658,7 @@ export function DashboardSidebarChatPanel({
   onCreateChat: () => void;
   onDeleteChat: (id: string) => Promise<void>;
   onLoadMoreChats: () => void;
+  onOpenUsage?: () => void;
   onOpenChat: (id: string, title: string) => void;
   onCreateWorkspace: (name: string) => Promise<void>;
   onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>;
@@ -761,7 +768,7 @@ export function DashboardSidebarChatPanel({
       </SidebarFooter>
 
       <div className="border-t border-sidebar-border px-3.5 py-2.5">
-        <SidebarUsageSummary />
+        <SidebarUsageSummary onOpenUsage={onOpenUsage} />
       </div>
     </div>
   );

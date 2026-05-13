@@ -22,7 +22,10 @@ export function ensureObjectBody(value: unknown) {
   return value;
 }
 
-export function createSseResponse(stream: AsyncGenerator<string>) {
+export function createSseResponse(
+  stream: AsyncGenerator<string>,
+  options: { cancel?: "return" | "detach" } = {},
+) {
   const bodyStream = new ReadableStream({
     async start(controller) {
       try {
@@ -39,6 +42,9 @@ export function createSseResponse(stream: AsyncGenerator<string>) {
       }
     },
     async cancel() {
+      if (options.cancel === "detach") {
+        return;
+      }
       await stream.return(undefined);
     },
   });

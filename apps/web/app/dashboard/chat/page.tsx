@@ -54,6 +54,10 @@ import {
   type SourceItem,
 } from "./_components/source-types";
 import {
+  readStoredSourceSelection,
+  writeStoredSourceSelection,
+} from "./_components/source-selection-storage";
+import {
   desktopBridge,
   handleDesktopAuthDeepLink,
 } from "../../../lib/desktop-bridge";
@@ -448,24 +452,7 @@ export default function DashboardChatPage() {
       return;
     }
 
-    const raw = window.sessionStorage.getItem(
-      `chat:sources:${workspaceId}:current`,
-    );
-    if (!raw) {
-      setActiveSourceIds([]);
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      setActiveSourceIds(
-        Array.isArray(parsed)
-          ? parsed.filter((item): item is string => typeof item === "string")
-          : [],
-      );
-    } catch {
-      setActiveSourceIds([]);
-    }
+    setActiveSourceIds(readStoredSourceSelection(workspaceId, "current"));
   }, [workspaceId]);
 
   const persistActiveSourceIds = useCallback(
@@ -475,10 +462,7 @@ export default function DashboardChatPage() {
         return;
       }
 
-      window.sessionStorage.setItem(
-        `chat:sources:${workspaceId}:current`,
-        JSON.stringify(sourceIds),
-      );
+      writeStoredSourceSelection(workspaceId, "current", sourceIds);
     },
     [workspaceId],
   );

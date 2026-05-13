@@ -143,6 +143,7 @@ export type PreparedThreadTurn = {
   agentBaseCheckpoint: AgentCheckpointRef | null;
   agentRunThreadId: string;
   isFirstAssistantResponse: boolean;
+  isFirstAssistantAttempt: boolean;
   initialTitle: string;
   traceContext?: TraceContext;
   failurePersistence: "persist-error-turn" | "transient";
@@ -251,6 +252,8 @@ export type FinalizeThreadTurnCommand = {
   latencyMs: number;
   modelForMessage?: string | null;
   agentCheckpoint?: AgentCheckpointMetadata;
+  assistantMessageId?: string;
+  assistantMetadata?: Record<string, unknown>;
 };
 
 export type FinalizeThreadTurnInput = FinalizeThreadTurnCommand & {
