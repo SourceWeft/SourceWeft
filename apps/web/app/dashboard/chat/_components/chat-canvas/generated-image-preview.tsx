@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -134,6 +135,7 @@ export function GeneratedImagePreview({
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [scale, setScale] = useState(1);
+  const previewDialogRef = useRef<HTMLDivElement>(null);
 
   const imageStyle = useMemo<CSSProperties>(
     () => ({
@@ -227,10 +229,23 @@ export function GeneratedImagePreview({
       <DialogContent
         className="w-auto max-w-[calc(100vw-1rem)] gap-0 border-0 bg-transparent p-0 text-foreground ring-0 shadow-none sm:max-w-[calc(100vw-2rem)]"
         constrainWidth={false}
+        onEscapeKeyDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+        }}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          previewDialogRef.current?.focus({ preventScroll: true });
+        }}
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
-        <div className="flex max-h-[calc(100dvh-1rem)] flex-col items-center justify-center gap-3 sm:max-h-[calc(100dvh-2rem)]">
+        <div
+          className="flex max-h-[calc(100dvh-1rem)] flex-col items-center justify-center gap-3 outline-none sm:max-h-[calc(100dvh-2rem)]"
+          ref={previewDialogRef}
+          tabIndex={-1}
+        >
           <div className="max-h-[calc(100dvh-5.75rem)] max-w-[calc(100vw-1rem)] overflow-auto rounded-lg sm:max-h-[calc(100dvh-6.5rem)] sm:max-w-[calc(100vw-2rem)]">
             <div className="flex min-h-full min-w-full items-center justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element -- Previewing API-backed generated artifact URLs. */}
