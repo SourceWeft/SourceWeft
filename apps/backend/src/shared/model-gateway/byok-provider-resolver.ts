@@ -1,0 +1,153 @@
+import { and, eq } from "drizzle-orm";
+import { config } from "../config";
+import { db } from "../database";
+import { modelGatewayByokKeyRefs } from "../db/schema";
+import { decryptSecret } from "../secrets";
+import { normalizeDefaultHeaders } from "./runtime";
+
+export type ResolvedCustomByokProvider = {
+  providerName: string;
+  providerKind:
+    | "openai-compatible"
+    | "openrouter"
+    | "deepinfra"
+    | "siliconflow-cn"
+    | "openai"
+    | "anthropic"
+    | "gemini"
+    | "azure-openai";
+  baseUrl: string;
+  apiKey: string;
+  defaultHeaders: Record<string, string>;
+  keyRef: string;
+  hasUserScopedKey: boolean;
+};
+
+function resolveScopeFromMetadata(metadata?: Record<string, unknown>) {
+  return {
+    workspaceId:
+      typeof metadata?.workspace_id === "string" ? metadata.workspace_id : null,
+    teamId: typeof metadata?.team_id === "string" ? metadata.team_id : null,
+    userId: typeof metadata?.user_id === "string" ? metadata.user_id : null,
+  };
+}
+
+export async function listCustomByokProviders(input: {
+  workspaceId: string;
+  teamId: string;
+  userId?: string | null;
+}) {
+  const rows = await db
+    .select()
+    .from(modelGatewayByokKeyRefs)
+    .where(
+      and(
+        eq(modelGatewayByokKeyRefs.workspaceId, input.workspaceId),
+        eq(modelGatewayByokKeyRefs.teamId, input.teamId),
+        eq(modelGatewayByokKeyRefs.isActive, true),
+      ),
+    );
+
+  const visibleRows = rows.filter((row) =>
+    row.userId ? row.userId === (input.userId ?? null) : true,
+  );
+
+  const providerMap = new Map<
+    string,
+    {
+      providerName: string;
+      providerKind: ResolvedCustomByokProvider["providerKind"];
+      baseUrl: string | null;
+      keyRefs: string[];
+      hasUserScopedKey: boolean;
+      defaultHeaders: Record<string, string>;
+    }
+  >();
+
+  for (const row of visibleRows) {
+    const key = `${row.providerName}:${row.baseUrl ?? ""}`;
+    const existing = providerMap.get(key) ?? {
+      providerName: row.providerName,
+      providerKind: row.providerKind,
+      baseUrl: row.baseUrl,
+      keyRefs: [],
+      hasUserScopedKey: false,
+      defaultHeaders: normalizeDefaultHeaders(row.defaultHeadersJson),
+    };
+
+    existing.keyRefs.push(row.keyRef);
+    if (row.userId) {
+      existing.hasUserScopedKey = true;
+    }
+    if (!existing.baseUrl && row.baseUrl) {
+      existing.baseUrl = row.baseUrl;
+    }
+    if (Object.keys(existing.defaultHeaders).length === 0) {
+      existing.defaultHeaders = normalizeDefaultHeaders(row.defaultHeadersJson);
+    }
+    providerMap.set(key, existing);
+  }
+
+  return Array.from(providerMap.values()).map((provider) => ({
+    ...provider,
+    keyRefs: Array.from(new Set(provider.keyRefs)).sort(),
+  }));
+}
+
+export async function resolveCustomByokProvider(input: {
+  providerName: string;
+  apiKeyRef?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<ResolvedCustomByokProvider | null> {
+  const scope = resolveScopeFromMetadata(input.metadata);
+  if (!scope.workspaceId || !scope.teamId) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(modelGatewayByokKeyRefs)
+    .where(
+      and(
+        eq(modelGatewayByokKeyRefs.workspaceId, scope.workspaceId),
+        eq(modelGatewayByokKeyRefs.teamId, scope.teamId),
+        eq(modelGatewayByokKeyRefs.providerName, input.providerName),
+        eq(modelGatewayByokKeyRefs.isActive, true),
+      ),
+    );
+
+  const visibleRows = rows.filter((candidate) => {
+    if (input.apiKeyRef && candidate.keyRef !== input.apiKeyRef) {
+      return false;
+    }
+    if (!candidate.userId) {
+      return true;
+    }
+    return scope.userId ? candidate.userId === scope.userId : false;
+  });
+
+  const row =
+    visibleRows.find((candidate) => candidate.baseUrl && candidate.userId === scope.userId) ??
+    visibleRows.find((candidate) => candidate.baseUrl) ??
+    null;
+
+  if (!row || !row.baseUrl) {
+    return null;
+  }
+
+  const apiKey =
+    decryptSecret(row.apiKeyEncrypted, config.modelGatewayEncryptionSecret) || "";
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    providerName: row.providerName,
+    providerKind: row.providerKind,
+    baseUrl: row.baseUrl,
+    apiKey,
+    defaultHeaders: normalizeDefaultHeaders(row.defaultHeadersJson),
+    keyRef: row.keyRef,
+    hasUserScopedKey: row.userId !== null,
+  };
+}

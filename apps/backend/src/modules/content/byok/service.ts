@@ -1,8 +1,13 @@
 import { config } from "../../../shared/config";
 import { encryptSecret } from "../../../shared/secrets";
+import {
+  listCustomByokProviders,
+} from "../../../shared/model-gateway/byok-provider-resolver";
+import { loadRoutedGatewayConfig } from "../../../shared/model-gateway/runtime";
 import { ContentError } from "../errors";
 import { requireContentWorkspace } from "../content-support";
 import {
+  type ByokProviderListItem,
   createByokKeyRefRecord,
   deleteByokKeyRefRecord,
   listByokKeyRefRecords,
@@ -27,6 +32,9 @@ export class ContentByokService {
     providerName: string;
     keyRef: string;
     apiKey: string;
+    providerKind?: string;
+    baseUrl?: string | null;
+    defaultHeaders?: Record<string, string>;
     metadata?: Record<string, unknown>;
   }) {
     const workspace = await requireContentWorkspace(input);
@@ -41,10 +49,61 @@ export class ContentByokService {
         input.apiKey,
         config.modelGatewayEncryptionSecret,
       ),
+      providerKind: input.providerKind,
+      baseUrl: input.baseUrl,
+      defaultHeaders: input.defaultHeaders,
       metadata: input.metadata,
     });
 
     return { item };
+  }
+
+  async listByokProviders(input: { workspaceId: string; userId: string }) {
+    const workspace = await requireContentWorkspace(input);
+
+    const [routedConfig, customProviders] = await Promise.all([
+      loadRoutedGatewayConfig(),
+      listCustomByokProviders({
+        workspaceId: workspace.id,
+        teamId: workspace.organizationId,
+        userId: input.userId,
+      }),
+    ]);
+
+    const items: ByokProviderListItem[] = [];
+
+    for (const [providerName, provider] of Object.entries(
+      routedConfig?.providers ?? {},
+    )) {
+      items.push({
+        providerName,
+        providerKind: provider.kind,
+        baseUrl: provider.baseUrl,
+        system: true,
+        ...(provider.isBYOK && !provider.hasGlobalApiKey
+          ? { isBYOKOnly: true }
+          : {}),
+        ...(provider.hasGlobalApiKey ? { hasApiKey: true } : {}),
+      });
+    }
+
+    for (const provider of customProviders) {
+      items.push({
+        providerName: provider.providerName,
+        providerKind: provider.providerKind,
+        baseUrl: provider.baseUrl,
+        system: false,
+        hasApiKey: provider.keyRefs.length > 0,
+        keyRefs: provider.keyRefs,
+        defaultHeaders: provider.defaultHeaders,
+      });
+    }
+
+    return {
+      items: items.sort((left, right) =>
+        left.providerName.localeCompare(right.providerName),
+      ),
+    };
   }
 
   async deleteByokKeyRef(input: {

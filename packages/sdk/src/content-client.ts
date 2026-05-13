@@ -32,6 +32,7 @@ import type {
   GetWorkingFileResponse,
   ListArtifactsResponse,
   ListThreadModelCatalogResponse,
+  ListByokProvidersResponse,
   ListByokKeyRefsResponse,
   ListSourceMentionsRequest,
   ListSourceMentionsResponse,
@@ -308,6 +309,12 @@ export class ContentClient {
   listThreadModelCatalog(workspaceId: string) {
     return this.http.get<ListThreadModelCatalogResponse>(
       `/v1/workspaces/${encode(workspaceId)}/model-gateway/models`,
+    );
+  }
+
+  listByokProviders(workspaceId: string) {
+    return this.http.get<ListByokProvidersResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-providers`,
     );
   }
 

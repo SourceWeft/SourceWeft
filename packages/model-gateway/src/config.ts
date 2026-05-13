@@ -1,5 +1,6 @@
 import { ModelGatewayError } from "./errors";
 import type {
+  CustomByokProviderConfig,
   GatewayExecutionInput,
   ModelGatewayConfig,
   RequestOptions,
@@ -203,10 +204,12 @@ export function resolveModelGatewayConfig(
     },
     allowNonDefaultAliases: config.allowNonDefaultAliases ?? false,
     allowedModelAliases: Object.keys(routes),
+    allowedBaseUrls: config.allowedBaseUrls ?? [],
     modeDefault: config.modeDefault ?? "GLOBAL",
     routingStrategyDefault: config.routingStrategyDefault ?? "priority",
     byokProviderAllowList: config.byokProviderAllowList ?? [],
     resolveApiKeyRef: config.resolveApiKeyRef,
+    resolveCustomByokProvider: config.resolveCustomByokProvider,
     logger: config.logger ?? {},
     requestMetadata: config.requestMetadata ?? {},
     observeSink: config.observeSink,
@@ -233,16 +236,12 @@ export function assertModelAliasAllowed(
   }
 }
 
-async function resolveByokApiKey(
+async function maybeResolveByokApiKey(
   config: ResolvedModelGatewayConfig,
   execution: GatewayExecutionInput,
-): Promise<string> {
+): Promise<string | undefined> {
   if (!execution.byok) {
-    throw new ModelGatewayError({
-      code: "POLICY",
-      message: "BYOK mode requires byok provider credentials",
-      retryable: false,
-    });
+    return undefined;
   }
 
   if (execution.byok.apiKey) {
@@ -262,11 +261,77 @@ async function resolveByokApiKey(
     }
   }
 
+  return undefined;
+}
+
+async function resolveByokApiKey(
+  config: ResolvedModelGatewayConfig,
+  execution: GatewayExecutionInput,
+): Promise<string> {
+  const apiKey = await maybeResolveByokApiKey(config, execution);
+  if (apiKey) {
+    return apiKey;
+  }
+
   throw new ModelGatewayError({
     code: "AUTH",
-    message: `No API key resolved for BYOK provider '${execution.byok.provider}'`,
+    message: `No API key resolved for BYOK provider '${execution.byok?.provider}'`,
     retryable: false,
   });
+}
+
+function resolveExecutionMetadata(
+  execution: GatewayExecutionInput,
+): Record<string, unknown> | undefined {
+  if (!("metadata" in execution)) {
+    return undefined;
+  }
+
+  const { metadata } = execution as { metadata?: unknown };
+  return metadata && typeof metadata === "object"
+    ? (metadata as Record<string, unknown>)
+    : undefined;
+}
+
+async function resolveCustomByokProvider(
+  config: ResolvedModelGatewayConfig,
+  execution: GatewayExecutionInput & { model: string },
+  providerName: string,
+  apiKey?: string,
+): Promise<ResolvedGatewayProviderConfig | null> {
+  const customProvider = await config.resolveCustomByokProvider?.({
+    provider: providerName,
+    model: execution.model,
+    profileAlias: execution.profileAlias,
+    apiKey,
+    apiKeyRef: execution.byok?.apiKeyRef,
+    metadata: resolveExecutionMetadata(execution),
+  });
+
+  if (!customProvider?.baseUrl) {
+    return null;
+  }
+
+  return normalizeCustomByokProvider(providerName, customProvider, config.allowedBaseUrls);
+}
+
+function normalizeCustomByokProvider(
+  name: string,
+  provider: CustomByokProviderConfig,
+  allowedBaseUrls: readonly string[],
+): ResolvedGatewayProviderConfig {
+  const baseUrl = normalizeBaseUrl(provider.baseUrl);
+  ensureBaseUrlAllowed(baseUrl, allowedBaseUrls);
+
+  return {
+    name,
+    kind: provider.kind,
+    baseUrl,
+    apiKey: provider.apiKey,
+    defaultHeaders: provider.defaultHeaders ?? {},
+    supports: provider.supports ?? [],
+    enabled: provider.enabled ?? true,
+  };
 }
 
 function selectTargetByStrategy(
@@ -304,7 +369,10 @@ function selectTargetByStrategy(
 
 export async function resolveRequestTarget(
   config: ResolvedModelGatewayConfig,
-  execution: GatewayExecutionInput & { model: string },
+  execution: GatewayExecutionInput & {
+    model: string;
+    metadata?: Record<string, unknown>;
+  },
 ): Promise<ResolvedRequestTarget> {
   const mode = execution.executionMode ?? config.modeDefault;
 
@@ -329,7 +397,18 @@ export async function resolveRequestTarget(
       });
     }
 
-    const provider = config.providers[providerName];
+    const resolvedApiKey = await maybeResolveByokApiKey(config, execution);
+    const configuredProvider = config.providers[providerName];
+    const customProvider = configuredProvider
+      ? null
+      : await resolveCustomByokProvider(
+        config,
+        execution,
+        providerName,
+        resolvedApiKey,
+      );
+    const provider = configuredProvider ?? customProvider;
+
     if (!provider || !provider.enabled) {
       throw new ModelGatewayError({
         code: "BAD_REQUEST",
@@ -338,7 +417,15 @@ export async function resolveRequestTarget(
       });
     }
 
-    const apiKey = await resolveByokApiKey(config, execution);
+    const apiKey = customProvider?.apiKey ?? resolvedApiKey;
+    if (!apiKey) {
+      throw new ModelGatewayError({
+        code: "AUTH",
+        message: `No API key resolved for BYOK provider '${providerName}'`,
+        retryable: false,
+      });
+    }
+
     return {
       provider: provider.name,
       providerKind: provider.kind,
@@ -347,7 +434,7 @@ export async function resolveRequestTarget(
       apiKey,
       defaultHeaders: provider.defaultHeaders,
       routeDecision: {
-        alias: execution.model,
+        alias: execution.profileAlias ?? execution.model,
         mode,
         strategy: "priority",
         provider: provider.name,
@@ -357,14 +444,15 @@ export async function resolveRequestTarget(
     };
   }
 
-  const route = config.routes[execution.model];
+  const routeKey = execution.profileAlias ?? execution.model;
+  const route = config.routes[routeKey];
   if (!route) {
-    assertModelAliasAllowed(execution.model, config);
+    assertModelAliasAllowed(routeKey, config);
     const provider = config.providers[DEFAULT_PROVIDER_NAME];
     if (!provider) {
       throw new ModelGatewayError({
         code: "BAD_REQUEST",
-        message: `No route configured for alias '${execution.model}'`,
+        message: `No route configured for alias '${routeKey}'`,
         retryable: false,
       });
     }
@@ -376,7 +464,7 @@ export async function resolveRequestTarget(
       apiKey: provider.apiKey,
       defaultHeaders: provider.defaultHeaders,
       routeDecision: {
-        alias: execution.model,
+        alias: routeKey,
         mode,
         strategy: "priority",
         provider: provider.name,
@@ -403,7 +491,7 @@ export async function resolveRequestTarget(
   if (candidates.length === 0) {
     throw new ModelGatewayError({
       code: "UPSTREAM",
-      message: `No active route target available for alias '${execution.model}'`,
+      message: `No active route target available for alias '${routeKey}'`,
       retryable: true,
     });
   }
@@ -412,7 +500,7 @@ export async function resolveRequestTarget(
   if (!selected) {
     throw new ModelGatewayError({
       code: "UPSTREAM",
-      message: `Failed to select route target for alias '${execution.model}'`,
+      message: `Failed to select route target for alias '${routeKey}'`,
       retryable: true,
     });
   }
@@ -426,7 +514,7 @@ export async function resolveRequestTarget(
     apiKey: provider.apiKey,
     defaultHeaders: provider.defaultHeaders,
     routeDecision: {
-      alias: execution.model,
+      alias: routeKey,
       mode,
       strategy: route.strategy,
       provider: provider.name,

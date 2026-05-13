@@ -16,6 +16,7 @@ import {
 import { createLlmObservabilitySink } from "./llm-observability-sink";
 import { decryptSecret } from "../secrets";
 import type { RoutedGatewayConfig } from "./types";
+import { resolveCustomByokProvider } from "./byok-provider-resolver";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
@@ -124,6 +125,49 @@ export async function resolveByokApiKeyRef(input: {
   );
 }
 
+export async function resolveByokProviderRuntime(input: {
+  provider: string;
+  apiKeyRef?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const activeConfig = await loadRoutedGatewayConfig();
+  const systemProvider = activeConfig?.providers[input.provider] ?? null;
+
+  const customProvider = await resolveCustomByokProvider({
+    providerName: input.provider,
+    apiKeyRef: input.apiKeyRef,
+    metadata: input.metadata,
+  });
+
+  if (customProvider) {
+    return {
+      source: "custom" as const,
+      providerName: customProvider.providerName,
+      providerKind: customProvider.providerKind,
+      baseUrl: customProvider.baseUrl,
+      apiKey: customProvider.apiKey,
+      defaultHeaders: customProvider.defaultHeaders,
+      keyRef: customProvider.keyRef,
+      hasUserScopedKey: customProvider.hasUserScopedKey,
+    };
+  }
+
+  if (!systemProvider) {
+    return null;
+  }
+
+  return {
+    source: "system" as const,
+    providerName: input.provider,
+    providerKind: systemProvider.kind,
+    baseUrl: systemProvider.baseUrl,
+    apiKey: systemProvider.apiKey ?? null,
+    defaultHeaders: systemProvider.defaultHeaders,
+    keyRef: input.apiKeyRef ?? null,
+    hasUserScopedKey: false,
+  };
+}
+
 export async function findActiveConfigVersionRow(): Promise<ActiveConfigVersionRow | null> {
   const [row] = await db
     .select()
@@ -199,6 +243,10 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
               config.modelGatewayEncryptionSecret,
             ) || undefined
           : undefined,
+      isBYOK: gatewayRow?.isBYOK ?? false,
+      hasGlobalApiKey:
+        typeof gatewayRow?.apiKeyEncrypted === "string" &&
+        gatewayRow.apiKeyEncrypted.length > 0,
       defaultHeaders: withOpenRouterAttributionHeaders({
         providerKind: row.providerKind,
         defaultHeaders: normalizeDefaultHeaders(
@@ -294,6 +342,24 @@ export function buildRoutedModelGatewayConfig(
     maxRetries,
     allowNonDefaultAliases: false,
     resolveApiKeyRef: resolveByokApiKeyRef,
+    resolveCustomByokProvider: async (input) => {
+      const provider = await resolveByokProviderRuntime({
+        provider: input.provider,
+        apiKeyRef: input.apiKeyRef,
+        metadata: input.metadata,
+      });
+
+      if (!provider) {
+        return null;
+      }
+
+      return {
+        kind: provider.providerKind,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey ?? undefined,
+        defaultHeaders: provider.defaultHeaders,
+      };
+    },
     observeSink: createLlmObservabilitySink(),
   };
 }

@@ -14,6 +14,7 @@ export type LlmThinkingConfig = {
 export type LlmExecutionConfig = {
   profileAlias?: string;
   modelAlias?: string;
+  providerModel?: string;
   executionMode?: "GLOBAL" | "BYOK";
   providerHint?: string;
   byok?: {

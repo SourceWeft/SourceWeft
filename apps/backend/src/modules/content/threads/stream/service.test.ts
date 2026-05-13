@@ -327,6 +327,7 @@ const prepared: PreparedThreadTurn = {
   assistantMessageParentId: null,
   profileAlias: "test-profile",
   modelAlias: "test-model",
+  providerModel: "test-model",
   chatProfile: {
     gatewayConfigId: "gateway-1",
   } as PreparedThreadTurn["chatProfile"],

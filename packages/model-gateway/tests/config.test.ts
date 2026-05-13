@@ -4,6 +4,7 @@ import {
   DEFAULT_ALLOWED_MODEL_ALIASES,
   ModelGatewayError,
   resolveModelGatewayConfig,
+  resolveRequestTarget,
 } from "../src/index";
 import {
   assertModelAliasAllowed,
@@ -187,4 +188,122 @@ test("resolveModelGatewayConfig accepts gemini providers", () => {
   });
 
   assert.equal(resolved.providers.gemini?.kind, "gemini");
+});
+
+test("resolveRequestTarget prefers profileAlias for GLOBAL routing", async () => {
+  const resolved = resolveModelGatewayConfig({
+    fetch: fetchStub,
+    allowNonDefaultAliases: true,
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "profile-private": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4.1-mini", priority: 1 }],
+      },
+    },
+  });
+
+  const target = await resolveRequestTarget(resolved, {
+    model: "chat-default",
+    profileAlias: "profile-private",
+  });
+
+  assert.equal(target.provider, "openai");
+  assert.equal(target.providerModel, "gpt-4.1-mini");
+  assert.deepEqual(target.routeDecision, {
+    alias: "profile-private",
+    mode: "GLOBAL",
+    strategy: "priority",
+    provider: "openai",
+    providerKind: "openai",
+  });
+});
+
+test("resolveRequestTarget falls back to custom BYOK provider resolver", async () => {
+  const resolved = resolveModelGatewayConfig({
+    fetch: fetchStub,
+    baseUrl: "https://gateway.example.com",
+    byokProviderAllowList: ["custom-openai"],
+    resolveCustomByokProvider: async (input) => {
+      assert.equal(input.provider, "custom-openai");
+      assert.equal(input.model, "my-custom-model");
+      assert.equal(input.profileAlias, "catalog-profile");
+      assert.equal(input.apiKey, "user-key");
+      assert.deepEqual(input.metadata, { workspaceId: "ws-1" });
+      return {
+        kind: "openai-compatible",
+        baseUrl: "https://custom.example.com/v1/",
+        defaultHeaders: {
+          "X-Custom": "1",
+        },
+      };
+    },
+  });
+
+  const target = await resolveRequestTarget(resolved, {
+    executionMode: "BYOK",
+    model: "my-custom-model",
+    profileAlias: "catalog-profile",
+    byok: {
+      provider: "custom-openai",
+      apiKey: "user-key",
+    },
+    metadata: {
+      workspaceId: "ws-1",
+    },
+  });
+
+  assert.equal(target.provider, "custom-openai");
+  assert.equal(target.providerKind, "openai-compatible");
+  assert.equal(target.providerModel, "my-custom-model");
+  assert.equal(target.baseUrl, "https://custom.example.com/v1");
+  assert.equal(target.apiKey, "user-key");
+  assert.deepEqual(target.defaultHeaders, {
+    "X-Custom": "1",
+  });
+  assert.deepEqual(target.routeDecision, {
+    alias: "catalog-profile",
+    mode: "BYOK",
+    strategy: "priority",
+    provider: "custom-openai",
+    providerKind: "openai-compatible",
+  });
+});
+
+test("resolveRequestTarget keeps BYOK routeDecision alias on raw model without profileAlias", async () => {
+  const resolved = resolveModelGatewayConfig({
+    fetch: fetchStub,
+    baseUrl: "https://gateway.example.com",
+    providers: {
+      deepseek: {
+        kind: "openai-compatible",
+        baseUrl: "https://api.deepseek.com/v1",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "deepseek", model: "deepseek-chat", priority: 1 }],
+      },
+    },
+  });
+
+  const target = await resolveRequestTarget(resolved, {
+    executionMode: "BYOK",
+    model: "deepseek-chat",
+    byok: {
+      provider: "deepseek",
+      apiKey: "deepseek-key",
+    },
+  });
+
+  assert.equal(target.providerModel, "deepseek-chat");
+  assert.equal(target.routeDecision.alias, "deepseek-chat");
+  assert.equal(target.routeDecision.mode, "BYOK");
 });

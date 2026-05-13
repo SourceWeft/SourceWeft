@@ -69,6 +69,7 @@ export interface ByokCredentialsInput {
 
 export interface GatewayExecutionInput {
   executionMode?: GatewayExecutionMode;
+  profileAlias?: string;
   providerHint?: string;
   byok?: ByokCredentialsInput;
 }
@@ -641,6 +642,14 @@ export interface ModelGatewayConfig {
     apiKeyRef: string;
     metadata?: Record<string, unknown>;
   }) => Promise<string | null | undefined>;
+  resolveCustomByokProvider?: (input: {
+    provider: string;
+    model: string;
+    profileAlias?: string;
+    apiKey?: string;
+    apiKeyRef?: string;
+    metadata?: Record<string, unknown>;
+  }) => Promise<CustomByokProviderConfig | null | undefined>;
   fetch?: typeof fetch;
   timeoutMs?: number;
   maxRetries?: number;
@@ -662,6 +671,15 @@ export interface ResolvedGatewayProviderConfig {
   defaultHeaders: Record<string, string>;
   supports: readonly string[];
   enabled: boolean;
+}
+
+export interface CustomByokProviderConfig {
+  kind: ProviderKind;
+  baseUrl: string;
+  apiKey?: string;
+  defaultHeaders?: Record<string, string>;
+  supports?: readonly string[];
+  enabled?: boolean;
 }
 
 export interface ResolvedModelRouteTarget {
@@ -689,10 +707,12 @@ export interface ResolvedModelGatewayConfig {
   defaultHeaders: Record<string, string>;
   allowNonDefaultAliases: boolean;
   allowedModelAliases: readonly string[];
+  allowedBaseUrls: readonly string[];
   modeDefault: GatewayExecutionMode;
   routingStrategyDefault: RoutingStrategy;
   byokProviderAllowList: readonly string[];
   resolveApiKeyRef?: ModelGatewayConfig["resolveApiKeyRef"];
+  resolveCustomByokProvider?: ModelGatewayConfig["resolveCustomByokProvider"];
   logger: GatewayLogger;
   requestMetadata: Record<string, unknown>;
   observeSink?: ObserveSink;

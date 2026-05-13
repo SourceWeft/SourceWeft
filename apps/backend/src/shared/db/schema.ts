@@ -881,6 +881,15 @@ export const modelGatewayByokKeyRefs = pgTable(
     providerName: text("provider_name").notNull(),
     keyRef: text("key_ref").notNull(),
     apiKeyEncrypted: text("api_key_encrypted").notNull(),
+    baseUrl: text("base_url"),
+    providerKind: text("provider_kind")
+      .$type<ModelGatewayProviderKind>()
+      .notNull()
+      .default("openai-compatible"),
+    defaultHeadersJson: jsonb("default_headers")
+      .$type<Record<string, string>>()
+      .notNull()
+      .default(emptyJsonObject),
     isActive: boolean("is_active").notNull().default(true),
     metadataJson: jsonb("metadata_json")
       .$type<Record<string, unknown>>()
@@ -912,6 +921,10 @@ export const modelGatewayByokKeyRefs = pgTable(
       table.userId,
       table.providerName,
       table.keyRef,
+    ),
+    check(
+      "model_gateway_byok_key_refs_kind_check",
+      sql`${table.providerKind} in ('openai-compatible', 'openrouter', 'deepinfra', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
     ),
   ],
 );

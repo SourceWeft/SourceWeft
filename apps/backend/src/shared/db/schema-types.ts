@@ -13,4 +13,15 @@ export interface ModelPricing {
   price_source: "litellm" | "manual" | "openrouter" | "unknown";
   litellm_key: string | null;
   price_updated_at: string | null;
+  litellm_provider?: string | null;
+  litellm_mode?: string | null;
+  supportsImageInput?: boolean;
+  supports_function_calling?: boolean | null;
+  supports_parallel_function_calling?: boolean | null;
+  supports_response_schema?: boolean | null;
+  supports_tool_choice?: boolean | null;
+  supports_prompt_caching?: boolean | null;
+  max_input_tokens?: number | null;
+  max_output_tokens?: number | null;
+  max_completion_tokens?: number | null;
 }

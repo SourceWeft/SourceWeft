@@ -38,6 +38,7 @@ export type {
   ChatCompleteResult,
   ChatStreamEvent,
   ChatStreamInput,
+  CustomByokProviderConfig,
   EmbedBatchInput,
   EmbedBatchResult,
   EmbedInput,

@@ -1317,6 +1317,7 @@ export async function* invokeDeepAgentTurn(input: {
 
   const agent = await createThreadAgent({
     modelAlias: input.prepared.modelAlias,
+    providerModel: input.prepared.providerModel,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     tools: [retrievalTool, ...webTools, ...artifactTools],
     backend,
@@ -1328,6 +1329,7 @@ export async function* invokeDeepAgentTurn(input: {
     traceContext: input.traceContext,
     execution: {
       executionMode: input.llm?.executionMode,
+      profileAlias: input.prepared.profileAlias,
       providerHint: input.llm?.providerHint,
       byok: input.llm?.byok,
       thinking: input.llm?.thinking,

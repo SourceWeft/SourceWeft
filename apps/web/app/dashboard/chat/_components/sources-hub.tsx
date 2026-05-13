@@ -258,6 +258,21 @@ export type ArtifactListItem = Awaited<
   ReturnType<typeof contentClient.listArtifacts>
 >["items"][number];
 
+const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
+const threadWorkfilesCache = new Map<string, WorkfileListItem[]>();
+
+function cloneArtifactItems(items: ArtifactListItem[]) {
+  return items.map((item) => ({ ...item }));
+}
+
+function cloneWorkfileItems(items: WorkfileListItem[]) {
+  return items.map((item) => ({ ...item }));
+}
+
+function getThreadWorkfilesCacheKey(workspaceId: string, threadId: string) {
+  return `${workspaceId}:${threadId}`;
+}
+
 type DisplayCitationItem = {
   id: string;
   sourceTitle: string;
@@ -2258,6 +2273,8 @@ export function SourcesHub({
   workfilesRefreshKey = 0,
   workspaceId,
   workspaceName,
+  initialSources = [],
+  initialSourcesLoaded = false,
   onSourceLoad,
   onArtifactOpen,
   onSkillsCatalogChange,
@@ -2280,6 +2297,8 @@ export function SourcesHub({
   workfilesRefreshKey?: number;
   workspaceId?: string | null;
   workspaceName?: string | null;
+  initialSources?: SourceItem[];
+  initialSourcesLoaded?: boolean;
   onSourceLoad?: (sources: SourceItem[]) => void;
   onArtifactOpen?: (artifact: ArtifactListItem) => void;
   onSkillsCatalogChange?: () => void | Promise<void>;
@@ -2299,7 +2318,7 @@ export function SourcesHub({
     Connectors: "",
   });
   const searchQuery = searchQueries[activeTab];
-  const [sources, setSources] = useState<SourceItem[]>([]);
+  const [sources, setSources] = useState<SourceItem[]>(initialSources);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
@@ -2420,6 +2439,10 @@ export function SourcesHub({
     setCitationScope("current");
   }, [mode]);
 
+  useEffect(() => {
+    setSources(initialSources);
+  }, [initialSources]);
+
   const refreshSources = useCallback(async () => {
     if (!workspaceId) {
       setSources([]);
@@ -2467,6 +2490,10 @@ export function SourcesHub({
     try {
       const result = await contentClient.listWorkingFiles(workspaceId, threadId);
       setWorkfiles(result.items);
+      threadWorkfilesCache.set(
+        getThreadWorkfilesCacheKey(workspaceId, threadId),
+        cloneWorkfileItems(result.items),
+      );
     } catch (error) {
       setWorkfiles([]);
       setWorkfilesLoadingError(getErrorMessage(error, "Failed to load workfiles."));
@@ -2489,6 +2516,7 @@ export function SourcesHub({
         limit: 100,
       });
       setArtifacts(result.items);
+      workspaceArtifactsCache.set(workspaceId, cloneArtifactItems(result.items));
     } catch (error) {
       setArtifacts([]);
       setArtifactsLoadingError(
@@ -2500,16 +2528,63 @@ export function SourcesHub({
   }, [workspaceId]);
 
   useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+
+    if (initialSourcesLoaded) {
+      setLoadingError(null);
+      setIsLoading(false);
+      onSourceLoad?.(initialSources);
+      return;
+    }
+
     void refreshSources();
-  }, [refreshSources]);
+  }, [
+    workspaceId,
+    initialSources,
+    initialSourcesLoaded,
+    onSourceLoad,
+    refreshSources,
+  ]);
 
   useEffect(() => {
+    if (!workspaceId || !threadId || mode !== "thread") {
+      setWorkfiles([]);
+      setWorkfilesLoadingError(null);
+      return;
+    }
+
+    const cached = threadWorkfilesCache.get(
+      getThreadWorkfilesCacheKey(workspaceId, threadId),
+    );
+    if (cached) {
+      setWorkfiles(cloneWorkfileItems(cached));
+      setWorkfilesLoadingError(null);
+      setIsLoadingWorkfiles(false);
+      return;
+    }
+
     void refreshWorkfiles();
-  }, [refreshWorkfiles]);
+  }, [mode, refreshWorkfiles, threadId, workspaceId]);
 
   useEffect(() => {
+    if (!workspaceId) {
+      setArtifacts([]);
+      setArtifactsLoadingError(null);
+      return;
+    }
+
+    if (workspaceArtifactsCache.has(workspaceId)) {
+      const cached = workspaceArtifactsCache.get(workspaceId) ?? [];
+      setArtifacts(cloneArtifactItems(cached));
+      setArtifactsLoadingError(null);
+      setIsLoadingArtifacts(false);
+      return;
+    }
+
     void refreshArtifacts();
-  }, [refreshArtifacts]);
+  }, [refreshArtifacts, workspaceId]);
 
   useEffect(() => {
     if (workfilesRefreshKey > 0) {

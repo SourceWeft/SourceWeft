@@ -136,6 +136,7 @@ export type PreparedThreadTurn = {
   assistantMessageParentId: string | null;
   profileAlias: string;
   modelAlias: string;
+  providerModel: string;
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
   llm: LlmExecutionConfig | undefined;
   llmIdempotencyKey: string;

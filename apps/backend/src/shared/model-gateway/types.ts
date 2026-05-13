@@ -42,6 +42,8 @@ export type RoutedGatewayConfig = {
         | "azure-openai";
       baseUrl: string;
       apiKey?: string;
+      isBYOK: boolean;
+      hasGlobalApiKey: boolean;
       defaultHeaders: Record<string, string>;
       supports: string[];
       timeoutMs: number;

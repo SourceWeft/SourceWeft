@@ -2,9 +2,35 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../../../shared/database";
 import { modelGatewayByokKeyRefs } from "../../../shared/db/schema";
-import type { ByokKeyRefRecord } from "../types";
 
 type ByokKeyRefRow = typeof modelGatewayByokKeyRefs.$inferSelect;
+
+export type ByokKeyRefRecord = {
+  id: string;
+  teamId: string;
+  workspaceId: string;
+  userId: string | null;
+  providerName: string;
+  keyRef: string;
+  providerKind: string;
+  baseUrl: string | null;
+  defaultHeaders: Record<string, string>;
+  isActive: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ByokProviderListItem = {
+  providerName: string;
+  providerKind: string;
+  baseUrl: string | null;
+  system: boolean;
+  isBYOKOnly?: boolean;
+  hasApiKey?: boolean;
+  keyRefs?: string[];
+  defaultHeaders?: Record<string, string>;
+};
 
 function mapByokKeyRef(row: ByokKeyRefRow): ByokKeyRefRecord {
   return {
@@ -14,6 +40,9 @@ function mapByokKeyRef(row: ByokKeyRefRow): ByokKeyRefRecord {
     userId: row.userId,
     providerName: row.providerName,
     keyRef: row.keyRef,
+    providerKind: row.providerKind,
+    baseUrl: row.baseUrl,
+    defaultHeaders: row.defaultHeadersJson ?? {},
     isActive: row.isActive,
     metadata: row.metadataJson ?? {},
     createdAt: row.createdAt.toISOString(),
@@ -50,6 +79,9 @@ export async function createByokKeyRefRecord(input: {
   providerName: string;
   keyRef: string;
   apiKeyEncrypted: string;
+  providerKind?: string;
+  baseUrl?: string | null;
+  defaultHeaders?: Record<string, string>;
   metadata?: Record<string, unknown>;
 }) {
   const [row] = await db
@@ -62,6 +94,9 @@ export async function createByokKeyRefRecord(input: {
       providerName: input.providerName,
       keyRef: input.keyRef,
       apiKeyEncrypted: input.apiKeyEncrypted,
+      providerKind: (input.providerKind ?? "openai-compatible") as ByokKeyRefRow["providerKind"],
+      baseUrl: input.baseUrl ?? null,
+      defaultHeadersJson: input.defaultHeaders ?? {},
       isActive: true,
       metadataJson: input.metadata ?? {},
     })
@@ -74,6 +109,9 @@ export async function createByokKeyRefRecord(input: {
       ],
       set: {
         apiKeyEncrypted: input.apiKeyEncrypted,
+        providerKind: (input.providerKind ?? "openai-compatible") as ByokKeyRefRow["providerKind"],
+        baseUrl: input.baseUrl ?? null,
+        defaultHeadersJson: input.defaultHeaders ?? {},
         isActive: true,
         metadataJson: input.metadata ?? {},
         updatedAt: new Date(),

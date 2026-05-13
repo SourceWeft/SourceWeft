@@ -890,29 +890,36 @@ function resolvePreparedLlmConfig(input: {
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
   llm?: LlmExecutionConfig;
 }): LlmExecutionConfig | undefined {
-  if (!input.llm?.thinking) {
-    return input.llm;
-  }
-
   const configJson =
     input.chatProfile.configJson &&
     typeof input.chatProfile.configJson === "object"
       ? (input.chatProfile.configJson as Record<string, unknown>)
       : {};
-  const supportedParameters = normalizeSupportedParameters(
-    configJson.supportedParameters,
-  );
-  const supportedEfforts = normalizeSupportedEfforts(
-    configJson.supportedEfforts,
-  );
+  const supportedParameters = input.llm?.thinking
+    ? normalizeSupportedParameters(configJson.supportedParameters)
+    : undefined;
+  const supportedEfforts = input.llm?.thinking
+    ? normalizeSupportedEfforts(configJson.supportedEfforts)
+    : undefined;
 
   return {
     ...input.llm,
-    thinking: {
-      ...input.llm.thinking,
-      supportedParameters,
-      supportedEfforts,
-    },
+    profileAlias: input.llm?.profileAlias ?? input.chatProfile.profileAlias,
+    modelAlias: input.llm?.modelAlias ?? input.chatProfile.modelAlias,
+    providerModel:
+      input.llm?.providerModel ??
+      (input.llm?.executionMode === "BYOK"
+        ? input.llm?.modelAlias ?? input.chatProfile.modelAlias
+        : input.chatProfile.modelAlias),
+    ...(input.llm?.thinking
+      ? {
+          thinking: {
+            ...input.llm.thinking,
+            supportedParameters,
+            supportedEfforts,
+          },
+        }
+      : {}),
   };
 }
 
@@ -1043,6 +1050,11 @@ export async function prepareThreadTurn(
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);
   const llm = resolvePreparedLlmConfig({ chatProfile, llm: input.llm });
+  const providerModel =
+    llm?.providerModel?.trim() ||
+    (llm?.executionMode === "BYOK"
+      ? llm?.modelAlias?.trim() || modelAlias
+      : modelAlias);
   const userMessageId = existingUserMessage?.id ?? randomUUID();
   const hasSubmittedImages = (input.images?.length ?? 0) > 0;
   const savedInputImages = existingUserMessage || !hasSubmittedImages
@@ -1268,6 +1280,7 @@ export async function prepareThreadTurn(
     assistantMessageParentId,
     profileAlias,
     modelAlias,
+    providerModel,
     chatProfile,
     llm,
     llmIdempotencyKey,

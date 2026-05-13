@@ -452,7 +452,8 @@ export const messageSchema = z.object({
 
 const byokConfigSchema = z.object({
   provider: z.string().trim().min(1).max(100),
-  apiKeyRef: z.string().trim().min(1).max(256),
+  apiKeyRef: z.string().trim().min(1).max(256).optional(),
+  apiKey: z.string().trim().min(1).max(4096).optional(),
 });
 
 const thinkingConfigSchema = z.object({
@@ -474,11 +475,34 @@ const llmExecutionConfigSchema = z
   .object({
     profileAlias: z.string().trim().min(1).max(512).optional(),
     modelAlias: z.string().trim().min(1).max(512).optional(),
+    providerModel: z.string().trim().min(1).max(512).optional(),
     executionMode: z.enum(["GLOBAL", "BYOK"]).optional(),
     providerHint: z.string().trim().min(1).max(100).optional(),
     byok: byokConfigSchema.optional(),
     thinking: thinkingConfigSchema.optional(),
   })
+  .refine(
+    (value) => {
+      if (value.executionMode !== "BYOK") {
+        return true;
+      }
+
+      if (!value.byok?.provider) {
+        return false;
+      }
+
+      if (value.byok.apiKeyRef || value.byok.apiKey) {
+        return true;
+      }
+
+      return false;
+    },
+    {
+      message:
+        "BYOK execution requires byok.provider and either byok.apiKeyRef or byok.apiKey",
+      path: ["byok"],
+    },
+  )
   .strict();
 
 export const streamThreadModeSchema = z.enum(["send", "refresh", "edit"]);
@@ -919,6 +943,8 @@ export const modelCatalogItemSchema = z.object({
   providerName: z.string().nullable(),
   providerKind: z.string().nullable(),
   targetModel: z.string().nullable(),
+  availableViaGlobal: z.boolean().optional(),
+  availableViaByokProviders: z.array(z.string()).optional(),
   displayName: z.string(),
   subtitle: z.string(),
   badges: z.array(z.string()),
@@ -954,6 +980,9 @@ export const byokKeyRefSchema = z.object({
   userId: z.string().nullable(),
   providerName: z.string(),
   keyRef: z.string(),
+  providerKind: z.string().nullable().optional(),
+  baseUrl: z.string().nullable().optional(),
+  defaultHeaders: z.record(z.string(), z.string()).optional(),
   isActive: z.boolean(),
   metadata: z.record(z.string(), z.unknown()),
   createdAt: z.string(),
@@ -968,7 +997,23 @@ export const createByokKeyRefRequestSchema = z.object({
   providerName: z.string().trim().min(1).max(100),
   keyRef: z.string().trim().min(1).max(256),
   apiKey: z.string().trim().min(1).max(4096),
+  providerKind: z.string().trim().min(1).max(100).optional(),
+  baseUrl: z.string().trim().url().max(2048).optional(),
+  defaultHeaders: z.record(z.string(), z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const byokProviderSchema = z.object({
+  providerName: z.string(),
+  providerKind: z.string(),
+  baseUrl: z.string().nullable(),
+  system: z.boolean(),
+  isBYOKOnly: z.boolean().optional(),
+  hasApiKey: z.boolean().optional(),
+});
+
+export const listByokProvidersResponseSchema = z.object({
+  items: z.array(byokProviderSchema),
 });
 
 export const createByokKeyRefResponseSchema = z.object({
@@ -1140,8 +1185,12 @@ export type ListThreadModelCatalogResponse = z.infer<
 >;
 
 export type ByokKeyRef = z.infer<typeof byokKeyRefSchema>;
+export type ByokProvider = z.infer<typeof byokProviderSchema>;
 export type ListByokKeyRefsResponse = z.infer<
   typeof listByokKeyRefsResponseSchema
+>;
+export type ListByokProvidersResponse = z.infer<
+  typeof listByokProvidersResponseSchema
 >;
 export type CreateByokKeyRefRequest = z.infer<
   typeof createByokKeyRefRequestSchema

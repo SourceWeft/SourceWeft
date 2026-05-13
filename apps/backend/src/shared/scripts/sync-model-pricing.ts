@@ -7,27 +7,15 @@ import {
 } from "../db/schema";
 import type { ModelPricing } from "../db/schema-types";
 import { logger } from "../logger";
+import {
+  autoMatchModelAlias,
+  resolveLiteLLMCapabilities,
+  type LiteLLMData,
+  type ModelAliasMatch,
+} from "../model-gateway/litellm-capabilities";
 
 const LITELLM_PRICING_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
-
-type LiteLLMEntry = {
-  input_cost_per_token?: number | null;
-  output_cost_per_token?: number | null;
-  cache_read_input_token_cost?: number | null;
-  cache_creation_input_token_cost?: number | null;
-  output_cost_per_reasoning_token?: number | null;
-  input_cost_per_image_token?: number | null;
-  output_cost_per_image_token?: number | null;
-  input_cost_per_audio_token?: number | null;
-  output_cost_per_audio_token?: number | null;
-  input_cost_per_image?: number | null;
-  output_cost_per_image?: number | null;
-  litellm_provider?: string;
-  mode?: string;
-};
-
-type LiteLLMData = Record<string, LiteLLMEntry>;
 
 function toRouteKey(kind: string, alias: string) {
   return `${kind}:${alias}`;
@@ -129,68 +117,6 @@ function normalizePriceNumber(value: number | null | undefined): number | null {
   return Number(value.toPrecision(15));
 }
 
-function normalizeModelPart(alias: string): string {
-  const trimmed = alias.trim();
-  if (!trimmed) {
-    return "";
-  }
-  const parts = trimmed.split("/").filter((part) => part.length > 0);
-  return (parts.at(-1) ?? trimmed).toLowerCase();
-}
-
-type ModelAliasMatch =
-  | { type: "matched"; key: string }
-  | { type: "unmatched" }
-  | { type: "ambiguous"; candidates: string[] };
-
-function autoMatchModelAlias(
-  alias: string,
-  litellmKeys: string[],
-): ModelAliasMatch {
-  if (litellmKeys.includes(alias)) {
-    return { type: "matched", key: alias };
-  }
-
-  const modelPart = normalizeModelPart(alias);
-  if (!modelPart) {
-    return { type: "unmatched" };
-  }
-
-  for (const key of litellmKeys) {
-    const keyModel = normalizeModelPart(key);
-    if (!keyModel) {
-      continue;
-    }
-    if (keyModel === modelPart) {
-      return { type: "matched", key };
-    }
-  }
-
-  const candidates: string[] = [];
-  for (const key of litellmKeys) {
-    const keyModel = normalizeModelPart(key);
-    if (!keyModel) {
-      continue;
-    }
-    if (keyModel.includes(modelPart) || modelPart.includes(keyModel)) {
-      candidates.push(key);
-    }
-  }
-
-  if (candidates.length === 1) {
-    const candidate = candidates[0];
-    if (candidate) {
-      return { type: "matched", key: candidate };
-    }
-  }
-
-  if (candidates.length > 1) {
-    return { type: "ambiguous", candidates };
-  }
-
-  return { type: "unmatched" };
-}
-
 function hasManualPriceConfigured(pricing: Partial<ModelPricing> | undefined): boolean {
   if (!pricing) {
     return false;
@@ -224,6 +150,19 @@ const PRICING_CONFIG_KEYS = new Set([
   "price_source",
   "litellm_key",
   "price_updated_at",
+  "litellm_provider",
+  "litellm_mode",
+  "supportsImageInput",
+  "supports_function_calling",
+  "supports_parallel_function_calling",
+  "supports_response_schema",
+  "supports_tool_choice",
+  "supports_prompt_caching",
+  "max_input_tokens",
+  "max_output_tokens",
+  "max_completion_tokens",
+  "supportedParameters",
+  "supportedEfforts",
 ]);
 
 function pickNonPricingConfig(configJson: Record<string, unknown>): Record<string, unknown> {
@@ -356,6 +295,7 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
         price_source: "litellm",
         litellm_key: match.key,
         price_updated_at: new Date().toISOString(),
+        ...resolveLiteLLMCapabilities(litellmEntry),
       };
 
       if (
@@ -449,6 +389,25 @@ export async function syncModelPricing(options?: {
   modelProfileIds?: string[];
 }): Promise<void> {
   await syncModelPricingForProfiles(options?.modelProfileIds);
+}
+
+export async function resolveModelCapabilitiesFromLitellm(modelName: string) {
+  const litellmData = await fetchLiteLLMPricing();
+  const litellmKeys = Object.keys(litellmData);
+  const match = autoMatchModelAlias(modelName, litellmKeys);
+  if (match.type !== "matched") {
+    return null;
+  }
+
+  const entry = litellmData[match.key];
+  if (!entry) {
+    return null;
+  }
+
+  return {
+    litellmKey: match.key,
+    ...resolveLiteLLMCapabilities(entry),
+  };
 }
 
 import { fileURLToPath } from "url";

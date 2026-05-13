@@ -8,6 +8,7 @@ import {
   modelGatewayRoutes,
 } from "../../../../shared/db/schema";
 import { requireContentWorkspace } from "../../content-support";
+import { listCustomByokProviders } from "../../../../shared/model-gateway/byok-provider-resolver";
 import {
   THREAD_KIND_BY_MODEL_KIND,
   type ThreadModelSettings,
@@ -24,6 +25,8 @@ type ThreadModelCatalogEntry = {
   providerName: string | null;
   providerKind: string | null;
   targetModel: string | null;
+  availableViaGlobal: boolean;
+  availableViaByokProviders: string[];
   displayName: string;
   subtitle: string;
   badges: string[];
@@ -124,7 +127,7 @@ export async function listThreadModelCatalog(input: {
   workspaceId: string;
   userId: string;
 }) {
-  await requireContentWorkspace({
+  const workspace = await requireContentWorkspace({
     workspaceId: input.workspaceId,
     userId: input.userId,
   });
@@ -163,6 +166,8 @@ export async function listThreadModelCatalog(input: {
     }
   >();
 
+  const byokProviderNames = new Set<string>();
+
   if (activeVersion) {
     const [routeRows, providerRows] = await Promise.all([
       db
@@ -186,6 +191,7 @@ export async function listThreadModelCatalog(input: {
         .select({
           providerName: modelGatewayProviderConfigs.providerName,
           providerKind: modelGatewayProviderConfigs.providerKind,
+          isBYOK: modelGatewayConfigs.isBYOK,
           apiKeyEncrypted: modelGatewayConfigs.apiKeyEncrypted,
         })
         .from(modelGatewayProviderConfigs)
@@ -211,6 +217,12 @@ export async function listThreadModelCatalog(input: {
       ]),
     );
 
+    for (const row of providerRows) {
+      if (row.isBYOK) {
+        byokProviderNames.add(row.providerName);
+      }
+    }
+
     routeRows
       .sort((left, right) => {
         if (left.priority !== right.priority) {
@@ -235,6 +247,15 @@ export async function listThreadModelCatalog(input: {
       });
   }
 
+  const customByokProviders = await listCustomByokProviders({
+    workspaceId: workspace.id,
+    teamId: workspace.organizationId,
+    userId: input.userId,
+  });
+  for (const provider of customByokProviders) {
+    byokProviderNames.add(provider.providerName);
+  }
+
   const defaults: ThreadModelSettings = {
     llmProfileAlias: null,
     imageProfileAlias: null,
@@ -254,9 +275,6 @@ export async function listThreadModelCatalog(input: {
     const profileKind = row.kind as CatalogModelProfileKind;
     const threadKind = THREAD_KIND_BY_MODEL_KIND[profileKind];
     const route = routeByKindAlias.get(`${profileKind}:${row.profileAlias}`);
-    if (!route?.hasGlobalApiKey) {
-      continue;
-    }
     const configJson =
       row.configJson && typeof row.configJson === "object"
         ? (row.configJson as Record<string, unknown>)
@@ -291,10 +309,12 @@ export async function listThreadModelCatalog(input: {
     if (threadKind === "image") {
       directCapabilities.imageGeneration = resolveImageModelCapabilities({
         configJson,
-        providerKind: route.providerKind,
-        modelId: route.targetModel,
+        providerKind: route?.providerKind,
+        modelId: route?.targetModel,
       });
     }
+
+    const availableViaByokProviders = Array.from(byokProviderNames).sort();
 
     kinds[threadKind].push({
       kind: threadKind,
@@ -302,9 +322,11 @@ export async function listThreadModelCatalog(input: {
       modelAlias: row.modelAlias,
       isDefault: row.isDefault,
       isActive: row.isActive,
-      providerName: route.providerName,
-      providerKind: route.providerKind,
-      targetModel: route.targetModel,
+      providerName: route?.providerName ?? null,
+      providerKind: route?.providerKind ?? null,
+      targetModel: route?.targetModel ?? null,
+      availableViaGlobal: route?.hasGlobalApiKey ?? false,
+      availableViaByokProviders,
       displayName,
       subtitle,
       badges,

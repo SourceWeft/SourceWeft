@@ -39,6 +39,17 @@ import {
   type ModelType,
 } from "../_components/header-model-selector";
 import {
+  buildThreadLlmExecution,
+  clearStoredByokState,
+  normalizeByokProviderOptions,
+  readStoredByokState,
+  writeStoredByokState,
+  type ByokKeyRefItem,
+  type ByokLlmSelection,
+  type ByokProviderOption,
+} from "../_components/byok-state";
+import { ByokManagerDialog } from "../_components/byok-manager";
+import {
   applySkillModelPresetState,
   DEFAULT_MODEL_SELECTION_SOURCES,
   type ModelSelectionSources,
@@ -81,6 +92,11 @@ import {
   readStoredSourceSelection,
   writeStoredSourceSelection,
 } from "../_components/source-selection-storage";
+import {
+  getCachedWorkspaceSources,
+  hasCachedWorkspaceSources,
+  setCachedWorkspaceSources,
+} from "../_components/source-library-cache";
 import {
   desktopBridge,
   handleDesktopAuthDeepLink,
@@ -1723,6 +1739,15 @@ export default function DashboardChatThreadPage({
     activeThreadRunRef.current = activeThreadRun;
   }, [activeThreadRun]);
 
+  useEffect(() => {
+    if (!workspaceId) {
+      setSelectedByokLlm(null);
+      return;
+    }
+    const stored = readStoredByokState(workspaceId, threadId);
+    setSelectedByokLlm(stored?.llmByok ?? null);
+  }, [threadId, workspaceId]);
+
   // ── Sources state ──────────────────────────────────────────────────────────
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
@@ -1745,6 +1770,11 @@ export default function DashboardChatThreadPage({
     useState<ModelSelectionSources>(DEFAULT_MODEL_SELECTION_SOURCES);
   const [availableModels, setAvailableModels] =
     useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
+  const [byokProviders, setByokProviders] = useState<ByokProviderOption[]>([]);
+  const [byokKeyRefs, setByokKeyRefs] = useState<ByokKeyRefItem[]>([]);
+  const [selectedByokLlm, setSelectedByokLlm] =
+    useState<ByokLlmSelection | null>(null);
+  const [byokManagerOpen, setByokManagerOpen] = useState(false);
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
@@ -1757,6 +1787,11 @@ export default function DashboardChatThreadPage({
   const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
     string | null
   >(null);
+
+  useEffect(() => {
+    setLibrarySources(getCachedWorkspaceSources(workspaceId) ?? []);
+  }, [workspaceId]);
+
   const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
     async ({ cursor, limit, query }) => {
       if (!workspaceId) {
@@ -1839,6 +1874,17 @@ export default function DashboardChatThreadPage({
     );
   }, [hasSavedThinkingPreference, selectedModels.llm]);
 
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    writeStoredByokState(
+      workspaceId,
+      selectedByokLlm ? { llmByok: selectedByokLlm } : null,
+      threadId,
+    );
+  }, [selectedByokLlm, threadId, workspaceId]);
+
   const effectiveActiveSkillIds = useMemo(
     () =>
       removeDisabledToolSkills({
@@ -1850,6 +1896,9 @@ export default function DashboardChatThreadPage({
   );
 
   useEffect(() => {
+    if (selectedByokLlm?.mode === "byok") {
+      return;
+    }
     const next = applySkillModelPresetState({
       activeSkillIds: effectiveActiveSkillIds,
       availableModels,
@@ -1880,6 +1929,7 @@ export default function DashboardChatThreadPage({
     baseSelectedModels,
     catalogKindEnabled.llm,
     modelSelectionSources,
+    selectedByokLlm,
     selectedModels,
   ]);
 
@@ -1917,7 +1967,6 @@ export default function DashboardChatThreadPage({
       setActiveSourceIds(sourceIds);
       if (workspaceId) {
         writeStoredSourceSelection(workspaceId, threadId, sourceIds);
-        writeStoredSourceSelection(workspaceId, "current", sourceIds);
       }
     },
     [threadId, workspaceId],
@@ -1926,7 +1975,6 @@ export default function DashboardChatThreadPage({
   useEffect(() => {
     if (!selectionLoaded || !workspaceId) return;
     writeStoredSourceSelection(workspaceId, threadId, activeSourceIds);
-    writeStoredSourceSelection(workspaceId, "current", activeSourceIds);
   }, [
     activeSourceIds,
     selectionLoaded,
@@ -1954,6 +2002,14 @@ export default function DashboardChatThreadPage({
       setThinkingSettings(settings);
     },
     [],
+  );
+
+  const handleLibrarySourcesLoad = useCallback(
+    (sources: SourceItem[]) => {
+      setCachedWorkspaceSources(workspaceId, sources);
+      setLibrarySources(sources);
+    },
+    [workspaceId],
   );
 
   useEffect(() => {
@@ -2427,6 +2483,9 @@ export default function DashboardChatThreadPage({
       setBaseSelectedModels(emptySelection);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
+      setByokProviders([]);
+      setByokKeyRefs([]);
+      setSelectedByokLlm(null);
       setStreamWithSelectedLlm(false);
       return;
     }
@@ -2434,9 +2493,13 @@ export default function DashboardChatThreadPage({
     setStreamWithSelectedLlm(false);
 
     try {
-      const [catalog, threadResponse] = await Promise.all([
+      const [catalog, threadResponse, providerResult, keyResult] = await Promise.all([
         contentClient.listThreadModelCatalog(workspaceId),
         contentClient.getThread(workspaceId, threadId),
+        contentClient.listByokProviders(workspaceId).catch(() => []),
+        contentClient.listByokKeyRefs(workspaceId).catch(() => ({
+          items: [],
+        })),
       ]);
 
       const catalogModels = mapCatalogKindsToModelItems(catalog.kinds);
@@ -2456,6 +2519,10 @@ export default function DashboardChatThreadPage({
       setSelectedModels(resolvedModels);
       setBaseSelectedModels(resolvedModels);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
+      setByokKeyRefs(keyResult.items);
+      setByokProviders(
+        normalizeByokProviderOptions(providerResult, keyResult.items),
+      );
       setStreamWithSelectedLlm(kindEnabled.llm);
     } catch {
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
@@ -2466,6 +2533,9 @@ export default function DashboardChatThreadPage({
       setSelectedModels(emptySelection);
       setBaseSelectedModels(emptySelection);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
+      setByokProviders([]);
+      setByokKeyRefs([]);
+      setSelectedByokLlm(null);
       setStreamWithSelectedLlm(false);
     }
   }, [threadId, workspaceId]);
@@ -2480,16 +2550,19 @@ export default function DashboardChatThreadPage({
         ...current,
         [input.type]: "user",
       }));
+      if (input.type === "llm") {
+        setSelectedByokLlm(null);
+      }
       if (!workspaceId || !catalogKindEnabled[input.type]) {
         return;
       }
 
       const patch: ModelAliasSettings =
         input.type === "llm"
-          ? { llmProfileAlias: input.model.id }
+          ? { llmProfileAlias: input.model.profileAlias ?? input.model.id }
           : input.type === "image"
-            ? { imageProfileAlias: input.model.id }
-            : { visionProfileAlias: input.model.id };
+            ? { imageProfileAlias: input.model.profileAlias ?? input.model.id }
+            : { visionProfileAlias: input.model.profileAlias ?? input.model.id };
 
       try {
         await contentClient.updateThreadModelSettings(
@@ -2927,7 +3000,7 @@ export default function DashboardChatThreadPage({
         });
         const selectedLlmProfileAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
-            ? selectedModels.llm?.id
+            ? selectedModels.llm?.profileAlias ?? selectedModels.llm?.id
             : undefined;
         const requestThinking =
           input.thinking ??
@@ -2935,7 +3008,13 @@ export default function DashboardChatThreadPage({
             capabilities: selectedModels.llm?.capabilities,
             settings: thinkingSettings,
           });
-        if (
+        const byokLlmRequest = buildThreadLlmExecution({
+          selection: selectedByokLlm,
+          thinking: requestThinking,
+        });
+        if (selectedByokLlm?.mode === "byok") {
+          requestBody.llm = byokLlmRequest;
+        } else if (
           typeof selectedLlmProfileAlias === "string" &&
           selectedLlmProfileAlias.length > 0
         ) {
@@ -2962,7 +3041,8 @@ export default function DashboardChatThreadPage({
         }
         if (catalogKindEnabled.vision && selectedModels.vision) {
           requestBody.modelSettings = {
-            visionProfileAlias: selectedModels.vision.id,
+            visionProfileAlias:
+              selectedModels.vision.profileAlias ?? selectedModels.vision.id,
           };
         }
         if (input.mode === "refresh" || input.mode === "edit") {
@@ -3766,10 +3846,12 @@ export default function DashboardChatThreadPage({
     },
     [
       catalogKindEnabled.llm,
+      catalogKindEnabled.vision,
       clearEditingState,
       loadThreadMessages,
       librarySources,
       messages,
+      selectedByokLlm,
       selectedModels,
       searchEnabled,
       streamWithSelectedLlm,
@@ -3882,6 +3964,7 @@ export default function DashboardChatThreadPage({
             availableModels?: Record<ModelType, ModelItem[]>;
             catalogKindEnabled?: Record<ModelType, boolean>;
             selectedModels?: SelectedModels;
+            byokSelection?: ByokLlmSelection | null;
           };
         };
         const pendingSourceIds = Array.isArray(sourceIds)
@@ -3921,6 +4004,9 @@ export default function DashboardChatThreadPage({
           setSelectedModels(pendingModelState.selectedModels);
           setBaseSelectedModels(pendingModelState.selectedModels);
           setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
+        }
+        if (pendingModelState?.byokSelection) {
+          setSelectedByokLlm(pendingModelState.byokSelection);
         }
         void streamThreadActionRef.current({
           mode: "send",
@@ -4215,6 +4301,29 @@ export default function DashboardChatThreadPage({
               </div>
               <HeaderModelSelector
                 availableModels={availableModels}
+                byokKeyRefs={byokKeyRefs}
+                byokProviders={byokProviders}
+                byokSelection={selectedByokLlm}
+                onByokSelect={({ model, selection }) => {
+                  setModelSelectionSources((current) => ({
+                    ...current,
+                    llm: "user",
+                  }));
+                  setSelectedModels((current) => ({
+                    ...current,
+                    llm: model,
+                  }));
+                  setSelectedByokLlm(selection);
+                  setThinkingSettings((current) =>
+                    normalizeThinkingSettingsForModel({
+                      capabilities: model.capabilities,
+                      hasSavedPreference: hasSavedThinkingPreference,
+                      settings: current,
+                    }),
+                  );
+                  setStreamWithSelectedLlm(true);
+                }}
+                onManageByok={() => setByokManagerOpen(true)}
                 onModelSelect={handleModelSelect}
                 selectedModels={selectedModels}
                 setSelectedModels={setSelectedModels}
@@ -4302,10 +4411,12 @@ export default function DashboardChatThreadPage({
           onArtifactOpen={setPreviewArtifact}
           onCitationLocate={scrollToMessage}
           onCitationOpen={handleSourceHubCitationOpen}
+          initialSources={librarySources}
+          initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
           onSkillSelectionChange={setActiveSkillIds}
           onSelectionChange={persistActiveSourceIds}
           onSkillsCatalogChange={loadAvailableSkills}
-          onSourceLoad={setLibrarySources}
+          onSourceLoad={handleLibrarySourcesLoad}
           selectedIds={activeSourceIds}
           selectedSkillIds={activeSkillIds}
           threadCitations={threadCitations}
@@ -4324,6 +4435,16 @@ export default function DashboardChatThreadPage({
           workspaceId={workspaceId}
         />
       ) : null}
+
+      <ByokManagerDialog
+        onOpenChange={setByokManagerOpen}
+        onStateChange={({ keyRefs, providers }) => {
+          setByokKeyRefs(keyRefs);
+          setByokProviders(providers);
+        }}
+        open={byokManagerOpen}
+        workspaceId={workspaceId}
+      />
 
       <Sheet
         open={Boolean(sourcesVisible && previewArtifact && !isDesktopPanel)}

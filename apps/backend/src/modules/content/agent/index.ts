@@ -148,6 +148,7 @@ function createSourceWeftImageHistorySanitizerMiddleware() {
 export interface CreateThreadAgentParams {
   /** The model alias to use (e.g., "chat-default") */
   modelAlias?: string;
+  providerModel?: string;
   gatewayConfigId?: string | null;
   execution?: LangChainModelExecutionConfig;
   tools?: Array<ClientTool | ServerTool>;
@@ -173,11 +174,15 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
   const checkpointer = await getChatCheckpointer();
 
   const modelAlias = params.modelAlias || "chat-default";
+  const providerModel = params.providerModel || modelAlias;
 
   const model = await createAgentChatModel({
-    modelAlias,
+    modelAlias: providerModel,
     gatewayConfigId: params.gatewayConfigId,
-    execution: params.execution,
+    execution: {
+      ...params.execution,
+      profileAlias: params.execution?.profileAlias ?? modelAlias,
+    },
   });
   const contextCompressionMiddleware =
     await createSourceWeftContextCompressionMiddleware({

@@ -24,6 +24,7 @@ export type GenerateThreadTitleInput = {
   messageContent: string;
   profileAlias: string;
   modelAlias: string;
+  providerModel?: string;
   gatewayConfigId: string;
   llm?: LlmExecutionConfig;
   parentSpanId?: string | null;
@@ -48,7 +49,8 @@ export async function generateThreadTitle(input: GenerateThreadTitleInput) {
   const gateway = await getModelGatewayClient(input.gatewayConfigId);
   const completion = await gateway.chat.complete(
     {
-      model: input.profileAlias,
+      model: input.providerModel ?? input.modelAlias,
+      profileAlias: input.profileAlias,
       messages: [
         {
           role: "user",
