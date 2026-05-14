@@ -54,12 +54,41 @@ export type MessageContentJson = {
 
 export type ThreadToolsSelection = {
   skillIds?: string[];
+  invokedSkillIds?: string[];
   webSearchEnabled?: boolean;
   artifact?: unknown;
   [AGENT_TOOL_NAMES.generateImage]?: GenerateImageToolSelection;
   [AGENT_TOOL_NAMES.webSearch]?: {
     enabled?: boolean;
   };
+};
+
+export type ThreadCommandSelection = {
+  name: string;
+  arguments?: string;
+  kind?: "tool" | "skill" | "skill-command";
+  displayName?: string;
+  skillSlug?: string;
+  commandName?: string;
+  toolName?: string;
+  path?: string;
+};
+
+export type ResolvedThreadCommand = {
+  name: string;
+  canonicalName: string;
+  arguments: string;
+  kind: "tool" | "skill" | "skill-command";
+  displayName: string;
+  toolName?: string;
+  skillSlug: string;
+  commandName?: string;
+  title?: string;
+  description: string;
+  path?: string;
+  instruction?: string;
+  tools?: string[];
+  skillSlugs?: string[];
 };
 
 export type StreamThreadEventInput = {
@@ -72,9 +101,12 @@ export type StreamThreadEventInput = {
   mentionedSourceIds?: string[];
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
+  command?: ThreadCommandSelection;
   timezone?: string;
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
+  image?: LlmExecutionConfig;
+  vision?: LlmExecutionConfig;
   visionProfileAlias?: string | null;
   userMessageParentId?: string | null;
   assistantMessageParentId?: string | null;
@@ -119,7 +151,10 @@ export type PreparedThreadTurn = {
     expandedDescendantSourceIds: string[];
   };
   skillIds: string[];
+  invokedSkillIds: string[];
+  selectedSkillIds: string[];
   webSearchEnabled: boolean;
+  command: ResolvedThreadCommand | null;
   generateImageTool: GenerateImageToolSelection | undefined;
   artifactIntent: ArtifactIntentDecision;
   imageProfile:

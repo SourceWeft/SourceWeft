@@ -137,12 +137,14 @@ export function EmptyState({
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
-            onSubmit={(message, tools) =>
+            onSubmit={(message, tools, command, skillIds) =>
               onSendMessage({
                 content: message.text.trim(),
                 images: promptFilesToImages(message.files),
                 mentionedSourceIds: message.mentionedSourceIds,
+                skillIds,
                 tools,
+                command,
               })
             }
             onSearchEnabledChange={onSearchEnabledChange}

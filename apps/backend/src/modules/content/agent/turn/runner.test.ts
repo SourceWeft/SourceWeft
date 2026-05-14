@@ -217,6 +217,40 @@ test("runtime prompt lists only available public web tools", () => {
   );
 });
 
+test("runtime prompt preloads slash-invoked skill instructions", () => {
+  const prompt = testExports.buildAgentRuntimePrompt({
+    timezone: "UTC",
+    enabledSkills: [
+      {
+        workspaceSkillId: "skill-1",
+        sourceType: "builtin",
+        name: "feynman",
+        version: "1.0.0",
+        description: "Explain concepts in simple steps.",
+        files: [
+          {
+            path: "SKILL.md",
+            contentText: "Explain with simple analogies and check understanding.",
+            mimeType: "text/markdown",
+            sizeBytes: 40,
+            contentHash: "hash",
+          },
+        ],
+      },
+    ],
+    invokedSkillIds: ["skill-1"],
+  });
+
+  assert.match(prompt, /<user_invoked_skills>/);
+  assert.match(prompt, /name="feynman"/);
+  assert.match(prompt, /skill_path="\/skills\/feynman\/SKILL\.md"/);
+  assert.match(prompt, /strong instruction, not a suggestion/);
+  assert.match(
+    prompt,
+    /Explain with simple analogies and check understanding\./,
+  );
+});
+
 test("extracts generated image artifacts from completed tool calls", () => {
   const artifacts = testExports.extractGeneratedImageArtifacts([
     {

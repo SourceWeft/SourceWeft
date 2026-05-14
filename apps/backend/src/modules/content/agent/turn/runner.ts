@@ -20,6 +20,7 @@ import {
   isWebSearchToolName,
   isWebToolName,
 } from "../tool-registry";
+import { sanitizeNonCitableCitationMarkers } from "../fs-utils";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { createDefaultWebProvider } from "../../web";
 import { listVirtualFsSources } from "../../virtual-fs/store";
@@ -173,6 +174,27 @@ function appendReasoningChunk(current: string | undefined, next: string) {
     return next;
   }
   return `${current}${next}`;
+}
+
+function resolveToolCommand(input: PreparedThreadTurn) {
+  if (
+    input.command?.kind === "tool" &&
+    input.command.toolName === AGENT_TOOL_NAMES.generateImage &&
+    input.generateImageTool?.mode === "generate" &&
+    input.artifactIntent.shouldInjectTool &&
+    input.imageProfile
+  ) {
+    return {
+      name: AGENT_TOOL_NAMES.generateImage,
+      prompt:
+        input.command.arguments?.trim() ||
+        (typeof input.userMessage.content === "string"
+          ? input.userMessage.content.trim()
+          : ""),
+    };
+  }
+
+  return null;
 }
 
 async function runToolRetrieval(input: {
@@ -939,10 +961,59 @@ function buildSelectedSourceManifest(input: {
     .join("\n");
 }
 
+function buildInvokedSkillsRuntimePrompt(input: {
+  enabledSkills: PreparedThreadTurn["enabledSkills"];
+  invokedSkillIds: string[];
+}) {
+  if (input.invokedSkillIds.length === 0) {
+    return "";
+  }
+  const invokedSkillIdSet = new Set(input.invokedSkillIds);
+  const invokedSkills = input.enabledSkills.filter((skill) =>
+    invokedSkillIdSet.has(skill.workspaceSkillId),
+  );
+  if (invokedSkills.length === 0) {
+    return "";
+  }
+
+  return [
+    "<user_invoked_skills>",
+    "The user explicitly invoked these skills for this turn. This is a strong instruction, not a suggestion: apply the loaded SKILL.md workflow when answering unless it conflicts with higher-priority system rules. Use /skills only for supporting files or additional details.",
+    ...invokedSkills.flatMap((skill) => {
+      const skillPath = `/skills/${skill.name}/SKILL.md`;
+      const skillContent = skill.files.find((file) => file.path === "SKILL.md")
+        ?.contentText;
+      const header = [
+        `- name="${escapeRuntimeValue(skill.name)}"`,
+        `description="${escapeRuntimeValue(skill.description)}"`,
+        `skill_path="${escapeRuntimeValue(skillPath)}"`,
+      ].join(" ");
+      const safeContent = skillContent
+        ? sanitizeNonCitableCitationMarkers(skillContent).trim()
+        : "";
+      if (!safeContent) {
+        return [
+          header,
+          `  Could not preload SKILL.md content. Read ${skillPath} from /skills before answering.`,
+        ];
+      }
+      return [
+        header,
+        `  <skill_content path="${escapeRuntimeValue(skillPath)}">`,
+        safeContent,
+        "  </skill_content>",
+      ];
+    }),
+    "</user_invoked_skills>",
+  ].join("\n");
+}
+
 function buildAgentRuntimePrompt(input: {
   availableWebTools?: string[];
   availableArtifactTools?: string[];
   artifactIntent?: PreparedThreadTurn["artifactIntent"];
+  enabledSkills?: PreparedThreadTurn["enabledSkills"];
+  invokedSkillIds?: string[];
   timezone: string;
   selectedSources?: VirtualFsSource[];
   selectedSourcesOmitted?: number;
@@ -959,6 +1030,13 @@ function buildAgentRuntimePrompt(input: {
   });
   if (sourceManifest) {
     lines.push(sourceManifest);
+  }
+  const invokedSkillsPrompt = buildInvokedSkillsRuntimePrompt({
+    enabledSkills: input.enabledSkills ?? [],
+    invokedSkillIds: input.invokedSkillIds ?? [],
+  });
+  if (invokedSkillsPrompt) {
+    lines.push(invokedSkillsPrompt);
   }
 
   const availableWebTools = input.availableWebTools ?? [];
@@ -1223,11 +1301,299 @@ export async function* invokeDeepAgentTurn(input: {
             traceId: input.traceContext?.traceId,
             parentSpanId: input.traceContext?.parentSpanId,
             profile: input.prepared.imageProfile.profile,
+            execution: input.prepared.generateImageTool?.execution,
             config: input.prepared.artifactIntent.config,
             billing: input.billing,
           }),
         ]
       : [];
+  const toolCommand = resolveToolCommand(input.prepared);
+  if (toolCommand?.name === AGENT_TOOL_NAMES.generateImage) {
+    const generateImageTool = artifactTools.find(
+      (candidate) => candidate.name === AGENT_TOOL_NAMES.generateImage,
+    );
+    if (!generateImageTool || toolCommand.prompt.length === 0) {
+      const errorText = !generateImageTool
+        ? "Image generation is not available for this turn."
+        : "Image prompt is empty.";
+      yield {
+        type: "text-delta",
+        delta: sanitizeSseValue(errorText),
+      };
+      yield {
+        type: "done",
+        outcome: {
+          assistantContent: errorText,
+          usage,
+          retrieval: null,
+          citations: [],
+          availableCitations: [],
+          retrievalCalls: [],
+          toolCalls: [],
+          thinkingSteps: [],
+          reasoningSegments,
+          agentCheckpoint: {
+            beforeInput: null,
+            beforeAssistant: null,
+            final: null,
+          },
+        },
+      };
+      return;
+    }
+
+    const toolCallId = resolveToolCallId({
+      toolName: AGENT_TOOL_NAMES.generateImage,
+      fallbackIndex: 1,
+    });
+    const normalizedInput = {
+      prompt: toolCommand.prompt,
+      title: compactTraceText(toolCommand.prompt, 80),
+    };
+    const startedAt = Date.now();
+    const imageConfig =
+      input.prepared.artifactIntent.kind === "image"
+        ? input.prepared.artifactIntent.config
+        : null;
+    const initialToolCall: ToolCallTrace = {
+      id: toolCallId,
+      tool: AGENT_TOOL_NAMES.generateImage,
+      input: normalizedInput,
+      output: null,
+      status: "running",
+      latencyMs: null,
+      error: null,
+      sequence: nextSequence(),
+    };
+    toolCallOrder.push(toolCallId);
+    toolCallsById.set(toolCallId, initialToolCall);
+    toolStartedAtById.set(toolCallId, startedAt);
+    if (input.traceContext) {
+      await startSpan({
+        ...input.traceContext,
+        spanId: toolCallId,
+        parentSpanId: input.traceContext.parentSpanId,
+        name: `tool:${AGENT_TOOL_NAMES.generateImage}`,
+        kind: "tool",
+        operation: "tool.call",
+        input: normalizedInput,
+        metadata: {
+          toolName: AGENT_TOOL_NAMES.generateImage,
+          sequence: initialToolCall.sequence,
+          source: "slash_command",
+        },
+      });
+    }
+    renderBlocks.appendGeneratedImage(toolCallId);
+    yield {
+      type: "tool-call-start",
+      id: toolCallId,
+      tool: AGENT_TOOL_NAMES.generateImage,
+      input: normalizedInput,
+      toolCall: initialToolCall,
+    };
+
+    let finalToolCall = initialToolCall;
+    const emitDirectProgress = (
+      stage: "preparing" | "generating" | "ready",
+      metadata?: Record<string, unknown>,
+    ) => {
+      const progressEvent = normalizeGeneratedImageProgressEvent({
+        type: GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
+        toolCallId,
+        tool: AGENT_TOOL_NAMES.generateImage,
+        prompt: normalizedInput.prompt,
+        stage,
+        title: normalizedInput.title,
+        ...(imageConfig
+          ? {
+              aspectRatio: imageConfig.aspectRatio,
+              quality: imageConfig.quality,
+              style: imageConfig.style,
+            }
+          : {}),
+        ...metadata,
+      });
+      if (!progressEvent) {
+        return;
+      }
+      const currentToolCall = toolCallsById.get(toolCallId) ?? finalToolCall;
+      const nextToolCall: ToolCallTrace = {
+        ...currentToolCall,
+        output: progressEvent.data,
+        status: stage === "ready" ? currentToolCall.status : "running",
+        error: null,
+      };
+      toolCallsById.set(toolCallId, nextToolCall);
+      finalToolCall = nextToolCall;
+      return {
+        type: "tool-call-event" as const,
+        id: toolCallId,
+        tool: AGENT_TOOL_NAMES.generateImage,
+        data: progressEvent.data,
+        toolCall: nextToolCall,
+      };
+    };
+    const preparingEvent = emitDirectProgress("preparing");
+    if (preparingEvent) {
+      yield preparingEvent;
+    }
+    try {
+      const generatingEvent = emitDirectProgress("generating", {
+        providerModel:
+          input.prepared.generateImageTool?.execution?.providerModel ??
+          input.prepared.generateImageTool?.execution?.modelAlias ??
+          input.prepared.imageProfile?.profile.modelAlias,
+      });
+      if (generatingEvent) {
+        yield generatingEvent;
+      }
+      const output = await generateImageTool.invoke(normalizedInput, {
+        toolCall: { id: toolCallId },
+      } as never);
+      const latencyMs = Date.now() - startedAt;
+      const normalizedOutput = normalizeToolOutputForObservability(
+        AGENT_TOOL_NAMES.generateImage,
+        output,
+      );
+      finalToolCall = {
+        ...(toolCallsById.get(toolCallId) ?? initialToolCall),
+        output: normalizedOutput,
+        status: "completed",
+        latencyMs,
+        error: null,
+      };
+      toolCallsById.set(toolCallId, finalToolCall);
+      const readyEvent = emitDirectProgress("ready");
+      if (readyEvent) {
+        finalToolCall = {
+          ...readyEvent.toolCall,
+          output: normalizedOutput,
+          status: "completed",
+          latencyMs,
+          error: null,
+        };
+        toolCallsById.set(toolCallId, finalToolCall);
+        yield {
+          ...readyEvent,
+          toolCall: finalToolCall,
+        };
+      }
+      if (input.traceContext) {
+        await endSpan({
+          traceId: input.traceContext.traceId,
+          teamId: input.traceContext.teamId,
+          workspaceId: input.traceContext.workspaceId,
+          spanId: toolCallId,
+          status: "ok",
+          latencyMs,
+          output: normalizedOutput,
+          metadata: {
+            toolName: AGENT_TOOL_NAMES.generateImage,
+            source: "slash_command",
+          },
+        });
+      }
+      yield {
+        type: "tool-call-result",
+        id: toolCallId,
+        tool: AGENT_TOOL_NAMES.generateImage,
+        input: normalizedInput,
+        output: normalizedOutput,
+        latencyMs,
+        toolCall: finalToolCall,
+      };
+      yield {
+        type: "tool-call-end",
+        id: toolCallId,
+        tool: AGENT_TOOL_NAMES.generateImage,
+        latencyMs,
+        status: "completed",
+        toolCall: finalToolCall,
+      };
+    } catch (error) {
+      const latencyMs = Date.now() - startedAt;
+      const errorText = normalizeErrorText(error);
+      finalToolCall = {
+        ...initialToolCall,
+        status: "error",
+        latencyMs,
+        error: errorText,
+      };
+      toolCallsById.set(toolCallId, finalToolCall);
+      if (input.traceContext) {
+        await endSpan({
+          traceId: input.traceContext.traceId,
+          teamId: input.traceContext.teamId,
+          workspaceId: input.traceContext.workspaceId,
+          spanId: toolCallId,
+          status: "error",
+          latencyMs,
+          errorMessage: errorText,
+          metadata: {
+            toolName: AGENT_TOOL_NAMES.generateImage,
+            source: "slash_command",
+          },
+        });
+      }
+      yield {
+        type: "tool-call-error",
+        id: toolCallId,
+        tool: AGENT_TOOL_NAMES.generateImage,
+        input: normalizedInput,
+        error: errorText,
+        latencyMs,
+        toolCall: finalToolCall,
+      };
+      yield {
+        type: "tool-call-end",
+        id: toolCallId,
+        tool: AGENT_TOOL_NAMES.generateImage,
+        latencyMs,
+        status: "error",
+        toolCall: finalToolCall,
+      };
+    }
+
+    const assistantText =
+      finalToolCall.status === "completed"
+        ? "Image artifact created."
+        : (finalToolCall.error ?? "Image generation failed.");
+    if (finalToolCall.status !== "completed") {
+      renderBlocks.appendText(assistantText);
+      yield {
+        type: "text-delta",
+        delta: sanitizeSseValue(assistantText),
+      };
+    }
+    const finalRenderBlocks = finalizeMessageRenderBlocks({
+      blocks: renderBlocks.list(),
+      finalText: assistantText,
+    });
+    yield {
+      type: "done",
+      outcome: {
+        assistantContent: assistantText,
+        usage,
+        retrieval: null,
+        citations: [],
+        availableCitations: [],
+        retrievalCalls: [],
+        toolCalls: [finalToolCall],
+        ...(finalRenderBlocks.length > 0
+          ? { renderBlocks: finalRenderBlocks }
+          : {}),
+        thinkingSteps: [],
+        reasoningSegments,
+        agentCheckpoint: {
+          beforeInput: null,
+          beforeAssistant: null,
+          final: null,
+        },
+      },
+    };
+    return;
+  }
   const runtimeSourceReferences =
     input.prepared.sourceIds.length > 0
       ? await listVirtualFsSources({
@@ -1275,6 +1641,8 @@ export async function* invokeDeepAgentTurn(input: {
     availableWebTools: webTools.map((tool) => tool.name),
     availableArtifactTools: artifactTools.map((tool) => tool.name),
     artifactIntent: input.prepared.artifactIntent,
+    enabledSkills: input.prepared.enabledSkills,
+    invokedSkillIds: input.prepared.invokedSkillIds,
     timezone: input.prepared.timezone,
     selectedSources: visibleSources,
     selectedSourcesOmitted: Math.max(
@@ -1329,15 +1697,31 @@ export async function* invokeDeepAgentTurn(input: {
     traceContext: input.traceContext,
     execution: {
       executionMode: input.llm?.executionMode,
-      profileAlias: input.prepared.profileAlias,
+      profileAlias:
+        input.llm?.executionMode === "BYOK"
+          ? undefined
+          : input.prepared.profileAlias,
       providerHint: input.llm?.providerHint,
+      byokModelId: input.llm?.byokModelId,
+      credentialId: input.llm?.credentialId,
       byok: input.llm?.byok,
       thinking: input.llm?.thinking,
       metadata: {
         traceId: input.traceContext?.traceId,
         parentSpanId: input.traceContext?.parentSpanId,
-        profileAlias: input.prepared.profileAlias,
+        ...(input.llm?.executionMode === "BYOK"
+          ? {}
+          : { profileAlias: input.prepared.profileAlias }),
         modelAlias: input.prepared.modelAlias,
+        providerModel: input.llm?.providerModel ?? input.prepared.providerModel,
+        ...(input.llm?.executionMode === "BYOK"
+          ? {
+              executionMode: "BYOK",
+              byokModelId: input.llm.byokModelId,
+              credentialId: input.llm.credentialId,
+              keySource: "byokCredential",
+            }
+          : { executionMode: input.llm?.executionMode ?? "GLOBAL" }),
         teamId: input.prepared.workspace.organizationId,
         workspaceId: input.prepared.workspace.id,
         userId: input.prepared.userId,
@@ -1350,7 +1734,9 @@ export async function* invokeDeepAgentTurn(input: {
         user_id: input.prepared.userId,
         thread_id: input.prepared.thread.id,
         message_id: input.prepared.userMessage.id,
-        selected_skill_ids: input.prepared.skillIds,
+        invoked_skill_ids: input.prepared.invokedSkillIds,
+        selected_skill_ids: input.prepared.selectedSkillIds,
+        skill_ids: input.prepared.skillIds,
         selected_skill_count: input.prepared.enabledSkills.length,
       },
     },
@@ -1391,7 +1777,9 @@ export async function* invokeDeepAgentTurn(input: {
       workspace_id: input.prepared.workspace.id,
       user_id: input.prepared.userId,
       sourceweft_thread_id: input.prepared.thread.id,
-      selected_skill_ids: input.prepared.skillIds,
+      invoked_skill_ids: input.prepared.invokedSkillIds,
+      selected_skill_ids: input.prepared.selectedSkillIds,
+      skill_ids: input.prepared.skillIds,
       selected_skill_count: input.prepared.enabledSkills.length,
     },
     streamMode: ["messages", "tools", "updates", "checkpoints", "custom"],
@@ -1403,11 +1791,13 @@ export async function* invokeDeepAgentTurn(input: {
       step: setThinkingStep({
         id: "selected-skills",
         kind: "state",
-        title: "Loaded selected skills",
+        title: "Loaded skills",
         status: "completed",
         items: input.prepared.enabledSkills.map((skill) => skill.name),
         description: `${input.prepared.enabledSkills.length} skill${input.prepared.enabledSkills.length === 1 ? "" : "s"} available under /skills.`,
         metadata: {
+          invokedSkillIds: input.prepared.invokedSkillIds,
+          selectedSkillIds: input.prepared.selectedSkillIds,
           skillIds: input.prepared.skillIds,
           skillNames: input.prepared.enabledSkills.map((skill) => skill.name),
         },

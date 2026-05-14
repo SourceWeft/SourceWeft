@@ -9,6 +9,7 @@ import {
   isConfigurableAgentTool,
   isSkillDeclarableAgentTool,
 } from "../agent/tool-registry";
+import { parseSkillCommands, publicSkillCommands } from "./commands";
 
 export type SkillBundleFile = {
   path: string;
@@ -46,6 +47,8 @@ type ParsedBuiltinManifest = {
   version: string;
   models?: SkillManifestJson["models"];
   tools?: string[];
+  slash?: boolean;
+  slashConfig?: SkillManifestJson["slashConfig"];
   defaultConfig?: Record<string, unknown>;
 };
 
@@ -165,6 +168,33 @@ function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
   return Object.keys(record).length > 0 ? record : undefined;
 }
 
+function normalizeSlash(value: unknown) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error("skill.json slash must be a boolean");
+  }
+  return value;
+}
+
+function normalizeSlashConfig(value: unknown): SkillManifestJson["slashConfig"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("skill.json slashConfig must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) => key !== "enabled") ||
+    (record.enabled !== undefined && typeof record.enabled !== "boolean")
+  ) {
+    throw new Error("skill.json slashConfig is invalid");
+  }
+  return record.enabled === undefined ? {} : { enabled: record.enabled };
+}
+
 function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinManifest {
   assertRecord(value, source);
   const slug = value.slug;
@@ -176,6 +206,8 @@ function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinMani
   const tools = normalizeTools(value.tools);
   const models = normalizeModels(value.models);
   const defaultConfig = normalizeDefaultConfig(value.defaultConfig, tools);
+  const slash = normalizeSlash(value.slash);
+  const slashConfig = normalizeSlashConfig(value.slashConfig);
 
   if (typeof slug !== "string" || !validateSkillName(slug)) {
     throw new Error(`${source} slug is invalid`);
@@ -215,6 +247,8 @@ function parseBuiltinManifest(value: unknown, source: string): ParsedBuiltinMani
     version: version.trim(),
     ...(models ? { models } : {}),
     ...(tools ? { tools } : {}),
+    ...(slash !== undefined ? { slash } : {}),
+    ...(slashConfig ? { slashConfig } : {}),
     ...(defaultConfig ? { defaultConfig } : {}),
   };
 }
@@ -355,8 +389,22 @@ async function loadBuiltinSkillsFromDisk(): Promise<BuiltinSkillManifest[]> {
         if (parsed.tools) {
           manifestJson.tools = parsed.tools;
         }
+        if (parsed.slash !== undefined) {
+          manifestJson.slash = parsed.slash;
+        }
+        if (parsed.slashConfig) {
+          manifestJson.slashConfig = parsed.slashConfig;
+        }
         if (parsed.defaultConfig) {
           manifestJson.defaultConfig = parsed.defaultConfig;
+        }
+        const commands = parseSkillCommands({
+          files,
+          skillSlug: parsed.slug,
+        });
+        const publicCommands = publicSkillCommands(commands);
+        if (publicCommands) {
+          manifestJson.commands = publicCommands;
         }
 
         return {

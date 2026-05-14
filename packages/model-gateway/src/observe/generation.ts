@@ -83,6 +83,9 @@ function buildObserveAttributes(metadata: Record<string, unknown>) {
       keySource: readMetadataValue(metadata, "keySource"),
       provider: readMetadataValue(metadata, "provider"),
       modelAlias: readMetadataValue(metadata, "modelAlias"),
+      byokModelId: readMetadataValue(metadata, "byokModelId"),
+      credentialId: readMetadataValue(metadata, "credentialId"),
+      providerModel: readMetadataValue(metadata, "providerModel"),
       modelKind: readMetadataValue(metadata, "modelKind"),
       routeStrategy: readMetadataValue(metadata, "routeStrategy"),
     }) ?? {}

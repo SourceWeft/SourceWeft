@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, Network, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
@@ -19,9 +19,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/com
 import { contentClient } from "../../../../lib/sdk";
 import {
   normalizeByokProviderOptions,
-  toCreateByokKeyPayload,
-  type ByokKeyRefItem,
+  toCreateByokCredentialPayload,
+  type ByokCredentialItem,
   type ByokProviderOption,
+  type ByokSavedModelItem,
 } from "./byok-state";
 
 function providerKindLabel(value: string) {
@@ -40,22 +41,23 @@ export function ByokManagerDialog({
 }: {
   onOpenChange: (open: boolean) => void;
   onStateChange?: (input: {
-    keyRefs: ByokKeyRefItem[];
+    credentials: ByokCredentialItem[];
+    models: ByokSavedModelItem[];
     providers: ByokProviderOption[];
   }) => void;
   open: boolean;
   workspaceId: string | null;
 }) {
   const [providers, setProviders] = useState<ByokProviderOption[]>([]);
-  const [keyRefs, setKeyRefs] = useState<ByokKeyRefItem[]>([]);
+  const [credentials, setCredentials] = useState<ByokCredentialItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deletingCredential, setDeletingCredential] = useState<string | null>(null);
   const [providerName, setProviderName] = useState("");
   const [providerKind, setProviderKind] = useState("openai-compatible");
   const [baseUrl, setBaseUrl] = useState("");
-  const [keyRef, setKeyRef] = useState("");
+  const [credentialAlias, setCredentialAlias] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [activeTab, setActiveTab] = useState("saved");
 
@@ -70,20 +72,25 @@ export function ByokManagerDialog({
       setLoading(true);
       setLoadError(null);
       try {
-        const [providerResult, keyResult] = await Promise.all([
+        const [providerResult, credentialResult, modelResult] = await Promise.all([
           contentClient.listByokProviders(activeWorkspaceId).catch(() => []),
-          contentClient.listByokKeyRefs(activeWorkspaceId),
+          contentClient.listByokCredentials(activeWorkspaceId),
+          contentClient.listByokModels(activeWorkspaceId),
         ]);
         if (cancelled) {
           return;
         }
         const nextProviders = normalizeByokProviderOptions(
           providerResult,
-          keyResult.items,
+          credentialResult.items,
         );
         setProviders(nextProviders);
-        setKeyRefs(keyResult.items);
-        onStateChange?.({ keyRefs: keyResult.items, providers: nextProviders });
+        setCredentials(credentialResult.items);
+        onStateChange?.({
+          credentials: credentialResult.items,
+          models: modelResult.items,
+          providers: nextProviders,
+        });
       } catch (error) {
         if (cancelled) {
           return;
@@ -104,9 +111,9 @@ export function ByokManagerDialog({
     };
   }, [onStateChange, open, workspaceId]);
 
-  const groupedKeyRefs = useMemo(() => {
-    const groups = new Map<string, ByokKeyRefItem[]>();
-    for (const item of keyRefs) {
+  const groupedCredentials = useMemo(() => {
+    const groups = new Map<string, ByokCredentialItem[]>();
+    for (const item of credentials) {
       const group = groups.get(item.providerName) ?? [];
       group.push(item);
       groups.set(item.providerName, group);
@@ -114,13 +121,13 @@ export function ByokManagerDialog({
     return [...groups.entries()].sort((left, right) =>
       left[0].localeCompare(right[0]),
     );
-  }, [keyRefs]);
+  }, [credentials]);
 
   const resetCreateForm = () => {
     setProviderName("");
     setProviderKind("openai-compatible");
     setBaseUrl("");
-    setKeyRef("");
+    setCredentialAlias("");
     setApiKey("");
   };
 
@@ -129,14 +136,22 @@ export function ByokManagerDialog({
       return;
     }
     const activeWorkspaceId = workspaceId;
-    const [providerResult, keyResult] = await Promise.all([
+    const [providerResult, credentialResult, modelResult] = await Promise.all([
       contentClient.listByokProviders(activeWorkspaceId).catch(() => []),
-      contentClient.listByokKeyRefs(activeWorkspaceId),
+      contentClient.listByokCredentials(activeWorkspaceId),
+      contentClient.listByokModels(activeWorkspaceId),
     ]);
-    const nextProviders = normalizeByokProviderOptions(providerResult, keyResult.items);
+    const nextProviders = normalizeByokProviderOptions(
+      providerResult,
+      credentialResult.items,
+    );
     setProviders(nextProviders);
-    setKeyRefs(keyResult.items);
-    onStateChange?.({ keyRefs: keyResult.items, providers: nextProviders });
+    setCredentials(credentialResult.items);
+    onStateChange?.({
+      credentials: credentialResult.items,
+      models: modelResult.items,
+      providers: nextProviders,
+    });
   };
 
   const handleCreate = async () => {
@@ -144,18 +159,18 @@ export function ByokManagerDialog({
       return;
     }
     const activeWorkspaceId = workspaceId;
-    if (!providerName.trim() || !keyRef.trim() || !apiKey.trim()) {
-      toast.error("Provider, key ref, and API key are required.");
+    if (!providerName.trim() || !credentialAlias.trim() || !apiKey.trim()) {
+      toast.error("Provider, credential alias, and API key are required.");
       return;
     }
     setSaving(true);
     try {
-      await contentClient.createByokKeyRef(
+      await contentClient.createByokCredential(
         activeWorkspaceId,
-        toCreateByokKeyPayload({
+        toCreateByokCredentialPayload({
           apiKey,
           baseUrl,
-          keyRef,
+          credentialAlias,
           providerName,
           providerKind,
         }),
@@ -163,10 +178,10 @@ export function ByokManagerDialog({
       await refreshState();
       resetCreateForm();
       setActiveTab("saved");
-      toast.success("BYOK key saved.");
+      toast.success("BYOK credential saved.");
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to save BYOK key.",
+        error instanceof Error ? error.message : "Failed to save BYOK credential.",
       );
     } finally {
       setSaving(false);
@@ -174,28 +189,27 @@ export function ByokManagerDialog({
   };
 
   const handleDelete = async (input: {
-    keyRef: string;
+    credentialId: string;
     providerName: string;
   }) => {
     if (!workspaceId) {
       return;
     }
     const activeWorkspaceId = workspaceId;
-    setDeletingKey(`${input.providerName}:${input.keyRef}`);
+    setDeletingCredential(`${input.providerName}:${input.credentialId}`);
     try {
-      await contentClient.deleteByokKeyRef(
+      await contentClient.deleteByokCredential(
         activeWorkspaceId,
-        input.providerName,
-        input.keyRef,
+        input.credentialId,
       );
       await refreshState();
-      toast.success("BYOK key deleted.");
+      toast.success("BYOK credential deleted.");
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to delete BYOK key.",
+        error instanceof Error ? error.message : "Failed to delete BYOK credential.",
       );
     } finally {
-      setDeletingKey(null);
+      setDeletingCredential(null);
     }
   };
 
@@ -203,14 +217,14 @@ export function ByokManagerDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[85vh] max-w-3xl overflow-hidden p-0">
+      <DialogContent className="max-h-[85vh] max-w-4xl overflow-hidden p-0">
         <DialogHeader className="border-b border-border/70 px-6 py-4">
           <DialogTitle className="flex items-center gap-2">
             <KeyRound className="size-4" />
             Manage BYOK Providers
           </DialogTitle>
           <DialogDescription>
-            Save provider keys once, then reuse them from the chat model selector.
+            Save provider credentials once, then reuse them from the chat model selector.
           </DialogDescription>
         </DialogHeader>
 
@@ -221,8 +235,8 @@ export function ByokManagerDialog({
         >
           <div className="px-6 pt-4">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="saved">Saved keys</TabsTrigger>
-              <TabsTrigger value="add">Add key</TabsTrigger>
+              <TabsTrigger value="saved">Credentials</TabsTrigger>
+              <TabsTrigger value="add">Add credential</TabsTrigger>
             </TabsList>
           </div>
 
@@ -239,13 +253,13 @@ export function ByokManagerDialog({
                   <Loader2 className="mr-2 size-4 animate-spin" />
                   Loading BYOK configuration...
                 </div>
-              ) : groupedKeyRefs.length === 0 ? (
+              ) : groupedCredentials.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-8 text-sm text-muted-foreground">
-                  No saved BYOK keys yet. Add one to unlock provider-backed chat runs.
+                  No BYOK credentials yet. Add one to unlock provider-backed chat runs.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {groupedKeyRefs.map(([groupName, items]) => {
+                  {groupedCredentials.map(([groupName, items]) => {
                     const provider =
                       providers.find((entry) => entry.providerName === groupName) ??
                       null;
@@ -277,7 +291,7 @@ export function ByokManagerDialog({
                         <div className="mt-3 space-y-2">
                           {items.map((item) => {
                             const busy =
-                              deletingKey === `${item.providerName}:${item.keyRef}`;
+                              deletingCredential === `${item.providerName}:${item.id}`;
                             return (
                               <div
                                 className="flex items-center justify-between gap-3 rounded-xl border border-border/60 px-3 py-2"
@@ -285,7 +299,7 @@ export function ByokManagerDialog({
                               >
                                 <div className="min-w-0">
                                   <div className="truncate text-sm font-medium text-foreground">
-                                    {item.keyRef}
+                                    {item.credentialAlias}
                                   </div>
                                   <div className="text-xs text-muted-foreground">
                                     Updated {new Date(item.updatedAt).toLocaleString()}
@@ -295,7 +309,7 @@ export function ByokManagerDialog({
                                   disabled={busy}
                                   onClick={() =>
                                     void handleDelete({
-                                      keyRef: item.keyRef,
+                                      credentialId: item.id,
                                       providerName: item.providerName,
                                     })
                                   }
@@ -322,98 +336,142 @@ export function ByokManagerDialog({
           </TabsContent>
 
           <TabsContent className="px-6 pb-6" value="add">
-            <div className="mt-4 space-y-4 rounded-2xl border border-border/70 bg-background/80 p-4">
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-provider">
-                  Provider name
-                </label>
-                <Input
-                  id="byok-provider"
-                  list="byok-provider-suggestions"
-                  onChange={(event) => setProviderName(event.target.value)}
-                  placeholder="openai, anthropic, deepseek, my-proxy"
-                  value={providerName}
-                />
-                <datalist id="byok-provider-suggestions">
-                  {providerNames.map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
-              </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
+              <section className="rounded-2xl border border-border/70 bg-muted/15 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <Network className="size-4 text-muted-foreground" />
+                  Provider
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Pick an existing provider or define a compatible endpoint.
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-key-ref">
-                  Key reference
-                </label>
-                <Input
-                  id="byok-key-ref"
-                  onChange={(event) => setKeyRef(event.target.value)}
-                  placeholder="personal-openai"
-                  value={keyRef}
-                />
-              </div>
+                {providerNames.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      Known providers
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {providerNames.slice(0, 10).map((name) => (
+                        <button
+                          className={
+                            providerName === name
+                              ? "rounded-full border border-foreground bg-foreground px-2.5 py-1 text-xs font-medium text-background"
+                              : "rounded-full border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted/40"
+                          }
+                          key={name}
+                          onClick={() => setProviderName(name)}
+                          type="button"
+                        >
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-provider-kind">
-                  Provider kind
-                </label>
-                <Input
-                  id="byok-provider-kind"
-                  onChange={(event) => setProviderKind(event.target.value)}
-                  placeholder="openai-compatible"
-                  value={providerKind}
-                />
-              </div>
+                <div className="mt-4 space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-provider">
+                    Provider name
+                  </label>
+                  <Input
+                    id="byok-provider"
+                    list="byok-provider-suggestions"
+                    onChange={(event) => setProviderName(event.target.value)}
+                    placeholder="openai, anthropic, deepseek, my-proxy"
+                    value={providerName}
+                  />
+                  <datalist id="byok-provider-suggestions">
+                    {providerNames.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-base-url">
-                  Base URL
-                </label>
-                <Input
-                  id="byok-base-url"
-                  onChange={(event) => setBaseUrl(event.target.value)}
-                  placeholder="https://my-proxy.example.com/v1"
-                  value={baseUrl}
-                />
-              </div>
+                <div className="mt-4 space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-provider-kind">
+                    Provider kind
+                  </label>
+                  <Input
+                    id="byok-provider-kind"
+                    onChange={(event) => setProviderKind(event.target.value)}
+                    placeholder="openai-compatible"
+                    value={providerKind}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-api-key">
-                  API key
-                </label>
-                <Input
-                  id="byok-api-key"
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder="sk-..."
-                  type="password"
-                  value={apiKey}
-                />
-              </div>
+                <div className="mt-4 space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-base-url">
+                    Base URL
+                  </label>
+                  <Input
+                    id="byok-base-url"
+                    onChange={(event) => setBaseUrl(event.target.value)}
+                    placeholder="https://my-proxy.example.com/v1"
+                    value={baseUrl}
+                  />
+                </div>
+              </section>
 
-              <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                Leave Base URL empty to use the system default endpoint for that provider. Add one when you want a custom BYOK-compatible endpoint.
-              </div>
+              <section className="flex min-h-[420px] flex-col rounded-2xl border border-border/70 bg-background/80 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <KeyRound className="size-4 text-muted-foreground" />
+                  Model access
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Save the credential once, then choose provider on the left and model on the right inside chat.
+                </div>
 
-              <div className="flex justify-end gap-2">
-                <Button
-                  onClick={() => {
-                    resetCreateForm();
-                    setActiveTab("saved");
-                  }}
-                  type="button"
-                  variant="ghost"
-                >
-                  Cancel
-                </Button>
-                <Button disabled={saving} onClick={() => void handleCreate()} type="button">
-                  {saving ? (
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                  ) : (
-                    <Plus className="mr-2 size-4" />
-                  )}
-                  Save key
-                </Button>
-              </div>
+                <div className="mt-4 space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-credential-alias">
+                    Credential alias
+                  </label>
+                  <Input
+                    id="byok-credential-alias"
+                    onChange={(event) => setCredentialAlias(event.target.value)}
+                    placeholder="personal-openai"
+                    value={credentialAlias}
+                  />
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="byok-api-key">
+                    API key
+                  </label>
+                  <Input
+                    id="byok-api-key"
+                    onChange={(event) => setApiKey(event.target.value)}
+                    placeholder="sk-..."
+                    type="password"
+                    value={apiKey}
+                  />
+                </div>
+
+                <div className="mt-4 rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Leave Base URL empty to use the system default endpoint for that provider. Add one for a custom OpenAI-compatible, Anthropic, Gemini, or proxy endpoint.
+                </div>
+
+                <div className="mt-auto flex justify-end gap-2 pt-6">
+                  <Button
+                    onClick={() => {
+                      resetCreateForm();
+                      setActiveTab("saved");
+                    }}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Cancel
+                  </Button>
+                  <Button disabled={saving} onClick={() => void handleCreate()} type="button">
+                    {saving ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : (
+                      <Plus className="mr-2 size-4" />
+                    )}
+                    Save credential
+                  </Button>
+                </div>
+              </section>
             </div>
           </TabsContent>
         </Tabs>

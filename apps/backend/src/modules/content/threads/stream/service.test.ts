@@ -13,6 +13,7 @@ import {
   ContentThreadStreamService,
   threadStreamObservability,
 } from "./service";
+import { buildGatewayRequestMetadata } from "../../model-gateway-audit";
 import type {
   DeepAgentTurnEvent,
   DeepAgentTurnOutcome,
@@ -244,6 +245,83 @@ test("buildAgentRunSpanMetadata includes thinking settings", () => {
   );
 });
 
+test("buildAgentRunSpanMetadata uses BYOK identity over catalog profile", () => {
+  assert.deepEqual(
+    buildAgentRunSpanMetadata({
+      ...prepared,
+      llm: {
+        executionMode: "BYOK",
+        providerHint: "openrouter",
+        byokModelId: "byok-model-1",
+        credentialId: "credential-1",
+        modelAlias: "openai/gpt-4o",
+        providerModel: "openai/gpt-4o",
+        byok: {
+          provider: "openrouter",
+          apiKey: "test-key",
+        },
+      },
+    }),
+    {
+      mode: "continue",
+      modelAlias: "byok:openrouter:openai/gpt-4o",
+      profileAlias: null,
+      catalogModelAlias: "test-model",
+      gateway: {
+        executionMode: "BYOK",
+        providerHint: "openrouter",
+        byokProvider: "openrouter",
+        byokModelId: "byok-model-1",
+        credentialId: "credential-1",
+        thinkingMode: null,
+        thinkingEnabled: false,
+        thinkingEffort: null,
+        thinkingIncludeReasoning: null,
+        keySource: "byokCredential",
+        provider: null,
+        routeStrategy: null,
+      },
+      selectedSkillCount: 0,
+    },
+  );
+});
+
+test("buildGatewayRequestMetadata keeps BYOK profileAlias out of observed metadata", () => {
+  const metadata = buildGatewayRequestMetadata({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    userId: "user-1",
+    threadId: "thread-1",
+    messageId: "message-1",
+    feature: "chat",
+    operation: "chat.complete",
+    modelAlias: "catalog-model",
+    profileAlias: "global-profile",
+    modelKind: "chat",
+    llm: {
+      executionMode: "BYOK",
+      providerHint: "openrouter",
+      byokModelId: "byok-model-1",
+      credentialId: "credential-1",
+      modelAlias: "openai/gpt-4o",
+      providerModel: "openai/gpt-4o",
+      byok: {
+        provider: "openrouter",
+        apiKey: "test-key",
+      },
+    },
+  });
+
+  assert.equal(metadata.profileAlias, null);
+  assert.equal(metadata.catalogProfileAlias, undefined);
+  assert.equal(metadata.modelAlias, "byok:openrouter:openai/gpt-4o");
+  assert.equal(metadata.catalogModelAlias, "catalog-model");
+  assert.equal(metadata.byokModelId, "byok-model-1");
+  assert.equal(metadata.credentialId, "credential-1");
+  assert.equal(metadata.providerModel, "openai/gpt-4o");
+  assert.equal(metadata.keySource, "byokCredential");
+});
+
 const prepared: PreparedThreadTurn = {
   userId: "user-1",
   workspace: {
@@ -288,7 +366,10 @@ const prepared: PreparedThreadTurn = {
     expandedDescendantSourceIds: [],
   },
   skillIds: [],
+  invokedSkillIds: [],
+  selectedSkillIds: [],
   webSearchEnabled: false,
+  command: null,
   generateImageTool: undefined,
   artifactIntent: {
     kind: null,

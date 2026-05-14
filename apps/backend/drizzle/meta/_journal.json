@@ -127,6 +127,20 @@
       "when": 1778691201785,
       "tag": "0017_steady_jazinda",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778716800000,
+      "tag": "0018_byok_credentials_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778716900000,
+      "tag": "0019_drop_byok_key_refs",
+      "breakpoints": true
     }
   ]
 }

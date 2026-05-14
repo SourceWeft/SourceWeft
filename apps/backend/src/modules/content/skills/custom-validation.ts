@@ -16,6 +16,7 @@ export const CUSTOM_SKILL_LIMITS = {
 };
 
 const ALLOWED_EXTENSIONS = new Set([".md", ".txt", ".json", ".yaml", ".yml"]);
+const COMMAND_FILE_PATTERN = /^commands\/.+\.md$/i;
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown",
   ".txt": "text/plain",
@@ -216,6 +217,33 @@ function normalizeDefaultConfig(value: unknown, tools: string[] | undefined) {
   return Object.keys(record).length > 0 ? record : undefined;
 }
 
+function normalizeSlash(value: unknown) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error("Custom skill manifest slash is invalid");
+  }
+  return value;
+}
+
+function normalizeSlashConfig(value: unknown): SkillManifestJson["slashConfig"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Custom skill manifest slashConfig is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some((key) => key !== "enabled") ||
+    (record.enabled !== undefined && typeof record.enabled !== "boolean")
+  ) {
+    throw new Error("Custom skill manifest slashConfig is invalid");
+  }
+  return record.enabled === undefined ? {} : { enabled: record.enabled };
+}
+
 function firstJsonObject(files: ValidatedCustomSkillFile[]) {
   const manifestFile = files.find((file) => file.path === "skill.json");
   if (!manifestFile) {
@@ -245,6 +273,9 @@ function normalizeSkillFilePath(inputPath: string) {
   }
   if (normalized.startsWith("scripts/") || normalized.includes("/scripts/")) {
     throw new Error(`Custom skills cannot include scripts: '${inputPath}'`);
+  }
+  if (COMMAND_FILE_PATTERN.test(normalized)) {
+    throw new Error(`Custom skills cannot include commands: '${inputPath}'`);
   }
   const ext = path.posix.extname(normalized).toLowerCase();
   if (!ALLOWED_EXTENSIONS.has(ext)) {
@@ -330,6 +361,8 @@ export function validateCustomSkillBundle(input: {
   const models = normalizeModels(skillJson?.models);
   const tools = normalizeTools(skillJson?.tools);
   const defaultConfig = normalizeDefaultConfig(skillJson?.defaultConfig, tools);
+  const slash = normalizeSlash(skillJson?.slash);
+  const slashConfig = normalizeSlashConfig(skillJson?.slashConfig);
 
   if (!validateSkillName(slug)) {
     throw new Error("Custom skill manifest slug is invalid");
@@ -374,6 +407,12 @@ export function validateCustomSkillBundle(input: {
   }
   if (tools) {
     manifestJson.tools = tools;
+  }
+  if (slash !== undefined) {
+    manifestJson.slash = slash;
+  }
+  if (slashConfig) {
+    manifestJson.slashConfig = slashConfig;
   }
 
   return {

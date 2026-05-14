@@ -33,6 +33,22 @@ test("validateCustomSkillBundle accepts small text-only bundles", () => {
   });
 });
 
+test("validateCustomSkillBundle rejects custom command files", () => {
+  assert.throws(
+    () =>
+      validateCustomSkillBundle({
+        files: [
+          { path: "SKILL.md", contentText: skillMd },
+          {
+            path: "commands/write-query.md",
+            contentText: "# Write Query",
+          },
+        ],
+      }),
+    /cannot include commands/,
+  );
+});
+
 test("validateCustomSkillBundle accepts skill.json manifest", () => {
   const bundle = validateCustomSkillBundle({
     files: [

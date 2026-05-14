@@ -33,6 +33,13 @@ export type AgentToolConfiguration = {
   configKeys?: readonly string[];
 };
 
+export type AgentToolSlashCommand = {
+  aliases?: readonly string[];
+  description?: string;
+  displayName: string;
+  enabled?: boolean;
+};
+
 export type AgentToolDefinitionShape = {
   id: string;
   name: string;
@@ -41,6 +48,7 @@ export type AgentToolDefinitionShape = {
   requirements?: AgentToolRequirements;
   activation: AgentToolActivation;
   configuration?: AgentToolConfiguration;
+  slash?: AgentToolSlashCommand;
 };
 
 export function defineAgentTool<const Tool extends AgentToolDefinitionShape>(

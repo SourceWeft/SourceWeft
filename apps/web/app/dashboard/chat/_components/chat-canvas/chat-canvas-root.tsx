@@ -68,6 +68,7 @@ function messageImagesToInitialAttachments(
 
 export function ChatCanvas({
   activeVersionByGroup = {},
+  composerInitialCommand = null,
   composerInitialInput,
   composerResetKey,
   editingMessageId = null,
@@ -109,6 +110,7 @@ export function ChatCanvas({
   onDisabledToolNamesChange,
 }: {
   activeVersionByGroup?: Record<string, number>;
+  composerInitialCommand?: ChatSendInput["command"] | null;
   composerInitialInput?: string;
   composerResetKey?: number;
   editingMessageId?: string | null;
@@ -133,6 +135,7 @@ export function ChatCanvas({
     groupId: string;
     messageId: string;
     message: string;
+    command?: ChatSendInput["command"];
     assistantMessageId: string | null;
     branchIndex: number;
   }) => void;
@@ -251,6 +254,7 @@ export function ChatCanvas({
             disabled={isStreaming}
             isStopping={isStopping}
             initialAttachments={editingInitialAttachments}
+            initialCommand={composerInitialCommand}
             initialInput={composerInitialInput}
             isEditing={isEditing}
             inputKey={threadTitle + "-" + (composerResetKey ?? 0)}
@@ -258,12 +262,14 @@ export function ChatCanvas({
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(message, tools) =>
+            onSubmit={(message, tools, command, skillIds) =>
               handleSendMessage({
                 content: message.text.trim(),
                 images: promptFilesToImages(message.files),
                 mentionedSourceIds: message.mentionedSourceIds,
+                skillIds,
                 tools,
+                command,
               })
             }
             onStopStreaming={onStopStreaming}

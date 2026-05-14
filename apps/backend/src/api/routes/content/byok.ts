@@ -1,25 +1,22 @@
 import type { Hono } from "hono";
-import { createByokKeyRefRequestSchema } from "@sourceweft/contracts";
-import { z } from "zod";
+import {
+  addByokModelRequestSchema,
+  createByokCredentialRequestSchema,
+  resolveByokModelCapabilitiesRequestSchema,
+} from "@sourceweft/contracts";
 import { contentByokService } from "../../../modules/content/byok";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
-const createByokKeyRefRouteSchema = createByokKeyRefRequestSchema.extend({
-  providerKind: z.string().trim().min(1).max(100).optional(),
-  baseUrl: z.string().trim().url().max(2048).optional(),
-  defaultHeaders: z.record(z.string(), z.string()).optional(),
-});
-
 export function registerByokRoutes(app: Hono) {
-  app.get("/model-gateway/byok-keys", async (c) => {
+  app.get("/model-gateway/byok-credentials", async (c) => {
     const session = await requireSession(c);
     if (!session) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentByokService.listByokKeyRefs({
+    const result = await contentByokService.listByokCredentials({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
     });
@@ -27,55 +24,126 @@ export function registerByokRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
-  app.post("/model-gateway/byok-keys", async (c) => {
+  app.post("/model-gateway/byok-credentials", async (c) => {
     const session = await requireSession(c);
     if (!session) {
       throw ApiError.unauthorized();
     }
 
     const body = ensureObjectBody(await c.req.json().catch(() => null));
-    const parsed = createByokKeyRefRouteSchema.safeParse(body);
+    const parsed = createByokCredentialRequestSchema.safeParse(body);
     if (!parsed.success) {
       throw ApiError.validation(
         parsed.error.flatten() as Record<string, unknown>,
       );
     }
-    const parsedData = parsed.data as {
-      providerName: string;
-      keyRef: string;
-      apiKey: string;
-      providerKind?: string;
-      baseUrl?: string;
-      defaultHeaders?: Record<string, string>;
-      metadata?: Record<string, unknown>;
-    };
 
-    const result = await contentByokService.createByokKeyRef({
+    const result = await contentByokService.createByokCredential({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
-      providerName: parsedData.providerName,
-      keyRef: parsedData.keyRef,
-      apiKey: parsedData.apiKey,
-      providerKind: parsedData.providerKind,
-      baseUrl: parsedData.baseUrl,
-      defaultHeaders: parsedData.defaultHeaders,
-      metadata: parsedData.metadata,
+      providerName: parsed.data.providerName,
+      credentialAlias: parsed.data.credentialAlias,
+      apiKey: parsed.data.apiKey,
+      providerKind: parsed.data.providerKind,
+      baseUrl: parsed.data.baseUrl,
+      defaultHeaders: parsed.data.defaultHeaders,
+      metadata: parsed.data.metadata,
     });
 
     return ApiResponse.success(c, result, 201);
   });
 
-  app.delete("/model-gateway/byok-keys/:provider/:keyRef", async (c) => {
+  app.delete("/model-gateway/byok-credentials/:credentialId", async (c) => {
     const session = await requireSession(c);
     if (!session) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentByokService.deleteByokKeyRef({
+    const result = await contentByokService.deleteByokCredential({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
-      providerName: requireRouteParam(c, "provider"),
-      keyRef: requireRouteParam(c, "keyRef"),
+      credentialId: requireRouteParam(c, "credentialId"),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/model-gateway/byok-models", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const credentialId = c.req.query("credentialId")?.trim() || undefined;
+    const result = await contentByokService.listByokModels({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      credentialId,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/model-gateway/byok-models", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = addByokModelRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentByokService.createByokModel({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      credentialId: parsed.data.credentialId,
+      modelName: parsed.data.modelName,
+      displayName: parsed.data.displayName,
+      modelType: parsed.data.modelType,
+      config: parsed.data.config,
+    });
+
+    return ApiResponse.success(c, result, 201);
+  });
+
+  app.delete("/model-gateway/byok-models/:modelId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentByokService.deleteByokModel({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      modelId: requireRouteParam(c, "modelId"),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/model-gateway/byok-model-capabilities", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = resolveByokModelCapabilitiesRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentByokService.resolveModelCapabilities({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      modelName: parsed.data.modelName,
     });
 
     return ApiResponse.success(c, result);

@@ -31,7 +31,6 @@ import {
 } from "@sourceweft/ui-web/components/ai-elements/attachments";
 import {
   PromptInput,
-  PromptInputActionAddAttachments,
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
@@ -43,6 +42,8 @@ import {
   usePromptInputAttachments,
   type PromptInputMentionSourceLoader,
   type PromptInputMessage,
+  type PromptInputSegment,
+  type PromptInputSlashCommand,
 } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import {
   DropdownMenu,
@@ -60,6 +61,7 @@ import {
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import {
   AGENT_TOOL_NAMES,
+  getAgentToolSlashCommand,
   isGeneratedImageArtifactToolName,
 } from "@sourceweft/sdk";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -80,6 +82,7 @@ import {
   thinkingEffortOptions,
 } from "./tool-selection";
 import type {
+  ChatSendInput,
   ChatImageArtifactConfig,
   ChatSkillItem,
   ChatToolName,
@@ -93,6 +96,92 @@ import type {
   ThinkingEffort,
 } from "./types";
 
+type ComposerSlashCommandMeta =
+  | {
+      command: NonNullable<ChatSkillItem["commands"]>[number];
+      kind: "skill-command";
+      skill: ChatSkillItem;
+    }
+  | {
+      kind: "tool-command";
+      tool: "generate_image";
+    }
+  | {
+      kind: "skill";
+      skill: ChatSkillItem;
+    };
+
+function commandDisplayNameFallback(command: ChatSendInput["command"]) {
+  if (!command?.name) {
+    return "";
+  }
+  const legacyDisplayName = sanitizeCommandDisplayName(
+    command.displayName,
+    command.name,
+  );
+  if (legacyDisplayName) {
+    return legacyDisplayName;
+  }
+  const normalized = command.name.startsWith("/")
+    ? command.name
+    : `/${command.name}`;
+  if (command.kind === "tool" || command.toolName) {
+    return normalized === "/generate_image" ? "Generate image" : normalized;
+  }
+  const name = command.commandName ?? normalized.replace(/^\//, "").split(":")[0] ?? normalized;
+  return name
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function humanizeCommandName(value: string) {
+  return value
+    .replace(/^\//, "")
+    .split(":")
+    .pop()!
+    .split(/[.\-_\s]+/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function sanitizeCommandDisplayName(
+  displayName: string | undefined,
+  canonicalName: string,
+) {
+  const trimmed = displayName?.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.startsWith("/") ? humanizeCommandName(trimmed) : trimmed;
+}
+
+function commandKindForPromptInput(
+  command: ChatSendInput["command"],
+): PromptInputSlashCommand["kind"] {
+  return command?.kind === "tool" || command?.toolName ? "tool" : "skill";
+}
+
+type ResolvedComposerCommand =
+  | {
+      arguments: string;
+      command: NonNullable<ChatSkillItem["commands"]>[number];
+      kind: "skill-command";
+      skill: ChatSkillItem;
+    }
+  | {
+      arguments: string;
+      kind: "skill";
+      skill: ChatSkillItem;
+    }
+  | {
+      arguments: string;
+      kind: "tool-command";
+      name: "/generate_image";
+    };
+
 export function Composer({
   isEditing = false,
   placeholder,
@@ -101,6 +190,7 @@ export function Composer({
   className,
   initialAttachments = [],
   initialInput = "",
+  initialCommand = null,
   inputKey,
   allSources = [],
   sourceMentionLoader,
@@ -125,11 +215,17 @@ export function Composer({
 }: {
   isEditing?: boolean;
   placeholder?: string;
-  onSubmit?: (message: PromptInputMessage, tools?: ChatToolsSelection) => void;
+  onSubmit?: (
+    message: PromptInputMessage,
+    tools?: ChatToolsSelection,
+    command?: ChatSendInput["command"],
+    skillIds?: string[],
+  ) => void;
   onCancelEditing?: () => void;
   className?: string;
   initialAttachments?: (FileUIPart & { id: string })[];
   initialInput?: string;
+  initialCommand?: ChatSendInput["command"] | null;
   inputKey?: string | number;
   allSources?: SourceItem[];
   sourceMentionLoader?: PromptInputMentionSourceLoader;
@@ -154,12 +250,18 @@ export function Composer({
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [, setDraftText] = useState(initialInput);
+  const [commandSegments, setCommandSegments] = useState<
+    Extract<PromptInputSegment, { type: "command" }>[]
+  >([]);
   const [composerSessionKey, setComposerSessionKey] = useState(0);
   const previousEditingRef = useRef(isEditing);
   const [imageConfig, setImageConfig] = useState<ChatImageArtifactConfig>(
     DEFAULT_IMAGE_ARTIFACT_CONFIG,
   );
   const [imageConfigPinned, setImageConfigPinned] = useState(false);
+  const [selectedCommandName, setSelectedCommandName] = useState<string | null>(
+    null,
+  );
   const disabledToolNameSet = useMemo(
     () => new Set(disabledToolNames),
     [disabledToolNames],
@@ -265,6 +367,150 @@ export function Composer({
       title: source.title,
       type: source.type,
     }));
+  const slashCommandOptions = useMemo<PromptInputSlashCommand[]>(
+    () => {
+      const generateImageSlash = getAgentToolSlashCommand(
+        AGENT_TOOL_NAMES.generateImage,
+      );
+      const toolCommands: PromptInputSlashCommand[] =
+        imageSupported && generateImageSlash
+          ? [
+              {
+                description: generateImageSlash.description,
+                group: "Tools",
+                id: "tool-command:generate_image",
+                kind: "tool",
+                label: generateImageSlash.displayName,
+                meta: {
+                  kind: "tool-command",
+                  tool: "generate_image",
+                } satisfies ComposerSlashCommandMeta,
+                value: "/generate_image",
+              },
+            ]
+          : [];
+      const skillCommands = availableSkills.flatMap((skill) =>
+        skill.slash === false || skill.slashConfig?.enabled === false
+          ? []
+          : (skill.commands ?? [])
+              .filter((command) => command.slash !== false)
+              .map((command) => ({
+                description: [skill.displayName, command.description]
+                  .filter(Boolean)
+                  .join(" · "),
+                group: skill.displayName,
+                id: `${skill.id}:${command.id}`,
+                kind: "skill" as const,
+                label:
+                  sanitizeCommandDisplayName(
+                    command.displayName,
+                    command.canonicalName,
+                  ) ||
+                  command.title ||
+                  humanizeCommandName(command.name),
+                meta: {
+                  command,
+                  kind: "skill-command",
+                  skill,
+                } satisfies ComposerSlashCommandMeta,
+                value: command.canonicalName,
+              })),
+      );
+      const skillActivationCommands = availableSkills
+        .filter(
+          (skill) =>
+            skill.slash !== false && skill.slashConfig?.enabled !== false,
+        )
+        .map((skill) => ({
+          description: skill.description,
+          group: "Skills",
+          id: `skill:${skill.id}`,
+          kind: "skill" as const,
+          label: skill.displayName,
+          meta: {
+            kind: "skill",
+            skill,
+          } satisfies ComposerSlashCommandMeta,
+          value: `/${skill.slug}`,
+        }));
+      return [...toolCommands, ...skillCommands, ...skillActivationCommands];
+    },
+    [availableSkills, imageSupported],
+  );
+  const commandByCanonicalName = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        command: NonNullable<ChatSkillItem["commands"]>[number];
+        skill: ChatSkillItem;
+      }
+    >();
+    for (const skill of availableSkills) {
+      for (const command of skill.commands ?? []) {
+        map.set(command.canonicalName.toLowerCase(), { command, skill });
+      }
+    }
+    return map;
+  }, [availableSkills]);
+
+  function supportsSkillSlash(
+    skill: ChatSkillItem | undefined,
+  ): skill is ChatSkillItem {
+    return Boolean(
+      skill &&
+        skill.slash !== false &&
+        skill.slashConfig?.enabled !== false,
+    );
+  }
+
+  const selectedCommandCandidate = selectedCommandName
+    ? (commandByCanonicalName.get(selectedCommandName.toLowerCase()) ?? null)
+    : null;
+  const selectedCommand =
+    selectedCommandCandidate &&
+    supportsSkillSlash(selectedCommandCandidate.skill) &&
+    selectedCommandCandidate.command.slash !== false
+      ? selectedCommandCandidate
+      : null;
+  const selectedSkillActivation = selectedCommandName?.startsWith("/")
+    ? (availableSkills.find(
+        (skill) =>
+          selectedCommandName.toLowerCase() ===
+            `/${skill.slug}`.toLowerCase() && supportsSkillSlash(skill),
+      ) ?? null)
+    : null;
+  const selectedToolCommand =
+    selectedCommandName === "/generate_image"
+      ? { canonicalName: "/generate_image" }
+      : null;
+  const initialPromptSegments = useMemo<PromptInputSegment[]>(() => {
+    const commandName = initialCommand?.name?.trim();
+    const textSegments: PromptInputSegment[] = initialInput
+      ? [{ text: initialInput, type: "text" }]
+      : [];
+    if (!commandName) {
+      return textSegments;
+    }
+    const canonicalName = commandName.startsWith("/")
+      ? commandName
+      : `/${commandName}`;
+    const command = initialCommand;
+    if (!command) {
+      return textSegments;
+    }
+    return [
+      {
+        command: {
+          kind: commandKindForPromptInput(command),
+          label: commandDisplayNameFallback(command),
+          value: canonicalName,
+        },
+        type: "command",
+      },
+      ...(initialInput ? [{ text: ` ${initialInput}`, type: "text" } as const] : []),
+    ];
+  }, [initialCommand, initialInput]);
+  const activeCommandSegment = commandSegments[0]?.command;
 
   function updateThinkingSettings(next: PromptThinkingSettings) {
     if (!supportsThinking) {
@@ -314,6 +560,132 @@ export function Composer({
     }
   }
 
+  function applyCommandTools(command: NonNullable<ChatSkillItem["commands"]>[number]) {
+    if (command.tools?.includes(AGENT_TOOL_NAMES.webSearch)) {
+      onSearchEnabledChange?.(true);
+    }
+    if (command.tools?.includes(AGENT_TOOL_NAMES.generateImage)) {
+      updateImageGenerationEnabled(true);
+    }
+  }
+
+  function buildCommandSkillIds(skill: ChatSkillItem | undefined) {
+    return skill ? [skill.id] : [];
+  }
+
+  function resolveTextCommand(text: string): ResolvedComposerCommand | null {
+    const trimmed = text.trim();
+    const imageMatch = /^\/generate_image(?:\s+([\s\S]*))?$/i.exec(trimmed);
+    if (imageMatch) {
+      return {
+        arguments: (imageMatch[1] ?? "").trim(),
+        kind: "tool-command",
+        name: "/generate_image",
+      };
+    }
+
+    const skillMatch = /^\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)(?:\s+([\s\S]*))?$/i.exec(
+      trimmed,
+    );
+    if (skillMatch?.[1]) {
+      const skill = availableSkills.find(
+        (candidate) =>
+          candidate.slug.toLowerCase() === skillMatch[1]?.toLowerCase(),
+      );
+      if (supportsSkillSlash(skill)) {
+        return {
+          arguments: (skillMatch[2] ?? "").trim(),
+          kind: "skill",
+          skill,
+        };
+      }
+    }
+
+    const match = /^\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?:[a-z0-9][a-z0-9.-]{0,127})(?:\s+([\s\S]*))?$/i.exec(
+      trimmed,
+    );
+    if (!match) {
+      return null;
+    }
+    const canonicalName = `/${match[1]}`;
+    const resolved = commandByCanonicalName.get(canonicalName.toLowerCase());
+    if (
+      !resolved ||
+      !supportsSkillSlash(resolved.skill) ||
+      resolved.command.slash === false
+    ) {
+      return null;
+    }
+    return {
+      ...resolved,
+      arguments: (match[2] ?? "").trim(),
+      kind: "skill-command",
+    };
+  }
+
+  function stripCommandText(text: string, commandName?: string) {
+    if (!commandName) {
+      return text.trim();
+    }
+    const trimmed = text.trim();
+    return trimmed
+      .toLowerCase()
+      .startsWith(commandName.toLowerCase())
+      ? trimmed.slice(commandName.length).trimStart()
+      : trimmed;
+  }
+
+  function stripSelectedCommandText(text: string) {
+    const commandName =
+      selectedCommand?.command.canonicalName ??
+      (selectedSkillActivation ? `/${selectedSkillActivation.slug}` : undefined) ??
+      selectedToolCommand?.canonicalName;
+    return stripCommandText(text, commandName);
+  }
+
+  function resolveTokenCommand(
+    commandName: string,
+    text: string,
+  ): ResolvedComposerCommand | null {
+    const args = stripCommandText(text, commandName);
+    if (commandName.toLowerCase() === "/generate_image") {
+      return {
+        arguments: args,
+        kind: "tool-command",
+        name: "/generate_image",
+      };
+    }
+
+    const skillActivation = availableSkills.find(
+      (skill) =>
+        commandName.toLowerCase() === `/${skill.slug}`.toLowerCase() &&
+        supportsSkillSlash(skill),
+    );
+    if (skillActivation) {
+      return {
+        arguments: args,
+        kind: "skill",
+        skill: skillActivation,
+      };
+    }
+
+    const resolvedCommand = commandByCanonicalName.get(commandName.toLowerCase());
+    if (
+      resolvedCommand &&
+      supportsSkillSlash(resolvedCommand.skill) &&
+      resolvedCommand.command.slash !== false
+    ) {
+      return {
+        arguments: args,
+        command: resolvedCommand.command,
+        kind: "skill-command",
+        skill: resolvedCommand.skill,
+      };
+    }
+
+    return null;
+  }
+
   useEffect(() => {
     if (imageConfigPinned) {
       return;
@@ -328,7 +700,31 @@ export function Composer({
 
   useEffect(() => {
     setDraftText(initialInput);
-  }, [initialInput, inputKey]);
+    setCommandSegments(
+      initialPromptSegments.filter(
+        (segment): segment is Extract<PromptInputSegment, { type: "command" }> =>
+          segment.type === "command",
+      ),
+    );
+    setSelectedCommandName(
+      initialCommand?.name
+        ? initialCommand.name.startsWith("/")
+          ? initialCommand.name
+          : `/${initialCommand.name}`
+        : null,
+    );
+  }, [initialCommand, initialInput, initialPromptSegments, inputKey]);
+
+  useEffect(() => {
+    if (
+      selectedCommandName &&
+      selectedCommandName !== "/generate_image" &&
+      !selectedSkillActivation &&
+      !selectedCommand
+    ) {
+      setSelectedCommandName(null);
+    }
+  }, [selectedCommand, selectedCommandName, selectedSkillActivation]);
 
   useEffect(() => {
     if (previousEditingRef.current !== isEditing) {
@@ -391,14 +787,111 @@ export function Composer({
             if (disabled) {
               return;
             }
+            const activeCommandName = activeCommandSegment?.value ?? null;
+            const activeSelectedToolCommand =
+              activeCommandName === selectedToolCommand?.canonicalName
+                ? selectedToolCommand
+                : null;
+            const activeSelectedSkillActivation =
+              activeCommandName &&
+              selectedSkillActivation &&
+              activeCommandName.toLowerCase() ===
+                `/${selectedSkillActivation.slug}`.toLowerCase()
+                ? selectedSkillActivation
+                : null;
+            const activeSelectedCommand =
+              activeCommandName &&
+              selectedCommand &&
+              activeCommandName.toLowerCase() ===
+                selectedCommand.command.canonicalName.toLowerCase()
+                ? selectedCommand
+                : null;
+            const tokenResolvedCommand = activeCommandName
+              ? resolveTokenCommand(activeCommandName, message.text)
+              : null;
+            const selectedResolvedCommand: ResolvedComposerCommand | null =
+              activeSelectedToolCommand
+                ? {
+                    arguments: stripSelectedCommandText(message.text),
+                    kind: "tool-command",
+                    name: "/generate_image",
+                  }
+                : activeSelectedSkillActivation
+                  ? {
+                      arguments: stripSelectedCommandText(message.text),
+                      kind: "skill",
+                      skill: activeSelectedSkillActivation,
+                    }
+                  : activeSelectedCommand
+                    ? {
+                        arguments: stripSelectedCommandText(message.text),
+                        command: activeSelectedCommand.command,
+                        kind: "skill-command",
+                        skill: activeSelectedCommand.skill,
+                    }
+                  : null;
+            const directCommand =
+              selectedResolvedCommand || tokenResolvedCommand || activeCommandSegment
+              ? null
+              : resolveTextCommand(message.text);
+            const activeCommand =
+              selectedResolvedCommand ?? tokenResolvedCommand ?? directCommand;
+            const invokedSkillIds =
+              activeCommand?.kind === "skill" ||
+              activeCommand?.kind === "skill-command"
+                ? buildCommandSkillIds(activeCommand.skill)
+                    .slice(0, 5)
+                : [];
+            const turnSkillIds = [
+              ...new Set([...effectiveSelectedSkillIds, ...invokedSkillIds]),
+            ].slice(0, 5);
+            const submittedMessage = message;
+            const commandRequest =
+              activeCommand?.kind === "skill-command"
+                ? {
+                    arguments: activeCommand.arguments,
+                    kind: "skill-command" as const,
+                    name: activeCommand.command.canonicalName,
+                  }
+                : activeCommand?.kind === "skill"
+                ? {
+                    arguments: activeCommand.arguments,
+                    kind: "skill" as const,
+                    name: `/${activeCommand.skill.slug}`,
+                  }
+                : activeCommand?.kind === "tool-command"
+                ? {
+                    arguments: activeCommand.arguments,
+                    kind: "tool" as const,
+                    name: "/generate_image",
+                  }
+                : undefined;
             const tools = buildComposerToolsSelection({
-              imageGenerationEnabled,
+              imageGenerationEnabled:
+                imageGenerationEnabled ||
+                activeCommand?.kind === "tool-command",
               imageSupported,
-              selectedSkills: effectiveSelectedSkills,
+              selectedSkills: availableSkills.filter((skill) =>
+                turnSkillIds.includes(skill.id),
+              ),
               imageConfig: effectiveImageConfig,
               imageModelAlias: effectiveImageModelAlias,
             });
-            (onSubmit ?? (() => undefined))(message, tools);
+            const toolsWithInvokedSkills =
+              invokedSkillIds.length > 0
+                ? {
+                    ...(tools ?? {}),
+                    invokedSkillIds,
+                  }
+                : tools;
+            (onSubmit ?? (() => undefined))(
+              submittedMessage,
+              toolsWithInvokedSkills,
+              commandRequest,
+              effectiveSelectedSkillIds,
+            );
+            setSelectedCommandName(null);
+            setCommandSegments([]);
             setComposerSessionKey((value) => value + 1);
           }}
         >
@@ -411,6 +904,7 @@ export function Composer({
               autoFocus={isEditing && !disabled}
               data-chat-prompt-editor="true"
               disabled={disabled}
+              initialSegments={initialPromptSegments}
               initialValue={initialInput}
               onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                 if (isEditing && event.key === "Escape") {
@@ -432,7 +926,35 @@ export function Composer({
                 placeholder ||
                 "Message your documents, links, or connected tools..."
               }
-              onValueChange={({ text }) => setDraftText(text)}
+              onValueChange={({ segments, text }) => {
+                setDraftText(text);
+                setCommandSegments(
+                  segments.filter(
+                    (
+                      segment,
+                    ): segment is Extract<PromptInputSegment, { type: "command" }> =>
+                      segment.type === "command",
+                  ),
+                );
+              }}
+              onSlashCommandSelect={(option: PromptInputSlashCommand) => {
+                const meta = option.meta as ComposerSlashCommandMeta | undefined;
+                if (!meta) {
+                  return;
+                }
+                if (meta.kind === "tool-command") {
+                  updateImageGenerationEnabled(true);
+                  setSelectedCommandName("/generate_image");
+                  return;
+                }
+                if (meta.kind === "skill") {
+                  setSelectedCommandName(`/${meta.skill.slug}`);
+                  return;
+                }
+                setSelectedCommandName(meta.command.canonicalName);
+                applyCommandTools(meta.command);
+              }}
+              slashCommands={slashCommandOptions}
               sourceLoader={sourceMentionLoader}
               sources={mentionSources}
             />
@@ -466,11 +988,6 @@ export function Composer({
                     <DropdownMenuLabel className="px-2 py-1.5 text-[11px] text-muted-foreground">
                       Options
                     </DropdownMenuLabel>
-                    <PromptInputActionAddAttachments
-                      className="h-9 rounded-lg px-2 text-xs"
-                      label="Add image"
-                    />
-                    <DropdownMenuSeparator />
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
                         <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">

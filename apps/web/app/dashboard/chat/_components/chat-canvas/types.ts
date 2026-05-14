@@ -3,15 +3,19 @@ import {
   type AgentToolName,
   type ChatInputImage,
   type ChatMessageImagePart,
+  type SkillCommand,
+  type ThreadCommandRequest,
 } from "@sourceweft/sdk";
 
 export type { ChatMessageImagePart };
 
 export type ChatSendInput = {
   content: string;
+  skillIds?: string[];
   images?: ChatInputImage[];
   mentionedSourceIds?: string[];
   tools?: ChatToolsSelection;
+  command?: ThreadCommandRequest;
 };
 
 export type MessageVersion = {
@@ -19,6 +23,7 @@ export type MessageVersion = {
   renderKey?: string;
   content: string;
   contentJson?: Record<string, unknown>;
+  command?: ThreadCommandRequest;
   citations?: CitationRecord[];
   availableCitations?: CitationRecord[];
   isError?: boolean;
@@ -102,7 +107,9 @@ export type ChatImageArtifactConfig = {
 
 export type ChatGenerateImageToolSelection = {
   enabled?: boolean;
+  mode?: "auto" | "generate";
   modelAlias?: string;
+  execution?: Record<string, unknown>;
   config?: ChatImageArtifactConfig;
 };
 
@@ -110,6 +117,7 @@ export type ChatToolName = AgentToolName;
 
 export type ChatToolsSelection = {
   [AGENT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
+  invokedSkillIds?: string[];
 };
 
 export type ChatSkillItem = {
@@ -131,7 +139,12 @@ export type ChatSkillItem = {
     image?: string;
     vision?: string;
   };
+  commands?: SkillCommand[];
   tools?: string[];
+  slash?: boolean;
+  slashConfig?: {
+    enabled?: boolean;
+  };
   defaultConfig?: Record<string, unknown>;
 };
 

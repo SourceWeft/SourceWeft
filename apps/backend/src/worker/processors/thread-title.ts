@@ -10,6 +10,43 @@ import {
   generateThreadTitle,
 } from "../../modules/content/threads/thread/title-generation";
 import { findThreadRecord } from "../../modules/content/threads/thread/repository";
+import { contentByokService } from "../../modules/content/byok";
+import type { LlmExecutionConfig } from "../../modules/content/model-gateway-audit";
+
+async function resolveThreadTitleExecution(
+  payload: ThreadTitleGenerateJobPayload,
+): Promise<LlmExecutionConfig | undefined> {
+  if (payload.llm?.executionMode !== "BYOK" || !payload.llm.byokModelId) {
+    return undefined;
+  }
+
+  const resolved = await contentByokService.resolveByokModelExecution({
+    workspaceId: payload.workspaceId,
+    userId: payload.userId,
+    byokModelId: payload.llm.byokModelId,
+  });
+
+  if (resolved.modelType !== "llm") {
+    throw new Error("BYOK title generation requires a llm model");
+  }
+
+  return {
+    executionMode: "BYOK",
+    profileAlias: undefined,
+    modelAlias: resolved.displayName,
+    providerModel: resolved.modelName,
+    providerHint: resolved.providerName,
+    byokModelId: resolved.byokModelId,
+    credentialId: resolved.credentialId,
+    byok: {
+      provider: resolved.providerName,
+      providerKind: resolved.providerKind,
+      ...(resolved.baseUrl ? { baseUrl: resolved.baseUrl } : {}),
+      apiKey: resolved.apiKey,
+      defaultHeaders: resolved.defaultHeaders,
+    },
+  };
+}
 
 export async function processThreadTitleGenerateJob(
   job: Job<Record<string, unknown>>,
@@ -51,7 +88,12 @@ export async function processThreadTitleGenerateJob(
   let title: string | null = null;
 
   try {
-    title = await generateThreadTitle(payload);
+    const llm = await resolveThreadTitleExecution(payload);
+    title = await generateThreadTitle({
+      ...payload,
+      providerModel: llm?.providerModel ?? payload.providerModel,
+      llm,
+    });
   } catch (error) {
     if (!isLastAttempt) {
       throw error;

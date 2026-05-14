@@ -1,9 +1,11 @@
 import { ContentError } from "../errors";
 import { loadBuiltinSkillBundle, listBuiltinSkills } from "./builtin";
 import {
+  findEnabledWorkspaceSkillRecordBySlug,
   listWorkspaceSkillRecordsByIds,
   loadSkillVersionBundle,
 } from "./repository";
+import { parseSkillCommands } from "./commands";
 import type { EnabledSkillDescriptor } from "./types";
 
 const MAX_SELECTED_SKILLS_PER_TURN = 5;
@@ -20,6 +22,32 @@ export function normalizeSkillIds(value: unknown) {
         .filter((item) => item.length > 0),
     ),
   ).slice(0, MAX_SELECTED_SKILLS_PER_TURN + 1);
+}
+
+export async function resolveSkillIdsWithSlashCommand(input: {
+  teamId: string;
+  workspaceId: string;
+  skillIds: string[];
+  commandName?: string;
+  findSkillBySlug?: typeof findEnabledWorkspaceSkillRecordBySlug;
+}) {
+  const skillIds = normalizeSkillIds(input.skillIds);
+  const slug = skillSlugFromSlashCommand(input.commandName);
+  if (!slug) {
+    return skillIds;
+  }
+
+  const findSkillBySlug =
+    input.findSkillBySlug ?? findEnabledWorkspaceSkillRecordBySlug;
+  const record = await findSkillBySlug({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    slug,
+  });
+  if (!record || skillIds.includes(record.id)) {
+    return skillIds;
+  }
+  return [...skillIds, record.id].slice(0, MAX_SELECTED_SKILLS_PER_TURN + 1);
 }
 
 export async function resolveSelectedSkills(input: {
@@ -82,15 +110,23 @@ export async function resolveSelectedSkills(input: {
     if (!files) {
       throw new ContentError(404, "SKILL_FILES_NOT_FOUND", "Selected skill files could not be loaded");
     }
+    const commands = parseSkillCommands({
+      files,
+      skillSlug: bundle.definition.slug,
+    });
     result.push({
       workspaceSkillId: record.id,
       sourceType: bundle.definition.sourceType,
       name: bundle.definition.slug,
+      displayName: bundle.definition.displayName,
       version: bundle.version.version,
       description: bundle.definition.description,
       capabilities: bundle.version.manifestJson.capabilities,
       models: bundle.version.manifestJson.models,
+      commands,
       tools: bundle.version.manifestJson.tools,
+      slash: bundle.version.manifestJson.slash,
+      slashConfig: bundle.version.manifestJson.slashConfig,
       defaultConfig: bundle.version.manifestJson.defaultConfig,
       files,
     });
@@ -101,4 +137,16 @@ export async function resolveSelectedSkills(input: {
 
 export async function builtinCatalogKeys() {
   return new Set((await listBuiltinSkills()).map((skill) => skill.slug));
+}
+
+function skillSlugFromSlashCommand(commandName: string | undefined) {
+  if (!commandName) {
+    return null;
+  }
+  const raw = commandName.trim();
+  const withSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  const match = withSlash.match(
+    /^\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)(?::[a-z0-9][a-z0-9.-]{0,127})?$/i,
+  );
+  return match?.[1]?.toLowerCase() ?? null;
 }

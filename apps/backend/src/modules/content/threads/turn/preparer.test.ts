@@ -322,3 +322,191 @@ test("empty thread message validation rejects textless imageless messages", () =
     true,
   );
 });
+
+test("parseRequestedCommand recognizes tool and skill slash forms", () => {
+  assert.deepEqual(
+    testExports.parseRequestedCommand({
+      content: "/generate_image neon dashboard",
+    }),
+    {
+      arguments: "neon dashboard",
+      name: "/generate_image",
+    },
+  );
+  assert.deepEqual(
+    testExports.parseRequestedCommand({
+      content: "/image neon dashboard",
+    }),
+    {
+      arguments: "neon dashboard",
+      name: "/image",
+    },
+  );
+  assert.equal(testExports.resolveToolCommandName("/image"), null);
+  assert.deepEqual(
+    testExports.parseRequestedCommand({
+      content: "/pm-data-analytics Show active users",
+    }),
+    {
+      arguments: "Show active users",
+      name: "/pm-data-analytics",
+    },
+  );
+  assert.deepEqual(
+    testExports.parseRequestedCommand({
+      content: "/pm-data-analytics:write-query Show active users",
+    }),
+    {
+      arguments: "Show active users",
+      name: "/pm-data-analytics:write-query",
+    },
+  );
+});
+
+test("resolveThreadCommand resolves slash skill activation when skill was loaded by slug", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      content: "/feynman 解释二八定律",
+    }),
+    enabledSkills: [
+      {
+        workspaceSkillId: "skill-1",
+        sourceType: "builtin",
+        name: "feynman",
+        displayName: "Feynman",
+        version: "1.0.0",
+        description: "Use the Feynman technique",
+        slash: true,
+        files: [],
+      },
+    ],
+  });
+
+  assert.deepEqual(command, {
+    arguments: "解释二八定律",
+    canonicalName: "/feynman",
+    description: "Use the Feynman technique",
+    displayName: "Feynman",
+    kind: "skill",
+    name: "/feynman",
+    skillSlug: "feynman",
+  });
+});
+
+test("resolveThreadCommand resolves slash skill command when skill was loaded by slug", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      content: "/feynman:explain 解释二八定律",
+    }),
+    enabledSkills: [
+      {
+        workspaceSkillId: "skill-1",
+        sourceType: "builtin",
+        name: "feynman",
+        displayName: "Feynman",
+        version: "1.0.0",
+        description: "Use the Feynman technique",
+        slash: true,
+        commands: [
+          {
+            id: "feynman:explain",
+            name: "explain",
+            canonicalName: "/feynman:explain",
+            displayName: "Explain",
+            description: "Explain simply",
+            path: "commands/explain.md",
+            instruction: "Explain $ARGUMENTS simply",
+            skillSlugs: ["feynman"],
+          },
+        ],
+        files: [],
+      },
+    ],
+  });
+
+  assert.equal(command?.kind, "skill-command");
+  assert.equal(command?.canonicalName, "/feynman:explain");
+  assert.equal(command?.arguments, "解释二八定律");
+  assert.equal(command?.instruction, "Explain $ARGUMENTS simply");
+});
+
+test("buildCommandAugmentedText leaves tool and skill activation text unchanged", () => {
+  assert.equal(
+    testExports.buildCommandAugmentedText({
+      command: {
+        arguments: "draw a chart",
+        canonicalName: "/generate_image",
+        description: "Generate image",
+        displayName: "Generate image",
+        kind: "tool",
+        name: "/generate_image",
+        skillSlug: "",
+        toolName: "generate_image",
+      },
+      text: "draw a chart",
+    }),
+    "draw a chart",
+  );
+  assert.equal(
+    testExports.buildCommandAugmentedText({
+      command: {
+        arguments: "Show active users",
+        canonicalName: "/pm-data-analytics",
+        description: "Analytics skill",
+        displayName: "PM Data Analytics",
+        kind: "skill",
+        name: "/pm-data-analytics",
+        skillSlug: "pm-data-analytics",
+      },
+      text: "Show active users",
+    }),
+    "Show active users",
+  );
+});
+
+test("buildCommandAugmentedText injects skill command instructions", () => {
+  assert.match(
+    testExports.buildCommandAugmentedText({
+      command: {
+        arguments: "Show active users",
+        canonicalName: "/pm-data-analytics:write-query",
+        commandName: "write-query",
+        description: "Write query",
+        displayName: "Write query",
+        instruction: "Use $ARGUMENTS to write SQL",
+        kind: "skill-command",
+        name: "/pm-data-analytics:write-query",
+        path: "commands/write-query.md",
+        skillSlug: "pm-data-analytics",
+      },
+      text: "Show active users",
+    }),
+    /<sourceweft_command name="\/pm-data-analytics:write-query" path="\/skills\/pm-data-analytics\/commands\/write-query.md">/,
+  );
+});
+
+test("buildThreadCommandMetadata preserves display labels and routing fields", () => {
+  assert.deepEqual(
+    testExports.buildThreadCommandMetadata({
+      arguments: "Show active users",
+      canonicalName: "/pm-data-analytics:write-query",
+      commandName: "write-query",
+      description: "Write query",
+      displayName: "Write Query",
+      instruction: "Use $ARGUMENTS to write SQL",
+      kind: "skill-command",
+      name: "/pm-data-analytics:write-query",
+      path: "commands/write-query.md",
+      skillSlug: "pm-data-analytics",
+    }),
+    {
+      arguments: "Show active users",
+      commandName: "write-query",
+      displayName: "Write Query",
+      kind: "skill-command",
+      name: "/pm-data-analytics:write-query",
+      path: "commands/write-query.md",
+      skillSlug: "pm-data-analytics",
+    },
+  );
+});

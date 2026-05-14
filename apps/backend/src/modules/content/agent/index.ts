@@ -181,7 +181,9 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
     gatewayConfigId: params.gatewayConfigId,
     execution: {
       ...params.execution,
-      profileAlias: params.execution?.profileAlias ?? modelAlias,
+      ...(params.execution?.executionMode === "BYOK"
+        ? {}
+        : { profileAlias: params.execution?.profileAlias ?? modelAlias }),
     },
   });
   const contextCompressionMiddleware =

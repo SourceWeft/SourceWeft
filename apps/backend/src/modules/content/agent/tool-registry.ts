@@ -8,8 +8,10 @@ export {
   agentToolRequiredForModelKind,
   getAgentToolConfigKeys,
   getAgentToolDefinition,
+  getAgentToolSlashCommand,
   hasAgentToolCapability,
   hasAgentToolTrait,
+  isAgentToolSlashCommandSupported,
   isGeneratedImageArtifactToolName,
   isAgentToolEnabledByDefault,
   isAgentToolFamily,
@@ -32,6 +34,7 @@ export {
   type AgentToolDefinition,
   type AgentToolDomain,
   type AgentToolFamily,
+  type AgentToolSlashCommand,
   type AgentToolName,
   type AgentToolTrait,
 } from "@sourceweft/contracts/agent-tools";

@@ -39,6 +39,9 @@ const RESERVED_EVENT_ATTRIBUTE_KEYS = new Set([
   "keySource",
   "provider",
   "modelAlias",
+  "byokModelId",
+  "credentialId",
+  "providerModel",
   "routeStrategy",
   "latencyMs",
 ]);
@@ -57,6 +60,7 @@ export type GatewayEventInput = {
   executionMode?: string | null;
   keySource?: string | null;
   provider?: string | null;
+  providerModel?: string | null;
   modelAlias?: string | null;
   routeStrategy?: string | null;
   success: boolean;
@@ -219,7 +223,7 @@ export async function createModelGatewayEvent(input: GatewayEventInput) {
     executionMode: input.executionMode ?? null,
     keySource: input.keySource ?? null,
     provider: input.provider ?? null,
-    providerModel: null,
+    providerModel: input.providerModel ?? null,
     modelAlias: input.modelAlias ?? null,
     routeStrategy: input.routeStrategy ?? null,
     success: input.success,
@@ -378,6 +382,10 @@ export function createLlmObservabilitySink(): ObserveSink {
         modelAlias:
           typeof attributes.modelAlias === "string"
             ? attributes.modelAlias
+            : null,
+        providerModel:
+          typeof attributes.providerModel === "string"
+            ? attributes.providerModel
             : null,
         routeStrategy:
           typeof attributes.routeStrategy === "string"

@@ -17,19 +17,39 @@ import type {
 } from "./types";
 
 export function buildChatToolsRequest(input: {
+  imageExecution?: Record<string, unknown> | null;
+  invokedSkillIds?: string[];
   skillIds?: string[];
   searchEnabled?: boolean;
   tools?: ChatToolsSelection;
+  forceImageGenerate?: boolean;
 }) {
   const generateImage = input.tools?.[AGENT_TOOL_NAMES.generateImage];
+  const generateImageWithMode = input.forceImageGenerate
+    ? {
+        ...(generateImage ?? {}),
+        enabled: generateImage?.enabled ?? true,
+        mode: "generate" as const,
+      }
+    : generateImage;
+  const generateImageWithExecution = input.imageExecution
+    ? {
+        ...(generateImageWithMode ?? {}),
+        enabled: generateImageWithMode?.enabled ?? true,
+        execution: input.imageExecution,
+      }
+    : generateImageWithMode;
 
   return {
     skillIds: input.skillIds ?? [],
+    ...(input.invokedSkillIds?.length
+      ? { invokedSkillIds: input.invokedSkillIds }
+      : {}),
     [AGENT_TOOL_NAMES.webSearch]: {
       enabled: input.searchEnabled === true,
     },
-    ...(generateImage
-      ? { [AGENT_TOOL_NAMES.generateImage]: generateImage }
+    ...(generateImageWithExecution
+      ? { [AGENT_TOOL_NAMES.generateImage]: generateImageWithExecution }
       : {}),
   };
 }

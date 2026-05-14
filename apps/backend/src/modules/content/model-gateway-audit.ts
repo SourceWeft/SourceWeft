@@ -12,15 +12,23 @@ export type LlmThinkingConfig = {
 };
 
 export type LlmExecutionConfig = {
+  // Global-only abstract model identity. BYOK requests must not rely on this.
   profileAlias?: string;
+  // UI/display compatibility field. Execution should prefer providerModel.
   modelAlias?: string;
+  // Real provider model sent upstream for both GLOBAL and BYOK execution.
   providerModel?: string;
   executionMode?: "GLOBAL" | "BYOK";
   providerHint?: string;
+  byokModelId?: string;
+  credentialId?: string;
   byok?: {
     provider: string;
+    providerKind?: string;
+    baseUrl?: string;
     apiKey?: string;
     apiKeyRef?: string;
+    defaultHeaders?: Record<string, string>;
   };
   thinking?: LlmThinkingConfig;
 };
@@ -29,13 +37,48 @@ function resolveByokKeySource(input: LlmExecutionConfig | undefined) {
   if (!input || input.executionMode !== "BYOK") {
     return "global";
   }
-  if (input.byok?.apiKeyRef) {
-    return "apiKeyRef";
-  }
-  if (input.byok?.apiKey) {
-    return "rawApiKey";
+  if (input.byokModelId || input.credentialId) {
+    return "byokCredential";
   }
   return "byok";
+}
+
+function normalizeIdentityPart(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+export function resolveGatewayObservedIdentity(input: {
+  llm?: LlmExecutionConfig;
+  modelAlias?: string | null;
+  profileAlias?: string | null;
+}) {
+  if (input.llm?.executionMode !== "BYOK") {
+    return {
+      modelAlias: input.modelAlias ?? null,
+      profileAlias: input.profileAlias ?? null,
+      catalogModelAlias: undefined,
+      catalogProfileAlias: undefined,
+    };
+  }
+
+  const provider =
+    normalizeIdentityPart(input.llm.byok?.provider) ??
+    normalizeIdentityPart(input.llm.providerHint) ??
+    "byok";
+  const model =
+    normalizeIdentityPart(input.llm.providerModel) ??
+    normalizeIdentityPart(input.llm.modelAlias) ??
+    normalizeIdentityPart(input.modelAlias ?? undefined) ??
+    "model";
+  const observedAlias = `byok:${provider}:${model}`;
+
+  return {
+    modelAlias: observedAlias,
+    profileAlias: null,
+    catalogModelAlias: input.modelAlias ?? null,
+    catalogProfileAlias: undefined,
+  };
 }
 
 function safeErrorSummary(error: unknown) {
@@ -61,10 +104,14 @@ export function buildGatewayAuditMetadata(input: {
   provider?: string;
   routeDecision?: Record<string, unknown> | undefined;
 }) {
+  const executionMode = input.llm?.executionMode ?? "GLOBAL";
+  const isByok = executionMode === "BYOK";
   return {
-    executionMode: input.llm?.executionMode ?? "GLOBAL",
+    executionMode,
     providerHint: input.llm?.providerHint ?? null,
-    byokProvider: input.llm?.byok?.provider ?? null,
+    byokProvider: isByok ? input.llm?.byok?.provider ?? null : null,
+    ...(isByok ? { byokModelId: input.llm?.byokModelId ?? null } : {}),
+    ...(isByok ? { credentialId: input.llm?.credentialId ?? null } : {}),
     thinkingMode: input.llm?.thinking?.mode ?? null,
     thinkingEnabled: input.llm?.thinking?.enabled ?? false,
     thinkingEffort: input.llm?.thinking?.effort ?? null,
@@ -113,6 +160,11 @@ export async function recordGatewayOperationEvent(input: {
     provider: input.provider ?? undefined,
     routeDecision: input.routeDecision ?? undefined,
   });
+  const observedIdentity = resolveGatewayObservedIdentity({
+    llm: input.llm,
+    modelAlias: input.modelAlias,
+    profileAlias: input.profileAlias,
+  });
 
   try {
     await createModelGatewayEvent({
@@ -131,7 +183,8 @@ export async function recordGatewayOperationEvent(input: {
       keySource:
         typeof gateway.keySource === "string" ? gateway.keySource : null,
       provider: typeof gateway.provider === "string" ? gateway.provider : null,
-      modelAlias: input.modelAlias ?? null,
+      providerModel: input.llm?.providerModel ?? null,
+      modelAlias: observedIdentity.modelAlias,
       routeStrategy: gateway.routeStrategy,
       success: input.success,
       errorCode: input.errorCode ?? null,
@@ -142,6 +195,15 @@ export async function recordGatewayOperationEvent(input: {
       attributes: {
         thinkingEnabled: gateway.thinkingEnabled,
         thinkingEffort: gateway.thinkingEffort,
+        ...(observedIdentity.catalogModelAlias
+          ? { catalogModelAlias: observedIdentity.catalogModelAlias }
+          : {}),
+        ...(observedIdentity.catalogProfileAlias
+          ? { catalogProfileAlias: observedIdentity.catalogProfileAlias }
+          : {}),
+        byokModelId: gateway.byokModelId,
+        credentialId: gateway.credentialId,
+        providerModel: input.llm?.providerModel ?? null,
         modelKind: input.modelKind ?? input.attributes?.modelKind ?? null,
         billable: input.modelKind === "chat",
         ...(input.attributes ?? {}),
@@ -181,6 +243,11 @@ export function buildGatewayRequestMetadata(input: {
   parentSpanId?: string | null;
 }) {
   const audit = buildGatewayAuditMetadata({ llm: input.llm });
+  const observedIdentity = resolveGatewayObservedIdentity({
+    llm: input.llm,
+    modelAlias: input.modelAlias,
+    profileAlias: input.profileAlias,
+  });
 
   return {
     teamId: input.teamId,
@@ -192,8 +259,17 @@ export function buildGatewayRequestMetadata(input: {
     operation: input.operation,
     observationName: input.operation,
     observationOperation: input.operation,
-    modelAlias: input.modelAlias ?? null,
-    profileAlias: input.profileAlias ?? null,
+    modelAlias: observedIdentity.modelAlias,
+    profileAlias: observedIdentity.profileAlias,
+    ...(observedIdentity.catalogModelAlias
+      ? { catalogModelAlias: observedIdentity.catalogModelAlias }
+      : {}),
+    ...(observedIdentity.catalogProfileAlias
+      ? { catalogProfileAlias: observedIdentity.catalogProfileAlias }
+      : {}),
+    byokModelId: audit.byokModelId,
+    credentialId: audit.credentialId,
+    providerModel: input.llm?.providerModel ?? null,
     modelKind: input.modelKind ?? null,
     parentSpanId: input.parentSpanId ?? null,
     executionMode:

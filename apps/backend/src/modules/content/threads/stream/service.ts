@@ -13,7 +13,10 @@ import { ContentError } from "../../errors";
 import { requireContentWorkspace } from "../../content-support";
 import { toContentServiceError } from "../../model-gateway-error";
 import { logger } from "../../../../shared/logger";
-import { buildGatewayAuditMetadata } from "../../model-gateway-audit";
+import {
+  buildGatewayAuditMetadata,
+  resolveGatewayObservedIdentity,
+} from "../../model-gateway-audit";
 import {
   endSpan,
   endTrace,
@@ -111,10 +114,22 @@ function buildTraceMetadata(input: {
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>;
   operation: "chat.stream" | "chat.complete";
 }) {
-  return {
-    operation: input.operation,
+  const observedIdentity = resolveGatewayObservedIdentity({
+    llm: input.prepared.llm,
     modelAlias: input.prepared.modelAlias,
     profileAlias: input.prepared.profileAlias,
+  });
+
+  return {
+    operation: input.operation,
+    modelAlias: observedIdentity.modelAlias,
+    profileAlias: observedIdentity.profileAlias,
+    ...(observedIdentity.catalogModelAlias
+      ? { catalogModelAlias: observedIdentity.catalogModelAlias }
+      : {}),
+    ...(observedIdentity.catalogProfileAlias
+      ? { catalogProfileAlias: observedIdentity.catalogProfileAlias }
+      : {}),
     agentMode: input.prepared.agentMode,
     sourceCount: input.prepared.selectedSourceIds.length,
     effectiveSourceCount: input.prepared.sourceIds.length,
@@ -145,10 +160,22 @@ async function throwIfClientCancelled(
 export function buildAgentRunSpanMetadata(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
 ) {
-  return {
-    mode: prepared.agentMode,
+  const observedIdentity = resolveGatewayObservedIdentity({
+    llm: prepared.llm,
     modelAlias: prepared.modelAlias,
     profileAlias: prepared.profileAlias,
+  });
+
+  return {
+    mode: prepared.agentMode,
+    modelAlias: observedIdentity.modelAlias,
+    profileAlias: observedIdentity.profileAlias,
+    ...(observedIdentity.catalogModelAlias
+      ? { catalogModelAlias: observedIdentity.catalogModelAlias }
+      : {}),
+    ...(observedIdentity.catalogProfileAlias
+      ? { catalogProfileAlias: observedIdentity.catalogProfileAlias }
+      : {}),
     gateway: buildGatewayAuditMetadata({ llm: prepared.llm }),
     selectedSkillCount: prepared.enabledSkills.length,
   };
@@ -157,10 +184,22 @@ export function buildAgentRunSpanMetadata(
 function buildTraceInput(
   prepared: Awaited<ReturnType<ContentThreadTurnService["prepareThreadTurn"]>>,
 ) {
-  return {
-    message: prepared.messageContent,
+  const observedIdentity = resolveGatewayObservedIdentity({
+    llm: prepared.llm,
     modelAlias: prepared.modelAlias,
     profileAlias: prepared.profileAlias,
+  });
+
+  return {
+    message: prepared.messageContent,
+    modelAlias: observedIdentity.modelAlias,
+    profileAlias: observedIdentity.profileAlias,
+    ...(observedIdentity.catalogModelAlias
+      ? { catalogModelAlias: observedIdentity.catalogModelAlias }
+      : {}),
+    ...(observedIdentity.catalogProfileAlias
+      ? { catalogProfileAlias: observedIdentity.catalogProfileAlias }
+      : {}),
     sourceIds: prepared.selectedSourceIds,
     effectiveSourceIds: prepared.sourceIds,
     mentionedSourceIds: prepared.mentionedSourceIds,
@@ -470,11 +509,23 @@ function buildPrepareSpanOutput(
     0,
   );
 
+  const observedIdentity = resolveGatewayObservedIdentity({
+    llm: prepared.llm,
+    modelAlias: prepared.modelAlias,
+    profileAlias: prepared.profileAlias,
+  });
+
   return {
     createdUserMessage: prepared.createdUserMessage,
     agentMode: prepared.agentMode,
-    modelAlias: prepared.modelAlias,
-    profileAlias: prepared.profileAlias,
+    modelAlias: observedIdentity.modelAlias,
+    profileAlias: observedIdentity.profileAlias,
+    ...(observedIdentity.catalogModelAlias
+      ? { catalogModelAlias: observedIdentity.catalogModelAlias }
+      : {}),
+    ...(observedIdentity.catalogProfileAlias
+      ? { catalogProfileAlias: observedIdentity.catalogProfileAlias }
+      : {}),
     sourceCount: prepared.selectedSourceIds.length,
     effectiveSourceCount: prepared.sourceIds.length,
     mentionedSourceCount: prepared.mentionedSourceIds.length,
@@ -783,8 +834,22 @@ async function enqueueAutomaticThreadTitleJob(input: {
     messageContent: input.prepared.messageContent,
     profileAlias: input.prepared.profileAlias,
     modelAlias: input.prepared.modelAlias,
+    providerModel: input.prepared.providerModel,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     expectedTitle: input.prepared.initialTitle,
+    ...(input.prepared.llm?.executionMode === "BYOK" &&
+    input.prepared.llm.byokModelId
+      ? {
+          llm: {
+            executionMode: "BYOK" as const,
+            byokModelId: input.prepared.llm.byokModelId,
+            credentialId: input.prepared.llm.credentialId,
+            providerHint: input.prepared.llm.providerHint,
+            providerModel: input.prepared.llm.providerModel,
+            modelAlias: input.prepared.llm.modelAlias,
+          },
+        }
+      : {}),
   };
 
   return enqueueThreadTitleGenerateJob(payload).catch((error: unknown) => {
@@ -960,7 +1025,9 @@ class ContentThreadStreamService {
       metadata: {
         operation: "chat.stream",
         modelAlias: prepared.modelAlias,
-        profileAlias: prepared.profileAlias,
+        ...(prepared.llm?.executionMode === "BYOK"
+          ? {}
+          : { profileAlias: prepared.profileAlias }),
       },
     });
     await threadStreamObservability.endSpan({
@@ -1000,6 +1067,24 @@ class ContentThreadStreamService {
         sourceIds: prepared.selectedSourceIds,
         effectiveSourceIds: prepared.sourceIds,
         contentJson: prepared.userMessage.contentJson,
+        ...(prepared.command
+          ? {
+              command: {
+                name: prepared.command.canonicalName,
+                arguments: prepared.command.arguments,
+                kind: prepared.command.kind,
+                displayName: prepared.command.displayName,
+                skillSlug: prepared.command.skillSlug,
+                ...(prepared.command.commandName
+                  ? { commandName: prepared.command.commandName }
+                  : {}),
+                ...(prepared.command.path ? { path: prepared.command.path } : {}),
+                ...(prepared.command.toolName
+                  ? { toolName: prepared.command.toolName }
+                  : {}),
+              },
+            }
+          : {}),
       });
       yield toSseData({ type: "text-start", id: textId });
       for (const step of prepared.preflightThinkingSteps) {
@@ -1052,7 +1137,9 @@ class ContentThreadStreamService {
           input: {
             message: prepared.messageContent,
             modelAlias: prepared.modelAlias,
-            profileAlias: prepared.profileAlias,
+            ...(prepared.llm?.executionMode === "BYOK"
+              ? {}
+              : { profileAlias: prepared.profileAlias }),
             sourceCount: prepared.selectedSourceIds.length,
             effectiveSourceCount: prepared.sourceIds.length,
           },
@@ -1447,7 +1534,9 @@ class ContentThreadStreamService {
       metadata: {
         operation: "chat.complete",
         modelAlias: prepared.modelAlias,
-        profileAlias: prepared.profileAlias,
+        ...(prepared.llm?.executionMode === "BYOK"
+          ? {}
+          : { profileAlias: prepared.profileAlias }),
       },
     });
     await threadStreamObservability.endSpan({
@@ -1469,7 +1558,9 @@ class ContentThreadStreamService {
       input: {
         message: prepared.messageContent,
         modelAlias: prepared.modelAlias,
-        profileAlias: prepared.profileAlias,
+        ...(prepared.llm?.executionMode === "BYOK"
+          ? {}
+          : { profileAlias: prepared.profileAlias }),
         sourceCount: prepared.selectedSourceIds.length,
         effectiveSourceCount: prepared.sourceIds.length,
       },

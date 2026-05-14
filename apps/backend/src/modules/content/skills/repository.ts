@@ -181,6 +181,29 @@ export async function listWorkspaceSkillRecordsByIds(input: {
   return rows.map(mapWorkspaceSkill);
 }
 
+export async function findEnabledWorkspaceSkillRecordBySlug(input: {
+  teamId: string;
+  workspaceId: string;
+  slug: string;
+}) {
+  const [row] = await db
+    .select({ workspaceSkill: workspaceSkills })
+    .from(workspaceSkills)
+    .innerJoin(skillDefinitions, eq(skillDefinitions.id, workspaceSkills.skillId))
+    .where(
+      and(
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+        eq(workspaceSkills.enabled, true),
+        eq(skillDefinitions.slug, input.slug),
+        eq(skillDefinitions.status, "active"),
+        visibleSkillCondition(input),
+      ),
+    )
+    .limit(1);
+  return row ? mapWorkspaceSkill(row.workspaceSkill) : null;
+}
+
 export async function listCatalogSkillVersionsForWorkspace(input: {
   teamId: string;
   workspaceId: string;

@@ -2,10 +2,27 @@ import type { SkillBundleFile } from "./builtin";
 
 export type SkillSourceType = "builtin" | "workspace_custom" | "team_custom";
 
+export type SkillCommandDescriptor = {
+  id: string;
+  name: string;
+  canonicalName: string;
+  displayName: string;
+  description: string;
+  path: string;
+  argumentHint?: string;
+  title?: string;
+  skillSlugs?: string[];
+  tools?: string[];
+  model?: string;
+  instruction?: string;
+  slash?: boolean;
+};
+
 export type EnabledSkillDescriptor = {
   workspaceSkillId: string;
   sourceType: SkillSourceType;
   name: string;
+  displayName?: string;
   version: string;
   description: string;
   capabilities?: {
@@ -17,7 +34,12 @@ export type EnabledSkillDescriptor = {
     image?: string;
     vision?: string;
   };
+  commands?: SkillCommandDescriptor[];
   tools?: string[];
+  slash?: boolean;
+  slashConfig?: {
+    enabled?: boolean;
+  };
   defaultConfig?: Record<string, unknown>;
   files: SkillBundleFile[];
 };
@@ -60,6 +82,11 @@ export type SkillCatalogItem = {
     image?: string;
     vision?: string;
   };
+  commands?: SkillCommandDescriptor[];
   tools?: string[];
+  slash?: boolean;
+  slashConfig?: {
+    enabled?: boolean;
+  };
   defaultConfig?: Record<string, unknown>;
 };

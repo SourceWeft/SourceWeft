@@ -1,11 +1,13 @@
 import type {
+  AddByokModelRequest,
+  AddByokModelResponse,
   CitationDetailResponse,
+  CreateByokCredentialRequest,
+  CreateByokCredentialResponse,
   CreateSourceRequest,
   CreateSourceResponse,
   CreateUrlSourceRequest,
   CreateUrlSourceResponse,
-  CreateByokKeyRefRequest,
-  CreateByokKeyRefResponse,
   EditThreadRequest,
   EditThreadResponse,
   CreateThreadRequest,
@@ -13,7 +15,8 @@ import type {
   CreateCustomSkillRequest,
   CreateCustomSkillVersionRequest,
   CustomSkillResponse,
-  DeleteByokKeyRefResponse,
+  DeleteByokCredentialResponse,
+  DeleteByokModelResponse,
   DeleteCustomSkillVersionFileResponse,
   DeleteSourceResponse,
   DeleteThreadResponse,
@@ -33,7 +36,8 @@ import type {
   ListArtifactsResponse,
   ListThreadModelCatalogResponse,
   ListByokProvidersResponse,
-  ListByokKeyRefsResponse,
+  ListByokCredentialsResponse,
+  ListByokModelsResponse,
   ListSourceMentionsRequest,
   ListSourceMentionsResponse,
   ListSkillsCatalogResponse,
@@ -47,6 +51,8 @@ import type {
   PutWorkingFileResponse,
   ReparseSourceRequest,
   ReparseSourceResponse,
+  ResolveByokModelCapabilitiesRequest,
+  ResolveByokModelCapabilitiesResponse,
   RetrySourceRequest,
   RetrySourceResponse,
   SourceStatusResponse,
@@ -425,22 +431,59 @@ export class ContentClient {
     );
   }
 
-  listByokKeyRefs(workspaceId: string) {
-    return this.http.get<ListByokKeyRefsResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-keys`,
+  listByokCredentials(workspaceId: string) {
+    return this.http.get<ListByokCredentialsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-credentials`,
     );
   }
 
-  createByokKeyRef(workspaceId: string, input: CreateByokKeyRefRequest) {
-    return this.http.post<CreateByokKeyRefResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-keys`,
+  createByokCredential(
+    workspaceId: string,
+    input: CreateByokCredentialRequest,
+  ) {
+    return this.http.post<CreateByokCredentialResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-credentials`,
       input,
     );
   }
 
-  deleteByokKeyRef(workspaceId: string, providerName: string, keyRef: string) {
-    return this.http.delete<DeleteByokKeyRefResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-keys/${encode(providerName)}/${encode(keyRef)}`,
+  deleteByokCredential(workspaceId: string, credentialId: string) {
+    return this.http.delete<DeleteByokCredentialResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-credentials/${encode(credentialId)}`,
+    );
+  }
+
+  resolveByokModelCapabilities(
+    workspaceId: string,
+    input: ResolveByokModelCapabilitiesRequest,
+  ) {
+    return this.http.post<ResolveByokModelCapabilitiesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-model-capabilities`,
+      input,
+    );
+  }
+
+  addByokModel(workspaceId: string, input: AddByokModelRequest) {
+    return this.http.post<AddByokModelResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-models`,
+      input,
+    );
+  }
+
+  listByokModels(workspaceId: string, input: { credentialId?: string } = {}) {
+    const params = new URLSearchParams();
+    if (input.credentialId) {
+      params.set("credentialId", input.credentialId);
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+    return this.http.get<ListByokModelsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-models${suffix}`,
+    );
+  }
+
+  deleteByokModel(workspaceId: string, modelId: string) {
+    return this.http.delete<DeleteByokModelResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-models/${encode(modelId)}`,
     );
   }
 

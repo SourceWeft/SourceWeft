@@ -450,12 +450,6 @@ export const messageSchema = z.object({
   createdAt: z.string(),
 });
 
-const byokConfigSchema = z.object({
-  provider: z.string().trim().min(1).max(100),
-  apiKeyRef: z.string().trim().min(1).max(256).optional(),
-  apiKey: z.string().trim().min(1).max(4096).optional(),
-});
-
 const thinkingConfigSchema = z.object({
   mode: z.enum(["auto", "off", "effort"]).optional(),
   enabled: z.boolean().optional(),
@@ -478,7 +472,8 @@ const llmExecutionConfigSchema = z
     providerModel: z.string().trim().min(1).max(512).optional(),
     executionMode: z.enum(["GLOBAL", "BYOK"]).optional(),
     providerHint: z.string().trim().min(1).max(100).optional(),
-    byok: byokConfigSchema.optional(),
+    byokModelId: z.string().trim().min(1).max(256).optional(),
+    credentialId: z.string().trim().min(1).max(256).optional(),
     thinking: thinkingConfigSchema.optional(),
   })
   .refine(
@@ -487,20 +482,22 @@ const llmExecutionConfigSchema = z
         return true;
       }
 
-      if (!value.byok?.provider) {
-        return false;
-      }
-
-      if (value.byok.apiKeyRef || value.byok.apiKey) {
+      if (value.byokModelId) {
         return true;
       }
 
       return false;
     },
     {
-      message:
-        "BYOK execution requires byok.provider and either byok.apiKeyRef or byok.apiKey",
-      path: ["byok"],
+      message: "BYOK execution requires byokModelId",
+      path: ["byokModelId"],
+    },
+  )
+  .refine(
+    (value) => value.executionMode !== "BYOK" || !value.profileAlias,
+    {
+      message: "profileAlias is only valid for GLOBAL execution",
+      path: ["profileAlias"],
     },
   )
   .strict();
@@ -561,12 +558,20 @@ const artifactToolSelectionSchema = z
 const generateImageToolSelectionSchema = z
   .object({
     enabled: z.boolean().optional(),
+    mode: z.enum(["auto", "generate"]).optional(),
     modelAlias: z.string().trim().min(1).max(512).optional(),
+    execution: llmExecutionConfigSchema.optional(),
     config: imageArtifactConfigSchema.optional(),
   })
   .strict();
 
 const webSearchToolSelectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+const skillSlashConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
   })
@@ -596,9 +601,38 @@ const skillSourceTypeSchema = z.enum([
   "team_custom",
 ]);
 
+export const skillCommandSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  canonicalName: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+  path: z.string(),
+  argumentHint: z.string().optional(),
+  title: z.string().optional(),
+  skillSlugs: z.array(z.string()).optional(),
+  tools: z.array(z.string()).optional(),
+  model: z.string().optional(),
+  slash: z.boolean().optional(),
+});
+
+export const threadCommandRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(160),
+    arguments: z.string().max(20000).optional(),
+    kind: z.enum(["tool", "skill", "skill-command"]).optional(),
+    displayName: z.string().trim().min(1).max(256).optional(),
+    skillSlug: z.string().trim().min(1).max(128).optional(),
+    commandName: z.string().trim().min(1).max(128).optional(),
+    toolName: z.string().trim().min(1).max(128).optional(),
+    path: z.string().trim().min(1).max(512).optional(),
+  })
+  .strict();
+
 const threadToolsRequestSchema = z
   .object({
     skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
+    invokedSkillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
     webSearchEnabled: z.boolean().optional(),
     artifact: artifactToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.generateImage]: generateImageToolSelectionSchema.optional(),
@@ -613,12 +647,15 @@ export const streamThreadRequestSchema = z.object({
   sourceIds: z.array(z.string()).max(100).optional(),
   mentionedSourceIds: z.array(z.string()).max(100).optional(),
   tools: threadToolsRequestSchema.optional(),
+  command: threadCommandRequestSchema.optional(),
   stream: z.boolean().optional(),
   timezone: z.string().trim().min(1).max(100).optional(),
   userMessageId: z.string().trim().min(1).max(128).optional(),
   assistantMessageId: z.string().trim().min(1).max(128).optional(),
   idempotencyKey: z.string().trim().min(1).max(256).optional(),
   llm: llmExecutionConfigSchema.optional(),
+  image: llmExecutionConfigSchema.optional(),
+  vision: llmExecutionConfigSchema.optional(),
   modelSettings: threadModelSettingsInputSchema.optional(),
 });
 
@@ -733,7 +770,10 @@ export const skillCatalogItemSchema = z.object({
       vision: z.string().optional(),
     })
     .optional(),
+  commands: z.array(skillCommandSchema).optional(),
   tools: z.array(z.string()).optional(),
+  slash: z.boolean().optional(),
+  slashConfig: skillSlashConfigSchema.optional(),
   defaultConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -757,7 +797,10 @@ export const skillManifestJsonSchema = z.object({
       vision: z.string().optional(),
     })
     .optional(),
+  commands: z.array(skillCommandSchema).optional(),
   tools: z.array(z.string()).optional(),
+  slash: z.boolean().optional(),
+  slashConfig: skillSlashConfigSchema.optional(),
   defaultConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -973,15 +1016,15 @@ export const listThreadModelCatalogResponseSchema = z.object({
   }),
 });
 
-export const byokKeyRefSchema = z.object({
+export const byokCredentialSchema = z.object({
   id: z.string(),
   teamId: z.string(),
   workspaceId: z.string(),
   userId: z.string().nullable(),
   providerName: z.string(),
-  keyRef: z.string(),
-  providerKind: z.string().nullable().optional(),
-  baseUrl: z.string().nullable().optional(),
+  providerKind: z.string(),
+  baseUrl: z.string().nullable(),
+  credentialAlias: z.string(),
   defaultHeaders: z.record(z.string(), z.string()).optional(),
   isActive: z.boolean(),
   metadata: z.record(z.string(), z.unknown()),
@@ -989,18 +1032,27 @@ export const byokKeyRefSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const listByokKeyRefsResponseSchema = z.object({
-  items: z.array(byokKeyRefSchema),
+export const listByokCredentialsResponseSchema = z.object({
+  items: z.array(byokCredentialSchema),
 });
 
-export const createByokKeyRefRequestSchema = z.object({
+export const createByokCredentialRequestSchema = z.object({
   providerName: z.string().trim().min(1).max(100),
-  keyRef: z.string().trim().min(1).max(256),
+  credentialAlias: z.string().trim().min(1).max(256),
   apiKey: z.string().trim().min(1).max(4096),
   providerKind: z.string().trim().min(1).max(100).optional(),
   baseUrl: z.string().trim().url().max(2048).optional(),
   defaultHeaders: z.record(z.string(), z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const createByokCredentialResponseSchema = z.object({
+  item: byokCredentialSchema,
+});
+
+export const deleteByokCredentialResponseSchema = z.object({
+  deleted: z.literal(true),
+  credentialId: z.string(),
 });
 
 export const byokProviderSchema = z.object({
@@ -1010,19 +1062,71 @@ export const byokProviderSchema = z.object({
   system: z.boolean(),
   isBYOKOnly: z.boolean().optional(),
   hasApiKey: z.boolean().optional(),
+  credentialAliases: z.array(z.string()).optional(),
+  defaultHeaders: z.record(z.string(), z.string()).optional(),
 });
 
 export const listByokProvidersResponseSchema = z.object({
   items: z.array(byokProviderSchema),
 });
 
-export const createByokKeyRefResponseSchema = z.object({
-  item: byokKeyRefSchema,
+export const resolveByokModelCapabilitiesRequestSchema = z.object({
+  modelName: z.string().trim().min(1).max(256),
 });
 
-export const deleteByokKeyRefResponseSchema = z.object({
+export const resolvedByokModelCapabilitiesSchema = z.object({
+  supportsThinking: z.boolean(),
+  supportsImageInput: z.boolean().optional(),
+  supportedParameters: z.array(z.string()),
+  supportedEfforts: z.array(reasoningEffortSchema),
+  reasoning: z.boolean(),
+  reasoningEffort: z.boolean(),
+  includeReasoning: z.boolean(),
+  supportSources: z.array(z.string()),
+  maxCompletionTokens: z.number().nullable().optional(),
+  litellmKey: z.string().optional(),
+});
+
+export const resolveByokModelCapabilitiesResponseSchema = z.object({
+  capabilities: resolvedByokModelCapabilitiesSchema.nullable(),
+});
+
+export const byokModelSchema = z.object({
+  id: z.string(),
+  credentialId: z.string(),
+  teamId: z.string(),
+  workspaceId: z.string(),
+  userId: z.string().nullable(),
+  providerName: z.string(),
+  modelName: z.string(),
+  displayName: z.string(),
+  modelType: modelCatalogKindSchema,
+  capabilities: z.record(z.string(), z.unknown()).nullable().optional(),
+  config: z.record(z.string(), z.unknown()),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const listByokModelsResponseSchema = z.object({
+  items: z.array(byokModelSchema),
+});
+
+export const addByokModelRequestSchema = z.object({
+  credentialId: z.string().trim().min(1).max(256),
+  modelName: z.string().trim().min(1).max(512),
+  displayName: z.string().trim().min(1).max(256).optional(),
+  modelType: modelCatalogKindSchema,
+  config: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const addByokModelResponseSchema = z.object({
+  item: byokModelSchema,
+});
+
+export const deleteByokModelResponseSchema = z.object({
   deleted: z.literal(true),
-  keyRef: z.string(),
+  modelId: z.string(),
 });
 
 export const citationDetailResponseSchema = z.object({
@@ -1098,6 +1202,8 @@ export type GenerateImageToolSelection = z.infer<
 export type WebSearchToolSelection = z.infer<
   typeof webSearchToolSelectionSchema
 >;
+export type SkillCommand = z.infer<typeof skillCommandSchema>;
+export type ThreadCommandRequest = z.infer<typeof threadCommandRequestSchema>;
 export type StreamThreadRequest = z.infer<typeof streamThreadRequestSchema>;
 export type StreamThreadResponse = z.infer<typeof streamThreadResponseSchema>;
 export type RefreshThreadRequest = z.infer<typeof refreshThreadRequestSchema>;
@@ -1184,22 +1290,37 @@ export type ListThreadModelCatalogResponse = z.infer<
   typeof listThreadModelCatalogResponseSchema
 >;
 
-export type ByokKeyRef = z.infer<typeof byokKeyRefSchema>;
+export type ByokCredential = z.infer<typeof byokCredentialSchema>;
+export type ByokModel = z.infer<typeof byokModelSchema>;
 export type ByokProvider = z.infer<typeof byokProviderSchema>;
-export type ListByokKeyRefsResponse = z.infer<
-  typeof listByokKeyRefsResponseSchema
+export type ListByokCredentialsResponse = z.infer<
+  typeof listByokCredentialsResponseSchema
+>;
+export type ListByokModelsResponse = z.infer<
+  typeof listByokModelsResponseSchema
 >;
 export type ListByokProvidersResponse = z.infer<
   typeof listByokProvidersResponseSchema
 >;
-export type CreateByokKeyRefRequest = z.infer<
-  typeof createByokKeyRefRequestSchema
+export type CreateByokCredentialRequest = z.infer<
+  typeof createByokCredentialRequestSchema
 >;
-export type CreateByokKeyRefResponse = z.infer<
-  typeof createByokKeyRefResponseSchema
+export type CreateByokCredentialResponse = z.infer<
+  typeof createByokCredentialResponseSchema
 >;
-export type DeleteByokKeyRefResponse = z.infer<
-  typeof deleteByokKeyRefResponseSchema
+export type DeleteByokCredentialResponse = z.infer<
+  typeof deleteByokCredentialResponseSchema
+>;
+export type ResolveByokModelCapabilitiesRequest = z.infer<
+  typeof resolveByokModelCapabilitiesRequestSchema
+>;
+export type ResolveByokModelCapabilitiesResponse = z.infer<
+  typeof resolveByokModelCapabilitiesResponseSchema
+>;
+export type AddByokModelRequest = z.infer<typeof addByokModelRequestSchema>;
+export type AddByokModelResponse = z.infer<typeof addByokModelResponseSchema>;
+export type DeleteByokModelResponse = z.infer<
+  typeof deleteByokModelResponseSchema
 >;
 export type CitationDetailResponse = z.infer<
   typeof citationDetailResponseSchema

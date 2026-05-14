@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { ImageGenerateInput } from "@sourceweft/model-gateway";
 import { getModelGatewayClient } from "../../../../shared/model-gateway/client";
 import type { RuntimeModelGatewayProfile } from "../../../../shared/model-gateway/types";
+import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import {
   buildArtifactStorageKey,
   getContentStorageBucketName,
@@ -46,6 +47,49 @@ function resolveToolRuntimeCallId(runtime: ToolRuntime) {
   return typeof candidate === "string" && candidate.length > 0
     ? candidate
     : undefined;
+}
+
+function buildImageGatewayMetadata(input: {
+  traceId?: string;
+  parentSpanId?: string;
+  profile: RuntimeModelGatewayProfile;
+  execution?: LlmExecutionConfig;
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  threadId: string;
+  userMessageId: string;
+  toolCallId?: string;
+}) {
+  const isByok = input.execution?.executionMode === "BYOK";
+  return {
+    traceId: input.traceId,
+    parentSpanId: input.parentSpanId,
+    ...(isByok ? {} : { profileAlias: input.profile.profileAlias }),
+    modelAlias: isByok
+      ? input.execution?.modelAlias ??
+        input.execution?.providerModel ??
+        input.profile.modelAlias
+      : input.profile.modelAlias,
+    providerModel: input.execution?.providerModel,
+    ...(isByok
+      ? {
+          executionMode: "BYOK",
+          byokModelId: input.execution?.byokModelId,
+          credentialId: input.execution?.credentialId,
+          keySource: "byokCredential",
+        }
+      : { executionMode: input.execution?.executionMode ?? "GLOBAL" }),
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    threadId: input.threadId,
+    messageId: input.userMessageId,
+    toolCallId: input.toolCallId,
+    observationName: "image_generation",
+    feature: "artifact.image",
+    modelKind: "image",
+  };
 }
 
 async function decodeGeneratedImage(image: {
@@ -121,6 +165,7 @@ export function createGenerateImageTool(input: {
   traceId?: string;
   parentSpanId?: string;
   profile: RuntimeModelGatewayProfile;
+  execution?: LlmExecutionConfig;
   config: ArtifactImageConfig;
   billing: ContentBillingPort;
 }) {
@@ -148,6 +193,7 @@ export function createGenerateImageTool(input: {
           toolCallId,
           tool: AGENT_TOOL_NAMES.generateImage,
           stage,
+          prompt,
           title,
           ...metadata,
         });
@@ -160,32 +206,35 @@ export function createGenerateImageTool(input: {
       });
       const gateway = await getModelGatewayClient(input.profile.gatewayConfigId);
       const request: ImageGenerateInput = {
-        model: input.profile.profileAlias,
+        model:
+          input.execution?.executionMode === "BYOK"
+            ? input.execution.providerModel ??
+              input.execution.modelAlias ??
+              input.profile.modelAlias
+            : input.profile.profileAlias,
+        ...(input.execution ? input.execution : {}),
         prompt,
         aspectRatio: input.config.aspectRatio,
         quality: input.config.quality,
         style: input.config.style,
         count: 1,
         responseFormat: "b64_json",
-        metadata: {
+        metadata: buildImageGatewayMetadata({
           traceId: input.traceId,
           parentSpanId: input.parentSpanId,
-          profileAlias: input.profile.profileAlias,
-          modelAlias: input.profile.modelAlias,
+          profile: input.profile,
+          execution: input.execution,
           teamId: input.teamId,
           workspaceId: input.workspaceId,
           userId: input.userId,
           threadId: input.threadId,
-          messageId: input.userMessageId,
+          userMessageId: input.userMessageId,
           toolCallId,
-          observationName: "image_generation",
-          feature: "artifact.image",
-          modelKind: "image",
-        },
+        }),
       };
 
       emitProgress("generating", {
-        providerModel: input.profile.modelAlias,
+        providerModel: request.model,
       });
       const result = await gateway.images.generate(request, {
         traceId: input.traceId,
@@ -262,10 +311,16 @@ export function createGenerateImageTool(input: {
         modelKind: "image",
         gatewayConfigId: input.profile.gatewayConfigId,
         profileAlias: input.profile.profileAlias,
-        modelAlias: input.profile.modelAlias,
+        modelAlias:
+          input.execution?.executionMode === "BYOK"
+            ? input.execution.modelAlias ??
+              input.execution.providerModel ??
+              input.profile.modelAlias
+            : input.profile.modelAlias,
         referenceId: `artifact:${artifactId}`,
         idempotencyKey: `artifact-image:${artifactId}`,
         usage: result.usage,
+        llm: input.execution,
         metadata: {
           traceId: input.traceId,
           threadId: input.threadId,

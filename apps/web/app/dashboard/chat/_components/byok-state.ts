@@ -3,9 +3,14 @@
 import type { ContentClient } from "@sourceweft/sdk";
 import type { ModelThinkingCapabilities, ModelType } from "./header-model-selector";
 
-type CreateByokKeyRefRequest = Parameters<ContentClient["createByokKeyRef"]>[1];
-type ListByokKeyRefsResponse = Awaited<
-  ReturnType<ContentClient["listByokKeyRefs"]>
+type CreateByokCredentialRequest = Parameters<
+  ContentClient["createByokCredential"]
+>[1];
+type ListByokCredentialsResponse = Awaited<
+  ReturnType<ContentClient["listByokCredentials"]>
+>;
+type ListByokModelsResponse = Awaited<
+  ReturnType<ContentClient["listByokModels"]>
 >;
 
 export type ByokProviderOption = {
@@ -17,28 +22,37 @@ export type ByokProviderOption = {
   hasApiKey: boolean;
 };
 
-export type ByokKeyRefItem = ListByokKeyRefsResponse["items"][number];
+export type ByokCredentialItem =
+  ListByokCredentialsResponse["items"][number];
+export type ByokSavedModelItem = ListByokModelsResponse["items"][number];
 
-export type ByokLlmSelection = {
+export type ByokModelSelection = {
   mode: "global" | "byok";
+  // Global-only identity. BYOK selections must keep this null.
   profileAlias?: string | null;
+  byokModelId?: string | null;
+  credentialId?: string | null;
+  credentialAlias?: string | null;
   modelAlias?: string | null;
   providerName?: string | null;
-  keyRef?: string | null;
   customModelName?: string | null;
   capabilities?: ModelThinkingCapabilities | null;
   source: "catalog" | "custom";
 };
 
+export type ByokLlmSelection = ByokModelSelection;
+
 export type PendingByokModelState = {
-  llmByok?: ByokLlmSelection | null;
+  llmByok?: ByokModelSelection | null;
+  imageByok?: ByokModelSelection | null;
+  visionByok?: ByokModelSelection | null;
 };
 
 export const DEFAULT_BYOK_PROVIDER_KIND = "openai-compatible";
 
 export function normalizeByokProviderOptions(
   input: unknown,
-  keyRefs: ByokKeyRefItem[],
+  credentials: ByokCredentialItem[],
 ): ByokProviderOption[] {
   const items =
     input && typeof input === "object" && Array.isArray((input as { items?: unknown }).items)
@@ -47,7 +61,7 @@ export function normalizeByokProviderOptions(
         ? input
         : [];
   const keyProviderNames = new Set(
-    keyRefs
+    credentials
       .map((item) => item.providerName?.trim())
       .filter((value): value is string => Boolean(value)),
   );
@@ -74,8 +88,7 @@ export function normalizeByokProviderOptions(
       const system = record.system === true;
       const isByokOnly =
         record.isBYOKOnly === true || record.isByokOnly === true;
-      const hasApiKey =
-        record.hasApiKey === true || keyProviderNames.has(providerName);
+      const hasApiKey = keyProviderNames.has(providerName);
 
       return {
         providerName,
@@ -89,8 +102,8 @@ export function normalizeByokProviderOptions(
     .filter((item): item is ByokProviderOption => item !== null);
 
   const existingNames = new Set(normalized.map((item) => item.providerName));
-  for (const keyRef of keyRefs) {
-    const providerName = keyRef.providerName?.trim();
+  for (const credential of credentials) {
+    const providerName = credential.providerName?.trim();
     if (!providerName || existingNames.has(providerName)) {
       continue;
     }
@@ -116,49 +129,30 @@ export function normalizeByokProviderOptions(
   });
 }
 
-export function toByokSelectionFromCatalogModel(input: {
-  capabilities?: ModelThinkingCapabilities | null;
-  providerName: string;
-  keyRef: string;
-  profileAlias?: string | null;
-  modelAlias: string;
-}): ByokLlmSelection | null {
-  if (!input.modelAlias.trim()) {
-    return null;
-  }
-
-  return {
-    mode: "byok",
-    profileAlias: input.profileAlias?.trim() || null,
-    modelAlias: input.modelAlias.trim(),
-    providerName: input.providerName,
-    keyRef: input.keyRef,
-    customModelName: null,
-    capabilities: input.capabilities ?? null,
-    source: "catalog",
-  };
-}
-
 export function toByokSelectionFromCustomModel(input: {
+  byokModelId?: string | null;
   capabilities?: ModelThinkingCapabilities | null;
+  credentialAlias?: string | null;
+  credentialId?: string | null;
   modelName: string;
   providerName: string;
-  keyRef: string;
-}): ByokLlmSelection {
+}): ByokModelSelection {
   return {
     mode: "byok",
     profileAlias: null,
+    byokModelId: input.byokModelId ?? null,
+    credentialId: input.credentialId ?? null,
+    credentialAlias: input.credentialAlias ?? null,
     modelAlias: null,
     providerName: input.providerName,
-    keyRef: input.keyRef,
     customModelName: input.modelName.trim(),
     capabilities: input.capabilities ?? null,
     source: "custom",
   };
 }
 
-export function buildThreadLlmExecution(input: {
-  selection: ByokLlmSelection | null | undefined;
+export function buildByokModelExecution(input: {
+  selection: ByokModelSelection | null | undefined;
   thinking?: {
     mode: "auto" | "off" | "effort";
     enabled?: boolean;
@@ -172,29 +166,30 @@ export function buildThreadLlmExecution(input: {
   }
 
   const provider = selection.providerName?.trim();
-  const apiKeyRef = selection.keyRef?.trim();
+  const byokModelId = selection.byokModelId?.trim();
   const customModelName = selection.customModelName?.trim();
   const modelAlias = selection.modelAlias?.trim();
-  if (!provider || !apiKeyRef) {
+  if (!byokModelId) {
     return input.thinking ? { thinking: input.thinking } : undefined;
   }
 
   const llm: Record<string, unknown> = {
     executionMode: "BYOK",
-    providerHint: provider,
-    byok: {
-      provider,
-      apiKeyRef,
-    },
+    byokModelId,
   };
-
-  if (selection.profileAlias) {
-    llm.profileAlias = selection.profileAlias;
+  if (selection.credentialId) {
+    llm.credentialId = selection.credentialId;
   }
+  if (provider) {
+    llm.providerHint = provider;
+  }
+
   if (customModelName) {
     llm.modelAlias = customModelName;
-  } else if (!selection.profileAlias && modelAlias) {
+    llm.providerModel = customModelName;
+  } else if (modelAlias) {
     llm.modelAlias = modelAlias;
+    llm.providerModel = modelAlias;
   }
   if (input.thinking) {
     llm.thinking = input.thinking;
@@ -203,11 +198,15 @@ export function buildThreadLlmExecution(input: {
   return llm;
 }
 
+export const buildThreadLlmExecution = buildByokModelExecution;
+
 export function buildThreadCreateModelSettings(input: {
-  byokSelection: ByokLlmSelection | null | undefined;
+  byokSelection?: ByokModelSelection | null | undefined;
   globalProfileAlias?: string | null;
   imageProfileAlias?: string | null;
+  imageByokSelection?: ByokModelSelection | null | undefined;
   visionProfileAlias?: string | null;
+  visionByokSelection?: ByokModelSelection | null | undefined;
 }) {
   const modelSettings: {
     llmProfileAlias?: string | null;
@@ -216,18 +215,21 @@ export function buildThreadCreateModelSettings(input: {
   } = {};
 
   const llmProfileAlias =
-    input.byokSelection?.profileAlias && input.byokSelection.mode === "byok"
-      ? input.byokSelection.profileAlias
-      : input.globalProfileAlias;
+    input.byokSelection?.mode === "byok" ? null : input.globalProfileAlias;
 
   if (llmProfileAlias) {
     modelSettings.llmProfileAlias = llmProfileAlias;
   }
-  if (input.imageProfileAlias) {
-    modelSettings.imageProfileAlias = input.imageProfileAlias;
+  const imageProfileAlias =
+    input.imageByokSelection?.mode === "byok" ? null : input.imageProfileAlias;
+  const visionProfileAlias =
+    input.visionByokSelection?.mode === "byok" ? null : input.visionProfileAlias;
+
+  if (imageProfileAlias) {
+    modelSettings.imageProfileAlias = imageProfileAlias;
   }
-  if (input.visionProfileAlias) {
-    modelSettings.visionProfileAlias = input.visionProfileAlias;
+  if (visionProfileAlias) {
+    modelSettings.visionProfileAlias = visionProfileAlias;
   }
 
   return Object.keys(modelSettings).length > 0 ? modelSettings : undefined;
@@ -258,7 +260,15 @@ export function readStoredByokState(
     return {
       llmByok:
         parsed.llmByok && typeof parsed.llmByok === "object"
-          ? (parsed.llmByok as ByokLlmSelection)
+          ? (parsed.llmByok as ByokModelSelection)
+          : null,
+      imageByok:
+        parsed.imageByok && typeof parsed.imageByok === "object"
+          ? (parsed.imageByok as ByokModelSelection)
+          : null,
+      visionByok:
+        parsed.visionByok && typeof parsed.visionByok === "object"
+          ? (parsed.visionByok as ByokModelSelection)
           : null,
     };
   } catch {
@@ -275,11 +285,24 @@ export function writeStoredByokState(
     return;
   }
   const key = getByokStorageKey(workspaceId, threadId);
-  if (!value || !value.llmByok) {
+  if (!value || (!value.llmByok && !value.imageByok && !value.visionByok)) {
     window.sessionStorage.removeItem(key);
     return;
   }
   window.sessionStorage.setItem(key, JSON.stringify(value));
+}
+
+export function copyStoredByokState(input: {
+  workspaceId: string;
+  fromBucket?: string | null;
+  toBucket?: string | null;
+}) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const value = readStoredByokState(input.workspaceId, input.fromBucket);
+  writeStoredByokState(input.workspaceId, value, input.toBucket);
 }
 
 export function clearStoredByokState(workspaceId: string, threadId?: string | null) {
@@ -289,17 +312,17 @@ export function clearStoredByokState(workspaceId: string, threadId?: string | nu
   window.sessionStorage.removeItem(getByokStorageKey(workspaceId, threadId));
 }
 
-export function toCreateByokKeyPayload(input: {
+export function toCreateByokCredentialPayload(input: {
   apiKey: string;
   baseUrl?: string;
-  keyRef: string;
+  credentialAlias: string;
   providerName: string;
   providerKind?: string;
   metadata?: Record<string, unknown>;
-}): CreateByokKeyRefRequest {
+}): CreateByokCredentialRequest {
   return {
     providerName: input.providerName.trim(),
-    keyRef: input.keyRef.trim(),
+    credentialAlias: input.credentialAlias.trim(),
     apiKey: input.apiKey.trim(),
     ...(input.providerKind?.trim()
       ? { providerKind: input.providerKind.trim() }
@@ -310,7 +333,7 @@ export function toCreateByokKeyPayload(input: {
 }
 
 export function selectionSupportsThinking(
-  selection: ByokLlmSelection | null | undefined,
+  selection: ByokModelSelection | null | undefined,
   fallbackCapabilities?: ModelThinkingCapabilities | undefined,
 ) {
   return (
@@ -320,5 +343,5 @@ export function selectionSupportsThinking(
 }
 
 export function modelTypeSupportsByok(type: ModelType) {
-  return type === "llm";
+  return type === "llm" || type === "image" || type === "vision";
 }

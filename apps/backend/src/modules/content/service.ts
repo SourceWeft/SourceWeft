@@ -401,30 +401,6 @@ export class ContentService {
     return this.sourceParsingService.processSourceParsePollJob(input);
   }
 
-  async listByokKeyRefs(input: { workspaceId: string; userId: string }) {
-    return contentByokService.listByokKeyRefs(input);
-  }
-
-  async createByokKeyRef(input: {
-    workspaceId: string;
-    userId: string;
-    providerName: string;
-    keyRef: string;
-    apiKey: string;
-    metadata?: Record<string, unknown>;
-  }) {
-    return contentByokService.createByokKeyRef(input);
-  }
-
-  async deleteByokKeyRef(input: {
-    workspaceId: string;
-    userId: string;
-    providerName: string;
-    keyRef: string;
-  }) {
-    return contentByokService.deleteByokKeyRef(input);
-  }
-
   async listThreads(input: {
     workspaceId: string;
     userId: string;
@@ -567,11 +543,14 @@ export class ContentService {
     mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    command?: StreamThreadEventInput["command"];
     timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    image?: LlmExecutionConfig;
+    vision?: LlmExecutionConfig;
     visionProfileAlias?: string | null;
   }) {
     return this.threadStreamService.refreshThread(input);
@@ -584,11 +563,14 @@ export class ContentService {
     mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    command?: StreamThreadEventInput["command"];
     timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    image?: LlmExecutionConfig;
+    vision?: LlmExecutionConfig;
     visionProfileAlias?: string | null;
   }): AsyncGenerator<string> {
     yield* this.threadStreamService.refreshThreadEvents(input);
@@ -604,11 +586,14 @@ export class ContentService {
     mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    command?: StreamThreadEventInput["command"];
     timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    image?: LlmExecutionConfig;
+    vision?: LlmExecutionConfig;
     visionProfileAlias?: string | null;
   }) {
     return this.threadStreamService.editThread(input);
@@ -624,11 +609,14 @@ export class ContentService {
     mentionedSourceIds?: string[];
     sourceIds?: string[];
     tools?: ThreadToolsSelection;
+    command?: StreamThreadEventInput["command"];
     timezone?: string;
     userMessageId?: string;
     assistantMessageId?: string;
     idempotencyKey?: string;
     llm?: LlmExecutionConfig;
+    image?: LlmExecutionConfig;
+    vision?: LlmExecutionConfig;
     visionProfileAlias?: string | null;
   }): AsyncGenerator<string> {
     yield* this.threadStreamService.editThreadEvents(input);

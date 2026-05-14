@@ -1,0 +1,9 @@
+{
+  "slug": "feynman",
+  "displayName": "Feynman",
+  "description": "Use this skill to deeply understand a concept by explaining it simply, identifying gaps, filling them, and refining the explanation through the Feynman technique.",
+  "visibility": "public",
+  "categories": ["learn"],
+  "version": "1.0.0",
+  "slash": true
+}

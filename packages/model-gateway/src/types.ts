@@ -62,15 +62,21 @@ export type RoutingStrategy =
 
 export interface ByokCredentialsInput {
   provider: string;
+  providerKind?: ProviderKind;
+  baseUrl?: string;
   apiKey?: string;
   apiKeyRef?: string;
+  defaultHeaders?: Record<string, string>;
   allowFallback?: boolean;
 }
 
 export interface GatewayExecutionInput {
   executionMode?: GatewayExecutionMode;
+  // Global-only route identity. BYOK requests should route by provider + providerModel.
   profileAlias?: string;
   providerHint?: string;
+  byokModelId?: string;
+  credentialId?: string;
   byok?: ByokCredentialsInput;
 }
 

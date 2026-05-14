@@ -14,11 +14,13 @@ import {
   resolveModelGatewayProfile,
 } from "../../../../shared/model-gateway/client";
 import { ContentError } from "../../errors";
+import { contentByokService } from "../../byok";
 import { dedupeSourceIds } from "../../source-ids";
 import { requireContentWorkspace } from "../../content-support";
 import {
   normalizeSkillIds,
   resolveSelectedSkills,
+  resolveSkillIdsWithSlashCommand,
 } from "../../skills/selection";
 import {
   findThreadRecord,
@@ -46,7 +48,11 @@ import {
   resolveThreadChatProfile,
 } from "./model-resolution";
 import { assertSourcesExist } from "./source-validation";
-import type { PreparedThreadTurn, StreamThreadEventInput } from "./types";
+import type {
+  PreparedThreadTurn,
+  ResolvedThreadCommand,
+  StreamThreadEventInput,
+} from "./types";
 import { resolveSourceTreeScope } from "../../sources/service";
 import { runArtifactIntentPipeline } from "../../artifacts/intent-pipeline";
 import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
@@ -62,6 +68,10 @@ import {
   resolveGenerateImageToolSelection,
   resolveWebSearchEnabled,
 } from "./tool-selection";
+import {
+  getAgentToolSlashCommand,
+  isAgentToolName,
+} from "../../agent/tool-registry";
 import type {
   AgentMultimodalContentPart,
   ChatInputImage,
@@ -78,6 +88,11 @@ const CHAT_IMAGE_MIME_TYPES = new Set([
   "image/gif",
 ]);
 const MAX_CHAT_IMAGE_COUNT = 8;
+
+const SKILL_COMMAND_NAME_PATTERN =
+  /^\/?([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?):([a-z0-9][a-z0-9.-]{0,127})$/;
+const SKILL_ACTIVATION_NAME_PATTERN =
+  /^\/?([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/;
 const MAX_CHAT_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 const CHAT_VISION_FALLBACK_OPERATION = "chat.vision_fallback";
 const VISION_FALLBACK_DESCRIPTION_OPERATION = "vision.describe";
@@ -106,6 +121,47 @@ type VisionFallbackResult = {
   preflightBilling: PreflightBillingTrace[];
   steps: ThinkingStepTrace[];
 };
+
+function buildCommandAugmentedText(input: {
+  command: ResolvedThreadCommand | null;
+  text: string;
+}) {
+  const args = input.command ? input.command.arguments : input.text;
+  if (input.command?.kind === "skill") {
+    return args;
+  }
+  if (!input.command?.instruction) {
+    return input.command ? args : input.text;
+  }
+  const instruction = input.command.instruction.includes("$ARGUMENTS")
+    ? input.command.instruction.replaceAll("$ARGUMENTS", args)
+    : `${input.command.instruction}\n\nARGUMENTS:\n${args}`;
+
+  const path = input.command.path
+    ? ` path="/skills/${input.command.skillSlug}/${input.command.path}"`
+    : "";
+  return `<sourceweft_command name="${input.command.canonicalName}"${path}>\n${instruction}\n</sourceweft_command>\n\n<user_request>\n${args}\n</user_request>`;
+}
+
+function buildCommandVisibleText(input: {
+  command: ResolvedThreadCommand | null;
+  text: string;
+}) {
+  return input.command ? input.command.arguments : input.text;
+}
+
+function buildThreadCommandMetadata(command: ResolvedThreadCommand) {
+  return {
+    name: command.canonicalName,
+    arguments: command.arguments,
+    kind: command.kind,
+    displayName: command.displayName,
+    skillSlug: command.skillSlug,
+    ...(command.commandName ? { commandName: command.commandName } : {}),
+    ...(command.path ? { path: command.path } : {}),
+    ...(command.toolName ? { toolName: command.toolName } : {}),
+  };
+}
 
 function chatProfileSupportsImageInput(input: {
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
@@ -575,6 +631,7 @@ function buildExistingVisionFallback(input: {
 async function runVisionFallbackDescription(input: {
   gateway: Awaited<ReturnType<typeof getModelGatewayClient>>;
   modelAlias: string;
+  execution?: LlmExecutionConfig;
   prompt: string;
   dataUrl: string;
   metadata: GatewayRequestMetadata;
@@ -583,6 +640,7 @@ async function runVisionFallbackDescription(input: {
   return input.gateway.chat.complete(
     {
       model: input.modelAlias,
+      ...(input.execution ? input.execution : {}),
       messages: [
         {
           role: "user",
@@ -619,6 +677,7 @@ async function buildVisionFallback(input: {
   onThinkingStep?: (step: ThinkingStepTrace) => void;
   requestedVisionProfileAlias?: string | null;
   threadVisionProfileAlias?: string | null;
+  visionExecution?: LlmExecutionConfig;
 }): Promise<VisionFallbackResult> {
   let visionProfile;
   try {
@@ -666,6 +725,7 @@ async function buildVisionFallback(input: {
     const result = await runVisionFallbackDescription({
       gateway,
       modelAlias: visionProfile.modelAlias,
+      execution: input.visionExecution,
       prompt: buildVisionFallbackDescriptionPrompt(input.text),
       dataUrl: image.dataUrl,
       traceId: input.userMessageId,
@@ -819,9 +879,14 @@ export const testExports = {
   PREFLIGHT_VISION_CAPABILITY_SEQUENCE,
   PREFLIGHT_VISION_FALLBACK_SEQUENCE,
   VISION_FALLBACK_DESCRIPTION_OPERATION,
+  buildThreadCommandMetadata,
   buildVisionFallbackDescriptionPrompt,
   buildVisionFallbackGatewayMetadata,
+  buildCommandAugmentedText,
   meterVisionFallbackBilling,
+  parseRequestedCommand,
+  resolveThreadCommand,
+  resolveToolCommandName,
   shouldRejectEmptyThreadMessage,
 };
 
@@ -886,10 +951,72 @@ function normalizeTimezone(value: unknown) {
   return isValidTimeZone(trimmed) ? trimmed : DEFAULT_TIMEZONE;
 }
 
-function resolvePreparedLlmConfig(input: {
+async function resolvePreparedByokExecution(input: {
+  workspaceId: string;
+  userId: string;
+  llm: LlmExecutionConfig;
+  expectedModelType: "llm" | "image" | "vision";
+}): Promise<LlmExecutionConfig> {
+  if (input.llm.byokModelId) {
+    const resolved = await contentByokService.resolveByokModelExecution({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      byokModelId: input.llm.byokModelId,
+    });
+    if (resolved.modelType !== input.expectedModelType) {
+      throw new ContentError(
+        400,
+        "BYOK_MODEL_TYPE_MISMATCH",
+        `BYOK ${input.expectedModelType} execution requires a ${input.expectedModelType} model`,
+      );
+    }
+    return {
+      ...input.llm,
+      profileAlias: undefined,
+      modelAlias: resolved.displayName,
+      providerModel: resolved.modelName,
+      providerHint: resolved.providerName,
+      byokModelId: resolved.byokModelId,
+      credentialId: resolved.credentialId,
+      byok: {
+        provider: resolved.providerName,
+        providerKind: resolved.providerKind,
+        ...(resolved.baseUrl ? { baseUrl: resolved.baseUrl } : {}),
+        apiKey: resolved.apiKey,
+        defaultHeaders: resolved.defaultHeaders,
+      },
+      ...(input.llm.thinking
+        ? {
+            thinking: {
+              ...input.llm.thinking,
+            },
+          }
+        : {}),
+    };
+  }
+
+  throw new ContentError(
+    400,
+    "BYOK_MODEL_REQUIRED",
+    "BYOK execution requires a saved BYOK model",
+  );
+}
+
+async function resolvePreparedLlmConfig(input: {
+  workspaceId: string;
+  userId: string;
   chatProfile: Awaited<ReturnType<typeof resolveActiveChatProfileByAlias>>;
   llm?: LlmExecutionConfig;
-}): LlmExecutionConfig | undefined {
+}): Promise<LlmExecutionConfig | undefined> {
+  if (input.llm?.executionMode === "BYOK") {
+    return resolvePreparedByokExecution({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      llm: input.llm,
+      expectedModelType: "llm",
+    });
+  }
+
   const configJson =
     input.chatProfile.configJson &&
     typeof input.chatProfile.configJson === "object"
@@ -906,11 +1033,7 @@ function resolvePreparedLlmConfig(input: {
     ...input.llm,
     profileAlias: input.llm?.profileAlias ?? input.chatProfile.profileAlias,
     modelAlias: input.llm?.modelAlias ?? input.chatProfile.modelAlias,
-    providerModel:
-      input.llm?.providerModel ??
-      (input.llm?.executionMode === "BYOK"
-        ? input.llm?.modelAlias ?? input.chatProfile.modelAlias
-        : input.chatProfile.modelAlias),
+    providerModel: input.llm?.providerModel ?? input.chatProfile.modelAlias,
     ...(input.llm?.thinking
       ? {
           thinking: {
@@ -967,11 +1090,18 @@ export async function prepareThreadTurn(
     typeof input.llm?.modelAlias === "string"
       ? input.llm.modelAlias.trim()
       : "";
+  const requestedExecutionMode = input.llm?.executionMode;
 
   const resolvedChatModel = await resolveThreadChatProfile({
     threadModelSettings: normalizeThreadModelSettings(thread.modelSettings),
-    requestedProfileAlias: requestedProfileAlias || undefined,
-    requestedModelAlias: requestedProfileAlias ? undefined : requestedModelAlias || undefined,
+    requestedProfileAlias:
+      requestedExecutionMode === "BYOK" ? undefined : requestedProfileAlias || undefined,
+    requestedModelAlias:
+      requestedExecutionMode === "BYOK"
+        ? undefined
+        : requestedProfileAlias
+          ? undefined
+          : requestedModelAlias || undefined,
   });
 
   const mentionedSourceIds = dedupeSourceIds(input.mentionedSourceIds);
@@ -999,20 +1129,81 @@ export async function prepareThreadTurn(
     selectedSourceIds,
   });
   const sourceIds = sourceScope.effectiveSourceIds;
-  const skillIds = normalizeSkillIds(input.tools?.skillIds);
-  const generateImageTool = resolveGenerateImageToolSelection(input.tools);
+  const requestedCommand = parseRequestedCommand({
+    command: input.command,
+    content: messageContent,
+  });
+  const selectedSkillIds = normalizeSkillIds(input.tools?.skillIds);
+  const invokedSkillIds = normalizeSkillIds(input.tools?.invokedSkillIds);
+  const requestedSkillIds = Array.from(
+    new Set([...invokedSkillIds, ...selectedSkillIds]),
+  ).slice(0, 5);
+  const skillIds = await resolveSkillIdsWithSlashCommand({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    skillIds: requestedSkillIds,
+    commandName: requestedCommand?.name,
+  });
   const timezone = normalizeTimezone(input.timezone);
   const enabledSkills = await resolveSelectedSkills({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
     skillIds,
   });
+  const resolvedCommand = resolveThreadCommand({
+    command: requestedCommand,
+    enabledSkills,
+  });
+  const commandSkillId =
+    resolvedCommand?.kind === "skill" || resolvedCommand?.kind === "skill-command"
+      ? enabledSkills.find((skill) => skill.name === resolvedCommand.skillSlug)
+          ?.workspaceSkillId
+      : undefined;
+  const effectiveInvokedSkillIds = Array.from(
+    new Set([
+      ...invokedSkillIds,
+      ...(commandSkillId ? [commandSkillId] : []),
+    ]),
+  ).slice(0, 5);
+  const toolsWithCommand = mergeCommandTools(input.tools, resolvedCommand);
+  const generateImageTool = resolveGenerateImageToolSelection(toolsWithCommand);
+  const imageExecution =
+    input.image?.executionMode === "BYOK"
+      ? await resolvePreparedByokExecution({
+          workspaceId: workspace.id,
+          userId: input.userId,
+          llm: input.image,
+          expectedModelType: "image",
+        })
+      : input.image;
+  const visionExecution =
+    input.vision?.executionMode === "BYOK"
+      ? await resolvePreparedByokExecution({
+          workspaceId: workspace.id,
+          userId: input.userId,
+          llm: input.vision,
+          expectedModelType: "vision",
+        })
+      : input.vision;
+  const effectiveGenerateImageTool =
+    imageExecution?.executionMode === "BYOK"
+      ? {
+          ...(generateImageTool ?? {}),
+          enabled: generateImageTool?.enabled ?? true,
+          execution: imageExecution,
+          ...(imageExecution.modelAlias
+            ? { modelAlias: imageExecution.modelAlias }
+            : imageExecution.providerModel
+              ? { modelAlias: imageExecution.providerModel }
+              : {}),
+        }
+      : generateImageTool;
   assertSelectedSkillsAllowedByTools({
     enabledSkills,
-    generateImageTool,
+    generateImageTool: effectiveGenerateImageTool,
   });
   const webSearchEnabled = resolveWebSearchEnabled({
-    tools: input.tools,
+    tools: toolsWithCommand,
     enabledSkills,
   });
 
@@ -1036,8 +1227,8 @@ export async function prepareThreadTurn(
   const normalizedThreadSettingsWithSnapshots =
     await resolveThreadModelSettingsSnapshots(normalizedThreadSettings);
   const artifactPipeline = await runArtifactIntentPipeline({
-    tools: generateImageTool
-      ? { [AGENT_TOOL_NAMES.generateImage]: generateImageTool }
+    tools: effectiveGenerateImageTool
+      ? { [AGENT_TOOL_NAMES.generateImage]: effectiveGenerateImageTool }
       : undefined,
     enabledSkills,
     threadModelSettings: normalizedThreadSettingsWithSnapshots,
@@ -1049,7 +1240,12 @@ export async function prepareThreadTurn(
   const profileAlias = resolvedChatModel.profileAlias;
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);
-  const llm = resolvePreparedLlmConfig({ chatProfile, llm: input.llm });
+  const llm = await resolvePreparedLlmConfig({
+    workspaceId: workspace.id,
+    userId: input.userId,
+    chatProfile,
+    llm: input.llm,
+  });
   const providerModel =
     llm?.providerModel?.trim() ||
     (llm?.executionMode === "BYOK"
@@ -1081,8 +1277,11 @@ export async function prepareThreadTurn(
   let preflightBilling: PreflightBillingTrace[] = [];
   let pendingVisionFallbackBilling: VisionFallbackBillingItem[] = [];
   const preflightThinkingSteps: ThinkingStepTrace[] = [];
-  let agentMessageContent: string | AgentMultimodalContentPart[] =
-    messageContent;
+  const agentText = buildCommandAugmentedText({
+    command: resolvedCommand,
+    text: messageContent,
+  });
+  let agentMessageContent: string | AgentMultimodalContentPart[] = agentText;
   if (savedImages.length > 0) {
     // Only explicit synced model capability enables direct multimodal input.
     if (chatProfileSupportsImageInput({ chatProfile })) {
@@ -1095,7 +1294,7 @@ export async function prepareThreadTurn(
       preflightThinkingSteps.push(step);
       input.onPreflightThinkingStep?.(step);
       agentMessageContent = await buildDirectMultimodalContent({
-        text: messageContent,
+        text: agentText,
         images: savedImages,
       });
     } else {
@@ -1109,7 +1308,7 @@ export async function prepareThreadTurn(
       input.onPreflightThinkingStep?.(step);
       const existingFallback = buildExistingVisionFallback({
         chatModelAlias: modelAlias,
-        text: messageContent,
+        text: agentText,
         images: savedImages,
       });
       const visionFallback =
@@ -1120,10 +1319,11 @@ export async function prepareThreadTurn(
           threadId: thread.id,
           userId: input.userId,
           userMessageId,
-          text: messageContent,
+          text: agentText,
           images: savedImages,
           onThinkingStep: input.onPreflightThinkingStep,
           threadVisionProfileAlias: normalizedThreadSettings.visionProfileAlias,
+          visionExecution,
         }));
       agentMessageContent = visionFallback.agentMessageContent;
       imageParts = visionFallback.imageParts;
@@ -1132,8 +1332,12 @@ export async function prepareThreadTurn(
       preflightThinkingSteps.push(...visionFallback.steps);
     }
   }
-  const messageContentJson = buildMessageContentJson({
+  const visibleMessageContent = buildCommandVisibleText({
+    command: resolvedCommand,
     text: messageContent,
+  });
+  const messageContentJson = buildMessageContentJson({
+    text: visibleMessageContent,
     images: imageParts,
   });
 
@@ -1146,7 +1350,7 @@ export async function prepareThreadTurn(
       threadId: thread.id,
       parentMessageId: input.userMessageParentId ?? null,
       role: "user",
-      content: messageContent,
+      content: visibleMessageContent,
       contentJson: messageContentJson,
       createdBy: input.userId,
       metadata: {
@@ -1159,11 +1363,22 @@ export async function prepareThreadTurn(
           : {}),
         sourceIds: selectedSourceIds,
         effectiveSourceIds: sourceIds,
-        skillIds,
+        skillIds: selectedSkillIds,
+        ...(effectiveInvokedSkillIds.length > 0
+          ? { invokedSkillIds: effectiveInvokedSkillIds }
+          : {}),
+        ...(resolvedCommand
+          ? {
+              command: buildThreadCommandMetadata(resolvedCommand),
+            }
+          : {}),
         tools: buildThreadToolsMetadata({
-          skillIds,
+          skillIds: selectedSkillIds,
+          ...(effectiveInvokedSkillIds.length > 0
+            ? { invokedSkillIds: effectiveInvokedSkillIds }
+            : {}),
           webSearchEnabled,
-          generateImageTool,
+          generateImageTool: effectiveGenerateImageTool,
         }),
         artifactIntent: artifactPipeline.decision,
         versionOf: input.userMessageParentId ?? null,
@@ -1268,8 +1483,11 @@ export async function prepareThreadTurn(
     sourceIds,
     sourceScope,
     skillIds,
+    invokedSkillIds: effectiveInvokedSkillIds,
+    selectedSkillIds,
     webSearchEnabled,
-    generateImageTool,
+    command: resolvedCommand,
+    generateImageTool: effectiveGenerateImageTool,
     artifactIntent: artifactPipeline.decision,
     imageProfile: artifactPipeline.imageProfile,
     timezone,
@@ -1336,4 +1554,222 @@ function resolveLatestAssistantFinalCheckpoint(
   }
 
   return null;
+}
+
+function parseRequestedCommand(input: {
+  command?: StreamThreadEventInput["command"];
+  content: string;
+}) {
+  if (input.command?.name) {
+    return {
+      arguments: input.command.arguments?.trim() ?? "",
+      kind: input.command.kind,
+      name: input.command.name.trim(),
+    };
+  }
+
+  const match = input.content.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
+  if (!match?.[1]) {
+    return null;
+  }
+  const name = `/${match[1]}`;
+  if (
+    !SKILL_COMMAND_NAME_PATTERN.test(name) &&
+    !SKILL_ACTIVATION_NAME_PATTERN.test(name) &&
+    !resolveToolCommandName(name)
+  ) {
+    return null;
+  }
+  return {
+    arguments: (match[2] ?? "").trim(),
+    name,
+  };
+}
+
+function resolveToolCommandName(name: string) {
+  const raw = name.trim().replace(/^\//, "");
+  if (isAgentToolName(raw) && getAgentToolSlashCommand(raw)) {
+    return raw;
+  }
+  for (const candidate of Object.values(AGENT_TOOL_NAMES)) {
+    const slash = getAgentToolSlashCommand(candidate);
+    if (slash?.aliases?.some((alias) => alias.toLowerCase() === raw.toLowerCase())) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function normalizeSkillCommandName(name: string) {
+  const raw = name.trim();
+  const withSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  const match = withSlash.match(SKILL_COMMAND_NAME_PATTERN);
+  if (!match?.[1] || !match[2]) {
+    throw new ContentError(
+      400,
+      "INVALID_COMMAND",
+      "Command must use /skill-slug:command-name",
+    );
+  }
+  return {
+    canonicalName: `/${match[1]}:${match[2]}`,
+    commandName: match[2],
+    skillSlug: match[1],
+  };
+}
+
+function normalizeSkillActivationName(name: string) {
+  const raw = name.trim();
+  const withSlash = raw.startsWith("/") ? raw : `/${raw}`;
+  const match = withSlash.match(SKILL_ACTIVATION_NAME_PATTERN);
+  if (!match?.[1]) {
+    throw new ContentError(
+      400,
+      "INVALID_COMMAND",
+      "Skill command must use /skill-slug",
+    );
+  }
+  return {
+    canonicalName: `/${match[1]}`,
+    skillSlug: match[1],
+  };
+}
+
+function resolveThreadCommand(input: {
+  command: ReturnType<typeof parseRequestedCommand>;
+  enabledSkills: PreparedThreadTurn["enabledSkills"];
+}): ResolvedThreadCommand | null {
+  if (!input.command) {
+    return null;
+  }
+
+  const toolName = resolveToolCommandName(input.command.name);
+  if (toolName) {
+    const slashCommand = getAgentToolSlashCommand(toolName);
+    return {
+      name: input.command.name,
+      canonicalName: `/${toolName}`,
+      arguments: input.command.arguments,
+      kind: "tool",
+      displayName: slashCommand?.displayName ?? toolName,
+      toolName,
+      skillSlug: "",
+      description: slashCommand?.description ?? `Run ${toolName}`,
+    };
+  }
+  if (input.command.kind === "tool") {
+    throw new ContentError(
+      404,
+      "COMMAND_NOT_FOUND",
+      `Tool command ${input.command.name} is not available for slash invocation`,
+    );
+  }
+
+  const isSkillActivation =
+    input.command.kind === "skill" ||
+    (!input.command.kind &&
+      !input.command.name.includes(":") &&
+      SKILL_ACTIVATION_NAME_PATTERN.test(input.command.name));
+  if (isSkillActivation) {
+    const normalized = normalizeSkillActivationName(input.command.name);
+    const skill = input.enabledSkills.find(
+      (candidate) => candidate.name === normalized.skillSlug,
+    );
+    if (!skill) {
+      throw new ContentError(
+        404,
+        "COMMAND_NOT_FOUND",
+        `Skill ${normalized.canonicalName} is not available for this turn`,
+      );
+    }
+    if (skill.slash === false || skill.slashConfig?.enabled === false) {
+      throw new ContentError(
+        404,
+        "COMMAND_NOT_FOUND",
+        `Skill ${normalized.canonicalName} does not support slash invocation`,
+      );
+    }
+    return {
+      name: input.command.name,
+      canonicalName: normalized.canonicalName,
+      arguments: input.command.arguments,
+      kind: "skill",
+      displayName: skill.displayName ?? skill.name,
+      skillSlug: normalized.skillSlug,
+      description: skill.description,
+    };
+  }
+
+  const normalized = normalizeSkillCommandName(input.command.name);
+  const skill = input.enabledSkills.find(
+    (candidate) => candidate.name === normalized.skillSlug,
+  );
+  const command = skill?.commands?.find(
+    (candidate) => candidate.canonicalName === normalized.canonicalName,
+  );
+  if (!skill || !command?.instruction) {
+    throw new ContentError(
+      404,
+      "COMMAND_NOT_FOUND",
+      `Command ${normalized.canonicalName} is not available for this turn`,
+    );
+  }
+  if (
+    skill.slash === false ||
+    skill.slashConfig?.enabled === false ||
+    command.slash === false
+  ) {
+    throw new ContentError(
+      404,
+      "COMMAND_NOT_FOUND",
+      `Command ${normalized.canonicalName} does not support slash invocation`,
+    );
+  }
+
+  return {
+    name: input.command.name,
+    canonicalName: command.canonicalName,
+    arguments: input.command.arguments,
+    kind: "skill-command",
+    displayName: command.displayName || command.title || command.name,
+    skillSlug: normalized.skillSlug,
+    commandName: normalized.commandName,
+    ...(command.title ? { title: command.title } : {}),
+    description: command.description,
+    path: command.path,
+    instruction: command.instruction,
+    ...(command.tools ? { tools: command.tools } : {}),
+    ...(command.skillSlugs ? { skillSlugs: command.skillSlugs } : {}),
+  };
+}
+
+function mergeCommandTools(
+  tools: StreamThreadEventInput["tools"],
+  command: ResolvedThreadCommand | null,
+): StreamThreadEventInput["tools"] {
+  if (command?.kind === "tool" && command.toolName === AGENT_TOOL_NAMES.generateImage) {
+    return {
+      ...(tools ?? {}),
+      [AGENT_TOOL_NAMES.generateImage]: {
+        ...((tools ?? {})[AGENT_TOOL_NAMES.generateImage] ?? {}),
+        enabled: true,
+        mode: "generate",
+      },
+    };
+  }
+  if (!command?.tools?.length) {
+    return tools;
+  }
+
+  const next = { ...(tools ?? {}) };
+  if (command.tools.includes(AGENT_TOOL_NAMES.webSearch)) {
+    next[AGENT_TOOL_NAMES.webSearch] = { enabled: true };
+  }
+  if (command.tools.includes(AGENT_TOOL_NAMES.generateImage)) {
+    next[AGENT_TOOL_NAMES.generateImage] = {
+      ...(next[AGENT_TOOL_NAMES.generateImage] ?? {}),
+      enabled: true,
+    };
+  }
+  return next;
 }

@@ -10,6 +10,8 @@ export type {
   ChatMessagePart,
   ChatMessageTextPart,
   MessageContentJson,
+  SkillCommand,
+  ThreadCommandRequest,
 } from "@sourceweft/contracts";
 export {
   SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,

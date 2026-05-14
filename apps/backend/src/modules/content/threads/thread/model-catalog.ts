@@ -8,7 +8,6 @@ import {
   modelGatewayRoutes,
 } from "../../../../shared/db/schema";
 import { requireContentWorkspace } from "../../content-support";
-import { listCustomByokProviders } from "../../../../shared/model-gateway/byok-provider-resolver";
 import {
   THREAD_KIND_BY_MODEL_KIND,
   type ThreadModelSettings,
@@ -127,7 +126,7 @@ export async function listThreadModelCatalog(input: {
   workspaceId: string;
   userId: string;
 }) {
-  const workspace = await requireContentWorkspace({
+  await requireContentWorkspace({
     workspaceId: input.workspaceId,
     userId: input.userId,
   });
@@ -165,8 +164,6 @@ export async function listThreadModelCatalog(input: {
       hasGlobalApiKey: boolean;
     }
   >();
-
-  const byokProviderNames = new Set<string>();
 
   if (activeVersion) {
     const [routeRows, providerRows] = await Promise.all([
@@ -217,12 +214,6 @@ export async function listThreadModelCatalog(input: {
       ]),
     );
 
-    for (const row of providerRows) {
-      if (row.isBYOK) {
-        byokProviderNames.add(row.providerName);
-      }
-    }
-
     routeRows
       .sort((left, right) => {
         if (left.priority !== right.priority) {
@@ -245,15 +236,6 @@ export async function listThreadModelCatalog(input: {
             providerHasGlobalApiKeyByName.get(route.targetProviderName) ?? false,
         });
       });
-  }
-
-  const customByokProviders = await listCustomByokProviders({
-    workspaceId: workspace.id,
-    teamId: workspace.organizationId,
-    userId: input.userId,
-  });
-  for (const provider of customByokProviders) {
-    byokProviderNames.add(provider.providerName);
   }
 
   const defaults: ThreadModelSettings = {
@@ -314,7 +296,8 @@ export async function listThreadModelCatalog(input: {
       });
     }
 
-    const availableViaByokProviders = Array.from(byokProviderNames).sort();
+    const availableViaByokProviders =
+      route?.providerName && !isGlobalDefaultAlias ? [route.providerName] : [];
 
     kinds[threadKind].push({
       kind: threadKind,

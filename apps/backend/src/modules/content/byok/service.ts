@@ -1,23 +1,67 @@
 import { config } from "../../../shared/config";
-import { encryptSecret } from "../../../shared/secrets";
-import {
-  listCustomByokProviders,
-} from "../../../shared/model-gateway/byok-provider-resolver";
+import { encryptSecret, decryptSecret } from "../../../shared/secrets";
+import { listCustomByokProviders } from "../../../shared/model-gateway/byok-provider-resolver";
+import { resolveModelCapabilitiesFromLitellm } from "../../../shared/model-gateway";
 import { loadRoutedGatewayConfig } from "../../../shared/model-gateway/runtime";
 import { ContentError } from "../errors";
 import { requireContentWorkspace } from "../content-support";
 import {
   type ByokProviderListItem,
-  createByokKeyRefRecord,
-  deleteByokKeyRefRecord,
-  listByokKeyRefRecords,
+  createByokCredentialRecord,
+  createByokModelRecord,
+  deleteByokCredentialRecord,
+  deleteByokModelRecord,
+  getByokModelRuntimeRecord,
+  listByokCredentialRecords,
+  listByokModelRecords,
 } from "./repository";
 
+type CapabilitySnapshot = {
+  supportsThinking: boolean;
+  supportsImageInput?: boolean;
+  supportedParameters: string[];
+  supportedEfforts: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+  reasoning: boolean;
+  reasoningEffort: boolean;
+  includeReasoning: boolean;
+  supportSources: string[];
+  maxCompletionTokens?: number | null;
+  litellmKey?: string;
+};
+
+async function resolveCapabilitySnapshot(modelName: string) {
+  const capabilities = await resolveModelCapabilitiesFromLitellm(
+    modelName,
+  ).catch(() => null);
+
+  if (!capabilities) {
+    return null;
+  }
+
+  const supportedParameters = capabilities.supportedParameters ?? [];
+
+  return {
+    supportsThinking:
+      supportedParameters.includes("reasoning") ||
+      supportedParameters.includes("reasoning_effort") ||
+      supportedParameters.includes("include_reasoning"),
+    supportsImageInput: capabilities.supportsImageInput === true,
+    supportedParameters,
+    supportedEfforts: capabilities.supportedEfforts ?? [],
+    reasoning: supportedParameters.includes("reasoning"),
+    reasoningEffort: supportedParameters.includes("reasoning_effort"),
+    includeReasoning: supportedParameters.includes("include_reasoning"),
+    supportSources: ["litellm"],
+    maxCompletionTokens: capabilities.max_completion_tokens ?? null,
+    litellmKey: capabilities.litellmKey,
+  } satisfies CapabilitySnapshot;
+}
+
 export class ContentByokService {
-  async listByokKeyRefs(input: { workspaceId: string; userId: string }) {
+  async listByokCredentials(input: { workspaceId: string; userId: string }) {
     const workspace = await requireContentWorkspace(input);
 
-    const items = await listByokKeyRefRecords({
+    const items = await listByokCredentialRecords({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       userId: input.userId,
@@ -26,11 +70,11 @@ export class ContentByokService {
     return { items };
   }
 
-  async createByokKeyRef(input: {
+  async createByokCredential(input: {
     workspaceId: string;
     userId: string;
     providerName: string;
-    keyRef: string;
+    credentialAlias: string;
     apiKey: string;
     providerKind?: string;
     baseUrl?: string | null;
@@ -39,12 +83,12 @@ export class ContentByokService {
   }) {
     const workspace = await requireContentWorkspace(input);
 
-    const item = await createByokKeyRefRecord({
+    const item = await createByokCredentialRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       userId: input.userId,
       providerName: input.providerName,
-      keyRef: input.keyRef,
+      credentialAlias: input.credentialAlias,
       apiKeyEncrypted: encryptSecret(
         input.apiKey,
         config.modelGatewayEncryptionSecret,
@@ -56,6 +100,157 @@ export class ContentByokService {
     });
 
     return { item };
+  }
+
+  async deleteByokCredential(input: {
+    workspaceId: string;
+    userId: string;
+    credentialId: string;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+
+    const deleted = await deleteByokCredentialRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      credentialId: input.credentialId,
+    });
+
+    if (!deleted) {
+      throw new ContentError(
+        404,
+        "BYOK_CREDENTIAL_NOT_FOUND",
+        "BYOK credential not found",
+      );
+    }
+
+    return { deleted: true as const, credentialId: input.credentialId };
+  }
+
+  async listByokModels(input: {
+    workspaceId: string;
+    userId: string;
+    credentialId?: string;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+
+    const items = await listByokModelRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      credentialId: input.credentialId,
+    });
+
+    return { items };
+  }
+
+  async createByokModel(input: {
+    workspaceId: string;
+    userId: string;
+    credentialId: string;
+    modelName: string;
+    displayName?: string;
+    modelType: "llm" | "image" | "vision";
+    config?: Record<string, unknown>;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+    const capabilitySnapshot = await resolveCapabilitySnapshot(input.modelName);
+    const item = await createByokModelRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      credentialId: input.credentialId,
+      modelName: input.modelName,
+      displayName: input.displayName?.trim() || input.modelName,
+      modelType: input.modelType,
+      capabilities: capabilitySnapshot,
+      config: input.config,
+    });
+
+    if (!item) {
+      throw new ContentError(
+        404,
+        "BYOK_CREDENTIAL_NOT_FOUND",
+        "BYOK credential not found",
+      );
+    }
+
+    return { item };
+  }
+
+  async deleteByokModel(input: {
+    workspaceId: string;
+    userId: string;
+    modelId: string;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+
+    const deleted = await deleteByokModelRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      modelId: input.modelId,
+    });
+
+    if (!deleted) {
+      throw new ContentError(
+        404,
+        "BYOK_MODEL_NOT_FOUND",
+        "BYOK model not found",
+      );
+    }
+
+    return { deleted: true as const, modelId: input.modelId };
+  }
+
+  async resolveByokModelExecution(input: {
+    workspaceId: string;
+    userId: string;
+    byokModelId: string;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+    const resolved = await getByokModelRuntimeRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      modelId: input.byokModelId,
+    });
+
+    if (!resolved) {
+      throw new ContentError(
+        404,
+        "BYOK_MODEL_NOT_FOUND",
+        "BYOK model not found",
+      );
+    }
+
+    const apiKey =
+      decryptSecret(
+        resolved.credential.apiKeyEncrypted,
+        config.modelGatewayEncryptionSecret,
+      ) || null;
+    if (!apiKey) {
+      throw new ContentError(
+        400,
+        "BYOK_CREDENTIAL_INVALID",
+        "BYOK credential could not be decrypted",
+      );
+    }
+
+    return {
+      byokModelId: resolved.id,
+      credentialId: resolved.credentialId,
+      credentialAlias: resolved.credential.credentialAlias,
+      providerName: resolved.providerName,
+      providerKind: resolved.credential.providerKind,
+      baseUrl: resolved.credential.baseUrl,
+      defaultHeaders: resolved.credential.defaultHeaders,
+      apiKey,
+      modelName: resolved.modelName,
+      displayName: resolved.displayName,
+      modelType: resolved.modelType,
+      capabilities: resolved.capabilities,
+    };
   }
 
   async listByokProviders(input: { workspaceId: string; userId: string }) {
@@ -93,8 +288,8 @@ export class ContentByokService {
         providerKind: provider.providerKind,
         baseUrl: provider.baseUrl,
         system: false,
-        hasApiKey: provider.keyRefs.length > 0,
-        keyRefs: provider.keyRefs,
+        hasApiKey: provider.credentialAliases.length > 0,
+        credentialAliases: provider.credentialAliases,
         defaultHeaders: provider.defaultHeaders,
       });
     }
@@ -106,31 +301,16 @@ export class ContentByokService {
     };
   }
 
-  async deleteByokKeyRef(input: {
+  async resolveModelCapabilities(input: {
     workspaceId: string;
     userId: string;
-    providerName: string;
-    keyRef: string;
+    modelName: string;
   }) {
-    const workspace = await requireContentWorkspace(input);
+    await requireContentWorkspace(input);
 
-    const deleted = await deleteByokKeyRefRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      userId: input.userId,
-      providerName: input.providerName,
-      keyRef: input.keyRef,
-    });
-
-    if (!deleted) {
-      throw new ContentError(
-        404,
-        "BYOK_KEY_REF_NOT_FOUND",
-        "BYOK key ref not found",
-      );
-    }
-
-    return { deleted: true as const, keyRef: input.keyRef };
+    return {
+      capabilities: await resolveCapabilitySnapshot(input.modelName),
+    };
   }
 }
 

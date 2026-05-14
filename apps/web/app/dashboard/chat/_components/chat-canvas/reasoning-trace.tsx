@@ -282,8 +282,17 @@ function getGeneratedImageTitle(toolCall: ToolCallRecord) {
 
 function getGeneratedImagePrompt(toolCall: ToolCallRecord) {
   const prompt = getRecordValue(toolCall.input, "prompt");
-  return typeof prompt === "string" && prompt.trim().length > 0
-    ? prompt.trim()
+  if (typeof prompt === "string" && prompt.trim().length > 0) {
+    return prompt.trim();
+  }
+
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
+  const outputPrompt = getRecordValue(output, "prompt");
+  return typeof outputPrompt === "string" && outputPrompt.trim().length > 0
+    ? outputPrompt.trim()
     : null;
 }
 
@@ -578,6 +587,9 @@ function getToolCallDetailParts(
   const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
     ? getGeneratedImageStatus(toolCall)
     : null;
+  const imagePrompt = isGeneratedImageArtifactToolName(toolCall.tool)
+    ? getGeneratedImagePrompt(toolCall)
+    : null;
   return [
     `status: ${toolCall.status}`,
     imageStatus?.stage ? `stage: ${imageStatus.stage}` : null,
@@ -611,6 +623,9 @@ function ToolCallDetails({
   const imageArtifact = resolveGeneratedImageArtifact(toolCall, toolStep);
   const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
     ? getGeneratedImageStatus(toolCall)
+    : null;
+  const imagePrompt = isGeneratedImageArtifactToolName(toolCall.tool)
+    ? getGeneratedImagePrompt(toolCall)
     : null;
   const imageUrl = imageArtifact
     ? resolveArtifactUrl({ artifact: imageArtifact, workspaceId })
@@ -658,6 +673,12 @@ function ToolCallDetails({
         <p>
           <span className="font-medium text-foreground/80">Stage:</span>{" "}
           {imageStatus.label}
+        </p>
+      ) : null}
+      {imagePrompt ? (
+        <p>
+          <span className="font-medium text-foreground/80">Prompt:</span>{" "}
+          {imagePrompt}
         </p>
       ) : null}
       {fetchUrls.length > 0 && !hasWebPageToolResults([toolCall]) ? (

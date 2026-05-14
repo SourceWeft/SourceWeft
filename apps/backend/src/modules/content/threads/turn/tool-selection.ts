@@ -64,6 +64,7 @@ export function resolveGenerateImageToolSelection(
     ...(legacySelection.modelAlias && !selection?.modelAlias
       ? { modelAlias: legacySelection.modelAlias }
       : {}),
+    ...(selection?.execution ? { execution: selection.execution } : {}),
     ...(legacySelection.image && !selection?.config
       ? { config: legacySelection.image }
       : {}),
@@ -71,12 +72,16 @@ export function resolveGenerateImageToolSelection(
 }
 
 export function buildThreadToolsMetadata(input: {
+  invokedSkillIds?: string[];
   skillIds: string[];
   webSearchEnabled: boolean;
   generateImageTool?: GenerateImageToolSelection;
 }) {
   return {
     skillIds: input.skillIds,
+    ...(input.invokedSkillIds?.length
+      ? { invokedSkillIds: input.invokedSkillIds }
+      : {}),
     [AGENT_TOOL_NAMES.webSearch]: {
       enabled: input.webSearchEnabled,
     },
@@ -132,6 +137,7 @@ export function resolveGenerateImageToolFromToolsMetadata(value: unknown) {
     ...(legacySelection.modelAlias && !selection?.modelAlias
       ? { modelAlias: legacySelection.modelAlias }
       : {}),
+    ...(selection?.execution ? { execution: selection.execution } : {}),
     ...(legacySelection.image && !selection?.config
       ? { config: legacySelection.image }
       : {}),

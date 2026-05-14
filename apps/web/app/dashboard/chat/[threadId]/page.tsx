@@ -33,22 +33,27 @@ import {
   HeaderModelSelector,
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
+  resolveSelectedModelsWithByok,
   type ModelAliasSettings,
   type ModelItem,
   type SelectedModels,
   type ModelType,
 } from "../_components/header-model-selector";
 import {
-  buildThreadLlmExecution,
-  clearStoredByokState,
+  buildByokModelExecution,
   normalizeByokProviderOptions,
   readStoredByokState,
   writeStoredByokState,
-  type ByokKeyRefItem,
-  type ByokLlmSelection,
+  type ByokCredentialItem,
+  type ByokModelSelection,
   type ByokProviderOption,
+  type ByokSavedModelItem,
 } from "../_components/byok-state";
-import { ByokManagerDialog } from "../_components/byok-manager";
+import { writeStoredModelSelection } from "../_components/model-selection-storage";
+import {
+  ByokModelConfigDialog,
+  type ByokModelConfigDefaults,
+} from "../_components/byok-model-config-dialog";
 import {
   applySkillModelPresetState,
   DEFAULT_MODEL_SELECTION_SOURCES,
@@ -73,6 +78,7 @@ import {
   type VersionedMessageGroup,
 } from "../_components/chat-canvas";
 import {
+  AGENT_TOOL_NAMES,
   isGeneratedImageArtifactToolName,
   isWorkfileWriteToolName,
 } from "@sourceweft/sdk";
@@ -437,6 +443,39 @@ function toNullableNumber(value: unknown): number | null {
 
 function toNullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function normalizeThreadCommandRequest(
+  value: unknown,
+): ChatSendInput["command"] | undefined {
+  const record = toObjectRecord(value);
+  const name = toNullableString(record?.name)?.trim();
+  if (!name) {
+    return undefined;
+  }
+
+  const rawKind = toNullableString(record?.kind);
+  const kind =
+    rawKind === "tool" || rawKind === "skill" || rawKind === "skill-command"
+      ? rawKind
+      : undefined;
+  const args = toNullableString(record?.arguments);
+  const displayName = toNullableString(record?.displayName)?.trim();
+  const skillSlug = toNullableString(record?.skillSlug)?.trim();
+  const commandName = toNullableString(record?.commandName)?.trim();
+  const toolName = toNullableString(record?.toolName)?.trim();
+  const path = toNullableString(record?.path)?.trim();
+
+  return {
+    name,
+    ...(kind ? { kind } : {}),
+    ...(args !== null ? { arguments: args } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(skillSlug ? { skillSlug } : {}),
+    ...(commandName ? { commandName } : {}),
+    ...(toolName ? { toolName } : {}),
+    ...(path ? { path } : {}),
+  };
 }
 
 function createDurableRunKey() {
@@ -1003,6 +1042,7 @@ type ToolCallEventType =
 type StreamEventPayload = {
   type: string;
   code?: string;
+  command?: unknown;
   delta?: string;
   error?: string;
   id?: string;
@@ -1585,6 +1625,11 @@ function buildVersionedMessageGroups(
               undefined,
             content: version.content,
             contentJson: version.contentJson,
+            command:
+              group.role === "user"
+                ? ((toObjectRecord(version.metadata.command) ??
+                    undefined) as ChatSendInput["command"] | undefined)
+                : undefined,
             citations: citationMetadata?.citations,
             availableCitations: citationMetadata?.availableCitations,
             isError: version.metadata.isError === true,
@@ -1741,11 +1786,17 @@ export default function DashboardChatThreadPage({
 
   useEffect(() => {
     if (!workspaceId) {
-      setSelectedByokLlm(null);
+      setLoadedByokStorageKey(null);
+      setSelectedByokModels({});
       return;
     }
     const stored = readStoredByokState(workspaceId, threadId);
-    setSelectedByokLlm(stored?.llmByok ?? null);
+    setLoadedByokStorageKey(`${workspaceId}:${threadId}`);
+    setSelectedByokModels({
+      image: stored?.imageByok ?? null,
+      llm: stored?.llmByok ?? null,
+      vision: stored?.visionByok ?? null,
+    });
   }, [threadId, workspaceId]);
 
   // ── Sources state ──────────────────────────────────────────────────────────
@@ -1759,6 +1810,9 @@ export default function DashboardChatThreadPage({
 
   // ── Composer state ─────────────────────────────────────────────────────────
   const [composerInitialInput, setComposerInitialInput] = useState("");
+  const [composerInitialCommand, setComposerInitialCommand] = useState<
+    ChatSendInput["command"] | null
+  >(null);
   const [composerResetKey, setComposerResetKey] = useState(0);
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
@@ -1771,10 +1825,16 @@ export default function DashboardChatThreadPage({
   const [availableModels, setAvailableModels] =
     useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
   const [byokProviders, setByokProviders] = useState<ByokProviderOption[]>([]);
-  const [byokKeyRefs, setByokKeyRefs] = useState<ByokKeyRefItem[]>([]);
-  const [selectedByokLlm, setSelectedByokLlm] =
-    useState<ByokLlmSelection | null>(null);
-  const [byokManagerOpen, setByokManagerOpen] = useState(false);
+  const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>([]);
+  const [byokModels, setByokModels] = useState<ByokSavedModelItem[]>([]);
+  const [selectedByokModels, setSelectedByokModels] = useState<
+    Partial<Record<ModelType, ByokModelSelection | null>>
+  >({});
+  const [loadedByokStorageKey, setLoadedByokStorageKey] = useState<
+    string | null
+  >(null);
+  const [byokModelConfig, setByokModelConfig] =
+    useState<ByokModelConfigDefaults | null>(null);
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
@@ -1831,6 +1891,7 @@ export default function DashboardChatThreadPage({
   const cancelEditing = useCallback(() => {
     clearEditingState();
     setComposerInitialInput("");
+    setComposerInitialCommand(null);
     setComposerResetKey((value) => value + 1);
   }, [clearEditingState]);
 
@@ -1876,14 +1937,57 @@ export default function DashboardChatThreadPage({
 
   useEffect(() => {
     if (!workspaceId) {
+      setLoadedByokStorageKey(null);
+      return;
+    }
+    if (loadedByokStorageKey !== `${workspaceId}:${threadId}`) {
       return;
     }
     writeStoredByokState(
       workspaceId,
-      selectedByokLlm ? { llmByok: selectedByokLlm } : null,
+      {
+        imageByok: selectedByokModels.image ?? null,
+        llmByok: selectedByokModels.llm ?? null,
+        visionByok: selectedByokModels.vision ?? null,
+      },
       threadId,
     );
-  }, [selectedByokLlm, threadId, workspaceId]);
+  }, [loadedByokStorageKey, selectedByokModels, threadId, workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    if (
+      !selectedModels.llm &&
+      !selectedModels.image &&
+      !selectedModels.vision &&
+      !selectedByokModels.llm &&
+      !selectedByokModels.image &&
+      !selectedByokModels.vision
+    ) {
+      return;
+    }
+
+    writeStoredModelSelection(workspaceId, threadId, {
+      llmProfileAlias:
+        selectedByokModels.llm?.mode === "byok"
+          ? null
+          : (selectedModels.llm?.profileAlias ?? selectedModels.llm?.id ?? null),
+      imageProfileAlias:
+        selectedByokModels.image?.mode === "byok"
+          ? null
+          : (selectedModels.image?.profileAlias ??
+            selectedModels.image?.id ??
+            null),
+      visionProfileAlias:
+        selectedByokModels.vision?.mode === "byok"
+          ? null
+          : (selectedModels.vision?.profileAlias ??
+            selectedModels.vision?.id ??
+            null),
+    });
+  }, [selectedByokModels, selectedModels, threadId, workspaceId]);
 
   const effectiveActiveSkillIds = useMemo(
     () =>
@@ -1896,7 +2000,7 @@ export default function DashboardChatThreadPage({
   );
 
   useEffect(() => {
-    if (selectedByokLlm?.mode === "byok") {
+    if (selectedByokModels.llm?.mode === "byok") {
       return;
     }
     const next = applySkillModelPresetState({
@@ -1929,7 +2033,7 @@ export default function DashboardChatThreadPage({
     baseSelectedModels,
     catalogKindEnabled.llm,
     modelSelectionSources,
-    selectedByokLlm,
+    selectedByokModels.llm,
     selectedModels,
   ]);
 
@@ -2079,6 +2183,9 @@ export default function DashboardChatThreadPage({
           capabilities: skill.capabilities,
           models: skill.models,
           tools: skill.tools,
+          slash: skill.slash,
+          slashConfig: skill.slashConfig,
+          commands: skill.commands,
           defaultConfig: skill.defaultConfig,
         }));
       setAvailableSkills(enabledSkills);
@@ -2484,20 +2591,36 @@ export default function DashboardChatThreadPage({
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       setByokProviders([]);
-      setByokKeyRefs([]);
-      setSelectedByokLlm(null);
+      setByokCredentials([]);
+      setByokModels([]);
+      setSelectedByokModels({});
       setStreamWithSelectedLlm(false);
       return;
     }
 
     setStreamWithSelectedLlm(false);
+    const stored = readStoredByokState(workspaceId, threadId);
+    const storedByokSelections = {
+      image: stored?.imageByok ?? null,
+      llm: stored?.llmByok ?? null,
+      vision: stored?.visionByok ?? null,
+    } satisfies Partial<Record<ModelType, ByokModelSelection | null>>;
 
     try {
-      const [catalog, threadResponse, providerResult, keyResult] = await Promise.all([
+      const [
+        catalog,
+        threadResponse,
+        providerResult,
+        credentialResult,
+        modelResult,
+      ] = await Promise.all([
         contentClient.listThreadModelCatalog(workspaceId),
         contentClient.getThread(workspaceId, threadId),
         contentClient.listByokProviders(workspaceId).catch(() => []),
-        contentClient.listByokKeyRefs(workspaceId).catch(() => ({
+        contentClient.listByokCredentials(workspaceId).catch(() => ({
+          items: [],
+        })),
+        contentClient.listByokModels(workspaceId).catch(() => ({
           items: [],
         })),
       ]);
@@ -2516,12 +2639,20 @@ export default function DashboardChatThreadPage({
         threadAliases: threadResponse.thread.modelSettings,
         fallbackAliases: catalog.defaults,
       });
-      setSelectedModels(resolvedModels);
+      setSelectedModels(
+        resolveSelectedModelsWithByok({
+          availableModels: catalogModels,
+          baseSelectedModels: resolvedModels,
+          byokSelections: storedByokSelections,
+        }),
+      );
       setBaseSelectedModels(resolvedModels);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
-      setByokKeyRefs(keyResult.items);
+      setByokCredentials(credentialResult.items);
+      setByokModels(modelResult.items);
+      setSelectedByokModels(storedByokSelections);
       setByokProviders(
-        normalizeByokProviderOptions(providerResult, keyResult.items),
+        normalizeByokProviderOptions(providerResult, credentialResult.items),
       );
       setStreamWithSelectedLlm(kindEnabled.llm);
     } catch {
@@ -2534,8 +2665,9 @@ export default function DashboardChatThreadPage({
       setBaseSelectedModels(emptySelection);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setByokProviders([]);
-      setByokKeyRefs([]);
-      setSelectedByokLlm(null);
+      setByokCredentials([]);
+      setByokModels([]);
+      setSelectedByokModels({});
       setStreamWithSelectedLlm(false);
     }
   }, [threadId, workspaceId]);
@@ -2550,9 +2682,10 @@ export default function DashboardChatThreadPage({
         ...current,
         [input.type]: "user",
       }));
-      if (input.type === "llm") {
-        setSelectedByokLlm(null);
-      }
+      setSelectedByokModels((current) => ({
+        ...current,
+        [input.type]: null,
+      }));
       if (!workspaceId || !catalogKindEnabled[input.type]) {
         return;
       }
@@ -2612,10 +2745,12 @@ export default function DashboardChatThreadPage({
       skillIds?: string[];
       tools?: ChatSendInput["tools"];
       images?: ChatSendInput["images"];
+      command?: ChatSendInput["command"];
       userMessageId?: string | null;
       assistantMessageId?: string | null;
       thinking?: RequestThinkingConfig;
       searchEnabled?: boolean;
+      byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
       durableRunKey?: string;
       attachOnly?: boolean;
       baseMessages?: ChatMessageItem[];
@@ -2695,10 +2830,21 @@ export default function DashboardChatThreadPage({
               : {}),
             skillIds: input.skillIds ?? [],
             tools: buildChatToolsRequest({
+              imageExecution:
+                selectedByokModels.image?.mode === "byok"
+                  ? buildByokModelExecution({
+                      selection: selectedByokModels.image,
+                    })
+                  : null,
+              invokedSkillIds: input.tools?.invokedSkillIds,
               skillIds: input.skillIds ?? [],
               searchEnabled: input.searchEnabled ?? searchEnabled,
               tools: input.tools,
+              forceImageGenerate:
+                input.command?.kind === "tool" &&
+                input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
             }),
+            ...(input.command ? { command: input.command } : {}),
             versionOf:
               input.mode === "edit"
                 ? (input.userMessageId ?? latestUserMessage?.id ?? null)
@@ -2992,11 +3138,26 @@ export default function DashboardChatThreadPage({
           timezone: resolveClientTimezone(),
           idempotencyKey: durableRunKey,
         };
+        if (input.command) {
+          requestBody.command = input.command;
+        }
         const selectedSkillIds = input.skillIds ?? [];
+        const effectiveByokSelections = input.byokSelections ?? selectedByokModels;
+
         requestBody.tools = buildChatToolsRequest({
+          imageExecution:
+            effectiveByokSelections.image?.mode === "byok"
+              ? buildByokModelExecution({
+                  selection: effectiveByokSelections.image,
+                })
+              : null,
+          invokedSkillIds: input.tools?.invokedSkillIds,
           skillIds: selectedSkillIds,
           searchEnabled: input.searchEnabled ?? searchEnabled,
           tools: input.tools,
+          forceImageGenerate:
+            input.command?.kind === "tool" &&
+            input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
         });
         const selectedLlmProfileAlias =
           streamWithSelectedLlm && catalogKindEnabled.llm
@@ -3008,11 +3169,11 @@ export default function DashboardChatThreadPage({
             capabilities: selectedModels.llm?.capabilities,
             settings: thinkingSettings,
           });
-        const byokLlmRequest = buildThreadLlmExecution({
-          selection: selectedByokLlm,
+        const byokLlmRequest = buildByokModelExecution({
+          selection: effectiveByokSelections.llm,
           thinking: requestThinking,
         });
-        if (selectedByokLlm?.mode === "byok") {
+        if (effectiveByokSelections.llm?.mode === "byok") {
           requestBody.llm = byokLlmRequest;
         } else if (
           typeof selectedLlmProfileAlias === "string" &&
@@ -3039,11 +3200,25 @@ export default function DashboardChatThreadPage({
             requestBody.images = input.images;
           }
         }
-        if (catalogKindEnabled.vision && selectedModels.vision) {
-          requestBody.modelSettings = {
-            visionProfileAlias:
-              selectedModels.vision.profileAlias ?? selectedModels.vision.id,
-          };
+        const modelSettings: Record<string, string> = {};
+        const byokVisionRequest = buildByokModelExecution({
+          selection: effectiveByokSelections.vision,
+        });
+        if (effectiveByokSelections.vision?.mode === "byok") {
+          requestBody.vision = byokVisionRequest;
+        } else if (catalogKindEnabled.vision && selectedModels.vision) {
+          modelSettings.visionProfileAlias =
+            selectedModels.vision.profileAlias ?? selectedModels.vision.id;
+        }
+        if (effectiveByokSelections.image?.mode === "byok") {
+          requestBody.image = buildByokModelExecution({
+            selection: effectiveByokSelections.image,
+          });
+        } else if (catalogKindEnabled.image && selectedModels.image?.profileAlias) {
+          modelSettings.imageProfileAlias = selectedModels.image.profileAlias;
+        }
+        if (Object.keys(modelSettings).length > 0) {
+          requestBody.modelSettings = modelSettings;
         }
         if (input.mode === "refresh" || input.mode === "edit") {
           if (input.userMessageId) {
@@ -3333,6 +3508,7 @@ export default function DashboardChatThreadPage({
                   )
                 : null;
               const serverContentJson = toObjectRecord(data.contentJson);
+              const serverCommand = normalizeThreadCommandRequest(data.command);
               preparedEffectiveSourceIds = serverEffectiveSourceIds;
               persistedUserMessageId = serverUserMessageId;
               if (tempUserId && createdUserMessageId === tempUserId) {
@@ -3351,6 +3527,7 @@ export default function DashboardChatThreadPage({
                             : message.contentJson,
                           metadata: {
                             ...message.metadata,
+                            ...(serverCommand ? { command: serverCommand } : {}),
                             ...(serverSourceIds
                               ? { sourceIds: serverSourceIds }
                               : {}),
@@ -3845,13 +4022,14 @@ export default function DashboardChatThreadPage({
       }
     },
     [
+      catalogKindEnabled.image,
       catalogKindEnabled.llm,
       catalogKindEnabled.vision,
       clearEditingState,
       loadThreadMessages,
       librarySources,
       messages,
-      selectedByokLlm,
+      selectedByokModels,
       selectedModels,
       searchEnabled,
       streamWithSelectedLlm,
@@ -3946,6 +4124,7 @@ export default function DashboardChatThreadPage({
           sourceIds,
           skillIds,
           tools,
+          command,
           thinking,
           thinkingSettings: pendingThinkingSettings,
           searchEnabled: pendingSearchEnabled,
@@ -3957,6 +4136,7 @@ export default function DashboardChatThreadPage({
           sourceIds: string[];
           skillIds?: string[];
           tools?: ChatSendInput["tools"];
+          command?: ChatSendInput["command"];
           thinking?: RequestThinkingConfig;
           thinkingSettings?: PromptThinkingSettings;
           searchEnabled?: boolean;
@@ -3964,7 +4144,8 @@ export default function DashboardChatThreadPage({
             availableModels?: Record<ModelType, ModelItem[]>;
             catalogKindEnabled?: Record<ModelType, boolean>;
             selectedModels?: SelectedModels;
-            byokSelection?: ByokLlmSelection | null;
+            byokSelection?: ByokModelSelection | null;
+            byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
           };
         };
         const pendingSourceIds = Array.isArray(sourceIds)
@@ -4005,8 +4186,10 @@ export default function DashboardChatThreadPage({
           setBaseSelectedModels(pendingModelState.selectedModels);
           setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
         }
-        if (pendingModelState?.byokSelection) {
-          setSelectedByokLlm(pendingModelState.byokSelection);
+        if (pendingModelState?.byokSelections) {
+          setSelectedByokModels(pendingModelState.byokSelections);
+        } else if (pendingModelState?.byokSelection) {
+          setSelectedByokModels({ llm: pendingModelState.byokSelection });
         }
         void streamThreadActionRef.current({
           mode: "send",
@@ -4016,7 +4199,13 @@ export default function DashboardChatThreadPage({
           sourceIds: pendingSourceIds,
           skillIds: pendingSkillIds,
           tools,
+          command,
           thinking,
+          byokSelections:
+            pendingModelState?.byokSelections ??
+            (pendingModelState?.byokSelection
+              ? { llm: pendingModelState.byokSelection }
+              : undefined),
           searchEnabled: pendingSearchEnabled === true,
         });
       } catch {
@@ -4112,6 +4301,7 @@ export default function DashboardChatThreadPage({
       });
       const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
       const sendSourceIds = mergeSourceIds(contextSourceIds);
+      const selectedSkillIds = input.skillIds ?? effectiveActiveSkillIds;
 
       if (editingMessageId) {
         const editingAssistantGroup = editingAssistantMessageId
@@ -4172,8 +4362,9 @@ export default function DashboardChatThreadPage({
           images,
           mentionedSourceIds,
           sourceIds: mergedEditSourceIds,
-          skillIds: effectiveActiveSkillIds,
+          skillIds: selectedSkillIds,
           tools: input.tools,
+          command: input.command,
           searchEnabled,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
@@ -4187,8 +4378,9 @@ export default function DashboardChatThreadPage({
         images,
         mentionedSourceIds,
         sourceIds: sendSourceIds,
-        skillIds: effectiveActiveSkillIds,
+        skillIds: selectedSkillIds,
         tools: input.tools,
+        command: input.command,
         searchEnabled,
       });
     },
@@ -4265,6 +4457,7 @@ export default function DashboardChatThreadPage({
       groupId: string;
       messageId: string;
       message: string;
+      command?: ChatSendInput["command"];
       assistantMessageId: string | null;
       branchIndex: number;
     }) => {
@@ -4278,6 +4471,7 @@ export default function DashboardChatThreadPage({
       setEditingGroupId(input.groupId);
       setEditingBranchIndex(input.branchIndex);
       setComposerInitialInput(input.message);
+      setComposerInitialCommand(input.command ?? null);
       setComposerResetKey((value) => value + 1);
     },
     [cancelEditing, editingMessageId],
@@ -4301,29 +4495,35 @@ export default function DashboardChatThreadPage({
               </div>
               <HeaderModelSelector
                 availableModels={availableModels}
-                byokKeyRefs={byokKeyRefs}
+                byokCredentials={byokCredentials}
+                byokModels={byokModels}
                 byokProviders={byokProviders}
-                byokSelection={selectedByokLlm}
-                onByokSelect={({ model, selection }) => {
+                byokSelections={selectedByokModels}
+                onAddByokModel={(input) => setByokModelConfig(input)}
+                onByokSelect={({ model, selection, type }) => {
                   setModelSelectionSources((current) => ({
                     ...current,
-                    llm: "user",
+                    [type]: "user",
                   }));
                   setSelectedModels((current) => ({
                     ...current,
-                    llm: model,
+                    [type]: model,
                   }));
-                  setSelectedByokLlm(selection);
-                  setThinkingSettings((current) =>
-                    normalizeThinkingSettingsForModel({
-                      capabilities: model.capabilities,
-                      hasSavedPreference: hasSavedThinkingPreference,
-                      settings: current,
-                    }),
-                  );
-                  setStreamWithSelectedLlm(true);
+                  setSelectedByokModels((current) => ({
+                    ...current,
+                    [type]: selection,
+                  }));
+                  if (type === "llm") {
+                    setThinkingSettings((current) =>
+                      normalizeThinkingSettingsForModel({
+                        capabilities: model.capabilities,
+                        hasSavedPreference: hasSavedThinkingPreference,
+                        settings: current,
+                      }),
+                    );
+                    setStreamWithSelectedLlm(true);
+                  }
                 }}
-                onManageByok={() => setByokManagerOpen(true)}
                 onModelSelect={handleModelSelect}
                 selectedModels={selectedModels}
                 setSelectedModels={setSelectedModels}
@@ -4355,6 +4555,7 @@ export default function DashboardChatThreadPage({
           activeVersionByGroup={activeVersionByGroup}
           allSources={librarySources}
           availableSkills={availableSkills}
+          composerInitialCommand={composerInitialCommand}
           composerInitialInput={composerInitialInput}
           composerResetKey={composerResetKey}
           editingMessageId={editingMessageId}
@@ -4436,13 +4637,48 @@ export default function DashboardChatThreadPage({
         />
       ) : null}
 
-      <ByokManagerDialog
-        onOpenChange={setByokManagerOpen}
-        onStateChange={({ keyRefs, providers }) => {
-          setByokKeyRefs(keyRefs);
+      <ByokModelConfigDialog
+        defaults={byokModelConfig}
+        credentials={byokCredentials}
+        onConfigured={({ model, selection, type }) => {
+          if (!model || !selection) {
+            return;
+          }
+          setModelSelectionSources((current) => ({
+            ...current,
+            [type]: "user",
+          }));
+          setSelectedModels((current) => ({
+            ...current,
+            [type]: model,
+          }));
+          setSelectedByokModels((current) => ({
+            ...current,
+            [type]: selection,
+          }));
+          if (type === "llm") {
+            setThinkingSettings((current) =>
+              normalizeThinkingSettingsForModel({
+                capabilities: model.capabilities,
+                hasSavedPreference: hasSavedThinkingPreference,
+                settings: current,
+              }),
+            );
+            setStreamWithSelectedLlm(true);
+          }
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setByokModelConfig(null);
+          }
+        }}
+        onStateChange={({ credentials, models, providers }) => {
+          setByokCredentials(credentials);
+          setByokModels(models);
           setByokProviders(providers);
         }}
-        open={byokManagerOpen}
+        open={Boolean(byokModelConfig)}
+        providers={byokProviders}
         workspaceId={workspaceId}
       />
 

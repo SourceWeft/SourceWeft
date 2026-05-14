@@ -13,6 +13,8 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { useDashboardChatState } from "./dashboard-chat-state";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
+import { copyStoredByokState } from "../chat/_components/byok-state";
+import { copyStoredModelSelection } from "../chat/_components/model-selection-storage";
 
 type NavItem = {
   title: string;
@@ -170,6 +172,24 @@ export function DashboardSidebar() {
     router.push("/dashboard/chat");
   };
 
+  const handleStartNewChat = () => {
+    if (workspaceId && activeThreadId) {
+      copyStoredModelSelection({
+        workspaceId,
+        fromBucket: activeThreadId,
+        toBucket: "current",
+      });
+      copyStoredByokState({
+        workspaceId,
+        fromBucket: activeThreadId,
+        toBucket: null,
+      });
+    }
+
+    startNewChat();
+    router.push("/dashboard/chat");
+  };
+
   const handleRenameWorkspace = async (workspaceId: string, name: string) => {
     const workspace = await renameWorkspace(workspaceId, name);
     if (!workspace) {
@@ -219,10 +239,7 @@ export function DashboardSidebar() {
             onArchiveChat={archiveChat}
             onClearArchivedChats={handleClearArchivedChats}
             onClearPrivateChats={handleClearPrivateChats}
-            onCreateChat={() => {
-              startNewChat();
-              router.push("/dashboard/chat");
-            }}
+            onCreateChat={handleStartNewChat}
             onCreateWorkspace={handleCreateWorkspace}
             onDeleteChat={handleDeleteChat}
             onLoadMoreChats={() => void loadMorePrivateChats()}

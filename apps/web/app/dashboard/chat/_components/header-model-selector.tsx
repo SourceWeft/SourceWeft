@@ -10,14 +10,10 @@ import {
 } from "react";
 import {
   ChevronDown,
-  Check,
   Eye,
   Image as ImageIcon,
   KeyRound,
-  LockKeyhole,
-  Network,
   Plus,
-  Sparkles,
   Zap,
 } from "lucide-react";
 import {
@@ -48,23 +44,27 @@ import {
   TooltipTrigger,
 } from "@sourceweft/ui-web/components/ui/tooltip";
 import {
-  toByokSelectionFromCatalogModel,
+  DEFAULT_BYOK_PROVIDER_KIND,
   toByokSelectionFromCustomModel,
-  type ByokKeyRefItem,
-  type ByokLlmSelection,
+  type ByokCredentialItem,
+  type ByokModelSelection,
   type ByokProviderOption,
+  type ByokSavedModelItem,
 } from "./byok-state";
 
 export type ModelType = "llm" | "image" | "vision";
 
 export type ModelThinkingCapabilities = {
   supportsThinking: boolean;
+  supportsImageInput?: boolean;
   supportedParameters?: string[];
   supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
   reasoning?: boolean;
   reasoningEffort?: boolean;
   includeReasoning?: boolean;
   supportSources?: string[];
+  maxCompletionTokens?: number | null;
+  litellmKey?: string;
   imageGeneration?: {
     supported: boolean;
     provider?: string;
@@ -108,6 +108,9 @@ export type ModelItem = {
   logoSrc?: string;
   provider: string;
   subtitle: string;
+  byokModelId?: string | null;
+  byokCredentialId?: string | null;
+  byokCredentialAlias?: string | null;
   badges?: string[];
   capabilities?: ModelThinkingCapabilities;
   availableViaGlobal?: boolean;
@@ -245,24 +248,39 @@ function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
 }
 
 export function createCustomModelItem(input: {
+  byokCredentialId?: string | null;
+  byokModelId?: string | null;
   capabilities?: ModelThinkingCapabilities | null;
   modelAlias: string;
   name?: string;
+  byokCredentialAlias?: string | null;
   providerLabel: string;
   providerSlug: string;
   subtitle?: string;
 }) {
   const modelAlias = input.modelAlias.trim();
   const name = input.name?.trim() || modelAlias;
+  const byokCredentialAlias = input.byokCredentialAlias?.trim() || null;
+  const identityParts = [
+    "custom",
+    input.providerSlug,
+    byokCredentialAlias,
+    modelAlias,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(":");
   return {
     chef: input.providerLabel,
     chefSlug: input.providerSlug,
-    id: `custom:${input.providerSlug}:${modelAlias}`,
+    id: identityParts,
     profileAlias: null,
     modelAlias,
     name,
     provider: input.providerSlug,
     subtitle: input.subtitle?.trim() || `${input.providerLabel} BYOK`,
+    byokCredentialId: input.byokCredentialId ?? null,
+    byokCredentialAlias,
+    byokModelId: input.byokModelId ?? null,
     badges: ["BYOK", "Custom"],
     capabilities: input.capabilities ?? undefined,
     availableViaGlobal: false,
@@ -388,6 +406,241 @@ const modelTypeLabels: Record<ModelType, string> = {
   vision: "Vision",
 };
 
+const byokAddModelLabels: Record<ModelType, string> = {
+  image: "Add Image Model",
+  llm: "Add Model",
+  vision: "Add Vision Model",
+};
+
+const byokAddCredentialLabels: Record<ModelType, string> = {
+  image: "Add Image Credential",
+  llm: "Add Credential",
+  vision: "Add Vision Credential",
+};
+
+const CUSTOM_BYOK_PROVIDER_NAME = "custom";
+
+function getByokProviderLabel(providerName: string) {
+  return providerName === CUSTOM_BYOK_PROVIDER_NAME
+    ? "Custom Provider"
+    : toProviderLabel(providerName);
+}
+
+function getByokProviderLogoSlug(providerName: string) {
+  return providerName === CUSTOM_BYOK_PROVIDER_NAME
+    ? "synthetic"
+    : normalizeProviderSlug(providerName);
+}
+
+function getByokProviderStatus(input: {
+  customCount?: number;
+  configured: boolean;
+  providerName: string;
+  type: ModelType;
+}) {
+  void input.type;
+
+  if (input.providerName === CUSTOM_BYOK_PROVIDER_NAME) {
+    return input.configured ? "Add model id" : "Custom endpoint";
+  }
+
+  if (!input.configured) {
+    return "Add credential to use";
+  }
+  return (input.customCount ?? 0) > 0 ? "BYOK models" : "Add model id";
+}
+
+function createCustomModelItemFromSelection(input: {
+  selection: ByokModelSelection;
+  type: ModelType;
+}) {
+  if (input.selection.mode !== "byok" || input.selection.source !== "custom") {
+    return null;
+  }
+
+  const customModelName = input.selection.customModelName?.trim();
+  const providerName = input.selection.providerName?.trim();
+  if (!customModelName || !providerName) {
+    return null;
+  }
+
+  const providerLabel = getByokProviderLabel(providerName);
+  return createCustomModelItem({
+    byokCredentialAlias: input.selection.credentialAlias,
+    byokCredentialId: input.selection.credentialId,
+    byokModelId: input.selection.byokModelId,
+    capabilities: input.selection.capabilities ?? null,
+    modelAlias: customModelName,
+    name: customModelName,
+    providerLabel,
+    providerSlug: normalizeProviderSlug(providerName),
+    subtitle: `${providerLabel} custom ${modelTypeLabels[input.type]} BYOK`,
+  });
+}
+
+function createCustomModelItemsFromSavedModels(input: {
+  credentials: ByokCredentialItem[];
+  savedModels: ByokSavedModelItem[];
+  providerName: string;
+  type: ModelType;
+}) {
+  const providerLabel = getByokProviderLabel(input.providerName);
+  const providerSlug = normalizeProviderSlug(input.providerName);
+  const seen = new Set<string>();
+  const models: ModelItem[] = [];
+
+  const credentialById = new Map(
+    input.credentials.map((credential) => [credential.id, credential]),
+  );
+  for (const savedModel of input.savedModels) {
+    if (
+      savedModel.providerName !== input.providerName ||
+      savedModel.modelType !== input.type
+    ) {
+      continue;
+    }
+    const credential = credentialById.get(savedModel.credentialId);
+    const dedupeKey = `${savedModel.id}:${savedModel.modelName}:${savedModel.modelType}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+    seen.add(dedupeKey);
+    models.push({
+      ...createCustomModelItem({
+        byokCredentialAlias: credential?.credentialAlias ?? null,
+        capabilities: savedModel.capabilities as ModelThinkingCapabilities | null,
+        modelAlias: savedModel.modelName,
+        name: savedModel.displayName,
+        providerLabel,
+        providerSlug,
+        subtitle: `${savedModel.modelName} via ${credential?.credentialAlias ?? providerLabel}`,
+      }),
+      byokModelId: savedModel.id,
+      byokCredentialId: savedModel.credentialId,
+    });
+  }
+
+  return models;
+}
+
+function resolveByokSelectedModelItem(input: {
+  availableModels: Record<ModelType, ModelItem[]>;
+  selection: ByokModelSelection | null | undefined;
+  type: ModelType;
+}) {
+  const selection = input.selection;
+  if (!selection || selection.mode !== "byok") {
+    return null;
+  }
+
+  if (selection.source === "catalog") {
+    const catalogModel = findModelItemByAlias({
+        alias: selection.modelAlias,
+        availableModels: input.availableModels,
+        type: input.type,
+      });
+    if (catalogModel) {
+      return catalogModel;
+    }
+
+    const providerName = selection.providerName?.trim();
+    const modelAlias = selection.modelAlias?.trim();
+    if (!providerName || !modelAlias) {
+      return null;
+    }
+    const providerLabel = getByokProviderLabel(providerName);
+    return createCustomModelItem({
+      byokCredentialAlias: selection.credentialAlias,
+      byokCredentialId: selection.credentialId,
+      byokModelId: selection.byokModelId,
+      capabilities: selection.capabilities ?? null,
+      modelAlias,
+      name: modelAlias,
+      providerLabel,
+      providerSlug: normalizeProviderSlug(providerName),
+      subtitle: `${providerLabel} ${modelTypeLabels[input.type]} BYOK`,
+    });
+  }
+
+  return createCustomModelItemFromSelection({
+    selection,
+    type: input.type,
+  });
+}
+
+export function resolveSelectedModelsWithByok(input: {
+  availableModels: Record<ModelType, ModelItem[]>;
+  baseSelectedModels: SelectedModels;
+  byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
+}) {
+  const nextModels: SelectedModels = { ...input.baseSelectedModels };
+
+  for (const type of ["llm", "image", "vision"] as const) {
+    const model = resolveByokSelectedModelItem({
+      availableModels: input.availableModels,
+      selection: input.byokSelections?.[type],
+      type,
+    });
+    if (model) {
+      nextModels[type] = model;
+    }
+  }
+
+  return nextModels;
+}
+
+function getSelectableByokProviders(providers: ByokProviderOption[]) {
+  const seen = new Set<string>();
+  const options: ByokProviderOption[] = [];
+  const existingCustom = providers.find(
+    (provider) => provider.providerName === CUSTOM_BYOK_PROVIDER_NAME,
+  );
+
+  for (const provider of providers) {
+    const providerName = provider.providerName.trim();
+    if (
+      !provider.system ||
+      !providerName ||
+      providerName === CUSTOM_BYOK_PROVIDER_NAME ||
+      seen.has(providerName)
+    ) {
+      continue;
+    }
+
+    options.push(provider);
+    seen.add(providerName);
+  }
+
+  options.push({
+    baseUrl: existingCustom?.baseUrl ?? null,
+    hasApiKey: existingCustom?.hasApiKey ?? false,
+    isByokOnly: true,
+    providerKind: DEFAULT_BYOK_PROVIDER_KIND,
+    providerName: CUSTOM_BYOK_PROVIDER_NAME,
+    system: false,
+  });
+
+  return options;
+}
+
+function resolveSelectableByokProviderName(
+  providerName: string | null | undefined,
+  providerOptions: ByokProviderOption[],
+) {
+  const requestedProviderName = providerName?.trim();
+  if (!requestedProviderName) {
+    return "";
+  }
+  if (
+    providerOptions.some(
+      (provider) => provider.providerName === requestedProviderName,
+    )
+  ) {
+    return requestedProviderName;
+  }
+  return CUSTOM_BYOK_PROVIDER_NAME;
+}
+
 function ModelTypeIcon({ type }: { type: ModelType }) {
   if (type === "llm") {
     return <Zap className="size-3.5" />;
@@ -399,15 +652,19 @@ function ModelTypeIcon({ type }: { type: ModelType }) {
 }
 
 function CatalogModelList({
+  disableCommandFilter = false,
   models,
   onSelect,
   scrollToSelectedKey,
   selectedModel,
+  showEmpty = true,
 }: {
+  disableCommandFilter?: boolean;
   models: ModelItem[];
   onSelect: (model: ModelItem) => void;
   scrollToSelectedKey?: string | number | null;
   selectedModel: ModelItem | null;
+  showEmpty?: boolean;
 }) {
   const chefs = [...new Set(models.map((model) => model.chef))];
   const selectedItemRef = useRef<HTMLDivElement | null>(null);
@@ -425,10 +682,16 @@ function CatalogModelList({
   }, [models.length, scrollToSelectedKey, selectedModel?.id]);
 
   return (
-    <ModelSelectorList className="max-h-[360px] overflow-y-auto">
-      <ModelSelectorEmpty>No models available.</ModelSelectorEmpty>
+    <ModelSelectorList className="max-h-full flex-1 overflow-y-auto">
+      {showEmpty ? (
+        <ModelSelectorEmpty>No models available.</ModelSelectorEmpty>
+      ) : null}
       {chefs.map((chef) => (
-        <ModelSelectorGroup heading={chef} key={chef}>
+        <ModelSelectorGroup
+          forceMount={disableCommandFilter ? true : undefined}
+          heading={chef}
+          key={chef}
+        >
           {models
             .concat()
             .filter((model) => model.chef === chef)
@@ -438,6 +701,7 @@ function CatalogModelList({
               return (
                 <ModelSelectorItem
                   data-checked={selected ? true : undefined}
+                  forceMount={disableCommandFilter ? true : undefined}
                   key={model.id}
                   onSelect={() => onSelect(model)}
                   ref={selected ? selectedItemRef : undefined}
@@ -468,281 +732,280 @@ function CatalogModelList({
 
 function ByokPanel({
   availableModels,
-  byokKeyRefs,
+  byokCredentials,
+  byokModels,
   byokProviders,
   byokSelection,
-  onManageByok,
+  byokSelectedModel,
+  onAddModel,
   onSelect,
   scrollToSelectedKey,
   selectedModel,
+  type,
 }: {
   availableModels: Record<ModelType, ModelItem[]>;
-  byokKeyRefs: ByokKeyRefItem[];
+  byokCredentials: ByokCredentialItem[];
+  byokModels: ByokSavedModelItem[];
   byokProviders: ByokProviderOption[];
-  byokSelection: ByokLlmSelection | null;
-  onManageByok?: () => void;
-  onSelect: (input: { model: ModelItem; selection: ByokLlmSelection }) => void;
+  byokSelection: ByokModelSelection | null;
+  byokSelectedModel: ModelItem | null;
+  onAddModel?: (input: {
+    credentialId?: string;
+    providerKind?: string;
+    providerName?: string;
+  }) => void;
+  onSelect: (input: { model: ModelItem; selection: ByokModelSelection }) => void;
   scrollToSelectedKey?: string | number | null;
   selectedModel: ModelItem | null;
+  type: ModelType;
 }) {
   const [providerName, setProviderName] = useState<string>("");
-  const [keyRef, setKeyRef] = useState<string>("");
-  const [customModelName, setCustomModelName] = useState("");
   const [query, setQuery] = useState("");
   const providerOptions = useMemo(
-    () => byokProviders.filter((provider) => provider.hasApiKey),
+    () => getSelectableByokProviders(byokProviders),
     [byokProviders],
   );
 
   useEffect(() => {
-    const nextProvider = byokSelection?.providerName?.trim();
-    if (nextProvider) {
+    const nextProvider = resolveSelectableByokProviderName(
+      byokSelection?.providerName,
+      providerOptions,
+    );
+    const currentProviderStillAvailable = providerOptions.some(
+      (provider) => provider.providerName === providerName,
+    );
+
+    if (!providerName && nextProvider) {
       setProviderName(nextProvider);
       return;
     }
     if (!providerName && providerOptions[0]) {
       setProviderName(providerOptions[0].providerName);
+      return;
+    }
+    if (providerName && !currentProviderStillAvailable) {
+      setProviderName(nextProvider || providerOptions[0]?.providerName || "");
     }
   }, [byokSelection?.providerName, providerName, providerOptions]);
 
-  useEffect(() => {
-    const nextKeyRef = byokSelection?.keyRef?.trim();
-    if (nextKeyRef) {
-      setKeyRef(nextKeyRef);
-      return;
-    }
-    const firstKey =
-      byokKeyRefs.find((item) => item.providerName === providerName)?.keyRef ?? "";
-    if (!keyRef || !byokKeyRefs.some((item) => item.providerName === providerName && item.keyRef === keyRef)) {
-      setKeyRef(firstKey);
-    }
-  }, [byokKeyRefs, byokSelection?.keyRef, keyRef, providerName]);
-
-  useEffect(() => {
-    if (byokSelection?.source === "custom" && byokSelection.customModelName) {
-      setCustomModelName(byokSelection.customModelName);
-    }
-  }, [byokSelection]);
-
-  const provider = byokProviders.find((item) => item.providerName === providerName) ?? null;
-  const providerLabel = provider ? toProviderLabel(provider.providerName) : "BYOK";
-  const providerSlug = provider ? normalizeProviderSlug(provider.providerName) : "byok";
-  const providerKeyRefs = byokKeyRefs.filter(
+  const provider =
+    providerOptions.find((item) => item.providerName === providerName) ?? null;
+  const providerLabel = provider
+    ? getByokProviderLabel(provider.providerName)
+    : "BYOK";
+  const providerCredentials = byokCredentials.filter(
     (item) => item.providerName === providerName,
   );
-  const knownModels = availableModels.llm.filter((model) =>
-    (model.availableViaByokProviders ?? []).includes(providerName),
-  );
+  const customModels = createCustomModelItemsFromSavedModels({
+    credentials: byokCredentials,
+    providerName,
+    savedModels: byokModels,
+    type,
+  });
+  const selectionCustomModel =
+    byokSelection?.mode === "byok" &&
+    byokSelection.providerName === providerName
+      ? createCustomModelItemFromSelection({ selection: byokSelection, type })
+      : null;
+  const knownModelMap = new Map<string, ModelItem>();
+  for (const model of customModels) {
+    knownModelMap.set(model.id, model);
+  }
+  if (selectionCustomModel) {
+    knownModelMap.set(selectionCustomModel.id, selectionCustomModel);
+  }
+  if (
+    byokSelection?.mode === "byok" &&
+    byokSelection.providerName === providerName &&
+    byokSelectedModel
+  ) {
+    knownModelMap.set(byokSelectedModel.id, byokSelectedModel);
+  }
+  const knownModels = Array.from(knownModelMap.values());
+  const hasKnownModels = knownModels.length > 0;
   const filteredKnownModels = knownModels.filter((model) => {
     const haystack = `${model.name} ${model.subtitle} ${model.modelAlias}`.toLowerCase();
     return haystack.includes(query.trim().toLowerCase());
   });
-  const canCreateCustomModel =
-    providerName.trim().length > 0 &&
-    keyRef.trim().length > 0 &&
-    customModelName.trim().length > 0;
+  const selectedProviderHasKey = providerCredentials.length > 0;
+  const providerStatus = provider
+    ? getByokProviderStatus({
+        customCount: customModels.length,
+        configured: selectedProviderHasKey,
+        providerName: provider.providerName,
+        type,
+      })
+    : "Not configured";
+  const handleAddModel = () => {
+    onAddModel?.({
+      credentialId: providerCredentials[0]?.id,
+      providerKind: provider?.providerKind,
+      providerName: providerName || undefined,
+    });
+  };
 
   return (
-    <div className="space-y-3 px-2 pt-2 pb-1">
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-            <LockKeyhole className="size-3.5 text-muted-foreground" />
-            BYOK configuration
-          </div>
-          <div className="truncate text-xs text-muted-foreground">
-            Saved provider, key ref, and model are bundled into the next chat request.
-          </div>
-        </div>
-        <Button onClick={onManageByok} size="sm" type="button" variant="outline">
-          <Plus className="mr-2 size-3.5" />
-          Manage
-        </Button>
-      </div>
+    <div className="px-2 pt-2 pb-1">
+      <div className="flex h-[382px] min-h-0 overflow-hidden rounded-lg border border-border/70 bg-background">
+        <aside className="flex w-12 shrink-0 flex-col border-r border-border/70 bg-muted/10">
+          <TooltipProvider>
+            <ModelSelectorList className="max-h-none min-h-0 flex-1 overflow-y-auto py-1.5">
+              <ModelSelectorGroup className="p-1" forceMount>
+                {providerOptions.map((item) => {
+                  const selected = item.providerName === providerName;
+                  const providerItemLabel = getByokProviderLabel(item.providerName);
+                  const credentialCount = byokCredentials.filter(
+                    (credential) => credential.providerName === item.providerName,
+                  ).length;
+                  const status = getByokProviderStatus({
+                    customCount: createCustomModelItemsFromSavedModels({
+                      credentials: byokCredentials,
+                      providerName: item.providerName,
+                      savedModels: byokModels,
+                      type,
+                    }).length,
+                    configured: credentialCount > 0,
+                    providerName: item.providerName,
+                    type,
+                  });
 
-      {providerOptions.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border/70 bg-muted/15 px-3 py-6 text-sm text-muted-foreground">
-          No saved BYOK providers yet. Add a key to start using BYOK models.
-        </div>
-      ) : (
-        <div className="grid gap-3 md:grid-cols-[minmax(170px,0.78fr)_minmax(0,1.22fr)]">
-          <section className="space-y-3 rounded-lg border border-border/70 bg-background p-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-              <Network className="size-3.5 text-muted-foreground" />
-              Provider
-            </div>
-            <div className="max-h-[188px] space-y-1.5 overflow-y-auto pr-1">
-              {providerOptions.map((item) => {
-                const selected = item.providerName === providerName;
-                return (
-                  <button
-                    className={
-                      selected
-                        ? "flex w-full items-center justify-between gap-2 rounded-md border border-foreground bg-foreground px-2.5 py-2 text-left text-xs font-medium text-background"
-                        : "flex w-full items-center justify-between gap-2 rounded-md border border-border/70 bg-muted/10 px-2.5 py-2 text-left text-xs font-medium text-foreground hover:bg-muted/40"
-                    }
-                    key={item.providerName}
-                    onClick={() => setProviderName(item.providerName)}
-                    type="button"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate">
-                        {toProviderLabel(item.providerName)}
-                      </span>
-                      <span
-                        className={
-                          selected
-                            ? "block truncate text-[10px] text-background/70"
-                            : "block truncate text-[10px] text-muted-foreground"
-                        }
-                      >
-                        {item.system ? "System provider" : "Custom provider"}
-                      </span>
-                    </span>
-                    {selected ? <Check className="size-3.5 shrink-0" /> : null}
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <Tooltip key={item.providerName}>
+                      <TooltipTrigger asChild>
+                        <ModelSelectorItem
+                          aria-label={`${providerItemLabel}: ${status}`}
+                          className="mx-auto flex size-8 justify-center rounded-lg p-0 data-[checked=true]:bg-background data-[checked=true]:shadow-xs data-[checked=true]:ring-1 data-[checked=true]:ring-border [&>svg:last-child]:hidden"
+                          data-checked={selected ? true : undefined}
+                          forceMount
+                          onSelect={() => setProviderName(item.providerName)}
+                          value={`provider ${providerItemLabel} ${item.providerName}`}
+                        >
+                          <ModelSelectorLogo
+                            className="size-4"
+                            provider={getByokProviderLogoSlug(item.providerName)}
+                          />
+                        </ModelSelectorItem>
+                      </TooltipTrigger>
+                      <TooltipContent align="center" side="right" sideOffset={8}>
+                        <div className="text-xs font-medium">
+                          {providerItemLabel}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {status}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </ModelSelectorGroup>
+            </ModelSelectorList>
+          </TooltipProvider>
+        </aside>
 
-            <div className="space-y-2 border-t border-border/70 pt-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold text-foreground">
-                  Saved key
+        <section className="flex min-w-0 flex-1 flex-col bg-background">
+          <div className="flex h-10 items-center gap-2 border-b border-border/70 px-3">
+            <ModelSelectorLogo
+              className="size-4"
+              provider={
+                provider
+                  ? getByokProviderLogoSlug(provider.providerName)
+                  : "synthetic"
+              }
+            />
+            <ModelSelectorName className="text-sm font-semibold text-foreground">
+              {providerLabel}
+            </ModelSelectorName>
+            <Badge className="h-4 rounded-md px-1.5 text-[9px]" variant="outline">
+              {provider?.system ? "System" : "Custom"}
+            </Badge>
+            <div className="ml-auto shrink-0 text-xs text-muted-foreground">
+              {providerStatus}
+            </div>
+          </div>
+
+          {!selectedProviderHasKey ? (
+            <div className="flex flex-1 items-center justify-center p-6">
+              <div className="max-w-[260px] px-4 py-6 text-center">
+                <KeyRound className="mx-auto mb-2 size-5 text-muted-foreground" />
+                <div className="text-sm font-medium text-foreground">
+                  No {providerLabel} models configured
                 </div>
-                {provider?.baseUrl ? (
-                  <span className="max-w-[132px] truncate text-[10px] text-muted-foreground">
-                    {provider.baseUrl}
-                  </span>
-                ) : null}
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {providerName === CUSTOM_BYOK_PROVIDER_NAME
+                    ? "Add a model with this provider to get started."
+                    : "Save an API key for this provider to get started."}
+                </div>
+                <Button
+                  className="mt-4"
+                  onClick={handleAddModel}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {providerName === CUSTOM_BYOK_PROVIDER_NAME
+                    ? byokAddModelLabels[type]
+                    : byokAddCredentialLabels[type]}
+                </Button>
               </div>
-              {providerKeyRefs.length === 0 ? (
-                <div className="rounded-md border border-dashed border-border/70 bg-muted/15 px-3 py-3 text-xs text-muted-foreground">
-                  No saved key found for {providerLabel}. Add one from Manage.
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {providerKeyRefs.map((item) => {
-                    const selected = item.keyRef === keyRef;
-                    return (
-                      <button
-                        className={
-                          selected
-                            ? "flex w-full items-center justify-between gap-2 rounded-md border border-foreground bg-foreground px-2.5 py-2 text-left text-xs font-medium text-background"
-                            : "flex w-full items-center justify-between gap-2 rounded-md border border-border/70 bg-background px-2.5 py-2 text-left text-xs font-medium text-foreground hover:bg-muted/40"
-                        }
-                        key={item.id}
-                        onClick={() => setKeyRef(item.keyRef)}
-                        type="button"
-                      >
-                        <span className="truncate">{item.keyRef}</span>
-                        {selected ? <Check className="size-3.5 shrink-0" /> : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
-          </section>
-
-          <section className="min-w-0 rounded-lg border border-border/70 bg-background p-3">
-            <Tabs className="w-full gap-0" defaultValue="known">
-              <TabsList className="grid h-9 w-full grid-cols-2">
-                <TabsTrigger value="known">
-                  <Sparkles className="mr-1.5 size-3.5" />
-                  Catalog
-                </TabsTrigger>
-                <TabsTrigger value="custom">
-                  <KeyRound className="mr-1.5 size-3.5" />
-                  Custom
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent className="mt-3 space-y-3" value="known">
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex min-h-0 flex-1 flex-col space-y-3 p-3">
                 <Input
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search BYOK-ready models..."
+                  placeholder="Search models"
                   value={query}
                 />
-                <CatalogModelList
-                  models={filteredKnownModels}
-                  onSelect={(model) => {
-                    if (!providerName || !keyRef) {
-                      return;
+                {filteredKnownModels.length > 0 ? (
+                  <CatalogModelList
+                    disableCommandFilter
+                    models={filteredKnownModels}
+                    onSelect={(model) => {
+                      if (!providerName || !model.byokModelId) {
+                        return;
+                      }
+                      const selection = toByokSelectionFromCustomModel({
+                        byokModelId: model.byokModelId,
+                        capabilities: model.capabilities ?? null,
+                        credentialId: model.byokCredentialId ?? null,
+                        credentialAlias: model.byokCredentialAlias ?? null,
+                        modelName: model.modelAlias,
+                        providerName,
+                      });
+                      onSelect({ model, selection });
+                    }}
+                    scrollToSelectedKey={scrollToSelectedKey}
+                    selectedModel={
+                      byokSelection?.mode === "byok" ? selectedModel : null
                     }
-                    const selection = toByokSelectionFromCatalogModel({
-                      capabilities: model.capabilities,
-                      keyRef,
-                      modelAlias: model.modelAlias,
-                      profileAlias: model.profileAlias ?? model.id,
-                      providerName,
-                    });
-                    if (!selection) {
-                      return;
-                    }
-                    onSelect({ model, selection });
-                  }}
-                  scrollToSelectedKey={scrollToSelectedKey}
-                  selectedModel={
-                    byokSelection?.source === "catalog" ? selectedModel : null
-                  }
-                />
-                {filteredKnownModels.length === 0 ? (
+                    showEmpty={false}
+                  />
+                ) : (
                   <div className="rounded-md border border-dashed border-border/70 bg-muted/15 px-3 py-4 text-xs text-muted-foreground">
-                    No catalog models are marked as available for {providerLabel}. You can still use a custom model name.
+                    {hasKnownModels
+                      ? "No models match this search."
+                      : `No ${modelTypeLabels[type].toLowerCase()} models have been saved for ${providerLabel} yet.`}
                   </div>
-                ) : null}
-              </TabsContent>
-
-              <TabsContent className="mt-3 space-y-3" value="custom">
-                <div className="rounded-lg border border-border/70 bg-muted/10 p-3">
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-foreground">
-                      Raw model name
-                    </div>
-                    <Input
-                      onChange={(event) => setCustomModelName(event.target.value)}
-                      placeholder="gpt-4.1-mini or my-vllm-model"
-                      value={customModelName}
-                    />
-                    <div className="text-xs text-muted-foreground">
-                      Custom models use the selected provider and key ref. Known catalog models keep richer capability metadata.
-                    </div>
-                  </div>
-                  <div className="mt-3 flex justify-end">
-                    <Button
-                      disabled={!canCreateCustomModel}
-                      onClick={() => {
-                        if (!providerName || !keyRef || !customModelName.trim()) {
-                          return;
-                        }
-                        const selection = toByokSelectionFromCustomModel({
-                          capabilities: null,
-                          keyRef,
-                          modelName: customModelName,
-                          providerName,
-                        });
-                        const model = createCustomModelItem({
-                          modelAlias: customModelName.trim(),
-                          name: customModelName.trim(),
-                          providerLabel,
-                          providerSlug,
-                          subtitle: `${providerLabel} custom BYOK`,
-                        });
-                        onSelect({ model, selection });
-                      }}
-                      size="sm"
-                      type="button"
-                    >
-                      Use custom model
-                    </Button>
-                  </div>
-                </div>
-              </TabsContent>
-            </Tabs>
-          </section>
-        </div>
-      )}
+                )}
+              </div>
+              <div className="mt-auto border-t border-border/70 p-2">
+                <Button
+                  className="h-9 w-full justify-start gap-2 rounded-lg"
+                  onClick={handleAddModel}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Plus className="size-4 text-primary" />
+                  <span className="text-sm font-medium">
+                    {byokAddModelLabels[type]}
+                  </span>
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -750,11 +1013,12 @@ function ByokPanel({
 function SelectorPanel({
   activeTab,
   availableModels,
-  byokKeyRefs,
+  byokCredentials,
+  byokModels,
   byokProviders,
-  byokSelection,
+  byokSelections,
+  onAddByokModel,
   onByokSelect,
-  onManageByok,
   onModelSelect,
   selectedModels,
   setActiveTab,
@@ -764,11 +1028,21 @@ function SelectorPanel({
 }: {
   activeTab: ModelType;
   availableModels: Record<ModelType, ModelItem[]>;
-  byokKeyRefs?: ByokKeyRefItem[];
+  byokCredentials?: ByokCredentialItem[];
+  byokModels?: ByokSavedModelItem[];
   byokProviders?: ByokProviderOption[];
-  byokSelection?: ByokLlmSelection | null;
-  onByokSelect?: (input: { model: ModelItem; selection: ByokLlmSelection }) => void;
-  onManageByok?: () => void;
+  byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
+  onAddByokModel?: (input: {
+    credentialId?: string;
+    providerKind?: string;
+    providerName?: string;
+    type: ModelType;
+  }) => void;
+  onByokSelect?: (input: {
+    model: ModelItem;
+    selection: ByokModelSelection;
+    type: ModelType;
+  }) => void;
   onModelSelect?: (input: { type: ModelType; model: ModelItem }) => void;
   selectedModels: SelectedModels;
   setActiveTab: Dispatch<SetStateAction<ModelType>>;
@@ -776,15 +1050,23 @@ function SelectorPanel({
   setSelectedModels: Dispatch<SetStateAction<SelectedModels>>;
   scrollToSelectedKey?: number;
 }) {
-  const [llmMode, setLlmMode] = useState<"global" | "byok">(
-    byokSelection?.mode === "byok" ? "byok" : "global",
-  );
+  const [modelModes, setModelModes] = useState<Record<ModelType, "global" | "byok">>({
+    image: byokSelections?.image?.mode === "byok" ? "byok" : "global",
+    llm: byokSelections?.llm?.mode === "byok" ? "byok" : "global",
+    vision: byokSelections?.vision?.mode === "byok" ? "byok" : "global",
+  });
 
   useEffect(() => {
-    if (byokSelection?.mode === "byok") {
-      setLlmMode("byok");
-    }
-  }, [byokSelection?.mode]);
+    setModelModes((current) => ({
+      image: byokSelections?.image?.mode === "byok" ? "byok" : current.image,
+      llm: byokSelections?.llm?.mode === "byok" ? "byok" : current.llm,
+      vision: byokSelections?.vision?.mode === "byok" ? "byok" : current.vision,
+    }));
+  }, [
+    byokSelections?.image?.mode,
+    byokSelections?.llm?.mode,
+    byokSelections?.vision?.mode,
+  ]);
 
   return (
     <Tabs
@@ -792,9 +1074,9 @@ function SelectorPanel({
       onValueChange={(value) => setActiveTab(value as ModelType)}
       value={activeTab}
     >
-      <div>
+      <div className="border-b border-border/70 pb-1.5">
         <TabsList
-          className="grid h-11 w-full grid-cols-3 rounded-none bg-transparent px-1 pt-1"
+          className="grid h-10 w-full grid-cols-3 rounded-none bg-transparent px-1 pt-1"
           variant="line"
         >
           {(["llm", "image", "vision"] as ModelType[]).map((type) => (
@@ -812,19 +1094,34 @@ function SelectorPanel({
 
       {(["llm", "image", "vision"] as ModelType[]).map((type) => (
         <TabsContent className="mt-0" key={type} value={type}>
-          {type === "llm" ? (
-            <div className="px-2 pt-2 pb-1.5">
-              <Tabs
-                className="w-full gap-0"
-                onValueChange={(value) => setLlmMode(value as "global" | "byok")}
-                value={llmMode}
-              >
-                <TabsList className="grid h-10 w-full grid-cols-2">
-                  <TabsTrigger value="global">Global</TabsTrigger>
-                  <TabsTrigger value="byok">BYOK</TabsTrigger>
-                </TabsList>
-                <TabsContent className="mt-0" value="global">
-                  <div className="px-0 pt-2.5 pb-1.5">
+          <div className="px-2 pt-3 pb-1.5">
+            <Tabs
+              className="w-full gap-0"
+              onValueChange={(value) =>
+                setModelModes((current) => ({
+                  ...current,
+                  [type]: value as "global" | "byok",
+                }))
+              }
+              value={modelModes[type]}
+            >
+              <TabsList className="grid h-9 w-full grid-cols-2 rounded-lg bg-muted/60 p-1">
+                <TabsTrigger
+                  className="rounded-md text-xs data-active:bg-background data-active:shadow-xs"
+                  value="global"
+                >
+                  Global
+                </TabsTrigger>
+                <TabsTrigger
+                  className="rounded-md text-xs data-active:bg-background data-active:shadow-xs"
+                  value="byok"
+                >
+                  BYOK
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent className="mt-0" value="global">
+                <div className="flex h-[382px] min-h-0 flex-col px-2 pt-2 pb-1">
+                  <div className="shrink-0 pb-2">
                     <ModelSelectorInput placeholder="Search models..." />
                   </div>
                   <CatalogModelList
@@ -841,61 +1138,50 @@ function SelectorPanel({
                       setOpen(false);
                     }}
                     scrollToSelectedKey={
-                      llmMode === "global"
-                        ? `${scrollToSelectedKey}:llm:global`
+                      modelModes[type] === "global"
+                        ? `${scrollToSelectedKey}:${type}:global`
                         : null
                     }
                     selectedModel={selectedModels[type]}
                   />
-                </TabsContent>
-                <TabsContent className="mt-0" value="byok">
-                  <ByokPanel
-                    availableModels={availableModels}
-                    byokKeyRefs={byokKeyRefs ?? []}
-                    byokProviders={byokProviders ?? []}
-                    byokSelection={byokSelection ?? null}
-                    onManageByok={onManageByok}
-                    onSelect={({ model, selection }) => {
-                      setSelectedModels((current) => ({
-                        ...current,
-                        llm: model,
-                      }));
-                      onByokSelect?.({ model, selection });
-                      setOpen(false);
-                    }}
-                    scrollToSelectedKey={
-                      byokSelection?.source === "catalog" && llmMode === "byok"
-                        ? `${scrollToSelectedKey}:llm:byok`
-                        : null
-                    }
-                    selectedModel={selectedModels.llm}
-                  />
-                </TabsContent>
-              </Tabs>
-            </div>
-          ) : (
-            <>
-              <div className="px-2 pt-2.5 pb-1.5">
-                <ModelSelectorInput placeholder="Search models..." />
-              </div>
-              <CatalogModelList
-                models={availableModels[type] ?? []}
-                onSelect={(model) => {
-                  setSelectedModels((current) => ({
-                    ...current,
-                    [type]: model,
-                  }));
-                  onModelSelect?.({
-                    type,
-                    model,
-                  });
-                  setOpen(false);
-                }}
-                scrollToSelectedKey={`${scrollToSelectedKey}:${type}`}
-                selectedModel={selectedModels[type]}
-              />
-            </>
-          )}
+                </div>
+              </TabsContent>
+              <TabsContent className="mt-0" value="byok">
+                <ByokPanel
+                  availableModels={availableModels}
+                  byokCredentials={byokCredentials ?? []}
+                  byokModels={byokModels ?? []}
+                  byokProviders={byokProviders ?? []}
+                  byokSelection={byokSelections?.[type] ?? null}
+                  byokSelectedModel={
+                    byokSelections?.[type]?.mode === "byok"
+                      ? selectedModels[type]
+                      : null
+                  }
+                  onAddModel={(input) => {
+                    setOpen(false);
+                    onAddByokModel?.({ ...input, type });
+                  }}
+                  onSelect={({ model, selection }) => {
+                    setSelectedModels((current) => ({
+                      ...current,
+                      [type]: model,
+                    }));
+                    onByokSelect?.({ model, selection, type });
+                    setOpen(false);
+                  }}
+                  scrollToSelectedKey={
+                    byokSelections?.[type]?.source === "catalog" &&
+                    modelModes[type] === "byok"
+                      ? `${scrollToSelectedKey}:${type}:byok`
+                      : null
+                  }
+                  selectedModel={selectedModels[type]}
+                  type={type}
+                />
+              </TabsContent>
+            </Tabs>
+          </div>
         </TabsContent>
       ))}
     </Tabs>
@@ -904,21 +1190,32 @@ function SelectorPanel({
 
 export function HeaderModelSelector({
   availableModels = emptyModelCatalog,
-  byokKeyRefs = [],
+  byokCredentials = [],
+  byokModels = [],
   byokProviders = [],
-  byokSelection = null,
+  byokSelections = {},
+  onAddByokModel,
   onByokSelect,
-  onManageByok,
   onModelSelect,
   selectedModels,
   setSelectedModels,
 }: {
   availableModels?: Record<ModelType, ModelItem[]>;
-  byokKeyRefs?: ByokKeyRefItem[];
+  byokCredentials?: ByokCredentialItem[];
+  byokModels?: ByokSavedModelItem[];
   byokProviders?: ByokProviderOption[];
-  byokSelection?: ByokLlmSelection | null;
-  onByokSelect?: (input: { model: ModelItem; selection: ByokLlmSelection }) => void;
-  onManageByok?: () => void;
+  byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
+  onAddByokModel?: (input: {
+    credentialId?: string;
+    providerKind?: string;
+    providerName?: string;
+    type: ModelType;
+  }) => void;
+  onByokSelect?: (input: {
+    model: ModelItem;
+    selection: ByokModelSelection;
+    type: ModelType;
+  }) => void;
   onModelSelect?: (input: { type: ModelType; model: ModelItem }) => void;
   selectedModels: SelectedModels;
   setSelectedModels: Dispatch<SetStateAction<SelectedModels>>;
@@ -938,8 +1235,18 @@ export function HeaderModelSelector({
       <TooltipProvider>
         <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs">
           {(["llm", "image", "vision"] as ModelType[]).map((type) => {
-            const model = selectedModels[type] ?? availableModels[type]?.[0] ?? null;
-            const showByokBadge = type === "llm" && byokSelection?.mode === "byok";
+            const byokSelection = byokSelections[type] ?? null;
+            const byokModel =
+              byokSelection?.mode === "byok"
+                ? resolveByokSelectedModelItem({
+                    availableModels,
+                    selection: byokSelection,
+                    type,
+                  })
+                : null;
+            const model =
+              byokModel ?? selectedModels[type] ?? availableModels[type]?.[0] ?? null;
+            const showByokBadge = byokSelection?.mode === "byok";
 
             return (
               <Tooltip key={type}>
@@ -975,8 +1282,8 @@ export function HeaderModelSelector({
                   </ModelSelectorTrigger>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={6}>
-                  {type === "llm" && byokSelection?.mode === "byok"
-                    ? `LLM: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
+                  {byokSelection?.mode === "byok"
+                    ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
                     : model
                       ? `${modelTypeLabels[type]}: ${model.name}`
                       : `No ${modelTypeLabels[type]} model available`}
@@ -991,11 +1298,12 @@ export function HeaderModelSelector({
         <SelectorPanel
           activeTab={activeTab}
           availableModels={availableModels}
-          byokKeyRefs={byokKeyRefs}
+          byokCredentials={byokCredentials}
+          byokModels={byokModels}
           byokProviders={byokProviders}
-          byokSelection={byokSelection}
+          byokSelections={byokSelections}
+          onAddByokModel={onAddByokModel}
           onByokSelect={onByokSelect}
-          onManageByok={onManageByok}
           onModelSelect={onModelSelect}
           selectedModels={selectedModels}
           scrollToSelectedKey={openSequence}

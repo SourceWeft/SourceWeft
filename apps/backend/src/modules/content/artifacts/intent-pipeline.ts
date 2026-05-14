@@ -35,6 +35,8 @@ export type ArtifactIntentPipelineResult = {
 type ResolveImageProfile = (input: {
   threadModelSettings: ThreadModelSettings;
   explicit: boolean;
+  hasByokExecution?: boolean;
+  byokExecution?: GenerateImageToolSelection["execution"];
   requestedModelAlias?: string | null;
 }) => Promise<ResolvedArtifactImageProfile | null>;
 
@@ -107,16 +109,55 @@ function clampConfigToCapabilities(input: {
 async function resolveImageProfile(input: {
   threadModelSettings: ThreadModelSettings;
   explicit: boolean;
+  hasByokExecution?: boolean;
+  byokExecution?: GenerateImageToolSelection["execution"];
   requestedModelAlias?: string | null;
 }): Promise<ResolvedArtifactImageProfile | null> {
-  const profile = await resolveModelGatewayProfile({
+  let profile = await resolveModelGatewayProfile({
     kind: "image",
-    requestedProfileAlias: input.requestedModelAlias
+    requestedProfileAlias:
+      input.requestedModelAlias || input.hasByokExecution
+        ? undefined
+        : input.threadModelSettings.imageProfileAlias,
+    requestedModelAlias: input.hasByokExecution
       ? undefined
-      : input.threadModelSettings.imageProfileAlias,
-    requestedModelAlias: input.requestedModelAlias,
-    defaultRequired: input.explicit,
+      : input.requestedModelAlias,
+    defaultRequired: input.explicit && !input.hasByokExecution,
   });
+  if (!profile && input.hasByokExecution) {
+    profile = await resolveModelGatewayProfile({
+      kind: "image",
+      requestedProfileAlias: input.threadModelSettings.imageProfileAlias,
+      defaultRequired: false,
+    });
+  }
+  if (!profile && input.hasByokExecution && input.byokExecution) {
+    const now = new Date().toISOString();
+    const modelAlias =
+      input.byokExecution.modelAlias ??
+      input.byokExecution.providerModel ??
+      input.byokExecution.byokModelId ??
+      "byok-image";
+    const profileAlias = `byok:image:${input.byokExecution.byokModelId ?? modelAlias}`;
+    const providerKind = input.byokExecution.providerHint ?? undefined;
+    profile = {
+      id: `byok:image:${profileAlias}`,
+      kind: "image",
+      gatewayConfigId: "",
+      profileAlias,
+      modelAlias,
+      requestedDimensions: null,
+      vectorStrategy: "auto",
+      isDefault: false,
+      isActive: true,
+      configJson: {
+        ...(providerKind ? { providerKind } : {}),
+        targetModel: modelAlias,
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
   if (!profile) {
     return null;
   }
@@ -168,6 +209,8 @@ export async function runArtifactIntentPipeline(input: {
     ? await (input.resolveImageProfile ?? resolveImageProfile)({
         threadModelSettings: input.threadModelSettings,
         explicit,
+        hasByokExecution: Boolean(generateImageSelection?.execution),
+        byokExecution: generateImageSelection?.execution,
         requestedModelAlias: requestedImageModelAlias,
       })
     : null;

@@ -4,6 +4,7 @@ import type {
   AgentToolDefinitionShape,
   AgentToolDomain,
   AgentToolRequirements,
+  AgentToolSlashCommand,
 } from "./define";
 import { artifactTools } from "./tools/generate-image";
 import { filesystemTools } from "./tools/filesystem";
@@ -59,6 +60,29 @@ function getAgentToolConfiguration(
   tool: AgentToolDefinition | null,
 ): AgentToolConfiguration | undefined {
   return tool && "configuration" in tool ? tool.configuration : undefined;
+}
+
+export function getAgentToolSlashCommand(
+  value: string,
+): AgentToolSlashCommand | null {
+  const tool = getAgentToolDefinition(value);
+  if (!tool || !("slash" in tool)) {
+    return null;
+  }
+  const slash = tool.slash as AgentToolSlashCommand | undefined;
+  if (slash?.enabled === false) {
+    return null;
+  }
+  return {
+    displayName: slash?.displayName ?? tool.name,
+    ...(slash?.description ? { description: slash.description } : {}),
+    ...(slash?.aliases ? { aliases: slash.aliases } : {}),
+    enabled: true,
+  };
+}
+
+export function isAgentToolSlashCommandSupported(value: string) {
+  return getAgentToolSlashCommand(value) !== null;
 }
 
 export function isConfigurableAgentTool(value: string) {

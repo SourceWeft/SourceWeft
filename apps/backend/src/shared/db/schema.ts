@@ -193,7 +193,25 @@ export type SkillManifestJson = {
     image?: string;
     vision?: string;
   };
+  commands?: {
+    id: string;
+    name: string;
+    canonicalName: string;
+    displayName: string;
+    description: string;
+    path: string;
+    argumentHint?: string;
+    title?: string;
+    skillSlugs?: string[];
+    tools?: string[];
+    model?: string;
+    slash?: boolean;
+  }[];
   tools?: string[];
+  slash?: boolean;
+  slashConfig?: {
+    enabled?: boolean;
+  };
   defaultConfig?: Record<string, unknown>;
 };
 
@@ -869,8 +887,8 @@ export const modelGatewayProviderConfigs = pgTable(
   ],
 );
 
-export const modelGatewayByokKeyRefs = pgTable(
-  "model_gateway_byok_key_refs",
+export const modelGatewayByokCredentials = pgTable(
+  "model_gateway_byok_credentials",
   {
     id: text("id").primaryKey(),
     teamId: text("team_id").notNull(),
@@ -879,14 +897,14 @@ export const modelGatewayByokKeyRefs = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     userId: text("user_id"),
     providerName: text("provider_name").notNull(),
-    keyRef: text("key_ref").notNull(),
-    apiKeyEncrypted: text("api_key_encrypted").notNull(),
-    baseUrl: text("base_url"),
     providerKind: text("provider_kind")
       .$type<ModelGatewayProviderKind>()
       .notNull()
       .default("openai-compatible"),
-    defaultHeadersJson: jsonb("default_headers")
+    baseUrl: text("base_url"),
+    credentialAlias: text("credential_alias").notNull(),
+    apiKeyEncrypted: text("api_key_encrypted").notNull(),
+    defaultHeadersJson: jsonb("default_headers_json")
       .$type<Record<string, string>>()
       .notNull()
       .default(emptyJsonObject),
@@ -904,27 +922,92 @@ export const modelGatewayByokKeyRefs = pgTable(
   },
   (table) => [
     foreignKey({
-      name: "model_gateway_byok_key_refs_workspace_team_fk",
+      name: "model_gateway_byok_credentials_workspace_team_fk",
       columns: [table.workspaceId, table.teamId],
       foreignColumns: [workspaces.id, workspaces.organizationId],
     }).onDelete("cascade"),
-    index("model_gateway_byok_key_refs_lookup_idx").on(
+    index("model_gateway_byok_credentials_lookup_idx").on(
       table.teamId,
       table.workspaceId,
       table.userId,
       table.providerName,
-      table.keyRef,
       table.isActive,
     ),
-    uniqueIndex("model_gateway_byok_key_refs_scope_uq").on(
+    uniqueIndex("model_gateway_byok_credentials_alias_uq").on(
       table.workspaceId,
       table.userId,
       table.providerName,
-      table.keyRef,
+      table.credentialAlias,
     ),
     check(
-      "model_gateway_byok_key_refs_kind_check",
+      "model_gateway_byok_credentials_kind_check",
       sql`${table.providerKind} in ('openai-compatible', 'openrouter', 'deepinfra', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai')`,
+    ),
+  ],
+);
+
+export const modelGatewayByokModels = pgTable(
+  "model_gateway_byok_models",
+  {
+    id: text("id").primaryKey(),
+    credentialId: text("credential_id")
+      .notNull()
+      .references(() => modelGatewayByokCredentials.id, {
+        onDelete: "restrict",
+      }),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id"),
+    providerName: text("provider_name").notNull(),
+    modelName: text("model_name").notNull(),
+    displayName: text("display_name").notNull(),
+    modelType: text("model_type")
+      .$type<"llm" | "image" | "vision">()
+      .notNull(),
+    capabilitiesJson: jsonb("capabilities_json")
+      .$type<Record<string, unknown> | null>(),
+    configJson: jsonb("config_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "model_gateway_byok_models_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    index("model_gateway_byok_models_credential_idx").on(
+      table.credentialId,
+      table.isActive,
+    ),
+    index("model_gateway_byok_models_lookup_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.userId,
+      table.providerName,
+      table.modelType,
+      table.isActive,
+    ),
+    uniqueIndex("model_gateway_byok_models_credential_model_uq").on(
+      table.workspaceId,
+      table.userId,
+      table.credentialId,
+      table.modelName,
+      table.modelType,
+    ),
+    check(
+      "model_gateway_byok_models_type_check",
+      sql`${table.modelType} in ('llm', 'image', 'vision')`,
     ),
   ],
 );

@@ -79,7 +79,10 @@ export class ContentSkillsService {
         hasReadme: false,
         capabilities: manifest.capabilities,
         models: manifest.models,
+        commands: manifest.commands,
         tools: manifest.tools,
+        slash: manifest.slash,
+        slashConfig: manifest.slashConfig,
         defaultConfig: manifest.defaultConfig,
       };
     });

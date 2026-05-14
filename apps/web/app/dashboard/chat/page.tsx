@@ -23,22 +23,27 @@ import {
   HeaderModelSelector,
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
+  resolveSelectedModelsWithByok,
   type ModelAliasSettings,
   type ModelItem,
   type SelectedModels,
   type ModelType,
 } from "./_components/header-model-selector";
 import {
+  buildByokModelExecution,
   buildThreadCreateModelSettings,
-  clearStoredByokState,
   normalizeByokProviderOptions,
   readStoredByokState,
   writeStoredByokState,
-  type ByokKeyRefItem,
-  type ByokLlmSelection,
+  type ByokCredentialItem,
+  type ByokModelSelection,
   type ByokProviderOption,
+  type ByokSavedModelItem,
 } from "./_components/byok-state";
-import { ByokManagerDialog } from "./_components/byok-manager";
+import {
+  ByokModelConfigDialog,
+  type ByokModelConfigDefaults,
+} from "./_components/byok-model-config-dialog";
 import {
   applySkillModelPresetState,
   DEFAULT_MODEL_SELECTION_SOURCES,
@@ -55,6 +60,7 @@ import {
   type PromptInputMentionSourceLoader,
   type PromptThinkingSettings,
 } from "./_components/chat-canvas";
+import { AGENT_TOOL_NAMES } from "@sourceweft/sdk";
 import {
   ArtifactPreviewPanel,
   SourcesHub,
@@ -68,6 +74,10 @@ import {
   readStoredSourceSelection,
   writeStoredSourceSelection,
 } from "./_components/source-selection-storage";
+import {
+  readStoredModelSelection,
+  writeStoredModelSelection,
+} from "./_components/model-selection-storage";
 import {
   getCachedWorkspaceSources,
   hasCachedWorkspaceSources,
@@ -263,10 +273,16 @@ export default function DashboardChatPage() {
   const [availableModels, setAvailableModels] =
     useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
   const [byokProviders, setByokProviders] = useState<ByokProviderOption[]>([]);
-  const [byokKeyRefs, setByokKeyRefs] = useState<ByokKeyRefItem[]>([]);
-  const [selectedByokLlm, setSelectedByokLlm] =
-    useState<ByokLlmSelection | null>(null);
-  const [byokManagerOpen, setByokManagerOpen] = useState(false);
+  const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>([]);
+  const [byokModels, setByokModels] = useState<ByokSavedModelItem[]>([]);
+  const [selectedByokModels, setSelectedByokModels] = useState<
+    Partial<Record<ModelType, ByokModelSelection | null>>
+  >({});
+  const [loadedByokStorageKey, setLoadedByokStorageKey] = useState<
+    string | null
+  >(null);
+  const [byokModelConfig, setByokModelConfig] =
+    useState<ByokModelConfigDefaults | null>(null);
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
@@ -326,6 +342,7 @@ export default function DashboardChatPage() {
 
   useEffect(() => {
     if (!workspaceId) {
+      setLoadedByokStorageKey(null);
       setAvailableModels(emptyModelCatalog);
       const emptySelection = resolveSelectedModels({
         availableModels: emptyModelCatalog,
@@ -335,13 +352,20 @@ export default function DashboardChatPage() {
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       setByokProviders([]);
-      setByokKeyRefs([]);
-      setSelectedByokLlm(null);
+      setByokCredentials([]);
+      setByokModels([]);
+      setSelectedByokModels({});
       return;
     }
 
     const stored = readStoredByokState(workspaceId);
-    setSelectedByokLlm(stored?.llmByok ?? null);
+    setLoadedByokStorageKey(workspaceId);
+    const storedByokSelections = {
+      image: stored?.imageByok ?? null,
+      llm: stored?.llmByok ?? null,
+      vision: stored?.visionByok ?? null,
+    } satisfies Partial<Record<ModelType, ByokModelSelection | null>>;
+    setSelectedByokModels(storedByokSelections);
 
     const activeWorkspaceId = workspaceId;
 
@@ -349,10 +373,13 @@ export default function DashboardChatPage() {
 
     async function loadModelCatalog() {
       try {
-        const [catalog, providerResult, keyResult] = await Promise.all([
+        const [catalog, providerResult, credentialResult, modelResult] = await Promise.all([
           contentClient.listThreadModelCatalog(activeWorkspaceId),
           contentClient.listByokProviders(activeWorkspaceId).catch(() => []),
-          contentClient.listByokKeyRefs(activeWorkspaceId).catch(() => ({
+          contentClient.listByokCredentials(activeWorkspaceId).catch(() => ({
+            items: [],
+          })),
+          contentClient.listByokModels(activeWorkspaceId).catch(() => ({
             items: [],
           })),
         ]);
@@ -369,16 +396,28 @@ export default function DashboardChatPage() {
 
         setCatalogKindEnabled(kindEnabled);
         setAvailableModels(catalogModels);
+        const storedModelSelection = readStoredModelSelection(
+          activeWorkspaceId,
+          "current",
+        );
         const resolvedModels = resolveSelectedModels({
           availableModels: catalogModels,
+          threadAliases: storedModelSelection ?? undefined,
           fallbackAliases: catalog.defaults,
         });
-        setSelectedModels(resolvedModels);
+        setSelectedModels(
+          resolveSelectedModelsWithByok({
+            availableModels: catalogModels,
+            baseSelectedModels: resolvedModels,
+            byokSelections: storedByokSelections,
+          }),
+        );
         setBaseSelectedModels(resolvedModels);
         setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
-        setByokKeyRefs(keyResult.items);
+        setByokCredentials(credentialResult.items);
+        setByokModels(modelResult.items);
         setByokProviders(
-          normalizeByokProviderOptions(providerResult, keyResult.items),
+          normalizeByokProviderOptions(providerResult, credentialResult.items),
         );
       } catch {
         if (cancelled) {
@@ -394,8 +433,9 @@ export default function DashboardChatPage() {
         setBaseSelectedModels(emptySelection);
         setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
         setByokProviders([]);
-        setByokKeyRefs([]);
-        setSelectedByokLlm(null);
+        setByokCredentials([]);
+        setByokModels([]);
+        setSelectedByokModels({});
       }
     }
 
@@ -468,6 +508,9 @@ export default function DashboardChatPage() {
           capabilities: skill.capabilities,
           models: skill.models,
           tools: skill.tools,
+          slash: skill.slash,
+          slashConfig: skill.slashConfig,
+          commands: skill.commands,
           defaultConfig: skill.defaultConfig,
         }));
       setAvailableSkills(enabledSkills);
@@ -522,11 +565,53 @@ export default function DashboardChatPage() {
     if (!workspaceId) {
       return;
     }
+    if (loadedByokStorageKey !== workspaceId) {
+      return;
+    }
     writeStoredByokState(
       workspaceId,
-      selectedByokLlm ? { llmByok: selectedByokLlm } : null,
+      {
+        imageByok: selectedByokModels.image ?? null,
+        llmByok: selectedByokModels.llm ?? null,
+        visionByok: selectedByokModels.vision ?? null,
+      },
     );
-  }, [selectedByokLlm, workspaceId]);
+  }, [loadedByokStorageKey, selectedByokModels, workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    if (
+      !selectedModels.llm &&
+      !selectedModels.image &&
+      !selectedModels.vision &&
+      !selectedByokModels.llm &&
+      !selectedByokModels.image &&
+      !selectedByokModels.vision
+    ) {
+      return;
+    }
+
+    writeStoredModelSelection(workspaceId, "current", {
+      llmProfileAlias:
+        selectedByokModels.llm?.mode === "byok"
+          ? null
+          : (selectedModels.llm?.profileAlias ?? selectedModels.llm?.id ?? null),
+      imageProfileAlias:
+        selectedByokModels.image?.mode === "byok"
+          ? null
+          : (selectedModels.image?.profileAlias ??
+            selectedModels.image?.id ??
+            null),
+      visionProfileAlias:
+        selectedByokModels.vision?.mode === "byok"
+          ? null
+          : (selectedModels.vision?.profileAlias ??
+            selectedModels.vision?.id ??
+            null),
+    });
+  }, [selectedByokModels, selectedModels, workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -592,7 +677,7 @@ export default function DashboardChatPage() {
   );
 
   useEffect(() => {
-    if (selectedByokLlm?.mode === "byok") {
+    if (selectedByokModels.llm?.mode === "byok") {
       return;
     }
     const next = applySkillModelPresetState({
@@ -615,7 +700,7 @@ export default function DashboardChatPage() {
     availableSkills,
     baseSelectedModels,
     modelSelectionSources,
-    selectedByokLlm,
+    selectedByokModels.llm,
     selectedModels,
   ]);
 
@@ -643,6 +728,7 @@ export default function DashboardChatPage() {
       if (!text && images.length === 0) return;
       const sourceIds = mergeSourceIds(activeSourceIds);
       const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
+      const selectedSkillIds = input.skillIds ?? effectiveActiveSkillIds;
 
       const modelSettings: ModelAliasSettings = {};
       if (catalogKindEnabled.image && selectedModels.image?.profileAlias) {
@@ -653,12 +739,14 @@ export default function DashboardChatPage() {
       }
 
       const resolvedThreadModelSettings = buildThreadCreateModelSettings({
-        byokSelection: selectedByokLlm,
+        byokSelection: selectedByokModels.llm,
         globalProfileAlias:
           catalogKindEnabled.llm && selectedModels.llm?.profileAlias
             ? selectedModels.llm.profileAlias
             : null,
+        imageByokSelection: selectedByokModels.image,
         imageProfileAlias: modelSettings.imageProfileAlias ?? null,
+        visionByokSelection: selectedByokModels.vision,
         visionProfileAlias: modelSettings.visionProfileAlias ?? null,
       });
       const thread = await createChat({
@@ -668,6 +756,15 @@ export default function DashboardChatPage() {
         toast.error("Failed to create conversation.");
         return;
       }
+      writeStoredByokState(
+        workspaceId,
+        {
+          imageByok: selectedByokModels.image ?? null,
+          llmByok: selectedByokModels.llm ?? null,
+          visionByok: selectedByokModels.vision ?? null,
+        },
+        thread.id,
+      );
 
       // Pass the initial message + selected sources to the thread page via
       // session storage (consumed once on mount).
@@ -678,11 +775,22 @@ export default function DashboardChatPage() {
           images,
           mentionedSourceIds,
           sourceIds,
-          skillIds: effectiveActiveSkillIds,
+          skillIds: selectedSkillIds,
+          command: input.command,
           tools: buildChatToolsRequest({
-            skillIds: effectiveActiveSkillIds,
+            imageExecution:
+              selectedByokModels.image?.mode === "byok"
+                ? buildByokModelExecution({
+                    selection: selectedByokModels.image,
+                  })
+                : null,
+            invokedSkillIds: input.tools?.invokedSkillIds,
+            skillIds: selectedSkillIds,
             searchEnabled,
             tools: input.tools,
+            forceImageGenerate:
+              input.command?.kind === "tool" &&
+              input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
           }),
           thinking: buildPendingThinking({
             capabilities: selectedModels.llm?.capabilities,
@@ -694,7 +802,7 @@ export default function DashboardChatPage() {
             availableModels,
             catalogKindEnabled,
             selectedModels,
-            byokSelection: selectedByokLlm,
+            byokSelections: selectedByokModels,
           },
         }),
       );
@@ -709,7 +817,7 @@ export default function DashboardChatPage() {
       router,
       catalogKindEnabled,
       availableModels,
-      selectedByokLlm,
+      selectedByokModels,
       selectedModels,
       thinkingSettings,
       searchEnabled,
@@ -729,39 +837,43 @@ export default function DashboardChatPage() {
               </div>
               <HeaderModelSelector
                 availableModels={availableModels}
-                byokKeyRefs={byokKeyRefs}
+                byokCredentials={byokCredentials}
+                byokModels={byokModels}
                 byokProviders={byokProviders}
-                byokSelection={selectedByokLlm}
-                onByokSelect={({ model, selection }) => {
+                byokSelections={selectedByokModels}
+                onAddByokModel={(input) => setByokModelConfig(input)}
+                onByokSelect={({ model, selection, type }) => {
                   setModelSelectionSources((current) => ({
                     ...current,
-                    llm: "user",
+                    [type]: "user",
                   }));
                   setSelectedModels((current) => ({
                     ...current,
-                    llm: model,
+                    [type]: model,
                   }));
-                  setSelectedByokLlm(selection);
-                  setThinkingSettings((current) =>
-                    normalizeThinkingSettingsForModel({
-                      capabilities: model.capabilities,
-                      hasSavedPreference: hasSavedThinkingPreference,
-                      settings: current,
-                    }),
-                  );
+                  setSelectedByokModels((current) => ({
+                    ...current,
+                    [type]: selection,
+                  }));
+                  if (type === "llm") {
+                    setThinkingSettings((current) =>
+                      normalizeThinkingSettingsForModel({
+                        capabilities: model.capabilities,
+                        hasSavedPreference: hasSavedThinkingPreference,
+                        settings: current,
+                      }),
+                    );
+                  }
                 }}
-                onManageByok={() => setByokManagerOpen(true)}
                 onModelSelect={(input) => {
                   setModelSelectionSources((current) => ({
                     ...current,
                     [input.type]: "user",
                   }));
-                  if (input.type === "llm") {
-                    setSelectedByokLlm(null);
-                    if (workspaceId) {
-                      clearStoredByokState(workspaceId);
-                    }
-                  }
+                  setSelectedByokModels((current) => ({
+                    ...current,
+                    [input.type]: null,
+                  }));
                   if (input.type === "llm") {
                     setThinkingSettings((current) =>
                       normalizeThinkingSettingsForModel({
@@ -856,13 +968,47 @@ export default function DashboardChatPage() {
         />
       ) : null}
 
-      <ByokManagerDialog
-        onOpenChange={setByokManagerOpen}
-        onStateChange={({ keyRefs, providers }) => {
-          setByokKeyRefs(keyRefs);
+      <ByokModelConfigDialog
+        defaults={byokModelConfig}
+        credentials={byokCredentials}
+        onConfigured={({ model, selection, type }) => {
+          if (!model || !selection) {
+            return;
+          }
+          setModelSelectionSources((current) => ({
+            ...current,
+            [type]: "user",
+          }));
+          setSelectedModels((current) => ({
+            ...current,
+            [type]: model,
+          }));
+          setSelectedByokModels((current) => ({
+            ...current,
+            [type]: selection,
+          }));
+          if (type === "llm") {
+            setThinkingSettings((current) =>
+              normalizeThinkingSettingsForModel({
+                capabilities: model.capabilities,
+                hasSavedPreference: hasSavedThinkingPreference,
+                settings: current,
+              }),
+            );
+          }
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setByokModelConfig(null);
+          }
+        }}
+        onStateChange={({ credentials, models, providers }) => {
+          setByokCredentials(credentials);
+          setByokModels(models);
           setByokProviders(providers);
         }}
-        open={byokManagerOpen}
+        open={Boolean(byokModelConfig)}
+        providers={byokProviders}
         workspaceId={workspaceId}
       />
 

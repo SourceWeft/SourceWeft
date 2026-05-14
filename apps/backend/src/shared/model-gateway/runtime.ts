@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../database";
 import {
-  modelGatewayByokKeyRefs,
+  modelGatewayByokCredentials,
   modelGatewayConfigVersions,
   modelGatewayConfigs,
   modelGatewayProviderConfigs,
@@ -97,14 +97,14 @@ export async function resolveByokApiKeyRef(input: {
 
   const rows = await db
     .select()
-    .from(modelGatewayByokKeyRefs)
+    .from(modelGatewayByokCredentials)
     .where(
       and(
-        eq(modelGatewayByokKeyRefs.workspaceId, workspaceId),
-        eq(modelGatewayByokKeyRefs.teamId, teamId),
-        eq(modelGatewayByokKeyRefs.providerName, input.provider),
-        eq(modelGatewayByokKeyRefs.keyRef, input.apiKeyRef),
-        eq(modelGatewayByokKeyRefs.isActive, true),
+        eq(modelGatewayByokCredentials.workspaceId, workspaceId),
+        eq(modelGatewayByokCredentials.teamId, teamId),
+        eq(modelGatewayByokCredentials.providerName, input.provider),
+        eq(modelGatewayByokCredentials.credentialAlias, input.apiKeyRef),
+        eq(modelGatewayByokCredentials.isActive, true),
       ),
     );
 
@@ -133,11 +133,13 @@ export async function resolveByokProviderRuntime(input: {
   const activeConfig = await loadRoutedGatewayConfig();
   const systemProvider = activeConfig?.providers[input.provider] ?? null;
 
-  const customProvider = await resolveCustomByokProvider({
-    providerName: input.provider,
-    apiKeyRef: input.apiKeyRef,
-    metadata: input.metadata,
-  });
+  const customProvider = systemProvider
+    ? null
+    : await resolveCustomByokProvider({
+        providerName: input.provider,
+        apiKeyRef: input.apiKeyRef,
+        metadata: input.metadata,
+      });
 
   if (customProvider) {
     return {
@@ -147,7 +149,6 @@ export async function resolveByokProviderRuntime(input: {
       baseUrl: customProvider.baseUrl,
       apiKey: customProvider.apiKey,
       defaultHeaders: customProvider.defaultHeaders,
-      keyRef: customProvider.keyRef,
       hasUserScopedKey: customProvider.hasUserScopedKey,
     };
   }
@@ -163,7 +164,6 @@ export async function resolveByokProviderRuntime(input: {
     baseUrl: systemProvider.baseUrl,
     apiKey: systemProvider.apiKey ?? null,
     defaultHeaders: systemProvider.defaultHeaders,
-    keyRef: input.apiKeyRef ?? null,
     hasUserScopedKey: false,
   };
 }

@@ -47,10 +47,13 @@ export function buildFallbackThreadTitle(messageContent: string) {
 
 export async function generateThreadTitle(input: GenerateThreadTitleInput) {
   const gateway = await getModelGatewayClient(input.gatewayConfigId);
+  const isByok = input.llm?.executionMode === "BYOK";
   const completion = await gateway.chat.complete(
     {
-      model: input.providerModel ?? input.modelAlias,
-      profileAlias: input.profileAlias,
+      model: isByok
+        ? input.llm?.providerModel ?? input.providerModel ?? input.modelAlias
+        : input.providerModel ?? input.modelAlias,
+      profileAlias: isByok ? undefined : input.profileAlias,
       messages: [
         {
           role: "user",
@@ -66,6 +69,8 @@ export async function generateThreadTitle(input: GenerateThreadTitleInput) {
       },
       executionMode: input.llm?.executionMode,
       providerHint: input.llm?.providerHint,
+      byokModelId: input.llm?.byokModelId,
+      credentialId: input.llm?.credentialId,
       byok: input.llm?.byok,
     },
     {

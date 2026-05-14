@@ -276,6 +276,7 @@ test("chat.complete emits generation observation events", async () => {
     workspaceId: "workspace-1",
     modelAlias: "chat-default",
     operation: "chat.answer",
+    providerModel: "gpt-4o-mini",
     generationPhase: "initial_response",
     messageCount: 1,
     lastMessageRole: "user",

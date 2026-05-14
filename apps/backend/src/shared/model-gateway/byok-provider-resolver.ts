@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../database";
-import { modelGatewayByokKeyRefs } from "../db/schema";
+import { modelGatewayByokCredentials } from "../db/schema";
 import { decryptSecret } from "../secrets";
 import { normalizeDefaultHeaders } from "./runtime";
 
@@ -19,7 +19,7 @@ export type ResolvedCustomByokProvider = {
   baseUrl: string;
   apiKey: string;
   defaultHeaders: Record<string, string>;
-  keyRef: string;
+  credentialAlias: string;
   hasUserScopedKey: boolean;
 };
 
@@ -39,12 +39,12 @@ export async function listCustomByokProviders(input: {
 }) {
   const rows = await db
     .select()
-    .from(modelGatewayByokKeyRefs)
+    .from(modelGatewayByokCredentials)
     .where(
       and(
-        eq(modelGatewayByokKeyRefs.workspaceId, input.workspaceId),
-        eq(modelGatewayByokKeyRefs.teamId, input.teamId),
-        eq(modelGatewayByokKeyRefs.isActive, true),
+        eq(modelGatewayByokCredentials.workspaceId, input.workspaceId),
+        eq(modelGatewayByokCredentials.teamId, input.teamId),
+        eq(modelGatewayByokCredentials.isActive, true),
       ),
     );
 
@@ -58,7 +58,7 @@ export async function listCustomByokProviders(input: {
       providerName: string;
       providerKind: ResolvedCustomByokProvider["providerKind"];
       baseUrl: string | null;
-      keyRefs: string[];
+      credentialAliases: string[];
       hasUserScopedKey: boolean;
       defaultHeaders: Record<string, string>;
     }
@@ -70,12 +70,12 @@ export async function listCustomByokProviders(input: {
       providerName: row.providerName,
       providerKind: row.providerKind,
       baseUrl: row.baseUrl,
-      keyRefs: [],
+      credentialAliases: [],
       hasUserScopedKey: false,
       defaultHeaders: normalizeDefaultHeaders(row.defaultHeadersJson),
     };
 
-    existing.keyRefs.push(row.keyRef);
+    existing.credentialAliases.push(row.credentialAlias);
     if (row.userId) {
       existing.hasUserScopedKey = true;
     }
@@ -90,7 +90,7 @@ export async function listCustomByokProviders(input: {
 
   return Array.from(providerMap.values()).map((provider) => ({
     ...provider,
-    keyRefs: Array.from(new Set(provider.keyRefs)).sort(),
+    credentialAliases: Array.from(new Set(provider.credentialAliases)).sort(),
   }));
 }
 
@@ -106,18 +106,18 @@ export async function resolveCustomByokProvider(input: {
 
   const rows = await db
     .select()
-    .from(modelGatewayByokKeyRefs)
+    .from(modelGatewayByokCredentials)
     .where(
       and(
-        eq(modelGatewayByokKeyRefs.workspaceId, scope.workspaceId),
-        eq(modelGatewayByokKeyRefs.teamId, scope.teamId),
-        eq(modelGatewayByokKeyRefs.providerName, input.providerName),
-        eq(modelGatewayByokKeyRefs.isActive, true),
+        eq(modelGatewayByokCredentials.workspaceId, scope.workspaceId),
+        eq(modelGatewayByokCredentials.teamId, scope.teamId),
+        eq(modelGatewayByokCredentials.providerName, input.providerName),
+        eq(modelGatewayByokCredentials.isActive, true),
       ),
     );
 
   const visibleRows = rows.filter((candidate) => {
-    if (input.apiKeyRef && candidate.keyRef !== input.apiKeyRef) {
+    if (input.apiKeyRef && candidate.credentialAlias !== input.apiKeyRef) {
       return false;
     }
     if (!candidate.userId) {
@@ -147,7 +147,7 @@ export async function resolveCustomByokProvider(input: {
     baseUrl: row.baseUrl,
     apiKey,
     defaultHeaders: normalizeDefaultHeaders(row.defaultHeadersJson),
-    keyRef: row.keyRef,
+    credentialAlias: row.credentialAlias,
     hasUserScopedKey: row.userId !== null,
   };
 }

@@ -276,16 +276,3 @@ export type WorkingFileRecord = {
   createdAt: string;
   updatedAt: string;
 };
-
-export type ByokKeyRefRecord = {
-  id: string;
-  teamId: string;
-  workspaceId: string;
-  userId: string | null;
-  providerName: string;
-  keyRef: string;
-  isActive: boolean;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-};

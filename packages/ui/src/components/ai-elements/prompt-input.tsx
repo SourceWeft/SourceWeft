@@ -51,9 +51,11 @@ import {
   FileTextIcon,
   FolderIcon,
   ImageIcon,
+  BookOpenIcon,
   Monitor,
   PlusIcon,
   SquareIcon,
+  WrenchIcon,
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
@@ -188,6 +190,7 @@ const captureScreenshot = async (): Promise<File | null> => {
 };
 
 const SOURCE_MENTION_TRIGGER_PATTERN = /(?:^|\s)@([^\s@]*)$/;
+const SLASH_COMMAND_TRIGGER_PATTERN = /^\s*\/([^\s/]*)$/;
 const SOURCE_MENTION_PAGE_SIZE = 20;
 
 const getSourceMentionLabel = (title: string) => `@${title}`;
@@ -341,6 +344,14 @@ export type PromptInputSegment =
       type: "text";
     }
   | {
+      command: {
+        kind?: "skill" | "tool";
+        label?: string;
+        value: string;
+      };
+      type: "command";
+    }
+  | {
       meta?: string;
       sourceId: string;
       title: string;
@@ -364,6 +375,17 @@ export type PromptInputMentionSourceLoader = (input: {
   limit: number;
   query: string;
 }) => Promise<PromptInputMentionSourcePage>;
+
+export type PromptInputSlashCommand = {
+  description?: string;
+  disabled?: boolean;
+  group?: string;
+  id: string;
+  kind?: "skill" | "tool";
+  label?: string;
+  meta?: unknown;
+  value: string;
+};
 
 const pushTextSegment = (segments: PromptInputSegment[], text: string) => {
   if (!text) {
@@ -405,6 +427,23 @@ const readSegmentsFromNode = (node: Node, segments: PromptInputSegment[]) => {
     return;
   }
 
+  const command = node.dataset.slashCommandValue;
+  if (command) {
+    segments.push({
+      command: {
+        kind:
+          node.dataset.slashCommandKind === "tool" ||
+          node.dataset.slashCommandKind === "skill"
+            ? node.dataset.slashCommandKind
+            : undefined,
+        label: node.dataset.slashCommandLabel,
+        value: command,
+      },
+      type: "command",
+    });
+    return;
+  }
+
   if (node.tagName === "BR") {
     pushTextSegment(segments, "\n");
     return;
@@ -428,6 +467,8 @@ const serializePromptSegments = (segments: PromptInputSegment[]) =>
     .map((segment) =>
       segment.type === "source"
         ? getSourceMentionLabel(segment.title)
+        : segment.type === "command"
+          ? segment.command.value
         : segment.text,
     )
     .join("");
@@ -457,12 +498,84 @@ const createSourceMentionElement = (source: PromptInputMentionSource) => {
   return element;
 };
 
+const SLASH_TOKEN_ICON_SVG: Record<"skill" | "tool", string> = {
+  skill:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>',
+  tool:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>',
+};
+
+const createSlashCommandElement = (command: PromptInputSlashCommand) => {
+  const element = document.createElement("span");
+  element.contentEditable = "false";
+  element.dataset.slashCommandValue = command.value;
+  if (command.label) {
+    element.dataset.slashCommandLabel = command.label;
+  }
+  if (command.kind) {
+    element.dataset.slashCommandKind = command.kind;
+  }
+  element.className =
+    "mx-0.5 inline-flex h-5 max-w-[240px] select-none items-center gap-1 overflow-hidden truncate whitespace-nowrap align-middle text-sm font-semibold leading-5 text-blue-600 dark:text-blue-400";
+  element.title = command.value;
+  const icon = document.createElement("span");
+  icon.className =
+    "inline-flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5";
+  const iconKind = command.kind === "tool" ? "tool" : "skill";
+  icon.innerHTML = SLASH_TOKEN_ICON_SVG[iconKind];
+  const label = document.createElement("span");
+  label.className = "truncate";
+  label.textContent = command.label ?? command.value;
+  element.append(icon, label);
+  return element;
+};
+
+const createSlashCommandElementFromSegment = (
+  segment: Extract<PromptInputSegment, { type: "command" }>,
+) =>
+  createSlashCommandElement({
+    id: `initial:${segment.command.value}`,
+    kind: segment.command.kind,
+    label: segment.command.label,
+    value: segment.command.value,
+  });
+
+const appendPromptSegmentNode = (
+  fragment: DocumentFragment | HTMLElement,
+  segment: PromptInputSegment,
+) => {
+  if (segment.type === "text") {
+    fragment.append(document.createTextNode(segment.text));
+    return;
+  }
+  if (segment.type === "command") {
+    fragment.append(createSlashCommandElementFromSegment(segment));
+    return;
+  }
+  fragment.append(
+    createSourceMentionElement({
+      id: segment.sourceId,
+      meta: segment.meta,
+      title: segment.title,
+      type: segment.type,
+    }),
+  );
+};
+
 function SourceMentionIcon({ source }: { source: PromptInputMentionSource }) {
   const type = source.type?.toLowerCase() ?? "";
   if (type.includes("directory") || type.includes("folder")) {
     return <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />;
   }
   return <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />;
+}
+
+function SlashCommandIcon({ command }: { command: PromptInputSlashCommand }) {
+  const className = "size-4 shrink-0 text-blue-600 dark:text-blue-400";
+  if (command.kind === "tool") {
+    return <WrenchIcon className={className} />;
+  }
+  return <BookOpenIcon className={className} />;
 }
 
 // ============================================================================
@@ -1428,13 +1541,16 @@ export type PromptInputMentionEditorProps = Omit<
 > & {
   disabled?: boolean;
   initialValue?: string;
+  initialSegments?: PromptInputSegment[];
   name?: string;
   onValueChange?: (input: {
     mentionedSourceIds: string[];
     segments: PromptInputSegment[];
     text: string;
   }) => void;
+  onSlashCommandSelect?: (command: PromptInputSlashCommand) => void;
   placeholder?: string;
+  slashCommands?: PromptInputSlashCommand[];
   sourceLoader?: PromptInputMentionSourceLoader;
   sources: PromptInputMentionSource[];
 };
@@ -1443,11 +1559,14 @@ export const PromptInputMentionEditor = ({
   className,
   disabled,
   initialValue = "",
+  initialSegments,
   name = "message",
   onKeyDown,
   onPaste,
+  onSlashCommandSelect,
   onValueChange,
   placeholder = "What would you like to know?",
+  slashCommands = [],
   sourceLoader,
   sources,
   ...props
@@ -1458,7 +1577,11 @@ export const PromptInputMentionEditor = ({
   const editorRef = useRef<HTMLDivElement | null>(null);
   const [isComposing, setIsComposing] = useState(false);
   const [segments, setSegments] = useState<PromptInputSegment[]>(() =>
-    initialValue ? [{ text: initialValue, type: "text" }] : [],
+    initialSegments && initialSegments.length > 0
+      ? initialSegments
+      : initialValue
+        ? [{ text: initialValue, type: "text" }]
+        : [],
   );
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStartOffset, setMentionStartOffset] = useState<number | null>(
@@ -1474,8 +1597,14 @@ export const PromptInputMentionEditor = ({
   const [mentionHighlightedIndex, setMentionHighlightedIndex] = useState(0);
   const [isMentionLoading, setIsMentionLoading] = useState(false);
   const [isMentionLoadingMore, setIsMentionLoadingMore] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashStartOffset, setSlashStartOffset] = useState<number | null>(null);
+  const [isSlashOpen, setIsSlashOpen] = useState(false);
+  const [slashHighlightedIndex, setSlashHighlightedIndex] = useState(0);
   const mentionListRef = useRef<HTMLDivElement | null>(null);
   const mentionItemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const slashListRef = useRef<HTMLDivElement | null>(null);
+  const slashItemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const mentionRequestSeqRef = useRef(0);
 
   const text = useMemo(() => serializePromptSegments(segments), [segments]);
@@ -1508,6 +1637,24 @@ export const PromptInputMentionEditor = ({
     (Boolean(sourceLoader) ||
       filteredSources.length > 0 ||
       mentionQuery.trim().length > 0);
+  const filteredSlashCommands = useMemo(() => {
+    const query = slashQuery.trim().toLowerCase();
+    const candidates = slashCommands.filter(
+      (command) => command.value.trim().length > 0,
+    );
+    if (!query) {
+      return candidates.slice(0, SOURCE_MENTION_PAGE_SIZE);
+    }
+
+    return candidates
+      .filter((command) => {
+        const haystack =
+          `${command.value} ${command.label ?? ""} ${command.description ?? ""} ${command.group ?? ""}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, SOURCE_MENTION_PAGE_SIZE);
+  }, [slashCommands, slashQuery]);
+  const isSlashPopoverOpen = isSlashOpen;
 
   const publishSegments = useCallback(
     (nextSegments: PromptInputSegment[]) => {
@@ -1557,26 +1704,73 @@ export const PromptInputMentionEditor = ({
     setIsMentionOpen(true);
   }, [isComposing]);
 
-  const syncAndUpdateMention = useCallback(() => {
-    syncFromDom();
-    window.requestAnimationFrame(updateMentionState);
-  }, [syncFromDom, updateMentionState]);
-
-  useLayoutEffect(() => {
+  const updateSlashState = useCallback(() => {
     const editor = editorRef.current;
-    if (!editor || editor.childNodes.length > 0 || !initialValue) {
+    if (!editor || isComposing) {
       return;
     }
 
-    editor.textContent = initialValue;
-    publishSegments([{ text: initialValue, type: "text" }]);
-  }, [initialValue, publishSegments]);
+    const caretOffset = getCaretTextOffset(editor);
+    const content = editor.textContent ?? "";
+    const beforeCaret = content.slice(0, caretOffset);
+    const match = SLASH_COMMAND_TRIGGER_PATTERN.exec(beforeCaret);
+    if (!match) {
+      setIsSlashOpen(false);
+      setSlashQuery("");
+      setSlashStartOffset(null);
+      return;
+    }
+
+    const query = match[1] ?? "";
+    setSlashStartOffset(caretOffset - query.length - 1);
+    setSlashQuery(query);
+    setIsSlashOpen(true);
+    setIsMentionOpen(false);
+  }, [isComposing]);
+
+  const syncAndUpdateMention = useCallback(() => {
+    syncFromDom();
+    window.requestAnimationFrame(() => {
+      updateSlashState();
+      updateMentionState();
+    });
+  }, [syncFromDom, updateMentionState, updateSlashState]);
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || editor.childNodes.length > 0) {
+      return;
+    }
+
+    const nextSegments =
+      initialSegments && initialSegments.length > 0
+        ? initialSegments
+        : initialValue
+          ? [{ text: initialValue, type: "text" } satisfies PromptInputSegment]
+          : [];
+    if (nextSegments.length === 0) {
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const segment of nextSegments) {
+      appendPromptSegmentNode(fragment, segment);
+    }
+    editor.append(fragment);
+    publishSegments(nextSegments);
+  }, [initialSegments, initialValue, publishSegments]);
 
   const closeMention = useCallback(() => {
     setIsMentionOpen(false);
     setMentionQuery("");
     setMentionStartOffset(null);
     setMentionHighlightedIndex(0);
+  }, []);
+
+  const closeSlash = useCallback(() => {
+    setIsSlashOpen(false);
+    setSlashQuery("");
+    setSlashStartOffset(null);
+    setSlashHighlightedIndex(0);
   }, []);
 
   useEffect(() => {
@@ -1667,6 +1861,19 @@ export const PromptInputMentionEditor = ({
   }, [filteredSources.length, isMentionOpen]);
 
   useEffect(() => {
+    if (!isSlashOpen) {
+      return;
+    }
+
+    setSlashHighlightedIndex((index) => {
+      if (filteredSlashCommands.length === 0) {
+        return 0;
+      }
+      return Math.min(index, filteredSlashCommands.length - 1);
+    });
+  }, [filteredSlashCommands.length, isSlashOpen]);
+
+  useEffect(() => {
     if (!isMentionOpen) {
       return;
     }
@@ -1690,6 +1897,29 @@ export const PromptInputMentionEditor = ({
   }, [isMentionOpen, mentionHighlightedIndex]);
 
   useEffect(() => {
+    if (!isSlashOpen) {
+      return;
+    }
+
+    const item = slashItemRefs.current.get(slashHighlightedIndex);
+    const container = slashListRef.current;
+    if (!item || !container) {
+      return;
+    }
+
+    const itemRect = item.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const padding = 6;
+    if (itemRect.top < containerRect.top + padding) {
+      container.scrollTop -= containerRect.top + padding - itemRect.top;
+      return;
+    }
+    if (itemRect.bottom > containerRect.bottom - padding) {
+      container.scrollTop += itemRect.bottom - (containerRect.bottom - padding);
+    }
+  }, [isSlashOpen, slashHighlightedIndex]);
+
+  useEffect(() => {
     if (!controller || controller.textInput.value !== "" || text === "") {
       return;
     }
@@ -1700,7 +1930,8 @@ export const PromptInputMentionEditor = ({
     }
     setSegments([]);
     closeMention();
-  }, [closeMention, controller, text]);
+    closeSlash();
+  }, [closeMention, closeSlash, controller, text]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1713,13 +1944,14 @@ export const PromptInputMentionEditor = ({
       editor.textContent = "";
       setSegments([]);
       closeMention();
+      closeSlash();
     };
 
     form.addEventListener("reset", handleReset);
     return () => {
       form.removeEventListener("reset", handleReset);
     };
-  }, [closeMention]);
+  }, [closeMention, closeSlash]);
 
   useEffect(() => {
     if (!isMentionOpen || sourceLoader) {
@@ -1768,13 +2000,55 @@ export const PromptInputMentionEditor = ({
     [closeMention, mentionQuery.length, mentionStartOffset, syncFromDom],
   );
 
+  const selectSlashCommand = useCallback(
+    (command: PromptInputSlashCommand) => {
+      if (command.disabled) {
+        return;
+      }
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
+
+      editor.focus();
+      const selection = window.getSelection();
+      const caretOffset =
+        selection &&
+        selection.rangeCount > 0 &&
+        editor.contains(selection.getRangeAt(0).endContainer)
+          ? getCaretTextOffset(editor)
+          : (editor.textContent?.length ?? 0);
+      const startOffset =
+        slashStartOffset ?? Math.max(0, caretOffset - slashQuery.length - 1);
+      const fragment = document.createDocumentFragment();
+      fragment.append(createSlashCommandElement(command));
+      fragment.append(document.createTextNode(" "));
+      replaceTextRange(editor, startOffset, caretOffset, fragment);
+      closeSlash();
+      setCaretTextOffset(
+        editor,
+        startOffset + (command.label ?? command.value).length + 1,
+      );
+      syncFromDom();
+      onSlashCommandSelect?.(command);
+    },
+    [
+      closeSlash,
+      onSlashCommandSelect,
+      slashQuery.length,
+      slashStartOffset,
+      syncFromDom,
+    ],
+  );
+
   const handleInput = useCallback(() => {
     syncAndUpdateMention();
   }, [syncAndUpdateMention]);
 
   const handleClick: MouseEventHandler<HTMLDivElement> = useCallback(() => {
+    updateSlashState();
     updateMentionState();
-  }, [updateMentionState]);
+  }, [updateMentionState, updateSlashState]);
 
   const handleCompositionStart = useCallback(() => setIsComposing(true), []);
   const handleCompositionEnd = useCallback(() => {
@@ -1819,6 +2093,42 @@ export const PromptInputMentionEditor = ({
       onKeyDown?.(e);
       if (e.defaultPrevented) {
         return;
+      }
+
+      if (isSlashOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeSlash();
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          if (filteredSlashCommands.length > 0) {
+            setSlashHighlightedIndex((index) =>
+              index < filteredSlashCommands.length - 1 ? index + 1 : 0,
+            );
+          }
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          if (filteredSlashCommands.length > 0) {
+            setSlashHighlightedIndex((index) =>
+              index > 0 ? index - 1 : filteredSlashCommands.length - 1,
+            );
+          }
+          return;
+        }
+        if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+          const command =
+            filteredSlashCommands[slashHighlightedIndex] ??
+            filteredSlashCommands[0];
+          if (command) {
+            e.preventDefault();
+            selectSlashCommand(command);
+            return;
+          }
+        }
       }
 
       if (isMentionOpen) {
@@ -1905,12 +2215,17 @@ export const PromptInputMentionEditor = ({
     [
       attachments,
       closeMention,
+      closeSlash,
+      filteredSlashCommands,
       filteredSources,
       mentionHighlightedIndex,
       isComposing,
       isMentionOpen,
+      isSlashOpen,
       onKeyDown,
       selectSource,
+      selectSlashCommand,
+      slashHighlightedIndex,
       syncAndUpdateMention,
     ],
   );
@@ -2057,6 +2372,81 @@ export const PromptInputMentionEditor = ({
                     Load more
                   </button>
                 ) : null}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      <Popover open={isSlashPopoverOpen}>
+        <PopoverAnchor asChild>
+          <span className="pointer-events-none absolute left-3 top-3 size-0" />
+        </PopoverAnchor>
+        <PopoverContent
+          align="start"
+          className="w-[360px] overflow-hidden rounded-lg border-border/80 bg-popover p-0 shadow-xl"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          side="top"
+          sideOffset={8}
+        >
+          <Command
+            onKeyDown={(event) => {
+              if (
+                event.key === "ArrowDown" ||
+                event.key === "ArrowUp" ||
+                event.key === "Enter"
+              ) {
+                event.preventDefault();
+              }
+            }}
+            shouldFilter={false}
+          >
+            <CommandList className="max-h-[280px]" ref={slashListRef}>
+              <CommandGroup className="px-2 py-1.5" heading="Commands">
+                {filteredSlashCommands.length === 0 ? (
+                  <CommandEmpty className="px-3 py-3 text-xs text-muted-foreground">
+                    No matching commands
+                  </CommandEmpty>
+                ) : null}
+                {filteredSlashCommands.map((command, index) => (
+                  <CommandItem
+                    className={cn(
+                      "min-h-10 cursor-pointer gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted hover:text-foreground data-[highlighted=true]:bg-muted data-[highlighted=true]:text-foreground data-[selected=true]:bg-muted data-[selected=true]:text-foreground",
+                      command.disabled && "cursor-not-allowed opacity-50",
+                      index === slashHighlightedIndex &&
+                        "bg-muted text-foreground",
+                    )}
+                    data-highlighted={
+                      index === slashHighlightedIndex ? "true" : undefined
+                    }
+                    key={command.id}
+                    onMouseEnter={() => setSlashHighlightedIndex(index)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onSelect={() => selectSlashCommand(command)}
+                    ref={(node) => {
+                      if (node) {
+                        slashItemRefs.current.set(index, node);
+                      } else {
+                        slashItemRefs.current.delete(index);
+                      }
+                    }}
+                    value={command.value}
+                  >
+                    <SlashCommandIcon command={command} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium leading-5">
+                        {command.label ?? command.value}
+                      </div>
+                      {command.description || command.group ? (
+                        <div className="truncate text-xs leading-4 text-muted-foreground">
+                          {command.description ?? command.group}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="ml-2 max-w-[120px] shrink-0 truncate font-mono text-[11px] text-muted-foreground/70">
+                      {command.value}
+                    </div>
+                  </CommandItem>
+                ))}
               </CommandGroup>
             </CommandList>
           </Command>

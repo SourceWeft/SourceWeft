@@ -233,7 +233,7 @@ test("resolveRequestTarget falls back to custom BYOK provider resolver", async (
     resolveCustomByokProvider: async (input) => {
       assert.equal(input.provider, "custom-openai");
       assert.equal(input.model, "my-custom-model");
-      assert.equal(input.profileAlias, "catalog-profile");
+      assert.equal(input.profileAlias, undefined);
       assert.equal(input.apiKey, "user-key");
       assert.deepEqual(input.metadata, { workspaceId: "ws-1" });
       return {
@@ -249,7 +249,6 @@ test("resolveRequestTarget falls back to custom BYOK provider resolver", async (
   const target = await resolveRequestTarget(resolved, {
     executionMode: "BYOK",
     model: "my-custom-model",
-    profileAlias: "catalog-profile",
     byok: {
       provider: "custom-openai",
       apiKey: "user-key",
@@ -268,7 +267,7 @@ test("resolveRequestTarget falls back to custom BYOK provider resolver", async (
     "X-Custom": "1",
   });
   assert.deepEqual(target.routeDecision, {
-    alias: "catalog-profile",
+    alias: "custom-openai:my-custom-model",
     mode: "BYOK",
     strategy: "priority",
     provider: "custom-openai",
@@ -276,7 +275,63 @@ test("resolveRequestTarget falls back to custom BYOK provider resolver", async (
   });
 });
 
-test("resolveRequestTarget keeps BYOK routeDecision alias on raw model without profileAlias", async () => {
+test("resolveRequestTarget prefers inline BYOK credential endpoint over system provider", async () => {
+  const resolved = resolveModelGatewayConfig({
+    fetch: fetchStub,
+    allowedBaseUrls: [
+      "https://api.openai.com/v1",
+      "https://tenant-openai.example.com/v1",
+    ],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "global-openai-key",
+        defaultHeaders: {
+          "X-Global": "1",
+        },
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4.1-mini", priority: 1 }],
+      },
+    },
+  });
+
+  const target = await resolveRequestTarget(resolved, {
+    executionMode: "BYOK",
+    model: "gpt-4o",
+    byok: {
+      provider: "openai",
+      providerKind: "openai-compatible",
+      baseUrl: "https://tenant-openai.example.com/v1/",
+      apiKey: "tenant-key",
+      defaultHeaders: {
+        "X-Tenant": "yes",
+      },
+    },
+  });
+
+  assert.equal(target.provider, "openai");
+  assert.equal(target.providerKind, "openai-compatible");
+  assert.equal(target.providerModel, "gpt-4o");
+  assert.equal(target.baseUrl, "https://tenant-openai.example.com/v1");
+  assert.equal(target.apiKey, "tenant-key");
+  assert.deepEqual(target.defaultHeaders, {
+    "X-Tenant": "yes",
+  });
+  assert.deepEqual(target.routeDecision, {
+    alias: "openai:gpt-4o",
+    mode: "BYOK",
+    strategy: "priority",
+    provider: "openai",
+    providerKind: "openai-compatible",
+  });
+});
+
+test("resolveRequestTarget uses provider-qualified BYOK routeDecision alias", async () => {
   const resolved = resolveModelGatewayConfig({
     fetch: fetchStub,
     baseUrl: "https://gateway.example.com",
@@ -304,6 +359,6 @@ test("resolveRequestTarget keeps BYOK routeDecision alias on raw model without p
   });
 
   assert.equal(target.providerModel, "deepseek-chat");
-  assert.equal(target.routeDecision.alias, "deepseek-chat");
+  assert.equal(target.routeDecision.alias, "deepseek:deepseek-chat");
   assert.equal(target.routeDecision.mode, "BYOK");
 });

@@ -1,4 +1,4 @@
-import { Copy, Pencil, RotateCcw } from "lucide-react";
+import { BookOpenIcon, Copy, Pencil, RotateCcw, WrenchIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Conversation,
@@ -32,6 +32,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import { WebToolResults } from "../web-tool-results";
 import {
+  buildRenderBlocksFromMessageContent,
   getMessageImageParts,
   getMessageText,
   normalizeAssetUrl,
@@ -145,6 +146,83 @@ function UserMessageImageReference({ image }: { image: ChatMessageImagePart }) {
   );
 }
 
+function commandDisplayName(version: MessageVersion) {
+  const command = version.command;
+  if (!command?.name) {
+    return null;
+  }
+  const displayName = command.displayName?.trim();
+  if (displayName) {
+    return displayName.startsWith("/")
+      ? displayName
+          .replace(/^\//, "")
+          .split(":")
+          .pop()!
+          .split(/[.\-_\s]+/)
+          .filter(Boolean)
+          .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+          .join(" ")
+      : displayName;
+  }
+  const normalized = command.name.startsWith("/")
+    ? command.name
+    : `/${command.name}`;
+  if (command.kind === "tool") {
+    return normalized === "/generate_image" ? "Generate image" : normalized;
+  }
+  const skillSlug = normalized.replace(/^\//, "").split(":")[0] ?? normalized;
+  return skillSlug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function UserCommandToken({ version }: { version: MessageVersion }) {
+  const label = commandDisplayName(version);
+  if (!label || !version.command) {
+    return null;
+  }
+  const Icon = version.command.kind === "tool" ? WrenchIcon : BookOpenIcon;
+  return (
+    <span
+      className="inline-flex max-w-full items-center gap-1 align-baseline text-sm font-semibold leading-6 text-blue-600 dark:text-blue-400"
+      title={version.command.name}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
+function splitUserCommandText(version: MessageVersion) {
+  const command = version.command;
+  if (!command?.name) {
+    return { commandToken: null, text: version.content };
+  }
+  const canonical = command.name.startsWith("/")
+    ? command.name
+    : `/${command.name}`;
+  const trimmedStart = version.content.trimStart();
+  const leadingWhitespaceLength = version.content.length - trimmedStart.length;
+  const commandPattern =
+    command.kind === "tool" && canonical === "/generate_image"
+      ? /^\/generate_image(?:\s+|$)/i
+      : new RegExp(
+          `^${canonical.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s+|$)`,
+          "i",
+        );
+  const match = trimmedStart.match(commandPattern);
+  if (!match) {
+    return { commandToken: <UserCommandToken version={version} />, text: version.content };
+  }
+  const afterCommand = trimmedStart.slice(match[0].length);
+  return {
+    commandToken: <UserCommandToken version={version} />,
+    text: `${version.content.slice(0, leadingWhitespaceLength)}${afterCommand}`.trimStart(),
+  };
+}
+
 function UserMessageReferences({
   images,
   sources,
@@ -217,9 +295,16 @@ function AssistantMessageBody({
   version: MessageVersion;
   workspaceId?: string | null;
 }) {
+  const fallbackRenderBlocks = !hasRenderBlocks(version.renderBlocks)
+    ? buildRenderBlocksFromMessageContent({
+        content: version.content,
+        toolCalls: version.toolCalls,
+        workspaceId,
+      })
+    : null;
   const renderBlocks = hasRenderBlocks(version.renderBlocks)
     ? (version.renderBlocks ?? [])
-    : null;
+    : fallbackRenderBlocks;
   const toolCallById = getToolCallById(version.toolCalls);
   const inlineToolIds = getInlineGeneratedImageToolIds({
     blocks: renderBlocks ?? [],
@@ -330,6 +415,7 @@ type MessageListProps = {
     groupId: string;
     messageId: string;
     message: string;
+    command?: MessageVersion["command"];
     assistantMessageId: string | null;
     branchIndex: number;
   }) => void;
@@ -538,6 +624,11 @@ export function MessageList({
                       version,
                       workspaceId,
                     });
+                    const userCommandText = !isAssistant
+                      ? splitUserCommandText(version)
+                      : null;
+                    const visibleUserMessageText =
+                      userCommandText?.text ?? messageText;
                     const userMessageImages = !isAssistant
                       ? getMessageImageParts(version)
                       : [];
@@ -595,20 +686,26 @@ export function MessageList({
                             }
                           >
                             {!isAssistant ? (
-                              <div>
-                                {messageText.length > 0 ? (
-                                  <div className="whitespace-pre-wrap break-words leading-6">
-                                    <UserMessageText
-                                      onSourcePreview={onSourcePreview}
-                                      sources={mentionSources}
-                                      sourceIds={mergeSourceIds(
-                                        version.mentionedSourceIds,
-                                        version.effectiveMentionedSourceIds,
-                                      )}
-                                    >
-                                      {messageText}
-                                    </UserMessageText>
-                                  </div>
+                              <div className="whitespace-pre-wrap break-words leading-6">
+                                {userCommandText?.commandToken ? (
+                                  <>
+                                    {userCommandText.commandToken}
+                                    {visibleUserMessageText.length > 0
+                                      ? " "
+                                      : null}
+                                  </>
+                                ) : null}
+                                {visibleUserMessageText.length > 0 ? (
+                                  <UserMessageText
+                                    onSourcePreview={onSourcePreview}
+                                    sources={mentionSources}
+                                    sourceIds={mergeSourceIds(
+                                      version.mentionedSourceIds,
+                                      version.effectiveMentionedSourceIds,
+                                    )}
+                                  >
+                                    {visibleUserMessageText}
+                                  </UserMessageText>
                                 ) : null}
                               </div>
                             ) : (
@@ -693,7 +790,8 @@ export function MessageList({
                                   onClick={() => {
                                     onRestartFromMessage?.({
                                       groupId: group.groupId,
-                                      message: messageText,
+                                      message: visibleUserMessageText,
+                                      command: version.command,
                                       messageId: version.id,
                                       assistantMessageId:
                                         selectedAssistantVersionForUser?.id ??

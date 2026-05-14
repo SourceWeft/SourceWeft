@@ -133,9 +133,7 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
               thread_id: input.threadId,
               feature: "retrieval",
             },
-            executionMode: input.llm?.executionMode,
-            providerHint: input.llm?.providerHint,
-            byok: input.llm?.byok,
+            executionMode: "GLOBAL",
           },
           {
             idempotencyKey:
@@ -152,7 +150,7 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
                 feature: "retrieval",
                 operation: "embeddings.embed",
                 modelAlias: profile.modelAlias,
-                llm: input.llm,
+                llm: undefined,
                 parentSpanId: input.traceContext?.parentSpanId,
               }),
             },
@@ -164,7 +162,6 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
       queryEmbedding = embedResult.embedding;
       embeddingLatencyMs = Date.now() - embedStartedAt;
       embeddingAuditMetadata = buildGatewayAuditMetadata({
-        llm: input.llm,
         provider: embedResult.provider,
         routeDecision: embedResult.routeDecision as
           | Record<string, unknown>
@@ -180,7 +177,7 @@ export const searchCandidatesStage: RetrievalPipelineStage = {
         operation: "embeddings.embed",
         modelKind: "embedding",
         modelAlias: profile.modelAlias,
-        llm: input.llm,
+        llm: undefined,
         provider: embedResult.provider,
         routeDecision: embedResult.routeDecision as
           | Record<string, unknown>

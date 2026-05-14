@@ -21,7 +21,20 @@ export type ArtifactToolSelection = {
 
 export type GenerateImageToolSelection = {
   enabled?: boolean;
+  mode?: "auto" | "generate";
   modelAlias?: string;
+  execution?: {
+    byokModelId?: string;
+    credentialId?: string;
+    modelAlias?: string;
+    providerModel?: string;
+    executionMode?: "GLOBAL" | "BYOK";
+    providerHint?: string;
+    byok?: {
+      provider: string;
+      apiKey?: string;
+    };
+  };
   config?: Partial<ArtifactImageConfig>;
 };
 
@@ -207,16 +220,23 @@ export function normalizeGenerateImageToolSelection(
       ? record.modelAlias.trim()
       : undefined;
   const config = normalizePartialArtifactImageConfig(record.config);
+  const execution =
+    record.execution && typeof record.execution === "object" && !Array.isArray(record.execution)
+      ? (record.execution as GenerateImageToolSelection["execution"])
+      : undefined;
   const enabled =
     typeof record.enabled === "boolean" ? record.enabled : undefined;
+  const mode = record.mode === "generate" ? "generate" : undefined;
 
-  if (enabled === undefined && !modelAlias && !config) {
+  if (enabled === undefined && !mode && !modelAlias && !execution && !config) {
     return undefined;
   }
 
   return {
     ...(enabled !== undefined ? { enabled } : {}),
+    ...(mode ? { mode } : {}),
     ...(modelAlias ? { modelAlias } : {}),
+    ...(execution ? { execution } : {}),
     ...(config ? { config } : {}),
   };
 }

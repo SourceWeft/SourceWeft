@@ -315,6 +315,35 @@ async function resolveCustomByokProvider(
   return normalizeCustomByokProvider(providerName, customProvider, config.allowedBaseUrls);
 }
 
+function resolveInlineByokProvider(input: {
+  config: ResolvedModelGatewayConfig;
+  execution: GatewayExecutionInput;
+  providerName: string;
+  configuredProvider?: ResolvedGatewayProviderConfig;
+  apiKey?: string;
+}): ResolvedGatewayProviderConfig | null {
+  const baseUrl = input.execution.byok?.baseUrl?.trim();
+  if (!baseUrl) {
+    return null;
+  }
+
+  return normalizeCustomByokProvider(
+    input.providerName,
+    {
+      kind:
+        input.execution.byok?.providerKind ??
+        input.configuredProvider?.kind ??
+        "openai-compatible",
+      baseUrl,
+      apiKey: input.apiKey,
+      defaultHeaders: input.execution.byok?.defaultHeaders,
+      supports: input.configuredProvider?.supports,
+      enabled: input.configuredProvider?.enabled ?? true,
+    },
+    input.config.allowedBaseUrls,
+  );
+}
+
 function normalizeCustomByokProvider(
   name: string,
   provider: CustomByokProviderConfig,
@@ -399,7 +428,14 @@ export async function resolveRequestTarget(
 
     const resolvedApiKey = await maybeResolveByokApiKey(config, execution);
     const configuredProvider = config.providers[providerName];
-    const customProvider = configuredProvider
+    const inlineProvider = resolveInlineByokProvider({
+      config,
+      execution,
+      providerName,
+      configuredProvider,
+      apiKey: resolvedApiKey,
+    });
+    const customProvider = configuredProvider || inlineProvider
       ? null
       : await resolveCustomByokProvider(
         config,
@@ -407,7 +443,7 @@ export async function resolveRequestTarget(
         providerName,
         resolvedApiKey,
       );
-    const provider = configuredProvider ?? customProvider;
+    const provider = inlineProvider ?? configuredProvider ?? customProvider;
 
     if (!provider || !provider.enabled) {
       throw new ModelGatewayError({
@@ -417,7 +453,7 @@ export async function resolveRequestTarget(
       });
     }
 
-    const apiKey = customProvider?.apiKey ?? resolvedApiKey;
+    const apiKey = inlineProvider?.apiKey ?? customProvider?.apiKey ?? resolvedApiKey;
     if (!apiKey) {
       throw new ModelGatewayError({
         code: "AUTH",
@@ -434,7 +470,7 @@ export async function resolveRequestTarget(
       apiKey,
       defaultHeaders: provider.defaultHeaders,
       routeDecision: {
-        alias: execution.profileAlias ?? execution.model,
+        alias: `${provider.name}:${execution.model}`,
         mode,
         strategy: "priority",
         provider: provider.name,

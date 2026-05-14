@@ -367,11 +367,14 @@ export function registerThreadRoutes(app: Hono) {
               mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
+              command: parsed.data.command,
               timezone: parsed.data.timezone,
               userMessageId: parsed.data.userMessageId,
               assistantMessageId: parsed.data.assistantMessageId,
               idempotencyKey: durableKey.idempotencyKey,
               llm: parsed.data.llm,
+              image: parsed.data.image,
+              vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
             }
@@ -386,11 +389,14 @@ export function registerThreadRoutes(app: Hono) {
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
+                command: parsed.data.command,
                 timezone: parsed.data.timezone,
                 userMessageId: parsed.data.userMessageId,
                 assistantMessageId: parsed.data.assistantMessageId,
                 idempotencyKey: durableKey.idempotencyKey,
                 llm: parsed.data.llm,
+                image: parsed.data.image,
+                vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
               }
@@ -403,9 +409,12 @@ export function registerThreadRoutes(app: Hono) {
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
+                command: parsed.data.command,
                 timezone: parsed.data.timezone,
                 idempotencyKey: durableKey.idempotencyKey,
                 llm: parsed.data.llm,
+                image: parsed.data.image,
+                vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
               };
@@ -451,11 +460,14 @@ export function registerThreadRoutes(app: Hono) {
               mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
+              command: parsed.data.command,
               timezone: parsed.data.timezone,
               userMessageId: parsed.data.userMessageId,
               assistantMessageId: parsed.data.assistantMessageId,
               idempotencyKey: parsed.data.idempotencyKey,
               llm: parsed.data.llm,
+              image: parsed.data.image,
+              vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
             })
@@ -470,11 +482,14 @@ export function registerThreadRoutes(app: Hono) {
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
+                command: parsed.data.command,
                 timezone: parsed.data.timezone,
                 userMessageId: parsed.data.userMessageId,
                 assistantMessageId: parsed.data.assistantMessageId,
                 idempotencyKey: parsed.data.idempotencyKey,
                 llm: parsed.data.llm,
+                image: parsed.data.image,
+                vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
               })
@@ -487,9 +502,12 @@ export function registerThreadRoutes(app: Hono) {
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
+                command: parsed.data.command,
                 timezone: parsed.data.timezone,
                 idempotencyKey: parsed.data.idempotencyKey,
                 llm: parsed.data.llm,
+                image: parsed.data.image,
+                vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
               });
@@ -506,11 +524,14 @@ export function registerThreadRoutes(app: Hono) {
             mentionedSourceIds: parsed.data.mentionedSourceIds,
             sourceIds: parsed.data.sourceIds,
             tools: parsed.data.tools,
+            command: parsed.data.command,
             timezone: parsed.data.timezone,
             userMessageId: parsed.data.userMessageId,
             assistantMessageId: parsed.data.assistantMessageId,
             idempotencyKey: parsed.data.idempotencyKey,
             llm: parsed.data.llm,
+            image: parsed.data.image,
+            vision: parsed.data.vision,
             visionProfileAlias:
               parsed.data.modelSettings?.visionProfileAlias ?? undefined,
           })
@@ -525,11 +546,14 @@ export function registerThreadRoutes(app: Hono) {
               mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
+              command: parsed.data.command,
               timezone: parsed.data.timezone,
               userMessageId: parsed.data.userMessageId,
               assistantMessageId: parsed.data.assistantMessageId,
               idempotencyKey: parsed.data.idempotencyKey,
               llm: parsed.data.llm,
+              image: parsed.data.image,
+              vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
             })
@@ -542,9 +566,12 @@ export function registerThreadRoutes(app: Hono) {
               mentionedSourceIds: parsed.data.mentionedSourceIds,
               sourceIds: parsed.data.sourceIds,
               tools: parsed.data.tools,
+              command: parsed.data.command,
               timezone: parsed.data.timezone,
               idempotencyKey: parsed.data.idempotencyKey,
               llm: parsed.data.llm,
+              image: parsed.data.image,
+              vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
             });

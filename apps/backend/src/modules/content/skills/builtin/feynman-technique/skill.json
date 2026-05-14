@@ -1,8 +1,0 @@
-{
-  "slug": "feynman-technique",
-  "displayName": "Feynman Technique",
-  "description": "Use this skill to learn a concept by explaining it simply, identifying gaps, and refining understanding through focused questions.",
-  "visibility": "public",
-  "categories": ["learn"],
-  "version": "1.0.0"
-}

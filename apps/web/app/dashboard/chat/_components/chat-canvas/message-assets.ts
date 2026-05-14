@@ -2,6 +2,7 @@ import { isGeneratedImageArtifactToolName } from "@sourceweft/sdk";
 import { apiBaseUrl } from "../../../../../lib/sdk";
 import type {
   ChatMessageImagePart,
+  MessageRenderBlock,
   MessageVersion,
   ThinkingStepRecord,
   ToolCallRecord,
@@ -103,6 +104,126 @@ export function getMessageText(input: {
     toolCalls: input.version.toolCalls,
     workspaceId: input.workspaceId,
   });
+}
+
+function matchGeneratedImageToolCall(input: {
+  artifactIds: Set<string>;
+  artifactUrls: Set<string>;
+  toolCalls?: ToolCallRecord[];
+  url: string;
+}) {
+  const normalizedUrl = normalizeAssetUrl(input.url);
+  const artifactId = extractArtifactIdFromUrl(input.url);
+
+  return (
+    (input.toolCalls ?? []).find((toolCall) => {
+      if (!isGeneratedImageArtifactToolName(toolCall.tool)) {
+        return false;
+      }
+
+      const artifact = resolveGeneratedImageArtifact(toolCall);
+      if (!artifact) {
+        return false;
+      }
+
+      if (artifactId && input.artifactIds.has(artifactId)) {
+        const toolArtifactId = artifact.artifactId;
+        if (toolArtifactId && toolArtifactId === artifactId) {
+          return true;
+        }
+      }
+
+      const candidateUrls = [
+        artifact.artifactUrl,
+        resolveArtifactUrl({ artifact, workspaceId: null }),
+      ]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => normalizeAssetUrl(value));
+
+      return (
+        candidateUrls.includes(normalizedUrl) ||
+        (artifactId ? candidateUrls.some((value) => extractArtifactIdFromUrl(value) === artifactId) : false)
+      );
+    }) ?? null
+  );
+}
+
+export function buildRenderBlocksFromMessageContent(input: {
+  content: string;
+  toolCalls?: ToolCallRecord[];
+  workspaceId?: string | null;
+}) {
+  const artifactRefs = getGeneratedImageArtifactRefs({
+    toolCalls: input.toolCalls,
+    workspaceId: input.workspaceId,
+  });
+  if (
+    artifactRefs.artifactIds.size === 0 &&
+    artifactRefs.artifactUrls.size === 0
+  ) {
+    return null;
+  }
+
+  const blocks: MessageRenderBlock[] = [];
+  const seenToolCallIds = new Set<string>();
+  const imageMarkdownPattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  let nextTextId = 1;
+  let lastIndex = 0;
+
+  for (const match of input.content.matchAll(imageMarkdownPattern)) {
+    const fullMatch = match[0];
+    const rawUrl = match[1];
+    const matchIndex = match.index ?? -1;
+    if (!fullMatch || !rawUrl || matchIndex < 0) {
+      continue;
+    }
+
+    const toolCall = matchGeneratedImageToolCall({
+      artifactIds: artifactRefs.artifactIds,
+      artifactUrls: artifactRefs.artifactUrls,
+      toolCalls: input.toolCalls,
+      url: rawUrl,
+    });
+    if (!toolCall) {
+      continue;
+    }
+
+    const textBefore = input.content.slice(lastIndex, matchIndex);
+    if (textBefore) {
+      blocks.push({
+        id: `fallback-text-${nextTextId}`,
+        type: "text",
+        text: textBefore,
+      });
+      nextTextId += 1;
+    }
+
+    if (!seenToolCallIds.has(toolCall.id)) {
+      blocks.push({
+        id: `fallback-generated-image-${toolCall.id}`,
+        type: "generated_image",
+        toolCallId: toolCall.id,
+      });
+      seenToolCallIds.add(toolCall.id);
+    }
+
+    lastIndex = matchIndex + fullMatch.length;
+  }
+
+  if (blocks.length === 0) {
+    return null;
+  }
+
+  const trailingText = input.content.slice(lastIndex);
+  if (trailingText) {
+    blocks.push({
+      id: `fallback-text-${nextTextId}`,
+      type: "text",
+      text: trailingText,
+    });
+  }
+
+  return blocks;
 }
 
 export function getMessageImageParts(version: MessageVersion) {

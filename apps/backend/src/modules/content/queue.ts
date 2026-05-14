@@ -41,8 +41,17 @@ export type ThreadTitleGenerateJobPayload = {
   messageContent: string;
   profileAlias: string;
   modelAlias: string;
+  providerModel?: string;
   gatewayConfigId: string;
   expectedTitle: string;
+  llm?: {
+    executionMode: "BYOK";
+    byokModelId: string;
+    credentialId?: string;
+    providerHint?: string;
+    providerModel?: string;
+    modelAlias?: string;
+  };
 };
 
 export type ThreadTitleGenerateJobResult =
