@@ -136,25 +136,34 @@ export function UserMessageText({
   const sourceById = new Map(
     mentionSources.map((source) => [source.id, source]),
   );
+  const sourceLabelsById = new Map<string, string>();
   for (const source of mentionSources) {
     for (const label of getMentionMatchLabels(source)) {
       labelToSource.set(label, source);
+      sourceLabelsById.set(source.id, label);
     }
   }
 
-  let tokenSourceIndex = 0;
-  for (const token of children.match(/@\S+/g) ?? []) {
-    const sourceId = sourceIds[tokenSourceIndex];
-    tokenSourceIndex += 1;
-    if (!sourceId || labelToSource.has(token)) {
+  for (const sourceId of sourceIds) {
+    const source = sourceById.get(sourceId);
+    const label = source ? sourceLabelsById.get(source.id) : null;
+    if (!source || !label || labelToSource.has(label)) {
       continue;
     }
+    labelToSource.set(label, source);
+  }
 
-    labelToSource.set(
-      token,
-      sourceById.get(sourceId) ??
-        createFallbackMentionSource({ label: token, sourceId }),
-    );
+  let fallbackIndex = 0;
+  for (const token of children.match(/@\S+/g) ?? []) {
+    if (labelToSource.has(token)) {
+      continue;
+    }
+    const sourceId = sourceIds[fallbackIndex];
+    fallbackIndex += 1;
+    if (!sourceId) {
+      continue;
+    }
+    labelToSource.set(token, createFallbackMentionSource({ label: token, sourceId }));
   }
 
   const labels = [...labelToSource.keys()].sort(

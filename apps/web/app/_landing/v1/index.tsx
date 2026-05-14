@@ -869,8 +869,8 @@ function Footer() {
             </p>
             <ul className="space-y-2 text-sm">
               {[
-                ["#", "Privacy"],
-                ["#", "Terms"],
+                ["/privacy", "Privacy"],
+                ["/terms", "Terms"],
               ].map(([href, label]) => (
                 <li key={label}>
                   <a

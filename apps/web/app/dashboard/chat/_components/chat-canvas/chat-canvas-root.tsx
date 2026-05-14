@@ -135,7 +135,6 @@ export function ChatCanvas({
     groupId: string;
     messageId: string;
     message: string;
-    command?: ChatSendInput["command"];
     assistantMessageId: string | null;
     branchIndex: number;
   }) => void;
@@ -262,9 +261,15 @@ export function ChatCanvas({
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(message, tools, command, skillIds) =>
+            onSubmit={(
+              message,
+              tools,
+              command,
+              skillIds,
+              content,
+            ) =>
               handleSendMessage({
-                content: message.text.trim(),
+                content: content ?? message.text.trim(),
                 images: promptFilesToImages(message.files),
                 mentionedSourceIds: message.mentionedSourceIds,
                 skillIds,

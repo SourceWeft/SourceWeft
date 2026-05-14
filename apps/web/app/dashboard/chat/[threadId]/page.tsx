@@ -4457,7 +4457,6 @@ export default function DashboardChatThreadPage({
       groupId: string;
       messageId: string;
       message: string;
-      command?: ChatSendInput["command"];
       assistantMessageId: string | null;
       branchIndex: number;
     }) => {
@@ -4471,7 +4470,7 @@ export default function DashboardChatThreadPage({
       setEditingGroupId(input.groupId);
       setEditingBranchIndex(input.branchIndex);
       setComposerInitialInput(input.message);
-      setComposerInitialCommand(input.command ?? null);
+      setComposerInitialCommand(null);
       setComposerResetKey((value) => value + 1);
     },
     [cancelEditing, editingMessageId],

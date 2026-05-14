@@ -19,6 +19,7 @@ import { dedupeSourceIds } from "../../source-ids";
 import { requireContentWorkspace } from "../../content-support";
 import {
   normalizeSkillIds,
+  resolveSkillIdsForSlashCommands,
   resolveSelectedSkills,
   resolveSkillIdsWithSlashCommand,
 } from "../../skills/selection";
@@ -53,7 +54,10 @@ import type {
   ResolvedThreadCommand,
   StreamThreadEventInput,
 } from "./types";
-import { resolveSourceTreeScope } from "../../sources/service";
+import {
+  resolveSourceIdsByTitles,
+  resolveSourceTreeScope,
+} from "../../sources/service";
 import { runArtifactIntentPipeline } from "../../artifacts/intent-pipeline";
 import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
 import {
@@ -143,11 +147,141 @@ function buildCommandAugmentedText(input: {
   return `<sourceweft_command name="${input.command.canonicalName}"${path}>\n${instruction}\n</sourceweft_command>\n\n<user_request>\n${args}\n</user_request>`;
 }
 
-function buildCommandVisibleText(input: {
-  command: ResolvedThreadCommand | null;
-  text: string;
-}) {
-  return input.command ? input.command.arguments : input.text;
+type ParsedPromptMarker =
+  | {
+      kind: "skill" | "skill-command" | "tool";
+      label: string;
+      value: string;
+      type: "command";
+    }
+  | {
+      sourceId: string | null;
+      title: string;
+      type: "source";
+    };
+
+function decodePromptMarkerValue(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function unescapePromptMarkerLabel(value: string) {
+  return value.replace(/\\([\\)\]])/g, "$1");
+}
+
+function parsePromptMarkers(content: string) {
+  const markers: ParsedPromptMarker[] = [];
+  const pattern = /\[(skills|skill-command|tool|source):([^\]]+)\]\(((?:\\.|[^)])*)\)/g;
+  let cleanContent = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(content)) !== null) {
+    cleanContent += content.slice(lastIndex, match.index);
+    const rawKind = match[1];
+    const rawValue = match[2] ?? "";
+    const label = unescapePromptMarkerLabel(match[3] ?? "");
+    const decodedValue = decodePromptMarkerValue(rawValue);
+
+    if (rawKind === "source") {
+      const title = label || decodedValue;
+      markers.push({
+        sourceId: decodedValue.trim() || null,
+        title,
+        type: "source",
+      });
+      cleanContent += `@${title}`;
+    } else {
+      markers.push({
+        kind:
+          rawKind === "tool"
+            ? "tool"
+            : rawKind === "skill-command"
+              ? "skill-command"
+              : "skill",
+        label,
+        value: `/${decodedValue.replace(/^\//, "")}`,
+        type: "command",
+      });
+    }
+
+    lastIndex = pattern.lastIndex;
+  }
+
+  cleanContent += content.slice(lastIndex);
+
+  return {
+    cleanContent: cleanContent
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim(),
+    markers,
+  };
+}
+
+function markerCommandNames(markers: ParsedPromptMarker[]) {
+  return markers
+    .filter(
+      (marker): marker is Extract<ParsedPromptMarker, { type: "command" }> =>
+        marker.type === "command",
+    )
+    .map((marker) => marker.value);
+}
+
+function markerSourceIds(markers: ParsedPromptMarker[]) {
+  return markers
+    .filter(
+      (marker): marker is Extract<ParsedPromptMarker, { type: "source" }> =>
+        marker.type === "source" && Boolean(marker.sourceId),
+    )
+    .map((marker) => marker.sourceId as string);
+}
+
+function markerSourceTitles(markers: ParsedPromptMarker[]) {
+  return markers
+    .filter(
+      (marker): marker is Extract<ParsedPromptMarker, { type: "source" }> =>
+        marker.type === "source",
+    )
+    .map((marker) => marker.title);
+}
+
+function lastSkillCommandMarker(markers: ParsedPromptMarker[]) {
+  return [...markers]
+    .reverse()
+    .find(
+      (marker): marker is Extract<ParsedPromptMarker, { type: "command" }> =>
+        marker.type === "command" && marker.kind === "skill-command",
+    );
+}
+
+function resolveMarkerToolSelection(
+  markers: ParsedPromptMarker[],
+  tools: StreamThreadEventInput["tools"],
+): StreamThreadEventInput["tools"] {
+  let next = tools;
+  for (const marker of markers) {
+    if (
+      marker.type !== "command" ||
+      marker.kind !== "tool" ||
+      resolveToolCommandName(marker.value) !== AGENT_TOOL_NAMES.generateImage
+    ) {
+      continue;
+    }
+    next = {
+      ...(next ?? {}),
+      [AGENT_TOOL_NAMES.generateImage]: {
+        ...((next ?? {})[AGENT_TOOL_NAMES.generateImage] ?? {}),
+        enabled: true,
+        mode: "generate",
+      },
+    };
+  }
+  return next;
 }
 
 function buildThreadCommandMetadata(command: ResolvedThreadCommand) {
@@ -883,6 +1017,7 @@ export const testExports = {
   buildVisionFallbackDescriptionPrompt,
   buildVisionFallbackGatewayMetadata,
   buildCommandAugmentedText,
+  parsePromptMarkers,
   meterVisionFallbackBilling,
   parseRequestedCommand,
   resolveThreadCommand,
@@ -1050,11 +1185,13 @@ export async function prepareThreadTurn(
   input: StreamThreadEventInput,
   dependencies: { billing?: ContentBillingPort } = {},
 ): Promise<PreparedThreadTurn> {
-  const messageContent =
+  const displayMessageContent =
     input.existingUserMessage?.content.trim() ?? input.content.trim();
+  const parsedPrompt = parsePromptMarkers(displayMessageContent);
+  const messageContent = parsedPrompt.cleanContent;
   if (
     shouldRejectEmptyThreadMessage({
-      messageContent,
+      messageContent: displayMessageContent,
       images: input.images,
       existingUserMessageContentJson: input.existingUserMessage?.contentJson,
       existingImageParts: input.existingImageParts,
@@ -1104,7 +1241,17 @@ export async function prepareThreadTurn(
           : requestedModelAlias || undefined,
   });
 
-  const mentionedSourceIds = dedupeSourceIds(input.mentionedSourceIds);
+  const markerMentionedSourceIds = dedupeSourceIds(markerSourceIds(parsedPrompt.markers));
+  const markerSourceTitleIds = await resolveSourceIdsByTitles({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    titles: markerSourceTitles(parsedPrompt.markers),
+  });
+  const mentionedSourceIds = dedupeSourceIds([
+    ...markerMentionedSourceIds,
+    ...markerSourceTitleIds,
+    ...(input.mentionedSourceIds ?? []),
+  ]);
   const mentionedSourceScope = await resolveSourceTreeScope({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
@@ -1129,14 +1276,30 @@ export async function prepareThreadTurn(
     selectedSourceIds,
   });
   const sourceIds = sourceScope.effectiveSourceIds;
+  const markerSkillCommand = lastSkillCommandMarker(parsedPrompt.markers);
+  const markerCommandNamesInput = markerCommandNames(parsedPrompt.markers);
   const requestedCommand = parseRequestedCommand({
-    command: input.command,
-    content: messageContent,
+    command: markerSkillCommand
+      ? {
+          arguments: messageContent,
+          kind: "skill-command",
+          name: markerSkillCommand.value,
+        }
+      : input.command,
   });
-  const selectedSkillIds = normalizeSkillIds(input.tools?.skillIds);
-  const invokedSkillIds = normalizeSkillIds(input.tools?.invokedSkillIds);
+  const toolsWithMarkers = resolveMarkerToolSelection(
+    parsedPrompt.markers,
+    input.tools,
+  );
+  const selectedSkillIds = normalizeSkillIds(toolsWithMarkers?.skillIds);
+  const invokedSkillIds = normalizeSkillIds(toolsWithMarkers?.invokedSkillIds);
+  const markerSkillIds = await resolveSkillIdsForSlashCommands({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    commandNames: markerCommandNamesInput,
+  });
   const requestedSkillIds = Array.from(
-    new Set([...invokedSkillIds, ...selectedSkillIds]),
+    new Set([...invokedSkillIds, ...markerSkillIds, ...selectedSkillIds]),
   ).slice(0, 5);
   const skillIds = await resolveSkillIdsWithSlashCommand({
     teamId: workspace.organizationId,
@@ -1165,7 +1328,7 @@ export async function prepareThreadTurn(
       ...(commandSkillId ? [commandSkillId] : []),
     ]),
   ).slice(0, 5);
-  const toolsWithCommand = mergeCommandTools(input.tools, resolvedCommand);
+  const toolsWithCommand = mergeCommandTools(toolsWithMarkers, resolvedCommand);
   const generateImageTool = resolveGenerateImageToolSelection(toolsWithCommand);
   const imageExecution =
     input.image?.executionMode === "BYOK"
@@ -1332,14 +1495,11 @@ export async function prepareThreadTurn(
       preflightThinkingSteps.push(...visionFallback.steps);
     }
   }
-  const visibleMessageContent = buildCommandVisibleText({
-    command: resolvedCommand,
-    text: messageContent,
-  });
-  const messageContentJson = buildMessageContentJson({
-    text: visibleMessageContent,
+  const baseMessageContentJson = buildMessageContentJson({
+    text: displayMessageContent,
     images: imageParts,
   });
+  const messageContentJson = baseMessageContentJson;
 
   const userMessage =
     existingUserMessage ??
@@ -1350,7 +1510,7 @@ export async function prepareThreadTurn(
       threadId: thread.id,
       parentMessageId: input.userMessageParentId ?? null,
       role: "user",
-      content: visibleMessageContent,
+      content: displayMessageContent,
       contentJson: messageContentJson,
       createdBy: input.userId,
       metadata: {
@@ -1558,7 +1718,6 @@ function resolveLatestAssistantFinalCheckpoint(
 
 function parseRequestedCommand(input: {
   command?: StreamThreadEventInput["command"];
-  content: string;
 }) {
   if (input.command?.name) {
     return {
@@ -1568,22 +1727,7 @@ function parseRequestedCommand(input: {
     };
   }
 
-  const match = input.content.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
-  if (!match?.[1]) {
-    return null;
-  }
-  const name = `/${match[1]}`;
-  if (
-    !SKILL_COMMAND_NAME_PATTERN.test(name) &&
-    !SKILL_ACTIVATION_NAME_PATTERN.test(name) &&
-    !resolveToolCommandName(name)
-  ) {
-    return null;
-  }
-  return {
-    arguments: (match[2] ?? "").trim(),
-    name,
-  };
+  return null;
 }
 
 function resolveToolCommandName(name: string) {

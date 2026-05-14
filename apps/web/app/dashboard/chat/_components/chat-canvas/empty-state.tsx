@@ -137,9 +137,15 @@ export function EmptyState({
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
             onSkillSelectionChange={onSkillSelectionChange}
-            onSubmit={(message, tools, command, skillIds) =>
+            onSubmit={(
+              message,
+              tools,
+              command,
+              skillIds,
+              content,
+            ) =>
               onSendMessage({
-                content: message.text.trim(),
+                content: content ?? message.text.trim(),
                 images: promptFilesToImages(message.files),
                 mentionedSourceIds: message.mentionedSourceIds,
                 skillIds,

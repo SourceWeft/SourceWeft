@@ -190,10 +190,19 @@ const captureScreenshot = async (): Promise<File | null> => {
 };
 
 const SOURCE_MENTION_TRIGGER_PATTERN = /(?:^|\s)@([^\s@]*)$/;
-const SLASH_COMMAND_TRIGGER_PATTERN = /^\s*\/([^\s/]*)$/;
+const SLASH_COMMAND_TRIGGER_PATTERN = /(?:^|\s)\/([^\s/]*)$/;
 const SOURCE_MENTION_PAGE_SIZE = 20;
 
 const getSourceMentionLabel = (title: string) => `@${title}`;
+
+const PROMPT_MARKER_PATTERN =
+  /\[(skills|skill-command|tool|source):([^\]]+)\]\(((?:\\.|[^)])*)\)/g;
+
+const escapeMarkerLabel = (value: string) =>
+  value.replaceAll("\\", "\\\\").replaceAll("]", "\\]").replaceAll(")", "\\)");
+
+const createSourceMarker = (source: { id: string; title: string }) =>
+  `[source:${encodeURIComponent(source.id)}](${escapeMarkerLabel(source.title)})`;
 
 const normalizeText = (value: string) =>
   value.replaceAll("\u00a0", " ").replace(/\r\n?/g, "\n");
@@ -202,44 +211,210 @@ const uniqueStrings = (values: string[]) => [
   ...new Set(values.map((value) => value.trim()).filter(Boolean)),
 ];
 
+const decodeMarkerValue = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const unescapeMarkerLabel = (value: string) =>
+  value.replace(/\\([\\)\]])/g, "$1");
+
+const promptSubmitText = (content: string) => {
+  let text = "";
+  let lastIndex = 0;
+  PROMPT_MARKER_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = PROMPT_MARKER_PATTERN.exec(content)) !== null) {
+    text += content.slice(lastIndex, match.index);
+    const rawKind = match[1];
+    if (rawKind === "source") {
+      const decodedValue = decodeMarkerValue(match[2] ?? "");
+      const label = unescapeMarkerLabel(match[3] ?? "");
+      text += `@${label || decodedValue}`;
+    }
+    lastIndex = PROMPT_MARKER_PATTERN.lastIndex;
+  }
+
+  text += content.slice(lastIndex);
+  return text
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+};
+
+const hasPromptSubmitText = (content: string) =>
+  promptSubmitText(content).length > 0;
+
+const isPromptAtomElement = (node: Node) =>
+  node instanceof HTMLElement &&
+  (Boolean(node.dataset.sourceMentionId) ||
+    Boolean(node.dataset.slashCommandValue));
+
+const isHtmlElement = (node: Node): node is HTMLElement =>
+  node instanceof HTMLElement;
+
+const getPromptAtomText = (element: HTMLElement) => {
+  const sourceId = element.dataset.sourceMentionId;
+  if (sourceId) {
+    const title =
+      element.dataset.sourceMentionTitle ||
+      element.textContent?.replace(/^@/, "") ||
+      sourceId;
+    return getSourceMentionLabel(title);
+  }
+
+  return (
+    element.dataset.slashCommandLabel ||
+    element.textContent ||
+    element.dataset.slashCommandValue ||
+    ""
+  );
+};
+
+const getNodeIndex = (node: Node) =>
+  node.parentNode
+    ? Array.prototype.indexOf.call(node.parentNode.childNodes, node)
+    : 0;
+
+const getNodeTextLength = (node: Node): number => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return normalizeText(node.textContent ?? "").length;
+  }
+  if (isHtmlElement(node)) {
+    if (isPromptAtomElement(node)) {
+      return getPromptAtomText(node).length;
+    }
+    if (node.tagName === "BR") {
+      return 1;
+    }
+  }
+  return Array.from(node.childNodes).reduce(
+    (length, child) => length + getNodeTextLength(child),
+    0,
+  );
+};
+
+const getPromptDisplayText = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return normalizeText(node.textContent ?? "");
+  }
+  if (isHtmlElement(node)) {
+    if (isPromptAtomElement(node)) {
+      return getPromptAtomText(node);
+    }
+    if (node.tagName === "BR") {
+      return "\n";
+    }
+  }
+  return Array.from(node.childNodes).map(getPromptDisplayText).join("");
+};
+
+const getBoundaryBeforeNode = (node: Node) => ({
+  node: node.parentNode ?? node,
+  offset: node.parentNode ? getNodeIndex(node) : 0,
+});
+
+const getBoundaryAfterNode = (node: Node) => ({
+  node: node.parentNode ?? node,
+  offset: node.parentNode ? getNodeIndex(node) + 1 : node.childNodes.length,
+});
+
+const getBoundaryOffset = (
+  node: Node,
+  container: Node,
+  containerOffset: number,
+): number | null => {
+  if (node === container) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return Math.max(
+        0,
+        Math.min(containerOffset, normalizeText(node.textContent ?? "").length),
+      );
+    }
+    if (node instanceof HTMLElement && isPromptAtomElement(node)) {
+      return containerOffset <= 0 ? 0 : getPromptAtomText(node).length;
+    }
+    return Array.from(node.childNodes)
+      .slice(0, containerOffset)
+      .reduce((length, child) => length + getNodeTextLength(child), 0);
+  }
+
+  if (node instanceof HTMLElement && isPromptAtomElement(node)) {
+    return node.contains(container) ? getPromptAtomText(node).length : null;
+  }
+
+  let offset = 0;
+  for (const child of node.childNodes) {
+    if (child === container || child.contains(container)) {
+      const childOffset = getBoundaryOffset(child, container, containerOffset);
+      return childOffset === null ? null : offset + childOffset;
+    }
+    offset += getNodeTextLength(child);
+  }
+
+  return null;
+};
+
 const getCaretTextOffset = (root: HTMLElement) => {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) {
-    return root.textContent?.length ?? 0;
+    return getNodeTextLength(root);
   }
 
   const range = selection.getRangeAt(0);
   if (!root.contains(range.endContainer)) {
-    return root.textContent?.length ?? 0;
+    return getNodeTextLength(root);
   }
 
-  const clone = range.cloneRange();
-  clone.selectNodeContents(root);
-  clone.setEnd(range.endContainer, range.endOffset);
-  return clone.toString().length;
+  return (
+    getBoundaryOffset(root, range.endContainer, range.endOffset) ??
+    getNodeTextLength(root)
+  );
 };
 
 const findTextPosition = (root: HTMLElement, offset: number) => {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let currentOffset = 0;
-  let node = walker.nextNode();
-
-  while (node) {
-    const length = node.textContent?.length ?? 0;
-    if (currentOffset + length >= offset) {
+  const findInNode = (node: Node, remainingOffset: number): {
+    node: Node;
+    offset: number;
+  } => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const length = normalizeText(node.textContent ?? "").length;
       return {
         node,
-        offset: Math.max(0, Math.min(offset - currentOffset, length)),
+        offset: Math.max(0, Math.min(remainingOffset, length)),
       };
     }
-    currentOffset += length;
-    node = walker.nextNode();
-  }
 
-  return {
-    node: root,
-    offset: root.childNodes.length,
+    if (node instanceof HTMLElement && isPromptAtomElement(node)) {
+      return remainingOffset <= 0
+        ? getBoundaryBeforeNode(node)
+        : getBoundaryAfterNode(node);
+    }
+
+    let consumed = 0;
+    for (const child of node.childNodes) {
+      const length = getNodeTextLength(child);
+      if (remainingOffset < consumed + length) {
+        return findInNode(child, remainingOffset - consumed);
+      }
+      if (remainingOffset === consumed + length) {
+        return getBoundaryAfterNode(child);
+      }
+      consumed += length;
+    }
+
+    return {
+      node,
+      offset: node.childNodes.length,
+    };
   };
+
+  return findInNode(root, Math.max(0, offset));
 };
 
 const setCaretTextOffset = (root: HTMLElement, offset: number) => {
@@ -251,6 +426,19 @@ const setCaretTextOffset = (root: HTMLElement, offset: number) => {
   const position = findTextPosition(root, offset);
   const range = document.createRange();
   range.setStart(position.node, position.offset);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+};
+
+const setCaretAfterNode = (node: Node) => {
+  const selection = window.getSelection();
+  if (!selection || !node.parentNode) {
+    return;
+  }
+
+  const range = document.createRange();
+  range.setStartAfter(node);
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
@@ -299,6 +487,12 @@ const closestSourceMention = (node: Node | null) =>
     : (node?.parentElement?.closest<HTMLElement>("[data-source-mention-id]") ??
       null);
 
+const closestSlashCommand = (node: Node | null) =>
+  node instanceof HTMLElement
+    ? node.closest<HTMLElement>("[data-slash-command-value]")
+    : (node?.parentElement?.closest<HTMLElement>("[data-slash-command-value]") ??
+      null);
+
 const findPreviousNode = (node: Node | null): Node | null => {
   if (!node) {
     return null;
@@ -338,6 +532,25 @@ const findSourceMentionBeforeCaret = (root: HTMLElement) => {
   return closestSourceMention(candidate);
 };
 
+const findSlashCommands = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll<HTMLElement>("[data-slash-command-value]"));
+
+const removeSlashCommands = (
+  root: HTMLElement,
+  predicate: (element: HTMLElement) => boolean,
+) => {
+  for (const command of findSlashCommands(root)) {
+    if (!predicate(command)) {
+      continue;
+    }
+    const next = command.nextSibling;
+    command.remove();
+    if (next?.nodeType === Node.TEXT_NODE && next.textContent?.startsWith(" ")) {
+      next.textContent = next.textContent.slice(1);
+    }
+  }
+};
+
 export type PromptInputSegment =
   | {
       text: string;
@@ -345,8 +558,9 @@ export type PromptInputSegment =
     }
   | {
       command: {
-        kind?: "skill" | "tool";
+        kind: "skill" | "skill-command" | "tool";
         label?: string;
+        marker: string;
         value: string;
       };
       type: "command";
@@ -381,10 +595,33 @@ export type PromptInputSlashCommand = {
   disabled?: boolean;
   group?: string;
   id: string;
-  kind?: "skill" | "tool";
+  kind?: "skill" | "skill-command" | "tool";
   label?: string;
   meta?: unknown;
   value: string;
+};
+
+const normalizeCommandValue = (value: string) =>
+  value.startsWith("/") ? value : `/${value}`;
+
+type PromptInputCommandKind = "skill" | "skill-command" | "tool";
+
+const commandMarkerPrefix = (kind: PromptInputCommandKind) =>
+  kind === "tool"
+    ? "tool"
+    : kind === "skill-command"
+      ? "skill-command"
+      : "skills";
+
+const createCommandMarker = (input: {
+  kind: "skill" | "skill-command" | "tool";
+  label?: string;
+  value: string;
+}) => {
+  const normalizedValue = normalizeCommandValue(input.value);
+  const markerValue = encodeURIComponent(normalizedValue.replace(/^\//, ""));
+  const label = escapeMarkerLabel(input.label?.trim() || normalizedValue);
+  return `[${commandMarkerPrefix(input.kind)}:${markerValue}](${label})`;
 };
 
 const pushTextSegment = (segments: PromptInputSegment[], text: string) => {
@@ -433,11 +670,24 @@ const readSegmentsFromNode = (node: Node, segments: PromptInputSegment[]) => {
       command: {
         kind:
           node.dataset.slashCommandKind === "tool" ||
-          node.dataset.slashCommandKind === "skill"
+          node.dataset.slashCommandKind === "skill" ||
+          node.dataset.slashCommandKind === "skill-command"
             ? node.dataset.slashCommandKind
-            : undefined,
+            : "skill",
         label: node.dataset.slashCommandLabel,
-        value: command,
+        marker:
+          node.dataset.slashCommandMarker ??
+          createCommandMarker({
+            kind:
+              node.dataset.slashCommandKind === "tool" ||
+              node.dataset.slashCommandKind === "skill" ||
+              node.dataset.slashCommandKind === "skill-command"
+                ? node.dataset.slashCommandKind
+                : "skill",
+            label: node.dataset.slashCommandLabel,
+            value: command,
+          }),
+        value: normalizeCommandValue(command),
       },
       type: "command",
     });
@@ -462,13 +712,62 @@ const readSegmentsFromElement = (root: HTMLElement) => {
   return segments;
 };
 
+const parsePromptInputMarkers = (content: string) => {
+  const segments: PromptInputSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  PROMPT_MARKER_PATTERN.lastIndex = 0;
+  while ((match = PROMPT_MARKER_PATTERN.exec(content)) !== null) {
+    pushTextSegment(segments, content.slice(lastIndex, match.index));
+    const rawKind = match[1];
+    const rawValue = match[2] ?? "";
+    const label = unescapeMarkerLabel(match[3] ?? "");
+    const decodedValue = decodeMarkerValue(rawValue);
+
+    if (rawKind === "source") {
+      segments.push({
+        sourceId: decodedValue,
+        title: label || decodedValue,
+        type: "source",
+      });
+    } else {
+      const kind =
+        rawKind === "tool"
+          ? "tool"
+          : rawKind === "skill-command"
+            ? "skill-command"
+            : "skill";
+      const value = normalizeCommandValue(decodedValue);
+      segments.push({
+        command: {
+          kind,
+          ...(label ? { label } : {}),
+          marker: createCommandMarker({
+            kind,
+            ...(label ? { label } : {}),
+            value,
+          }),
+          value,
+        },
+        type: "command",
+      });
+    }
+
+    lastIndex = PROMPT_MARKER_PATTERN.lastIndex;
+  }
+
+  pushTextSegment(segments, content.slice(lastIndex));
+  return segments;
+};
+
 const serializePromptSegments = (segments: PromptInputSegment[]) =>
   segments
     .map((segment) =>
       segment.type === "source"
-        ? getSourceMentionLabel(segment.title)
+        ? createSourceMarker({ id: segment.sourceId, title: segment.title })
         : segment.type === "command"
-          ? segment.command.value
+          ? segment.command.marker
         : segment.text,
     )
     .join("");
@@ -492,7 +791,7 @@ const createSourceMentionElement = (source: PromptInputMentionSource) => {
     element.dataset.sourceMentionMeta = source.meta;
   }
   element.className =
-    "mx-0.5 inline-block h-5 max-w-[180px] select-none overflow-hidden truncate whitespace-nowrap rounded border border-border bg-muted px-1.5 align-middle text-xs font-medium leading-5 text-foreground/80";
+    "mx-0.5 inline max-w-full select-none align-baseline font-medium text-primary underline decoration-primary/35 underline-offset-2";
   element.title = getSourceMentionLabel(source.title);
   element.textContent = getSourceMentionLabel(source.title);
   return element;
@@ -508,20 +807,26 @@ const SLASH_TOKEN_ICON_SVG: Record<"skill" | "tool", string> = {
 const createSlashCommandElement = (command: PromptInputSlashCommand) => {
   const element = document.createElement("span");
   element.contentEditable = "false";
-  element.dataset.slashCommandValue = command.value;
+  const kind = command.kind ?? "skill";
+  const value = normalizeCommandValue(command.value);
+  const marker = createCommandMarker({
+    kind,
+    label: command.label,
+    value,
+  });
+  element.dataset.slashCommandKind = kind;
+  element.dataset.slashCommandMarker = marker;
+  element.dataset.slashCommandValue = value;
   if (command.label) {
     element.dataset.slashCommandLabel = command.label;
   }
-  if (command.kind) {
-    element.dataset.slashCommandKind = command.kind;
-  }
   element.className =
     "mx-0.5 inline-flex h-5 max-w-[240px] select-none items-center gap-1 overflow-hidden truncate whitespace-nowrap align-middle text-sm font-semibold leading-5 text-blue-600 dark:text-blue-400";
-  element.title = command.value;
+  element.title = value;
   const icon = document.createElement("span");
   icon.className =
     "inline-flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5";
-  const iconKind = command.kind === "tool" ? "tool" : "skill";
+  const iconKind = kind === "tool" ? "tool" : "skill";
   icon.innerHTML = SLASH_TOKEN_ICON_SVG[iconKind];
   const label = document.createElement("span");
   label.className = "truncate";
@@ -915,6 +1220,7 @@ export interface PromptInputMessage {
   text: string;
   files: FileUIPart[];
   mentionedSourceIds?: string[];
+  segments?: PromptInputSegment[];
 }
 
 export type PromptInputProps = Omit<
@@ -1257,7 +1563,7 @@ export const PromptInput = ({
   );
   const formState = useMemo<PromptInputFormState>(
     () => ({
-      canSubmit: textInput.trim().length > 0 || files.length > 0,
+      canSubmit: hasPromptSubmitText(textInput) || files.length > 0,
       setTextInput: usingProvider
         ? controller.textInput.setInput
         : setLocalTextInput,
@@ -1301,6 +1607,10 @@ export const PromptInput = ({
             .filter(Boolean),
         ),
       ];
+      const editor = form.querySelector(
+        '[data-prompt-input-editor="true"]',
+      ) as HTMLElement | null;
+      const segments = editor ? readSegmentsFromElement(editor) : undefined;
 
       // Reset form immediately after capturing text to avoid race condition
       // where user input during async blob conversion would be lost
@@ -1326,12 +1636,12 @@ export const PromptInput = ({
           }),
         );
 
-        if (text.trim().length === 0 && convertedFiles.length === 0) {
+        if (!hasPromptSubmitText(text) && convertedFiles.length === 0) {
           return;
         }
 
         const result = onSubmit(
-          { files: convertedFiles, mentionedSourceIds, text },
+          { files: convertedFiles, mentionedSourceIds, segments, text },
           event,
         );
 
@@ -1580,7 +1890,7 @@ export const PromptInputMentionEditor = ({
     initialSegments && initialSegments.length > 0
       ? initialSegments
       : initialValue
-        ? [{ text: initialValue, type: "text" }]
+        ? parsePromptInputMarkers(initialValue)
         : [],
   );
   const [mentionQuery, setMentionQuery] = useState("");
@@ -1688,7 +1998,7 @@ export const PromptInputMentionEditor = ({
     }
 
     const caretOffset = getCaretTextOffset(editor);
-    const content = editor.textContent ?? "";
+    const content = getPromptDisplayText(editor);
     const beforeCaret = content.slice(0, caretOffset);
     const match = SOURCE_MENTION_TRIGGER_PATTERN.exec(beforeCaret);
     if (!match) {
@@ -1711,7 +2021,7 @@ export const PromptInputMentionEditor = ({
     }
 
     const caretOffset = getCaretTextOffset(editor);
-    const content = editor.textContent ?? "";
+    const content = getPromptDisplayText(editor);
     const beforeCaret = content.slice(0, caretOffset);
     const match = SLASH_COMMAND_TRIGGER_PATTERN.exec(beforeCaret);
     if (!match) {
@@ -1722,7 +2032,11 @@ export const PromptInputMentionEditor = ({
     }
 
     const query = match[1] ?? "";
-    setSlashStartOffset(caretOffset - query.length - 1);
+    const triggerText = match[0] ?? "";
+    const slashIndexInTrigger = triggerText.lastIndexOf("/");
+    setSlashStartOffset(
+      caretOffset - triggerText.length + Math.max(0, slashIndexInTrigger),
+    );
     setSlashQuery(query);
     setIsSlashOpen(true);
     setIsMentionOpen(false);
@@ -1746,7 +2060,7 @@ export const PromptInputMentionEditor = ({
       initialSegments && initialSegments.length > 0
         ? initialSegments
         : initialValue
-          ? [{ text: initialValue, type: "text" } satisfies PromptInputSegment]
+          ? parsePromptInputMarkers(initialValue)
           : [];
     if (nextSegments.length === 0) {
       return;
@@ -2021,14 +2335,21 @@ export const PromptInputMentionEditor = ({
       const startOffset =
         slashStartOffset ?? Math.max(0, caretOffset - slashQuery.length - 1);
       const fragment = document.createDocumentFragment();
-      fragment.append(createSlashCommandElement(command));
+      const commandElement = createSlashCommandElement(command);
+      fragment.append(commandElement);
       fragment.append(document.createTextNode(" "));
       replaceTextRange(editor, startOffset, caretOffset, fragment);
+      if (command.kind === "skill" && command.value.includes(":")) {
+        removeSlashCommands(
+          editor,
+          (element) =>
+            element.dataset.slashCommandValue !== command.value &&
+            element.dataset.slashCommandKind === "skill" &&
+            (element.dataset.slashCommandValue ?? "").includes(":"),
+        );
+      }
       closeSlash();
-      setCaretTextOffset(
-        editor,
-        startOffset + (command.label ?? command.value).length + 1,
-      );
+      setCaretAfterNode(commandElement.nextSibling ?? commandElement);
       syncFromDom();
       onSlashCommandSelect?.(command);
     },
@@ -2203,6 +2524,30 @@ export const PromptInputMentionEditor = ({
           return;
         }
 
+        const selection = window.getSelection();
+        if (selection?.rangeCount && selection.isCollapsed) {
+          const range = selection.getRangeAt(0);
+          if (editor.contains(range.startContainer)) {
+            const command =
+              range.startContainer.nodeType === Node.TEXT_NODE &&
+              range.startOffset === 0
+                ? closestSlashCommand(findPreviousNode(range.startContainer))
+                : range.startContainer.nodeType !== Node.TEXT_NODE
+                  ? closestSlashCommand(
+                      range.startContainer.childNodes.item(
+                        range.startOffset - 1,
+                      ),
+                    )
+                  : null;
+            if (command) {
+              e.preventDefault();
+              command.remove();
+              syncAndUpdateMention();
+              return;
+            }
+          }
+        }
+
         if ((editor.textContent ?? "") === "" && attachments.files.length > 0) {
           e.preventDefault();
           const lastAttachment = attachments.files.at(-1);
@@ -2251,6 +2596,7 @@ export const PromptInputMentionEditor = ({
         )}
         contentEditable={!disabled}
         data-placeholder={placeholder}
+        data-prompt-input-editor="true"
         data-slot="input-group-control"
         onClick={handleClick}
         onCompositionEnd={handleCompositionEnd}

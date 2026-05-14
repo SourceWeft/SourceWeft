@@ -146,15 +146,80 @@ function UserMessageImageReference({ image }: { image: ChatMessageImagePart }) {
   );
 }
 
-function commandDisplayName(version: MessageVersion) {
-  const command = version.command;
-  if (!command?.name) {
-    return null;
+type UserContentToken =
+  | { text: string; type: "text" }
+  | {
+      kind: "skill" | "skill-command" | "tool";
+      label: string;
+      value: string;
+      type: "command";
+    }
+  | {
+      sourceId: string;
+      title: string;
+      type: "source";
+    };
+
+function unescapeMarkerLabel(value: string) {
+  return value.replace(/\\([\\)\]])/g, "$1");
+}
+
+function parseMarkerContent(content: string): UserContentToken[] {
+  const tokens: UserContentToken[] = [];
+  const pattern = /\[(skills|skill-command|tool|source):([^\]]+)\]\(((?:\\.|[^)])*)\)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push({ text: content.slice(lastIndex, match.index), type: "text" });
+    }
+
+    const rawKind = match[1];
+    const rawValue = match[2] ?? "";
+    const label = unescapeMarkerLabel(match[3] ?? "");
+    let decodedValue: string;
+    try {
+      decodedValue = decodeURIComponent(rawValue);
+    } catch {
+      decodedValue = rawValue;
+    }
+    if (rawKind === "source") {
+      tokens.push({
+        sourceId: decodedValue,
+        title: label || decodedValue,
+        type: "source",
+      });
+    } else {
+      tokens.push({
+        kind:
+          rawKind === "tool"
+            ? "tool"
+            : rawKind === "skill-command"
+              ? "skill-command"
+              : "skill",
+        label,
+        value: `/${decodedValue.replace(/^\//, "")}`,
+        type: "command",
+      });
+    }
+    lastIndex = pattern.lastIndex;
   }
-  const displayName = command.displayName?.trim();
-  if (displayName) {
-    return displayName.startsWith("/")
-      ? displayName
+
+  if (lastIndex < content.length) {
+    tokens.push({ text: content.slice(lastIndex), type: "text" });
+  }
+
+  return tokens.length > 0 ? tokens : [{ text: content, type: "text" }];
+}
+
+function commandTokenDisplayName(
+  command: Extract<UserContentToken, { type: "command" }>,
+) {
+  const label = command.label?.trim();
+  if (label) {
+    return label.startsWith("/")
+      ? label
           .replace(/^\//, "")
           .split(":")
           .pop()!
@@ -162,11 +227,11 @@ function commandDisplayName(version: MessageVersion) {
           .filter(Boolean)
           .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
           .join(" ")
-      : displayName;
+      : label;
   }
-  const normalized = command.name.startsWith("/")
-    ? command.name
-    : `/${command.name}`;
+  const normalized = command.value.startsWith("/")
+    ? command.value
+    : `/${command.value}`;
   if (command.kind === "tool") {
     return normalized === "/generate_image" ? "Generate image" : normalized;
   }
@@ -178,16 +243,20 @@ function commandDisplayName(version: MessageVersion) {
     .join(" ");
 }
 
-function UserCommandToken({ version }: { version: MessageVersion }) {
-  const label = commandDisplayName(version);
-  if (!label || !version.command) {
+function UserCommandSegmentView({
+  command,
+}: {
+  command: Extract<UserContentToken, { type: "command" }>;
+}) {
+  const label = commandTokenDisplayName(command);
+  if (!label) {
     return null;
   }
-  const Icon = version.command.kind === "tool" ? WrenchIcon : BookOpenIcon;
+  const Icon = command.kind === "tool" ? WrenchIcon : BookOpenIcon;
   return (
     <span
       className="inline-flex max-w-full items-center gap-1 align-baseline text-sm font-semibold leading-6 text-blue-600 dark:text-blue-400"
-      title={version.command.name}
+      title={command.value}
     >
       <Icon className="size-3.5 shrink-0" />
       <span className="truncate">{label}</span>
@@ -195,32 +264,67 @@ function UserCommandToken({ version }: { version: MessageVersion }) {
   );
 }
 
-function splitUserCommandText(version: MessageVersion) {
-  const command = version.command;
-  if (!command?.name) {
-    return { commandToken: null, text: version.content };
-  }
-  const canonical = command.name.startsWith("/")
-    ? command.name
-    : `/${command.name}`;
-  const trimmedStart = version.content.trimStart();
-  const leadingWhitespaceLength = version.content.length - trimmedStart.length;
-  const commandPattern =
-    command.kind === "tool" && canonical === "/generate_image"
-      ? /^\/generate_image(?:\s+|$)/i
-      : new RegExp(
-          `^${canonical.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s+|$)`,
-          "i",
+function UserMessageContent({
+  content,
+  onSourcePreview,
+  sources,
+}: {
+  content: string;
+  onSourcePreview?: (source: SourceItem) => void;
+  sources: SourceItem[];
+}) {
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+  const tokens = parseMarkerContent(content);
+
+  const sourceFromToken = (token: Extract<UserContentToken, { type: "source" }>) =>
+    sourceById.get(token.sourceId) ?? {
+      contentText: "",
+      id: token.sourceId,
+      meta: "Mentioned source",
+      parentSourceId: null,
+      sourceType: "file_upload" as const,
+      status: "Indexed" as const,
+      storageKey: null,
+      title: token.title,
+      type: "DOC" as const,
+    };
+
+  return (
+    <>
+      {tokens.map((token, index) => {
+        if (token.type === "command") {
+          return (
+            <UserCommandSegmentView
+              command={token}
+              key={`command-${token.value}-${index}`}
+            />
+          );
+        }
+        if (token.type === "source") {
+          const source = sourceFromToken(token);
+          return (
+            <UserMessageText
+              key={`source-${token.sourceId}-${index}`}
+              onSourcePreview={onSourcePreview}
+              sources={[source]}
+              sourceIds={[token.sourceId]}
+            >
+              {`@${token.title}`}
+            </UserMessageText>
+          );
+        }
+        return (
+          <UserMessageText
+            key={`text-${index}`}
+            onSourcePreview={onSourcePreview}
+            sources={sources}
+          >
+            {token.text}
+          </UserMessageText>
         );
-  const match = trimmedStart.match(commandPattern);
-  if (!match) {
-    return { commandToken: <UserCommandToken version={version} />, text: version.content };
-  }
-  const afterCommand = trimmedStart.slice(match[0].length);
-  return {
-    commandToken: <UserCommandToken version={version} />,
-    text: `${version.content.slice(0, leadingWhitespaceLength)}${afterCommand}`.trimStart(),
-  };
+      })}
+    </>
+  );
 }
 
 function UserMessageReferences({
@@ -415,7 +519,6 @@ type MessageListProps = {
     groupId: string;
     messageId: string;
     message: string;
-    command?: MessageVersion["command"];
     assistantMessageId: string | null;
     branchIndex: number;
   }) => void;
@@ -624,11 +727,6 @@ export function MessageList({
                       version,
                       workspaceId,
                     });
-                    const userCommandText = !isAssistant
-                      ? splitUserCommandText(version)
-                      : null;
-                    const visibleUserMessageText =
-                      userCommandText?.text ?? messageText;
                     const userMessageImages = !isAssistant
                       ? getMessageImageParts(version)
                       : [];
@@ -687,26 +785,11 @@ export function MessageList({
                           >
                             {!isAssistant ? (
                               <div className="whitespace-pre-wrap break-words leading-6">
-                                {userCommandText?.commandToken ? (
-                                  <>
-                                    {userCommandText.commandToken}
-                                    {visibleUserMessageText.length > 0
-                                      ? " "
-                                      : null}
-                                  </>
-                                ) : null}
-                                {visibleUserMessageText.length > 0 ? (
-                                  <UserMessageText
-                                    onSourcePreview={onSourcePreview}
-                                    sources={mentionSources}
-                                    sourceIds={mergeSourceIds(
-                                      version.mentionedSourceIds,
-                                      version.effectiveMentionedSourceIds,
-                                    )}
-                                  >
-                                    {visibleUserMessageText}
-                                  </UserMessageText>
-                                ) : null}
+                                <UserMessageContent
+                                  content={messageText}
+                                  onSourcePreview={onSourcePreview}
+                                  sources={mentionSources}
+                                />
                               </div>
                             ) : (
                               <div className="space-y-3">
@@ -790,8 +873,7 @@ export function MessageList({
                                   onClick={() => {
                                     onRestartFromMessage?.({
                                       groupId: group.groupId,
-                                      message: visibleUserMessageText,
-                                      command: version.command,
+                                      message: messageText,
                                       messageId: version.id,
                                       assistantMessageId:
                                         selectedAssistantVersionForUser?.id ??

@@ -19,6 +19,7 @@ import {
   listSourceMentionRecords,
   listSourceRecords,
   listSourceRecordsByIds,
+  listSourceRecordsByTitles,
   updateSourceRecordAndInvalidateDocuments,
   updateSourceRecord,
 } from "./repository";
@@ -212,6 +213,18 @@ export async function resolveSourceTreeScope(input: {
     selectedDirectoryIds,
     expandedDescendantSourceIds,
   };
+}
+
+export async function resolveSourceIdsByTitles(input: {
+  teamId: string;
+  workspaceId: string;
+  titles: string[];
+}) {
+  const records = await listSourceRecordsByTitles(input);
+  const byTitle = new Map(records.map((record) => [record.title, record.id]));
+  return input.titles
+    .map((title) => byTitle.get(title.trim()))
+    .filter((sourceId): sourceId is string => typeof sourceId === "string");
 }
 
 export class ContentSourceService {

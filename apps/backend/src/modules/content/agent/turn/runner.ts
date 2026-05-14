@@ -188,9 +188,7 @@ function resolveToolCommand(input: PreparedThreadTurn) {
       name: AGENT_TOOL_NAMES.generateImage,
       prompt:
         input.command.arguments?.trim() ||
-        (typeof input.userMessage.content === "string"
-          ? input.userMessage.content.trim()
-          : ""),
+        input.messageContent.trim(),
     };
   }
 
@@ -635,6 +633,7 @@ export const testExports = {
   getFilesystemToolDescription,
   getFilesystemToolEndTitle,
   getFilesystemToolStartTitle,
+  resolveToolCommand,
 };
 
 export function normalizeGeneratedImageProgressEvent(

@@ -128,6 +128,67 @@ test("normalizes all-failed web_fetch outputs to display-safe metadata", () => {
   });
 });
 
+test("resolveToolCommand uses clean message content when display content has markers", () => {
+  const command = testExports.resolveToolCommand({
+    artifactIntent: {
+      kind: "image",
+      shouldInjectTool: true,
+      source: "explicit_tool",
+      confidence: 1,
+      reason: "explicit tool",
+      config: {
+        aspectRatio: "auto",
+        quality: "auto",
+        style: "auto",
+      },
+      warnings: [],
+    },
+    command: {
+      arguments: "",
+      canonicalName: "/generate_image",
+      description: "Generate image",
+      displayName: "Generate image",
+      kind: "tool",
+      name: "/generate_image",
+      skillSlug: "",
+      toolName: "generate_image",
+    },
+    generateImageTool: {
+      enabled: true,
+      mode: "generate",
+    },
+    imageProfile: {
+      capabilities: {
+        controls: {},
+        supported: true,
+      },
+      profile: {
+        id: "profile-1",
+        kind: "image",
+        gatewayConfigId: "gateway-1",
+        profileAlias: "image-default",
+        modelAlias: "image-model",
+        requestedDimensions: null,
+        vectorStrategy: "disabled",
+        isDefault: true,
+        isActive: true,
+        configJson: {},
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+    },
+    messageContent: "draw a dashboard",
+    userMessage: {
+      content: "[tool:generate_image](Generate image) draw a dashboard",
+    },
+  } as unknown as Parameters<typeof testExports.resolveToolCommand>[0]);
+
+  assert.deepEqual(command, {
+    name: "generate_image",
+    prompt: "draw a dashboard",
+  });
+});
+
 test("filesystem tool titles classify glob scope from mounted pattern", () => {
   assert.equal(
     testExports.getFilesystemToolStartTitle("glob", {

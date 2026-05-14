@@ -28,7 +28,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, type Components } from "streamdown";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -337,18 +337,70 @@ export const MessageBranchPage = ({
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
-
-export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className
-      )}
-      plugins={streamdownPlugins}
+const streamdownComponents: Components = {
+  img: ({ alt, className, node: _node, ...props }) => (
+    <img
+      alt={alt ?? ""}
+      className={cn("my-4 max-w-full rounded-lg", className)}
+      data-streamdown="image"
+      loading="lazy"
       {...props}
     />
   ),
+  td: ({ children, className, node: _node, ...props }) => {
+    const { vAlign: _vAlign, ...domProps } = props as typeof props & {
+      vAlign?: unknown;
+    };
+
+    return (
+      <td
+        className={cn("px-4 py-2 text-sm", className)}
+        data-streamdown="table-cell"
+        {...domProps}
+      >
+        {children}
+      </td>
+    );
+  },
+  th: ({ children, className, node: _node, ...props }) => {
+    const { vAlign: _vAlign, ...domProps } = props as typeof props & {
+      vAlign?: unknown;
+    };
+
+    return (
+      <th
+        className={cn(
+          "whitespace-nowrap px-4 py-2 text-left font-semibold text-sm",
+          className
+        )}
+        data-streamdown="table-header-cell"
+        {...domProps}
+      >
+        {children}
+      </th>
+    );
+  },
+};
+
+export const MessageResponse = memo(
+  ({ className, components, ...props }: MessageResponseProps) => {
+    const safeComponents = useMemo(
+      () => ({ ...streamdownComponents, ...components }),
+      [components]
+    );
+
+    return (
+      <Streamdown
+        className={cn(
+          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
+        components={safeComponents}
+        plugins={streamdownPlugins}
+        {...props}
+      />
+    );
+  },
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     nextProps.isAnimating === prevProps.isAnimating

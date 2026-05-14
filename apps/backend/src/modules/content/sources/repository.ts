@@ -247,6 +247,33 @@ export async function listSourceRecordsByIds(input: {
   return rows.map(mapSource);
 }
 
+export async function listSourceRecordsByTitles(input: {
+  teamId: string;
+  workspaceId: string;
+  titles: string[];
+}) {
+  const titles = Array.from(
+    new Set(input.titles.map((title) => title.trim()).filter(Boolean)),
+  );
+  if (titles.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select()
+    .from(sources)
+    .where(
+      and(
+        eq(sources.teamId, input.teamId),
+        eq(sources.workspaceId, input.workspaceId),
+        inArray(sources.title, titles),
+        ne(sources.status, "archived"),
+      ),
+    );
+
+  return rows.map(mapSource);
+}
+
 export async function listSourceChildren(input: {
   teamId: string;
   workspaceId: string;

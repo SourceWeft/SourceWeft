@@ -323,42 +323,80 @@ test("empty thread message validation rejects textless imageless messages", () =
   );
 });
 
-test("parseRequestedCommand recognizes tool and skill slash forms", () => {
-  assert.deepEqual(
+test("parseRequestedCommand ignores plain slash text without a structured command", () => {
+  assert.equal(
     testExports.parseRequestedCommand({
       content: "/generate_image neon dashboard",
+    } as Parameters<typeof testExports.parseRequestedCommand>[0]),
+    null,
+  );
+  assert.deepEqual(
+    testExports.parseRequestedCommand({
+      command: {
+        arguments: "neon dashboard",
+        kind: "tool",
+        name: "/generate_image",
+      },
     }),
     {
       arguments: "neon dashboard",
+      kind: "tool",
       name: "/generate_image",
     },
   );
-  assert.deepEqual(
-    testExports.parseRequestedCommand({
-      content: "/image neon dashboard",
-    }),
-    {
-      arguments: "neon dashboard",
-      name: "/image",
-    },
-  );
   assert.equal(testExports.resolveToolCommandName("/image"), null);
+});
+
+test("parsePromptMarkers removes command markers and keeps source mentions in clean content", () => {
   assert.deepEqual(
-    testExports.parseRequestedCommand({
-      content: "/pm-data-analytics Show active users",
-    }),
+    testExports.parsePromptMarkers(
+      "[skills:feynman](Feynman) hi [source:source-1](Hacker News) [tool:generate_image](Generate image)",
+    ),
     {
-      arguments: "Show active users",
-      name: "/pm-data-analytics",
+      cleanContent: "hi @Hacker News",
+      markers: [
+        {
+          kind: "skill",
+          label: "Feynman",
+          type: "command",
+          value: "/feynman",
+        },
+        {
+          sourceId: "source-1",
+          title: "Hacker News",
+          type: "source",
+        },
+        {
+          kind: "tool",
+          label: "Generate image",
+          type: "command",
+          value: "/generate_image",
+        },
+      ],
     },
   );
+});
+
+test("parsePromptMarkers preserves escaped marker labels", () => {
   assert.deepEqual(
-    testExports.parseRequestedCommand({
-      content: "/pm-data-analytics:write-query Show active users",
-    }),
+    testExports.parsePromptMarkers(
+      String.raw`[source:source-1](Quarterly (Q1\) \] Report) [skill-command:feynman%3Asimplify](Feynman Simplify) hi`,
+    ),
     {
-      arguments: "Show active users",
-      name: "/pm-data-analytics:write-query",
+      cleanContent: "@Quarterly (Q1) ] Report hi",
+      markers: [
+        {
+          sourceId: "source-1",
+          title: "Quarterly (Q1) ] Report",
+          type: "source",
+        },
+        {
+          kind: "skill-command",
+          label: "Feynman Simplify",
+          type: "command",
+          value: "/feynman:simplify",
+        },
+      ],
     },
   );
 });
@@ -366,7 +404,11 @@ test("parseRequestedCommand recognizes tool and skill slash forms", () => {
 test("resolveThreadCommand resolves slash skill activation when skill was loaded by slug", () => {
   const command = testExports.resolveThreadCommand({
     command: testExports.parseRequestedCommand({
-      content: "/feynman 解释二八定律",
+      command: {
+        arguments: "解释二八定律",
+        kind: "skill",
+        name: "/feynman",
+      },
     }),
     enabledSkills: [
       {
@@ -396,7 +438,11 @@ test("resolveThreadCommand resolves slash skill activation when skill was loaded
 test("resolveThreadCommand resolves slash skill command when skill was loaded by slug", () => {
   const command = testExports.resolveThreadCommand({
     command: testExports.parseRequestedCommand({
-      content: "/feynman:explain 解释二八定律",
+      command: {
+        arguments: "解释二八定律",
+        kind: "skill-command",
+        name: "/feynman:explain",
+      },
     }),
     enabledSkills: [
       {
