@@ -184,9 +184,22 @@ export function toSummary(input: {
   account: BillingAccountState;
   billingMode: BillingRuntimeConfig["mode"];
   seatsUsed?: number;
+  activeMembers?: number;
+  pendingInvitations?: number;
 }): BillingSummaryResponse {
   const pagesRemaining = getAvailablePages(input.account);
-  const seatsUsed = Math.max(0, Math.floor(input.seatsUsed ?? 0));
+  const activeMembers = Math.max(
+    0,
+    Math.floor(input.activeMembers ?? input.seatsUsed ?? 0),
+  );
+  const pendingInvitations = Math.max(
+    0,
+    Math.floor(input.pendingInvitations ?? 0),
+  );
+  const seatsUsed = Math.max(
+    0,
+    Math.floor(input.seatsUsed ?? activeMembers + pendingInvitations),
+  );
   const seatsLimit = Math.max(0, input.account.seatCount);
 
   return {
@@ -219,6 +232,8 @@ export function toSummary(input: {
       used: seatsUsed,
       limit: seatsLimit,
       remaining: Math.max(seatsLimit - seatsUsed, 0),
+      activeMembers,
+      pendingInvitations,
     },
     spendLimits: {
       softCapUsd: input.account.spendSoftCapUsd,

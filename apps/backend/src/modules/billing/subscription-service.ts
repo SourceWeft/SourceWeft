@@ -683,7 +683,12 @@ export class BillingSubscriptionService {
           account.teamId,
           client,
         );
-        const seatCount = Math.max(TEAM_SEAT_MIN, seatsUsed);
+        const pendingInvitations =
+          await this.store.countPendingTeamInvitations(account.teamId, client);
+        const seatCount = Math.max(
+          TEAM_SEAT_MIN,
+          seatsUsed + pendingInvitations,
+        );
         return {
           seatCount,
           currentSeatCount: account.seatCount,
@@ -1177,14 +1182,21 @@ export class BillingSubscriptionService {
 
     const seatCount = this.normalizeRequestedSeatCount(requested);
     const seatsUsed = await this.store.countTeamMembers(teamId, client);
-    if (seatCount < seatsUsed) {
+    const pendingInvitations = await this.store.countPendingTeamInvitations(
+      teamId,
+      client,
+    );
+    const allocatedSeats = seatsUsed + pendingInvitations;
+    if (seatCount < allocatedSeats) {
       throw new BillingError(
-        "SEAT_COUNT_BELOW_MEMBERS",
+        "SEAT_COUNT_BELOW_ALLOCATED_SEATS",
         409,
-        "seatCount cannot be lower than current team members",
+        "seatCount cannot be lower than current team members and pending invitations",
         {
           seatCount,
           seatsUsed,
+          pendingInvitations,
+          allocatedSeats,
         },
       );
     }
@@ -1200,7 +1212,7 @@ export class BillingSubscriptionService {
       return;
     }
 
-    await this.accountService.withLockedAccount(
+    const target = await this.accountService.withLockedAccount(
       teamId,
       async ({ account, client }) => {
         const subscription = await this.store.getSubscriptionByTeam(
@@ -1213,7 +1225,7 @@ export class BillingSubscriptionService {
           subscription.planFamily !== TEAM_STANDARD_PLAN ||
           !isActiveSubscriptionStatus(subscription.status)
         ) {
-          return;
+          return null;
         }
 
         const seatsUsed = await this.store.countTeamMembers(
@@ -1226,28 +1238,30 @@ export class BillingSubscriptionService {
         );
         const allocatedSeats =
           mode === "add_member" ? seatsUsed : seatsUsed + pendingInvites;
-        const limitReached =
-          mode === "accept_invitation"
-            ? allocatedSeats > account.seatCount
-            : allocatedSeats >= account.seatCount;
+        const requestedSeats =
+          mode === "accept_invitation" ? allocatedSeats : allocatedSeats + 1;
 
-        if (!limitReached) {
-          return;
+        if (requestedSeats <= account.seatCount) {
+          return null;
         }
 
-        throw new BillingError(
-          "TEAM_SEAT_LIMIT_REACHED",
-          409,
-          "Team seat limit reached. Add seats in billing before adding more members.",
-          {
-            seatCount: account.seatCount,
-            seatsUsed,
-            pendingInvites,
-            mode,
-          },
-        );
+        return requestedSeats;
       },
     );
+
+    if (target === null) {
+      return;
+    }
+
+    await this.syncTeamSubscriptionSeats(teamId, {
+      seatCount: target,
+      reason:
+        mode === "invite"
+          ? "invitation_created"
+          : mode === "accept_invitation"
+            ? "invitation_accepted"
+            : "member_added",
+    });
   }
 
   private seatSyncAlertKey(teamId: string) {

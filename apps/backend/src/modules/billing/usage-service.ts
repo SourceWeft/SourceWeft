@@ -57,15 +57,20 @@ export class BillingUsageService {
     return this.accountService.withLockedAccount(
       teamId,
       async ({ account, client }) => {
-        const seatsUsed = await this.store.countTeamMembers(
+        const activeMembers = await this.store.countTeamMembers(
           account.teamId,
           client,
         );
+        const pendingInvitations =
+          await this.store.countPendingTeamInvitations(account.teamId, client);
+        const seatsUsed = activeMembers + pendingInvitations;
 
         return toSummary({
           account,
           billingMode: this.runtimeConfig.mode,
           seatsUsed,
+          activeMembers,
+          pendingInvitations,
         });
       },
     );

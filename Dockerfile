@@ -24,7 +24,7 @@ COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/tailwind-config/package.json packages/tailwind-config/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json
 COPY packages/ui/package.json packages/ui/package.json
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=cacheKey-pnpm-store,target=/pnpm/store pnpm install --frozen-lockfile
 
 FROM deps AS builder
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
@@ -55,7 +55,7 @@ COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/credits-core/package.json packages/credits-core/package.json
 COPY packages/model-gateway/package.json packages/model-gateway/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json
-RUN --mount=type=cache,id=pnpm-runtime-store,target=/pnpm/store \
+RUN --mount=type=cache,id=cacheKey-pnpm-runtime-store,target=/pnpm/store \
   apk add --no-cache --virtual .runtime-build-deps make g++ python3 \
   && pnpm install --filter @sourceweft/backend... --frozen-lockfile --prod=false \
   && apk del .runtime-build-deps

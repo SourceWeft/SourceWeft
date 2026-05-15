@@ -123,6 +123,8 @@ export const billingSummaryResponseSchema = z.object({
     used: z.number().int().nonnegative(),
     limit: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
+    activeMembers: z.number().int().nonnegative(),
+    pendingInvitations: z.number().int().nonnegative(),
   }),
   spendLimits: z.object({
     softCapUsd: z.number().nonnegative().nullable(),
