@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ConnectorError, toConnectorError } from "./errors";
+import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   createActionRunRecord,
@@ -77,6 +78,11 @@ export class ConnectorActionRunner {
         "Connector action is not supported",
       );
     }
+    validateObjectWithJsonSchema({
+      schema: actionSpec.inputSchema,
+      value: input.requestJson,
+      label: "requestJson",
+    });
 
     const redactedRequest = redactConnectorSecrets(
       input.requestJson,
@@ -180,13 +186,23 @@ export class ConnectorActionRunner {
   }
 
   async execute(input: {
-    teamId: string;
     workspaceId: string;
     connectorId: string;
     actionRunId: string;
     userId: string;
   }) {
-    const action = await findActionRunRecord(input);
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "connector.action.approve",
+    });
+    const lookup = {
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: input.connectorId,
+      actionRunId: input.actionRunId,
+    };
+    const action = await findActionRunRecord(lookup);
     if (!action) {
       throw new ConnectorError(
         404,
@@ -201,7 +217,11 @@ export class ConnectorActionRunner {
         "Connector action must be approved before execution",
       );
     }
-    const connector = await findSourceConnectorRecord(input);
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: input.connectorId,
+    });
     if (!connector || connector.status !== "active") {
       throw new ConnectorError(
         409,
@@ -211,22 +231,22 @@ export class ConnectorActionRunner {
     }
 
     await updateActionRunRecord({
-      ...input,
+      ...lookup,
       status: "running",
       executedBy: input.userId,
     });
 
     try {
       const accessToken = await this.oauthService.getRuntimeToken({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
         accountId: connector.oauthAccountId,
         connectorType: connector.connectorType,
       });
       const adapter = this.registry.getAdapter(connector.connectorType);
       const result = await adapter.executeAction({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
         connectorId: connector.id,
         connectorType: connector.connectorType,
         actionType: action.actionType,
@@ -236,7 +256,7 @@ export class ConnectorActionRunner {
         idempotencyKey: action.idempotencyKey,
       });
       const updated = await updateActionRunRecord({
-        ...input,
+        ...lookup,
         status: "succeeded",
         resultJson: redactConnectorSecrets(result.result) as Record<
           string,
@@ -248,7 +268,7 @@ export class ConnectorActionRunner {
     } catch (error) {
       const connectorError = toConnectorError(error);
       const failed = await updateActionRunRecord({
-        ...input,
+        ...lookup,
         status: "failed",
         errorCode: connectorError.code,
         errorMessage: connectorError.message,

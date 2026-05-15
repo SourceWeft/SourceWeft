@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CreateOrganizationDialog,
   OrganizationMembersCard,
   OrganizationSettingsCards,
   OrganizationsCard,
@@ -9,6 +8,8 @@ import {
 import { MailPlus, Plus, Users } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { useState } from "react";
+import { TeamCheckoutDialog } from "../../_components/team-checkout-dialog";
+import { getPricingConfig } from "../../_landing/pricing-config";
 import {
   DashboardEmbed,
   DashboardMetaRow,
@@ -27,6 +28,9 @@ export function DashboardTeamModal({
 }) {
   const resolvedName = teamName || "Personal team";
   const [createOpen, setCreateOpen] = useState(false);
+  const teamPlan = getPricingConfig().find((plan) => plan.id === "team");
+  const monthlyTeamSeatPrice = teamPlan?.monthlyPrice ?? 0;
+  const yearlyTeamSeatPrice = teamPlan?.yearlyPrice ?? 0;
 
   return (
     <>
@@ -34,7 +38,7 @@ export function DashboardTeamModal({
         actions={
           <Button onClick={() => setCreateOpen(true)} size="sm" type="button">
             <Plus className="h-4 w-4" />
-            Create org
+            Create team
           </Button>
         }
         className="sm:max-w-3xl"
@@ -92,7 +96,17 @@ export function DashboardTeamModal({
           </DashboardSection>
         </div>
       </DashboardModalShell>
-      <CreateOrganizationDialog onOpenChange={setCreateOpen} open={createOpen} />
+      <TeamCheckoutDialog
+        allowBillingIntervalSwitch
+        billingInterval="yearly"
+        monthlyPerSeatPrice={monthlyTeamSeatPrice}
+        onOpenChange={setCreateOpen}
+        open={createOpen}
+        perSeatPrice={yearlyTeamSeatPrice}
+        referencePrefix="dashboard-team"
+        source="dashboard"
+        yearlyPerSeatPrice={yearlyTeamSeatPrice}
+      />
     </>
   );
 }

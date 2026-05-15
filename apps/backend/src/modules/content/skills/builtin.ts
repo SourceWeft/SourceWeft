@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { SkillManifestJson } from "../../../shared/db/schema";
+import { resolveBackendRuntimePath } from "../../../shared/runtime-paths";
 import {
   agentToolRequiredForModelKind,
   getAgentToolConfigKeys,
@@ -52,10 +52,14 @@ type ParsedBuiltinManifest = {
   defaultConfig?: Record<string, unknown>;
 };
 
-const builtinRoot = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "builtin",
-);
+const builtinRoot = resolveBackendRuntimePath({
+  candidates: [
+    "dist/modules/content/skills/builtin",
+    "src/modules/content/skills/builtin",
+  ],
+  envVar: "BUILTIN_SKILLS_DIR",
+  label: "builtin skills directory",
+});
 
 const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
   ".md": "text/markdown",

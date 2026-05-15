@@ -29,12 +29,17 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store pnpm install --frozen-lo
 FROM deps AS builder
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
 ARG NEXT_PUBLIC_WEB_BASE_URL=http://localhost:3000
+ARG NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED=false
+ARG NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED=false
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 ENV NEXT_PUBLIC_WEB_BASE_URL=${NEXT_PUBLIC_WEB_BASE_URL}
+ENV NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED=${NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED}
+ENV NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED=${NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED}
 COPY . .
 RUN pnpm --filter @sourceweft/ui-web build
 RUN pnpm --filter web build
+RUN pnpm --filter @sourceweft/backend build
 RUN find . -name ".turbo" -type d -prune -exec rm -rf '{}' + \
   && rm -rf apps/web/.next/cache
 
@@ -52,7 +57,7 @@ COPY packages/model-gateway/package.json packages/model-gateway/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json
 RUN --mount=type=cache,id=pnpm-runtime-store,target=/pnpm/store \
   apk add --no-cache --virtual .runtime-build-deps make g++ python3 \
-  && pnpm install --filter @sourceweft/backend... --frozen-lockfile \
+  && pnpm install --filter @sourceweft/backend... --frozen-lockfile --prod=false \
   && apk del .runtime-build-deps
 RUN addgroup -S sourceweft \
   && adduser -S sourceweft -G sourceweft
@@ -60,8 +65,10 @@ COPY --chown=sourceweft:sourceweft --from=builder /app/apps/web/.next/standalone
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/web/.next/static web-standalone/apps/web/.next/static
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/web/public web-standalone/apps/web/public
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/config apps/backend/config
+COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/dist apps/backend/dist
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/drizzle apps/backend/drizzle
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/drizzle.config.ts apps/backend/drizzle.config.ts
+COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/scripts apps/backend/scripts
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/src apps/backend/src
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/backend/tsconfig.json apps/backend/tsconfig.json
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/contracts/src packages/contracts/src

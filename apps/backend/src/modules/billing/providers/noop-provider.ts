@@ -9,19 +9,26 @@ import type {
   BillingProviderUpdateSeatsResult,
 } from "../types";
 
-function notConfigured(): never {
+function notConfigured(input?: BillingProviderCheckoutInput): never {
+  const planLabel =
+    input?.planFamily === "individual_pro"
+      ? "personal Pro checkout"
+      : input?.planFamily === "team_standard"
+        ? "team subscription checkout"
+        : "billing checkout";
+
   throw new BillingError(
     "BILLING_PROVIDER_NOT_CONFIGURED",
     503,
-    "Billing provider is not configured for team subscriptions",
+    `Billing provider is not configured for ${planLabel}`,
   );
 }
 
 export class NoopBillingProvider implements BillingProviderAdapter {
   async createCheckout(
-    _input: BillingProviderCheckoutInput,
+    input: BillingProviderCheckoutInput,
   ): Promise<BillingProviderCheckoutResult> {
-    notConfigured();
+    notConfigured(input);
   }
 
   async createPortal(

@@ -36,6 +36,7 @@ export type BillingStore = {
   listLedger(
     teamId: string,
     limit?: number,
+    options?: { activityOnly?: boolean },
     client?: PoolClient,
   ): Promise<BillingLedgerRow[]>;
   getOrderById(
@@ -86,6 +87,19 @@ export type BillingStore = {
     teamId: string,
     client?: PoolClient,
   ): Promise<BillingSubscriptionState | null>;
+  getSubscriptionByProviderSubscription(
+    provider: BillingSubscriptionState["provider"],
+    externalSubscriptionId: string,
+    client?: PoolClient,
+  ): Promise<BillingSubscriptionState | null>;
+  getLatestCustomerSubscriptionByUser(
+    userId: string,
+    client?: PoolClient,
+  ): Promise<BillingSubscriptionState | null>;
+  getLatestCustomerOrderByUser(
+    userId: string,
+    client?: PoolClient,
+  ): Promise<BillingOrderState | null>;
   upsertSubscription(
     snapshot: TeamSubscriptionSnapshot,
     client: PoolClient,

@@ -2,6 +2,7 @@ import {
   createPersonalOrganizationForUser,
   createTeamOrganizationForUser,
   createWorkspaceRecord,
+  ensureUserWorkspaceInOrganizationRecord,
   ensureWorkspaceMembership,
   findMembershipByUser,
   findOrganizationById,
@@ -82,15 +83,24 @@ export class WorkspaceService {
     return listWorkspacesForMember(input);
   }
 
+  async ensureUserWorkspaceInOrganization(input: {
+    organizationId: string;
+    userId: string;
+  }) {
+    const name = "My Workspace";
+    return ensureUserWorkspaceInOrganizationRecord({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      name,
+      primarySlug: slugify(name) || "workspace",
+    });
+  }
+
   async ensureDefaultWorkspace(input: {
     organizationId: string;
     userId: string;
   }) {
-    return this.createWorkspace({
-      organizationId: input.organizationId,
-      userId: input.userId,
-      name: "My Workspace",
-    });
+    return this.ensureUserWorkspaceInOrganization(input);
   }
 
   async updateWorkspaceName(input: {

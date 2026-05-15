@@ -11,6 +11,7 @@ import type {
   MeterConsumeResponse,
   MeterIngestionRequest,
   MeterIngestionResponse,
+  PreviewTeamSubscriptionSeatsResponse,
   UpdateTeamSubscriptionSeatsRequest,
   UpdateTeamSubscriptionSeatsResponse,
   UpdateSpendLimitsRequest,
@@ -41,7 +42,7 @@ export class BillingService {
   private readonly reconcileService: BillingReconcileService;
 
   constructor(
-    store: BillingStore,
+    private readonly store: BillingStore,
     runtimeConfig: BillingRuntimeConfig,
     provider: BillingProviderAdapter,
     alerts?: ConstructorParameters<typeof BillingSubscriptionService>[4],
@@ -92,12 +93,27 @@ export class BillingService {
     return this.usageService.getUsage(teamId);
   }
 
-  getLedger(teamId: string, limit = 50) {
-    return this.usageService.getLedger(teamId, limit);
+  getLedger(teamId: string, limit = 50, options?: { activityOnly?: boolean }) {
+    return this.usageService.getLedger(teamId, limit, options);
   }
 
   getSubscription(teamId: string) {
     return this.subscriptionService.getSubscription(teamId);
+  }
+
+  async getSubscriptionWebhookContext(
+    provider: TeamSubscriptionSnapshot["provider"],
+    externalSubscriptionId: string,
+  ) {
+    const subscription = await this.store.getSubscriptionByProviderSubscription(
+      provider,
+      externalSubscriptionId,
+    );
+    const account = subscription
+      ? await this.store.getAccount(subscription.teamId)
+      : null;
+
+    return { account, subscription };
   }
 
   createSubscriptionCheckout(
@@ -160,6 +176,13 @@ export class BillingService {
 
   assertCanAddTeamMember(teamId: string) {
     return this.subscriptionService.assertCanAddTeamMember(teamId);
+  }
+
+  previewTeamSubscriptionSeats(
+    teamId: string,
+    input: UpdateTeamSubscriptionSeatsRequest,
+  ): Promise<PreviewTeamSubscriptionSeatsResponse> {
+    return this.subscriptionService.previewTeamSubscriptionSeats(teamId, input);
   }
 
   syncTeamSubscriptionSeats(

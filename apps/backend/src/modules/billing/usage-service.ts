@@ -19,7 +19,11 @@ import type {
 import { BillingAccountService } from "./account-service";
 import { BillingOrderService } from "./order-service";
 import { BillingError } from "./errors";
-import { appendBillingLedger } from "./ledger";
+import {
+  appendBillingLedger,
+  createOperationId,
+  formatSignedLedgerDelta,
+} from "./ledger";
 import type { BillingStore } from "./store-port";
 import type { BillingAccountState, BillingRuntimeConfig } from "./types";
 import {
@@ -74,6 +78,7 @@ export class BillingUsageService {
         const entries = await this.store.listLedger(
           account.teamId,
           undefined,
+          undefined,
           client,
         );
         const usageByFeature = new Map<string, BillingUsageItem>();
@@ -92,6 +97,10 @@ export class BillingUsageService {
           }
 
           if (entry.eventType !== "consume") {
+            continue;
+          }
+
+          if (entry.unitType !== "credit" && entry.unitType !== "page") {
             continue;
           }
 
@@ -146,7 +155,11 @@ export class BillingUsageService {
     );
   }
 
-  async getLedger(teamId: string, limit = 50): Promise<BillingLedgerResponse> {
+  async getLedger(
+    teamId: string,
+    limit = 50,
+    options?: { activityOnly?: boolean },
+  ): Promise<BillingLedgerResponse> {
     return this.accountService.withLockedAccount(
       teamId,
       async ({ account, client }) => {
@@ -156,7 +169,12 @@ export class BillingUsageService {
 
         return {
           teamId: account.teamId,
-          items: await this.store.listLedger(account.teamId, safeLimit, client),
+          items: await this.store.listLedger(
+            account.teamId,
+            safeLimit,
+            options,
+            client,
+          ),
         };
       },
     );
@@ -298,6 +316,15 @@ export class BillingUsageService {
             workspaceId: input.workspaceId,
             referenceId: input.referenceId,
             idempotencyKey,
+            operationId:
+              idempotencyKey ??
+              (input.referenceId
+                ? createOperationId("usage", account.teamId, input.referenceId)
+                : undefined),
+            operationType: "usage",
+            activityVisible: true,
+            activityTitle: "Chat credits used",
+            activitySummary: formatSignedLedgerDelta("credit", -creditsToConsume),
             metadata: {
               creditUnitUsd: this.runtimeConfig.creditUnitUsd,
               ...(input.modelKind ? { modelKind: input.modelKind } : {}),
@@ -414,6 +441,15 @@ export class BillingUsageService {
             workspaceId: input.workspaceId,
             referenceId: input.referenceId,
             idempotencyKey,
+            operationId:
+              idempotencyKey ??
+              (input.referenceId
+                ? createOperationId("usage", account.teamId, input.referenceId)
+                : undefined),
+            operationType: "usage",
+            activityVisible: true,
+            activityTitle: "Pages indexed",
+            activitySummary: formatSignedLedgerDelta("page", -pagesToConsume),
             metadata: {
               monthlyPagesGrant: account.monthlyPagesGrant,
               monthlyPagesBalance: account.monthlyPagesBalance,

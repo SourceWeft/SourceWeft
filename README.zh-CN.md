@@ -73,11 +73,17 @@ SourceWeft 支持自托管，可通过自己的 Model Gateway 路由对话、Emb
 git clone https://github.com/SourceWeft/SourceWeft.git
 cd SourceWeft
 cp docker/.env.example docker/.env
-# 编辑 docker/.env——设置 MODEL_GATEWAY_ENCRYPTION_SECRET 和至少一个模型供应商密钥
+# 编辑 docker/.env——至少设置两个必填 secret；本地以外部署请使用强随机值。
+# OSS 默认开启额度拦截，关闭支付/邮件 SaaS provider。
+# 模型 provider key 不影响启动；使用模型功能前再配置即可。
 docker compose -f docker/docker-compose.yml up -d
 ```
 
 打开 **http://localhost:3000**，注册，开始使用。
+
+SaaS 计费和支付 checkout 需要显式启用。请参考 `docker/.env.example`
+里的 SaaS billing 区块，配置 `SOURCEWEFT_SAAS_ENABLED`、
+`BACKEND_BILLING_PROVIDER`、Creem 和前端 checkout UI 开关。
 
 ---
 

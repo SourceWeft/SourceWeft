@@ -1,9 +1,9 @@
 import { getPlanQuota } from "@sourceweft/credits-core";
 import type {
   BillingInterval,
-  LedgerUnitType,
   PricingCheckoutPlan,
   SubscriptionPlanFamily,
+  TopupUnitType,
 } from "@sourceweft/contracts";
 import { BillingError } from "./errors";
 import type { BillingRuntimeConfig } from "./types";
@@ -22,7 +22,7 @@ type SubscriptionCatalogEntry = {
 
 type TopupCatalogEntry = {
   kind: "credit_topup" | "page_topup";
-  unitType: LedgerUnitType;
+  unitType: TopupUnitType;
   unitAmount: number;
   amountCents: number;
   productId: string;
@@ -30,7 +30,7 @@ type TopupCatalogEntry = {
 
 export type BillingCatalog = {
   subscriptions: Record<SubscriptionPlanFamily, SubscriptionCatalogEntry>;
-  topups: Record<LedgerUnitType, TopupCatalogEntry>;
+  topups: Record<TopupUnitType, TopupCatalogEntry>;
 };
 
 export type PricingDisplayPlan = {
@@ -105,7 +105,7 @@ export function getSubscriptionCatalogEntry(
 
 export function getTopupCatalogEntry(
   runtimeConfig: BillingRuntimeConfig,
-  unitType: LedgerUnitType,
+  unitType: TopupUnitType,
 ) {
   return createBillingCatalog(runtimeConfig).topups[unitType];
 }
@@ -135,12 +135,22 @@ export function resolveSubscriptionProduct(input: {
 export function validateBillingCatalog(input: {
   runtimeConfig: BillingRuntimeConfig;
   pricingDisplay?: PricingDisplayPlan[];
+  subscriptionPlanFamilies?: SubscriptionPlanFamily[];
+  topupUnitTypes?: TopupUnitType[];
 }) {
   const catalog = createBillingCatalog(input.runtimeConfig);
   const errors: string[] = [];
   const providerRequiresProducts = input.runtimeConfig.provider === "creem";
+  const subscriptionEntries = input.subscriptionPlanFamilies
+    ? input.subscriptionPlanFamilies.map(
+        (planFamily) => catalog.subscriptions[planFamily],
+      )
+    : Object.values(catalog.subscriptions);
+  const topupEntries = input.topupUnitTypes
+    ? input.topupUnitTypes.map((unitType) => catalog.topups[unitType])
+    : Object.values(catalog.topups);
 
-  for (const entry of Object.values(catalog.subscriptions)) {
+  for (const entry of subscriptionEntries) {
     const quota = getPlanQuota(entry.planFamily, entry.quotaSeatCount);
     if (quota.monthlyCreditsGrant <= 0 || quota.monthlyPagesLimit <= 0) {
       errors.push(`Missing quota for active plan ${entry.planFamily}`);
@@ -157,7 +167,7 @@ export function validateBillingCatalog(input: {
     }
   }
 
-  for (const entry of Object.values(catalog.topups)) {
+  for (const entry of topupEntries) {
     if (entry.unitAmount <= 0) {
       errors.push(`Missing unit amount for ${entry.unitType} top-up`);
     }

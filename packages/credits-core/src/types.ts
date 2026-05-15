@@ -20,4 +20,4 @@ export type LedgerEventType =
   | "expire"
   | "adjust";
 
-export type LedgerUnitType = "credit" | "page";
+export type LedgerUnitType = "credit" | "page" | "seat";

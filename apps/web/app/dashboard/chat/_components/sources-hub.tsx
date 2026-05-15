@@ -36,7 +36,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { HttpClientError } from "@sourceweft/sdk";
+import { HttpClientError, type SourceConnector } from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   Alert,
@@ -77,7 +77,7 @@ import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
+import { apiBaseUrl, connectorsClient, contentClient } from "../../../../lib/sdk";
 import { SkillsGallery } from "../../skills/_components/skills-gallery";
 import type { CitationRecord } from "./chat-canvas";
 import { GeneratedImagePreview } from "./chat-canvas/generated-image-preview";
@@ -285,11 +285,10 @@ type DisplayCitationItem = {
 type ConnectorItem = {
   id: string;
   name: string;
-  status: "Connected" | "Syncing" | "Action needed";
+  status: "active" | "paused" | "error" | "disabled";
   meta: string;
+  raw: SourceConnector;
 };
-
-const connectors: ConnectorItem[] = [];
 
 export type ThreadCitationRecord = {
   citation: CitationRecord;
@@ -2258,6 +2257,22 @@ function countFilteredSkills(items: HubSkillItem[], searchQuery: string) {
   ).length;
 }
 
+function mapConnectorToUi(connector: SourceConnector): ConnectorItem {
+  const lastSync = connector.lastIndexedAt
+    ? `Last sync ${new Date(connector.lastIndexedAt).toLocaleString()}`
+    : "Not synced yet";
+  const schedule = connector.periodicIndexingEnabled
+    ? `Every ${connector.indexingFrequencyMinutes ?? "?"} min`
+    : "Manual sync";
+  return {
+    id: connector.id,
+    name: connector.name,
+    status: connector.status,
+    meta: `${connector.connectorType} · ${lastSync} · ${schedule}`,
+    raw: connector,
+  };
+}
+
 export function SourcesHub({
   activeCitationIndex = null,
   citations = [],
@@ -2327,6 +2342,11 @@ export function SourcesHub({
   const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
   const [artifactsLoadingError, setArtifactsLoadingError] = useState<string | null>(null);
+  const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
+  const [isLoadingConnectors, setIsLoadingConnectors] = useState(false);
+  const [connectorsLoadingError, setConnectorsLoadingError] = useState<string | null>(null);
+  const [connectorBusyById, setConnectorBusyById] = useState<Record<string, boolean>>({});
+  const [isConnectingNotion, setIsConnectingNotion] = useState(false);
   const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(null);
   const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(null);
   const [workfileBusyByPath, setWorkfileBusyByPath] = useState<Record<string, boolean>>({});
@@ -2346,7 +2366,7 @@ export function SourcesHub({
   );
   const filteredConnectors = useMemo(
     () => filterConnectors(connectors, searchQueries.Connectors),
-    [searchQueries.Connectors],
+    [connectors, searchQueries.Connectors],
   );
   const filteredSourceCount = useMemo(
     () => countFilteredSources(sources, searchQueries.Sources),
@@ -2540,6 +2560,28 @@ export function SourcesHub({
     }
   }, [workspaceId]);
 
+  const refreshConnectors = useCallback(async () => {
+    if (!workspaceId) {
+      setConnectors([]);
+      setConnectorsLoadingError(null);
+      return;
+    }
+
+    setIsLoadingConnectors(true);
+    setConnectorsLoadingError(null);
+    try {
+      const result = await connectorsClient.list(workspaceId);
+      setConnectors(result.items.map(mapConnectorToUi));
+    } catch (error) {
+      setConnectors([]);
+      setConnectorsLoadingError(
+        getErrorMessage(error, "Failed to load connectors."),
+      );
+    } finally {
+      setIsLoadingConnectors(false);
+    }
+  }, [workspaceId]);
+
   useEffect(() => {
     if (!workspaceId) {
       loadedSourcesWorkspaceIdRef.current = null;
@@ -2617,6 +2659,10 @@ export function SourcesHub({
 
     void refreshArtifacts();
   }, [refreshArtifacts, workspaceId]);
+
+  useEffect(() => {
+    void refreshConnectors();
+  }, [refreshConnectors]);
 
   useEffect(() => {
     if (workfilesRefreshKey > 0) {
@@ -2744,6 +2790,90 @@ export function SourcesHub({
       return next;
     });
   }
+
+  function setConnectorBusy(id: string, busy: boolean) {
+    setConnectorBusyById((prev) => {
+      if (busy) return { ...prev, [id]: true };
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  const handleConnectNotion = useCallback(async () => {
+    if (!workspaceId) {
+      toast.error("No workspace selected yet.");
+      return;
+    }
+
+    setIsConnectingNotion(true);
+    try {
+      const result = await connectorsClient.startOAuth(workspaceId, "notion", {
+        redirectAfter: window.location.href,
+      });
+      window.location.href = result.authorizationUrl;
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to start Notion connection."));
+    } finally {
+      setIsConnectingNotion(false);
+    }
+  }, [workspaceId]);
+
+  const handleCreateNotionConnector = useCallback(async () => {
+    if (!workspaceId) {
+      toast.error("No workspace selected yet.");
+      return;
+    }
+
+    setIsConnectingNotion(true);
+    try {
+      const accounts = await connectorsClient.listAccounts(workspaceId, {
+        connectorType: "notion",
+      });
+      const account = accounts.items.find((item) => item.status === "active");
+      if (!account) {
+        toast.error("Connect Notion before creating a connector.");
+        return;
+      }
+
+      await connectorsClient.create(workspaceId, {
+        connectorType: "notion",
+        name: account.displayName || "Notion",
+        oauthAccountId: account.id,
+        configJson: {
+          includePages: true,
+          includeDataSources: true,
+          includeDatabases: true,
+        },
+        periodicIndexingEnabled: true,
+        indexingFrequencyMinutes: 360,
+      });
+      toast.success("Notion connector created.");
+      await refreshConnectors();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to create Notion connector."));
+    } finally {
+      setIsConnectingNotion(false);
+    }
+  }, [refreshConnectors, workspaceId]);
+
+  const handleSyncConnector = useCallback(
+    async (connector: ConnectorItem) => {
+      if (!workspaceId) return;
+
+      setConnectorBusy(connector.id, true);
+      try {
+        await connectorsClient.sync(workspaceId, connector.id);
+        toast.success("Connector sync queued.");
+        await refreshConnectors();
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to sync connector."));
+      } finally {
+        setConnectorBusy(connector.id, false);
+      }
+    },
+    [refreshConnectors, workspaceId],
+  );
 
   const handleStartRename = useCallback((source: SourceItem) => {
     setEditingSourceId(source.id);
@@ -3645,13 +3775,55 @@ export function SourcesHub({
                   ) : null}
                 </div>
                 <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
-                  <Button size="xs" type="button" variant="outline">
-                    <Link2 className="size-3.5" />
-                    Connect
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        disabled={isConnectingNotion || !workspaceId}
+                        size="xs"
+                        type="button"
+                        variant="outline"
+                      >
+                        {isConnectingNotion ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Link2 className="size-3.5" />
+                        )}
+                        Connect
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          void handleConnectNotion();
+                        }}
+                      >
+                        <Link2 className="size-3.5" />
+                        Connect Notion
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          void handleCreateNotionConnector();
+                        }}
+                      >
+                        <Upload className="size-3.5" />
+                        Create Notion connector
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
-              {filteredConnectors.length === 0 ? (
+              {connectorsLoadingError ? (
+                <Alert className="mb-2" variant="destructive">
+                  <AlertDescription>{connectorsLoadingError}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              {isLoadingConnectors ? (
+                <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                  Loading connectors...
+                </div>
+              ) : filteredConnectors.length === 0 ? (
                 <HubEmptyState
                   description={
                     searchQueries.Connectors
@@ -3683,14 +3855,25 @@ export function SourcesHub({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {connector.meta}
                     </p>
-                    {mode === "new" ? (
-                      <div className="mt-3">
-                        <Button size="xs" type="button" variant="outline">
-                          <Upload className="size-3.5" />
-                          Pull sources
-                        </Button>
-                      </div>
-                    ) : null}
+                    <div className="mt-3 flex items-center gap-1.5">
+                      <Button
+                        disabled={
+                          connector.status !== "active" ||
+                          Boolean(connectorBusyById[connector.id])
+                        }
+                        onClick={() => void handleSyncConnector(connector)}
+                        size="xs"
+                        type="button"
+                        variant="outline"
+                      >
+                        {connectorBusyById[connector.id] ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <RotateCcw className="size-3.5" />
+                        )}
+                        Sync now
+                      </Button>
+                    </div>
                   </article>
                   ))}
                 </div>

@@ -3,8 +3,10 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --filter=!@sourceweft/extension --filter=!@sourceweft/desktop",
+    "dev": "turbo run dev --filter=@sourceweft/ui-web --filter=web --filter=@sourceweft/backend",
+    "dev:backend": "pnpm --filter @sourceweft/backend dev",
     "dev:chrome": "pnpm --filter @sourceweft/extension dev",
+    "dev:docs": "pnpm --filter docs dev",
     "dev:desktop": "turbo run dev --filter=@sourceweft/desktop",
     "lint": "turbo run lint",
     "check-types": "turbo run check-types",

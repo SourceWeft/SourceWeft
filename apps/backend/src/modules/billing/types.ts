@@ -5,6 +5,7 @@ import type {
   PlanFamily,
 } from "@sourceweft/credits-core";
 import type {
+  PreviewTeamSubscriptionSeatsResponse,
   BillingCycleSource,
   BillingInterval,
   BillingOrderKind,
@@ -21,12 +22,13 @@ import type {
   CreatePricingCheckoutResponse,
   CreateTeamSubscriptionCheckoutRequest,
   CreateTeamSubscriptionCheckoutResponse,
-  LedgerUnitType,
+  TopupUnitType,
   UpdateTeamSubscriptionSeatsRequest,
   UpdateTeamSubscriptionSeatsResponse,
 } from "@sourceweft/contracts";
 
 export type BillingRuntimeConfig = {
+  saasEnabled: boolean;
   mode: BillingMode;
   scope: BillingScope;
   provider: BillingProvider;
@@ -37,6 +39,8 @@ export type BillingRuntimeConfig = {
   creditUnitUsd: number;
   defaultMarkupRate: number;
   defaultPlanFamily: PlanFamily;
+  defaultMonthlyPages: number;
+  defaultMonthlyCredits: number;
   reconcileEnabled: boolean;
   creem: {
     apiKey: string;
@@ -213,7 +217,7 @@ export type BillingProviderCheckoutInput = {
   planFamily: SubscriptionPlanFamily | null;
   billingInterval: Exclude<BillingInterval, "unknown"> | null;
   quantity: number;
-  unitType?: LedgerUnitType | null;
+  unitType?: TopupUnitType | null;
   unitAmount?: number | null;
   grantedCredits?: number;
   grantedPages?: number;
@@ -236,6 +240,7 @@ export type BillingProviderPortalInput = {
   teamId: string;
   actorUserId: string;
   externalCustomerId?: string | null;
+  externalSubscriptionId?: string | null;
 };
 
 export type BillingProviderPortalResult = {
@@ -247,7 +252,12 @@ export type BillingProviderUpdateSeatsInput = {
   teamId: string;
   actorUserId?: string | null;
   externalSubscriptionId: string;
+  externalProductId?: string | null;
   seatCount: number;
+  updateBehavior:
+    | "proration-charge-immediately"
+    | "proration-charge"
+    | "proration-none";
 };
 
 export type BillingProviderUpdateSeatsResult = {
@@ -276,5 +286,7 @@ export type TeamSubscriptionCheckoutResult =
   CreateTeamSubscriptionCheckoutResponse;
 export type TeamSubscriptionSeatsInput = UpdateTeamSubscriptionSeatsRequest;
 export type TeamSubscriptionSeatsResult = UpdateTeamSubscriptionSeatsResponse;
+export type TeamSubscriptionSeatsPreview =
+  PreviewTeamSubscriptionSeatsResponse;
 export type TeamSubscriptionPortalResult = CreateTeamBillingPortalResponse;
 export type TeamSubscriptionCancelResult = CancelTeamSubscriptionResponse;

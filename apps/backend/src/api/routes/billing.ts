@@ -186,7 +186,27 @@ export function registerBillingRoutes(app: Hono) {
     await requireTeamMembership(teamId, userId);
 
     const limit = parseLedgerLimit(c.req.query("limit"));
-    const ledger = await billingService.getLedger(teamId, limit);
+    const activityOnly = c.req.query("activity") === "true";
+    const ledger = await billingService.getLedger(teamId, limit, {
+      activityOnly,
+    });
+    return ApiResponse.success(c, ledger);
+  });
+
+  app.get("/v1/teams/:teamId/billing/activity", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const teamId = c.req.param("teamId");
+    const userId = getSessionUserId(session);
+    await requireTeamMembership(teamId, userId);
+
+    const limit = parseLedgerLimit(c.req.query("limit"));
+    const ledger = await billingService.getLedger(teamId, limit, {
+      activityOnly: true,
+    });
     return ApiResponse.success(c, ledger);
   });
 
@@ -327,16 +347,56 @@ export function registerBillingRoutes(app: Hono) {
       );
     }
 
-    const response = await billingService.syncTeamSubscriptionSeats(
-      teamId,
-      {
-        ...parsed.data,
-        actorUserId: userId,
-        reason: "user_requested",
-      },
-    );
+    const response = await billingService.syncTeamSubscriptionSeats(teamId, {
+      ...parsed.data,
+      actorUserId: userId,
+      reason: "user_requested",
+    });
     return ApiResponse.success(c, response);
   });
+
+  app.post(
+    "/v1/teams/:teamId/billing/subscription/seats/preview",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
+
+      const teamId = c.req.param("teamId");
+      const userId = getSessionUserId(session);
+      await requireTeamMembership(teamId, userId, {
+        requireBillingManager: true,
+      });
+
+      const organization = await workspaceService.getOrganization(teamId);
+      if (!organization) {
+        throw ApiError.notFound("Organization not found");
+      }
+
+      if (isPersonalOrganizationMetadata(organization.metadata)) {
+        throw new ApiError(
+          400,
+          "PLAN_SCOPE_MISMATCH",
+          "Seat updates are only available for team billing",
+        );
+      }
+
+      const body = ensureObjectBody(await c.req.json().catch(() => null));
+      const parsed = updateTeamSubscriptionSeatsRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw ApiError.validation(
+          parsed.error.flatten() as Record<string, unknown>,
+        );
+      }
+
+      const response = await billingService.previewTeamSubscriptionSeats(
+        teamId,
+        parsed.data,
+      );
+      return ApiResponse.success(c, response);
+    },
+  );
 
   app.post("/v1/teams/:teamId/billing/subscription/portal", async (c) => {
     const session = await requireSession(c);

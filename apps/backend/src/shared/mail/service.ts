@@ -1,6 +1,7 @@
 import { config } from "../config";
 import { logger } from "../logger";
 import { renderMailTemplate } from "./templates";
+import { ConsoleMailProvider } from "./providers/console-provider";
 import { PlunkApiProvider } from "./providers/plunk-provider";
 import type {
   MailProvider,
@@ -12,6 +13,10 @@ import type {
 
 function createProvider(): MailProvider {
   const provider = config.mail.provider.toLowerCase();
+  if (provider === "console" || provider === "noop") {
+    return new ConsoleMailProvider();
+  }
+
   if (provider === "plunk") {
     return new PlunkApiProvider();
   }

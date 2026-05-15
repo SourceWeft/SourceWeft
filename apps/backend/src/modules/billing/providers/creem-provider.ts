@@ -20,6 +20,72 @@ type CreemServerOptions = {
   testMode?: boolean;
 };
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readString(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function resolveEntityId(value: unknown) {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+
+  return readString(asRecord(value), "id");
+}
+
+function resolveSubscriptionProductId(subscription: unknown) {
+  const record = asRecord(subscription);
+  return (
+    readString(record, "productId") ??
+    readString(record, "product_id") ??
+    resolveEntityId(record?.product)
+  );
+}
+
+export function resolveCreemSubscriptionSeatUpdateItem(input: {
+  subscription: unknown;
+  seatCount: number;
+  fallbackProductId?: string | null;
+}) {
+  const record = asRecord(input.subscription);
+  const items = record?.items;
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+
+  const firstItem = asRecord(items[0]);
+  const itemId = readString(firstItem, "id");
+  if (!itemId) {
+    return null;
+  }
+
+  const productId =
+    readString(firstItem, "productId") ??
+    readString(firstItem, "product_id") ??
+    resolveSubscriptionProductId(input.subscription) ??
+    input.fallbackProductId ??
+    undefined;
+  const priceId =
+    readString(firstItem, "priceId") ??
+    readString(firstItem, "price_id") ??
+    undefined;
+
+  return {
+    id: itemId,
+    ...(productId ? { productId } : {}),
+    ...(priceId ? { priceId } : {}),
+    units: input.seatCount,
+  };
+}
+
 export class CreemBillingProvider implements BillingProviderAdapter {
   private readonly options: CreemServerOptions;
   private readonly defaultSuccessUrl: string;
@@ -54,23 +120,23 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     return productId;
   }
 
-  private resolveSubscriptionItemId(subscription: unknown) {
+  private resolveSubscriptionCustomerId(subscription: unknown) {
     const record =
       subscription && typeof subscription === "object"
         ? (subscription as Record<string, unknown>)
         : null;
-    const items = record?.items;
-    if (!Array.isArray(items) || items.length === 0) {
-      return null;
+    const customer = record?.customer;
+
+    if (typeof customer === "string" && customer.trim()) {
+      return customer;
     }
 
-    const first = items[0];
-    if (!first || typeof first !== "object") {
-      return null;
+    if (customer && typeof customer === "object") {
+      const id = (customer as Record<string, unknown>).id;
+      return typeof id === "string" && id.trim() ? id : null;
     }
 
-    const itemId = (first as Record<string, unknown>).id;
-    return typeof itemId === "string" && itemId.trim() ? itemId : null;
+    return null;
   }
 
   async createCheckout(
@@ -133,7 +199,17 @@ export class CreemBillingProvider implements BillingProviderAdapter {
   async createPortal(
     input: BillingProviderPortalInput,
   ): Promise<BillingProviderPortalResult> {
-    if (!input.externalCustomerId) {
+    let externalCustomerId = input.externalCustomerId ?? null;
+
+    if (!externalCustomerId && input.externalSubscriptionId) {
+      const creemClient = createCreemClient(this.options);
+      const subscription = await creemClient.subscriptions.get(
+        input.externalSubscriptionId,
+      );
+      externalCustomerId = this.resolveSubscriptionCustomerId(subscription);
+    }
+
+    if (!externalCustomerId) {
       throw new BillingError(
         "CREEM_CUSTOMER_ID_MISSING",
         409,
@@ -143,7 +219,7 @@ export class CreemBillingProvider implements BillingProviderAdapter {
 
     const response = await createPortal(
       this.options as any,
-      input.externalCustomerId,
+      externalCustomerId,
     );
 
     return {
@@ -159,9 +235,13 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     const subscription = await creemClient.subscriptions.get(
       input.externalSubscriptionId,
     );
-    const itemId = this.resolveSubscriptionItemId(subscription);
+    const item = resolveCreemSubscriptionSeatUpdateItem({
+      subscription,
+      seatCount: input.seatCount,
+      fallbackProductId: input.externalProductId,
+    });
 
-    if (!itemId) {
+    if (!item) {
       throw new BillingError(
         "CREEM_SUBSCRIPTION_ITEM_MISSING",
         502,
@@ -169,14 +249,17 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       );
     }
 
+    if (!item.productId && !item.priceId) {
+      throw new BillingError(
+        "CREEM_SUBSCRIPTION_ITEM_PRODUCT_MISSING",
+        502,
+        "Creem subscription item did not include a product or price to update",
+      );
+    }
+
     await creemClient.subscriptions.update(input.externalSubscriptionId, {
-      items: [
-        {
-          id: itemId,
-          units: input.seatCount,
-        },
-      ],
-      updateBehavior: "proration-charge-immediately",
+      items: [item],
+      updateBehavior: input.updateBehavior,
     });
 
     return {

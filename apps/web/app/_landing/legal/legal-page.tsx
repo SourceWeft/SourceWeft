@@ -1,7 +1,10 @@
+"use client";
+
 import Link from "next/link";
 
 import { SourceWeftBrandLockup } from "../components/sourceweft-brand";
 import { SourceWeftHeader } from "../components/sourceweft-header";
+import { useLandingAuthState } from "../components/use-landing-auth-state";
 
 type LegalSection = {
   title: string;
@@ -103,9 +106,11 @@ function LegalFooter() {
 }
 
 export function LegalPage({ title, description, sections }: LegalPageProps) {
+  const authState = useLandingAuthState();
+
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SourceWeftHeader />
+      <SourceWeftHeader authState={authState} />
       <main>
         <div className="mx-auto flex max-w-4xl flex-col px-6 pt-28 pb-14 sm:pt-32 sm:pb-18">
           <header className="border-b border-zinc-200 pb-8 dark:border-white/[0.08]">

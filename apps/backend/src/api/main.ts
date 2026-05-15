@@ -15,10 +15,14 @@ const app = createApp();
 serve(
   {
     fetch: app.fetch,
+    hostname: config.apiHost,
     port: config.apiPort,
   },
   () => {
-    logger.info("API server started", { port: config.apiPort });
+    logger.info("API server started", {
+      host: config.apiHost,
+      port: config.apiPort,
+    });
   },
 );
 

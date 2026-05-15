@@ -4,7 +4,11 @@ import {
   getPlanQuota,
 } from "@sourceweft/credits-core";
 import { BillingError } from "./errors";
-import { appendBillingLedger } from "./ledger";
+import {
+  appendBillingLedger,
+  createOperationId,
+  formatSignedLedgerDelta,
+} from "./ledger";
 import type { BillingStore } from "./store-port";
 import type { BillingAccountState, BillingRuntimeConfig } from "./types";
 import {
@@ -17,6 +21,46 @@ const ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES = new Set([
   "active",
   "past_due",
 ]);
+
+function resolvePlanQuota(
+  runtimeConfig: BillingRuntimeConfig,
+  planFamily: BillingAccountState["planFamily"],
+  seatCount = 1,
+) {
+  const quota = getPlanQuota(planFamily, seatCount);
+  if (planFamily !== "individual_free") {
+    return quota;
+  }
+
+  return {
+    ...quota,
+    monthlyPagesLimit: runtimeConfig.defaultMonthlyPages,
+    monthlyCreditsGrant: runtimeConfig.defaultMonthlyCredits,
+  };
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function formatQuotaRenewalSummary(input: {
+  credits: number;
+  pages: number;
+}) {
+  return [
+    input.credits > 0 ? formatSignedLedgerDelta("credit", input.credits) : null,
+    input.pages > 0 ? formatSignedLedgerDelta("page", input.pages) : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(", ");
+}
+
+function formatPlanName(planFamily: BillingAccountState["planFamily"]) {
+  return planFamily
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 export class BillingAccountService {
   constructor(
@@ -109,19 +153,43 @@ export class BillingAccountService {
     const previousPlanFamily = account.planFamily;
     const previousMonthlyGrant = account.monthlyCreditsGrant;
     const previousMonthlyPagesGrant = account.monthlyPagesGrant;
-    const nextQuota = getPlanQuota(nextPlanFamily, account.seatCount);
+    const nextQuota = resolvePlanQuota(
+      this.runtimeConfig,
+      nextPlanFamily,
+      account.seatCount,
+    );
 
     account.planFamily = nextPlanFamily;
     account.monthlyCreditsGrant = nextQuota.monthlyCreditsGrant;
     account.monthlyPagesGrant = nextQuota.monthlyPagesLimit;
     account.pagesLimit = account.monthlyPagesGrant;
     account.pagesUsed = account.pagesConsumedThisCycle;
+    const operationId = createOperationId(
+      "plan-change",
+      account.teamId,
+      previousPlanFamily,
+      nextPlanFamily,
+      Date.now(),
+    );
+    const creditGrantDelta = nextQuota.monthlyCreditsGrant - previousMonthlyGrant;
+    const pageGrantDelta = nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
+    const isCreditPlanActivityVisible =
+      !metadata.suppressImmediateGrant &&
+      this.runtimeConfig.creditsEnabled &&
+      creditGrantDelta > 0;
+    const isPagePlanActivityVisible =
+      !metadata.suppressImmediateGrant &&
+      pageGrantDelta > 0 &&
+      !isCreditPlanActivityVisible;
+    const activitySummary = `${formatPlanName(previousPlanFamily)} -> ${formatPlanName(
+      nextPlanFamily,
+    )}`;
 
     if (
       !metadata.suppressImmediateGrant &&
-      nextQuota.monthlyCreditsGrant > previousMonthlyGrant
+      creditGrantDelta > 0
     ) {
-      const grantDelta = nextQuota.monthlyCreditsGrant - previousMonthlyGrant;
+      const grantDelta = creditGrantDelta;
       account.monthlyCreditsBalance += grantDelta;
 
       await appendBillingLedger({
@@ -134,6 +202,11 @@ export class BillingAccountService {
           delta: grantDelta,
           balanceAfter: getTotalCreditsBalance(account),
           feature: "plan_upgrade_grant",
+          operationId,
+          operationType: "plan_change",
+          activityVisible: isCreditPlanActivityVisible,
+          activityTitle: "Plan changed",
+          activitySummary,
           metadata: {
             ...metadata,
             fromPlanFamily: previousPlanFamily,
@@ -146,9 +219,9 @@ export class BillingAccountService {
 
     if (
       !metadata.suppressImmediateGrant &&
-      nextQuota.monthlyPagesLimit > previousMonthlyPagesGrant
+      pageGrantDelta > 0
     ) {
-      const grantDelta = nextQuota.monthlyPagesLimit - previousMonthlyPagesGrant;
+      const grantDelta = pageGrantDelta;
       account.monthlyPagesBalance += grantDelta;
 
       await appendBillingLedger({
@@ -161,6 +234,11 @@ export class BillingAccountService {
           delta: grantDelta,
           balanceAfter: getTotalPagesBalance(account),
           feature: "plan_upgrade_grant",
+          operationId,
+          operationType: "plan_change",
+          activityVisible: isPagePlanActivityVisible,
+          activityTitle: "Plan changed",
+          activitySummary,
           metadata: {
             ...metadata,
             fromPlanFamily: previousPlanFamily,
@@ -186,7 +264,53 @@ export class BillingAccountService {
   ) {
     const previousMonthlyGrant = account.monthlyCreditsGrant;
     const previousMonthlyPagesGrant = account.monthlyPagesGrant;
-    const nextQuota = getPlanQuota(account.planFamily, account.seatCount);
+    const previousSeatCount = readNumber(metadata.previousSeatCount);
+    const nextSeatCount = readNumber(metadata.nextSeatCount) ?? account.seatCount;
+    const isSeatChange =
+      previousSeatCount !== null && previousSeatCount !== nextSeatCount;
+    const operationId =
+      typeof metadata.operationId === "string"
+        ? metadata.operationId
+        : isSeatChange
+          ? createOperationId(
+              "seat-change",
+              account.teamId,
+              previousSeatCount,
+              nextSeatCount,
+              metadata.externalSubscriptionId as string | undefined,
+              Date.now(),
+            )
+          : createOperationId("quota-adjustment", account.teamId, Date.now());
+    const nextQuota = resolvePlanQuota(
+      this.runtimeConfig,
+      account.planFamily,
+      account.seatCount,
+    );
+
+    if (isSeatChange) {
+      await appendBillingLedger({
+        store: this.store,
+        client,
+        account,
+        entry: {
+          eventType: "adjust",
+          unitType: "seat",
+          delta: nextSeatCount - previousSeatCount,
+          balanceAfter: nextSeatCount,
+          feature: "seat_quota_change",
+          operationId,
+          operationType: "seat_change",
+          activityVisible: true,
+          activityTitle: "Seats updated",
+          activitySummary: `${previousSeatCount} -> ${nextSeatCount} seats`,
+          metadata: {
+            ...metadata,
+            previousSeatCount,
+            nextSeatCount,
+          },
+        },
+      });
+    }
 
     if (
       account.monthlyCreditsGrant === nextQuota.monthlyCreditsGrant &&
@@ -216,6 +340,9 @@ export class BillingAccountService {
           delta: grantDelta,
           balanceAfter: getTotalCreditsBalance(account),
           feature: "seat_quota_grant",
+          operationId,
+          operationType: isSeatChange ? "seat_change" : "quota_adjustment",
+          activityVisible: false,
           metadata: {
             ...metadata,
             reason: "seat_count_increase",
@@ -240,6 +367,9 @@ export class BillingAccountService {
           delta: grantDelta,
           balanceAfter: getTotalPagesBalance(account),
           feature: "seat_quota_grant",
+          operationId,
+          operationType: isSeatChange ? "seat_change" : "quota_adjustment",
+          activityVisible: false,
           metadata: {
             ...metadata,
             reason: "seat_count_increase",
@@ -274,7 +404,17 @@ export class BillingAccountService {
     const previousPagesConsumedThisCycle = account.pagesConsumedThisCycle;
     const expiredCycleSource = account.cycleSource;
     const expiredCycleStartAt = account.cycleStartAt;
-    const quota = getPlanQuota(account.planFamily, account.seatCount);
+    const operationId = createOperationId(
+      "cycle-renewal",
+      account.teamId,
+      input.cycleSource,
+      input.cycleStartAt,
+    );
+    const quota = resolvePlanQuota(
+      this.runtimeConfig,
+      account.planFamily,
+      account.seatCount,
+    );
 
     if (input.expireCurrentMonthly) {
       if (this.runtimeConfig.creditsEnabled && previousMonthlyBalance > 0) {
@@ -290,6 +430,9 @@ export class BillingAccountService {
             balanceAfter: getTotalCreditsBalance(account),
             feature: "cycle_expire",
             idempotencyKey: `cycle-expire:${expiredCycleSource}:${expiredCycleStartAt}`,
+            operationId,
+            operationType: "cycle_renewal",
+            activityVisible: false,
             metadata: input.metadata,
           },
         });
@@ -308,6 +451,9 @@ export class BillingAccountService {
             balanceAfter: getTotalPagesBalance(account),
             feature: "cycle_expire",
             idempotencyKey: `cycle-pages-expire:${expiredCycleSource}:${expiredCycleStartAt}`,
+            operationId,
+            operationType: "cycle_renewal",
+            activityVisible: false,
             metadata: {
               ...input.metadata,
               previousPagesConsumedThisCycle,
@@ -332,7 +478,10 @@ export class BillingAccountService {
     account.pagesUsed = 0;
 
     if (input.grantNewMonthly) {
-      await this.grantCycleBalancesLocked(account, client, quota, input.metadata);
+      await this.grantCycleBalancesLocked(account, client, quota, {
+        ...input.metadata,
+        operationId,
+      });
     }
 
     account.updatedAt = new Date().toISOString();
@@ -349,7 +498,10 @@ export class BillingAccountService {
   }
 
   private async createDefaultAccountLocked(teamId: string, client: PoolClient) {
-    const quota = getPlanQuota(this.runtimeConfig.defaultPlanFamily);
+    const quota = resolvePlanQuota(
+      this.runtimeConfig,
+      this.runtimeConfig.defaultPlanFamily,
+    );
     const now = new Date();
     const nowIso = now.toISOString();
     const cycle = getAnchoredMonthlyCycleWindow(now, now);
@@ -487,7 +639,11 @@ export class BillingAccountService {
       return account;
     }
 
-    const quota = getPlanQuota(account.planFamily, account.seatCount);
+    const quota = resolvePlanQuota(
+      this.runtimeConfig,
+      account.planFamily,
+      account.seatCount,
+    );
     const isProviderMonthlyCycle =
       account.cycleSource === "provider_subscription" &&
       subscription?.billingInterval === "monthly";
@@ -564,6 +720,12 @@ export class BillingAccountService {
       source: account.cycleSource,
       startAt: account.cycleStartAt,
     };
+    const operationId = createOperationId(
+      "cycle-renewal",
+      account.teamId,
+      account.cycleSource,
+      nextCycle.startAt.toISOString(),
+    );
 
     account.cycleStartAt = nextCycle.startAt.toISOString();
     account.cycleEndAt = nextCycle.endAt.toISOString();
@@ -582,6 +744,7 @@ export class BillingAccountService {
       {
         source: "cycle_sync",
         cycleStartAt: account.cycleStartAt,
+        operationId,
       },
       expiredCycle,
     );
@@ -616,6 +779,9 @@ export class BillingAccountService {
             balanceAfter: getTotalCreditsBalance(account),
             feature: "cycle_expire",
             idempotencyKey: `cycle-expire:${expiredCycle.source}:${expiredCycle.startAt}`,
+            operationId: metadata.operationId as string | undefined,
+            operationType: "cycle_renewal",
+            activityVisible: false,
             metadata,
           },
         });
@@ -636,6 +802,9 @@ export class BillingAccountService {
             balanceAfter: getTotalPagesBalance(account),
             feature: "cycle_expire",
             idempotencyKey: `cycle-pages-expire:${expiredCycle.source}:${expiredCycle.startAt}`,
+            operationId: metadata.operationId as string | undefined,
+            operationType: "cycle_renewal",
+            activityVisible: false,
             metadata: {
               ...metadata,
               previousPagesConsumedThisCycle,
@@ -680,6 +849,14 @@ export class BillingAccountService {
           balanceAfter: getTotalCreditsBalance(account),
           feature: "cycle_expire",
           idempotencyKey: `cycle-expire:${account.cycleSource}:${account.cycleStartAt}`,
+          operationId: createOperationId(
+            "cycle-expire",
+            account.teamId,
+            account.cycleSource,
+            account.cycleStartAt,
+          ),
+          operationType: "cycle_renewal",
+          activityVisible: false,
           metadata,
         },
       });
@@ -698,6 +875,14 @@ export class BillingAccountService {
           balanceAfter: getTotalPagesBalance(account),
           feature: "cycle_expire",
           idempotencyKey: `cycle-pages-expire:${account.cycleSource}:${account.cycleStartAt}`,
+          operationId: createOperationId(
+            "cycle-expire",
+            account.teamId,
+            account.cycleSource,
+            account.cycleStartAt,
+          ),
+          operationType: "cycle_renewal",
+          activityVisible: false,
           metadata: {
             ...metadata,
             previousPagesConsumedThisCycle,
@@ -719,6 +904,26 @@ export class BillingAccountService {
     quota: ReturnType<typeof getPlanQuota>,
     metadata: Record<string, unknown>,
   ) {
+    const operationId =
+      typeof metadata.operationId === "string"
+        ? metadata.operationId
+        : createOperationId(
+            "cycle-renewal",
+            account.teamId,
+            account.cycleSource,
+            account.cycleStartAt,
+          );
+    const activitySummary = formatQuotaRenewalSummary({
+      credits: quota.monthlyCreditsGrant,
+      pages: quota.monthlyPagesLimit,
+    });
+    const isCreditCycleActivityVisible =
+      this.runtimeConfig.creditsEnabled && quota.monthlyCreditsGrant > 0;
+    const isPageCycleActivityVisible =
+      this.runtimeConfig.pagesEnabled &&
+      quota.monthlyPagesLimit > 0 &&
+      !isCreditCycleActivityVisible;
+
     if (this.runtimeConfig.creditsEnabled) {
       account.monthlyCreditsBalance = quota.monthlyCreditsGrant;
       if (quota.monthlyCreditsGrant > 0) {
@@ -733,6 +938,11 @@ export class BillingAccountService {
             balanceAfter: getTotalCreditsBalance(account),
             feature: "cycle_grant",
             idempotencyKey: `cycle-grant:${account.cycleSource}:${account.cycleStartAt}`,
+            operationId,
+            operationType: "cycle_renewal",
+            activityVisible: isCreditCycleActivityVisible,
+            activityTitle: "Monthly quota renewed",
+            activitySummary,
             metadata,
           },
         });
@@ -753,6 +963,11 @@ export class BillingAccountService {
             balanceAfter: getTotalPagesBalance(account),
             feature: "cycle_grant",
             idempotencyKey: `cycle-pages-grant:${account.cycleSource}:${account.cycleStartAt}`,
+            operationId,
+            operationType: "cycle_renewal",
+            activityVisible: isPageCycleActivityVisible,
+            activityTitle: "Monthly quota renewed",
+            activitySummary,
             metadata: {
               ...metadata,
               monthlyPagesGrant: account.monthlyPagesGrant,

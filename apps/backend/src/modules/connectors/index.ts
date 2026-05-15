@@ -1,6 +1,7 @@
 import { billingService } from "../billing";
 import { ConnectorActionRunner } from "./action-runner";
 import { ConnectorOAuthService } from "./oauth-service";
+import { registerBuiltinConnectorAdapters } from "./register-builtin-adapters";
 import { ConnectorService } from "./service";
 import { ConnectorSyncOrchestrator } from "./sync-orchestrator";
 
@@ -22,6 +23,8 @@ export type {
   OAuthRefreshInput,
   OAuthTokenSet,
 } from "./types";
+
+registerBuiltinConnectorAdapters();
 
 export const connectorService = new ConnectorService();
 export const connectorOAuthService = new ConnectorOAuthService();

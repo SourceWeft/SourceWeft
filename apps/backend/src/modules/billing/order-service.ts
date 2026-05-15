@@ -25,7 +25,11 @@ import {
   validateBillingCatalog,
 } from "./catalog";
 import { BillingError } from "./errors";
-import { appendBillingLedger } from "./ledger";
+import {
+  appendBillingLedger,
+  createOperationId,
+  formatSignedLedgerDelta,
+} from "./ledger";
 import type { BillingStore } from "./store-port";
 import type {
   BillingAccountState,
@@ -35,6 +39,8 @@ import type {
   TeamSubscriptionSnapshot,
 } from "./types";
 import {
+  ensureBillingCheckoutEnabled,
+  ensureTeamBillingEnabled,
   getTotalPagesBalance,
   getTotalCreditsBalance,
   INDIVIDUAL_PRO_PLAN,
@@ -82,10 +88,25 @@ const REUSABLE_ORDER_STATUSES = new Set<BillingOrderState["status"]>([
   "checkout_created",
 ]);
 
+const RECOVERABLE_CHECKOUT_STATUSES = new Set<BillingOrderState["status"]>([
+  "pending",
+  "checkout_created",
+  "payment_failed",
+]);
+
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set([
   "active",
   "past_due",
 ]);
+const TEAM_SEAT_MIN = 2;
+const TEAM_SEAT_MAX = 99;
+
+function hasCheckoutUrl(order: BillingOrderState) {
+  return (
+    typeof order.metadata.checkoutUrl === "string" &&
+    order.metadata.checkoutUrl.trim().length > 0
+  );
+}
 
 function normalizeTeamName(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 80) : "";
@@ -187,6 +208,27 @@ function normalizeClientReferenceKey(value: string | undefined) {
   return trimmed || null;
 }
 
+function normalizeTeamSeatCount(value: number | undefined) {
+  if (value === undefined) {
+    return TEAM_SEAT_MIN;
+  }
+
+  const seatCount = Math.floor(value);
+  if (
+    !Number.isFinite(seatCount) ||
+    seatCount < TEAM_SEAT_MIN ||
+    seatCount > TEAM_SEAT_MAX
+  ) {
+    throw new BillingError(
+      "INVALID_SEAT_COUNT",
+      400,
+      `seatCount must be between ${TEAM_SEAT_MIN} and ${TEAM_SEAT_MAX}`,
+    );
+  }
+
+  return seatCount;
+}
+
 function buildRetryAt() {
   return new Date(Date.now() + 5 * 60_000).toISOString();
 }
@@ -264,15 +306,27 @@ export class BillingOrderService {
     actor: Actor;
     personalTeamId?: string | null;
   }): Promise<CreatePricingCheckoutResponse> {
-    validateBillingCatalog({ runtimeConfig: this.runtimeConfig });
-
     const planFamily = pricingPlanToPlanFamily(input.request.plan);
+    ensureBillingCheckoutEnabled(this.runtimeConfig);
+    validateBillingCatalog({
+      runtimeConfig: this.runtimeConfig,
+      subscriptionPlanFamilies: [planFamily],
+      topupUnitTypes: [],
+    });
+
+    if (planFamily === TEAM_STANDARD_PLAN) {
+      ensureTeamBillingEnabled(this.runtimeConfig);
+    }
+
     const catalogEntry = getSubscriptionCatalogEntry(
       this.runtimeConfig,
       planFamily,
     );
     const billingInterval = input.request.billingInterval;
-    const quantity = catalogEntry.defaultQuantity;
+    const quantity =
+      planFamily === TEAM_STANDARD_PLAN
+        ? normalizeTeamSeatCount(input.request.seatCount)
+        : catalogEntry.defaultQuantity;
     const product = resolveSubscriptionProduct({
       runtimeConfig: this.runtimeConfig,
       planFamily,
@@ -301,8 +355,25 @@ export class BillingOrderService {
         input.actor.userId,
         clientReferenceKey,
       );
-      if (existing) {
+      if (existing && hasCheckoutUrl(existing)) {
         return toCheckoutResponse(existing);
+      }
+      if (
+        existing &&
+        RECOVERABLE_CHECKOUT_STATUSES.has(existing.status) &&
+        existing.kind === "subscription" &&
+        existing.planFamily === planFamily &&
+        existing.billingInterval === billingInterval
+      ) {
+        const recovered = await this.createProviderCheckoutForSubscriptionOrder({
+          order: existing,
+          actor: input.actor,
+          planFamily,
+          billingInterval,
+          quantity,
+          productId: product.productId,
+        });
+        return toCheckoutResponse(recovered);
       }
     }
 
@@ -313,7 +384,11 @@ export class BillingOrderService {
         planFamily,
         billingInterval,
       });
-      if (reusable && REUSABLE_ORDER_STATUSES.has(reusable.status)) {
+      if (
+        reusable &&
+        REUSABLE_ORDER_STATUSES.has(reusable.status) &&
+        hasCheckoutUrl(reusable)
+      ) {
         return toCheckoutResponse(reusable);
       }
     }
@@ -348,35 +423,13 @@ export class BillingOrderService {
     draft.successUrl = input.request.successUrl ?? defaultSuccessUrl(this.runtimeConfig, draft.id);
 
     let order = await this.store.insertOrder(draft);
-    const providerResult = await this.provider.createCheckout({
-      orderId: order.id,
-      persistedOrder: true,
-      kind: order.kind,
-      teamId: order.teamId,
-      actorUserId: input.actor.userId,
-      actorEmail: input.actor.email,
+    order = await this.createProviderCheckoutForSubscriptionOrder({
+      order,
+      actor: input.actor,
       planFamily,
       billingInterval,
       quantity,
-      externalProductId: product.productId,
-      amountTotal: order.amountTotal,
-      currency: order.currency,
-      successUrl: order.successUrl ?? undefined,
-      cancelUrl: order.cancelUrl ?? undefined,
-      metadata: order.metadata,
-    });
-
-    order = await this.store.updateOrder({
-      ...order,
-      provider: providerResult.provider,
-      status: "checkout_created",
-      externalCheckoutId: providerResult.externalCheckoutId,
-      externalCustomerId: providerResult.externalCustomerId,
-      metadata: {
-        ...order.metadata,
-        checkoutUrl: providerResult.checkoutUrl,
-      },
-      updatedAt: new Date().toISOString(),
+      productId: product.productId,
     });
 
     return toCheckoutResponse(order);
@@ -387,9 +440,14 @@ export class BillingOrderService {
     request: CreateTopupCheckoutRequest;
     actor: Actor;
   }): Promise<CreateTopupCheckoutResponse> {
-    validateBillingCatalog({ runtimeConfig: this.runtimeConfig });
-
     const unitType = input.request.unitType;
+    ensureBillingCheckoutEnabled(this.runtimeConfig);
+    validateBillingCatalog({
+      runtimeConfig: this.runtimeConfig,
+      subscriptionPlanFamilies: [],
+      topupUnitTypes: [unitType],
+    });
+
     const quantity = Math.floor(input.request.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new BillingError(
@@ -480,6 +538,68 @@ export class BillingOrderService {
     });
 
     return toTopupResponse(order);
+  }
+
+  private async createProviderCheckoutForSubscriptionOrder(input: {
+    order: BillingOrderState;
+    actor: Actor;
+    planFamily: typeof INDIVIDUAL_PRO_PLAN | typeof TEAM_STANDARD_PLAN;
+    billingInterval: Exclude<BillingInterval, "unknown">;
+    quantity: number;
+    productId: string;
+  }) {
+    let providerResult;
+    try {
+      providerResult = await this.provider.createCheckout({
+        orderId: input.order.id,
+        persistedOrder: true,
+        kind: input.order.kind,
+        teamId: input.order.teamId,
+        actorUserId: input.actor.userId,
+        actorEmail: input.actor.email,
+        planFamily: input.planFamily,
+        billingInterval: input.billingInterval,
+        quantity: input.quantity,
+        externalProductId: input.productId,
+        amountTotal: input.order.amountTotal,
+        currency: input.order.currency,
+        successUrl: input.order.successUrl ?? undefined,
+        cancelUrl: input.order.cancelUrl ?? undefined,
+        metadata: input.order.metadata,
+      });
+    } catch (error) {
+      await this.store.updateOrder({
+        ...input.order,
+        status: "payment_failed",
+        paymentStatus: "failed",
+        errorCode:
+          error instanceof BillingError
+            ? error.code
+            : "BILLING_CHECKOUT_CREATE_FAILED",
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : "Unable to create billing checkout",
+        updatedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+
+    return this.store.updateOrder({
+      ...input.order,
+      provider: providerResult.provider,
+      status: "checkout_created",
+      paymentStatus: "unpaid",
+      externalCheckoutId: providerResult.externalCheckoutId,
+      externalCustomerId: providerResult.externalCustomerId,
+      metadata: {
+        ...input.order.metadata,
+        checkoutUrl: providerResult.checkoutUrl,
+      },
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   getOrder(orderId: string) {
@@ -617,6 +737,10 @@ export class BillingOrderService {
 
     const now = new Date();
     const period = this.resolveSubscriptionPeriod(order.billingInterval, input);
+    if (order.planFamily === TEAM_STANDARD_PLAN) {
+      ensureTeamBillingEnabled(this.runtimeConfig);
+    }
+
     const teamId =
       order.planFamily === TEAM_STANDARD_PLAN
         ? await this.ensurePaidTeamOrganization(order)
@@ -735,6 +859,14 @@ export class BillingOrderService {
           actorUserId: order.userId,
           referenceId: order.id,
           idempotencyKey: `billing-order:${order.id}:grant`,
+          operationId: createOperationId("topup", order.teamId, order.id),
+          operationType: "topup",
+          activityVisible: true,
+          activityTitle:
+            order.unitType === "credit"
+              ? "Credits top-up purchased"
+              : "Pages top-up purchased",
+          activitySummary: formatSignedLedgerDelta(order.unitType, grantAmount),
           metadata: {
             orderId: order.id,
             quantity: order.quantity,
@@ -779,7 +911,7 @@ export class BillingOrderService {
     });
 
     if (created.created) {
-      await workspaceService.ensureDefaultWorkspace({
+      await workspaceService.ensureUserWorkspaceInOrganization({
         organizationId: created.id,
         userId: order.userId,
       });
@@ -824,6 +956,7 @@ export class BillingOrderService {
   ) {
     await this.store.upsertSubscription(snapshot, client);
 
+    const previousSeatCount = account.seatCount;
     account.seatCount = snapshot.seatCount;
     await this.accountService.applyPlanFamilyLocked(
       account,
@@ -837,6 +970,18 @@ export class BillingOrderService {
         suppressImmediateGrant: true,
       },
     );
+
+    if (previousSeatCount !== account.seatCount) {
+      await this.accountService.refreshPlanQuotaLocked(account, client, {
+        source: "billing_order_fulfillment",
+        provider: snapshot.provider,
+        orderId: snapshot.billingOrderId,
+        externalSubscriptionId: snapshot.externalSubscriptionId,
+        reason: "subscription_created",
+        previousSeatCount,
+        nextSeatCount: account.seatCount,
+      });
+    }
 
     const cycle =
       snapshot.billingInterval === "monthly"

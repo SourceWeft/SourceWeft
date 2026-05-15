@@ -29,6 +29,20 @@ function buildCallbackUrl(input: { workspaceId: string; connectorType: string })
   return `${config.auth.baseUrl}/v1/workspaces/${input.workspaceId}/connectors/oauth/${input.connectorType}/callback`;
 }
 
+function resolveCallbackUrl(input: {
+  manifest: { auth: { redirectUri?: string } };
+  workspaceId: string;
+  connectorType: string;
+}) {
+  return (
+    input.manifest.auth.redirectUri ||
+    buildCallbackUrl({
+      workspaceId: input.workspaceId,
+      connectorType: input.connectorType,
+    })
+  );
+}
+
 function normalizeScopes(tokenSet: OAuthTokenSet, fallback: string[]) {
   const scopes = tokenSet.scopes?.length ? tokenSet.scopes : fallback;
   return Array.from(new Set(scopes));
@@ -64,9 +78,23 @@ export class ConnectorOAuthService {
 
     const authorizationUrl = new URL(manifest.auth.authorizationUrl);
     authorizationUrl.searchParams.set("response_type", "code");
-    authorizationUrl.searchParams.set("redirect_uri", buildCallbackUrl(input));
+    authorizationUrl.searchParams.set(
+      "redirect_uri",
+      resolveCallbackUrl({
+        manifest,
+        workspaceId: input.workspaceId,
+        connectorType: input.connectorType,
+      }),
+    );
     authorizationUrl.searchParams.set("state", state);
-    authorizationUrl.searchParams.set("scope", manifest.auth.scopes.join(" "));
+    for (const [key, value] of Object.entries(
+      manifest.auth.authorizationParams ?? {},
+    )) {
+      authorizationUrl.searchParams.set(key, value);
+    }
+    if (manifest.auth.sendScope !== false && manifest.auth.scopes.length > 0) {
+      authorizationUrl.searchParams.set("scope", manifest.auth.scopes.join(" "));
+    }
 
     return {
       authorizationUrl: authorizationUrl.toString(),
@@ -97,7 +125,67 @@ export class ConnectorOAuthService {
     const manifest = adapter.getManifest();
     const tokenSet = await adapter.exchangeOAuthCode({
       code: input.code,
-      redirectUri: buildCallbackUrl(input),
+      redirectUri: resolveCallbackUrl({
+        manifest,
+        workspaceId: input.workspaceId,
+        connectorType: input.connectorType,
+      }),
+      scopes: manifest.auth.scopes,
+    });
+    const scopes = normalizeScopes(tokenSet, manifest.auth.scopes);
+    const secret = resolveOAuthEncryptionSecret();
+    const account = await createOAuthAccountRecord({
+      teamId: stateRow.teamId,
+      workspaceId: stateRow.workspaceId,
+      connectorType: input.connectorType,
+      providerAccountId: tokenSet.providerAccountId ?? null,
+      providerAccountEmail: tokenSet.providerAccountEmail ?? null,
+      displayName:
+        tokenSet.displayName ??
+        tokenSet.providerAccountEmail ??
+        `${manifest.displayName} account`,
+      scopes,
+      accessTokenEncrypted: encryptSecret(tokenSet.accessToken, secret),
+      refreshTokenEncrypted: tokenSet.refreshToken
+        ? encryptSecret(tokenSet.refreshToken, secret)
+        : null,
+      expiresAt: tokenSet.expiresAt ?? null,
+      createdBy: stateRow.userId,
+    });
+
+    return {
+      account,
+      redirectAfter: stateRow.redirectAfter,
+    };
+  }
+
+  async finishGlobalCallback(input: {
+    connectorType: string;
+    code: string;
+    state: string;
+  }) {
+    const stateRow = await consumeOAuthStateRecord({
+      stateHash: hashState(input.state),
+      connectorType: input.connectorType,
+      now: new Date(),
+    });
+    if (!stateRow) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_OAUTH_STATE_INVALID",
+        "Connector OAuth state is invalid or expired",
+      );
+    }
+
+    const adapter = this.registry.getAdapter(input.connectorType);
+    const manifest = adapter.getManifest();
+    const tokenSet = await adapter.exchangeOAuthCode({
+      code: input.code,
+      redirectUri: resolveCallbackUrl({
+        manifest,
+        workspaceId: stateRow.workspaceId,
+        connectorType: input.connectorType,
+      }),
       scopes: manifest.auth.scopes,
     });
     const scopes = normalizeScopes(tokenSet, manifest.auth.scopes);

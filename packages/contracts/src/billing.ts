@@ -53,7 +53,17 @@ export const ledgerEventTypeSchema = z.enum([
   "adjust",
 ]);
 
-export const ledgerUnitTypeSchema = z.enum(["credit", "page"]);
+export const ledgerUnitTypeSchema = z.enum(["credit", "page", "seat"]);
+export const topupUnitTypeSchema = z.enum(["credit", "page"]);
+
+export const billingOperationTypeSchema = z.enum([
+  "seat_change",
+  "cycle_renewal",
+  "plan_change",
+  "topup",
+  "usage",
+  "quota_adjustment",
+]);
 
 export const billingOrderKindSchema = z.enum([
   "subscription",
@@ -151,6 +161,11 @@ export const billingLedgerEntrySchema = z.object({
   balanceAfter: z.number().int(),
   referenceId: z.string().nullable(),
   idempotencyKey: z.string().nullable(),
+  operationId: z.string().nullable(),
+  operationType: billingOperationTypeSchema.nullable(),
+  activityVisible: z.boolean(),
+  activityTitle: z.string().nullable(),
+  activitySummary: z.string().nullable(),
   metadata: z.record(z.string(), z.unknown()),
   createdAt: z.string(),
 });
@@ -178,15 +193,26 @@ export const updateSpendLimitsResponseSchema = z.object({
   hardCapUsd: z.number().nonnegative().nullable(),
 });
 
-export const createPricingCheckoutRequestSchema = z.object({
-  plan: pricingCheckoutPlanSchema,
-  billingInterval: z.enum(["monthly", "yearly"]).default("yearly"),
-  clientReferenceKey: z.string().trim().min(1).max(160).optional(),
-  source: billingCheckoutSourceSchema.default("dashboard"),
-  teamName: z.string().trim().min(1).max(80).optional(),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
-});
+export const createPricingCheckoutRequestSchema = z
+  .object({
+    plan: pricingCheckoutPlanSchema,
+    billingInterval: z.enum(["monthly", "yearly"]).default("yearly"),
+    clientReferenceKey: z.string().trim().min(1).max(160).optional(),
+    source: billingCheckoutSourceSchema.default("dashboard"),
+    teamName: z.string().trim().min(1).max(80).optional(),
+    seatCount: z.number().int().min(2).max(99).optional(),
+    successUrl: z.string().url().optional(),
+    cancelUrl: z.string().url().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.plan === "pro" && value.seatCount !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "seatCount is only supported for team pricing checkout",
+        path: ["seatCount"],
+      });
+    }
+  });
 
 export const createPricingCheckoutResponseSchema = z.object({
   orderId: z.string(),
@@ -202,7 +228,7 @@ export const createPricingCheckoutResponseSchema = z.object({
 
 export const createTopupCheckoutRequestSchema = z
   .object({
-    unitType: ledgerUnitTypeSchema.default("credit"),
+    unitType: topupUnitTypeSchema.default("credit"),
     quantity: z.number().int().positive(),
     clientReferenceKey: z.string().trim().min(1).max(160).optional(),
     successUrl: z.string().url().optional(),
@@ -225,7 +251,7 @@ export const createTopupCheckoutResponseSchema = z.object({
   checkoutUrl: z.string().url(),
   status: billingOrderStatusSchema,
   paymentStatus: billingOrderPaymentStatusSchema,
-  unitType: ledgerUnitTypeSchema,
+  unitType: topupUnitTypeSchema,
   quantity: z.number().int().positive(),
   unitAmount: z.number().int().positive(),
   grantedCredits: z.number().int().nonnegative(),
@@ -245,7 +271,7 @@ export const billingOrderResponseSchema = z.object({
   planFamily: planFamilySchema.nullable(),
   billingInterval: billingIntervalSchema.nullable(),
   quantity: z.number().int().positive(),
-  unitType: ledgerUnitTypeSchema.nullable(),
+  unitType: topupUnitTypeSchema.nullable(),
   unitAmount: z.number().int().nonnegative().nullable(),
   grantedCredits: z.number().int().nonnegative(),
   grantedPages: z.number().int().nonnegative(),
@@ -290,7 +316,7 @@ export const createTeamSubscriptionCheckoutRequestSchema = z
   .object({
     planFamily: subscriptionPlanFamilySchema.default("team_standard"),
     billingInterval: z.enum(["monthly", "yearly"]).default("yearly"),
-    seatCount: z.number().int().min(2).max(20).optional(),
+    seatCount: z.number().int().min(2).max(99).optional(),
     successUrl: z.string().url().optional(),
   })
   .superRefine((value, ctx) => {
@@ -302,7 +328,10 @@ export const createTeamSubscriptionCheckoutRequestSchema = z
       });
     }
 
-    if (value.planFamily === "individual_pro" && value.seatCount !== undefined) {
+    if (
+      value.planFamily === "individual_pro" &&
+      value.seatCount !== undefined
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "seatCount is only supported for team_standard subscriptions",
@@ -318,7 +347,43 @@ export const createTeamSubscriptionCheckoutResponseSchema = z.object({
 });
 
 export const updateTeamSubscriptionSeatsRequestSchema = z.object({
-  seatCount: z.number().int().min(2).max(20),
+  seatCount: z.number().int().min(2).max(99),
+});
+
+export const teamSubscriptionSeatQuotaAdjustmentSchema = z.object({
+  removedSeats: z.number().int().nonnegative(),
+  remainingRatio: z.number().min(0).max(1),
+  targetCredits: z.number().int().nonnegative(),
+  actualCredits: z.number().int().nonnegative(),
+  targetPages: z.number().int().nonnegative(),
+  actualPages: z.number().int().nonnegative(),
+  creditRecoverRatio: z.number().min(0).max(1),
+  pageRecoverRatio: z.number().min(0).max(1),
+  refundRatio: z.number().min(0).max(1),
+});
+
+export const teamSubscriptionSeatBillingAdjustmentSchema = z.object({
+  theoreticalRefundCents: z.number().int().nonnegative(),
+  actualRefundCents: z.number().int().nonnegative(),
+  unrefundedCents: z.number().int().nonnegative(),
+  currency: z.string(),
+  providerAction: z.enum([
+    "none",
+    "proration_charge_immediately",
+    "proration_credit",
+    "internal_partial_credit",
+  ]),
+});
+
+export const previewTeamSubscriptionSeatsResponseSchema = z.object({
+  teamId: z.string(),
+  provider: billingProviderSchema,
+  currentSeatCount: z.number().int().min(1),
+  seatCount: z.number().int().min(2),
+  seatsUsed: z.number().int().nonnegative(),
+  pendingInvitations: z.number().int().nonnegative(),
+  quotaAdjustment: teamSubscriptionSeatQuotaAdjustmentSchema.nullable(),
+  billingAdjustment: teamSubscriptionSeatBillingAdjustmentSchema.nullable(),
 });
 
 export const updateTeamSubscriptionSeatsResponseSchema = z.object({
@@ -326,6 +391,9 @@ export const updateTeamSubscriptionSeatsResponseSchema = z.object({
   provider: billingProviderSchema,
   seatCount: z.number().int().min(2),
   seatsUsed: z.number().int().nonnegative(),
+  pendingInvitations: z.number().int().nonnegative(),
+  quotaAdjustment: teamSubscriptionSeatQuotaAdjustmentSchema.nullable(),
+  billingAdjustment: teamSubscriptionSeatBillingAdjustmentSchema.nullable(),
 });
 
 export const createTeamBillingPortalResponseSchema = z.object({
@@ -411,15 +479,15 @@ export type BillingSubscriptionStatus = z.infer<
 >;
 export type LedgerEventType = z.infer<typeof ledgerEventTypeSchema>;
 export type LedgerUnitType = z.infer<typeof ledgerUnitTypeSchema>;
+export type TopupUnitType = z.infer<typeof topupUnitTypeSchema>;
+export type BillingOperationType = z.infer<typeof billingOperationTypeSchema>;
 export type BillingOrderKind = z.infer<typeof billingOrderKindSchema>;
 export type BillingOrderStatus = z.infer<typeof billingOrderStatusSchema>;
 export type BillingOrderPaymentStatus = z.infer<
   typeof billingOrderPaymentStatusSchema
 >;
 export type PricingCheckoutPlan = z.infer<typeof pricingCheckoutPlanSchema>;
-export type BillingCheckoutSource = z.infer<
-  typeof billingCheckoutSourceSchema
->;
+export type BillingCheckoutSource = z.infer<typeof billingCheckoutSourceSchema>;
 export type BillingSummaryResponse = z.infer<
   typeof billingSummaryResponseSchema
 >;
@@ -457,6 +525,15 @@ export type CreateTeamSubscriptionCheckoutResponse = z.infer<
 >;
 export type UpdateTeamSubscriptionSeatsRequest = z.infer<
   typeof updateTeamSubscriptionSeatsRequestSchema
+>;
+export type TeamSubscriptionSeatQuotaAdjustment = z.infer<
+  typeof teamSubscriptionSeatQuotaAdjustmentSchema
+>;
+export type TeamSubscriptionSeatBillingAdjustment = z.infer<
+  typeof teamSubscriptionSeatBillingAdjustmentSchema
+>;
+export type PreviewTeamSubscriptionSeatsResponse = z.infer<
+  typeof previewTeamSubscriptionSeatsResponseSchema
 >;
 export type UpdateTeamSubscriptionSeatsResponse = z.infer<
   typeof updateTeamSubscriptionSeatsResponseSchema

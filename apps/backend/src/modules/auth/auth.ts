@@ -29,13 +29,11 @@ import {
   withSourceweftOrganizationKind,
 } from "./organization-metadata";
 
-function withBaseUrl(path: string) {
-  const base = config.auth.baseUrl.replace(/\/$/, "");
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
-  }
-
-  return `${base}${path.startsWith("/") ? "" : "/"}${path}`;
+function buildAcceptInvitationUrl(invitationId: string) {
+  const url = new URL("/auth/accept-invitation", config.auth.webBaseUrl);
+  url.searchParams.set("invitationId", invitationId);
+  url.searchParams.set("redirectTo", "/dashboard");
+  return url.toString();
 }
 
 const socialProviders: Record<string, unknown> = {};
@@ -120,12 +118,13 @@ export const auth: any = betterAuth({
   baseURL: config.auth.baseUrl,
   secret: config.auth.secret,
   logger: {
-    level: (process.env.BETTER_AUTH_LOG_LEVEL as
-      | "debug"
-      | "info"
-      | "warn"
-      | "error"
-      | undefined) || "info",
+    level:
+      (process.env.BETTER_AUTH_LOG_LEVEL as
+        | "debug"
+        | "info"
+        | "warn"
+        | "error"
+        | undefined) || "info",
     log: (level, message, ...args) => {
       const meta = args.length > 0 ? { args } : undefined;
       if (level === "debug") {
@@ -252,9 +251,7 @@ export const auth: any = betterAuth({
           variables: {
             inviterLabel: data.inviter.user.name || data.inviter.user.email,
             organizationName: data.organization.name,
-            url: withBaseUrl(
-              `/auth/accept-invitation?invitationId=${encodeURIComponent(data.id)}`,
-            ),
+            url: buildAcceptInvitationUrl(data.id),
           },
         });
       },
@@ -301,7 +298,10 @@ export const auth: any = betterAuth({
             return { data: organization };
           }
 
-          if (organization.name !== undefined || organization.slug !== undefined) {
+          if (
+            organization.name !== undefined ||
+            organization.slug !== undefined
+          ) {
             throw new APIError("BAD_REQUEST", {
               message: "Personal workspace cannot be renamed.",
             });
@@ -366,13 +366,16 @@ export const auth: any = betterAuth({
           });
         },
         async afterRemoveMember({ organization, user }) {
-          await syncOrganizationSeatsAfterMembershipChange({
+          logger.info("Team member removed; paid seat count unchanged", {
             organizationId: organization.id,
             actorUserId: user.id,
-            reason: "member_removed",
           });
         },
         async afterAcceptInvitation({ organization, user }) {
+          await workspaceService.ensureUserWorkspaceInOrganization({
+            organizationId: organization.id,
+            userId: user.id,
+          });
           await syncOrganizationSeatsAfterMembershipChange({
             organizationId: organization.id,
             actorUserId: user.id,

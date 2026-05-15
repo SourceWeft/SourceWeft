@@ -4,13 +4,20 @@ import * as React from "react";
 import { Check, Sparkles } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { toast } from "sonner";
+import { TeamCheckoutDialog } from "../../_components/team-checkout-dialog";
 import { billingClient } from "../../../lib/sdk";
-import type { PlanConfig } from "../../_landing/pricing-config";
+import {
+  planFamilyToPricingPlanId,
+  type PlanConfig,
+} from "../../_landing/pricing-config";
 import { DashboardModalShell, DashboardSection } from "./dashboard-modal-shell";
 
 type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
 
-function createReferenceKey(plan: "pro" | "team", interval: "monthly" | "yearly") {
+function createReferenceKey(
+  plan: "pro" | "team",
+  interval: "monthly" | "yearly",
+) {
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
@@ -41,10 +48,23 @@ export function DashboardPricingModal({
   const [loadingPlan, setLoadingPlan] = React.useState<"pro" | "team" | null>(
     null,
   );
-  const currentPlan = summary?.planFamily ?? "individual_free";
+  const [teamCheckoutOpen, setTeamCheckoutOpen] = React.useState(false);
+  const currentPlanId = planFamilyToPricingPlanId(summary?.planFamily);
+  const teamPlan = plans.find((plan) => plan.id === "team");
+  const monthlyTeamSeatPrice = teamPlan?.monthlyPrice ?? 0;
+  const yearlyTeamSeatPrice = teamPlan?.yearlyPrice ?? 0;
+  const teamSeatPrice =
+    billingPeriod === "yearly"
+      ? yearlyTeamSeatPrice
+      : monthlyTeamSeatPrice;
 
   async function handlePlanAction(planId: PlanConfig["id"]) {
     if (planId === "free") {
+      return;
+    }
+
+    if (planId === "team") {
+      setTeamCheckoutOpen(true);
       return;
     }
 
@@ -67,7 +87,8 @@ export function DashboardPricingModal({
   }
 
   return (
-    <DashboardModalShell
+    <>
+      <DashboardModalShell
       actions={
         <div
           aria-label="Billing period"
@@ -102,22 +123,36 @@ export function DashboardPricingModal({
       <div className="space-y-3">
         <div className="grid gap-3 xl:grid-cols-3">
           {plans.map((plan) => {
-            const price = billingPeriod === "yearly" ? plan.yearlyPrice : plan.monthlyPrice;
-            const modeLabel = plan.id === "free" ? "Explore" : plan.id === "team" ? "Collaborate" : "Scale";
-            const isCurrent =
-              (plan.id === "free" && currentPlan === "individual_free") ||
-              (plan.id === "pro" && currentPlan === "individual_pro");
+            const price =
+              billingPeriod === "yearly"
+                ? plan.yearlyPrice
+                : plan.monthlyPrice;
+            const modeLabel =
+              plan.id === "free"
+                ? "Explore"
+                : plan.id === "team"
+                  ? "Collaborate"
+                  : "Scale";
+            const isCurrent = currentPlanId === plan.id;
             const buttonLabel = isCurrent
               ? "Current plan"
               : loadingPlan === plan.id
                 ? "Opening..."
                 : plan.id === "team"
                   ? "Create team"
-                  : "Upgrade";
+                  : plan.id === "pro"
+                    ? "Upgrade to Pro"
+                    : plan.cta;
             return (
               <DashboardSection
-                className={plan.highlighted ? "border-primary/30 bg-card shadow-[0_12px_32px_rgba(0,0,0,0.06)]" : "bg-background/90"}
-                eyebrow={isCurrent ? "Current" : plan.highlighted ? "Recommended" : "Plan"}
+                className={
+                  plan.highlighted
+                    ? "border-primary/30 bg-card shadow-[0_12px_32px_rgba(0,0,0,0.06)]"
+                    : "bg-background/90"
+                }
+                eyebrow={
+                  isCurrent ? "Current" : plan.highlighted ? "Recommended" : "Plan"
+                }
                 key={plan.id}
                 title={plan.name}
               >
@@ -136,10 +171,15 @@ export function DashboardPricingModal({
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">{plan.description}</p>
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                    {plan.description}
+                  </p>
                   <div className="mt-5 flex-1 space-y-2.5">
                     {plan.features.map((feature) => (
-                      <div className="flex items-start gap-2 text-sm text-foreground" key={feature}>
+                      <div
+                        className="flex items-start gap-2 text-sm text-foreground"
+                        key={feature}
+                      >
                         <Check className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                         <span>{feature}</span>
                       </div>
@@ -147,12 +187,16 @@ export function DashboardPricingModal({
                   </div>
                   {plan.id === "team" ? (
                     <p className="mt-4 text-xs leading-5 text-muted-foreground">
-                      Checkout creates a new team after payment. Extra seats stay in dashboard billing.
+                      Checkout creates a new team after payment. Extra seats
+                      stay in dashboard billing.
                     </p>
                   ) : null}
                   <Button
                     className="mt-5 w-full"
-                    disabled={isCurrent || loadingPlan === plan.id}
+                    disabled={
+                      isCurrent ||
+                      loadingPlan === plan.id
+                    }
                     onClick={() => void handlePlanAction(plan.id)}
                     size="sm"
                     type="button"
@@ -188,6 +232,18 @@ export function DashboardPricingModal({
           </div>
         </DashboardSection>
       </div>
-    </DashboardModalShell>
+      </DashboardModalShell>
+      <TeamCheckoutDialog
+        allowBillingIntervalSwitch
+        billingInterval={billingPeriod}
+        monthlyPerSeatPrice={monthlyTeamSeatPrice}
+        onOpenChange={setTeamCheckoutOpen}
+        open={teamCheckoutOpen}
+        perSeatPrice={teamSeatPrice}
+        referencePrefix="dashboard-pricing"
+        source="dashboard"
+        yearlyPerSeatPrice={yearlyTeamSeatPrice}
+      />
+    </>
   );
 }

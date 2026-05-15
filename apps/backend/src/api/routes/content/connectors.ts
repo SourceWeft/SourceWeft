@@ -249,6 +249,21 @@ export function registerConnectorRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.post("/connectors/:connectorId/actions/:actionRunId/execute", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await connectorActionRunner.execute({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      connectorId: requireRouteParam(c, "connectorId"),
+      actionRunId: requireRouteParam(c, "actionRunId"),
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/connectors/:connectorId/actions", async (c) => {
     const session = await requireSession(c);
     if (!session) {

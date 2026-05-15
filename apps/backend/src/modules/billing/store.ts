@@ -77,6 +77,11 @@ function mapLedger(row: BillingLedgerRowDb): BillingLedgerRow {
     balanceAfter: row.balanceAfter,
     referenceId: row.referenceId,
     idempotencyKey: row.idempotencyKey,
+    operationId: row.operationId,
+    operationType: row.operationType,
+    activityVisible: row.activityVisible,
+    activityTitle: row.activityTitle,
+    activitySummary: row.activitySummary,
     metadata: row.metadata ?? {},
     createdAt: row.createdAt.toISOString(),
   };
@@ -324,6 +329,11 @@ export class PostgresBillingStore implements BillingStore {
         balanceAfter: entry.balanceAfter,
         referenceId: entry.referenceId,
         idempotencyKey: entry.idempotencyKey,
+        operationId: entry.operationId,
+        operationType: entry.operationType,
+        activityVisible: entry.activityVisible,
+        activityTitle: entry.activityTitle,
+        activitySummary: entry.activitySummary,
         metadata: entry.metadata ?? {},
         createdAt: parseDate(entry.createdAt),
       });
@@ -348,11 +358,23 @@ export class PostgresBillingStore implements BillingStore {
     return row ? mapLedger(row) : null;
   }
 
-  async listLedger(teamId: string, limit?: number, client?: PoolClient) {
+  async listLedger(
+    teamId: string,
+    limit?: number,
+    options?: { activityOnly?: boolean },
+    client?: PoolClient,
+  ) {
     const query = pickDb(client)
       .select()
       .from(usageLedgers)
-      .where(eq(usageLedgers.teamId, teamId))
+      .where(
+        options?.activityOnly
+          ? and(
+              eq(usageLedgers.teamId, teamId),
+              eq(usageLedgers.activityVisible, true),
+            )
+          : eq(usageLedgers.teamId, teamId),
+      )
       .orderBy(desc(usageLedgers.createdAt));
 
     const rows = limit !== undefined ? await query.limit(limit) : await query;
@@ -546,6 +568,23 @@ export class PostgresBillingStore implements BillingStore {
     return row ? mapOrder(row) : null;
   }
 
+  async getLatestCustomerOrderByUser(userId: string, client?: PoolClient) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(
+        and(
+          eq(billingOrders.userId, userId),
+          sql`${billingOrders.externalCustomerId} is not null`,
+          sql`${billingOrders.status} in ('payment_confirmed', 'fulfilled')`,
+        ),
+      )
+      .orderBy(desc(billingOrders.updatedAt))
+      .limit(1);
+
+    return row ? mapOrder(row) : null;
+  }
+
   async listRetryableOrders(input?: { limit?: number }, client?: PoolClient) {
     const safeLimit = Math.min(
       100,
@@ -605,6 +644,50 @@ export class PostgresBillingStore implements BillingStore {
     return row ? mapSubscription(row) : null;
   }
 
+  async getSubscriptionByProviderSubscription(
+    provider: BillingSubscriptionState["provider"],
+    externalSubscriptionId: string,
+    client?: PoolClient,
+  ) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.provider, provider),
+          eq(subscriptions.externalSubscriptionId, externalSubscriptionId),
+        ),
+      )
+      .limit(1);
+
+    return row ? mapSubscription(row) : null;
+  }
+
+  async getLatestCustomerSubscriptionByUser(
+    userId: string,
+    client?: PoolClient,
+  ) {
+    const [row] = await pickDb(client)
+      .select({
+        subscription: subscriptions,
+      })
+      .from(subscriptions)
+      .innerJoin(
+        billingOrders,
+        eq(billingOrders.id, subscriptions.billingOrderId),
+      )
+      .where(
+        and(
+          eq(billingOrders.userId, userId),
+          sql`${subscriptions.externalCustomerId} is not null`,
+        ),
+      )
+      .orderBy(desc(subscriptions.updatedAt))
+      .limit(1);
+
+    return row ? mapSubscription(row.subscription) : null;
+  }
+
   async upsertSubscription(
     snapshot: TeamSubscriptionSnapshot,
     client: PoolClient,
@@ -642,7 +725,8 @@ export class PostgresBillingStore implements BillingStore {
           billingInterval: snapshot.billingInterval,
           currentPeriodStart: parseDateOrNull(snapshot.currentPeriodStart),
           currentPeriodEnd: parseDateOrNull(snapshot.currentPeriodEnd),
-          externalCustomerId: snapshot.externalCustomerId,
+          externalCustomerId:
+            snapshot.externalCustomerId ?? sql`${subscriptions.externalCustomerId}`,
           externalSubscriptionId: snapshot.externalSubscriptionId,
           externalSubscriptionItemId:
             snapshot.externalSubscriptionItemId ?? null,

@@ -10,6 +10,22 @@ export interface PlanConfig {
   highlighted: boolean;
 }
 
+export function planFamilyToPricingPlanId(
+  planFamily: string | null | undefined,
+): PlanConfig["id"] | null {
+  switch (planFamily) {
+    case "individual_free":
+      return "free";
+    case "individual_pro":
+      return "pro";
+    case "team_standard":
+    case "team_premium":
+      return "team";
+    default:
+      return null;
+  }
+}
+
 export type PricingEnv = Partial<
   Record<
     | "NEXT_PUBLIC_PRICING_PRO_MONTHLY"
@@ -85,7 +101,7 @@ export function getPricingConfig(
         "SSO (coming soon)",
         "Dedicated support",
       ],
-      cta: "Create Team",
+      cta: "Create team",
       ctaHref: "/auth/sign-in",
       highlighted: false,
     },

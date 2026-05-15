@@ -1,13 +1,52 @@
 "use client";
 
-import { useState } from "react";
 import { toast } from "sonner";
+import { useEffect, useMemo, useState } from "react";
+import { TeamCheckoutDialog } from "../../_components/team-checkout-dialog";
 import { authClient } from "../../../lib/auth-client";
 import { billingClient } from "../../../lib/sdk";
-import type { PlanConfig } from "../../_landing/pricing-config";
+import {
+  planFamilyToPricingPlanId,
+  type PlanConfig,
+} from "../../_landing/pricing-config";
 
 type BillingInterval = "monthly" | "yearly";
 type PaidPlanId = Extract<PlanConfig["id"], "pro" | "team">;
+type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
+
+type PricingOrg = {
+  id: string;
+  metadata?: unknown;
+  name?: string;
+  slug?: string;
+};
+
+function parseOrganizationMetadata(metadata: unknown) {
+  if (!metadata) return {};
+  if (typeof metadata === "object") {
+    return metadata as { sourceweft?: { kind?: string } };
+  }
+  if (typeof metadata !== "string") return {};
+
+  try {
+    let parsed: unknown = JSON.parse(metadata);
+    if (typeof parsed === "string") {
+      parsed = JSON.parse(parsed);
+    }
+
+    return parsed && typeof parsed === "object"
+      ? (parsed as { sourceweft?: { kind?: string } })
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function isPersonalOrganization(org: PricingOrg) {
+  return (
+    parseOrganizationMetadata(org.metadata).sourceweft?.kind === "personal"
+  );
+}
 
 function formatPrice(cents: number): string {
   if (cents === 0) return "Free";
@@ -32,14 +71,20 @@ function createCheckoutIntent() {
   return id;
 }
 
-function createReferenceKey(plan: PaidPlanId, interval: BillingInterval) {
-  return `pricing:${plan}:${interval}:${createCheckoutIntent()}`;
+function createReferenceKey(
+  plan: PaidPlanId,
+  interval: BillingInterval,
+  seatCount?: number,
+) {
+  const seatSegment = seatCount ? `:${seatCount}` : "";
+  return `pricing:${plan}:${interval}${seatSegment}:${createCheckoutIntent()}`;
 }
 
 function createPricingCheckoutPath(
   plan: PaidPlanId,
   interval: BillingInterval,
   source: "landing" | "dashboard" = "landing",
+  teamOptions?: { seatCount?: number; teamName?: string },
 ) {
   const params = new URLSearchParams({
     plan,
@@ -48,33 +93,109 @@ function createPricingCheckoutPath(
     intent: createCheckoutIntent(),
   });
 
+  if (plan === "team") {
+    const teamName = teamOptions?.teamName?.trim();
+    if (teamName) {
+      params.set("teamName", teamName);
+    }
+
+    if (teamOptions?.seatCount) {
+      params.set("seatCount", String(teamOptions.seatCount));
+    }
+  }
+
   return `/dashboard/billing/checkout?${params.toString()}`;
 }
 
-function createPricingAuthHref(plan: PaidPlanId, interval: BillingInterval) {
+function createPricingAuthHref(
+  plan: PaidPlanId,
+  interval: BillingInterval,
+  teamOptions?: { seatCount?: number; teamName?: string },
+) {
   return `/auth/sign-in?redirectTo=${encodeURIComponent(
-    createPricingCheckoutPath(plan, interval),
+    createPricingCheckoutPath(plan, interval, "landing", teamOptions),
   )}`;
 }
 
 export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
   const [yearly, setYearly] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<"pro" | "team" | null>(null);
+  const [summary, setSummary] = useState<BillingSummary | null>(null);
+  const [teamCheckoutOpen, setTeamCheckoutOpen] = useState(false);
+  const { data: activeOrg } = authClient.useActiveOrganization();
+  const { data: orgs } = authClient.useListOrganizations();
+
+  const billingTeamId = useMemo(() => {
+    const activeOrgRecord = activeOrg as PricingOrg | null | undefined;
+    if (activeOrgRecord?.id) {
+      return activeOrgRecord.id;
+    }
+
+    return (
+      ((orgs ?? []) as PricingOrg[]).find(isPersonalOrganization)?.id ?? null
+    );
+  }, [activeOrg, orgs]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummary() {
+      if (!billingTeamId) {
+        setSummary(null);
+        return;
+      }
+
+      try {
+        const nextSummary = await billingClient.getSummary(billingTeamId);
+        if (!cancelled) {
+          setSummary(nextSummary);
+        }
+      } catch {
+        if (!cancelled) {
+          setSummary(null);
+        }
+      }
+    }
+
+    void loadSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [billingTeamId]);
+
+  const currentPlanId = planFamilyToPricingPlanId(summary?.planFamily);
+  const teamPlan = plans.find((plan) => plan.id === "team");
+  const teamSeatPrice = teamPlan
+    ? yearly
+      ? teamPlan.yearlyPrice
+      : teamPlan.monthlyPrice
+    : 0;
 
   async function handleCheckout(planId: PlanConfig["id"]) {
-    const session = await authClient.getSession();
-    const isLoggedIn = Boolean(session.data?.session || session.data?.user);
-
     if (planId === "free") {
+      const session = await authClient.getSession();
+      const isLoggedIn = Boolean(session.data?.session || session.data?.user);
       window.location.assign(isLoggedIn ? "/dashboard" : "/auth/sign-in");
       return;
     }
 
     if (!isPaidPlan(planId)) {
+      const session = await authClient.getSession();
+      const isLoggedIn = Boolean(session.data?.session || session.data?.user);
+      window.location.assign(isLoggedIn ? "/dashboard" : "/auth/sign-in");
       return;
     }
 
     const billingInterval = yearly ? "yearly" : "monthly";
+
+    if (planId === "team") {
+      setTeamCheckoutOpen(true);
+      return;
+    }
+
+    const session = await authClient.getSession();
+    const isLoggedIn = Boolean(session.data?.session || session.data?.user);
 
     if (!isLoggedIn) {
       window.location.assign(createPricingAuthHref(planId, billingInterval));
@@ -147,14 +268,17 @@ export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
             yearly && plan.monthlyPrice > 0
               ? yearlyDiscount(plan.monthlyPrice, plan.yearlyPrice)
               : 0;
-          const isCurrent =
-            false;
+          const isCurrent = currentPlanId === plan.id;
           const ctaLabel =
             loadingPlan === plan.id
               ? "Opening..."
-              : plan.id === "team"
+              : isCurrent
+                ? "Current plan"
+                : plan.id === "team"
                   ? "Create team"
-                  : plan.cta;
+                  : plan.id === "pro"
+                    ? "Upgrade to Pro"
+                    : plan.cta;
           const ctaClassName = `block w-full rounded-lg px-4 py-2.5 text-center text-sm font-medium transition-colors ${
             plan.highlighted
               ? "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
@@ -239,6 +363,16 @@ export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
           );
         })}
       </div>
+
+      <TeamCheckoutDialog
+        authRedirectOnUnauthenticated
+        billingInterval={yearly ? "yearly" : "monthly"}
+        onOpenChange={setTeamCheckoutOpen}
+        open={teamCheckoutOpen}
+        perSeatPrice={teamSeatPrice}
+        referencePrefix="pricing"
+        source="landing"
+      />
     </div>
   );
 }

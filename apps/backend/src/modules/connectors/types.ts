@@ -35,6 +35,9 @@ export type ConnectorManifest = {
     authorizationUrl: string;
     tokenUrl: string;
     scopes: string[];
+    redirectUri?: string;
+    authorizationParams?: Record<string, string>;
+    sendScope?: boolean;
   };
   sync: {
     supportsIncremental: boolean;

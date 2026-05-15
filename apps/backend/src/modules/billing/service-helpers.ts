@@ -33,6 +33,22 @@ export function ensureTeamBillingEnabled(runtimeConfig: BillingRuntimeConfig) {
   }
 }
 
+export function ensureBillingCheckoutEnabled(
+  runtimeConfig: BillingRuntimeConfig,
+) {
+  if (!runtimeConfig.saasEnabled || runtimeConfig.provider !== "creem") {
+    throw new BillingError(
+      "BILLING_CHECKOUT_DISABLED",
+      409,
+      "Billing checkout is disabled for this deployment",
+      {
+        provider: runtimeConfig.provider,
+        saasEnabled: runtimeConfig.saasEnabled,
+      },
+    );
+  }
+}
+
 export function toWebhookError(error: unknown): { code: string; message: string } {
   if (error instanceof BillingError) {
     return {

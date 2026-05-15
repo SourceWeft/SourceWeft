@@ -59,7 +59,11 @@ export class BillingWebhookService {
       };
     }
 
-    if (!this.runtimeConfig.teamBillingEnabled) {
+    if (
+      !this.runtimeConfig.teamBillingEnabled &&
+      input.snapshot?.planFamily === "team_standard" &&
+      !input.orderFulfillment
+    ) {
       const ignored = await this.store.updateWebhookEventState(
         webhookEvent.id,
         {
@@ -107,7 +111,9 @@ export class BillingWebhookService {
         }
 
         await this.orderService.fulfillOrder(input.orderFulfillment);
-      } else if (input.snapshot) {
+      }
+
+      if (input.snapshot) {
         await this.subscriptionService.syncSubscriptionSnapshot(input.snapshot);
       }
 

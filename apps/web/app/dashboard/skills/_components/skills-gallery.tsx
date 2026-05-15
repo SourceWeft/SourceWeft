@@ -531,6 +531,7 @@ export function SkillsGallery({
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const workspaceIdRef = React.useRef<string | null>(null);
+  const catalogGenerationRef = React.useRef(0);
 
   React.useEffect(() => {
     workspaceIdRef.current = workspace?.id ?? null;
@@ -579,26 +580,37 @@ export function SkillsGallery({
   ]);
 
   const loadCatalog = React.useCallback(async () => {
+    const generation = ++catalogGenerationRef.current;
     setError(null);
     setIsResolvingWorkspace(true);
     try {
       const resolved = await resolveWorkspace();
+      if (catalogGenerationRef.current !== generation) {
+        return;
+      }
       setWorkspace(resolved);
       if (!resolved) {
         setItems([]);
-        setError("No active workspace is available yet.");
         return;
       }
 
       setIsLoading(true);
       const result = await contentClient.listSkillsCatalog(resolved.id);
+      if (catalogGenerationRef.current !== generation) {
+        return;
+      }
       setItems(result.items);
     } catch (loadError) {
+      if (catalogGenerationRef.current !== generation) {
+        return;
+      }
       setItems([]);
       setError(loadError instanceof Error ? loadError.message : "Failed to load skills.");
     } finally {
-      setIsResolvingWorkspace(false);
-      setIsLoading(false);
+      if (catalogGenerationRef.current === generation) {
+        setIsResolvingWorkspace(false);
+        setIsLoading(false);
+      }
     }
   }, [resolveWorkspace]);
 
@@ -666,7 +678,13 @@ export function SkillsGallery({
       setIsLoading(true);
       try {
         await dashboardState.switchWorkspace(nextWorkspaceId, nextWorkspaceName);
+        if (workspaceIdRef.current !== nextWorkspaceId) {
+          return;
+        }
         const result = await contentClient.listSkillsCatalog(nextWorkspaceId);
+        if (workspaceIdRef.current !== nextWorkspaceId) {
+          return;
+        }
         setItems(result.items);
       } catch (changeError) {
         setItems([]);

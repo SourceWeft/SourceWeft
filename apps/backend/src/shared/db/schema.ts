@@ -139,7 +139,15 @@ type LedgerEventType =
   | "refund"
   | "expire"
   | "adjust";
-type LedgerUnitType = "credit" | "page";
+type LedgerUnitType = "credit" | "page" | "seat";
+type TopupUnitType = "credit" | "page";
+type BillingOperationType =
+  | "seat_change"
+  | "cycle_renewal"
+  | "plan_change"
+  | "topup"
+  | "usage"
+  | "quota_adjustment";
 type PlanFamily =
   | "individual_free"
   | "individual_pro"
@@ -531,6 +539,11 @@ export const usageLedgers = pgTable(
     balanceAfter: integer("balance_after").notNull(),
     referenceId: text("reference_id"),
     idempotencyKey: text("idempotency_key"),
+    operationId: text("operation_id"),
+    operationType: text("operation_type").$type<BillingOperationType>(),
+    activityVisible: boolean("activity_visible").notNull().default(false),
+    activityTitle: text("activity_title"),
+    activitySummary: text("activity_summary"),
     metadata: jsonb("metadata")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -551,12 +564,19 @@ export const usageLedgers = pgTable(
     ),
     check(
       "usage_ledgers_unit_type_check",
-      sql`${table.unitType} in ('credit', 'page')`,
+      sql`${table.unitType} in ('credit', 'page', 'seat')`,
+    ),
+    check(
+      "usage_ledgers_operation_type_check",
+      sql`${table.operationType} is null or ${table.operationType} in ('seat_change', 'cycle_renewal', 'plan_change', 'topup', 'usage', 'quota_adjustment')`,
     ),
     index("usage_ledgers_team_created_idx").on(
       table.teamId,
       desc(table.createdAt),
     ),
+    index("usage_ledgers_team_activity_created_idx")
+      .on(table.teamId, desc(table.createdAt))
+      .where(sql`${table.activityVisible} = true`),
     index("usage_ledgers_team_workspace_created_idx").on(
       table.teamId,
       table.workspaceId,
@@ -566,6 +586,11 @@ export const usageLedgers = pgTable(
       table.teamId,
       table.idempotencyKey,
     ),
+    uniqueIndex("usage_ledgers_team_operation_visible_uq")
+      .on(table.teamId, table.operationId)
+      .where(
+        sql`${table.activityVisible} = true and ${table.operationId} is not null`,
+      ),
   ],
 );
 
@@ -630,7 +655,7 @@ export const billingOrders = pgTable(
       "monthly" | "yearly" | "unknown"
     >(),
     quantity: integer("quantity").notNull().default(1),
-    unitType: text("unit_type").$type<LedgerUnitType>(),
+    unitType: text("unit_type").$type<TopupUnitType>(),
     unitAmount: integer("unit_amount"),
     grantedCredits: integer("granted_credits").notNull().default(0),
     grantedPages: integer("granted_pages").notNull().default(0),

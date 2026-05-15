@@ -16,6 +16,7 @@ import type {
   MeterConsumeResponse,
   MeterIngestionRequest,
   MeterIngestionResponse,
+  PreviewTeamSubscriptionSeatsResponse,
   UpdateTeamSubscriptionSeatsRequest,
   UpdateTeamSubscriptionSeatsResponse,
   UpdateSpendLimitsRequest,
@@ -42,10 +43,26 @@ export class BillingClient {
     );
   }
 
-  getLedger(teamId: string, input?: { limit?: number }) {
-    const query = input?.limit ? `?limit=${encodeURIComponent(input.limit)}` : "";
+  getLedger(teamId: string, input?: { limit?: number; activity?: boolean }) {
+    const params = new URLSearchParams();
+    if (input?.limit) {
+      params.set("limit", String(input.limit));
+    }
+    if (input?.activity) {
+      params.set("activity", "true");
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
     return this.http.get<BillingLedgerResponse>(
       `/v1/teams/${encodeTeamId(teamId)}/billing/ledger${query}`,
+    );
+  }
+
+  getActivity(teamId: string, input?: { limit?: number }) {
+    const query = input?.limit
+      ? `?limit=${encodeURIComponent(input.limit)}`
+      : "";
+    return this.http.get<BillingLedgerResponse>(
+      `/v1/teams/${encodeTeamId(teamId)}/billing/activity${query}`,
     );
   }
 
@@ -98,6 +115,16 @@ export class BillingClient {
   ) {
     return this.http.post<UpdateTeamSubscriptionSeatsResponse>(
       `/v1/teams/${encodeTeamId(teamId)}/billing/subscription/seats`,
+      input,
+    );
+  }
+
+  previewSubscriptionSeats(
+    teamId: string,
+    input: UpdateTeamSubscriptionSeatsRequest,
+  ) {
+    return this.http.post<PreviewTeamSubscriptionSeatsResponse>(
+      `/v1/teams/${encodeTeamId(teamId)}/billing/subscription/seats/preview`,
       input,
     );
   }

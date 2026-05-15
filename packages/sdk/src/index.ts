@@ -1,4 +1,5 @@
 export * from "./billing-client";
+export * from "./connectors-client";
 export * from "./content-client";
 export * from "./http-client";
 export * from "./jobs-client";
@@ -9,6 +10,7 @@ export type {
   ChatMessageImagePart,
   ChatMessagePart,
   ChatMessageTextPart,
+  SourceConnector,
   MessageContentJson,
   SkillCommand,
   ThreadCommandRequest,

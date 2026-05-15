@@ -6,11 +6,20 @@ import { config } from "../../../shared/config";
 import { logger } from "../../../shared/logger";
 import type { opsAlertService } from "../../ops";
 import type { BillingService } from "../service";
-import type { TeamSubscriptionSnapshot } from "../types";
+import type {
+  BillingAccountState,
+  BillingSubscriptionState,
+  TeamSubscriptionSnapshot,
+} from "../types";
 
 type CreemSubscriptionSyncDeps = {
   billing: BillingService;
   alerts: typeof opsAlertService;
+};
+
+type SubscriptionWebhookContext = {
+  account: BillingAccountState | null;
+  subscription: BillingSubscriptionState | null;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -282,6 +291,23 @@ function resolveCreemSeatCount(
   throw new Error("Unable to resolve Creem subscription seat count");
 }
 
+function resolveCreemSeatCountWithFallback(
+  data: unknown,
+  metadata: Record<string, unknown> | null,
+  planFamily: "individual_pro" | "team_standard",
+  context?: SubscriptionWebhookContext | null,
+) {
+  try {
+    return resolveCreemSeatCount(data, metadata, planFamily);
+  } catch (error) {
+    if (planFamily === "team_standard" && context?.account) {
+      return context.account.seatCount;
+    }
+
+    throw error;
+  }
+}
+
 function resolveSubscriptionItemId(data: unknown) {
   const record = asRecord(data);
   const items = record?.items;
@@ -297,11 +323,17 @@ function buildCreemSubscriptionSnapshot(
   eventType: string,
   data: unknown,
   fallbackStatus: BillingSubscriptionStatus,
+  context?: SubscriptionWebhookContext | null,
 ): TeamSubscriptionSnapshot | null {
   const record = asRecord(data);
   const metadata = resolveMetadata(record);
-  const teamId = resolveTeamId(metadata);
-  const planFamily = resolvePlanFamily(metadata, data);
+  const teamId = resolveTeamId(metadata) ?? context?.subscription?.teamId;
+  const planFamily =
+    resolvePlanFamily(metadata, data) ??
+    (context?.subscription?.planFamily === "individual_pro" ||
+    context?.subscription?.planFamily === "team_standard"
+      ? context.subscription.planFamily
+      : null);
 
   if (!planFamily || (planFamily === "individual_pro" && !teamId)) {
     return null;
@@ -319,18 +351,33 @@ function buildCreemSubscriptionSnapshot(
   const customer = asRecord(record?.customer ?? null);
   const product = asRecord(record?.product ?? null);
   const customerId =
-    readString(customer, "id") ?? readString(record, "customer");
-  const productId = readString(product, "id") ?? readString(record, "product");
+    readString(customer, "id") ??
+    readString(record, "customer") ??
+    context?.subscription?.externalCustomerId ??
+    null;
+  const productId =
+    readString(product, "id") ??
+    readString(record, "product") ??
+    context?.subscription?.externalProductId ??
+    null;
   const rawStatus = readString(record, "status");
   const currentPeriodStart = toDateIso(
     record?.current_period_start_date ?? record?.currentPeriodStartDate,
-  );
+  ) ?? context?.subscription?.currentPeriodStart ?? null;
   const currentPeriodEnd = toDateIso(
     record?.current_period_end_date ?? record?.currentPeriodEndDate,
-  );
+  ) ?? context?.subscription?.currentPeriodEnd ?? null;
   const billingInterval =
     resolveBillingIntervalFromProduct(metadata, data) ??
+    (context?.subscription?.billingInterval === "monthly" ||
+    context?.subscription?.billingInterval === "yearly"
+      ? context.subscription.billingInterval
+      : null) ??
     inferBillingInterval(currentPeriodStart, currentPeriodEnd);
+  const externalSubscriptionId: string | null =
+    readString(record, "id") ??
+    context?.subscription?.externalSubscriptionId ??
+    null;
 
   return {
     teamId: resolvedTeamId,
@@ -345,16 +392,24 @@ function buildCreemSubscriptionSnapshot(
     currentPeriodStart,
     currentPeriodEnd,
     externalCustomerId: customerId,
-    externalSubscriptionId: readString(record, "id"),
+    externalSubscriptionId,
     externalProductId: productId,
     cancelAtPeriodEnd:
       rawStatus === "scheduled_cancel" ||
       record?.cancel_at_period_end === true ||
       eventType === "subscription.scheduled_cancel",
     metadata: metadata ?? {},
-    seatCount: resolveCreemSeatCount(data, metadata, planFamily),
-    billingOrderId: resolveOrderId(metadata),
-    externalSubscriptionItemId: resolveSubscriptionItemId(data),
+    seatCount: resolveCreemSeatCountWithFallback(
+      data,
+      metadata,
+      planFamily,
+      context,
+    ),
+    billingOrderId:
+      resolveOrderId(metadata) ?? context?.subscription?.billingOrderId,
+    externalSubscriptionItemId:
+      resolveSubscriptionItemId(data) ??
+      context?.subscription?.externalSubscriptionItemId,
   };
 }
 
@@ -368,16 +423,24 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
     const payload = record ?? {
       raw: data,
     };
+    const providerEventId = readString(record, "webhookId");
+    const rawExternalSubscriptionId = readString(record, "id");
+    const context = rawExternalSubscriptionId
+      ? await deps.billing.getSubscriptionWebhookContext(
+          "creem",
+          rawExternalSubscriptionId,
+        )
+      : null;
     const snapshot = buildCreemSubscriptionSnapshot(
       eventType,
       data,
       fallbackStatus,
+      context,
     );
     const metadata = resolveMetadata(record);
     const orderId = resolveOrderId(metadata);
-    const providerEventId = readString(record, "webhookId");
     const externalSubscriptionId =
-      snapshot?.externalSubscriptionId || readString(record, "id");
+      snapshot?.externalSubscriptionId || rawExternalSubscriptionId;
     const teamId = snapshot?.teamId || resolveTeamId(asRecord(payload.metadata));
 
     async function triggerAlertSafely(

@@ -8,6 +8,15 @@ import { resolveGoogleOneTapConfig } from "../lib/google-one-tap-config";
 const ONE_TAP_PATHS = new Set(["/", "/auth/sign-in"]);
 const googleOneTapConfig = resolveGoogleOneTapConfig();
 
+type SessionData = {
+  session?: unknown;
+  user?: unknown;
+} | null;
+
+function hasActiveSession(data: SessionData | undefined) {
+  return Boolean(data?.session || data?.user);
+}
+
 function shouldIgnoreOneTapError(error: unknown) {
   if (error instanceof DOMException && error.name === "NotAllowedError") {
     return true;
@@ -30,6 +39,8 @@ function shouldIgnoreOneTapError(error: unknown) {
 export function GoogleOneTap() {
   const pathname = usePathname();
   const promptedPathRef = useRef<string | null>(null);
+  const { data, isPending } = authClient.useSession();
+  const isSignedIn = hasActiveSession(data as SessionData | undefined);
 
   useEffect(() => {
     if (!googleOneTapConfig.enabled) {
@@ -44,6 +55,10 @@ export function GoogleOneTap() {
       return;
     }
 
+    if (isPending || isSignedIn) {
+      return;
+    }
+
     if (promptedPathRef.current === pathname) {
       return;
     }
@@ -53,13 +68,15 @@ export function GoogleOneTap() {
     }
 
     promptedPathRef.current = pathname;
-    void authClient.oneTap({
-      callbackURL: "/dashboard",
-      cancelOnTapOutside: false,
-      fetchOptions: {
-        credentials: "include",
-      },
-    }).catch((error: unknown) => {
+    void (async () => {
+      await authClient.oneTap({
+        callbackURL: "/dashboard",
+        cancelOnTapOutside: false,
+        fetchOptions: {
+          credentials: "include",
+        },
+      });
+    })().catch((error: unknown) => {
       promptedPathRef.current = null;
       if (shouldIgnoreOneTapError(error)) {
         return;
@@ -67,7 +84,7 @@ export function GoogleOneTap() {
 
       console.error("[Google One Tap] prompt failed", error);
     });
-  }, [pathname]);
+  }, [isPending, isSignedIn, pathname]);
 
   return null;
 }

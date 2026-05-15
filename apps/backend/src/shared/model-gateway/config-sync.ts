@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { dirname, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
 import { eq, ne, sql } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../database";
@@ -30,8 +28,7 @@ import {
 import type { ModelGatewayProfileKind } from "./types";
 import { encryptSecret } from "../secrets";
 import { syncModelPricing } from "../scripts/sync-model-pricing";
-
-const GLOBAL_MODEL_GATEWAY_CONFIG_RELATIVE_PATH = "../../../config/model-gateway.global.json";
+import { resolveBackendRuntimePath } from "../runtime-paths";
 
 let modelConfigSyncPromise: Promise<void> | null = null;
 
@@ -136,14 +133,11 @@ function applyOpenRouterFacts<T extends {
 }
 
 export function resolveGlobalModelGatewayConfigPath() {
-  const configuredPath = config.modelGatewayGlobalConfigPath?.trim();
-  if (configuredPath) {
-    return configuredPath;
-  }
-
-  const currentFilePath = fileURLToPath(import.meta.url);
-  const currentDirPath = dirname(currentFilePath);
-  return resolvePath(currentDirPath, GLOBAL_MODEL_GATEWAY_CONFIG_RELATIVE_PATH);
+  return resolveBackendRuntimePath({
+    candidates: ["config/model-gateway.global.json"],
+    envVar: "MODEL_GATEWAY_GLOBAL_CONFIG_PATH",
+    label: "global model gateway config",
+  });
 }
 
 async function upsertModelGatewayProfileFromGlobalConfig(

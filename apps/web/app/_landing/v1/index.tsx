@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LayoutDashboard } from "lucide-react";
 import {
   SourceWeftHeader,
 } from "../components/sourceweft-header";
@@ -8,6 +9,10 @@ import {
   SourceWeftBrandLockup,
   SourceWeftBrandMark,
 } from "../components/sourceweft-brand";
+import {
+  type LandingAuthState,
+  useLandingAuthState,
+} from "../components/use-landing-auth-state";
 import { getPricingConfig } from "../pricing-config";
 import { PricingToggle } from "./pricing-toggle";
 
@@ -96,7 +101,12 @@ function IconCheck() {
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
-function HeroSection() {
+function HeroSection({ authState }: { authState: LandingAuthState }) {
+  const primaryHref = authState.isSignedIn ? "/dashboard" : "/auth/sign-in";
+  const primaryLabel = authState.isSignedIn
+    ? "Open Dashboard"
+    : "Start for free";
+
   return (
     <section className="relative overflow-hidden pt-32 pb-20 md:pt-40 md:pb-28">
       {/* Grid + glow background */}
@@ -152,11 +162,18 @@ function HeroSection() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
-                href="/auth/sign-in"
-                className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                href={primaryHref}
+                className={
+                  authState.isSignedIn
+                    ? "inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
+                    : "inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                }
               >
-                Start for free
-                <IconArrow />
+                {authState.isSignedIn ? (
+                  <LayoutDashboard className="size-4" />
+                ) : null}
+                {primaryLabel}
+                {authState.isSignedIn ? null : <IconArrow />}
               </Link>
               <a
                 href="#how-it-works"
@@ -667,7 +684,14 @@ function PricingSection() {
 
 // ─── Footer ───────────────────────────────────────────────────────────────────
 
-function Footer() {
+function Footer({ authState }: { authState: LandingAuthState }) {
+  const productLinks = [
+    ["#features", "Features"],
+    ["#how-it-works", "How it works"],
+    ["#pricing", "Pricing"],
+    [authState.isSignedIn ? "/dashboard" : "/auth/sign-in", authState.isSignedIn ? "Dashboard" : "Get started"],
+  ] as const;
+
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
@@ -686,12 +710,7 @@ function Footer() {
               Product
             </p>
             <ul className="space-y-2 text-sm">
-              {[
-                ["#features", "Features"],
-                ["#how-it-works", "How it works"],
-                ["#pricing", "Pricing"],
-                ["/auth/sign-in", "Get started"],
-              ].map(([href, label]) => (
+              {productLinks.map(([href, label]) => (
                 <li key={href}>
                   <a
                     href={href}
@@ -776,17 +795,23 @@ function GlobalStyles() {
 
 // ─── Page root ────────────────────────────────────────────────────────────────
 
-export default function LandingV1() {
+export default function LandingV1({
+  initialAuthState,
+}: {
+  initialAuthState?: LandingAuthState;
+}) {
+  const authState = useLandingAuthState(initialAuthState);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <GlobalStyles />
-      <SourceWeftHeader />
-      <HeroSection />
+      <SourceWeftHeader authState={authState} />
+      <HeroSection authState={authState} />
       <SocialProof />
       <FeaturesSection />
       <HowItWorks />
       <PricingSection />
-      <Footer />
+      <Footer authState={authState} />
     </div>
   );
 }

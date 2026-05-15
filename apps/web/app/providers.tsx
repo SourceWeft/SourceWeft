@@ -111,6 +111,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         }}
         passkey
         replace={router.replace}
+        redirectTo="/dashboard"
         signUp={{
           fields: ["name"],
         }}

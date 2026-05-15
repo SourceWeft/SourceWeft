@@ -5,6 +5,7 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "../modules/auth";
+import { handleCreemScheduledCancelWebhook } from "../modules/billing/providers/creem-webhook-bypass";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { describeError } from "./response/error-detail";
@@ -12,6 +13,7 @@ import { ApiError, ApiResponse, toApiError } from "./response/api-response";
 import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
+import { registerConnectorOAuthRoutes } from "./routes/connectors-oauth";
 import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
@@ -57,7 +59,18 @@ export function createApp() {
   );
 
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {
-    return auth.handler(withBetterAuthClientIp(c));
+    const authRequest = withBetterAuthClientIp(c);
+
+    if (c.req.method === "POST") {
+      const scheduledCancelResponse = await handleCreemScheduledCancelWebhook(
+        authRequest.clone(),
+      );
+      if (scheduledCancelResponse) {
+        return scheduledCancelResponse;
+      }
+    }
+
+    return auth.handler(authRequest);
   });
 
   app.get("/.well-known/oauth-authorization-server/api/auth", (c) =>
@@ -74,6 +87,7 @@ export function createApp() {
 
   registerAuthMetaRoutes(app);
   registerDesktopAuthRoutes(app);
+  registerConnectorOAuthRoutes(app);
   registerWorkspaceRoutes(app);
   registerBillingRoutes(app);
   registerContentRoutes(app);

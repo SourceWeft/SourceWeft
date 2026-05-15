@@ -52,6 +52,11 @@ function parseNonNegativeNumber(value: string | undefined, fallback: number) {
   return parsed;
 }
 
+function parseNonNegativeInteger(value: string | undefined, fallback: number) {
+  const parsed = parseNonNegativeNumber(value, fallback);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+
 const billingModes: ReadonlySet<BillingMode> = new Set([
   "disabled",
   "shadow",
@@ -303,8 +308,20 @@ function resolvePasskeyOrigin() {
   return resolveWebBaseUrl();
 }
 
+const saasEnabled = parseBoolean(process.env.SOURCEWEFT_SAAS_ENABLED, false);
+const requestedBillingProvider = parseBillingProvider(
+  process.env.BACKEND_BILLING_PROVIDER,
+  "none",
+);
+// SOURCEWEFT_SAAS_ENABLED is the payment/subscription gate for OSS deploys:
+// provider credentials alone must not turn checkout on, and only Creem is a
+// provider-backed checkout path in this release.
+const effectiveBillingProvider: BillingProvider =
+  saasEnabled && requestedBillingProvider === "creem" ? "creem" : "none";
+
 export const config = {
-  apiPort: Number(process.env.BACKEND_API_PORT || 3001),
+  apiHost: process.env.BACKEND_API_HOST || "0.0.0.0",
+  apiPort: Number(process.env.PORT || process.env.BACKEND_API_PORT || 3001),
   databaseUrl:
     process.env.DATABASE_URL ||
     "postgres://postgres:postgres@127.0.0.1:5432/sourceweft",
@@ -372,8 +389,6 @@ export const config = {
     false,
   ),
   modelGatewayEncryptionSecret: requireEnv("MODEL_GATEWAY_ENCRYPTION_SECRET"),
-  modelGatewayGlobalConfigPath:
-    process.env.MODEL_GATEWAY_GLOBAL_CONFIG_PATH?.trim() || null,
   modelGatewaySyncOpenRouterCatalog: parseBoolean(
     process.env.MODEL_GATEWAY_SYNC_OPENROUTER_CATALOG,
     true,
@@ -381,6 +396,7 @@ export const config = {
   auth: {
     secret: process.env.BETTER_AUTH_SECRET || "replace_with_dev_secret_only",
     baseUrl: resolveApiBaseUrl(),
+    webBaseUrl: resolveWebBaseUrl(),
     errorUrl: resolveAuthErrorUrl(),
     trustedOrigins: resolveTrustedOrigins(),
     googleClientId: process.env.AUTH_GOOGLE_CLIENT_ID || "",
@@ -398,7 +414,7 @@ export const config = {
     extensionRedirectUri: resolveExtensionRedirectUri(),
   },
   mail: {
-    provider: process.env.MAIL_PROVIDER || "plunk",
+    provider: process.env.MAIL_PROVIDER || "console",
     fromAddress: process.env.MAIL_FROM_ADDRESS || "noreply@example.com",
     fromName: process.env.MAIL_FROM_NAME || "SourceWeft",
     plunkApiBaseUrl:
@@ -406,25 +422,22 @@ export const config = {
     plunkApiKey: process.env.PLUNK_API_KEY || "",
   },
   billing: {
-    mode: parseBillingMode(process.env.BACKEND_BILLING_MODE, "shadow"),
+    saasEnabled,
+    mode: parseBillingMode(process.env.BACKEND_BILLING_MODE, "enforced"),
     scope: parseBillingScope(
       process.env.BACKEND_BILLING_SCOPE,
       "individual_only",
     ),
     creditsEnabled: parseBoolean(process.env.BACKEND_CREDITS_ENABLED, true),
     pagesEnabled: parseBoolean(process.env.BACKEND_PAGES_ENABLED, true),
-    provider: parseBillingProvider(
-      process.env.BACKEND_BILLING_PROVIDER,
-      "none",
-    ),
+    provider: effectiveBillingProvider,
     enforceLimits: parseBoolean(
       process.env.BACKEND_BILLING_ENFORCE_LIMITS,
       true,
     ),
-    teamBillingEnabled: parseBoolean(
-      process.env.BACKEND_TEAM_BILLING_ENABLED,
-      false,
-    ),
+    teamBillingEnabled:
+      saasEnabled &&
+      parseBoolean(process.env.BACKEND_TEAM_BILLING_ENABLED, false),
     creditUnitUsd: parsePositiveNumber(
       process.env.BACKEND_CREDIT_UNIT_USD,
       0.00125,
@@ -437,11 +450,18 @@ export const config = {
       process.env.BACKEND_DEFAULT_PLAN_FAMILY,
       "individual_free",
     ),
-    reconcileEnabled: parseBoolean(
-      process.env.BACKEND_BILLING_RECONCILE_ENABLED,
-      true,
+    defaultMonthlyPages: parseNonNegativeInteger(
+      process.env.BACKEND_DEFAULT_MONTHLY_PAGES,
+      300,
     ),
-    defaultSuccessUrl: `${resolveWebBaseUrl()}/app/billing?checkout=success`,
+    defaultMonthlyCredits: parseNonNegativeInteger(
+      process.env.BACKEND_DEFAULT_MONTHLY_CREDITS,
+      3000,
+    ),
+    reconcileEnabled:
+      saasEnabled &&
+      parseBoolean(process.env.BACKEND_BILLING_RECONCILE_ENABLED, false),
+    defaultSuccessUrl: `${resolveWebBaseUrl()}/dashboard/billing?checkout=success`,
     creem: {
       apiKey: process.env.CREEM_API_KEY || "",
       webhookSecret: process.env.CREEM_WEBHOOK_SECRET || "",

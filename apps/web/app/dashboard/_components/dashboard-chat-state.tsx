@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -158,6 +159,8 @@ export function DashboardChatStateProvider({
 
   const [activeChatId, setActiveChatId] = useState("");
   const [threadTitle, setThreadTitle] = useState("New chat");
+  const activeOrganizationRef = useRef<string | null>(null);
+  const hydrateGenerationRef = useRef(0);
   const toggleSourcesVisible = useCallback(() => {
     setSourcesVisible((value) => !value);
   }, []);
@@ -178,27 +181,38 @@ export function DashboardChatStateProvider({
   );
 
   const hydrateWorkspace = useCallback(
-    async (organizationId: string) => {
-      const listed = await workspaceClient.listWorkspaces(organizationId);
-      const resolvedItems =
-        listed.items.length > 0
-          ? listed.items
-          : [
-              await workspaceClient.createWorkspace(organizationId, {
-                name: "My Workspace",
-              }),
-            ];
-      const storedWorkspaceId = getStoredDashboardWorkspaceId(organizationId);
+    async (targetOrganizationId: string, generation: number) => {
+      const isCurrent = () => hydrateGenerationRef.current === generation;
+      const listed = await workspaceClient.listWorkspaces(targetOrganizationId);
+      if (!isCurrent()) {
+        return;
+      }
+
+      const resolvedItems = listed.items;
+      const storedWorkspaceId =
+        getStoredDashboardWorkspaceId(targetOrganizationId);
       const active =
         resolvedItems.find((item) => item.id === storedWorkspaceId) ??
-        resolvedItems[0]!;
+        resolvedItems[0] ??
+        null;
+
+      if (!active) {
+        setWorkspaces([]);
+        setWorkspaceId(null);
+        setWorkspaceName("Workspace");
+        setPrivateChats([]);
+        setPrivateChatsCursor(null);
+        setHasMorePrivateChats(false);
+        setIsLoadingPrivateChats(false);
+        return;
+      }
 
       setWorkspaces(
         resolvedItems.map((item) => ({ id: item.id, name: item.name })),
       );
       setWorkspaceId(active.id);
       setWorkspaceName(active.name);
-      setStoredDashboardWorkspaceId(organizationId, active.id);
+      setStoredDashboardWorkspaceId(targetOrganizationId, active.id);
 
       setIsLoadingPrivateChats(true);
       setPrivateChats([]);
@@ -211,13 +225,22 @@ export function DashboardChatStateProvider({
         // context persistence is best-effort for now
       }
 
+      if (!isCurrent()) {
+        return;
+      }
+
       try {
         const threads = await fetchPrivateChatsPage(active.id);
+        if (!isCurrent()) {
+          return;
+        }
         setPrivateChats(threads.items);
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
       } finally {
-        setIsLoadingPrivateChats(false);
+        if (isCurrent()) {
+          setIsLoadingPrivateChats(false);
+        }
       }
     },
     [fetchPrivateChatsPage],
@@ -225,6 +248,7 @@ export function DashboardChatStateProvider({
 
   useEffect(() => {
     let cancelled = false;
+    const generation = ++hydrateGenerationRef.current;
 
     async function bootstrap() {
       try {
@@ -235,38 +259,61 @@ export function DashboardChatStateProvider({
           metadata?: unknown;
         }>;
         const personalOrg = orgList.find(isPersonalOrganization);
-        const organizationId =
+        const resolvedOrganizationId =
           activeOrg?.id ??
           current.activeOrganizationId ??
           personalOrg?.id ??
           null;
-        const organizationName =
+        const resolvedOrganizationName =
           activeOrg?.name ??
-          orgList.find((org) => org.id === organizationId)?.name ??
+          orgList.find((org) => org.id === resolvedOrganizationId)?.name ??
           "SourceWeft";
 
-        if (!organizationId) {
+        if (!resolvedOrganizationId) {
           return;
         }
 
         if (!cancelled) {
-          setOrganizationId(organizationId);
-          setOrganizationName(organizationName);
+          const organizationChanged =
+            activeOrganizationRef.current !== resolvedOrganizationId;
+          activeOrganizationRef.current = resolvedOrganizationId;
+          setOrganizationId(resolvedOrganizationId);
+          setOrganizationName(resolvedOrganizationName);
+
+          if (organizationChanged) {
+            setWorkspaceId(null);
+            setWorkspaceName("Workspace");
+            setWorkspaces([]);
+            setPrivateChats([]);
+            setPrivateChatsCursor(null);
+            setHasMorePrivateChats(false);
+            setSharedChats([]);
+            setArchivedChats([]);
+            setActiveChatId("");
+            setThreadTitle("New chat");
+            setMode("new");
+            setIsLoadingPrivateChats(true);
+          }
         }
 
         if (!activeOrg?.id) {
           try {
-            await authClient.organization.setActive({ organizationId });
+            await authClient.organization.setActive({
+              organizationId: resolvedOrganizationId,
+            });
           } catch {
             // keep bootstrapping even if active organization sync fails
           }
         }
 
         if (!cancelled) {
-          await hydrateWorkspace(organizationId);
+          await hydrateWorkspace(resolvedOrganizationId, generation);
         }
       } catch {
         // keep UI usable; sidebar still renders local state
+        if (!cancelled && hydrateGenerationRef.current === generation) {
+          setIsLoadingPrivateChats(false);
+        }
       }
     }
 

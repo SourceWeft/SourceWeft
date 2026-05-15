@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive,
   ChevronDown,
@@ -47,6 +47,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { authClient } from "../../../lib/auth-client";
 import { billingClient } from "../../../lib/sdk";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
+import { subscribeDashboardBillingSummaryRefresh } from "./dashboard-billing-summary-refresh";
 import {
   getPersonalOrganization,
 } from "./dashboard-team-selector-shared";
@@ -112,11 +113,23 @@ function SidebarUsageSummary({ onOpenUsage }: { onOpenUsage?: () => void }) {
   const [summary, setSummary] = useState<BillingSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const mountedRef = useRef(false);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
-    let cancelled = false;
+    mountedRef.current = true;
 
-    async function loadSummary() {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadSummary = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const silent = options?.silent === true;
+
       if (!teamId) {
         setSummary(null);
         setLoading(resolvingTeamId);
@@ -124,33 +137,44 @@ function SidebarUsageSummary({ onOpenUsage }: { onOpenUsage?: () => void }) {
         return;
       }
 
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setHasError(false);
 
       try {
         const nextSummary = await billingClient.getSummary(teamId);
 
-        if (!cancelled) {
+        if (mountedRef.current && requestIdRef.current === requestId) {
           setSummary(nextSummary);
         }
       } catch {
-        if (!cancelled) {
-          setSummary(null);
+        if (mountedRef.current && requestIdRef.current === requestId) {
+          if (!silent) {
+            setSummary(null);
+          }
           setHasError(true);
         }
       } finally {
-        if (!cancelled) {
+        if (mountedRef.current && requestIdRef.current === requestId) {
           setLoading(false);
         }
       }
-    }
+    },
+    [resolvingTeamId, teamId],
+  );
 
+  useEffect(() => {
     void loadSummary();
+  }, [loadSummary]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [resolvingTeamId, teamId]);
+  useEffect(
+    () =>
+      subscribeDashboardBillingSummaryRefresh(() => {
+        void loadSummary({ silent: true });
+      }),
+    [loadSummary],
+  );
 
   const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
   const creditsLimit = summary?.credits.monthlyGrant ?? 0;

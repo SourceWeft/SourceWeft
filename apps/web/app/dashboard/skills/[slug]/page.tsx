@@ -97,6 +97,7 @@ export default function SkillDetailPage() {
   const [isInstalling, setIsInstalling] = React.useState(false);
   const [isUninstalling, setIsUninstalling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const detailGenerationRef = React.useRef(0);
 
   const resolveWorkspace = React.useCallback(async () => {
     if (dashboardState.workspaceId) {
@@ -117,14 +118,17 @@ export default function SkillDetailPage() {
   }, [dashboardState.workspaceId, dashboardState.workspaceName]);
 
   const loadDetail = React.useCallback(async () => {
+    const generation = ++detailGenerationRef.current;
     setError(null);
     setIsResolvingWorkspace(true);
     try {
       const resolved = await resolveWorkspace();
+      if (detailGenerationRef.current !== generation) {
+        return;
+      }
       setWorkspace(resolved);
       if (!resolved) {
         setDetail(null);
-        setError("No active workspace is available yet.");
         return;
       }
       if (!slug) {
@@ -135,6 +139,9 @@ export default function SkillDetailPage() {
 
       setIsLoading(true);
       const catalog = await contentClient.listSkillsCatalog(resolved.id);
+      if (detailGenerationRef.current !== generation) {
+        return;
+      }
       const skill = catalog.items.find((item) => item.slug === slug);
       if (!skill) {
         setDetail(null);
@@ -143,13 +150,21 @@ export default function SkillDetailPage() {
       }
 
       const result = await contentClient.getSkillCatalogDetail(resolved.id, skill.catalogId);
+      if (detailGenerationRef.current !== generation) {
+        return;
+      }
       setDetail(result);
     } catch (loadError) {
+      if (detailGenerationRef.current !== generation) {
+        return;
+      }
       setDetail(null);
       setError(loadError instanceof Error ? loadError.message : "Failed to load skill.");
     } finally {
-      setIsResolvingWorkspace(false);
-      setIsLoading(false);
+      if (detailGenerationRef.current === generation) {
+        setIsResolvingWorkspace(false);
+        setIsLoading(false);
+      }
     }
   }, [resolveWorkspace, slug]);
 

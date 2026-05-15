@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { htmlToText } from "html-to-text";
+import { resolveBackendRuntimePath } from "../runtime-paths";
 
 type TemplateMetadata = {
   action?: string;
@@ -19,7 +19,11 @@ export type RenderedMailTemplate = {
   text: string;
 };
 
-const templatesDir = fileURLToPath(new URL("./templates/", import.meta.url));
+const templatesDir = resolveBackendRuntimePath({
+  candidates: ["dist/shared/mail/templates", "src/shared/mail/templates"],
+  envVar: "MAIL_TEMPLATES_DIR",
+  label: "mail templates directory",
+});
 
 function assertTemplateId(templateId: string) {
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(templateId)) {

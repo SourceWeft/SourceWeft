@@ -33,10 +33,18 @@ export function registerWorkspaceRoutes(app: Hono) {
       throw ApiError.forbidden();
     }
 
-    const workspaces = await workspaceService.listWorkspaces({
+    let workspaces = await workspaceService.listWorkspaces({
       organizationId: teamId,
       userId,
     });
+
+    if (workspaces.length === 0) {
+      const workspace = await workspaceService.ensureUserWorkspaceInOrganization({
+        organizationId: teamId,
+        userId,
+      });
+      workspaces = [workspace];
+    }
 
     return ApiResponse.success(c, { items: workspaces });
   });
@@ -117,27 +125,19 @@ export function registerWorkspaceRoutes(app: Hono) {
       c.req.header("x-workspace-id") || c.req.query("workspaceId") || null;
 
     const organizationId = activeOrganizationId || null;
-    const ensureDefaultWorkspace = async (teamId: string) => {
-      const listed = await workspaceService.listWorkspaces({
-        organizationId: teamId,
-        userId,
-      });
-
-      if (listed.length > 0) {
-        return listed[0] ?? null;
-      }
-
-      return null;
-    };
-
-    const workspace = requestedWorkspaceId
+    let workspace = requestedWorkspaceId
       ? await workspaceService.resolveWorkspace({
           workspaceId: requestedWorkspaceId,
           userId,
         })
-      : organizationId
-        ? await ensureDefaultWorkspace(organizationId)
-        : null;
+      : null;
+
+    if (!requestedWorkspaceId && !workspace && organizationId) {
+      workspace = await workspaceService.ensureUserWorkspaceInOrganization({
+        organizationId,
+        userId,
+      });
+    }
 
     return ApiResponse.success(c, {
       authenticated: true,

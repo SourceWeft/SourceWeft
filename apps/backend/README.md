@@ -5,6 +5,8 @@ This directory contains the backend runtime for SourceWeft.
 Queue backend: BullMQ + Redis (skeleton only, minimal implementation).
 
 Billing MVP (`pages + credits`) is backed by PostgreSQL tables managed by Drizzle.
+OSS defaults enforce the configured free quota while keeping payment checkout
+disabled unless `SOURCEWEFT_SAAS_ENABLED=true` and a billing provider are set.
 
 Team subscription notes (current phase):
 

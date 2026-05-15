@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
+import { useRouter } from "next/navigation";
 import { authClient } from "../../../lib/auth-client";
 import {
   Avatar,
@@ -99,6 +100,7 @@ export function getPersonalOrganization<T extends DashboardTeamOrganization>(
 }
 
 export function useDashboardTeamSelector() {
+  const router = useRouter();
   const authState = useAuthenticate();
   const sessionState = authState.data as
     | {
@@ -153,6 +155,7 @@ export function useDashboardTeamSelector() {
     await authClient.organization.setActive({
       organizationId: item.id,
     });
+    router.refresh();
   }
 
   return {

@@ -36,6 +36,7 @@ import {
   useDashboardShortcutPlatform,
   type DashboardShortcutDefinition,
 } from "../../_components/dashboard-shortcuts";
+import { dispatchDashboardBillingSummaryRefresh } from "../../_components/dashboard-billing-summary-refresh";
 import {
   emptyModelCatalog,
   HeaderModelSelector,
@@ -4033,6 +4034,9 @@ export default function DashboardChatThreadPage({
           setActiveThreadRun((current) =>
             current?.idempotencyKey === durableRunKey ? null : current,
           );
+          dispatchDashboardBillingSummaryRefresh({
+            reason: "chat-turn-terminal",
+          });
         } else {
           setIsStopping(false);
         }

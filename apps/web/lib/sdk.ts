@@ -1,5 +1,6 @@
 import {
   BillingClient,
+  ConnectorsClient,
   ContentClient,
   HttpClient,
   JobsClient,
@@ -19,6 +20,7 @@ const httpClient = new HttpClient({
 
 export const jobsClient = new JobsClient(httpClient);
 export const billingClient = new BillingClient(httpClient);
+export const connectorsClient = new ConnectorsClient(httpClient);
 export const contentClient = new ContentClient(httpClient);
 export const workspaceClient = new WorkspaceClient(httpClient);
 export const llmObservabilityClient = new LlmObservabilityClient(httpClient);

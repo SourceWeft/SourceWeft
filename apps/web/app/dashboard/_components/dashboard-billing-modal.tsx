@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown, CreditCard, Download, Receipt, Sparkles } from "lucide-react";
+import { Check, ChevronDown, CreditCard, Sparkles } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import {
@@ -12,6 +12,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
+import { billingCheckoutEnabled } from "../../../lib/deployment-config";
 import { billingClient } from "../../../lib/sdk";
 import { getPricingConfig } from "../../_landing/pricing-config";
 import {
@@ -27,12 +28,6 @@ import {
 import { DashboardPricingModal } from "./dashboard-pricing-modal";
 
 type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
-
-const invoices = [
-  { period: "Apr 2026", amount: "$20.00", status: "Paid" },
-  { period: "Mar 2026", amount: "$20.00", status: "Paid" },
-  { period: "Feb 2026", amount: "$20.00", status: "Paid" },
-];
 
 function SummaryCard({
   label,
@@ -219,7 +214,7 @@ export function DashboardBillingModal({
 
   const content = isTeam
     ? {
-        description: "Manage plan, invoices, and payment details for this team.",
+        description: "Manage plan, payment details, and subscription state for this team.",
         plan: "Team",
         status: "Active",
         cycle: "Renews on May 12, 2026",
@@ -231,7 +226,7 @@ export function DashboardBillingModal({
         paymentMethod: "Mastercard ending in 2244",
       }
     : {
-        description: "Manage plan, invoices, and payment details for your personal account.",
+        description: "Manage plan, payment details, and subscription state for your personal account.",
         plan: "Pro",
         status: "Active",
         cycle: "Renews on May 7, 2026",
@@ -268,21 +263,24 @@ export function DashboardBillingModal({
                 {content.status} · {content.cycle}
               </p>
               <p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">
-                A single billing surface for usage, invoices, and subscription state without leaving the active workspace shell.
+                A single billing surface for usage, payment details, and subscription state without leaving the active workspace shell.
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                 <span className="rounded-full border border-border bg-background px-2 py-0.5">Auto-renew enabled</span>
-                <span className="rounded-full border border-border bg-background px-2 py-0.5">Invoices emailed monthly</span>
                 <span className="rounded-full border border-border bg-background px-2 py-0.5">Tax profile complete</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button onClick={() => setPricingOpen(true)} size="sm" type="button" variant="outline">
-                View pricing
-              </Button>
-              <Button size="sm" type="button">
-                Manage plan
-              </Button>
+              {billingCheckoutEnabled ? (
+                <>
+                  <Button onClick={() => setPricingOpen(true)} size="sm" type="button" variant="outline">
+                    View pricing
+                  </Button>
+                  <Button size="sm" type="button">
+                    Manage plan
+                  </Button>
+                </>
+              ) : null}
             </div>
           </div>
         </DashboardSection>
@@ -329,7 +327,7 @@ export function DashboardBillingModal({
                   </span>
                   <div>
                     <p className="text-sm font-medium text-foreground">{content.paymentMethod}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Auto-pay enabled for upcoming invoices</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Auto-pay enabled for upcoming renewals</p>
                   </div>
                 </div>
                 <Button size="xs" type="button" variant="outline">
@@ -356,35 +354,6 @@ export function DashboardBillingModal({
           </DashboardSection>
         </div>
 
-        <DashboardSection eyebrow="Invoices" meta="Recent billing history" title="Invoices">
-          <div className="space-y-2">
-            {invoices.map((invoice) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-3 transition-colors hover:bg-accent/40"
-                key={invoice.period}
-              >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="rounded-lg border border-border bg-card p-2 text-muted-foreground">
-                    <Receipt className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">{invoice.period}</p>
-                    <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <span>{invoice.amount}</span>
-                      <span>·</span>
-                      <span>{invoice.status}</span>
-                    </div>
-                  </div>
-                </div>
-                <Button size="xs" type="button" variant="outline">
-                  <Download className="h-3.5 w-3.5" />
-                  Download
-                </Button>
-              </div>
-            ))}
-          </div>
-        </DashboardSection>
-
         <DashboardSection
           eyebrow="Scope"
           meta="Clarifies whether charges apply to your personal account or active organization"
@@ -392,7 +361,7 @@ export function DashboardBillingModal({
         >
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-lg border border-border bg-background px-4 py-3">
-              <DashboardMetaRow label="Personal" value="Individual account usage and invoices" />
+              <DashboardMetaRow label="Personal" value="Individual account usage and billing controls" />
             </div>
             <div className="rounded-lg border border-border bg-background px-4 py-3">
               <DashboardMetaRow
@@ -407,14 +376,16 @@ export function DashboardBillingModal({
         </DashboardSection>
       </div>
     </DashboardModalShell>
-    <DashboardPricingModal
-      billingPeriod={billingPeriod}
-      onBillingPeriodChange={setBillingPeriod}
-      onOpenChange={setPricingOpen}
-      open={pricingOpen}
-      plans={plans}
-      summary={pricingSummary}
-    />
+    {billingCheckoutEnabled ? (
+      <DashboardPricingModal
+        billingPeriod={billingPeriod}
+        onBillingPeriodChange={setBillingPeriod}
+        onOpenChange={setPricingOpen}
+        open={pricingOpen}
+        plans={plans}
+        summary={pricingSummary}
+      />
+    ) : null}
     </>
   );
 }

@@ -52,6 +52,9 @@ const connectorAuthManifestSchema = z.object({
   authorizationUrl: z.string().url(),
   tokenUrl: z.string().url(),
   scopes: z.array(z.string().min(1)),
+  redirectUri: z.string().url().optional(),
+  authorizationParams: z.record(z.string(), z.string()).optional(),
+  sendScope: z.boolean().optional(),
 });
 
 export const connectorResourceSpecSchema = z.object({
@@ -243,6 +246,9 @@ export const updateConnectorActionResponseSchema = z.object({
   action: connectorActionRunSchema,
 });
 
+export const executeConnectorActionResponseSchema =
+  updateConnectorActionResponseSchema;
+
 export const listConnectorActionsResponseSchema = z.object({
   items: z.array(connectorActionRunSchema),
 });
@@ -252,3 +258,60 @@ export type ConnectorOAuthAccount = z.infer<typeof connectorOAuthAccountSchema>;
 export type SourceConnector = z.infer<typeof sourceConnectorSchema>;
 export type ConnectorSyncRun = z.infer<typeof connectorSyncRunSchema>;
 export type ConnectorActionRun = z.infer<typeof connectorActionRunSchema>;
+export type StartConnectorOAuthRequest = z.infer<
+  typeof startConnectorOAuthRequestSchema
+>;
+export type StartConnectorOAuthResponse = z.infer<
+  typeof startConnectorOAuthResponseSchema
+>;
+export type FinishConnectorOAuthResponse = z.infer<
+  typeof finishConnectorOAuthResponseSchema
+>;
+export type ListConnectorOAuthAccountsRequest = z.infer<
+  typeof listConnectorOAuthAccountsRequestSchema
+>;
+export type ListConnectorOAuthAccountsResponse = z.infer<
+  typeof listConnectorOAuthAccountsResponseSchema
+>;
+export type CreateConnectorRequest = z.infer<
+  typeof createConnectorRequestSchema
+>;
+export type CreateConnectorResponse = z.infer<
+  typeof createConnectorResponseSchema
+>;
+export type UpdateConnectorRequest = z.infer<
+  typeof updateConnectorRequestSchema
+>;
+export type UpdateConnectorResponse = z.infer<
+  typeof updateConnectorResponseSchema
+>;
+export type DeleteConnectorResponse = z.infer<
+  typeof deleteConnectorResponseSchema
+>;
+export type ListConnectorsResponse = z.infer<
+  typeof listConnectorsResponseSchema
+>;
+export type TriggerConnectorSyncResponse = z.infer<
+  typeof triggerConnectorSyncResponseSchema
+>;
+export type ListConnectorSyncRunsResponse = z.infer<
+  typeof listConnectorSyncRunsResponseSchema
+>;
+export type CreateConnectorActionRequest = z.infer<
+  typeof createConnectorActionRequestSchema
+>;
+export type CreateConnectorActionResponse = z.infer<
+  typeof createConnectorActionResponseSchema
+>;
+export type UpdateConnectorActionResponse = z.infer<
+  typeof updateConnectorActionResponseSchema
+>;
+export type ExecuteConnectorActionResponse = z.infer<
+  typeof executeConnectorActionResponseSchema
+>;
+export type ListConnectorManifestsResponse = z.infer<
+  typeof listConnectorManifestsResponseSchema
+>;
+export type ListConnectorActionsResponse = z.infer<
+  typeof listConnectorActionsResponseSchema
+>;

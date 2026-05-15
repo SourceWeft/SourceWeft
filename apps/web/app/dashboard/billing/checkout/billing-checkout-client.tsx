@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { billingClient } from "../../../../lib/sdk";
@@ -9,6 +10,8 @@ type BillingInterval = "monthly" | "yearly";
 type PricingPlan = "pro" | "team";
 type CheckoutSource = "landing" | "dashboard";
 type CheckoutState = "preparing" | "opening" | "error";
+const MIN_TEAM_SEATS = 2;
+const MAX_TEAM_SEATS = 99;
 
 function isPricingPlan(value: string | null): value is PricingPlan {
   return value === "pro" || value === "team";
@@ -34,10 +37,29 @@ function safeIntent(value: string | null) {
   return value?.trim().replace(/[^a-zA-Z0-9:_.-]/g, "").slice(0, 80) || "";
 }
 
+function parseTeamSeatCount(value: string | null) {
+  if (!value) {
+    return MIN_TEAM_SEATS;
+  }
+
+  const parsed = Number(value);
+  if (
+    !Number.isFinite(parsed) ||
+    !Number.isInteger(parsed) ||
+    parsed < MIN_TEAM_SEATS ||
+    parsed > MAX_TEAM_SEATS
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function getOrCreateIntent(input: {
   billingInterval: BillingInterval;
   intent: string | null;
   plan: PricingPlan;
+  seatCount: number;
   source: CheckoutSource;
   teamName: string;
 }) {
@@ -52,6 +74,7 @@ function getOrCreateIntent(input: {
     input.billingInterval,
     input.source,
     input.teamName,
+    input.seatCount,
   ].join(":");
   const existing = window.sessionStorage.getItem(storageKey);
   if (existing) {
@@ -71,12 +94,14 @@ export function BillingCheckoutClient({
   billingInterval,
   intent,
   plan,
+  seatCount,
   source,
   teamName,
 }: {
   billingInterval: string | null;
   intent: string | null;
   plan: string | null;
+  seatCount: string | null;
   source: string | null;
   teamName: string | null;
 }) {
@@ -100,10 +125,19 @@ export function BillingCheckoutClient({
     startedRef.current = true;
     const normalizedSource = normalizeSource(source);
     const normalizedTeamName = teamName?.trim() ?? "";
+    const normalizedSeatCount = parseTeamSeatCount(seatCount);
+    if (checkoutPlan === "team" && normalizedSeatCount === null) {
+      setError("This team checkout link has an invalid seat count.");
+      setState("error");
+      startedRef.current = false;
+      return;
+    }
+
     const checkoutIntent = getOrCreateIntent({
       billingInterval: checkoutBillingInterval,
       intent,
       plan: checkoutPlan,
+      seatCount: normalizedSeatCount ?? MIN_TEAM_SEATS,
       source: normalizedSource,
       teamName: normalizedTeamName,
     });
@@ -117,6 +151,9 @@ export function BillingCheckoutClient({
           clientReferenceKey: `pricing:${checkoutPlan}:${checkoutBillingInterval}:${checkoutIntent}`,
           ...(checkoutPlan === "team" && normalizedTeamName
             ? { teamName: normalizedTeamName }
+            : {}),
+          ...(checkoutPlan === "team" && normalizedSeatCount
+            ? { seatCount: normalizedSeatCount }
             : {}),
         });
         setState("opening");
@@ -133,7 +170,7 @@ export function BillingCheckoutClient({
     }
 
     void startCheckout();
-  }, [billingInterval, intent, plan, source, teamName]);
+  }, [billingInterval, intent, plan, seatCount, source, teamName]);
 
   const resolvedPlan = isPricingPlan(plan) ? plan : null;
   const title =
@@ -169,7 +206,7 @@ export function BillingCheckoutClient({
               Try again
             </Button>
             <Button asChild size="sm" variant="outline">
-              <a href="/#pricing">Back to pricing</a>
+              <Link href="/#pricing">Back to pricing</Link>
             </Button>
           </div>
         ) : null}

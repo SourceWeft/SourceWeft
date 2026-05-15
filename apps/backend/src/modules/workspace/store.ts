@@ -145,6 +145,96 @@ export async function listWorkspacesForMember(input: {
   return rows.map(mapWorkspaceRow);
 }
 
+export async function ensureUserWorkspaceInOrganizationRecord(input: {
+  organizationId: string;
+  userId: string;
+  name: string;
+  primarySlug: string;
+}) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select pg_advisory_xact_lock(
+        hashtext('sourceweft:user-workspace'),
+        hashtext(${`${input.organizationId}:${input.userId}`})
+      )
+    `);
+
+    const [existing] = await tx
+      .select({
+        id: workspaces.id,
+        organizationId: workspaces.organizationId,
+        name: workspaces.name,
+        slug: workspaces.slug,
+        createdBy: workspaces.createdBy,
+        createdAt: workspaces.createdAt,
+      })
+      .from(workspaces)
+      .innerJoin(
+        workspaceMemberships,
+        eq(workspaceMemberships.workspaceId, workspaces.id),
+      )
+      .where(
+        and(
+          eq(workspaces.organizationId, input.organizationId),
+          eq(workspaceMemberships.userId, input.userId),
+        ),
+      )
+      .orderBy(asc(workspaces.createdAt))
+      .limit(1);
+
+    if (existing) {
+      return mapWorkspaceRow(existing);
+    }
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const slug =
+        attempt === 0
+          ? input.primarySlug
+          : `${input.primarySlug}-${Math.random().toString(36).slice(2, 8)}`;
+      const [workspace] = await tx
+        .insert(workspaces)
+        .values({
+          id: randomUUID(),
+          organizationId: input.organizationId,
+          name: input.name,
+          slug,
+          createdBy: input.userId,
+        })
+        .onConflictDoNothing({
+          target: [workspaces.organizationId, workspaces.slug],
+        })
+        .returning();
+
+      if (!workspace) {
+        continue;
+      }
+
+      await tx
+        .insert(workspaceMemberships)
+        .values({
+          workspaceId: workspace.id,
+          userId: input.userId,
+          role: "workspace_admin",
+          source: "direct",
+        })
+        .onConflictDoUpdate({
+          target: [
+            workspaceMemberships.workspaceId,
+            workspaceMemberships.userId,
+          ],
+          set: {
+            role: "workspace_admin",
+            source: "direct",
+          },
+        });
+
+      return mapWorkspaceRow(workspace);
+    }
+
+    throw new Error("Failed to create user workspace");
+  });
+}
+
 export async function findWorkspaceByIdForMember(input: {
   workspaceId: string;
   userId: string;
