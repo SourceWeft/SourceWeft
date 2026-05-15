@@ -86,7 +86,7 @@ Bug reports, feature ideas, code, and design — all welcome.
 See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 <a href="https://github.com/SourceWeft/SourceWeft/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=SourceWeft/SourceWeft" />
+  <img src="https://contrib.rocks/image?repo=SourceWeft/SourceWeft&1=1" alt="SourceWeft contributors" />
 </a>
 
 ## Community

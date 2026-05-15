@@ -42,6 +42,9 @@ yarn-error.log*
 # ui
 dist/
 
+# local docs
+/docs/
+
 # rust
 target/
 
