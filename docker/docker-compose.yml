@@ -1,78 +1,150 @@
 name: sourceweft
 
+x-sourceweft-app: &sourceweft-app
+  image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
+  pull_policy: missing
+  env_file:
+    - path: .env
+      required: false
+  init: true
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  stop_grace_period: 1m
+
+x-sourceweft-env: &sourceweft-env
+  NODE_ENV: production
+  DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
+  NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-http://localhost:3000}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in docker/.env}
+  MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET:?set MODEL_GATEWAY_ENCRYPTION_SECRET in docker/.env}
+  MODEL_GATEWAY_GLOBAL_CONFIG_PATH: /app/apps/backend/config/model-gateway.global.json
+  MODEL_GATEWAY_SYNC_OPENROUTER_CATALOG: ${MODEL_GATEWAY_SYNC_OPENROUTER_CATALOG:-false}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:-}
+  SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+  AUTH_GOOGLE_CLIENT_ID: ${AUTH_GOOGLE_CLIENT_ID:-}
+  AUTH_GOOGLE_CLIENT_SECRET: ${AUTH_GOOGLE_CLIENT_SECRET:-}
+  AUTH_GITHUB_CLIENT_ID: ${AUTH_GITHUB_CLIENT_ID:-}
+  AUTH_GITHUB_CLIENT_SECRET: ${AUTH_GITHUB_CLIENT_SECRET:-}
+
 services:
   postgres:
     image: paradedb/paradedb:latest-pg17
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${DB_USER:-sourceweft}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-sourceweft}
       POSTGRES_DB: ${DB_NAME:-sourceweft}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${DB_USER:-sourceweft} -d ${DB_NAME:-sourceweft}",
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-sourceweft} -d ${DB_NAME:-sourceweft}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   redis:
     image: redis:8-alpine
+    command: redis-server --appendonly yes
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+
+  migrate:
+    <<: *sourceweft-app
+    command: ["pnpm", "--filter", "@sourceweft/backend", "migrate"]
+    environment:
+      <<: *sourceweft-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   api:
-    image: node:20-alpine
-    working_dir: /app
-    command: ["pnpm", "--filter", "@sourceweft/backend", "dev:api"]
-    volumes:
-      - ..:/app
+    <<: *sourceweft-app
+    command: ["pnpm", "--filter", "@sourceweft/backend", "start:api"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      MODEL_GATEWAY_GLOBAL_CONFIG_PATH: ${MODEL_GATEWAY_GLOBAL_CONFIG_PATH:-/app/apps/backend/config/model-gateway.global.json}
-      MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET}
-      ANYCRAWL_API_KEY: ${ANYCRAWL_API_KEY:-}
+      <<: *sourceweft-env
+      BACKEND_API_PORT: 3001
+    ports:
+      - "${BACKEND_API_PORT:-3001}:3001"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    <<: *sourceweft-app
+    command: ["pnpm", "--filter", "@sourceweft/backend", "start:worker"]
+    environment:
+      <<: *sourceweft-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
 
-  worker:
-    image: node:20-alpine
-    working_dir: /app
-    command: ["pnpm", "--filter", "@sourceweft/backend", "dev:worker"]
-    volumes:
-      - ..:/app
+  scheduler:
+    <<: *sourceweft-app
+    command: ["pnpm", "--filter", "@sourceweft/backend", "start:scheduler"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      MODEL_GATEWAY_GLOBAL_CONFIG_PATH: ${MODEL_GATEWAY_GLOBAL_CONFIG_PATH:-/app/apps/backend/config/model-gateway.global.json}
-      MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET}
-      ANYCRAWL_API_KEY: ${ANYCRAWL_API_KEY:-}
+      <<: *sourceweft-env
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
+
+  web:
+    <<: *sourceweft-app
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: 1
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
+      NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-http://localhost:3000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   postgres_data:

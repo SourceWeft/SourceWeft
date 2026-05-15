@@ -276,6 +276,39 @@ importers:
       '@daveyplate/better-auth-ui':
         specifier: ^3.4.0
         version: 3.4.0(2caf0c2628b84ded05d379cf2f847dad)
+      '@fontsource-variable/geist':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource-variable/geist-mono':
+        specifier: ^5.2.7
+        version: 5.2.7
+      '@fontsource-variable/noto-sans-arabic':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource-variable/noto-sans-devanagari':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource-variable/noto-sans-hebrew':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource-variable/noto-sans-jp':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource-variable/noto-sans-kr':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource-variable/noto-sans-sc':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource-variable/noto-sans-tc':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource-variable/noto-sans-thai':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource-variable/sora':
+        specifier: ^5.2.8
+        version: 5.2.8
       '@sourceweft/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
@@ -1770,6 +1803,39 @@ packages:
 
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
+
+  '@fontsource-variable/geist-mono@5.2.7':
+    resolution: {integrity: sha512-ZKlZ5sjtalb2TwXKs400mAGDlt/+2ENLNySPx0wTz3bP3mWARCsUW+rpxzZc7e05d2qGch70pItt3K4qttbIYA==}
+
+  '@fontsource-variable/geist@5.2.8':
+    resolution: {integrity: sha512-cJ6m9e+8MQ5dCYJsLylfZrgBh6KkG4bOLckB35Tr9J/EqdkEM6QllH5PxqP1dhTvFup+HtMRPuz9xOjxXJggxw==}
+
+  '@fontsource-variable/noto-sans-arabic@5.2.10':
+    resolution: {integrity: sha512-6vP9gU5yQQE/4ClrVoS92rjwc3qUnSkoxaw/Hkrha1Nqn9UEwuh3WVxT2+DMlMdV49uxvxUKVauSd2nwLu/WBA==}
+
+  '@fontsource-variable/noto-sans-devanagari@5.2.8':
+    resolution: {integrity: sha512-KogMgbXfY/gGtuubU+Pc/vV5Tc4zggObUppNKcSKIRixGUBM1gZdBTpEtS6Q6Cyr9kaIH7081npaxEx3zLlBnA==}
+
+  '@fontsource-variable/noto-sans-hebrew@5.2.8':
+    resolution: {integrity: sha512-km22GjnWdDcHExbnbzVQWsgwWWFglny2TPHAm9SITmW3lYhDPFumnbZxAfSFmRZafuXkm0NCcLfaxQG1koB2tw==}
+
+  '@fontsource-variable/noto-sans-jp@5.2.10':
+    resolution: {integrity: sha512-m0XfZ38rZtCaGAuAQL0cBPQ6fc/RguYEOqw66zvuLOV9vNRUBf9MFqyoazTu2JVCRIcnkrxbwF29UUaHHgTKdg==}
+
+  '@fontsource-variable/noto-sans-kr@5.2.10':
+    resolution: {integrity: sha512-UZOO7HF44Rt5+7SCeFMHYVgbKu36Jet6IxrAd7jjEkQMVDmeefwd0H8V5pSZydvBOOxClk3V5cQsujJqGHhQMw==}
+
+  '@fontsource-variable/noto-sans-sc@5.2.10':
+    resolution: {integrity: sha512-zdk10i5HrDQTXI7ldD61zToX1fsgig8vDTsu7zB48SXOitWfuX0e5viZAwnkHuhwh096PU6X6i1AyAsbBCISpA==}
+
+  '@fontsource-variable/noto-sans-tc@5.2.10':
+    resolution: {integrity: sha512-COVssWiIp9VVfdGuHpbrcH8u9H5JK4Lm6U7oee2BD6aLwKzPshj49KGmmQe/r3Fcp4e4SSuCaqyN/BtDKxHOGQ==}
+
+  '@fontsource-variable/noto-sans-thai@5.2.8':
+    resolution: {integrity: sha512-btwMwVkcyGHc7UuC4+JJqiIrXxdswIA6RPzqiJ35dkD9ECfMM+1qECenQkaFPCiMWXfQvk0lV/N1BgBIq9ztdA==}
+
+  '@fontsource-variable/sora@5.2.8':
+    resolution: {integrity: sha512-sP+ILTfi5r3cqmMBntI4ooQNxFI+LyHyD5hcPbWwwL4uh4kKFAkOz0w2veCXjz18fKRdva6OG0dY+5yQ02f30w==}
 
   '@google/generative-ai@0.24.1':
     resolution: {integrity: sha512-MqO+MLfM6kjxcKoy0p1wRzG3b4ZZXtPI+z2IE26UogS2Cm/XHO+7gGRBh6gcJsOiIVoH93UwKvW4HdgiOZCy9Q==}
@@ -11827,6 +11893,28 @@ snapshots:
       react-dom: 19.2.0(react@19.2.0)
 
   '@floating-ui/utils@0.2.11': {}
+
+  '@fontsource-variable/geist-mono@5.2.7': {}
+
+  '@fontsource-variable/geist@5.2.8': {}
+
+  '@fontsource-variable/noto-sans-arabic@5.2.10': {}
+
+  '@fontsource-variable/noto-sans-devanagari@5.2.8': {}
+
+  '@fontsource-variable/noto-sans-hebrew@5.2.8': {}
+
+  '@fontsource-variable/noto-sans-jp@5.2.10': {}
+
+  '@fontsource-variable/noto-sans-kr@5.2.10': {}
+
+  '@fontsource-variable/noto-sans-sc@5.2.10': {}
+
+  '@fontsource-variable/noto-sans-tc@5.2.10': {}
+
+  '@fontsource-variable/noto-sans-thai@5.2.8': {}
+
+  '@fontsource-variable/sora@5.2.8': {}
 
   '@google/generative-ai@0.24.1': {}
 

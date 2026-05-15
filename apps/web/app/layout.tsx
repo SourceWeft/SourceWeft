@@ -7,7 +7,6 @@ import {
   LOCALE_COOKIE_NAME,
   resolveRequestLocale,
 } from "../lib/locale";
-import { typographyVariableClassName } from "../lib/typography";
 
 import { Providers } from "./providers";
 
@@ -42,9 +41,7 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} dir={direction} suppressHydrationWarning>
-      <body
-        className={`${typographyVariableClassName} flex min-h-svh flex-col antialiased`}
-      >
+      <body className="flex min-h-svh flex-col antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>
