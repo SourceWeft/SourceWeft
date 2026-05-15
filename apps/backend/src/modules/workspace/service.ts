@@ -1,5 +1,6 @@
 import {
   createPersonalOrganizationForUser,
+  createTeamOrganizationForUser,
   createWorkspaceRecord,
   ensureWorkspaceMembership,
   findMembershipByUser,
@@ -154,6 +155,16 @@ export class WorkspaceService {
     metadata: Record<string, unknown>;
   }) {
     return createPersonalOrganizationForUser(input);
+  }
+
+  async createTeamOrganization(input: {
+    name: string;
+    slug: string;
+    userId: string;
+    metadata: Record<string, unknown>;
+    idempotencyKey: string;
+  }) {
+    return createTeamOrganizationForUser(input);
   }
 
   async hasOrganizationMembership(input: {

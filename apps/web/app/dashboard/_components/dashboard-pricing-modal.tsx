@@ -1,10 +1,22 @@
 "use client";
 
+import * as React from "react";
 import { Check, Sparkles } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
+import { toast } from "sonner";
+import { billingClient } from "../../../lib/sdk";
 import type { PlanConfig } from "../../_landing/pricing-config";
 import { DashboardModalShell, DashboardSection } from "./dashboard-modal-shell";
+
+type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
+
+function createReferenceKey(plan: "pro" | "team", interval: "monthly" | "yearly") {
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `dashboard-pricing:${plan}:${interval}:${id}`;
+}
 
 function formatPrice(cents: number) {
   if (cents === 0) return "Free";
@@ -17,26 +29,67 @@ export function DashboardPricingModal({
   plans,
   billingPeriod,
   onBillingPeriodChange,
+  summary,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   plans: PlanConfig[];
   billingPeriod: "monthly" | "yearly";
   onBillingPeriodChange: (value: "monthly" | "yearly") => void;
+  summary?: BillingSummary | null;
 }) {
+  const [loadingPlan, setLoadingPlan] = React.useState<"pro" | "team" | null>(
+    null,
+  );
+  const currentPlan = summary?.planFamily ?? "individual_free";
+
+  async function handlePlanAction(planId: PlanConfig["id"]) {
+    if (planId === "free") {
+      return;
+    }
+
+    setLoadingPlan(planId);
+    try {
+      const result = await billingClient.createPricingCheckout({
+        plan: planId,
+        billingInterval: billingPeriod,
+        source: "dashboard",
+        clientReferenceKey: createReferenceKey(planId, billingPeriod),
+      });
+      window.location.assign(result.checkoutUrl);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to start checkout.",
+      );
+    } finally {
+      setLoadingPlan(null);
+    }
+  }
+
   return (
     <DashboardModalShell
       actions={
-        <Tabs onValueChange={(value) => onBillingPeriodChange(value as "monthly" | "yearly")} value={billingPeriod}>
-          <TabsList className="rounded-xl bg-muted/60 p-1">
-            <TabsTrigger className="min-w-20 text-xs" value="monthly">
-              Monthly
-            </TabsTrigger>
-            <TabsTrigger className="min-w-20 text-xs" value="yearly">
-              Yearly
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div
+          aria-label="Billing period"
+          className="inline-flex rounded-xl border border-border bg-muted/60 p-1"
+          role="group"
+        >
+          {(["monthly", "yearly"] as const).map((period) => (
+            <button
+              aria-pressed={billingPeriod === period}
+              className={`min-w-20 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                billingPeriod === period
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              key={period}
+              onClick={() => onBillingPeriodChange(period)}
+              type="button"
+            >
+              {period === "monthly" ? "Monthly" : "Yearly"}
+            </button>
+          ))}
+        </div>
       }
       className="sm:max-w-5xl"
       contentClassName="bg-muted/5"
@@ -51,10 +104,20 @@ export function DashboardPricingModal({
           {plans.map((plan) => {
             const price = billingPeriod === "yearly" ? plan.yearlyPrice : plan.monthlyPrice;
             const modeLabel = plan.id === "free" ? "Explore" : plan.id === "team" ? "Collaborate" : "Scale";
+            const isCurrent =
+              (plan.id === "free" && currentPlan === "individual_free") ||
+              (plan.id === "pro" && currentPlan === "individual_pro");
+            const buttonLabel = isCurrent
+              ? "Current plan"
+              : loadingPlan === plan.id
+                ? "Opening..."
+                : plan.id === "team"
+                  ? "Create team"
+                  : "Upgrade";
             return (
               <DashboardSection
                 className={plan.highlighted ? "border-primary/30 bg-card shadow-[0_12px_32px_rgba(0,0,0,0.06)]" : "bg-background/90"}
-                eyebrow={plan.highlighted ? "Recommended" : "Plan"}
+                eyebrow={isCurrent ? "Current" : plan.highlighted ? "Recommended" : "Plan"}
                 key={plan.id}
                 title={plan.name}
               >
@@ -82,8 +145,20 @@ export function DashboardPricingModal({
                       </div>
                     ))}
                   </div>
-                  <Button className="mt-5 w-full" size="sm" type="button" variant={plan.highlighted ? "default" : "outline"}>
-                    {plan.cta}
+                  {plan.id === "team" ? (
+                    <p className="mt-4 text-xs leading-5 text-muted-foreground">
+                      Checkout creates a new team after payment. Extra seats stay in dashboard billing.
+                    </p>
+                  ) : null}
+                  <Button
+                    className="mt-5 w-full"
+                    disabled={isCurrent || loadingPlan === plan.id}
+                    onClick={() => void handlePlanAction(plan.id)}
+                    size="sm"
+                    type="button"
+                    variant={plan.highlighted ? "default" : "outline"}
+                  >
+                    {buttonLabel}
                   </Button>
                 </div>
               </DashboardSection>
@@ -104,7 +179,7 @@ export function DashboardPricingModal({
               Team plans add shared workspaces, member access, and organization-level billing controls.
             </div>
             <div className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
-              Upgrade and checkout actions are mocked in this dashboard preview.
+              Team checkout creates a new paid team after provider confirmation.
             </div>
           </div>
           <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">

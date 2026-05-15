@@ -3,6 +3,7 @@ import { jobsQueue } from "../../shared/queue";
 
 export const SOURCE_PARSE_JOB = "source-parse";
 export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
+export const CONNECTOR_SYNC_JOB = "connector-sync";
 export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
 export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
 export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
@@ -71,6 +72,14 @@ export type ThreadChatRunJobPayload = {
   teamId: string;
   workspaceId: string;
   threadId: string;
+  userId: string;
+};
+
+export type ConnectorSyncJobPayload = {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
   userId: string;
 };
 
@@ -147,6 +156,29 @@ export async function enqueueThreadChatRunJob(payload: ThreadChatRunJobPayload) 
 
   try {
     return await jobsQueue.add(THREAD_CHAT_RUN_JOB, payload, {
+      jobId,
+      attempts: 1,
+      removeOnComplete: 100,
+      removeOnFail: 100,
+    });
+  } catch (error) {
+    const duplicate = await jobsQueue.getJob(jobId);
+    if (duplicate) {
+      return duplicate;
+    }
+    throw error;
+  }
+}
+
+export async function enqueueConnectorSyncJob(payload: ConnectorSyncJobPayload) {
+  const jobId = `connector_sync_${payload.connectorId}_${payload.runId}`;
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    return await jobsQueue.add(CONNECTOR_SYNC_JOB, payload, {
       jobId,
       attempts: 1,
       removeOnComplete: 100,

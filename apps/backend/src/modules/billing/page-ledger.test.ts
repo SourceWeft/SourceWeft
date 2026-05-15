@@ -3,12 +3,14 @@ import test from "node:test";
 import type { PoolClient } from "pg";
 import type { BillingStore } from "./store-port";
 import { BillingAccountService } from "./account-service";
+import { validateBillingCatalog } from "./catalog";
 import { createCreemSubscriptionSync } from "./providers/creem-subscription-sync";
 import { BillingService } from "./service";
 import { BillingUsageService } from "./usage-service";
 import type {
   BillingAccountState,
   BillingLedgerRow,
+  BillingOrderState,
   BillingRuntimeConfig,
   BillingSubscriptionState,
   BillingWebhookEventState,
@@ -39,6 +41,18 @@ const runtimeConfig: BillingRuntimeConfig = {
     individualProYearlyProductId: "prod_individual_yearly",
     teamStandardMonthlyProductId: "prod_team_monthly",
     teamStandardYearlyProductId: "prod_team_yearly",
+    creditTopupProductId: "prod_credit_topup",
+    pageTopupProductId: "prod_page_topup",
+  },
+  catalog: {
+    individualProMonthlyAmountCents: 1200,
+    individualProYearlyAmountCents: 9600,
+    teamStandardMonthlyAmountCents: 4900,
+    teamStandardYearlyAmountCents: 39200,
+    creditTopupUnitAmount: 10000,
+    creditTopupAmountCents: 1250,
+    pageTopupUnitAmount: 1000,
+    pageTopupAmountCents: 500,
   },
   defaultSuccessUrl: "http://localhost:3000/app/billing?checkout=success",
 };
@@ -46,6 +60,7 @@ const runtimeConfig: BillingRuntimeConfig = {
 class MemoryBillingStore implements BillingStore {
   account: BillingAccountState | null = null;
   subscription: BillingSubscriptionState | null = null;
+  order: BillingOrderState | null = null;
   webhook: BillingWebhookEventState | null = null;
   ledgers: BillingLedgerRow[] = [];
   teamMemberCount = 1;
@@ -115,7 +130,9 @@ class MemoryBillingStore implements BillingStore {
       currentPeriodEnd: snapshot.currentPeriodEnd,
       externalCustomerId: snapshot.externalCustomerId,
       externalSubscriptionId: snapshot.externalSubscriptionId,
+    externalSubscriptionItemId: snapshot.externalSubscriptionItemId ?? null,
       externalProductId: snapshot.externalProductId,
+    billingOrderId: snapshot.billingOrderId ?? null,
       cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
       metadata: snapshot.metadata,
       lastEventAt: now,
@@ -124,6 +141,44 @@ class MemoryBillingStore implements BillingStore {
     };
     this.subscription = nextSubscription;
     return nextSubscription;
+  }
+
+  async getOrderById() {
+    return this.order;
+  }
+
+  async getOrderByIdForUpdate() {
+    return this.order;
+  }
+
+  async getOrderByClientReference() {
+    return this.order;
+  }
+
+  async getOrderByProviderCheckoutId() {
+    return this.order;
+  }
+
+  async insertOrder(order: BillingOrderState) {
+    this.order = { ...order, metadata: { ...order.metadata } };
+    return this.order;
+  }
+
+  async updateOrder(order: BillingOrderState) {
+    this.order = { ...order, metadata: { ...order.metadata } };
+    return this.order;
+  }
+
+  async findOpenSubscriptionOrder() {
+    return this.order;
+  }
+
+  async listRetryableOrders() {
+    return this.order &&
+      (this.order.status === "payment_confirmed" ||
+        this.order.status === "fulfillment_failed")
+      ? [this.order]
+      : [];
   }
 
   async getWebhookEventByProviderEventId() {
@@ -397,7 +452,9 @@ test("expired paid monthly cycle waits for provider renewal webhook", async () =
     currentPeriodEnd: expiredEnd,
     externalCustomerId: "cus_1",
     externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
     externalProductId: "prod_1",
+    billingOrderId: null,
     cancelAtPeriodEnd: false,
     metadata: {},
     lastEventAt: expiredStart,
@@ -469,7 +526,9 @@ test("stale provider monthly snapshot is rejected before subscription upsert", a
         currentPeriodEnd: staleEnd,
         externalCustomerId: "cus_1",
         externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
         externalProductId: "prod_1",
+    billingOrderId: null,
         cancelAtPeriodEnd: false,
         metadata: {},
         seatCount: 2,
@@ -519,7 +578,9 @@ test("active provider snapshot without usable period is rejected before subscrip
         currentPeriodEnd: null,
         externalCustomerId: "cus_1",
         externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
         externalProductId: "prod_1",
+    billingOrderId: null,
         cancelAtPeriodEnd: false,
         metadata: {},
         seatCount: 2,
@@ -563,7 +624,9 @@ test("webhook with active snapshot without usable period is ignored without retr
       currentPeriodEnd: null,
       externalCustomerId: "cus_1",
       externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
       externalProductId: "prod_1",
+    billingOrderId: null,
       cancelAtPeriodEnd: false,
       metadata: {},
       seatCount: 2,
@@ -595,6 +658,8 @@ test("team subscription checkout rejects seats below current members", async () 
         return {
           provider: "creem",
           checkoutUrl: "https://checkout.example.test/team",
+          externalCheckoutId: null,
+          externalCustomerId: null,
         };
       },
     },
@@ -658,7 +723,9 @@ test("team subscription seat sync updates provider before local quota", async ()
     currentPeriodEnd: new Date(Date.now() + 31 * 86_400_000).toISOString(),
     externalCustomerId: "cus_1",
     externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
     externalProductId: "prod_team_monthly",
+    billingOrderId: null,
     cancelAtPeriodEnd: false,
     metadata: {},
     lastEventAt: now,
@@ -739,7 +806,9 @@ test("team subscription seat sync failure leaves local seat count unchanged", as
     currentPeriodEnd: new Date(Date.now() + 31 * 86_400_000).toISOString(),
     externalCustomerId: "cus_1",
     externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
     externalProductId: "prod_team_monthly",
+    billingOrderId: null,
     cancelAtPeriodEnd: false,
     metadata: {},
     lastEventAt: now,
@@ -810,7 +879,9 @@ test("active team subscription rejects invitations at seat capacity", async () =
     currentPeriodEnd: new Date(Date.now() + 31 * 86_400_000).toISOString(),
     externalCustomerId: "cus_1",
     externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
     externalProductId: "prod_team_monthly",
+    billingOrderId: null,
     cancelAtPeriodEnd: false,
     metadata: {},
     lastEventAt: now,
@@ -955,7 +1026,9 @@ test("billing portal actions reject subscriptions without provider customer", as
     currentPeriodEnd: new Date(Date.now() + 31 * 86_400_000).toISOString(),
     externalCustomerId: null,
     externalSubscriptionId: "ext_sub_1",
+    externalSubscriptionItemId: null,
     externalProductId: "prod_1",
+    billingOrderId: null,
     cancelAtPeriodEnd: false,
     metadata: {},
     lastEventAt: now,
@@ -970,5 +1043,162 @@ test("billing portal actions reject subscriptions without provider customer", as
   await assertRejectsWithBillingCode(
     () => billingService.cancelSubscription("team_1", "user_1"),
     "BILLING_CUSTOMER_NOT_FOUND",
+  );
+});
+
+test("pricing pro checkout reuses open order for same personal organization", async () => {
+  const store = new MemoryBillingStore();
+  const providerCalls: Array<unknown> = [];
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout(input) {
+        providerCalls.push(input);
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/pro",
+          externalCheckoutId: null,
+          externalCustomerId: null,
+        };
+      },
+    },
+  );
+
+  const first = await billingService.createPricingCheckout(
+    {
+      plan: "pro",
+      billingInterval: "monthly",
+      source: "dashboard",
+    },
+    {
+      userId: "user_1",
+      email: "user@example.com",
+    },
+    { personalTeamId: "personal_1" },
+  );
+  const second = await billingService.createPricingCheckout(
+    {
+      plan: "pro",
+      billingInterval: "monthly",
+      source: "dashboard",
+    },
+    {
+      userId: "user_1",
+      email: "user@example.com",
+    },
+    { personalTeamId: "personal_1" },
+  );
+
+  assert.equal(first.orderId, second.orderId);
+  assert.equal(providerCalls.length, 1);
+  assert.equal(store.order?.teamId, "personal_1");
+});
+
+test("team pricing checkout leaves team empty until fulfillment", async () => {
+  const store = new MemoryBillingStore();
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout() {
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/team",
+          externalCheckoutId: null,
+          externalCustomerId: null,
+        };
+      },
+    },
+  );
+
+  const checkout = await billingService.createPricingCheckout(
+    {
+      plan: "team",
+      billingInterval: "yearly",
+      source: "landing",
+      teamName: "Launch Lab",
+    },
+    {
+      userId: "user_1",
+      email: "user@example.com",
+    },
+  );
+
+  assert.equal(checkout.planFamily, "team_standard");
+  assert.equal(checkout.quantity, 2);
+  assert.equal(store.order?.teamId, null);
+  assert.equal(store.order?.status, "checkout_created");
+  assert.equal(store.order?.metadata.teamName, "Launch Lab");
+});
+
+test("top-up fulfillment is idempotent and ledger backed", async () => {
+  const store = new MemoryBillingStore();
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout() {
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/topup",
+          externalCheckoutId: null,
+          externalCustomerId: null,
+        };
+      },
+    },
+  );
+
+  const checkout = await billingService.createTopupCheckout(
+    "team_1",
+    {
+      unitType: "credit",
+      quantity: 2,
+    },
+    "user_1",
+    "user@example.com",
+  );
+
+  await billingService.fulfillOrder({ orderId: checkout.orderId });
+  await billingService.fulfillOrder({ orderId: checkout.orderId });
+
+  const topupLedgers = store.ledgers.filter(
+    (entry) => entry.feature === "credit_topup_purchase",
+  );
+  assert.equal(topupLedgers.length, 1);
+  assert.equal(topupLedgers[0]?.delta, 20_000);
+  assert.equal(store.account?.addOnCreditsBalance, 20_000);
+  assert.equal(store.order?.status, "fulfilled");
+});
+
+test("catalog validation catches missing active provider product", async () => {
+  assert.throws(
+    () =>
+      validateBillingCatalog({
+        runtimeConfig: {
+          ...runtimeConfig,
+          provider: "creem",
+          creem: {
+            ...runtimeConfig.creem,
+            teamStandardYearlyProductId: "",
+          },
+        },
+      }),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, "BILLING_CATALOG_INVALID");
+      return true;
+    },
   );
 });

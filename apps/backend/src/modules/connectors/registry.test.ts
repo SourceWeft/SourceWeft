@@ -1,0 +1,50 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { ConnectorError } from "./errors";
+import { ConnectorRegistry } from "./registry";
+import type { ConnectorAdapter, ConnectorManifest } from "./types";
+
+const manifest: ConnectorManifest = {
+  type: "fake",
+  displayName: "Fake",
+  auth: {
+    kind: "oauth2",
+    authorizationUrl: "https://provider.example/oauth/authorize",
+    tokenUrl: "https://provider.example/oauth/token",
+    scopes: ["read"],
+  },
+  sync: {
+    supportsIncremental: true,
+    defaultFrequencyMinutes: 60,
+    resources: [],
+  },
+  actions: [],
+  configSchema: { type: "object" },
+};
+
+const adapter: ConnectorAdapter = {
+  getManifest: () => manifest,
+  exchangeOAuthCode: async () => ({ accessToken: "token" }),
+  refreshOAuthToken: async () => ({ accessToken: "token" }),
+  async *discover() {},
+  extract: async ({ item }) => ({ item, contentText: "" }),
+  executeAction: async () => ({ result: {} }),
+};
+
+test("ConnectorRegistry registers adapters and lists manifests", () => {
+  const registry = new ConnectorRegistry([adapter]);
+
+  assert.equal(registry.getAdapter("fake"), adapter);
+  assert.deepEqual(registry.listManifests(), [manifest]);
+});
+
+test("ConnectorRegistry rejects missing adapters with connector error", () => {
+  const registry = new ConnectorRegistry();
+
+  assert.throws(
+    () => registry.getAdapter("missing"),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_ADAPTER_NOT_FOUND",
+  );
+});

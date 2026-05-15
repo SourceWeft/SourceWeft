@@ -1,10 +1,13 @@
 import type {
   BillingSubscriptionResponse,
+  BillingOrderResponse,
   BillingLedgerResponse,
   BillingSummaryResponse,
   BillingUsageResponse,
   CancelTeamSubscriptionResponse,
   CreateTeamBillingPortalResponse,
+  CreatePricingCheckoutRequest,
+  CreatePricingCheckoutResponse,
   CreateTeamSubscriptionCheckoutRequest,
   CreateTeamSubscriptionCheckoutResponse,
   CreateTopupCheckoutRequest,
@@ -50,6 +53,19 @@ export class BillingClient {
     return this.http.post<UpdateSpendLimitsResponse>(
       `/v1/teams/${encodeTeamId(teamId)}/billing/spend-limits`,
       input,
+    );
+  }
+
+  createPricingCheckout(input: CreatePricingCheckoutRequest) {
+    return this.http.post<CreatePricingCheckoutResponse>(
+      "/v1/billing/pricing/checkout",
+      input,
+    );
+  }
+
+  getOrder(orderId: string) {
+    return this.http.get<BillingOrderResponse>(
+      `/v1/billing/orders/${encodeURIComponent(orderId)}`,
     );
   }
 

@@ -15,14 +15,14 @@ import { apiKeyClient } from "@better-auth/api-key/client";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { passkeyClient } from "@better-auth/passkey/client";
 import { creemClient } from "@creem_io/better-auth/client";
+import { resolveGoogleOneTapConfig } from "./google-one-tap-config";
 
 function resolveAuthBaseUrl() {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
   return `${base.replace(/\/$/, "")}/api/auth`;
 }
 
-const oneTapClientId =
-  process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID?.trim() || "";
+const googleOneTapConfig = resolveGoogleOneTapConfig();
 
 export const authClient = createAuthClient({
   baseURL: resolveAuthBaseUrl(),
@@ -41,10 +41,17 @@ export const authClient = createAuthClient({
     passkeyClient(),
     oauthProviderClient(),
     creemClient(),
-    ...(oneTapClientId
+    ...(googleOneTapConfig.active
       ? [
           oneTapClient({
-            clientId: oneTapClientId,
+            clientId: googleOneTapConfig.clientId,
+            ...(googleOneTapConfig.fedCmEnabled
+              ? {
+                  additionalOptions: {
+                    use_fedcm_for_prompt: true,
+                  },
+                }
+              : {}),
             promptOptions: {
               baseDelay: 1000,
               maxAttempts: 3,

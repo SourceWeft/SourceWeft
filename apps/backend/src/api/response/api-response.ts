@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { ZodError } from "zod";
 import { isBillingError } from "../../modules/billing/errors";
+import { isConnectorError } from "../../modules/connectors/errors";
 import { isContentError } from "../../modules/content/errors";
 
 export type ApiErrorBody = {
@@ -79,6 +80,15 @@ export function toApiError(error: unknown): ApiError {
 
   if (isContentError(error)) {
     return new ApiError(error.statusCode, error.code, error.message);
+  }
+
+  if (isConnectorError(error)) {
+    return new ApiError(
+      error.statusCode,
+      error.code,
+      error.message,
+      error.details,
+    );
   }
 
   if (isBillingError(error)) {

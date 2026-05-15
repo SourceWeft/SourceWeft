@@ -23,14 +23,12 @@ type CreemServerOptions = {
 export class CreemBillingProvider implements BillingProviderAdapter {
   private readonly options: CreemServerOptions;
   private readonly defaultSuccessUrl: string;
-  private readonly products: BillingRuntimeConfig["creem"];
 
   constructor(config: BillingRuntimeConfig) {
     this.options = {
       apiKey: config.creem.apiKey,
       testMode: config.creem.testMode,
     };
-    this.products = config.creem;
     this.defaultSuccessUrl = config.defaultSuccessUrl;
 
     if (!this.options.apiKey) {
@@ -43,20 +41,13 @@ export class CreemBillingProvider implements BillingProviderAdapter {
   }
 
   private resolveProductId(input: BillingProviderCheckoutInput) {
-    const productId =
-      input.planFamily === "individual_pro"
-        ? input.billingInterval === "monthly"
-          ? this.products.individualProMonthlyProductId
-          : this.products.individualProYearlyProductId
-        : input.billingInterval === "monthly"
-          ? this.products.teamStandardMonthlyProductId
-          : this.products.teamStandardYearlyProductId;
+    const productId = input.externalProductId;
 
     if (!productId) {
       throw new BillingError(
         "CREEM_PRODUCT_ID_MISSING",
         500,
-        `Creem product ID is required for ${input.planFamily} ${input.billingInterval}`,
+        `Creem product ID is required for billing order ${input.orderId}`,
       );
     }
 
@@ -87,26 +78,39 @@ export class CreemBillingProvider implements BillingProviderAdapter {
   ): Promise<BillingProviderCheckoutResult> {
     const successUrl = input.successUrl || this.defaultSuccessUrl;
     const productId = this.resolveProductId(input);
+    const metadata = {
+      ...(input.metadata ?? {}),
+      ...(input.persistedOrder ? { orderId: input.orderId } : {}),
+      userId: input.actorUserId,
+      kind: input.kind,
+      quantity: input.quantity,
+      ...(input.planFamily ? { planFamily: input.planFamily } : {}),
+      ...(input.billingInterval
+        ? { billingInterval: input.billingInterval }
+        : {}),
+      ...(input.teamId ? { teamId: input.teamId } : {}),
+      ...(input.unitType ? { unitType: input.unitType } : {}),
+      ...(input.unitAmount ? { unitAmount: input.unitAmount } : {}),
+      ...(input.grantedCredits ? { grantedCredits: input.grantedCredits } : {}),
+      ...(input.grantedPages ? { grantedPages: input.grantedPages } : {}),
+    };
 
     const response = await createCheckout(
       this.options as any,
       {
         productId,
         units:
-          input.planFamily === "team_standard" ? input.seatCount : undefined,
+          input.kind === "subscription" &&
+          input.planFamily === "individual_pro"
+            ? undefined
+            : input.quantity,
         successUrl,
         customer: {
           email: input.actorEmail,
         },
-        metadata: {
-          referenceId: input.actorUserId,
-          teamId: input.teamId,
-          planFamily: input.planFamily,
-          billingInterval: input.billingInterval,
-          actorUserId: input.actorUserId,
-          ...(input.seatCount ? { seatCount: input.seatCount } : {}),
-        },
-        requestId: `subscription:${input.teamId}:${input.planFamily}:${Date.now()}`,
+        skipTrial: true,
+        metadata,
+        requestId: `order:${input.orderId}`,
       } as any,
     );
 
@@ -121,6 +125,8 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     return {
       provider: "creem",
       checkoutUrl: response.url,
+      externalCheckoutId: null,
+      externalCustomerId: null,
     };
   }
 

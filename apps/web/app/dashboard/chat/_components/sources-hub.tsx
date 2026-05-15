@@ -2392,6 +2392,8 @@ export function SourcesHub({
   const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
+  const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
+  const loadedSourcesWorkspaceIdRef = useRef<string | null>(null);
 
   const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([]);
 
@@ -2440,22 +2442,29 @@ export function SourcesHub({
   }, [mode]);
 
   useEffect(() => {
-    setSources(initialSources);
-  }, [initialSources]);
+    currentWorkspaceIdRef.current = workspaceId;
+  }, [workspaceId]);
 
   const refreshSources = useCallback(async () => {
     if (!workspaceId) {
       setSources([]);
       onSourceLoad?.([]);
+      loadedSourcesWorkspaceIdRef.current = null;
       return;
     }
 
+    const activeWorkspaceId = workspaceId;
     setIsLoading(true);
     setLoadingError(null);
     try {
-      const result = await contentClient.listSources(workspaceId);
+      const result = await contentClient.listSources(activeWorkspaceId);
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
+
       const mapped = mapSourcesToUi(result.items);
       setSources(mapped);
+      loadedSourcesWorkspaceIdRef.current = activeWorkspaceId;
       onSourceLoad?.(mapped);
 
       const syncing = result.items
@@ -2469,12 +2478,16 @@ export function SourcesHub({
         );
       }
     } catch (error) {
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
+
       const message = getErrorMessage(error, "Failed to load sources.");
       setLoadingError(message);
-      setSources([]);
-      onSourceLoad?.([]);
     } finally {
-      setIsLoading(false);
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        setIsLoading(false);
+      }
     }
   }, [workspaceId, onSourceLoad]);
 
@@ -2529,22 +2542,41 @@ export function SourcesHub({
 
   useEffect(() => {
     if (!workspaceId) {
-      return;
-    }
-
-    if (initialSourcesLoaded) {
+      loadedSourcesWorkspaceIdRef.current = null;
+      setSources([]);
       setLoadingError(null);
       setIsLoading(false);
-      onSourceLoad?.(initialSources);
+      setPendingSourceIds([]);
       return;
     }
 
+    setLoadingError(null);
+    setPendingSourceIds([]);
+    setEditingSourceId(null);
+    setEditingTitle("");
+    setRowBusyById({});
+    setPreviewSource(null);
+    setDeleteSource(null);
+    setMoveSource(null);
+    setMoveParentSourceId(null);
+    setReadmeSource(null);
+    setReadmeContent("");
+    setAddParentSourceId(null);
+    setDirectoryParentSourceId(null);
+
+    if (
+      initialSourcesLoaded &&
+      loadedSourcesWorkspaceIdRef.current === workspaceId
+    ) {
+      return;
+    }
+
+    setSources(initialSourcesLoaded ? initialSources : []);
     void refreshSources();
   }, [
     workspaceId,
     initialSources,
     initialSourcesLoaded,
-    onSourceLoad,
     refreshSources,
   ]);
 

@@ -14,7 +14,6 @@ import {
 } from "./service-helpers";
 
 const ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES = new Set([
-  "trialing",
   "active",
   "past_due",
 ]);
@@ -46,6 +45,15 @@ export class BillingAccountService {
         client,
       });
     });
+  }
+
+  async ensureAccountLocked(teamId: string, client: PoolClient) {
+    const normalizedTeamId = normalizeTeamId(teamId);
+    const account = await this.getOrCreateAccountLocked(
+      normalizedTeamId,
+      client,
+    );
+    return this.syncCycleLocked(account, client);
   }
 
   async updateSpendLimits(

@@ -45,8 +45,22 @@ type SourceType =
   | "connector"
   | "directory";
 type ConnectorStatus = "active" | "paused" | "error" | "disabled";
+type ConnectorOAuthAccountStatus =
+  | "active"
+  | "reauth_required"
+  | "revoked"
+  | "disabled";
 type SyncRunTriggerType = "manual" | "scheduled" | "webhook" | "backfill";
 type SyncRunStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+type ConnectorActionRiskLevel = "low" | "medium" | "high";
+type ConnectorActionRunStatus =
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled";
 type DocumentStatus = "pending" | "processing" | "ready" | "failed";
 type ModelGatewayProfileKind =
   | "chat"
@@ -143,6 +157,21 @@ type BillingSubscriptionStatus =
   | "canceled"
   | "expired";
 type BillingWebhookStatus = "received" | "processed" | "ignored" | "failed";
+type BillingOrderKind = "subscription" | "credit_topup" | "page_topup";
+type BillingOrderStatus =
+  | "pending"
+  | "checkout_created"
+  | "payment_confirmed"
+  | "fulfilled"
+  | "payment_failed"
+  | "expired"
+  | "fulfillment_failed";
+type BillingOrderPaymentStatus =
+  | "unknown"
+  | "unpaid"
+  | "paid"
+  | "failed"
+  | "expired";
 type OpsAlertLevel = "warn" | "error" | "critical";
 type OpsAlertStatus = "open" | "resolved";
 type LlmObservationStatus = "running" | "ok" | "error" | "cancelled";
@@ -579,6 +608,164 @@ export const spendLimits = pgTable(
   ],
 );
 
+export const billingOrders = pgTable(
+  "billing_orders",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").$type<BillingProvider>().notNull(),
+    kind: text("kind").$type<BillingOrderKind>().notNull(),
+    status: text("status")
+      .$type<BillingOrderStatus>()
+      .notNull()
+      .default("pending"),
+    paymentStatus: text("payment_status")
+      .$type<BillingOrderPaymentStatus>()
+      .notNull()
+      .default("unknown"),
+    userId: text("user_id").notNull(),
+    teamId: text("team_id"),
+    clientReferenceKey: text("client_reference_key"),
+    planFamily: text("plan_family").$type<PlanFamily>(),
+    billingInterval: text("billing_interval").$type<
+      "monthly" | "yearly" | "unknown"
+    >(),
+    quantity: integer("quantity").notNull().default(1),
+    unitType: text("unit_type").$type<LedgerUnitType>(),
+    unitAmount: integer("unit_amount"),
+    grantedCredits: integer("granted_credits").notNull().default(0),
+    grantedPages: integer("granted_pages").notNull().default(0),
+    externalCheckoutId: text("external_checkout_id"),
+    externalPaymentId: text("external_payment_id"),
+    externalCustomerId: text("external_customer_id"),
+    externalSubscriptionId: text("external_subscription_id"),
+    externalProductId: text("external_product_id"),
+    amountTotal: integer("amount_total"),
+    currency: text("currency"),
+    successUrl: text("success_url"),
+    cancelUrl: text("cancel_url"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }),
+    fulfilledAt: timestamp("fulfilled_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    fulfillmentAttemptCount: integer("fulfillment_attempt_count")
+      .notNull()
+      .default(0),
+    nextRetryAt: timestamp("next_retry_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_orders_provider_checkout_uq")
+      .on(table.provider, table.externalCheckoutId)
+      .where(sql`${table.externalCheckoutId} is not null`),
+    uniqueIndex("billing_orders_user_reference_uq")
+      .on(table.userId, table.clientReferenceKey)
+      .where(sql`${table.clientReferenceKey} is not null`),
+    index("billing_orders_user_status_created_idx").on(
+      table.userId,
+      table.status,
+      desc(table.createdAt),
+    ),
+    index("billing_orders_team_status_created_idx").on(
+      table.teamId,
+      table.status,
+      desc(table.createdAt),
+    ),
+    index("billing_orders_status_retry_idx").on(
+      table.status,
+      table.nextRetryAt,
+    ),
+    check(
+      "billing_orders_provider_check",
+      sql`${table.provider} in ('none', 'creem', 'stripe', 'manual')`,
+    ),
+    check(
+      "billing_orders_kind_check",
+      sql`${table.kind} in ('subscription', 'credit_topup', 'page_topup')`,
+    ),
+    check(
+      "billing_orders_status_check",
+      sql`${table.status} in ('pending', 'checkout_created', 'payment_confirmed', 'fulfilled', 'payment_failed', 'expired', 'fulfillment_failed')`,
+    ),
+    check(
+      "billing_orders_payment_status_check",
+      sql`${table.paymentStatus} in ('unknown', 'unpaid', 'paid', 'failed', 'expired')`,
+    ),
+    check(
+      "billing_orders_plan_family_check",
+      sql`${table.planFamily} is null or ${table.planFamily} in ('individual_free', 'individual_pro', 'team_standard', 'team_premium', 'enterprise_usage')`,
+    ),
+    check(
+      "billing_orders_billing_interval_check",
+      sql`${table.billingInterval} is null or ${table.billingInterval} in ('monthly', 'yearly', 'unknown')`,
+    ),
+    check(
+      "billing_orders_unit_type_check",
+      sql`${table.unitType} is null or ${table.unitType} in ('credit', 'page')`,
+    ),
+    check("billing_orders_quantity_check", sql`${table.quantity} >= 1`),
+    check(
+      "billing_orders_unit_amount_check",
+      sql`${table.unitAmount} is null or ${table.unitAmount} > 0`,
+    ),
+    check(
+      "billing_orders_granted_credits_check",
+      sql`${table.grantedCredits} >= 0`,
+    ),
+    check(
+      "billing_orders_granted_pages_check",
+      sql`${table.grantedPages} >= 0`,
+    ),
+    check(
+      "billing_orders_amount_total_check",
+      sql`${table.amountTotal} is null or ${table.amountTotal} >= 0`,
+    ),
+    check(
+      "billing_orders_attempt_count_check",
+      sql`${table.fulfillmentAttemptCount} >= 0`,
+    ),
+    check(
+      "billing_orders_subscription_shape_check",
+      sql`${table.kind} <> 'subscription' or (${table.planFamily} in ('individual_pro', 'team_standard') and ${table.billingInterval} in ('monthly', 'yearly') and ${table.unitType} is null and ${table.unitAmount} is null and ${table.grantedCredits} = 0 and ${table.grantedPages} = 0)`,
+    ),
+    check(
+      "billing_orders_topup_shape_check",
+      sql`${table.kind} not in ('credit_topup', 'page_topup') or (${table.teamId} is not null and ${table.unitType} is not null and ${table.unitAmount} is not null and (${table.grantedCredits} > 0 or ${table.grantedPages} > 0))`,
+    ),
+    check(
+      "billing_orders_credit_topup_shape_check",
+      sql`${table.kind} <> 'credit_topup' or (${table.unitType} = 'credit' and ${table.grantedCredits} = ${table.unitAmount} * ${table.quantity} and ${table.grantedPages} = 0)`,
+    ),
+    check(
+      "billing_orders_page_topup_shape_check",
+      sql`${table.kind} <> 'page_topup' or (${table.unitType} = 'page' and ${table.grantedPages} = ${table.unitAmount} * ${table.quantity} and ${table.grantedCredits} = 0)`,
+    ),
+    check(
+      "billing_orders_pro_team_required_check",
+      sql`${table.planFamily} <> 'individual_pro' or ${table.teamId} is not null`,
+    ),
+    check(
+      "billing_orders_team_checkout_no_org_check",
+      sql`${table.planFamily} <> 'team_standard' or ${table.status} not in ('pending', 'checkout_created') or ${table.teamId} is null`,
+    ),
+  ],
+);
+
 export const subscriptions = pgTable(
   "subscriptions",
   {
@@ -606,7 +793,9 @@ export const subscriptions = pgTable(
     }),
     externalCustomerId: text("external_customer_id"),
     externalSubscriptionId: text("external_subscription_id"),
+    externalSubscriptionItemId: text("external_subscription_item_id"),
     externalProductId: text("external_product_id"),
+    billingOrderId: text("billing_order_id"),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     metadata: jsonb("metadata")
       .$type<Record<string, unknown>>()
@@ -629,6 +818,7 @@ export const subscriptions = pgTable(
       table.provider,
       table.externalSubscriptionId,
     ),
+    index("subscriptions_billing_order_idx").on(table.billingOrderId),
     check(
       "subscriptions_provider_check",
       sql`${table.provider} in ('none', 'creem', 'stripe', 'manual')`,
@@ -1121,6 +1311,113 @@ export const modelGatewayProfiles = pgTable(
   ],
 );
 
+export const connectorOAuthAccounts = pgTable(
+  "connector_oauth_accounts",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      ,
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    connectorType: text("connector_type").notNull(),
+    providerAccountId: text("provider_account_id"),
+    providerAccountEmail: text("provider_account_email"),
+    displayName: text("display_name").notNull(),
+    scopes: jsonb("scopes")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    accessTokenEncrypted: text("access_token_encrypted").notNull(),
+    refreshTokenEncrypted: text("refresh_token_encrypted"),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    status: text("status")
+      .$type<ConnectorOAuthAccountStatus>()
+      .notNull()
+      .default("active"),
+    lastRefreshAt: timestamp("last_refresh_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    lastError: text("last_error"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "connector_oauth_accounts_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    unique("connector_oauth_accounts_id_workspace_team_uq").on(
+      table.id,
+      table.workspaceId,
+      table.teamId,
+    ),
+    check(
+      "connector_oauth_accounts_status_check",
+      sql`${table.status} in ('active', 'reauth_required', 'revoked', 'disabled')`,
+    ),
+    check(
+      "connector_oauth_accounts_scopes_array_check",
+      sql`jsonb_typeof(${table.scopes}) = 'array'`,
+    ),
+    index("connector_oauth_accounts_workspace_type_status_idx").on(
+      table.workspaceId,
+      table.connectorType,
+      table.status,
+    ),
+    index("connector_oauth_accounts_team_workspace_created_idx").on(
+      table.teamId,
+      table.workspaceId,
+      desc(table.createdAt),
+    ),
+  ],
+);
+
+export const connectorOAuthStates = pgTable(
+  "connector_oauth_states",
+  {
+    id: text("id").primaryKey(),
+    stateHash: text("state_hash").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      ,
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    connectorType: text("connector_type").notNull(),
+    redirectAfter: text("redirect_after"),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" })
+      .notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "connector_oauth_states_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    uniqueIndex("connector_oauth_states_state_hash_uq").on(table.stateHash),
+    index("connector_oauth_states_workspace_user_created_idx").on(
+      table.workspaceId,
+      table.userId,
+      desc(table.createdAt),
+    ),
+    index("connector_oauth_states_expires_idx").on(table.expiresAt),
+  ],
+);
+
 export const sourceConnectors = pgTable(
   "source_connectors",
   {
@@ -1138,6 +1435,10 @@ export const sourceConnectors = pgTable(
       .notNull()
       .default(emptyJsonObject),
     secretRef: text("secret_ref"),
+    oauthAccountId: text("oauth_account_id").references(
+      () => connectorOAuthAccounts.id,
+      { onDelete: "restrict" },
+    ),
     status: text("status").$type<ConnectorStatus>().notNull().default("active"),
     periodicIndexingEnabled: boolean("periodic_indexing_enabled")
       .notNull()
@@ -1166,6 +1467,15 @@ export const sourceConnectors = pgTable(
       columns: [table.workspaceId, table.teamId],
       foreignColumns: [workspaces.id, workspaces.organizationId],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "source_connectors_oauth_account_workspace_team_fk",
+      columns: [table.oauthAccountId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        connectorOAuthAccounts.id,
+        connectorOAuthAccounts.workspaceId,
+        connectorOAuthAccounts.teamId,
+      ],
+    }).onDelete("restrict"),
     unique("source_connectors_id_workspace_team_uq").on(
       table.id,
       table.workspaceId,
@@ -1193,6 +1503,87 @@ export const sourceConnectors = pgTable(
     index("source_connectors_workspace_created_idx").on(
       table.workspaceId,
       desc(table.createdAt),
+    ),
+  ],
+);
+
+export const connectorActionRuns = pgTable(
+  "connector_action_runs",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      ,
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    connectorId: text("connector_id")
+      .notNull()
+      .references(() => sourceConnectors.id, { onDelete: "cascade" }),
+    connectorType: text("connector_type").notNull(),
+    actionType: text("action_type").notNull(),
+    riskLevel: text("risk_level")
+      .$type<ConnectorActionRiskLevel>()
+      .notNull(),
+    status: text("status").$type<ConnectorActionRunStatus>().notNull(),
+    requestJson: jsonb("request_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    requestPreview: text("request_preview").notNull(),
+    resultJson: jsonb("result_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    externalId: text("external_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    approvedBy: text("approved_by"),
+    executedBy: text("executed_by"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "connector_action_runs_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "connector_action_runs_connector_workspace_team_fk",
+      columns: [table.connectorId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        sourceConnectors.id,
+        sourceConnectors.workspaceId,
+        sourceConnectors.teamId,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "connector_action_runs_risk_level_check",
+      sql`${table.riskLevel} in ('low', 'medium', 'high')`,
+    ),
+    check(
+      "connector_action_runs_status_check",
+      sql`${table.status} in ('proposed', 'approved', 'rejected', 'running', 'succeeded', 'failed', 'canceled')`,
+    ),
+    index("connector_action_runs_connector_created_idx").on(
+      table.connectorId,
+      desc(table.createdAt),
+    ),
+    index("connector_action_runs_workspace_status_created_idx").on(
+      table.workspaceId,
+      table.status,
+      desc(table.createdAt),
+    ),
+    uniqueIndex("connector_action_runs_idempotency_uq").on(
+      table.workspaceId,
+      table.connectorId,
+      table.idempotencyKey,
     ),
   ],
 );
@@ -1377,9 +1768,6 @@ export const sources = pgTable(
     uniqueIndex("sources_connector_external_id_uq")
       .on(table.connectorId, table.externalId)
       .where(sql`${table.externalId} is not null`),
-    uniqueIndex("sources_workspace_content_hash_uq")
-      .on(table.workspaceId, table.contentHash)
-      .where(sql`${table.contentHash} is not null`),
     index("sources_team_workspace_status_updated_idx").on(
       table.teamId,
       table.workspaceId,

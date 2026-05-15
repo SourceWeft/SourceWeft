@@ -8,6 +8,7 @@ import { ThemeProvider } from "next-themes";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
+import { GoogleOneTap } from "./google-one-tap";
 import { authClient } from "../lib/auth-client";
 import {
   additionalFields,
@@ -60,8 +61,6 @@ function isCancelledPasskeyRejection(reason: unknown) {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const oneTapClientId =
-    process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID?.trim() || "";
   const webBaseUrl = resolveWebBaseUrl();
 
   useEffect(() => {
@@ -105,7 +104,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
         multiSession
         navigate={router.push}
         onSessionChange={() => router.refresh()}
-        oneTap={Boolean(oneTapClientId)}
         organization={{
           apiKey: true,
           basePath: "/organization",
@@ -145,6 +143,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         twoFactor={["otp", "totp"]}
         viewPaths={customAuthViewPaths}
       >
+        <GoogleOneTap />
         <TooltipProvider>{children}</TooltipProvider>
         <Toaster closeButton position="top-right" richColors />
       </AuthUIProvider>

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  createPricingCheckoutRequestSchema,
   createTeamSubscriptionCheckoutRequestSchema,
   createTopupCheckoutRequestSchema,
   meterConsumeRequestSchema,
@@ -8,6 +9,7 @@ import {
   updateSpendLimitsRequestSchema,
 } from "@sourceweft/contracts";
 import { billingService } from "../../modules/billing";
+import { onboardingService } from "../../modules/onboarding";
 import { workspaceService } from "../../modules/workspace";
 import type { OrganizationMembership } from "../../modules/workspace";
 import { isPersonalOrganizationMetadata } from "../../modules/auth/organization-metadata";
@@ -85,6 +87,66 @@ async function requirePlanMatchesOrganization(
 }
 
 export function registerBillingRoutes(app: Hono) {
+  app.post("/v1/billing/pricing/checkout", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const userId = getSessionUserId(session);
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = createPricingCheckoutRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    let personalTeamId: string | null = null;
+    if (parsed.data.plan === "pro") {
+      await onboardingService.ensurePersonalTeamForUser({ userId });
+      const personalMembership =
+        await workspaceService.findPersonalOrganizationMembershipByUser(userId);
+      personalTeamId = personalMembership?.organizationId ?? null;
+    }
+
+    const response = await billingService.createPricingCheckout(
+      parsed.data,
+      {
+        userId,
+        email: session.user.email,
+      },
+      { personalTeamId },
+    );
+
+    return ApiResponse.success(c, response);
+  });
+
+  app.get("/v1/billing/orders/:orderId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const order = await billingService.getOrder(c.req.param("orderId"));
+    if (!order) {
+      throw ApiError.notFound("Billing order not found");
+    }
+
+    const userId = getSessionUserId(session);
+    if (order.userId !== userId) {
+      if (!order.teamId) {
+        throw ApiError.forbidden();
+      }
+
+      await requireTeamMembership(order.teamId, userId, {
+        requireBillingManager: true,
+      });
+    }
+
+    return ApiResponse.success(c, order);
+  });
+
   app.get("/v1/teams/:teamId/billing/summary", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -193,6 +255,7 @@ export function registerBillingRoutes(app: Hono) {
       teamId,
       parsed.data,
       userId,
+      session.user.email,
     );
     return ApiResponse.success(c, response);
   });

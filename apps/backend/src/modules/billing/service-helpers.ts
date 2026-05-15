@@ -19,7 +19,6 @@ export const TEAM_STANDARD_PLAN = "team_standard" as const;
 export const INDIVIDUAL_PRO_PLAN = "individual_pro" as const;
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<BillingSubscriptionStatus>([
-  "trialing",
   "active",
   "past_due",
 ]);
@@ -71,6 +70,9 @@ export function toSubscriptionSummary(input: {
     cancelAtPeriodEnd: input.subscription?.cancelAtPeriodEnd ?? false,
     externalCustomerId: input.subscription?.externalCustomerId ?? null,
     externalSubscriptionId: input.subscription?.externalSubscriptionId ?? null,
+    billingOrderId: input.subscription?.billingOrderId ?? null,
+    externalSubscriptionItemId:
+      input.subscription?.externalSubscriptionItemId ?? null,
     lastEventAt: input.subscription?.lastEventAt ?? null,
   };
 }

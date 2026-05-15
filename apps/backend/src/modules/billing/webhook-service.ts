@@ -5,6 +5,7 @@ import type {
   BillingWebhookProcessResult,
 } from "./types";
 import { isBillingError } from "./errors";
+import { BillingOrderService } from "./order-service";
 import { BillingSubscriptionService } from "./subscription-service";
 import {
   createFallbackWebhookEventId,
@@ -16,6 +17,7 @@ export class BillingWebhookService {
     private readonly store: BillingStore,
     private readonly runtimeConfig: BillingRuntimeConfig,
     private readonly subscriptionService: BillingSubscriptionService,
+    private readonly orderService?: BillingOrderService,
   ) {}
 
   async processSubscriptionWebhookEvent(
@@ -78,7 +80,7 @@ export class BillingWebhookService {
       };
     }
 
-    if (!input.snapshot) {
+    if (!input.snapshot && !input.orderFulfillment) {
       const ignored = await this.store.updateWebhookEventState(
         webhookEvent.id,
         {
@@ -99,14 +101,25 @@ export class BillingWebhookService {
     }
 
     try {
-      await this.subscriptionService.syncSubscriptionSnapshot(input.snapshot);
+      if (input.orderFulfillment) {
+        if (!this.orderService) {
+          throw new Error("Billing order service is not configured");
+        }
+
+        await this.orderService.fulfillOrder(input.orderFulfillment);
+      } else if (input.snapshot) {
+        await this.subscriptionService.syncSubscriptionSnapshot(input.snapshot);
+      }
 
       const processed = await this.store.updateWebhookEventState(
         webhookEvent.id,
         {
           status: "processed",
-          teamId: input.snapshot.teamId,
-          externalSubscriptionId: input.snapshot.externalSubscriptionId,
+          teamId: input.snapshot?.teamId ?? input.teamId,
+          externalSubscriptionId:
+            input.snapshot?.externalSubscriptionId ??
+            input.orderFulfillment?.externalSubscriptionId ??
+            input.externalSubscriptionId,
           processedAt: new Date().toISOString(),
           errorCode: null,
           errorMessage: null,
@@ -127,8 +140,11 @@ export class BillingWebhookService {
           webhookEvent.id,
           {
             status: "ignored",
-            teamId: input.snapshot.teamId,
-            externalSubscriptionId: input.snapshot.externalSubscriptionId,
+            teamId: input.snapshot?.teamId ?? input.teamId,
+            externalSubscriptionId:
+              input.snapshot?.externalSubscriptionId ??
+              input.orderFulfillment?.externalSubscriptionId ??
+              input.externalSubscriptionId,
             processedAt: new Date().toISOString(),
             errorCode: details.code,
             errorMessage: details.message,
@@ -144,8 +160,11 @@ export class BillingWebhookService {
 
       await this.store.updateWebhookEventState(webhookEvent.id, {
         status: "failed",
-        teamId: input.snapshot.teamId,
-        externalSubscriptionId: input.snapshot.externalSubscriptionId,
+        teamId: input.snapshot?.teamId ?? input.teamId,
+        externalSubscriptionId:
+          input.snapshot?.externalSubscriptionId ??
+          input.orderFulfillment?.externalSubscriptionId ??
+          input.externalSubscriptionId,
         processedAt: new Date().toISOString(),
         errorCode: details.code,
         errorMessage: details.message,

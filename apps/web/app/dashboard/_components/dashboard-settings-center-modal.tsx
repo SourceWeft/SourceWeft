@@ -1685,7 +1685,7 @@ function BillingPanel() {
     ? "Personal billing"
     : `${activeOrgRecord?.name ?? "Team"} billing`;
   const subscriptionStatus = subscription?.status ?? "inactive";
-  const isSubscriptionActive = ["trialing", "active", "past_due"].includes(
+  const isSubscriptionActive = ["active", "past_due"].includes(
     subscriptionStatus,
   );
   const hasPaidSubscription = Boolean(subscription?.externalSubscriptionId);

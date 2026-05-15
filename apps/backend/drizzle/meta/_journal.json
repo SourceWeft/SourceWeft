@@ -141,6 +141,20 @@
       "when": 1778716900000,
       "tag": "0019_drop_byok_key_refs",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778832000000,
+      "tag": "0020_connector_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1778835600000,
+      "tag": "0021_billing_orders",
+      "breakpoints": true
     }
   ]
 }

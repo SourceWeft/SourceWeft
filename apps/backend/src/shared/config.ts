@@ -454,6 +454,42 @@ export const config = {
         process.env.CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID || "",
       teamStandardYearlyProductId:
         process.env.CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID || "",
+      creditTopupProductId: process.env.CREEM_CREDIT_TOPUP_PRODUCT_ID || "",
+      pageTopupProductId: process.env.CREEM_PAGE_TOPUP_PRODUCT_ID || "",
+    },
+    catalog: {
+      individualProMonthlyAmountCents: parsePositiveNumber(
+        process.env.BILLING_PRICE_INDIVIDUAL_PRO_MONTHLY_CENTS,
+        1200,
+      ),
+      individualProYearlyAmountCents: parsePositiveNumber(
+        process.env.BILLING_PRICE_INDIVIDUAL_PRO_YEARLY_CENTS,
+        9600,
+      ),
+      teamStandardMonthlyAmountCents: parsePositiveNumber(
+        process.env.BILLING_PRICE_TEAM_STANDARD_MONTHLY_CENTS,
+        4900,
+      ),
+      teamStandardYearlyAmountCents: parsePositiveNumber(
+        process.env.BILLING_PRICE_TEAM_STANDARD_YEARLY_CENTS,
+        39200,
+      ),
+      creditTopupUnitAmount: parsePositiveNumber(
+        process.env.BILLING_CREDIT_TOPUP_UNIT_AMOUNT,
+        10000,
+      ),
+      creditTopupAmountCents: parsePositiveNumber(
+        process.env.BILLING_CREDIT_TOPUP_AMOUNT_CENTS,
+        1250,
+      ),
+      pageTopupUnitAmount: parsePositiveNumber(
+        process.env.BILLING_PAGE_TOPUP_UNIT_AMOUNT,
+        1000,
+      ),
+      pageTopupAmountCents: parsePositiveNumber(
+        process.env.BILLING_PAGE_TOPUP_AMOUNT_CENTS,
+        500,
+      ),
     },
   },
   ops: {

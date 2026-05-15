@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { db, database } from "../../shared/database";
 import * as schema from "../../shared/db/schema";
 import {
+  billingOrders,
   billingWebhookEvents,
   billingAccounts,
   subscriptions,
@@ -13,6 +14,7 @@ import {
 import type {
   BillingAccountState,
   BillingLedgerRow,
+  BillingOrderState,
   BillingSubscriptionState,
   BillingWebhookEventState,
   BillingWebhookStatus,
@@ -22,6 +24,7 @@ import type { BillingStore } from "./store-port";
 
 type BillingAccountRow = typeof billingAccounts.$inferSelect;
 type BillingLedgerRowDb = typeof usageLedgers.$inferSelect;
+type BillingOrderRow = typeof billingOrders.$inferSelect;
 type BillingSubscriptionRow = typeof subscriptions.$inferSelect;
 type BillingWebhookEventRow = typeof billingWebhookEvents.$inferSelect;
 
@@ -97,10 +100,51 @@ function mapSubscription(
       : null,
     externalCustomerId: row.externalCustomerId,
     externalSubscriptionId: row.externalSubscriptionId,
+    externalSubscriptionItemId: row.externalSubscriptionItemId,
     externalProductId: row.externalProductId,
+    billingOrderId: row.billingOrderId,
     cancelAtPeriodEnd: row.cancelAtPeriodEnd,
     metadata: row.metadata ?? {},
     lastEventAt: row.lastEventAt ? row.lastEventAt.toISOString() : null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function mapOrder(row: BillingOrderRow): BillingOrderState {
+  return {
+    id: row.id,
+    provider: row.provider,
+    kind: row.kind,
+    status: row.status,
+    paymentStatus: row.paymentStatus,
+    userId: row.userId,
+    teamId: row.teamId,
+    clientReferenceKey: row.clientReferenceKey,
+    planFamily: row.planFamily,
+    billingInterval: row.billingInterval,
+    quantity: row.quantity,
+    unitType: row.unitType,
+    unitAmount: row.unitAmount,
+    grantedCredits: row.grantedCredits,
+    grantedPages: row.grantedPages,
+    externalCheckoutId: row.externalCheckoutId,
+    externalPaymentId: row.externalPaymentId,
+    externalCustomerId: row.externalCustomerId,
+    externalSubscriptionId: row.externalSubscriptionId,
+    externalProductId: row.externalProductId,
+    amountTotal: row.amountTotal,
+    currency: row.currency,
+    successUrl: row.successUrl,
+    cancelUrl: row.cancelUrl,
+    metadata: row.metadata ?? {},
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
+    paidAt: row.paidAt ? row.paidAt.toISOString() : null,
+    fulfilledAt: row.fulfilledAt ? row.fulfilledAt.toISOString() : null,
+    expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+    fulfillmentAttemptCount: row.fulfillmentAttemptCount,
+    nextRetryAt: row.nextRetryAt ? row.nextRetryAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -153,6 +197,14 @@ function parseDate(value: string) {
 }
 
 function parseDateOrNull(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return new Date(value);
+}
+
+function parseDateOrUndefined(value: string | null | undefined) {
   if (!value) {
     return null;
   }
@@ -308,6 +360,215 @@ export class PostgresBillingStore implements BillingStore {
     return rows.map(mapLedger);
   }
 
+  async getOrderById(orderId: string, client?: PoolClient) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(eq(billingOrders.id, orderId))
+      .limit(1);
+
+    return row ? mapOrder(row) : null;
+  }
+
+  async getOrderByIdForUpdate(orderId: string, client: PoolClient) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(eq(billingOrders.id, orderId))
+      .limit(1)
+      .for("update");
+
+    return row ? mapOrder(row) : null;
+  }
+
+  async getOrderByClientReference(
+    userId: string,
+    clientReferenceKey: string,
+    client?: PoolClient,
+  ) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(
+        and(
+          eq(billingOrders.userId, userId),
+          eq(billingOrders.clientReferenceKey, clientReferenceKey),
+        ),
+      )
+      .limit(1);
+
+    return row ? mapOrder(row) : null;
+  }
+
+  async getOrderByProviderCheckoutId(
+    provider: BillingOrderState["provider"],
+    externalCheckoutId: string,
+    client?: PoolClient,
+  ) {
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(
+        and(
+          eq(billingOrders.provider, provider),
+          eq(billingOrders.externalCheckoutId, externalCheckoutId),
+        ),
+      )
+      .limit(1);
+
+    return row ? mapOrder(row) : null;
+  }
+
+  async insertOrder(order: BillingOrderState, client?: PoolClient) {
+    const [row] = await pickDb(client)
+      .insert(billingOrders)
+      .values({
+        id: order.id,
+        provider: order.provider,
+        kind: order.kind,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        userId: order.userId,
+        teamId: order.teamId,
+        clientReferenceKey: order.clientReferenceKey,
+        planFamily: order.planFamily,
+        billingInterval: order.billingInterval,
+        quantity: order.quantity,
+        unitType: order.unitType,
+        unitAmount: order.unitAmount,
+        grantedCredits: order.grantedCredits,
+        grantedPages: order.grantedPages,
+        externalCheckoutId: order.externalCheckoutId,
+        externalPaymentId: order.externalPaymentId,
+        externalCustomerId: order.externalCustomerId,
+        externalSubscriptionId: order.externalSubscriptionId,
+        externalProductId: order.externalProductId,
+        amountTotal: order.amountTotal,
+        currency: order.currency,
+        successUrl: order.successUrl,
+        cancelUrl: order.cancelUrl,
+        metadata: order.metadata,
+        errorCode: order.errorCode,
+        errorMessage: order.errorMessage,
+        paidAt: parseDateOrUndefined(order.paidAt),
+        fulfilledAt: parseDateOrUndefined(order.fulfilledAt),
+        expiresAt: parseDateOrUndefined(order.expiresAt),
+        fulfillmentAttemptCount: order.fulfillmentAttemptCount,
+        nextRetryAt: parseDateOrUndefined(order.nextRetryAt),
+        createdAt: parseDate(order.createdAt),
+        updatedAt: parseDate(order.updatedAt),
+      })
+      .returning();
+
+    if (!row) {
+      throw new Error("Failed to insert billing order");
+    }
+
+    return mapOrder(row);
+  }
+
+  async updateOrder(order: BillingOrderState, client?: PoolClient) {
+    const [row] = await pickDb(client)
+      .update(billingOrders)
+      .set({
+        provider: order.provider,
+        kind: order.kind,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        userId: order.userId,
+        teamId: order.teamId,
+        clientReferenceKey: order.clientReferenceKey,
+        planFamily: order.planFamily,
+        billingInterval: order.billingInterval,
+        quantity: order.quantity,
+        unitType: order.unitType,
+        unitAmount: order.unitAmount,
+        grantedCredits: order.grantedCredits,
+        grantedPages: order.grantedPages,
+        externalCheckoutId: order.externalCheckoutId,
+        externalPaymentId: order.externalPaymentId,
+        externalCustomerId: order.externalCustomerId,
+        externalSubscriptionId: order.externalSubscriptionId,
+        externalProductId: order.externalProductId,
+        amountTotal: order.amountTotal,
+        currency: order.currency,
+        successUrl: order.successUrl,
+        cancelUrl: order.cancelUrl,
+        metadata: order.metadata,
+        errorCode: order.errorCode,
+        errorMessage: order.errorMessage,
+        paidAt: parseDateOrUndefined(order.paidAt),
+        fulfilledAt: parseDateOrUndefined(order.fulfilledAt),
+        expiresAt: parseDateOrUndefined(order.expiresAt),
+        fulfillmentAttemptCount: order.fulfillmentAttemptCount,
+        nextRetryAt: parseDateOrUndefined(order.nextRetryAt),
+        updatedAt: parseDate(order.updatedAt),
+      })
+      .where(eq(billingOrders.id, order.id))
+      .returning();
+
+    if (!row) {
+      throw new Error("Failed to update billing order");
+    }
+
+    return mapOrder(row);
+  }
+
+  async findOpenSubscriptionOrder(
+    input: {
+      userId: string;
+      teamId: string | null;
+      planFamily: BillingOrderState["planFamily"];
+      billingInterval: BillingOrderState["billingInterval"];
+    },
+    client?: PoolClient,
+  ) {
+    const teamPredicate =
+      input.teamId === null
+        ? sql`${billingOrders.teamId} is null`
+        : eq(billingOrders.teamId, input.teamId);
+    const [row] = await pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(
+        and(
+          eq(billingOrders.kind, "subscription"),
+          eq(billingOrders.userId, input.userId),
+          teamPredicate,
+          sql`${billingOrders.planFamily} = ${input.planFamily}`,
+          sql`${billingOrders.billingInterval} = ${input.billingInterval}`,
+          sql`${billingOrders.status} in ('pending', 'checkout_created')`,
+        ),
+      )
+      .orderBy(desc(billingOrders.createdAt))
+      .limit(1);
+
+    return row ? mapOrder(row) : null;
+  }
+
+  async listRetryableOrders(input?: { limit?: number }, client?: PoolClient) {
+    const safeLimit = Math.min(
+      100,
+      Math.max(1, Math.floor(input?.limit ?? 25)),
+    );
+    const rows = await pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(
+        and(
+          sql`${billingOrders.status} in ('payment_confirmed', 'fulfillment_failed')`,
+          or(
+            isNull(billingOrders.nextRetryAt),
+            lte(billingOrders.nextRetryAt, new Date()),
+          ),
+        ),
+      )
+      .orderBy(billingOrders.createdAt)
+      .limit(safeLimit);
+
+    return rows.map(mapOrder);
+  }
+
   async countTeamMembers(teamId: string, client?: PoolClient) {
     const result = await pickDb(client).execute<{ count: string }>(sql`
       select count(*)::text as count
@@ -363,7 +624,9 @@ export class PostgresBillingStore implements BillingStore {
         currentPeriodEnd: parseDateOrNull(snapshot.currentPeriodEnd),
         externalCustomerId: snapshot.externalCustomerId,
         externalSubscriptionId: snapshot.externalSubscriptionId,
+        externalSubscriptionItemId: snapshot.externalSubscriptionItemId ?? null,
         externalProductId: snapshot.externalProductId,
+        billingOrderId: snapshot.billingOrderId ?? null,
         cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
         metadata: snapshot.metadata,
         lastEventAt: now,
@@ -381,7 +644,10 @@ export class PostgresBillingStore implements BillingStore {
           currentPeriodEnd: parseDateOrNull(snapshot.currentPeriodEnd),
           externalCustomerId: snapshot.externalCustomerId,
           externalSubscriptionId: snapshot.externalSubscriptionId,
+          externalSubscriptionItemId:
+            snapshot.externalSubscriptionItemId ?? null,
           externalProductId: snapshot.externalProductId,
+          billingOrderId: snapshot.billingOrderId ?? null,
           cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
           metadata: snapshot.metadata,
           lastEventAt: now,

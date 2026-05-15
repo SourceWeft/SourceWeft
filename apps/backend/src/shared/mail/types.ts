@@ -1,4 +1,5 @@
 export type MailMessageType =
+  | "auth.welcome"
   | "auth.verify-email"
   | "auth.email-otp"
   | "auth.two-factor-otp"
@@ -32,6 +33,13 @@ export type MailSendResult = {
   provider: string;
   requestId?: string;
   messageIds: string[];
+};
+
+export type TemplateMailSendInput = {
+  to: MailRecipient | MailRecipient[];
+  templateId: string;
+  variables?: Record<string, unknown>;
+  messageType: MailMessageType;
 };
 
 export interface MailProvider {

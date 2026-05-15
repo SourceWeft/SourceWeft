@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import type {
   BillingAccountState,
   BillingLedgerRow,
+  BillingOrderState,
   BillingSubscriptionState,
   BillingWebhookEventState,
   BillingWebhookStatus,
@@ -37,6 +38,45 @@ export type BillingStore = {
     limit?: number,
     client?: PoolClient,
   ): Promise<BillingLedgerRow[]>;
+  getOrderById(
+    orderId: string,
+    client?: PoolClient,
+  ): Promise<BillingOrderState | null>;
+  getOrderByIdForUpdate(
+    orderId: string,
+    client: PoolClient,
+  ): Promise<BillingOrderState | null>;
+  getOrderByClientReference(
+    userId: string,
+    clientReferenceKey: string,
+    client?: PoolClient,
+  ): Promise<BillingOrderState | null>;
+  getOrderByProviderCheckoutId(
+    provider: BillingOrderState["provider"],
+    externalCheckoutId: string,
+    client?: PoolClient,
+  ): Promise<BillingOrderState | null>;
+  insertOrder(
+    order: BillingOrderState,
+    client?: PoolClient,
+  ): Promise<BillingOrderState>;
+  updateOrder(
+    order: BillingOrderState,
+    client?: PoolClient,
+  ): Promise<BillingOrderState>;
+  findOpenSubscriptionOrder(
+    input: {
+      userId: string;
+      teamId: string | null;
+      planFamily: BillingOrderState["planFamily"];
+      billingInterval: BillingOrderState["billingInterval"];
+    },
+    client?: PoolClient,
+  ): Promise<BillingOrderState | null>;
+  listRetryableOrders(
+    input?: { limit?: number },
+    client?: PoolClient,
+  ): Promise<BillingOrderState[]>;
   countTeamMembers(teamId: string, client?: PoolClient): Promise<number>;
   countPendingTeamInvitations(
     teamId: string,

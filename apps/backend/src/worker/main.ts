@@ -4,6 +4,7 @@ import { logger } from "../shared/logger";
 import { ensureModelConfigAvailable } from "../shared/model-gateway/index";
 import { connectionOptions } from "../shared/redis-connection";
 import { buildWorkerJobFailureLog } from "./job-failure-log";
+import { processConnectorSyncJob } from "./processors/connector-sync";
 import { processExampleJob } from "./processors/example-job";
 import {
   processSourceParseJob,
@@ -19,6 +20,7 @@ type JobPayload = Record<string, unknown>;
 
 const processors: Record<string, (job: Job<JobPayload>) => Promise<unknown>> = {
   example: processExampleJob,
+  "connector-sync": processConnectorSyncJob,
   "source-parse": processSourceParseJob,
   "source-parse-poll": processSourceParsePollJob,
   "sync-model-pricing": processSyncModelPricingJob,

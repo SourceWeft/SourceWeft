@@ -1,10 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useAuthenticate } from "@daveyplate/better-auth-ui";
-import { Github } from "lucide-react";
 import {
-  SOURCEWEFT_GITHUB_URL,
   SourceWeftHeader,
 } from "../components/sourceweft-header";
 import {
@@ -100,9 +97,6 @@ function IconCheck() {
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 function HeroSection() {
-  const authState = useAuthenticate({ enabled: false });
-  const isLoggedIn = Boolean(authState.data);
-
   return (
     <section className="relative overflow-hidden pt-32 pb-20 md:pt-40 md:pb-28">
       {/* Grid + glow background */}
@@ -158,7 +152,7 @@ function HeroSection() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
-                href={isLoggedIn ? "/dashboard" : "/auth/sign-up"}
+                href="/auth/sign-in"
                 className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
               >
                 Start for free
@@ -169,15 +163,6 @@ function HeroSection() {
                 className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-5 py-2.5 text-sm text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
               >
                 See how it works
-              </a>
-              <a
-                href={SOURCEWEFT_GITHUB_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white/70 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:bg-white/5 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/10"
-              >
-                <Github className="h-4 w-4" />
-                GitHub
               </a>
             </div>
 
@@ -705,7 +690,7 @@ function Footer() {
                 ["#features", "Features"],
                 ["#how-it-works", "How it works"],
                 ["#pricing", "Pricing"],
-                ["/auth/sign-up", "Get started"],
+                ["/auth/sign-in", "Get started"],
               ].map(([href, label]) => (
                 <li key={href}>
                   <a

@@ -55,6 +55,34 @@ export const ledgerEventTypeSchema = z.enum([
 
 export const ledgerUnitTypeSchema = z.enum(["credit", "page"]);
 
+export const billingOrderKindSchema = z.enum([
+  "subscription",
+  "credit_topup",
+  "page_topup",
+]);
+
+export const billingOrderStatusSchema = z.enum([
+  "pending",
+  "checkout_created",
+  "payment_confirmed",
+  "fulfilled",
+  "payment_failed",
+  "expired",
+  "fulfillment_failed",
+]);
+
+export const billingOrderPaymentStatusSchema = z.enum([
+  "unknown",
+  "unpaid",
+  "paid",
+  "failed",
+  "expired",
+]);
+
+export const pricingCheckoutPlanSchema = z.enum(["pro", "team"]);
+
+export const billingCheckoutSourceSchema = z.enum(["landing", "dashboard"]);
+
 export const billingSummaryResponseSchema = z.object({
   teamId: z.string(),
   planFamily: planFamilySchema,
@@ -150,16 +178,96 @@ export const updateSpendLimitsResponseSchema = z.object({
   hardCapUsd: z.number().nonnegative().nullable(),
 });
 
-export const createTopupCheckoutRequestSchema = z.object({
-  credits: z.number().int().positive(),
+export const createPricingCheckoutRequestSchema = z.object({
+  plan: pricingCheckoutPlanSchema,
+  billingInterval: z.enum(["monthly", "yearly"]).default("yearly"),
+  clientReferenceKey: z.string().trim().min(1).max(160).optional(),
+  source: billingCheckoutSourceSchema.default("dashboard"),
+  teamName: z.string().trim().min(1).max(80).optional(),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
 });
 
+export const createPricingCheckoutResponseSchema = z.object({
+  orderId: z.string(),
+  provider: billingProviderSchema,
+  checkoutUrl: z.string().url(),
+  status: billingOrderStatusSchema,
+  paymentStatus: billingOrderPaymentStatusSchema,
+  teamId: z.string().nullable(),
+  planFamily: subscriptionPlanFamilySchema,
+  billingInterval: z.enum(["monthly", "yearly"]),
+  quantity: z.number().int().positive(),
+});
+
+export const createTopupCheckoutRequestSchema = z
+  .object({
+    unitType: ledgerUnitTypeSchema.default("credit"),
+    quantity: z.number().int().positive(),
+    clientReferenceKey: z.string().trim().min(1).max(160).optional(),
+    successUrl: z.string().url().optional(),
+    cancelUrl: z.string().url().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.quantity === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "quantity is required",
+        path: ["quantity"],
+      });
+    }
+  });
+
 export const createTopupCheckoutResponseSchema = z.object({
+  orderId: z.string(),
   teamId: z.string(),
   provider: billingProviderSchema,
-  status: z.enum(["completed", "pending"]),
-  credits: z.number().int().positive(),
+  checkoutUrl: z.string().url(),
+  status: billingOrderStatusSchema,
+  paymentStatus: billingOrderPaymentStatusSchema,
+  unitType: ledgerUnitTypeSchema,
+  quantity: z.number().int().positive(),
+  unitAmount: z.number().int().positive(),
+  grantedCredits: z.number().int().nonnegative(),
+  grantedPages: z.number().int().nonnegative(),
   amountUsd: z.number().nonnegative(),
+});
+
+export const billingOrderResponseSchema = z.object({
+  id: z.string(),
+  provider: billingProviderSchema,
+  kind: billingOrderKindSchema,
+  status: billingOrderStatusSchema,
+  paymentStatus: billingOrderPaymentStatusSchema,
+  userId: z.string(),
+  teamId: z.string().nullable(),
+  clientReferenceKey: z.string().nullable(),
+  planFamily: planFamilySchema.nullable(),
+  billingInterval: billingIntervalSchema.nullable(),
+  quantity: z.number().int().positive(),
+  unitType: ledgerUnitTypeSchema.nullable(),
+  unitAmount: z.number().int().nonnegative().nullable(),
+  grantedCredits: z.number().int().nonnegative(),
+  grantedPages: z.number().int().nonnegative(),
+  externalCheckoutId: z.string().nullable(),
+  externalPaymentId: z.string().nullable(),
+  externalCustomerId: z.string().nullable(),
+  externalSubscriptionId: z.string().nullable(),
+  externalProductId: z.string().nullable(),
+  amountTotal: z.number().int().nonnegative().nullable(),
+  currency: z.string().nullable(),
+  successUrl: z.string().nullable(),
+  cancelUrl: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  paidAt: z.string().nullable(),
+  fulfilledAt: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  fulfillmentAttemptCount: z.number().int().nonnegative(),
+  nextRetryAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 export const billingSubscriptionResponseSchema = z.object({
@@ -173,6 +281,8 @@ export const billingSubscriptionResponseSchema = z.object({
   cancelAtPeriodEnd: z.boolean(),
   externalCustomerId: z.string().nullable(),
   externalSubscriptionId: z.string().nullable(),
+  billingOrderId: z.string().nullable(),
+  externalSubscriptionItemId: z.string().nullable(),
   lastEventAt: z.string().nullable(),
 });
 
@@ -301,6 +411,15 @@ export type BillingSubscriptionStatus = z.infer<
 >;
 export type LedgerEventType = z.infer<typeof ledgerEventTypeSchema>;
 export type LedgerUnitType = z.infer<typeof ledgerUnitTypeSchema>;
+export type BillingOrderKind = z.infer<typeof billingOrderKindSchema>;
+export type BillingOrderStatus = z.infer<typeof billingOrderStatusSchema>;
+export type BillingOrderPaymentStatus = z.infer<
+  typeof billingOrderPaymentStatusSchema
+>;
+export type PricingCheckoutPlan = z.infer<typeof pricingCheckoutPlanSchema>;
+export type BillingCheckoutSource = z.infer<
+  typeof billingCheckoutSourceSchema
+>;
 export type BillingSummaryResponse = z.infer<
   typeof billingSummaryResponseSchema
 >;
@@ -314,12 +433,19 @@ export type UpdateSpendLimitsRequest = z.infer<
 export type UpdateSpendLimitsResponse = z.infer<
   typeof updateSpendLimitsResponseSchema
 >;
+export type CreatePricingCheckoutRequest = z.infer<
+  typeof createPricingCheckoutRequestSchema
+>;
+export type CreatePricingCheckoutResponse = z.infer<
+  typeof createPricingCheckoutResponseSchema
+>;
 export type CreateTopupCheckoutRequest = z.infer<
   typeof createTopupCheckoutRequestSchema
 >;
 export type CreateTopupCheckoutResponse = z.infer<
   typeof createTopupCheckoutResponseSchema
 >;
+export type BillingOrderResponse = z.infer<typeof billingOrderResponseSchema>;
 export type BillingSubscriptionResponse = z.infer<
   typeof billingSubscriptionResponseSchema
 >;

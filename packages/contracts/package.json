@@ -8,7 +8,9 @@
     "./health": "./src/health.ts",
     "./jobs": "./src/jobs.ts",
     "./billing": "./src/billing.ts",
+    "./pricing": "./src/pricing.ts",
     "./content": "./src/content.ts",
+    "./connectors": "./src/connectors.ts",
     "./agent-tools": "./src/agent-tools.ts",
     "./workspace": "./src/workspace.ts",
     "./api-response": "./src/api-response.ts"

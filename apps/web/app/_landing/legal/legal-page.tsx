@@ -20,7 +20,7 @@ const PRODUCT_LINKS = [
   ["/#features", "Features"],
   ["/#how-it-works", "How it works"],
   ["/#pricing", "Pricing"],
-  ["/auth/sign-up", "Get started"],
+  ["/auth/sign-in", "Get started"],
 ] as const;
 const LEGAL_LINKS = [
   ["/privacy", "Privacy"],

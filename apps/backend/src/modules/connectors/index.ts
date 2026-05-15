@@ -1,0 +1,31 @@
+import { billingService } from "../billing";
+import { ConnectorActionRunner } from "./action-runner";
+import { ConnectorOAuthService } from "./oauth-service";
+import { ConnectorService } from "./service";
+import { ConnectorSyncOrchestrator } from "./sync-orchestrator";
+
+export { ConnectorActionRunner } from "./action-runner";
+export { ConnectorError, isConnectorError } from "./errors";
+export { ConnectorOAuthService } from "./oauth-service";
+export { ConnectorRegistry, connectorRegistry } from "./registry";
+export { ConnectorService } from "./service";
+export { ConnectorSyncOrchestrator } from "./sync-orchestrator";
+export type {
+  ConnectorAdapter,
+  ConnectorActionResult,
+  ConnectorDiscoverInput,
+  ConnectorExtractedContent,
+  ConnectorExtractInput,
+  ConnectorItem,
+  ConnectorManifest,
+  OAuthCodeExchangeInput,
+  OAuthRefreshInput,
+  OAuthTokenSet,
+} from "./types";
+
+export const connectorService = new ConnectorService();
+export const connectorOAuthService = new ConnectorOAuthService();
+export const connectorSyncOrchestrator = new ConnectorSyncOrchestrator(
+  billingService,
+);
+export const connectorActionRunner = new ConnectorActionRunner();

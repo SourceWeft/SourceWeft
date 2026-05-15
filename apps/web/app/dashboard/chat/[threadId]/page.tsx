@@ -1818,6 +1818,10 @@ export default function DashboardChatThreadPage({
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
   const skillsLoadGenerationRef = useRef(0);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
+  const initialSourcesForWorkspace = useMemo(
+    () => getCachedWorkspaceSources(workspaceId) ?? librarySources,
+    [librarySources, workspaceId],
+  );
 
   // ── Composer state ─────────────────────────────────────────────────────────
   const [composerInitialInput, setComposerInitialInput] = useState("");
@@ -4663,7 +4667,7 @@ export default function DashboardChatThreadPage({
           onArtifactOpen={setPreviewArtifact}
           onCitationLocate={scrollToMessage}
           onCitationOpen={handleSourceHubCitationOpen}
-          initialSources={librarySources}
+          initialSources={initialSourcesForWorkspace}
           initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
           onSkillSelectionChange={setActiveSkillIds}
           onSelectionChange={persistActiveSourceIds}

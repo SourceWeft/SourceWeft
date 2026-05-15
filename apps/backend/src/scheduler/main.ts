@@ -3,6 +3,7 @@ import { logger } from "../shared/logger";
 import { syncGlobalModelGatewayConfig } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
+import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleExampleJob } from "./schedules/example-schedule";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
@@ -32,6 +33,8 @@ async function tick() {
     if (config.billing.teamBillingEnabled && config.billing.reconcileEnabled) {
       jobs.push(reconcileTeamSubscriptionsSchedule());
     }
+
+    jobs.push(scheduleConnectorSyncs());
 
     if (jobs.length === 0) {
       return;

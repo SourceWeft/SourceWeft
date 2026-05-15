@@ -7,14 +7,21 @@ import type {
 import type {
   BillingCycleSource,
   BillingInterval,
+  BillingOrderKind,
+  BillingOrderPaymentStatus,
+  BillingOrderResponse,
+  BillingOrderStatus,
   SubscriptionPlanFamily,
   BillingSubscriptionStatus,
   BillingLedgerEntry,
   BillingSubscriptionResponse,
   CancelTeamSubscriptionResponse,
   CreateTeamBillingPortalResponse,
+  CreatePricingCheckoutRequest,
+  CreatePricingCheckoutResponse,
   CreateTeamSubscriptionCheckoutRequest,
   CreateTeamSubscriptionCheckoutResponse,
+  LedgerUnitType,
   UpdateTeamSubscriptionSeatsRequest,
   UpdateTeamSubscriptionSeatsResponse,
 } from "@sourceweft/contracts";
@@ -39,6 +46,18 @@ export type BillingRuntimeConfig = {
     individualProYearlyProductId: string;
     teamStandardMonthlyProductId: string;
     teamStandardYearlyProductId: string;
+    creditTopupProductId: string;
+    pageTopupProductId: string;
+  };
+  catalog: {
+    individualProMonthlyAmountCents: number;
+    individualProYearlyAmountCents: number;
+    teamStandardMonthlyAmountCents: number;
+    teamStandardYearlyAmountCents: number;
+    creditTopupUnitAmount: number;
+    creditTopupAmountCents: number;
+    pageTopupUnitAmount: number;
+    pageTopupAmountCents: number;
   };
   defaultSuccessUrl: string;
 };
@@ -81,13 +100,17 @@ export type BillingSubscriptionState = {
   currentPeriodEnd: string | null;
   externalCustomerId: string | null;
   externalSubscriptionId: string | null;
+  externalSubscriptionItemId: string | null;
   externalProductId: string | null;
+  billingOrderId: string | null;
   cancelAtPeriodEnd: boolean;
   metadata: Record<string, unknown>;
   lastEventAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type BillingOrderState = BillingOrderResponse;
 
 export type BillingWebhookStatus =
   | "received"
@@ -123,6 +146,18 @@ export type BillingWebhookProcessInput = {
   externalSubscriptionId: string | null;
   metadata?: Record<string, unknown>;
   snapshot: TeamSubscriptionSnapshot | null;
+  orderFulfillment?: {
+    orderId: string;
+    externalPaymentId?: string | null;
+    externalCustomerId?: string | null;
+    externalSubscriptionId?: string | null;
+    externalSubscriptionItemId?: string | null;
+    externalProductId?: string | null;
+    currentPeriodStart?: string | null;
+    currentPeriodEnd?: string | null;
+    status?: BillingSubscriptionStatus;
+    metadata?: Record<string, unknown>;
+  } | null;
 };
 
 export type BillingWebhookProcessOutcome =
@@ -146,7 +181,9 @@ export type TeamSubscriptionSnapshot = {
   currentPeriodEnd: string | null;
   externalCustomerId: string | null;
   externalSubscriptionId: string | null;
+  externalSubscriptionItemId?: string | null;
   externalProductId: string | null;
+  billingOrderId?: string | null;
   cancelAtPeriodEnd: boolean;
   metadata: Record<string, unknown>;
   seatCount: number;
@@ -167,18 +204,32 @@ export type TeamPlanReconcileResult = {
 };
 
 export type BillingProviderCheckoutInput = {
-  teamId: string;
+  orderId: string;
+  persistedOrder?: boolean;
+  kind: BillingOrderKind;
+  teamId: string | null;
   actorUserId: string;
   actorEmail: string;
-  planFamily: SubscriptionPlanFamily;
-  billingInterval: Exclude<BillingInterval, "unknown">;
-  seatCount?: number;
+  planFamily: SubscriptionPlanFamily | null;
+  billingInterval: Exclude<BillingInterval, "unknown"> | null;
+  quantity: number;
+  unitType?: LedgerUnitType | null;
+  unitAmount?: number | null;
+  grantedCredits?: number;
+  grantedPages?: number;
+  externalProductId: string;
+  amountTotal?: number | null;
+  currency?: string | null;
   successUrl?: string;
+  cancelUrl?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type BillingProviderCheckoutResult = {
   provider: BillingProvider;
   checkoutUrl: string;
+  externalCheckoutId: string | null;
+  externalCustomerId: string | null;
 };
 
 export type BillingProviderPortalInput = {
@@ -217,6 +268,8 @@ export type BillingProviderAdapter = {
 };
 
 export type TeamSubscriptionSummary = BillingSubscriptionResponse;
+export type PricingCheckoutInput = CreatePricingCheckoutRequest;
+export type PricingCheckoutResult = CreatePricingCheckoutResponse;
 export type TeamSubscriptionCheckoutInput =
   CreateTeamSubscriptionCheckoutRequest;
 export type TeamSubscriptionCheckoutResult =

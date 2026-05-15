@@ -1,6 +1,8 @@
 import type {
   CancelTeamSubscriptionResponse,
   CreateTeamBillingPortalResponse,
+  CreatePricingCheckoutRequest,
+  CreatePricingCheckoutResponse,
   CreateTeamSubscriptionCheckoutRequest,
   CreateTeamSubscriptionCheckoutResponse,
   CreateTopupCheckoutRequest,
@@ -15,11 +17,13 @@ import type {
   UpdateSpendLimitsResponse,
 } from "@sourceweft/contracts";
 import { BillingAccountService } from "./account-service";
+import { BillingOrderService } from "./order-service";
 import { BillingReconcileService } from "./reconcile-service";
 import { BillingSubscriptionService } from "./subscription-service";
 import type { BillingStore } from "./store-port";
 import type {
   BillingProviderAdapter,
+  BillingOrderState,
   BillingRuntimeConfig,
   BillingWebhookProcessInput,
   BillingWebhookProcessResult,
@@ -30,6 +34,7 @@ import { BillingWebhookService } from "./webhook-service";
 
 export class BillingService {
   private readonly accountService: BillingAccountService;
+  private readonly orderService: BillingOrderService;
   private readonly usageService: BillingUsageService;
   private readonly subscriptionService: BillingSubscriptionService;
   private readonly webhookService: BillingWebhookService;
@@ -42,10 +47,18 @@ export class BillingService {
     alerts?: ConstructorParameters<typeof BillingSubscriptionService>[4],
   ) {
     this.accountService = new BillingAccountService(store, runtimeConfig);
+    this.orderService = new BillingOrderService(
+      store,
+      runtimeConfig,
+      provider,
+      this.accountService,
+      alerts,
+    );
     this.usageService = new BillingUsageService(
       store,
       runtimeConfig,
       this.accountService,
+      this.orderService,
     );
     this.subscriptionService = new BillingSubscriptionService(
       store,
@@ -58,6 +71,7 @@ export class BillingService {
       store,
       runtimeConfig,
       this.subscriptionService,
+      this.orderService,
     );
     this.reconcileService = new BillingReconcileService(
       store,
@@ -96,6 +110,26 @@ export class BillingService {
       input,
       actor,
     );
+  }
+
+  createPricingCheckout(
+    input: CreatePricingCheckoutRequest,
+    actor: { userId: string; email: string },
+    options?: { personalTeamId?: string | null },
+  ): Promise<CreatePricingCheckoutResponse> {
+    return this.orderService.createPricingCheckout({
+      request: input,
+      actor,
+      personalTeamId: options?.personalTeamId,
+    });
+  }
+
+  getOrder(orderId: string): Promise<BillingOrderState | null> {
+    return this.orderService.getOrder(orderId);
+  }
+
+  fulfillOrder(input: Parameters<BillingOrderService["fulfillOrder"]>[0]) {
+    return this.orderService.fulfillOrder(input);
   }
 
   createBillingPortal(
@@ -161,6 +195,10 @@ export class BillingService {
     return this.reconcileService.reconcileTeamSubscriptions();
   }
 
+  reconcileBillingOrders() {
+    return this.orderService.reconcileRetryableOrders();
+  }
+
   updateSpendLimits(
     teamId: string,
     input: UpdateSpendLimitsRequest,
@@ -172,8 +210,14 @@ export class BillingService {
     teamId: string,
     input: CreateTopupCheckoutRequest,
     actorUserId?: string,
+    actorEmail?: string,
   ): Promise<CreateTopupCheckoutResponse> {
-    return this.usageService.createTopupCheckout(teamId, input, actorUserId);
+    return this.usageService.createTopupCheckout(
+      teamId,
+      input,
+      actorUserId,
+      actorEmail,
+    );
   }
 
   meterConsume(

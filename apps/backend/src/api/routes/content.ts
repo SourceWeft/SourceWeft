@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { registerArtifactRoutes } from "./content/artifacts";
 import { registerByokRoutes } from "./content/byok";
+import { registerConnectorRoutes } from "./content/connectors";
 import { registerWorkspaceLlmObservabilityRoutes } from "./llm-observability";
 import { registerModelGatewayRoutes } from "./content/model-gateway";
 import { registerSourceRoutes } from "./content/sources";
@@ -13,6 +14,7 @@ export function registerContentRoutes(app: Hono) {
 
   registerArtifactRoutes(workspaceRoutes);
   registerSourceRoutes(workspaceRoutes);
+  registerConnectorRoutes(workspaceRoutes);
   registerSkillRoutes(workspaceRoutes);
   registerThreadRoutes(workspaceRoutes);
   registerWorkingFileRoutes(workspaceRoutes);

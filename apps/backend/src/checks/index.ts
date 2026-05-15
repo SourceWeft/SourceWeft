@@ -1,7 +1,9 @@
+import { runBillingCatalogCheck } from "./billing-catalog";
 import { runStorageCheck } from "./storage";
 import type { CheckContext, CheckResult, CheckRunner } from "./types";
 
 const implementedChecks: Record<string, CheckRunner> = {
+  "billing-catalog": () => runBillingCatalogCheck(),
   storage: () => runStorageCheck(),
 };
 

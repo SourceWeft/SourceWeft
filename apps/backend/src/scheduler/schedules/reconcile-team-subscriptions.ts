@@ -3,12 +3,17 @@ import { opsAlertService } from "../../modules/ops";
 import { logger } from "../../shared/logger";
 
 export async function reconcileTeamSubscriptionsSchedule() {
-  const result = await billingService.reconcileTeamSubscriptions();
+  const [result, orderResult] = await Promise.all([
+    billingService.reconcileTeamSubscriptions(),
+    billingService.reconcileBillingOrders(),
+  ]);
 
-  if (result.realigned === 0) {
+  if (result.realigned === 0 && orderResult.failed === 0) {
     logger.info("Billing reconcile completed", {
       checked: result.checked,
       realigned: 0,
+      orderChecked: orderResult.checked,
+      orderRetried: orderResult.retried,
     });
     return result;
   }
@@ -16,6 +21,9 @@ export async function reconcileTeamSubscriptionsSchedule() {
   logger.warn("Billing reconcile realigned team plans", {
     checked: result.checked,
     realigned: result.realigned,
+    orderChecked: orderResult.checked,
+    orderRetried: orderResult.retried,
+    orderFailed: orderResult.failed,
   });
 
   for (const anomaly of result.anomalies) {

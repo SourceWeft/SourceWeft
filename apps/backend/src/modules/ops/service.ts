@@ -148,25 +148,21 @@ export class OpsAlertService {
     input: OpsAlertTriggerInput,
   ) {
     try {
-      await mailService.send({
+      await mailService.sendTemplate({
         to: this.runtimeConfig.alertEmails,
-        subject: `[SourceWeft][${alert.level.toUpperCase()}][${alert.source}] ${alert.title}`,
-        html: `
-          <h2>${alert.title}</h2>
-          <p><strong>Level:</strong> ${alert.level}</p>
-          <p><strong>Source:</strong> ${alert.source}</p>
-          <p><strong>Alert Key:</strong> ${alert.alertKey}</p>
-          <p><strong>Team:</strong> ${alert.teamId || "n/a"}</p>
-          <p><strong>Trigger Count:</strong> ${alert.triggerCount}</p>
-          <p><strong>Message:</strong> ${alert.message}</p>
-          <pre>${JSON.stringify(alert.metadata, null, 2)}</pre>
-        `,
         messageType: "ops.alert",
         templateId: "ops.alert",
         variables: {
           ...input.metadata,
           alertKey: alert.alertKey,
+          level: alert.level,
+          levelUpper: alert.level.toUpperCase(),
+          message: alert.message,
+          metadataJson: JSON.stringify(alert.metadata, null, 2),
           source: alert.source,
+          teamLabel: alert.teamId || "n/a",
+          title: alert.title,
+          triggerCount: alert.triggerCount,
         },
       });
 

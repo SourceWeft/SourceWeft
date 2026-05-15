@@ -353,6 +353,82 @@ export async function createPersonalOrganizationForUser(input: {
   });
 }
 
+export async function createTeamOrganizationForUser(input: {
+  name: string;
+  slug: string;
+  userId: string;
+  metadata: Record<string, unknown>;
+  idempotencyKey: string;
+}) {
+  const now = new Date();
+  const organizationId = randomUUID();
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select pg_advisory_xact_lock(
+        hashtext('sourceweft:team-organization'),
+        hashtext(${input.idempotencyKey})
+      )
+    `);
+
+    const existingResult = await tx.execute<{ id: string }>(sql`
+      select id
+      from organization
+      where metadata is not null
+        and metadata <> ''
+        and metadata::jsonb #>> '{sourceweft,billingOrderId}' = ${input.idempotencyKey}
+      limit 1
+    `);
+
+    const existing = existingResult.rows?.[0];
+    if (existing) {
+      return { created: false, id: existing.id };
+    }
+
+    const organizationResult = await tx.execute<{ id: string }>(sql`
+      insert into organization (
+        id,
+        name,
+        slug,
+        metadata,
+        "createdAt"
+      )
+      values (
+        ${organizationId},
+        ${input.name},
+        ${input.slug},
+        ${JSON.stringify(input.metadata)},
+        ${now}
+      )
+      returning id
+    `);
+
+    await tx.execute(sql`
+      insert into member (
+        id,
+        "organizationId",
+        "userId",
+        role,
+        "createdAt"
+      )
+      values (
+        ${randomUUID()},
+        ${organizationId},
+        ${input.userId},
+        'owner',
+        ${now}
+      )
+    `);
+
+    const row = organizationResult.rows?.[0];
+    if (!row) {
+      throw new Error("Failed to create team organization");
+    }
+
+    return { created: true, id: row.id };
+  });
+}
+
 export async function findPersonalOrganizationMembershipByUser(userId: string) {
   const result = await db.execute<OrganizationMembershipRow>(sql`
     select

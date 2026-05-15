@@ -12,6 +12,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
+import { billingClient } from "../../../lib/sdk";
 import { getPricingConfig } from "../../_landing/pricing-config";
 import {
   DashboardMetaRow,
@@ -24,6 +25,8 @@ import {
   isPersonalOrganization,
 } from "./dashboard-team-selector-shared";
 import { DashboardPricingModal } from "./dashboard-pricing-modal";
+
+type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;
 
 const invoices = [
   { period: "Apr 2026", amount: "$20.00", status: "Paid" },
@@ -164,19 +167,62 @@ export function DashboardBillingModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
-  const isTeam = !!activeOrg;
+  const allOrgs = (orgs ?? []) as Array<{
+    id: string;
+    metadata?: unknown;
+    name: string;
+    slug?: string;
+  }>;
+  const activeOrgRecord = activeOrg as
+    | { id: string; metadata?: unknown; name: string }
+    | null
+    | undefined;
+  const personalOrg = getPersonalOrganization(allOrgs);
+  const billingTeamId = activeOrgRecord?.id ?? personalOrg?.id ?? null;
+  const isTeam = Boolean(activeOrgRecord && !isPersonalOrganization(activeOrgRecord));
 
   const [pricingOpen, setPricingOpen] = React.useState(false);
   const [billingPeriod, setBillingPeriod] = React.useState<"monthly" | "yearly">("yearly");
+  const [pricingSummary, setPricingSummary] =
+    React.useState<BillingSummary | null>(null);
   const plans = getPricingConfig();
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummary() {
+      if (!open || !billingTeamId) {
+        setPricingSummary(null);
+        return;
+      }
+
+      try {
+        const nextSummary = await billingClient.getSummary(billingTeamId);
+        if (!cancelled) {
+          setPricingSummary(nextSummary);
+        }
+      } catch {
+        if (!cancelled) {
+          setPricingSummary(null);
+        }
+      }
+    }
+
+    void loadSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [billingTeamId, open]);
 
   const content = isTeam
     ? {
         description: "Manage plan, invoices, and payment details for this team.",
         plan: "Team",
-        status: "Trialing",
-        cycle: "Trial ends on May 12, 2026",
+        status: "Active",
+        cycle: "Renews on May 12, 2026",
         nextPayment: "$80.00",
         usageLabel: "11,600 / 80,000 credits",
         usageValue: "14%",
@@ -367,6 +413,7 @@ export function DashboardBillingModal({
       onOpenChange={setPricingOpen}
       open={pricingOpen}
       plans={plans}
+      summary={pricingSummary}
     />
     </>
   );

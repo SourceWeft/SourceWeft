@@ -1,7 +1,14 @@
 import { config } from "../config";
 import { logger } from "../logger";
+import { renderMailTemplate } from "./templates";
 import { PlunkApiProvider } from "./providers/plunk-provider";
-import type { MailProvider, MailRecipient, MailSendInput, MailSendResult } from "./types";
+import type {
+  MailProvider,
+  MailRecipient,
+  MailSendInput,
+  MailSendResult,
+  TemplateMailSendInput,
+} from "./types";
 
 function createProvider(): MailProvider {
   const provider = config.mail.provider.toLowerCase();
@@ -52,6 +59,17 @@ export class MailService {
       });
       throw error;
     }
+  }
+
+  async sendTemplate(input: TemplateMailSendInput): Promise<MailSendResult> {
+    const rendered = renderMailTemplate(input.templateId, input.variables);
+    return this.send({
+      to: input.to,
+      ...rendered,
+      messageType: input.messageType,
+      templateId: input.templateId,
+      variables: input.variables,
+    });
   }
 }
 

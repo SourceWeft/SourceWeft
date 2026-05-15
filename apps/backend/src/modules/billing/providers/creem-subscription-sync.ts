@@ -52,6 +52,15 @@ function resolveTeamId(metadata: Record<string, unknown> | null) {
   return null;
 }
 
+function resolveOrderId(metadata: Record<string, unknown> | null) {
+  const fromMetadata = metadata?.orderId;
+  if (typeof fromMetadata === "string" && fromMetadata.trim()) {
+    return fromMetadata;
+  }
+
+  return null;
+}
+
 function resolveMetadata(record: Record<string, unknown> | null) {
   const metadata = asRecord(record?.metadata ?? null);
   if (metadata) {
@@ -273,6 +282,17 @@ function resolveCreemSeatCount(
   throw new Error("Unable to resolve Creem subscription seat count");
 }
 
+function resolveSubscriptionItemId(data: unknown) {
+  const record = asRecord(data);
+  const items = record?.items;
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+
+  const firstItem = asRecord(items[0]);
+  return readString(firstItem, "id");
+}
+
 function buildCreemSubscriptionSnapshot(
   eventType: string,
   data: unknown,
@@ -283,7 +303,16 @@ function buildCreemSubscriptionSnapshot(
   const teamId = resolveTeamId(metadata);
   const planFamily = resolvePlanFamily(metadata, data);
 
-  if (!teamId || !planFamily) {
+  if (!planFamily || (planFamily === "individual_pro" && !teamId)) {
+    return null;
+  }
+
+  if (planFamily === "team_standard" && !teamId) {
+    return null;
+  }
+
+  const resolvedTeamId = teamId;
+  if (!resolvedTeamId) {
     return null;
   }
 
@@ -304,7 +333,7 @@ function buildCreemSubscriptionSnapshot(
     inferBillingInterval(currentPeriodStart, currentPeriodEnd);
 
   return {
-    teamId,
+    teamId: resolvedTeamId,
     provider: "creem",
     planFamily,
     status: resolveCreemSubscriptionStatus({
@@ -324,6 +353,8 @@ function buildCreemSubscriptionSnapshot(
       eventType === "subscription.scheduled_cancel",
     metadata: metadata ?? {},
     seatCount: resolveCreemSeatCount(data, metadata, planFamily),
+    billingOrderId: resolveOrderId(metadata),
+    externalSubscriptionItemId: resolveSubscriptionItemId(data),
   };
 }
 
@@ -342,6 +373,8 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
       data,
       fallbackStatus,
     );
+    const metadata = resolveMetadata(record);
+    const orderId = resolveOrderId(metadata);
     const providerEventId = readString(record, "webhookId");
     const externalSubscriptionId =
       snapshot?.externalSubscriptionId || readString(record, "id");
@@ -374,8 +407,26 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
         externalSubscriptionId: externalSubscriptionId ?? null,
         metadata: {
           fallbackStatus,
+          ...(metadata ?? {}),
         },
         snapshot,
+        orderFulfillment: orderId
+          ? {
+              orderId,
+              externalCustomerId: snapshot?.externalCustomerId ?? null,
+              externalSubscriptionId: externalSubscriptionId ?? null,
+              externalSubscriptionItemId:
+                snapshot?.externalSubscriptionItemId ?? null,
+              externalProductId: snapshot?.externalProductId ?? null,
+              currentPeriodStart: snapshot?.currentPeriodStart ?? null,
+              currentPeriodEnd: snapshot?.currentPeriodEnd ?? null,
+              status: snapshot?.status ?? fallbackStatus,
+              metadata: {
+                fallbackStatus,
+                ...(metadata ?? {}),
+              },
+            }
+          : null,
       });
 
       if (result.outcome === "ignored") {

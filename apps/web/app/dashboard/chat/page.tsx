@@ -272,6 +272,10 @@ export default function DashboardChatPage() {
     useState<ArtifactListItem | null>(null);
   const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
   const skillsLoadGenerationRef = useRef(0);
+  const initialSourcesForWorkspace = useMemo(
+    () => getCachedWorkspaceSources(workspaceId) ?? librarySources,
+    [librarySources, workspaceId],
+  );
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
   );
@@ -1001,7 +1005,7 @@ export default function DashboardChatPage() {
             onSkillSelectionChange={setActiveSkillIds}
             onSelectionChange={persistActiveSourceIds}
             onSkillsCatalogChange={loadAvailableSkills}
-            initialSources={librarySources}
+            initialSources={initialSourcesForWorkspace}
             initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
             onSourceLoad={handleLibrarySourcesLoad}
             selectedIds={activeSourceIds}

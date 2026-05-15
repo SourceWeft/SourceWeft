@@ -28,7 +28,6 @@ import {
   parseSourceweftOrganizationKind,
   withSourceweftOrganizationKind,
 } from "./organization-metadata";
-import { renderLinkTemplate, renderOtpTemplate } from "./templates";
 
 function withBaseUrl(path: string) {
   const base = config.auth.baseUrl.replace(/\/$/, "");
@@ -181,18 +180,13 @@ export const auth: any = betterAuth({
         await assertUserHardDeleteAllowed(user.id);
       },
       async sendDeleteAccountVerification(data) {
-        await mailService.send({
+        await mailService.sendTemplate({
           to: data.user.email,
-          subject: "Confirm account deletion",
-          html: renderLinkTemplate({
-            title: "Confirm account deletion",
-            message:
-              "We received a request to delete your SourceWeft account. This action is permanent.",
-            buttonLabel: "Delete account",
-            buttonUrl: data.url,
-          }),
           templateId: "auth.delete-account",
           messageType: "auth.delete-account",
+          variables: {
+            url: data.url,
+          },
         });
       },
     },
@@ -201,36 +195,26 @@ export const auth: any = betterAuth({
     enabled: true,
     requireEmailVerification: false,
     async sendResetPassword(data) {
-      await mailService.send({
+      await mailService.sendTemplate({
         to: data.user.email,
-        subject: "Reset your SourceWeft password",
-        html: renderLinkTemplate({
-          title: "Reset your password",
-          message:
-            "We received a request to reset your password. Use the button below to continue.",
-          buttonLabel: "Reset password",
-          buttonUrl: data.url,
-        }),
         templateId: "auth.reset-password",
         messageType: "auth.reset-password",
+        variables: {
+          url: data.url,
+        },
       });
     },
   },
   emailVerification: {
     sendOnSignUp: false,
     async sendVerificationEmail(data) {
-      await mailService.send({
+      await mailService.sendTemplate({
         to: data.user.email,
-        subject: "Verify your SourceWeft email",
-        html: renderLinkTemplate({
-          title: "Verify your email",
-          message:
-            "Confirm your email address to complete account setup and secure your access.",
-          buttonLabel: "Verify email",
-          buttonUrl: data.url,
-        }),
         templateId: "auth.verify-email",
         messageType: "auth.verify-email",
+        variables: {
+          url: data.url,
+        },
       });
     },
   },
@@ -261,20 +245,17 @@ export const auth: any = betterAuth({
     username(),
     organization({
       async sendInvitationEmail(data) {
-        await mailService.send({
+        await mailService.sendTemplate({
           to: data.email,
-          subject: `${data.inviter.user.name || data.inviter.user.email} invited you to ${data.organization.name}`,
-          html: renderLinkTemplate({
-            title: `Join ${data.organization.name}`,
-            message:
-              "You were invited to join an organization on SourceWeft. Sign in and accept the invitation.",
-            buttonLabel: "Accept invitation",
-            buttonUrl: withBaseUrl(
-              `/auth/accept-invitation?invitationId=${encodeURIComponent(data.id)}`,
-            ),
-          }),
           templateId: "org.invitation",
           messageType: "org.invitation",
+          variables: {
+            inviterLabel: data.inviter.user.name || data.inviter.user.email,
+            organizationName: data.organization.name,
+            url: withBaseUrl(
+              `/auth/accept-invitation?invitationId=${encodeURIComponent(data.id)}`,
+            ),
+          },
         });
       },
       organizationHooks: {
@@ -404,17 +385,13 @@ export const auth: any = betterAuth({
       issuer: "SourceWeft",
       otpOptions: {
         async sendOTP({ user, otp }) {
-          await mailService.send({
+          await mailService.sendTemplate({
             to: user.email,
-            subject: "Your two-factor verification code",
-            html: renderOtpTemplate({
-              title: "Two-factor verification",
-              message:
-                "Use this verification code to complete your SourceWeft sign-in.",
-              otp,
-            }),
             templateId: "auth.two-factor-otp",
             messageType: "auth.two-factor-otp",
+            variables: {
+              otp,
+            },
           });
         },
       },
@@ -524,53 +501,31 @@ export const auth: any = betterAuth({
       allowedAttempts: 5,
       resendStrategy: "reuse",
       async sendVerificationOTP({ email, otp, type }) {
-        const labels: Record<string, { title: string; message: string }> = {
-          "sign-in": {
-            title: "Your sign-in code",
-            message: "Use this code to sign in to SourceWeft.",
-          },
-          "email-verification": {
-            title: "Verify your email",
-            message:
-              "Use this verification code to confirm your email address.",
-          },
-          "forget-password": {
-            title: "Reset your password",
-            message: "Use this code to continue resetting your password.",
-          },
-        };
+        const templateType =
+          type === "email-verification" || type === "forget-password"
+            ? type
+            : "sign-in";
 
-        const content = labels[type] || {
-          title: "Your sign-in code",
-          message: "Use this code to sign in to SourceWeft.",
-        };
-
-        await mailService.send({
+        await mailService.sendTemplate({
           to: email,
-          subject: content.title,
-          html: renderOtpTemplate({
-            title: content.title,
-            message: content.message,
-            otp,
-          }),
-          templateId: `auth.email-otp.${type}`,
+          templateId: `auth.email-otp.${templateType}`,
           messageType: "auth.email-otp",
+          variables: {
+            otp,
+            type,
+          },
         });
       },
     }),
     magicLink({
       async sendMagicLink({ email, url }) {
-        await mailService.send({
+        await mailService.sendTemplate({
           to: email,
-          subject: "Your SourceWeft magic link",
-          html: renderLinkTemplate({
-            title: "Sign in with magic link",
-            message: "Use this secure link to continue signing in.",
-            buttonLabel: "Sign in",
-            buttonUrl: url,
-          }),
           templateId: "auth.magic-link",
           messageType: "auth.magic-link",
+          variables: {
+            url,
+          },
         });
       },
     }),

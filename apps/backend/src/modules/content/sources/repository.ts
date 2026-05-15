@@ -48,6 +48,8 @@ export async function createSourceRecord(input: {
   parsedTokens?: number;
   sourceType?: SourceRecord["sourceType"];
   parentSourceId?: string | null;
+  connectorId?: string | null;
+  syncRunId?: string | null;
   externalId?: string | null;
   externalUri?: string | null;
   externalUpdatedAt?: Date | null;
@@ -73,6 +75,8 @@ export async function createSourceRecord(input: {
       ingestKind: input.ingestKind ?? "manual_upload",
       sourceType: input.sourceType ?? "manual_upload",
       parentSourceId: input.parentSourceId ?? null,
+      connectorId: input.connectorId ?? null,
+      syncRunId: input.syncRunId ?? null,
       title: input.title,
       contentText: input.contentText,
       externalId: input.externalId ?? null,
@@ -402,6 +406,29 @@ export async function findSourceRecordByExternalUri(input: {
   return row ? mapSource(row) : null;
 }
 
+export async function findSourceRecordByConnectorExternalId(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+  externalId: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(sources)
+    .where(
+      and(
+        eq(sources.teamId, input.teamId),
+        eq(sources.workspaceId, input.workspaceId),
+        eq(sources.connectorId, input.connectorId),
+        eq(sources.externalId, input.externalId),
+        ne(sources.status, "archived"),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapSource(row) : null;
+}
+
 export async function updateSourceRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -409,6 +436,8 @@ export async function updateSourceRecord(input: {
   title?: string;
   contentText?: string;
   parentSourceId?: string | null;
+  connectorId?: string | null;
+  syncRunId?: string | null;
   externalId?: string | null;
   externalUri?: string | null;
   externalUpdatedAt?: Date | null;
@@ -432,6 +461,8 @@ export async function updateSourceRecord(input: {
 
   if (input.title !== undefined) updates.title = input.title;
   if (input.parentSourceId !== undefined) updates.parentSourceId = input.parentSourceId;
+  if (input.connectorId !== undefined) updates.connectorId = input.connectorId;
+  if (input.syncRunId !== undefined) updates.syncRunId = input.syncRunId;
   if (input.externalId !== undefined) updates.externalId = input.externalId;
   if (input.externalUri !== undefined) updates.externalUri = input.externalUri;
   if (input.externalUpdatedAt !== undefined) updates.externalUpdatedAt = input.externalUpdatedAt;

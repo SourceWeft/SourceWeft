@@ -17,6 +17,7 @@ import type {
   MeterIngestionResponse,
 } from "@sourceweft/contracts";
 import { BillingAccountService } from "./account-service";
+import { BillingOrderService } from "./order-service";
 import { BillingError } from "./errors";
 import { appendBillingLedger } from "./ledger";
 import type { BillingStore } from "./store-port";
@@ -38,6 +39,7 @@ export class BillingUsageService {
     private readonly store: BillingStore,
     private readonly runtimeConfig: BillingRuntimeConfig,
     private readonly accountService: BillingAccountService,
+    private readonly orderService?: BillingOrderService,
   ) {}
 
   async ensureBillingAccount(teamId: string) {
@@ -163,12 +165,24 @@ export class BillingUsageService {
   async createTopupCheckout(
     teamId: string,
     input: CreateTopupCheckoutRequest,
-    _actorUserId?: string,
+    actorUserId?: string,
+    actorEmail?: string,
   ): Promise<CreateTopupCheckoutResponse> {
+    if (this.orderService && actorUserId && actorEmail) {
+      return this.orderService.createTopupCheckout({
+        teamId,
+        request: input,
+        actor: {
+          userId: actorUserId,
+          email: actorEmail,
+        },
+      });
+    }
+
     return this.accountService.withLockedAccount(
       teamId,
       async ({ account }) => {
-        const creditsToAdd = Math.floor(input.credits);
+        const creditsToAdd = Math.floor(input.quantity);
 
         if (creditsToAdd <= 0) {
           throw new BillingError(

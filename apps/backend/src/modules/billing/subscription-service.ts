@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import type {
   BillingSubscriptionResponse,
@@ -12,6 +13,7 @@ import type {
 import { getAnchoredMonthlyCycleWindow } from "@sourceweft/credits-core";
 import { logger } from "../../shared/logger";
 import { BillingAccountService } from "./account-service";
+import { resolveSubscriptionProduct } from "./catalog";
 import { BillingError } from "./errors";
 import type { BillingStore } from "./store-port";
 import type {
@@ -29,7 +31,6 @@ import {
 } from "./service-helpers";
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<BillingSubscriptionStatus>([
-  "trialing",
   "active",
   "past_due",
 ]);
@@ -158,14 +159,29 @@ export class BillingSubscriptionService {
         input.planFamily === TEAM_STANDARD_PLAN
           ? await this.resolveCheckoutSeatCount(account.teamId, input, client)
           : undefined;
+      const product = resolveSubscriptionProduct({
+        runtimeConfig: this.runtimeConfig,
+        planFamily: input.planFamily,
+        billingInterval: input.billingInterval,
+      });
       const result = await this.provider.createCheckout({
+        orderId: `legacy-subscription:${randomUUID()}`,
+        kind: "subscription",
         teamId: account.teamId,
         actorUserId: actor.userId,
         actorEmail: actor.email,
         planFamily: input.planFamily,
         billingInterval: input.billingInterval,
-        seatCount,
+        quantity: seatCount ?? 1,
+        externalProductId: product.productId,
+        amountTotal: product.amountCents * (seatCount ?? 1),
+        currency: product.currency,
         successUrl: input.successUrl,
+        metadata: {
+          teamId: account.teamId,
+          referenceId: actor.userId,
+          seatCount: seatCount ?? 1,
+        },
       });
 
       return {

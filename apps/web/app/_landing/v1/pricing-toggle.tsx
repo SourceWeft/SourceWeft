@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
+import { authClient } from "../../../lib/auth-client";
+import { billingClient } from "../../../lib/sdk";
 import type { PlanConfig } from "../../_landing/pricing-config";
+
+type BillingInterval = "monthly" | "yearly";
+type PaidPlanId = Extract<PlanConfig["id"], "pro" | "team">;
 
 function formatPrice(cents: number): string {
   if (cents === 0) return "Free";
@@ -14,49 +20,123 @@ function yearlyDiscount(monthly: number, yearly: number): number {
   return Math.round(((monthlyAnnual - yearly) / monthlyAnnual) * 100);
 }
 
+function isPaidPlan(planId: PlanConfig["id"]): planId is PaidPlanId {
+  return planId === "pro" || planId === "team";
+}
+
+function createCheckoutIntent() {
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return id;
+}
+
+function createReferenceKey(plan: PaidPlanId, interval: BillingInterval) {
+  return `pricing:${plan}:${interval}:${createCheckoutIntent()}`;
+}
+
+function createPricingCheckoutPath(
+  plan: PaidPlanId,
+  interval: BillingInterval,
+  source: "landing" | "dashboard" = "landing",
+) {
+  const params = new URLSearchParams({
+    plan,
+    billingInterval: interval,
+    source,
+    intent: createCheckoutIntent(),
+  });
+
+  return `/dashboard/billing/checkout?${params.toString()}`;
+}
+
+function createPricingAuthHref(plan: PaidPlanId, interval: BillingInterval) {
+  return `/auth/sign-in?redirectTo=${encodeURIComponent(
+    createPricingCheckoutPath(plan, interval),
+  )}`;
+}
+
 export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
   const [yearly, setYearly] = useState(false);
+  const [loadingPlan, setLoadingPlan] = useState<"pro" | "team" | null>(null);
+
+  async function handleCheckout(planId: PlanConfig["id"]) {
+    const session = await authClient.getSession();
+    const isLoggedIn = Boolean(session.data?.session || session.data?.user);
+
+    if (planId === "free") {
+      window.location.assign(isLoggedIn ? "/dashboard" : "/auth/sign-in");
+      return;
+    }
+
+    if (!isPaidPlan(planId)) {
+      return;
+    }
+
+    const billingInterval = yearly ? "yearly" : "monthly";
+
+    if (!isLoggedIn) {
+      window.location.assign(createPricingAuthHref(planId, billingInterval));
+      return;
+    }
+
+    setLoadingPlan(planId);
+    try {
+      const result = await billingClient.createPricingCheckout({
+        plan: planId,
+        billingInterval,
+        source: "landing",
+        clientReferenceKey: createReferenceKey(planId, billingInterval),
+      });
+      window.location.assign(result.checkoutUrl);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to start checkout.",
+      );
+    } finally {
+      setLoadingPlan(null);
+    }
+  }
 
   return (
     <div>
-      {/* Toggle */}
-      <div className="mb-10 flex items-center justify-center gap-3">
-        <span
-          className={`text-sm transition-colors ${
-            !yearly
-              ? "text-zinc-900 dark:text-white"
-              : "text-zinc-400 dark:text-zinc-500"
-          }`}
+      <div className="mb-10 flex justify-center">
+        <div
+          aria-label="Billing period"
+          className="inline-flex rounded-xl border border-zinc-200 bg-zinc-100 p-1 dark:border-white/12 dark:bg-white/5"
+          role="group"
         >
-          Monthly
-        </span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={yearly}
-          onClick={() => setYearly((v) => !v)}
-          className="relative inline-flex h-6 w-11 items-center rounded-full border border-zinc-300 bg-zinc-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:border-white/20 dark:bg-zinc-800 dark:focus-visible:ring-white/40"
-        >
-          <span
-            className={`inline-block h-4 w-4 rounded-full bg-zinc-900 shadow transition-transform duration-200 dark:bg-white ${
-              yearly ? "translate-x-6" : "translate-x-1"
-            }`}
-          />
-        </button>
-        <span
-          className={`text-sm transition-colors ${
-            yearly
-              ? "text-zinc-900 dark:text-white"
-              : "text-zinc-400 dark:text-zinc-500"
-          }`}
-        >
-          Yearly
-          {yearly && (
-            <span className="ml-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
-              2 months free
-            </span>
-          )}
-        </span>
+          {(["monthly", "yearly"] as const).map((period) => {
+            const active = yearly === (period === "yearly");
+
+            return (
+              <button
+                aria-label={period === "monthly" ? "Monthly" : "Yearly"}
+                aria-pressed={active}
+                className={`inline-flex min-w-24 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:focus-visible:ring-white/40 ${
+                  active
+                    ? "bg-white text-zinc-900 shadow-sm dark:bg-white dark:text-zinc-950"
+                    : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+                }`}
+                key={period}
+                onClick={() => setYearly(period === "yearly")}
+                type="button"
+              >
+                {period === "monthly" ? (
+                  "Monthly"
+                ) : (
+                  <>
+                    Yearly
+                    <span className="ml-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                      2 months free
+                    </span>
+                  </>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Cards */}
@@ -67,6 +147,19 @@ export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
             yearly && plan.monthlyPrice > 0
               ? yearlyDiscount(plan.monthlyPrice, plan.yearlyPrice)
               : 0;
+          const isCurrent =
+            false;
+          const ctaLabel =
+            loadingPlan === plan.id
+              ? "Opening..."
+              : plan.id === "team"
+                  ? "Create team"
+                  : plan.cta;
+          const ctaClassName = `block w-full rounded-lg px-4 py-2.5 text-center text-sm font-medium transition-colors ${
+            plan.highlighted
+              ? "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+              : "border border-zinc-200 text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
+          }`;
 
           return (
             <div
@@ -134,16 +227,14 @@ export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
                 ))}
               </ul>
 
-              <a
-                href={plan.ctaHref}
-                className={`block w-full rounded-lg px-4 py-2.5 text-center text-sm font-medium transition-colors ${
-                  plan.highlighted
-                    ? "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
-                    : "border border-zinc-200 text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
-                }`}
+              <button
+                className={`${ctaClassName} disabled:pointer-events-none disabled:opacity-60`}
+                disabled={loadingPlan === plan.id || isCurrent}
+                onClick={() => void handleCheckout(plan.id)}
+                type="button"
               >
-                {plan.cta}
-              </a>
+                {ctaLabel}
+              </button>
             </div>
           );
         })}

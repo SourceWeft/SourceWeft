@@ -1,0 +1,15 @@
+---
+subject: [SourceWeft][{{levelUpper}}][{{source}}] {{title}}
+heading: {{title}}
+preview: SourceWeft {{level}} alert from {{source}}.
+---
+<p><strong>Level:</strong> {{level}}</p>
+<p><strong>Source:</strong> {{source}}</p>
+<p><strong>Alert Key:</strong> {{alertKey}}</p>
+<p><strong>Team:</strong> {{teamLabel}}</p>
+<p><strong>Trigger Count:</strong> {{triggerCount}}</p>
+<p><strong>Message:</strong> {{message}}</p>
+
+{{#if metadataJson}}
+<pre>{{metadataJson}}</pre>
+{{/if}}
