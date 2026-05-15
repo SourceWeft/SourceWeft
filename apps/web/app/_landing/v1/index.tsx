@@ -1,11 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
+import { Github } from "lucide-react";
+import {
+  SOURCEWEFT_GITHUB_URL,
+  SourceWeftHeader,
+} from "../components/sourceweft-header";
+import {
+  SourceWeftBrandLockup,
+  SourceWeftBrandMark,
+} from "../components/sourceweft-brand";
 import { getPricingConfig } from "../pricing-config";
 import { PricingToggle } from "./pricing-toggle";
-import { ThemeToggle } from "./theme-toggle";
 
 // ─── tiny SVG icons (inline, no external dep) ────────────────────────────────
 
@@ -90,142 +97,6 @@ function IconCheck() {
   );
 }
 
-type BrandLockupVariant = "size-only" | "minimal-refined";
-
-const LANDING_BRAND_LOCKUP_VARIANT: BrandLockupVariant = "size-only";
-
-function BrandMark({
-  className = "h-6 w-6 rounded-md",
-  imageClassName = "",
-}: {
-  className?: string;
-  imageClassName?: string;
-}) {
-  return (
-    <span
-      aria-hidden
-      className={`inline-flex shrink-0 overflow-hidden ${className}`}
-    >
-      <Image
-        src="/icon-512.png"
-        alt=""
-        width={40}
-        height={40}
-        className={`h-full w-full object-contain ${imageClassName}`}
-      />
-    </span>
-  );
-}
-
-function BrandLockup({ size = "nav" }: { size?: "nav" | "footer" }) {
-  const refined = LANDING_BRAND_LOCKUP_VARIANT === "minimal-refined";
-
-  const gapClassName =
-    size === "nav"
-      ? refined
-        ? "gap-3.5"
-        : "gap-2.5"
-      : refined
-        ? "gap-2.5"
-        : "gap-2";
-
-  const markClassName =
-    size === "nav"
-      ? refined
-        ? "h-10 w-10 rounded-xl ring-1 ring-zinc-900/10 shadow-[0_8px_20px_rgba(24,24,27,0.16)] transition-all duration-300 group-hover:-translate-y-0.5 group-hover:shadow-[0_12px_26px_rgba(24,24,27,0.22)] dark:ring-white/12 dark:shadow-[0_10px_22px_rgba(0,0,0,0.45)] dark:group-hover:shadow-[0_14px_30px_rgba(0,0,0,0.52)]"
-        : "h-8 w-8 rounded-md transition-transform duration-300 group-hover:scale-[1.03]"
-      : refined
-        ? "h-9 w-9 rounded-lg ring-1 ring-zinc-900/10 shadow-[0_6px_16px_rgba(24,24,27,0.14)] dark:ring-white/12 dark:shadow-[0_8px_20px_rgba(0,0,0,0.45)]"
-        : "h-7 w-7 rounded-md";
-
-  const imageClassName = refined
-    ? size === "nav"
-      ? "scale-[1.06]"
-      : "scale-105"
-    : size === "nav"
-      ? "scale-[1.02]"
-      : "scale-100";
-
-  const wordmarkClassName =
-    size === "nav"
-      ? refined
-        ? "text-[1.16rem] font-semibold tracking-[-0.03em] text-zinc-900 transition-colors group-hover:text-zinc-700 dark:text-white dark:group-hover:text-zinc-200"
-        : "text-[1.05rem] font-semibold tracking-[-0.02em] text-zinc-900 dark:text-white"
-      : refined
-        ? "text-base font-semibold tracking-[-0.025em] text-zinc-900 dark:text-white"
-        : "text-sm font-semibold tracking-tight text-zinc-900 dark:text-white";
-
-  return (
-    <Link href="/" className={`group inline-flex items-center ${gapClassName}`}>
-      <BrandMark className={markClassName} imageClassName={imageClassName} />
-      <span className={`font-brand ${wordmarkClassName}`}>SourceWeft</span>
-    </Link>
-  );
-}
-
-// ─── Navbar ───────────────────────────────────────────────────────────────────
-
-function Navbar() {
-  const authState = useAuthenticate({ enabled: false });
-  const isLoggedIn = Boolean(authState.data);
-
-  return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-200/80 bg-white/85 backdrop-blur-[12px] dark:border-white/[0.06] dark:bg-zinc-950/85">
-      <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
-        {/* Logo */}
-        <BrandLockup size="nav" />
-
-        {/* Center links */}
-        <div className="hidden items-center gap-6 md:flex">
-          {(
-            [
-              ["#features", "Features"],
-              ["#how-it-works", "How it works"],
-              ["#pricing", "Pricing"],
-            ] as const
-          ).map(([href, label]) => (
-            <a
-              key={href}
-              href={href}
-              className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-            >
-              {label}
-            </a>
-          ))}
-        </div>
-
-        {/* Right CTAs */}
-        <div className="flex items-center gap-3">
-          <ThemeToggle />
-          {isLoggedIn ? (
-            <Link
-              href="/dashboard"
-              className="text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-            >
-              Go to dashboard →
-            </Link>
-          ) : (
-            <>
-              <Link
-                href="/auth/sign-in"
-                className="hidden text-sm text-zinc-500 transition-colors hover:text-zinc-900 sm:block dark:text-zinc-400 dark:hover:text-white"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/auth/sign-up"
-                className="rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
-              >
-                Get Started
-              </Link>
-            </>
-          )}
-        </div>
-      </nav>
-    </header>
-  );
-}
-
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 function HeroSection() {
@@ -299,6 +170,15 @@ function HeroSection() {
               >
                 See how it works
               </a>
+              <a
+                href={SOURCEWEFT_GITHUB_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white/70 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:bg-white/5 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/10"
+              >
+                <Github className="h-4 w-4" />
+                GitHub
+              </a>
             </div>
 
             {/* Stats */}
@@ -347,7 +227,7 @@ function HeroSection() {
 
                 {/* AI reply */}
                 <div className="flex gap-3">
-                  <BrandMark className="mt-0.5 h-6 w-6 rounded-full" />
+                  <SourceWeftBrandMark className="mt-0.5 h-6 w-6 rounded-full" />
                   <div className="flex-1 space-y-2">
                     <div className="rounded-xl rounded-tl-sm border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm text-zinc-700 leading-relaxed dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-200">
                       Based on your Q4 research notes, here are the key
@@ -460,7 +340,7 @@ function HeroSection() {
 
                 {/* Typing indicator */}
                 <div className="flex gap-3">
-                  <BrandMark className="mt-0.5 h-6 w-6 rounded-full" />
+                  <SourceWeftBrandMark className="mt-0.5 h-6 w-6 rounded-full" />
                   <div className="flex items-center gap-1.5 rounded-xl rounded-tl-sm border border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-white/8 dark:bg-zinc-800/60">
                     <span
                       className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-500"
@@ -714,7 +594,7 @@ function HowItWorks() {
             </div>
           </div>
           <div className="flex gap-2">
-            <BrandMark className="mt-0.5 h-5 w-5 rounded-full" />
+            <SourceWeftBrandMark className="mt-0.5 h-5 w-5 rounded-full" />
             <div className="rounded-lg rounded-tl-sm border border-zinc-100 bg-white px-3 py-2 text-zinc-700 leading-relaxed dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-200">
               From your thesis draft: attention is a mechanism that allows
               models to focus on relevant parts of the input…{" "}
@@ -809,7 +689,7 @@ function Footer() {
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           {/* Brand */}
           <div>
-            <BrandLockup size="footer" />
+            <SourceWeftBrandLockup size="footer" />
             <p className="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
               Your AI notebook workspace. Connect everything. Think deeper.
             </p>
@@ -875,6 +755,8 @@ function Footer() {
                 <li key={label}>
                   <a
                     href={href}
+                    target="_blank"
+                    rel="noreferrer"
                     className="text-zinc-400 transition-colors hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white"
                   >
                     {label}
@@ -913,7 +795,7 @@ export default function LandingV1() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <GlobalStyles />
-      <Navbar />
+      <SourceWeftHeader />
       <HeroSection />
       <SocialProof />
       <FeaturesSection />

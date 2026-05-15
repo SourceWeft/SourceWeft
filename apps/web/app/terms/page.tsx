@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { LegalPage } from "../_legal/legal-page";
+import { LegalPage } from "../_landing/legal/legal-page";
 
 export const metadata: Metadata = {
   title: "Terms of Service | SourceWeft",

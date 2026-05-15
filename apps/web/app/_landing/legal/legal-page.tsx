@@ -1,5 +1,7 @@
 import Link from "next/link";
-import Image from "next/image";
+
+import { SourceWeftBrandLockup } from "../components/sourceweft-brand";
+import { SourceWeftHeader } from "../components/sourceweft-header";
 
 type LegalSection = {
   title: string;
@@ -25,71 +27,13 @@ const LEGAL_LINKS = [
   ["/terms", "Terms"],
 ] as const;
 
-function BrandLockup() {
-  return (
-    <Link href="/" className="group inline-flex items-center gap-2.5">
-      <span
-        aria-hidden
-        className="inline-flex h-8 w-8 shrink-0 overflow-hidden rounded-md transition-transform duration-300 group-hover:scale-[1.03]"
-      >
-        <Image
-          src="/icon-512.png"
-          alt=""
-          width={40}
-          height={40}
-          className="h-full w-full object-contain"
-        />
-      </span>
-      <span className="font-brand text-[1.05rem] font-semibold tracking-[-0.02em] text-zinc-900 dark:text-white">
-        SourceWeft
-      </span>
-    </Link>
-  );
-}
-
-function LegalHeader() {
-  return (
-    <header className="sticky inset-x-0 top-0 z-50 border-b border-zinc-200/80 bg-white/85 backdrop-blur-[12px] dark:border-white/[0.06] dark:bg-zinc-950/85">
-      <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
-        <BrandLockup />
-        <div className="flex items-center gap-5 text-sm">
-          <Link
-            href="/privacy"
-            className="text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-          >
-            Privacy
-          </Link>
-          <Link
-            href="/terms"
-            className="text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
-          >
-            Terms
-          </Link>
-          <Link
-            href="/auth/sign-in"
-            className="hidden text-zinc-500 transition-colors hover:text-zinc-900 sm:inline dark:text-zinc-400 dark:hover:text-white"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/auth/sign-up"
-            className="rounded-lg bg-zinc-900 px-3.5 py-1.5 font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
-          >
-            Get Started
-          </Link>
-        </div>
-      </nav>
-    </header>
-  );
-}
-
 function LegalFooter() {
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div>
-            <BrandLockup />
+            <SourceWeftBrandLockup size="footer" />
             <p className="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
               Your AI notebook workspace. Connect everything. Think deeper.
             </p>
@@ -137,6 +81,8 @@ function LegalFooter() {
                 <li key={href}>
                   <Link
                     href={href}
+                    target="_blank"
+                    rel="noreferrer"
                     className="text-zinc-400 transition-colors hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white"
                   >
                     {label}
@@ -159,9 +105,9 @@ function LegalFooter() {
 export function LegalPage({ title, description, sections }: LegalPageProps) {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <LegalHeader />
+      <SourceWeftHeader />
       <main>
-        <div className="mx-auto flex max-w-4xl flex-col px-6 py-14 sm:py-18">
+        <div className="mx-auto flex max-w-4xl flex-col px-6 pt-28 pb-14 sm:pt-32 sm:pb-18">
           <header className="border-b border-zinc-200 pb-8 dark:border-white/[0.08]">
             <p className="text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
               Last updated: {LAST_UPDATED}
