@@ -11,7 +11,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Keyboard, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -28,6 +28,14 @@ import {
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
+import {
+  DASHBOARD_WORKSPACE_SHORTCUT_LIMIT,
+  DashboardShortcutsDialog,
+  getDashboardWorkspaceShortcutKeys,
+  useDashboardShortcuts,
+  useDashboardShortcutPlatform,
+  type DashboardShortcutDefinition,
+} from "../../_components/dashboard-shortcuts";
 import {
   emptyModelCatalog,
   HeaderModelSelector,
@@ -1723,11 +1731,14 @@ export default function DashboardChatThreadPage({
   const {
     privateChats,
     sourcesVisible,
+    startNewChat,
+    switchWorkspace,
     toggleSourcesVisible,
     updateChatTitle,
     updateChatSourceCount,
     workspaceId,
     workspaceName,
+    workspaces,
   } = useDashboardChatState();
 
   // ── Thread metadata from sidebar list ─────────────────────────────────────
@@ -1835,6 +1846,8 @@ export default function DashboardChatThreadPage({
   >(null);
   const [byokModelConfig, setByokModelConfig] =
     useState<ByokModelConfigDefaults | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const shortcutPlatform = useDashboardShortcutPlatform();
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
@@ -4476,6 +4489,35 @@ export default function DashboardChatThreadPage({
     [cancelEditing, editingMessageId],
   );
 
+  const handleWorkspaceShortcut = useCallback(
+    (targetWorkspaceId: string) => {
+      if (targetWorkspaceId === workspaceId) {
+        return;
+      }
+
+      startNewChat();
+      void switchWorkspace(targetWorkspaceId);
+      router.push("/dashboard/chat");
+    },
+    [router, startNewChat, switchWorkspace, workspaceId],
+  );
+
+  const shortcutDefinitions = useMemo<DashboardShortcutDefinition[]>(
+    () =>
+      workspaces
+        .slice(0, DASHBOARD_WORKSPACE_SHORTCUT_LIMIT)
+        .map((workspace, index) => ({
+          group: "Workspace",
+          id: `workspace-${workspace.id}`,
+          keys: getDashboardWorkspaceShortcutKeys(index, shortcutPlatform),
+          onRun: () => handleWorkspaceShortcut(workspace.id),
+          title: `Switch to ${workspace.name}`,
+        })),
+    [handleWorkspaceShortcut, shortcutPlatform, workspaces],
+  );
+
+  useDashboardShortcuts(shortcutDefinitions);
+
   const selectedSources = useMemo(
     () => expandSelectedSources(librarySources, activeSourceIds),
     [activeSourceIds, librarySources],
@@ -4530,6 +4572,16 @@ export default function DashboardChatThreadPage({
             </div>
 
             <div className="ml-auto flex items-center gap-2">
+              <Button
+                onClick={() => setShortcutsOpen(true)}
+                size="icon-sm"
+                title="Keyboard shortcuts"
+                type="button"
+                variant="outline"
+              >
+                <Keyboard className="h-4 w-4" />
+                <span className="sr-only">Keyboard shortcuts</span>
+              </Button>
               <Button
                 onClick={toggleSourcesVisible}
                 size="icon-sm"
@@ -4679,6 +4731,12 @@ export default function DashboardChatThreadPage({
         open={Boolean(byokModelConfig)}
         providers={byokProviders}
         workspaceId={workspaceId}
+      />
+
+      <DashboardShortcutsDialog
+        definitions={shortcutDefinitions}
+        onOpenChange={setShortcutsOpen}
+        open={shortcutsOpen}
       />
 
       <Sheet

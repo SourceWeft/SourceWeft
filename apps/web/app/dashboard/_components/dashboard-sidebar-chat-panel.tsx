@@ -50,6 +50,12 @@ import { formatShortRelativeTime } from "../../../lib/relative-time";
 import {
   getPersonalOrganization,
 } from "./dashboard-team-selector-shared";
+import {
+  DASHBOARD_WORKSPACE_SHORTCUT_LIMIT,
+  formatDashboardShortcut,
+  getDashboardWorkspaceShortcutKeys,
+  useDashboardShortcutPlatform,
+} from "./dashboard-shortcuts";
 import type { ChatItem } from "./dashboard-chat-types";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -224,6 +230,7 @@ function WorkspaceSwitcher({
   const [renameOpen, setRenameOpen] = useState(false);
   const [workspaceNameInput, setWorkspaceNameInput] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const shortcutPlatform = useDashboardShortcutPlatform();
 
   const activeWorkspaceRecord =
     workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
@@ -289,7 +296,13 @@ function WorkspaceSwitcher({
               className={cn("gap-2 p-2", workspace.id === workspaceId && "bg-accent/60")}
             >
               <span className="flex-1 truncate text-left">{workspace.name}</span>
-              <span className="text-xs text-muted-foreground">⌘{index + 1}</span>
+              {index < DASHBOARD_WORKSPACE_SHORTCUT_LIMIT ? (
+                <span className="text-xs text-muted-foreground">
+                  {formatDashboardShortcut(
+                    getDashboardWorkspaceShortcutKeys(index, shortcutPlatform),
+                  )}
+                </span>
+              ) : null}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
