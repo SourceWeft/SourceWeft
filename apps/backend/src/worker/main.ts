@@ -1,7 +1,10 @@
 import { Worker, type Job } from "bullmq";
 import { config } from "../shared/config";
 import { logger } from "../shared/logger";
-import { ensureModelConfigAvailable } from "../shared/model-gateway/index";
+import {
+  ensureModelConfigAvailable,
+  syncGlobalModelGatewayConfig,
+} from "../shared/model-gateway/index";
 import { connectionOptions } from "../shared/redis-connection";
 import { buildWorkerJobFailureLog } from "./job-failure-log";
 import { processConnectorSyncJob } from "./processors/connector-sync";
@@ -14,6 +17,7 @@ import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { processThreadChatRunJob } from "./processors/thread-chat-run";
 
+await syncGlobalModelGatewayConfig();
 await ensureModelConfigAvailable();
 
 type JobPayload = Record<string, unknown>;

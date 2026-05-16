@@ -2,11 +2,15 @@ import { serve } from "@hono/node-server";
 import { config } from "../shared/config";
 import { closeDatabase } from "../shared/database";
 import { logger } from "../shared/logger";
-import { ensureModelConfigAvailable } from "../shared/model-gateway/index";
+import {
+  ensureModelConfigAvailable,
+  syncGlobalModelGatewayConfig,
+} from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { createApp } from "./app";
 import { contentSkillsService } from "../modules/content/skills";
 
+await syncGlobalModelGatewayConfig();
 await ensureModelConfigAvailable();
 await contentSkillsService.syncBuiltinCatalog();
 
