@@ -368,6 +368,7 @@ export const teamSubscriptionSeatBillingAdjustmentSchema = z.object({
   theoreticalRefundCents: z.number().int().nonnegative(),
   actualRefundCents: z.number().int().nonnegative(),
   unrefundedCents: z.number().int().nonnegative(),
+  estimatedChargeCents: z.number().int().nonnegative(),
   currency: z.string(),
   providerAction: z.enum([
     "none",

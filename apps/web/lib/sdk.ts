@@ -7,9 +7,7 @@ import {
   LlmObservabilityClient,
   WorkspaceClient,
 } from "@sourceweft/sdk";
-
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+import { apiBaseUrl } from "./api-base-url";
 
 export { apiBaseUrl };
 

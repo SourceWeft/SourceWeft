@@ -257,8 +257,9 @@ function calculateSeatPreview(input: {
   provider: BillingRuntimeConfig["provider"];
 }): PreviewTeamSubscriptionSeatsResponse {
   const removedSeats = Math.max(0, input.account.seatCount - input.seatCount);
+  const addedSeats = Math.max(0, input.seatCount - input.account.seatCount);
   const remainingRatio =
-    removedSeats > 0
+    removedSeats > 0 || addedSeats > 0
       ? resolveRemainingCycleRatio({
           account: input.account,
           subscription: input.subscription,
@@ -296,6 +297,9 @@ function calculateSeatPreview(input: {
   const actualRefundCents = roundNonNegative(
     theoreticalRefundCents * refundRatio,
   );
+  const estimatedChargeCents = roundNonNegative(
+    addedSeats * unitPriceCents * remainingRatio,
+  );
   const providerAction = resolveSeatBillingProviderAction({
     currentSeatCount: input.account.seatCount,
     seatCount: input.seatCount,
@@ -332,6 +336,7 @@ function calculateSeatPreview(input: {
               theoreticalRefundCents - actualRefundCents,
               0,
             ),
+            estimatedChargeCents,
             currency: "usd",
             providerAction,
           }

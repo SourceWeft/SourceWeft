@@ -488,6 +488,16 @@ function formatSeatProviderAction(value: string | undefined) {
   return value ? (labelByAction[value] ?? formatFeatureName(value)) : "--";
 }
 
+function getSeatPreviewDirection(preview: SeatPreview | null) {
+  if (!preview || preview.seatCount === preview.currentSeatCount) {
+    return "none";
+  }
+
+  return preview.seatCount > preview.currentSeatCount
+    ? ("increase" as const)
+    : ("decrease" as const);
+}
+
 function formatLedgerChange(entry: BillingLedgerEntry) {
   const prefix = entry.delta > 0 ? "+" : "";
   return `${prefix}${formatNumber(entry.delta)}`;
@@ -629,7 +639,7 @@ function isLedgerEntryInCycle(
 
 // ── Account / Profile panel ───────────────────────────────────────────────────
 
-function AccountPanel({
+export function AccountPanel({
   userName,
   userEmail,
   userImage,
@@ -937,7 +947,7 @@ function AccountPanel({
 
 // ── Team panel ────────────────────────────────────────────────────────────────
 
-function TeamPanel({
+export function TeamPanel({
   onScopeChange,
 }: {
   hasTeam: boolean;
@@ -1446,7 +1456,7 @@ function TeamPanel({
 
 // ── Usage panel ───────────────────────────────────────────────────────────────
 
-function UsagePanel() {
+export function UsagePanel() {
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
   const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
@@ -1779,7 +1789,7 @@ function UsagePanel() {
 
 // ── Billing panel ─────────────────────────────────────────────────────────────
 
-function BillingPanel() {
+export function BillingPanel() {
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
   const activeOrgRecord = activeOrg as BillingOrg | null | undefined;
@@ -1875,18 +1885,11 @@ function BillingPanel() {
     try {
       const minimumSeats = Math.max(summary?.seats.used ?? 2, 2);
       const seatCount = Math.max(targetSeatCount, minimumSeats);
-      if (seatCount < (summary?.seats.limit ?? 0)) {
-        const preview = await billingClient.previewSubscriptionSeats(teamId, {
-          seatCount,
-        });
-        setSeatPreview(preview);
-        setSeatPreviewOpen(true);
-        return;
-      }
-
-      await billingClient.updateSubscriptionSeats(teamId, { seatCount });
-      toast.success("Seat count updated.");
-      await loadBilling({ silent: true });
+      const preview = await billingClient.previewSubscriptionSeats(teamId, {
+        seatCount,
+      });
+      setSeatPreview(preview);
+      setSeatPreviewOpen(true);
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Unable to update seats.",
@@ -1896,7 +1899,7 @@ function BillingPanel() {
     }
   }
 
-  async function handleConfirmSeatReduction() {
+  async function handleConfirmSeatChange() {
     if (!teamId || !seatPreview) {
       return;
     }
@@ -1995,6 +1998,80 @@ function BillingPanel() {
     targetSeatCount !== seatsLimit;
   const seatPreviewQuota = seatPreview?.quotaAdjustment;
   const seatPreviewBilling = seatPreview?.billingAdjustment;
+  const seatPreviewDirection = getSeatPreviewDirection(seatPreview);
+  const seatPreviewIsIncrease = seatPreviewDirection === "increase";
+  const seatPreviewRows =
+    seatPreviewDirection === "decrease"
+      ? [
+          {
+            label: "Theoretical refund",
+            value: seatPreviewBilling
+              ? formatCurrencyCents(
+                  seatPreviewBilling.theoreticalRefundCents,
+                  seatPreviewBilling.currency,
+                )
+              : "--",
+          },
+          {
+            label: "Refund or credit",
+            value: seatPreviewBilling
+              ? formatCurrencyCents(
+                  seatPreviewBilling.actualRefundCents,
+                  seatPreviewBilling.currency,
+                )
+              : "--",
+          },
+          {
+            label: "Not refundable",
+            value: seatPreviewBilling
+              ? formatCurrencyCents(
+                  seatPreviewBilling.unrefundedCents,
+                  seatPreviewBilling.currency,
+                )
+              : "--",
+          },
+          {
+            label: "Refund ratio",
+            value: seatPreviewQuota
+              ? formatPercent(seatPreviewQuota.refundRatio)
+              : "--",
+          },
+          {
+            label: "Credits deducted",
+            value: seatPreviewQuota
+              ? `${formatNumber(seatPreviewQuota.actualCredits)} / ${formatNumber(
+                  seatPreviewQuota.targetCredits,
+                )}`
+              : "--",
+          },
+          {
+            label: "Pages deducted",
+            value: seatPreviewQuota
+              ? `${formatNumber(seatPreviewQuota.actualPages)} / ${formatNumber(
+                  seatPreviewQuota.targetPages,
+                )}`
+              : "--",
+          },
+          {
+            label: "Billing action",
+            value: formatSeatProviderAction(seatPreviewBilling?.providerAction),
+          },
+        ]
+      : [
+          {
+            label: "Estimated prorated charge",
+            value: seatPreviewBilling
+              ? formatCurrencyCents(
+                  seatPreviewBilling.estimatedChargeCents,
+                  seatPreviewBilling.currency,
+                )
+              : "--",
+          },
+          {
+            label: "Billing action",
+            value: formatSeatProviderAction(seatPreviewBilling?.providerAction),
+          },
+        ];
 
   return (
     <>
@@ -2117,6 +2194,12 @@ function BillingPanel() {
                   applied.
                 </p>
               )}
+              {isSubscriptionActive && targetSeatCount > seatsLimit && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Seat increases require a billing preview before they are
+                  applied.
+                </p>
+              )}
               {isSubscriptionActive && targetSeatCount === seatsLimit && (
                 <p className="mt-3 text-xs text-muted-foreground">
                   Seat count is already synced.
@@ -2185,13 +2268,21 @@ function BillingPanel() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Review seat reduction</DialogTitle>
+            <DialogTitle>
+              {seatPreviewIsIncrease
+                ? "Review seat increase"
+                : "Review seat reduction"}
+            </DialogTitle>
           </DialogHeader>
           {seatPreview ? (
             <div className="space-y-4">
               <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Minus className="h-3.5 w-3.5" />
+                  {seatPreviewIsIncrease ? (
+                    <Plus className="h-3.5 w-3.5" />
+                  ) : (
+                    <Minus className="h-3.5 w-3.5" />
+                  )}
                   {formatNumber(seatPreview.currentSeatCount)} to{" "}
                   {formatNumber(seatPreview.seatCount)} seats
                 </div>
@@ -2202,63 +2293,7 @@ function BillingPanel() {
                 </p>
               </div>
               <div className="overflow-hidden rounded-lg border border-border">
-                {[
-                  {
-                    label: "Theoretical refund",
-                    value: seatPreviewBilling
-                      ? formatCurrencyCents(
-                          seatPreviewBilling.theoreticalRefundCents,
-                          seatPreviewBilling.currency,
-                        )
-                      : "--",
-                  },
-                  {
-                    label: "Refund or credit",
-                    value: seatPreviewBilling
-                      ? formatCurrencyCents(
-                          seatPreviewBilling.actualRefundCents,
-                          seatPreviewBilling.currency,
-                        )
-                      : "--",
-                  },
-                  {
-                    label: "Not refundable",
-                    value: seatPreviewBilling
-                      ? formatCurrencyCents(
-                          seatPreviewBilling.unrefundedCents,
-                          seatPreviewBilling.currency,
-                        )
-                      : "--",
-                  },
-                  {
-                    label: "Refund ratio",
-                    value: seatPreviewQuota
-                      ? formatPercent(seatPreviewQuota.refundRatio)
-                      : "--",
-                  },
-                  {
-                    label: "Credits deducted",
-                    value: seatPreviewQuota
-                      ? `${formatNumber(seatPreviewQuota.actualCredits)} / ${formatNumber(
-                          seatPreviewQuota.targetCredits,
-                        )}`
-                      : "--",
-                  },
-                  {
-                    label: "Pages deducted",
-                    value: seatPreviewQuota
-                      ? `${formatNumber(seatPreviewQuota.actualPages)} / ${formatNumber(
-                          seatPreviewQuota.targetPages,
-                        )}`
-                      : "--",
-                  },
-                  {
-                    label: "Billing action",
-                    value: formatSeatProviderAction(
-                      seatPreviewBilling?.providerAction,
-                    ),
-                  },
-                ].map((row, index) => (
+                {seatPreviewRows.map((row, index) => (
                   <div
                     className={cn(
                       "flex items-center justify-between gap-4 px-4 py-2.5",
@@ -2287,11 +2322,15 @@ function BillingPanel() {
             </Button>
             <Button
               disabled={seatActionLoading || !seatPreview}
-              onClick={() => void handleConfirmSeatReduction()}
+              onClick={() => void handleConfirmSeatChange()}
               size="sm"
               type="button"
             >
-              {seatActionLoading ? "Updating..." : "Confirm reduction"}
+              {seatActionLoading
+                ? "Updating..."
+                : seatPreviewIsIncrease
+                  ? "Confirm increase"
+                  : "Confirm reduction"}
             </Button>
           </DialogFooter>
         </DialogContent>

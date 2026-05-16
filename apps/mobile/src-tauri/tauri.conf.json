@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "nicelab.sourceweft.mobile",
   "build": {
-    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": {
+      "script": "pnpm --filter web dev"
+    },
+    "devUrl": "http://0.0.0.0:3000",
     "frontendDist": "../placeholder-dist"
   },
   "bundle": {

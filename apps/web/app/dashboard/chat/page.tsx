@@ -17,6 +17,7 @@ import {
   SheetContent,
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
+import { SidebarTrigger } from "@sourceweft/ui-web/components/ui/sidebar";
 import { useDashboardChatState } from "../_components/dashboard-chat-state";
 import {
   DASHBOARD_WORKSPACE_SHORTCUT_LIMIT,
@@ -270,6 +271,7 @@ export default function DashboardChatPage() {
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
+  const isPersistentLayout = useMediaQuery("(min-width: 768px)");
   const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
   const skillsLoadGenerationRef = useRef(0);
   const initialSourcesForWorkspace = useMemo(
@@ -309,6 +311,7 @@ export default function DashboardChatPage() {
     string | null
   >(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const shortcutPlatform = useDashboardShortcutPlatform();
   const handleArtifactPreview = useCallback(
     (artifact: ArtifactPreviewRecord) => {
@@ -874,9 +877,12 @@ export default function DashboardChatPage() {
     <div className="flex h-full w-full overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
-          <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-6 xl:px-8">
-            <div className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
-              <div className="min-w-0 flex-1">
+          <div className="flex min-h-16 items-center justify-between gap-2 px-3 py-2 md:h-16 md:gap-3 md:px-6 md:py-0 xl:px-8">
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden md:gap-2.5">
+              <div className="shrink-0 md:hidden">
+                <SidebarTrigger />
+              </div>
+              <div className="min-w-0 flex-1 md:flex-none">
                 <h1 className="truncate text-base font-semibold text-foreground">
                   New chat
                 </h1>
@@ -935,7 +941,7 @@ export default function DashboardChatPage() {
               />
             </div>
 
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex shrink-0 items-center gap-1.5 md:gap-2">
               <Button
                 onClick={() => setShortcutsOpen(true)}
                 size="icon-sm"
@@ -947,19 +953,35 @@ export default function DashboardChatPage() {
                 <span className="sr-only">Keyboard shortcuts</span>
               </Button>
               <Button
-                onClick={toggleSourcesVisible}
+                onClick={() => {
+                  if (isPersistentLayout) {
+                    toggleSourcesVisible();
+                    return;
+                  }
+                  setHubDrawerOpen(true);
+                }}
                 size="icon-sm"
-                title={sourcesVisible ? "Hide sources" : "Show sources"}
+                title={
+                  isPersistentLayout
+                    ? sourcesVisible
+                      ? "Hide sources"
+                      : "Show sources"
+                    : "Open Hub"
+                }
                 type="button"
                 variant="outline"
               >
-                {sourcesVisible ? (
+                {isPersistentLayout && sourcesVisible ? (
                   <PanelRightClose className="h-4 w-4" />
                 ) : (
                   <PanelRightOpen className="h-4 w-4" />
                 )}
                 <span className="sr-only">
-                  {sourcesVisible ? "Hide sources" : "Show sources"}
+                  {isPersistentLayout
+                    ? sourcesVisible
+                      ? "Hide sources"
+                      : "Show sources"
+                    : "Open Hub"}
                 </span>
               </Button>
             </div>
@@ -996,7 +1018,7 @@ export default function DashboardChatPage() {
         />
       </div>
 
-      {sourcesVisible && (!previewArtifact || !isDesktopPanel) ? (
+      {sourcesVisible && isPersistentLayout && !previewArtifact ? (
           <SourcesHub
             mode="new"
             disabledToolNames={disabledToolNames}
@@ -1097,6 +1119,36 @@ export default function DashboardChatPage() {
               workspaceId={workspaceId}
             />
           ) : null}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={hubDrawerOpen} onOpenChange={setHubDrawerOpen}>
+        <SheetContent
+          className="w-[calc(100vw-1rem)] max-w-[360px] gap-0 overflow-hidden p-0 sm:w-[380px] sm:max-w-[380px] [&>button]:hidden"
+          side="right"
+        >
+          <SheetTitle className="sr-only">Hub</SheetTitle>
+          <SourcesHub
+            mode="new"
+            onClose={() => setHubDrawerOpen(false)}
+            disabledToolNames={disabledToolNames}
+            installedSkills={availableSkills}
+            onArtifactOpen={(artifact) => {
+              setPreviewArtifact(artifact);
+              setHubDrawerOpen(false);
+            }}
+            onSkillSelectionChange={setActiveSkillIds}
+            onSelectionChange={persistActiveSourceIds}
+            onSkillsCatalogChange={loadAvailableSkills}
+            initialSources={initialSourcesForWorkspace}
+            initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
+            onSourceLoad={handleLibrarySourcesLoad}
+            selectedIds={activeSourceIds}
+            selectedSkillIds={activeSkillIds}
+            variant="drawer"
+            workspaceId={workspaceId}
+            workspaceName={workspaceName}
+          />
         </SheetContent>
       </Sheet>
     </div>

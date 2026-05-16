@@ -76,7 +76,7 @@ export function DashboardTeamSwitcher({
         <button
           className={cn(
             "flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-left transition-colors hover:bg-accent/50 focus-visible:bg-accent/50 aria-expanded:bg-accent/50",
-            size === "sm" && "px-2 py-1",
+            size === "sm" && "h-10 px-2 py-0",
             className,
           )}
           type="button"

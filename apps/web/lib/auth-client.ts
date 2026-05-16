@@ -15,11 +15,11 @@ import { apiKeyClient } from "@better-auth/api-key/client";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { passkeyClient } from "@better-auth/passkey/client";
 import { creemClient } from "@creem_io/better-auth/client";
+import { apiBaseUrl } from "./api-base-url";
 import { resolveGoogleOneTapConfig } from "./google-one-tap-config";
 
 function resolveAuthBaseUrl() {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
-  return `${base.replace(/\/$/, "")}/api/auth`;
+  return `${apiBaseUrl}/api/auth`;
 }
 
 const googleOneTapConfig = resolveGoogleOneTapConfig();

@@ -6,12 +6,28 @@ This directory hosts the SourceWeft mobile shell built with Tauri 2.
 - `src-tauri/`: Rust runtime and Tauri mobile configuration
 - `placeholder-dist/`: static fallback used when a bundled frontend has not been wired yet
 
-The app opens the web origin at `http://localhost:3000` during development, then
-the mobile native host redirects to `/auth/sign-in` and routes into `/dashboard`
-after the Better Auth session is available. Keeping `devUrl` at the origin root
-prevents WebView dev chunks from resolving under a nested auth path. For native
-projects, run the Tauri mobile init commands from this package after installing
-the Android and/or iOS toolchains:
+The app opens the web origin during development, then the mobile native host
+redirects to `/auth/sign-in` and routes into `/dashboard` after the Better Auth
+session is available. The Tauri `devUrl` intentionally uses
+`http://0.0.0.0:3000` and the dev hook starts Next.js with
+its default `0.0.0.0` host so iOS devices can load the host machine instead of
+trying to resolve `localhost` on the device. Keeping `devUrl` at the origin
+root prevents WebView dev chunks from resolving under a nested auth path. For
+native projects, run the Tauri mobile init commands from this package after
+installing the Android and/or iOS toolchains:
+
+```sh
+pnpm --filter @sourceweft/mobile ios
+```
+
+When using a physical iPhone, keep the phone and development machine on the same
+network and allow the iOS local-network prompt. The generated iOS project
+includes `NSAllowsLocalNetworking` for the local HTTP dev server.
+
+For authenticated local testing on a physical device, also expose the backend on
+`0.0.0.0:3001` and add the web dev origin to `BETTER_AUTH_TRUSTED_ORIGINS`, for
+example `http://192.168.1.20:3000`. The web client falls back to the same host
+on port `3001` when it is loaded through a non-localhost development URL.
 
 The mobile host identifies itself through the same native bridge shape as the desktop host: `window.__SOURCEWEFT_NATIVE__`. Check `bridge.kind === "mobile"` or a named capability such as `externalUrl`; avoid branching on browser platform strings for native behavior.
 

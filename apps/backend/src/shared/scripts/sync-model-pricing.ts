@@ -1,5 +1,5 @@
 import { eq, and, inArray } from "drizzle-orm";
-import { closeDatabase, db } from "../database";
+import { db } from "../database";
 import {
   modelGatewayConfigVersions,
   modelGatewayProfiles,
@@ -408,25 +408,4 @@ export async function resolveModelCapabilitiesFromLitellm(modelName: string) {
     litellmKey: match.key,
     ...resolveLiteLLMCapabilities(entry),
   };
-}
-
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const isMainModule = process.argv[1] === __filename;
-
-if (isMainModule) {
-  syncModelPricing()
-    .then(() => {
-      logger.info("sync-model-pricing script completed");
-    })
-    .catch((error) => {
-      logger.error("sync-model-pricing script failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      process.exitCode = 1;
-    })
-    .finally(async () => {
-      await closeDatabase();
-    });
 }

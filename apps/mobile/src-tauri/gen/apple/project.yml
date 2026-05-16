@@ -54,6 +54,9 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: SourceWeft connects to your local development server while running debug builds.
     entitlements:
       path: sourceweft-mobile_iOS/sourceweft-mobile_iOS.entitlements
     scheme:

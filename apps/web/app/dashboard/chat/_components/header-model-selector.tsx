@@ -731,7 +731,6 @@ function CatalogModelList({
 }
 
 function ByokPanel({
-  availableModels,
   byokCredentials,
   byokModels,
   byokProviders,
@@ -743,7 +742,6 @@ function ByokPanel({
   selectedModel,
   type,
 }: {
-  availableModels: Record<ModelType, ModelItem[]>;
   byokCredentials: ByokCredentialItem[];
   byokModels: ByokSavedModelItem[];
   byokProviders: ByokProviderOption[];
@@ -1148,7 +1146,6 @@ function SelectorPanel({
               </TabsContent>
               <TabsContent className="mt-0" value="byok">
                 <ByokPanel
-                  availableModels={availableModels}
                   byokCredentials={byokCredentials ?? []}
                   byokModels={byokModels ?? []}
                   byokProviders={byokProviders ?? []}
@@ -1229,11 +1226,48 @@ export function HeaderModelSelector({
       setOpenSequence((current) => current + 1);
     }
   };
+  const primaryByokSelection = byokSelections.llm ?? null;
+  const primaryByokModel =
+    primaryByokSelection?.mode === "byok"
+      ? resolveByokSelectedModelItem({
+          availableModels,
+          selection: primaryByokSelection,
+          type: "llm",
+        })
+      : null;
+  const primaryModel =
+    primaryByokModel ?? selectedModels.llm ?? availableModels.llm?.[0] ?? null;
 
   return (
     <ModelSelector onOpenChange={handleOpenChange} open={open}>
       <TooltipProvider>
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs">
+        <div className="flex shrink-0 items-center rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs md:hidden">
+          <ModelSelectorTrigger asChild>
+            <button
+              className="flex min-w-0 max-w-[44vw] items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 aria-expanded:bg-muted/50"
+              onClick={() => setActiveTab("llm")}
+              type="button"
+            >
+              <div className="flex size-5.5 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/35 text-muted-foreground">
+                <ModelTypeIcon type="llm" />
+              </div>
+              <span
+                className={
+                  primaryModel
+                    ? "min-w-0 truncate text-[11px] leading-4 font-medium text-foreground"
+                    : "min-w-0 truncate text-[11px] leading-4 font-medium text-muted-foreground"
+                }
+              >
+                {primaryModel?.name ?? "Model"}
+              </span>
+              {primaryByokSelection?.mode === "byok" ? (
+                <KeyRound className="size-3 shrink-0 text-muted-foreground" />
+              ) : null}
+              <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+            </button>
+          </ModelSelectorTrigger>
+        </div>
+        <div className="hidden shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs md:flex">
           {(["llm", "image", "vision"] as ModelType[]).map((type) => {
             const byokSelection = byokSelections[type] ?? null;
             const byokModel =

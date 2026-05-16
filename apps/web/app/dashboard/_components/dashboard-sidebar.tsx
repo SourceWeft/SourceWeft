@@ -9,6 +9,12 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Logo } from "@sourceweft/ui-web/logo";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@sourceweft/ui-web/components/ui/sheet";
+import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { useDashboardChatState } from "./dashboard-chat-state";
@@ -55,11 +61,13 @@ function RailButton({
   href,
   icon: Icon,
   label,
+  onNavigate,
 }: {
   active?: boolean;
   href?: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  onNavigate?: () => void;
 }) {
   const className = cn(
     "flex h-10 w-10 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
@@ -82,8 +90,36 @@ function RailButton({
   }
 
   return (
-    <a className={className} href={href} title={label}>
+    <a className={className} href={href} onClick={onNavigate} title={label}>
       {content}
+    </a>
+  );
+}
+
+function MobileNavLink({
+  active,
+  href,
+  icon: Icon,
+  label,
+  onNavigate,
+}: {
+  active?: boolean;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  onNavigate?: () => void;
+}) {
+  return (
+    <a
+      className={cn(
+        "flex h-10 min-w-0 items-center gap-3 rounded-xl px-3 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground",
+      )}
+      href={href}
+      onClick={onNavigate}
+    >
+      <Icon className="h-4.5 w-4.5 shrink-0" />
+      <span className="min-w-0 truncate">{label}</span>
     </a>
   );
 }
@@ -91,6 +127,7 @@ function RailButton({
 export function DashboardSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { openMobile, setOpenMobile } = useSidebar();
   const hasChatPanel = pathname.startsWith("/dashboard/chat");
   const [settingsRequest, setSettingsRequest] = React.useState<{
     id: number;
@@ -197,73 +234,166 @@ export function DashboardSidebar() {
     }
   };
 
-  return (
-    <aside
-      className={cn(
-        "hidden h-svh shrink-0 bg-sidebar text-sidebar-foreground md:flex",
-        hasChatPanel ? "w-[360px] border-r border-border" : "w-14",
-      )}
-    >
-      <div className="flex h-full w-14 shrink-0 flex-col items-center justify-between border-r border-sidebar-border px-2 py-4">
-        <div className="flex flex-col items-center gap-2">
-          <a
-            className="flex h-10 w-10 items-center justify-center text-primary"
-            href="/dashboard"
-            title="SourceWeft"
-          >
-            <Logo className="h-9 w-9 bg-sidebar-accent text-sidebar-accent-foreground" />
-            <span className="sr-only">SourceWeft</span>
-          </a>
+  const handleOpenChat = (id: string) => {
+    setOpenMobile(false);
+    router.push(`/dashboard/chat/${id}`);
+  };
 
-          <div className="mt-2 flex flex-col items-center gap-1">
-            {navMain.map((item) => (
-              <RailButton
-                active={item.match(pathname)}
-                href={item.href}
-                icon={item.icon}
-                key={item.title}
-                label={item.title}
-              />
-            ))}
-          </div>
+  const handleMobileWorkspaceChange = (nextId: string) => {
+    setOpenMobile(false);
+    startNewChat();
+    void switchWorkspace(nextId);
+    router.push("/dashboard/chat");
+  };
+
+  const renderRail = () => (
+    <div className="flex h-full w-14 shrink-0 flex-col items-center justify-between border-r border-sidebar-border px-2 py-4">
+      <div className="flex flex-col items-center gap-2">
+        <a
+          className="flex h-10 w-10 items-center justify-center text-primary"
+          href="/dashboard"
+          onClick={() => setOpenMobile(false)}
+          title="SourceWeft"
+        >
+          <Logo className="h-9 w-9 bg-sidebar-accent text-sidebar-accent-foreground" />
+          <span className="sr-only">SourceWeft</span>
+        </a>
+
+        <div className="mt-2 flex flex-col items-center gap-1">
+          {navMain.map((item) => (
+            <RailButton
+              active={item.match(pathname)}
+              href={item.href}
+              icon={item.icon}
+              key={item.title}
+              label={item.title}
+              onNavigate={() => setOpenMobile(false)}
+            />
+          ))}
         </div>
-
-        <DashboardAccountMenu settingsRequest={settingsRequest} />
       </div>
 
-      {hasChatPanel ? (
-        <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-sidebar-border bg-card">
-          <DashboardSidebarChatPanel
-            archivedChats={archivedChats}
-            activeChatId={activeThreadId}
-            onArchiveChat={archiveChat}
-            onClearArchivedChats={handleClearArchivedChats}
-            onClearPrivateChats={handleClearPrivateChats}
-            onCreateChat={handleStartNewChat}
-            onCreateWorkspace={handleCreateWorkspace}
-            onDeleteChat={handleDeleteChat}
-            onLoadMoreChats={() => void loadMorePrivateChats()}
-            onOpenUsage={() =>
-              setSettingsRequest({ id: Date.now(), tab: "usage" })
-            }
-            onOpenChat={(id) => router.push(`/dashboard/chat/${id}`)}
-            onRenameWorkspace={handleRenameWorkspace}
-            hasMorePrivateChats={hasMorePrivateChats}
-            isLoadingPrivateChats={isLoadingPrivateChats}
-            privateChats={privateChats}
-            sharedChats={sharedChats}
-            onWorkspaceChange={(nextId) => {
-              startNewChat();
-              void switchWorkspace(nextId);
-              router.push("/dashboard/chat");
-            }}
-            organizationName={organizationName}
-            workspaceId={workspaceId}
-            workspaceName={workspaceName}
-            workspaces={workspaces}
-          />
+      <DashboardAccountMenu settingsRequest={settingsRequest} />
+    </div>
+  );
+
+  const renderMobileMenuPanel = () => (
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
+      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-sidebar-border px-4">
+        <Logo className="h-9 w-9 shrink-0 bg-sidebar-accent text-sidebar-accent-foreground" />
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-sidebar-foreground">
+            SourceWeft
+          </div>
+          <div className="truncate text-xs text-sidebar-foreground/60">
+            Dashboard
+          </div>
         </div>
-      ) : null}
-    </aside>
+      </div>
+
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-3">
+        {navMain.map((item) => (
+          <MobileNavLink
+            active={item.match(pathname)}
+            href={item.href}
+            icon={item.icon}
+            key={item.title}
+            label={item.title}
+            onNavigate={() => setOpenMobile(false)}
+          />
+        ))}
+      </nav>
+
+      <div className="border-t border-sidebar-border px-3 py-3">
+        <DashboardAccountMenu settingsRequest={settingsRequest} />
+      </div>
+    </div>
+  );
+
+  const renderChatPanel = ({
+    onOpenChat,
+    onWorkspaceChange,
+  }: {
+    onOpenChat: (id: string) => void;
+    onWorkspaceChange: (nextId: string) => void;
+  }) =>
+    hasChatPanel ? (
+      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-sidebar-border bg-card">
+        <DashboardSidebarChatPanel
+          archivedChats={archivedChats}
+          activeChatId={activeThreadId}
+          onArchiveChat={archiveChat}
+          onClearArchivedChats={handleClearArchivedChats}
+          onClearPrivateChats={handleClearPrivateChats}
+          onCreateChat={handleStartNewChat}
+          onCreateWorkspace={handleCreateWorkspace}
+          onDeleteChat={handleDeleteChat}
+          onLoadMoreChats={() => void loadMorePrivateChats()}
+          onOpenUsage={() =>
+            setSettingsRequest({ id: Date.now(), tab: "usage" })
+          }
+          onOpenChat={onOpenChat}
+          onRenameWorkspace={handleRenameWorkspace}
+          hasMorePrivateChats={hasMorePrivateChats}
+          isLoadingPrivateChats={isLoadingPrivateChats}
+          privateChats={privateChats}
+          sharedChats={sharedChats}
+          onWorkspaceChange={onWorkspaceChange}
+          organizationName={organizationName}
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          workspaces={workspaces}
+        />
+      </div>
+    ) : null;
+
+  const desktopChatPanel = renderChatPanel({
+    onOpenChat: (id) => router.push(`/dashboard/chat/${id}`),
+    onWorkspaceChange: (nextId) => {
+      startNewChat();
+      void switchWorkspace(nextId);
+      router.push("/dashboard/chat");
+    },
+  });
+
+  const mobileChatPanel = renderChatPanel({
+    onOpenChat: handleOpenChat,
+    onWorkspaceChange: handleMobileWorkspaceChange,
+  });
+
+  return (
+    <>
+      <aside
+        className={cn(
+          "hidden h-svh shrink-0 bg-sidebar text-sidebar-foreground md:flex",
+          hasChatPanel ? "w-[360px] border-r border-border" : "w-14",
+        )}
+      >
+        {renderRail()}
+        {desktopChatPanel}
+      </aside>
+
+      <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+        <SheetContent
+          className={cn(
+            "gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground md:hidden [&>button]:hidden",
+            hasChatPanel
+              ? "w-[min(100vw,360px)] max-w-none"
+              : "w-[min(100vw,280px)] max-w-none",
+          )}
+          side="left"
+        >
+          <SheetTitle className="sr-only">Dashboard menu</SheetTitle>
+          <div
+            className={cn(
+              "flex h-full min-h-0 bg-sidebar text-sidebar-foreground",
+              hasChatPanel ? "w-[min(100vw,360px)]" : "w-[min(100vw,280px)]",
+            )}
+          >
+            {hasChatPanel ? mobileChatPanel : renderMobileMenuPanel()}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

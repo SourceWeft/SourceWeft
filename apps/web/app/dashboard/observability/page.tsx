@@ -17,6 +17,13 @@ import {
 } from "lucide-react";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@sourceweft/ui-web/components/ui/dialog";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   DropdownMenu,
@@ -247,6 +254,56 @@ function sessionLabel(trace: Pick<LlmTraceSummary, "sessionId" | "threadId">) {
 
 function traceSelectionKey(traceId: string, workspaceId?: string | null) {
   return `${workspaceId ?? ""}:${traceId}`;
+}
+
+function TraceMobileRow({
+  allWorkspacesSelected,
+  onOpen,
+  selected,
+  trace,
+  workspaces,
+}: {
+  allWorkspacesSelected: boolean;
+  onOpen: () => void;
+  selected: boolean;
+  trace: LlmTraceSummary;
+  workspaces: Array<{ id: string; name: string }>;
+}) {
+  return (
+    <button
+      className={cn(
+        "w-full border-b border-border px-3 py-2.5 text-left transition-colors hover:bg-accent/40",
+        selected && "bg-accent/60",
+      )}
+      onClick={onOpen}
+      type="button"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-medium text-foreground">{trace.name}</div>
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            <span className="whitespace-nowrap">{formatTime(trace.startedAt)}</span>
+            <span className="text-border">/</span>
+            <span className="whitespace-nowrap">{formatLatency(trace.latencyMs)}</span>
+            <span className="text-border">/</span>
+            <span className="truncate">{trace.model ?? "--"}</span>
+          </div>
+        </div>
+        <Badge className={cn("h-5 shrink-0 border px-1.5 text-[10px]", statusClassName(trace.status))} variant="outline">
+          {trace.status}
+        </Badge>
+      </div>
+
+      <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="shrink-0">{trace.totalTokens ?? "--"} tokens</span>
+        <span className="shrink-0">{trace.observationCount ?? "--"} obs</span>
+        {allWorkspacesSelected ? (
+          <span className="min-w-0 truncate">{workspaceLabel(workspaces, trace.workspaceId)}</span>
+        ) : null}
+        <span className="min-w-0 truncate font-mono">{sessionLabel(trace)}</span>
+      </div>
+    </button>
+  );
 }
 
 function unwrapPayload(value: unknown) {
@@ -652,7 +709,7 @@ function PreviewSection({ title, children }: { title: string; children: React.Re
   return (
     <section className="space-y-1.5">
       <h4 className="px-2 text-sm font-medium text-foreground">{title}</h4>
-      <div className="rounded-md px-2 py-1 text-sm leading-6 text-foreground">
+      <div className="min-w-0 rounded-md px-2 py-1 text-sm leading-6 text-foreground">
         {children}
       </div>
     </section>
@@ -676,8 +733,8 @@ function TextValue({ value }: { value: string }) {
   return (
     <details className="group rounded-md border border-border bg-background" open={false}>
       <summary className="cursor-pointer list-none border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40">
-        <div className="flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate">{preview}{value.length > 360 ? "..." : ""}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="min-w-0 break-words md:truncate">{preview}{value.length > 360 ? "..." : ""}</span>
           <span className="shrink-0 font-medium text-foreground group-open:hidden">Show full text</span>
           <span className="hidden shrink-0 font-medium text-foreground group-open:inline">Hide full text</span>
         </div>
@@ -701,8 +758,8 @@ function MarkdownValue({ value }: { value: string }) {
   return (
     <details className="group rounded-lg border border-border bg-background" open>
       <summary className="cursor-pointer list-none border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40">
-        <div className="flex items-center justify-between gap-3">
-          <span>Long markdown output ({value.length.toLocaleString()} chars)</span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="min-w-0 break-words">Long markdown output ({value.length.toLocaleString()} chars)</span>
           <span className="font-medium text-foreground group-open:hidden">Show</span>
           <span className="hidden font-medium text-foreground group-open:inline">Hide</span>
         </div>
@@ -735,8 +792,8 @@ function MessageTextValue({ value }: { value: string }) {
   return (
     <details className="group">
       <summary className="cursor-pointer list-none text-xs leading-5 text-muted-foreground hover:text-foreground">
-        <div className="flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate">{preview}{value.length > 320 ? "..." : ""}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="min-w-0 break-words md:truncate">{preview}{value.length > 320 ? "..." : ""}</span>
           <span className="shrink-0 font-medium text-foreground group-open:hidden">Show full text</span>
           <span className="hidden shrink-0 font-medium text-foreground group-open:inline">Hide full text</span>
         </div>
@@ -771,7 +828,7 @@ function PrimitiveValue({ value }: { value: unknown }) {
     return <Badge variant="secondary">{value ? "true" : "false"}</Badge>;
   }
   if (typeof value === "number" || typeof value === "bigint") {
-    return <span className="font-mono text-xs">{String(value)}</span>;
+    return <span className="break-all font-mono text-xs">{String(value)}</span>;
   }
   if (value === "[REDACTED]") return <RedactedValueNotice />;
   return <TextValue value={String(value)} />;
@@ -820,11 +877,11 @@ function JsonValueTable({ value, depth = 0, keepEmpty = false }: { value: unknow
       .filter(({ entryValue }) => keepEmpty || !isEmptyPayload(entryValue));
     if (entries.length === 0) return <DashValue />;
     return (
-      <div className={cn("min-w-0 overflow-hidden rounded-md text-sm", depth === 0 && "border border-border", depth > 0 && "bg-muted/10")}> 
+      <div className={cn("min-w-0 overflow-hidden rounded-md text-sm", depth === 0 && "border border-border", depth > 0 && "bg-muted/10")}>
         {entries.map(({ entryValue, index }) => (
-          <div className={cn("border-b border-border/60 last:border-b-0", depth === 0 && "grid grid-cols-[88px_minmax(0,1fr)]")} key={index}>
+          <div className={cn("border-b border-border/60 last:border-b-0", depth === 0 && "md:grid md:grid-cols-[88px_minmax(0,1fr)]")} key={index}>
             <div className="bg-muted/20 px-2 py-1.5 font-mono text-xs text-muted-foreground">[{index}]</div>
-            <div className="min-w-0 overflow-x-auto px-2 py-1.5 text-foreground">
+            <div className="min-w-0 px-2 py-1.5 text-foreground">
               <JsonValueTable depth={depth + 1} keepEmpty={keepEmpty} value={entryValue} />
             </div>
           </div>
@@ -837,17 +894,17 @@ function JsonValueTable({ value, depth = 0, keepEmpty = false }: { value: unknow
     const entries = Object.entries(record).filter(([, entryValue]) => keepEmpty || !isEmptyPayload(entryValue));
     if (entries.length === 0) return <DashValue />;
     return (
-      <div className={cn("min-w-0 overflow-hidden rounded-md text-sm", depth === 0 && "border border-border", depth > 0 && "bg-muted/10")}> 
+      <div className={cn("min-w-0 overflow-hidden rounded-md text-sm", depth === 0 && "border border-border", depth > 0 && "bg-muted/10")}>
         {entries.map(([key, entryValue]) => {
           const nested = unwrapDeepPayload(entryValue);
           const isNested = Boolean(nested && typeof nested === "object");
           return (
-            <div className={cn("border-b border-border/60 last:border-b-0", depth === 0 && "grid grid-cols-[160px_minmax(0,1fr)]")} key={key}>
+            <div className={cn("border-b border-border/60 last:border-b-0", depth === 0 && "md:grid md:grid-cols-[160px_minmax(0,1fr)]")} key={key}>
               <div className="flex min-w-0 items-center gap-2 bg-muted/20 px-2 py-1.5 font-medium text-muted-foreground">
                 {isNested ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <span className="w-3.5 shrink-0" />}
-                <span className="truncate">{key}</span>
+                <span className="min-w-0 break-all md:truncate">{key}</span>
               </div>
-              <div className="min-w-0 overflow-x-auto px-2 py-1.5 text-foreground">
+              <div className="min-w-0 px-2 py-1.5 text-foreground">
                 {isNested ? <JsonValueTable depth={depth + 1} keepEmpty={keepEmpty} value={nested} /> : <PrimitiveValue value={nested} />}
               </div>
             </div>
@@ -865,8 +922,10 @@ function KeyValueTable({ value }: { value: unknown }) {
   return (
     <div className="overflow-hidden rounded-md border border-border text-sm">
       {entries.map(([key, entryValue]) => (
-        <div className="grid grid-cols-[160px_minmax(0,1fr)] border-b border-border/60 last:border-b-0" key={key}>
-          <div className="bg-muted/20 px-2 py-1.5 font-medium text-muted-foreground">{key}</div>
+        <div className="border-b border-border/60 last:border-b-0 md:grid md:grid-cols-[160px_minmax(0,1fr)]" key={key}>
+          <div className="min-w-0 bg-muted/20 px-2 py-1.5 font-medium text-muted-foreground">
+            <span className="break-all md:break-normal">{key}</span>
+          </div>
           <div className="min-w-0 px-2 py-1.5 text-foreground">
             <JsonValueTable value={entryValue} />
           </div>
@@ -1148,7 +1207,7 @@ function MessageList({ value, fallbackRole = "user" }: { value: unknown; fallbac
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
-    <div className="max-h-[520px] overflow-auto rounded-lg bg-background text-sm">
+    <div className="max-h-[520px] min-w-0 overflow-auto rounded-lg bg-background text-sm">
       <JsonValueTable keepEmpty value={value} />
     </div>
   );
@@ -1391,6 +1450,7 @@ function FilterPanel({
   onUserIdChange,
   onApply,
   onClear,
+  placement = "desktop",
 }: {
   visible: boolean;
   selectedWorkspaceScope: string;
@@ -1411,10 +1471,18 @@ function FilterPanel({
   onUserIdChange: (value: string) => void;
   onApply: () => void;
   onClear: () => void;
+  placement?: "desktop" | "drawer";
 }) {
   if (!visible) return null;
   return (
-    <aside className="min-h-0 w-[260px] shrink-0 overflow-hidden border-r border-border bg-card max-lg:hidden lg:flex lg:flex-col">
+    <aside
+      className={cn(
+        "min-h-0 w-[260px] shrink-0 overflow-hidden border-r border-border bg-card",
+        placement === "desktop"
+          ? "hidden md:flex md:flex-col"
+          : "flex h-full w-full flex-col",
+      )}
+    >
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">Filters</h2>
@@ -1764,7 +1832,7 @@ function NodeDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="border-b border-border px-4 py-3">
+      <div className="min-w-0 border-b border-border px-3 py-3 md:px-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="truncate text-base font-semibold text-foreground">{node.title}</h3>
@@ -1772,7 +1840,7 @@ function NodeDetail({
             <div className="mt-2 flex flex-wrap gap-2">
               <Badge variant="secondary">Latency: {formatLatency(node.latencyMs)}</Badge>
               {inputTokens || outputTokens || totalTokens ? (
-                <Badge variant="secondary">
+                <Badge className="h-auto max-w-full whitespace-normal text-left" variant="secondary">
                   {String(inputTokens ?? 0)} prompt -&gt; {String(outputTokens ?? 0)} completion (sum {String(totalTokens ?? 0)})
                 </Badge>
               ) : null}
@@ -1789,14 +1857,14 @@ function NodeDetail({
         ) : null}
       </div>
 
-      <Tabs className="min-h-0 flex-1 p-3" defaultValue="preview">
-        <TabsList className="h-8">
+      <Tabs className="min-h-0 flex-1 p-2 md:p-3" defaultValue="preview">
+        <TabsList className="h-auto max-w-full overflow-x-auto">
           <TabsTrigger value="preview">Preview</TabsTrigger>
           <TabsTrigger value="log">Log View</TabsTrigger>
           <TabsTrigger value="formatted">Formatted</TabsTrigger>
           <TabsTrigger value="json">JSON</TabsTrigger>
         </TabsList>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] space-y-4 overflow-auto pr-2" value="preview">
+        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2" value="preview">
           <div className="px-2 text-sm font-semibold text-foreground">{selectedObservationTitle}</div>
           <PreviewSection title="Input">
             <StructuredValue value={node.input} />
@@ -1830,10 +1898,10 @@ function NodeDetail({
             </PreviewSection>
           ) : null}
         </TabsContent>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] overflow-auto pr-2" value="log">
+        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2" value="log">
           <TraceLogView detail={detail} onSelect={onSelect} selected={selected} />
         </TabsContent>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] space-y-4 overflow-auto pr-2" value="formatted">
+        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2" value="formatted">
           <Section title="Input"><StructuredValue value={node.input} /></Section>
           {hasReasoning ? <Section title="Reasoning"><ReasoningView reasoning={node.reasoning} segments={node.reasoningSegments} /></Section> : null}
           <Section title="Output"><StructuredValue fallbackRole="assistant" unwrapToolOutput={node.kind === "tool"} value={outputWithoutReasoning} /></Section>
@@ -1841,7 +1909,7 @@ function NodeDetail({
           {hasUsefulPayload(node.metrics) ? <Section title="Metrics"><KeyValueTable value={node.metrics} /></Section> : null}
           {hasUsefulPayload(node.metadata) ? <Section title="Metadata"><KeyValueTable value={node.metadata} /></Section> : null}
         </TabsContent>
-        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] overflow-auto pr-2" value="json">
+        <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2" value="json">
           <JsonBlock value={node.raw} />
         </TabsContent>
       </Tabs>
@@ -1866,6 +1934,8 @@ export default function ObservabilityPage() {
   const [threadId, setThreadId] = React.useState("");
   const [userId, setUserId] = React.useState("");
   const [filtersVisible, setFiltersVisible] = React.useState(true);
+  const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
+  const [timelineDialogOpen, setTimelineDialogOpen] = React.useState(false);
   const [selectedWorkspaceScope, setSelectedWorkspaceScope] = React.useState<string | null>(
     workspaceId ?? (organizationId ? ALL_WORKSPACES : null),
   );
@@ -2004,48 +2074,86 @@ export default function ObservabilityPage() {
     setUserId("");
   }, []);
 
+  const filtersPanel = (
+    <FilterPanel
+      visible={filtersVisible}
+      onApply={() => void loadTraces(null)}
+      onClear={clearFilters}
+      onSelectedTraceNamesChange={setSelectedTraceNames}
+      onStatusChange={setStatus}
+      onTraceIdChange={setTraceId}
+      onThreadIdChange={setThreadId}
+      onUserIdChange={setUserId}
+      onWorkspaceChange={handleWorkspaceChange}
+      selectedWorkspaceScope={selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES}
+      status={status}
+      selectedTraceNames={selectedTraceNames}
+      traceId={traceId}
+      traceNameOptions={traceNameOptions}
+      threadId={threadId}
+      userId={userId}
+      workspaceId={workspaceId}
+      workspaceName={workspaceName}
+      workspaces={workspaces}
+    />
+  );
+  const drawerFiltersPanel = (
+    <FilterPanel
+      visible
+      onApply={() => void loadTraces(null)}
+      onClear={clearFilters}
+      onSelectedTraceNamesChange={setSelectedTraceNames}
+      onStatusChange={setStatus}
+      onTraceIdChange={setTraceId}
+      onThreadIdChange={setThreadId}
+      onUserIdChange={setUserId}
+      onWorkspaceChange={handleWorkspaceChange}
+      placement="drawer"
+      selectedWorkspaceScope={selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES}
+      status={status}
+      selectedTraceNames={selectedTraceNames}
+      traceId={traceId}
+      traceNameOptions={traceNameOptions}
+      threadId={threadId}
+      userId={userId}
+      workspaceId={workspaceId}
+      workspaceName={workspaceName}
+      workspaces={workspaces}
+    />
+  );
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <FilterPanel
-          visible={filtersVisible}
-          onApply={() => void loadTraces(null)}
-          onClear={clearFilters}
-          onSelectedTraceNamesChange={setSelectedTraceNames}
-          onStatusChange={setStatus}
-          onTraceIdChange={setTraceId}
-          onThreadIdChange={setThreadId}
-          onUserIdChange={setUserId}
-          onWorkspaceChange={handleWorkspaceChange}
-          selectedWorkspaceScope={selectedWorkspaceScope ?? workspaceId ?? ALL_WORKSPACES}
-          status={status}
-          selectedTraceNames={selectedTraceNames}
-          traceId={traceId}
-          traceNameOptions={traceNameOptions}
-          threadId={threadId}
-          userId={userId}
-          workspaceId={workspaceId}
-          workspaceName={workspaceName}
-          workspaces={workspaces}
-        />
+        {filtersPanel}
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
           <div className="border-b border-border px-3 py-2">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Button className="h-8 gap-1.5 px-2 text-xs" onClick={() => setFiltersVisible((visible) => !visible)} size="sm" type="button" variant="outline">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Button
+                  className="h-8 shrink-0 gap-1.5 px-2 text-xs md:hidden"
+                  onClick={() => setFiltersDrawerOpen(true)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Filters
+                </Button>
+                <Button className="hidden h-8 gap-1.5 px-2 text-xs md:inline-flex" onClick={() => setFiltersVisible((visible) => !visible)} size="sm" type="button" variant="outline">
                   <SlidersHorizontal className="h-4 w-4" />
                   {filtersVisible ? "Hide filters" : "Show filters"}
                 </Button>
-                <Badge className="h-6 px-2 text-[11px]" variant="secondary">All time</Badge>
-                <Badge className="h-6 px-2 text-[11px]" variant="outline">{traces.length} loaded</Badge>
+                <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="secondary">All time</Badge>
+                <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="outline">{traces.length} loaded</Badge>
                 {hasTraceNameFilter ? (
-                  <Badge className="h-6 px-2 text-[11px]" variant="outline">{visibleTraces.length} shown</Badge>
+                  <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="outline">{visibleTraces.length} shown</Badge>
                 ) : null}
-                <Badge className="h-6 px-2 text-[11px]" variant="secondary">Page size {LIST_LIMIT}</Badge>
-                {allWorkspacesSelected ? <Badge className="h-6 px-2 text-[11px]" variant="outline">All workspaces</Badge> : null}
+                <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="secondary">Page size {LIST_LIMIT}</Badge>
+                {allWorkspacesSelected ? <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="outline">All workspaces</Badge> : null}
               </div>
-              <Button className="h-8 px-2 text-xs" onClick={() => void loadTraces(null)} size="sm" type="button" variant="outline">
+              <Button className="h-8 shrink-0 px-2 text-xs" onClick={() => void loadTraces(null)} size="sm" type="button" variant="outline">
                 {loadingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 Refresh
               </Button>
@@ -2053,60 +2161,79 @@ export default function ObservabilityPage() {
             {error ? <p className="mt-2 text-xs text-red-600 dark:text-red-300">{error}</p> : null}
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            <table className="w-full table-fixed text-xs">
-              <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
-                <tr>
-                  <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
-                  <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
-                  {allWorkspacesSelected ? <th className="w-[160px] px-3 py-1.5 font-medium">Workspace</th> : null}
-                  <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
-                  <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
-                  <th className="w-[150px] px-3 py-1.5 font-medium">Model</th>
-                  <th className="w-[90px] px-3 py-1.5 font-medium">Tokens</th>
-                  <th className="w-[90px] px-3 py-1.5 font-medium">Obs.</th>
-                  <th className="w-[190px] px-3 py-1.5 font-medium">Session ID</th>
-                  <th className="w-[140px] px-3 py-1.5 font-medium">User</th>
-                  <th className="w-[190px] px-3 py-1.5 font-medium">Trace ID</th>
-                  <th className="w-[36px] px-3 py-1.5 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {visibleTraces.map((trace) => (
-                  <tr
-                    className={cn(
-                      "cursor-pointer border-b border-border transition-colors hover:bg-accent/40",
-                      selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId) && "bg-accent/60",
-                    )}
-                    key={trace.id}
-                    onClick={() => void openTrace(trace.traceId, trace.workspaceId)}
-                  >
-                    <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatTime(trace.startedAt)}</td>
-                    <td className="px-3 py-1.5">
-                      <div className="truncate font-medium text-foreground">{trace.name}</div>
-                      <div className="truncate font-mono text-[11px] text-muted-foreground">Session: {sessionLabel(trace)}</div>
-                    </td>
-                    {allWorkspacesSelected ? (
-                      <td className="truncate px-3 py-1.5 text-muted-foreground">{workspaceLabel(workspaces, trace.workspaceId)}</td>
-                    ) : null}
-                    <td className="px-3 py-1.5">
-                      <Badge className={cn("h-5 border px-1.5 text-[10px]", statusClassName(trace.status))} variant="outline">
-                        {trace.status}
-                      </Badge>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatLatency(trace.latencyMs)}</td>
-                    <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.model ?? "--"}</td>
-                    <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.totalTokens ?? "--"}</td>
-                    <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.observationCount ?? "--"}</td>
-                    <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{sessionLabel(trace)}</td>
-                    <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.userDisplayName ?? trace.userId ?? "--"}</td>
-                    <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{trace.traceId}</td>
-                    <td className="px-3 py-1.5 text-right text-muted-foreground">
-                      <ChevronRight className="ml-auto h-3.5 w-3.5" />
-                    </td>
+            <div className="md:hidden">
+              {visibleTraces.map((trace) => (
+                <TraceMobileRow
+                  allWorkspacesSelected={allWorkspacesSelected}
+                  key={trace.id}
+                  onOpen={() => void openTrace(trace.traceId, trace.workspaceId)}
+                  selected={selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId)}
+                  trace={trace}
+                  workspaces={workspaces}
+                />
+              ))}
+            </div>
+            <div className="hidden min-w-0 overflow-x-auto md:block">
+              <table
+                className={cn(
+                  "w-full table-fixed text-xs",
+                  allWorkspacesSelected ? "min-w-[1680px]" : "min-w-[1520px]",
+                )}
+              >
+                <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
+                  <tr>
+                    <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
+                    <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
+                    {allWorkspacesSelected ? <th className="w-[160px] px-3 py-1.5 font-medium">Workspace</th> : null}
+                    <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
+                    <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
+                    <th className="w-[150px] px-3 py-1.5 font-medium">Model</th>
+                    <th className="w-[90px] px-3 py-1.5 font-medium">Tokens</th>
+                    <th className="w-[90px] px-3 py-1.5 font-medium">Obs.</th>
+                    <th className="w-[190px] px-3 py-1.5 font-medium">Session ID</th>
+                    <th className="w-[140px] px-3 py-1.5 font-medium">User</th>
+                    <th className="w-[190px] px-3 py-1.5 font-medium">Trace ID</th>
+                    <th className="w-[36px] px-3 py-1.5 font-medium" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleTraces.map((trace) => (
+                    <tr
+                      className={cn(
+                        "cursor-pointer border-b border-border transition-colors hover:bg-accent/40",
+                        selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId) && "bg-accent/60",
+                      )}
+                      key={trace.id}
+                      onClick={() => void openTrace(trace.traceId, trace.workspaceId)}
+                    >
+                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatTime(trace.startedAt)}</td>
+                      <td className="px-3 py-1.5">
+                        <div className="truncate font-medium text-foreground">{trace.name}</div>
+                        <div className="truncate font-mono text-[11px] text-muted-foreground">Session: {sessionLabel(trace)}</div>
+                      </td>
+                      {allWorkspacesSelected ? (
+                        <td className="truncate px-3 py-1.5 text-muted-foreground">{workspaceLabel(workspaces, trace.workspaceId)}</td>
+                      ) : null}
+                      <td className="px-3 py-1.5">
+                        <Badge className={cn("h-5 border px-1.5 text-[10px]", statusClassName(trace.status))} variant="outline">
+                          {trace.status}
+                        </Badge>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatLatency(trace.latencyMs)}</td>
+                      <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.model ?? "--"}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.totalTokens ?? "--"}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.observationCount ?? "--"}</td>
+                      <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{sessionLabel(trace)}</td>
+                      <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.userDisplayName ?? trace.userId ?? "--"}</td>
+                      <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{trace.traceId}</td>
+                      <td className="px-3 py-1.5 text-right text-muted-foreground">
+                        <ChevronRight className="ml-auto h-3.5 w-3.5" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {visibleTraces.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">
                 {loadingList ? "Loading traces..." : traces.length === 0 ? "No traces found." : "No traces match the current search."}
@@ -2122,8 +2249,25 @@ export default function ObservabilityPage() {
           </ScrollArea>
         </section>
       </div>
+      <Sheet open={filtersDrawerOpen} onOpenChange={setFiltersDrawerOpen}>
+        <SheetContent
+          className="w-[min(100vw,320px)] max-w-none gap-0 overflow-hidden p-0 [&>button]:hidden"
+          side="left"
+        >
+          <SheetTitle className="sr-only">Observability filters</SheetTitle>
+          {drawerFiltersPanel}
+        </SheetContent>
+      </Sheet>
 
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+      <Sheet
+        open={drawerOpen}
+        onOpenChange={(open) => {
+          setDrawerOpen(open);
+          if (!open) {
+            setTimelineDialogOpen(false);
+          }
+        }}
+      >
         <SheetContent
           className="w-[min(1120px,94vw)] gap-0 p-0 sm:max-w-none"
           overlayClassName="bg-black/30"
@@ -2139,23 +2283,54 @@ export default function ObservabilityPage() {
           </SheetHeader>
           <TraceSummaryBar detail={detail} />
           <div className="min-h-0 flex-1">
-            <div className="grid h-full min-h-0 md:grid-cols-[320px_minmax(0,1fr)]">
-              <div className="min-h-0 overflow-hidden border-r border-border p-2">
-                <div className="mb-2 px-2 text-xs font-medium text-muted-foreground">Timeline</div>
-                <TraceTree
-                  detail={detail}
-                  loading={loadingDetail}
-                  onSelect={setSelectedNode}
-                  selected={selectedNode}
-                />
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
+                <div className="min-w-0 text-xs font-medium text-muted-foreground">
+                  Detail
+                </div>
+                <Button
+                  className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                  onClick={() => setTimelineDialogOpen(true)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <GitBranch className="h-4 w-4" />
+                  Timeline
+                </Button>
               </div>
-              <div className="min-h-0 overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-hidden">
                 <NodeDetail detail={detail} onSelect={setSelectedNode} selected={selectedNode} />
               </div>
             </div>
           </div>
         </SheetContent>
       </Sheet>
+
+      <Dialog open={timelineDialogOpen} onOpenChange={setTimelineDialogOpen}>
+        <DialogContent
+          className="flex max-h-[85vh] w-[min(100vw-1rem,440px)] max-w-none flex-col gap-0 overflow-hidden p-0"
+          constrainWidth={false}
+        >
+          <DialogHeader className="border-b border-border px-4 py-3 pr-12 text-left">
+            <DialogTitle className="text-base">Timeline</DialogTitle>
+            <DialogDescription className="truncate">
+              {detail ? detail.trace.name : selectedTraceKey ?? "Trace detail"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-hidden p-2">
+            <TraceTree
+              detail={detail}
+              loading={loadingDetail}
+              onSelect={(node) => {
+                setSelectedNode(node);
+                setTimelineDialogOpen(false);
+              }}
+              selected={selectedNode}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

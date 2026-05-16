@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Database,
   FileText,
+  ListFilter,
   Loader2,
   PanelsTopLeft,
   Search,
@@ -25,6 +26,11 @@ import {
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@sourceweft/ui-web/components/ui/sheet";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
@@ -322,6 +328,7 @@ function SkillsFilterPanel({
   publisherFilter,
   statusFilter,
   totalCount,
+  placement = "desktop",
 }: {
   category: CategoryKey;
   categoryCounts: Record<CategoryKey, number>;
@@ -335,6 +342,7 @@ function SkillsFilterPanel({
   publisherFilter: PublisherFilter;
   statusFilter: StatusFilter;
   totalCount: number;
+  placement?: "desktop" | "drawer";
 }) {
   const notInstalledCount = Math.max(totalCount - installedCount, 0);
   const categorySummary = categories.find((item) => item.key === category)?.label ?? "All";
@@ -342,7 +350,14 @@ function SkillsFilterPanel({
   const statusSummary = statusOptions.find((item) => item.key === statusFilter)?.label ?? "All";
 
   return (
-    <aside className="min-h-0 w-[260px] shrink-0 overflow-hidden border-r border-border bg-card max-lg:hidden lg:flex lg:flex-col">
+    <aside
+      className={cn(
+        "min-h-0 w-[260px] shrink-0 overflow-hidden border-r border-border bg-card",
+        placement === "desktop"
+          ? "hidden md:flex md:flex-col"
+          : "flex h-full w-full flex-col",
+      )}
+    >
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">Filters</h2>
@@ -530,6 +545,7 @@ export function SkillsGallery({
   const [isResolvingWorkspace, setIsResolvingWorkspace] = React.useState(true);
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
   const workspaceIdRef = React.useRef<string | null>(null);
   const catalogGenerationRef = React.useRef(0);
 
@@ -770,42 +786,74 @@ export function SkillsGallery({
   const pageLoading = isResolvingWorkspace || (isLoading && items.length === 0);
   const currentWorkspaceName =
     workspace?.name ?? workspaceName ?? dashboardState.workspaceName;
+  const filtersPanel = (
+    <SkillsFilterPanel
+      category={category}
+      categoryCounts={categoryCounts}
+      installedCount={installedCount}
+      onCategoryChange={setCategory}
+      onClear={clearFilters}
+      onQueryChange={setQuery}
+      onPublisherFilterChange={setPublisherFilter}
+      onStatusFilterChange={setStatusFilter}
+      query={query}
+      publisherFilter={publisherFilter}
+      statusFilter={statusFilter}
+      totalCount={items.length}
+    />
+  );
+  const drawerFiltersPanel = (
+    <SkillsFilterPanel
+      category={category}
+      categoryCounts={categoryCounts}
+      installedCount={installedCount}
+      onCategoryChange={setCategory}
+      onClear={clearFilters}
+      onQueryChange={setQuery}
+      onPublisherFilterChange={setPublisherFilter}
+      onStatusFilterChange={setStatusFilter}
+      placement="drawer"
+      query={query}
+      publisherFilter={publisherFilter}
+      statusFilter={statusFilter}
+      totalCount={items.length}
+    />
+  );
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden bg-background", className)}>
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <SkillsFilterPanel
-          category={category}
-          categoryCounts={categoryCounts}
-          installedCount={installedCount}
-          onCategoryChange={setCategory}
-          onClear={clearFilters}
-          onQueryChange={setQuery}
-          onPublisherFilterChange={setPublisherFilter}
-          onStatusFilterChange={setStatusFilter}
-          query={query}
-          publisherFilter={publisherFilter}
-          statusFilter={statusFilter}
-          totalCount={items.length}
-        />
+        {filtersPanel}
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
           <ScrollArea className="min-h-0 flex-1">
             <div className="px-4 py-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                {lockWorkspace ? (
-                  <WorkspacePill workspaceName={currentWorkspaceName} />
-                ) : (
-                  <WorkspaceMenu
-                    disabled={isResolvingWorkspace}
-                    onChange={(nextWorkspaceId, nextWorkspaceName) =>
-                      void handleWorkspaceChange(nextWorkspaceId, nextWorkspaceName)
-                    }
-                    workspaceId={workspace?.id ?? dashboardState.workspaceId}
-                    workspaceName={workspace?.name ?? dashboardState.workspaceName}
-                    workspaces={dashboardState.workspaces}
-                  />
-                )}
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <Button
+                    className="h-8 gap-1.5 px-2 text-xs md:hidden"
+                    onClick={() => setFiltersDrawerOpen(true)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <ListFilter className="h-4 w-4" />
+                    Filters
+                  </Button>
+                  {lockWorkspace ? (
+                    <WorkspacePill workspaceName={currentWorkspaceName} />
+                  ) : (
+                    <WorkspaceMenu
+                      disabled={isResolvingWorkspace}
+                      onChange={(nextWorkspaceId, nextWorkspaceName) =>
+                        void handleWorkspaceChange(nextWorkspaceId, nextWorkspaceName)
+                      }
+                      workspaceId={workspace?.id ?? dashboardState.workspaceId}
+                      workspaceName={workspace?.name ?? dashboardState.workspaceName}
+                      workspaces={dashboardState.workspaces}
+                    />
+                  )}
+                </div>
                 <SortMenu
                   onChange={setSort}
                   options={sortOptions}
@@ -857,6 +905,15 @@ export function SkillsGallery({
           </ScrollArea>
         </section>
       </div>
+      <Sheet open={filtersDrawerOpen} onOpenChange={setFiltersDrawerOpen}>
+        <SheetContent
+          className="w-[min(100vw,320px)] max-w-none gap-0 overflow-hidden p-0 [&>button]:hidden"
+          side="left"
+        >
+          <SheetTitle className="sr-only">Skill filters</SheetTitle>
+          {drawerFiltersPanel}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -2297,6 +2297,8 @@ export function SourcesHub({
   selectedSkillIds = [],
   onSkillSelectionChange = () => {},
   disabledToolNames = [],
+  onClose,
+  variant = "panel",
 }: {
   activeCitationIndex?: number | null;
   citations?: CitationRecord[];
@@ -2321,6 +2323,8 @@ export function SourcesHub({
   selectedSkillIds?: string[];
   onSkillSelectionChange?: (ids: string[]) => void;
   disabledToolNames?: string[];
+  onClose?: () => void;
+  variant?: "panel" | "drawer";
 }) {
   const [activeTab, setActiveTab] = useState<HubTab>(lastHubActiveTab);
   const [citationScope, setCitationScope] = useState<CitationScope>("current");
@@ -3349,22 +3353,43 @@ export function SourcesHub({
 
   return (
     <>
-      <aside className="flex h-full w-[410px] shrink-0 flex-col border-l bg-background">
-        <div className="shrink-0 border-b px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
+      <aside
+        className={cn(
+          "flex h-full shrink-0 flex-col overflow-x-hidden bg-background",
+          variant === "drawer"
+            ? "w-full min-w-0"
+            : "w-[410px] border-l",
+        )}
+      >
+        <div className="min-w-0 shrink-0 border-b px-3 py-3">
+          <div className="flex min-w-0 items-start justify-between gap-2">
             <h2 className="text-sm font-medium text-foreground">Hub</h2>
-            {pendingSourceIds.length > 0 ? (
-              <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                <Loader2 className="size-3 animate-spin" />
-                syncing {pendingSourceIds.length}
-              </span>
-            ) : null}
+            <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5">
+              {pendingSourceIds.length > 0 ? (
+                <span className="inline-flex max-w-32 items-center gap-1 truncate text-[10px] text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin" />
+                  syncing {pendingSourceIds.length}
+                </span>
+              ) : null}
+              {onClose ? (
+                <Button
+                  aria-label="Close Hub"
+                  className="size-7"
+                  onClick={onClose}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X className="size-4" />
+                </Button>
+              ) : null}
+            </div>
           </div>
 
           <div className="relative mt-2">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              className="h-8 rounded-xl bg-muted/35 pr-20 pl-8 text-xs"
+              className="h-8 rounded-xl bg-muted/35 pr-8 pl-8 text-xs sm:pr-20"
               onChange={(e) => setActiveSearchQuery(e.target.value)}
               placeholder={searchPlaceholders[activeTab]}
               value={searchQuery}
@@ -3383,7 +3408,7 @@ export function SourcesHub({
             )}
           </div>
 
-          <div className="mt-2 flex flex-nowrap gap-1 overflow-x-auto border-t pt-2">
+          <div className="mt-2 flex max-w-full flex-nowrap gap-1 overflow-x-auto overscroll-x-contain border-t pt-2">
             {tabs.map((tab) => (
               <button
                 className={cn(
@@ -3407,11 +3432,11 @@ export function SourcesHub({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3">
           {activeTab === "Sources" && (
             <section className="space-y-1">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+              <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <h3 className="text-xs font-medium text-foreground">
                     Sources
                   </h3>
@@ -3429,7 +3454,7 @@ export function SourcesHub({
                     </span>
                   ) : null}
                 </div>
-                <div className="flex min-h-8 items-center justify-end gap-1.5">
+                <div className="flex min-h-8 shrink-0 items-center justify-end gap-1.5">
                   <Button
                     disabled={selectableSourceIds.length === 0}
                     onClick={handleToggleAllSources}

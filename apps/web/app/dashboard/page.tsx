@@ -20,7 +20,6 @@ import {
   ScrollArea,
   ScrollBar,
 } from "@sourceweft/ui-web/components/ui/scroll-area";
-import { SidebarTrigger } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../lib/sdk";
 import {
@@ -718,17 +717,17 @@ export default function DashboardPage() {
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/20">
       <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
-        <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-6 xl:px-8">
-          <div className="flex items-center gap-3">
-            <SidebarTrigger />
-            <div className="hidden h-5 w-px bg-border md:block" />
+        <div className="flex min-h-16 items-center justify-between gap-2 px-3 py-2 md:h-16 md:gap-3 md:px-6 md:py-0 xl:px-8">
+          <div className="flex min-w-0 items-center gap-2 md:gap-3">
             <DashboardTeamSwitcher
+              className="max-w-[48vw]"
               onAddTeam={() => router.push("/dashboard/settings")}
+              size="sm"
             />
           </div>
 
-          <div className="flex flex-1 items-center justify-end gap-2 md:gap-3">
-            <div className="relative min-w-0 w-full max-w-56 md:max-w-72">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2 md:gap-3">
+            <div className="relative min-w-0 w-full max-w-[42vw] md:max-w-72">
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted-foreground">
                 <Search className="h-4 w-4" />
               </div>
@@ -745,7 +744,7 @@ export default function DashboardPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-9 p-4 pb-10 md:p-6 md:pb-12 xl:p-8 xl:pb-16">
-          <section className="space-y-4">
+          <section className="hidden space-y-4 md:block">
             <SectionTitle title="Home" />
 
             {loading ? (
@@ -766,13 +765,13 @@ export default function DashboardPage() {
             )}
           </section>
 
-          <section className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
+          <section className="flex flex-col gap-4">
+            <div className={cn("items-center justify-between gap-3", search ? "flex" : "hidden md:flex")}>
               <SectionTitle
                 title={search ? "Search results" : "Recent workspaces"}
               />
 
-              <div className="flex items-center gap-2">
+              <div className="hidden items-center gap-2 md:flex">
                 <Button
                   aria-label="Scroll recent workspaces left"
                   className="h-8 w-8 rounded-full"
@@ -794,7 +793,11 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {filteredWorkspaces.length === 0 ? (
+            {loading ? (
+              <div className="flex min-h-[240px] items-center justify-center rounded-[28px] border border-border/80 bg-card md:hidden">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : filteredWorkspaces.length === 0 ? (
               <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 rounded-[28px] border border-dashed border-border/80 bg-card px-6 py-12 text-center">
                 <div className="rounded-full border border-border bg-background p-4 text-muted-foreground">
                   <Search className="h-6 w-6" />
@@ -812,9 +815,9 @@ export default function DashboardPage() {
             ) : (
               <div onWheel={handleRecentWheel} ref={recentScrollRef}>
                 <ScrollArea className="w-full">
-                  <div className="flex min-w-0 items-stretch gap-3 pb-3 pr-1">
+                  <div className="grid min-w-0 grid-cols-1 gap-3 pb-3 md:flex md:items-stretch md:pr-1">
                     {!search ? (
-                      <div className="w-[292px] shrink-0">
+                      <div className="hidden w-[292px] shrink-0 md:block">
                         <CreateWorkspaceCard
                           disabled={!canCreateWorkspace || createLoading}
                           onCreate={() => void handleCreateWorkspace()}
@@ -823,7 +826,7 @@ export default function DashboardPage() {
                     ) : null}
 
                     {filteredWorkspaces.map((workspace) => (
-                      <div className="w-[292px] shrink-0" key={workspace.id}>
+                      <div className="w-full md:w-[292px] md:shrink-0" key={workspace.id}>
                         <WorkspaceCard
                           onOpen={(workspaceId) =>
                             void handleOpenWorkspace(workspaceId)

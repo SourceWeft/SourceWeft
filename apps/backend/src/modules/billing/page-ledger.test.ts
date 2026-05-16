@@ -1516,6 +1516,51 @@ test("team subscription seat downgrade fully claws back unused monthly quota", a
   );
 });
 
+test("team subscription seat upgrade preview includes prorated charge", async () => {
+  const store = new MemoryBillingStore();
+  store.teamMemberCount = 2;
+  const nowMs = Date.now();
+  const periodStart = new Date(nowMs - 15 * 86_400_000).toISOString();
+  const periodEnd = new Date(nowMs + 15 * 86_400_000).toISOString();
+  store.account = createActiveTeamAccount({
+    cycleStartAt: periodStart,
+    cycleEndAt: periodEnd,
+    seatCount: 2,
+  });
+  store.subscription = createActiveTeamSubscription({
+    currentPeriodStart: periodStart,
+    currentPeriodEnd: periodEnd,
+  });
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    noopProvider,
+  );
+
+  const preview = await billingService.previewTeamSubscriptionSeats("team_1", {
+    seatCount: 4,
+  });
+
+  assert.equal(preview.quotaAdjustment, null);
+  assert.equal(
+    preview.billingAdjustment?.providerAction,
+    "proration_charge_immediately",
+  );
+  assert.equal(preview.billingAdjustment?.theoreticalRefundCents, 0);
+  assert.equal(preview.billingAdjustment?.actualRefundCents, 0);
+  assert.equal(preview.billingAdjustment?.unrefundedCents, 0);
+  assert.ok(
+    (preview.billingAdjustment?.estimatedChargeCents ?? 0) > 4_800,
+  );
+  assert.ok(
+    (preview.billingAdjustment?.estimatedChargeCents ?? 0) <= 4_900,
+  );
+});
+
 test("team subscription seat downgrade partially refunds when monthly quota is spent", async () => {
   const store = new MemoryBillingStore();
   store.teamMemberCount = 2;
