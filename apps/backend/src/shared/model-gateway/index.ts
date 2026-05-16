@@ -13,7 +13,7 @@ export {
   requireDefaultModelGatewayProfile,
 } from "./client";
 export { resolveByokProviderRuntime } from "./runtime";
-export { resolveModelCapabilitiesFromLitellm } from "../scripts/sync-model-pricing";
+export { resolveModelCapabilitiesFromLitellm } from "./pricing";
 export type {
   ModelGatewayProfileKind,
   RoutedGatewayConfig,

@@ -27,7 +27,7 @@ import {
 } from "./runtime";
 import type { ModelGatewayProfileKind } from "./types";
 import { encryptSecret } from "../secrets";
-import { syncModelPricing } from "../scripts/sync-model-pricing";
+import { syncModelPricing } from "./pricing";
 import { resolveBackendRuntimePath } from "../runtime-paths";
 
 let modelConfigSyncPromise: Promise<void> | null = null;
