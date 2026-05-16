@@ -230,7 +230,10 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   });
 }
 
-async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
+async function syncGlobalModelGatewayConfigFromFile(
+  configPath: string,
+  options?: { syncPricing?: boolean },
+) {
   const loaded = await loadGlobalModelGatewayConfig(configPath);
   if (!loaded) {
     return;
@@ -755,27 +758,31 @@ async function syncGlobalModelGatewayConfigFromFile(configPath: string) {
     embeddingProfiles: loaded.embeddingProfiles.length,
   });
 
-  try {
-    await syncModelPricing();
-    logger.info("Triggered immediate model pricing sync after config sync", {
-      versionHash: loaded.versionHash,
-    });
-  } catch (error) {
-    logger.error("Immediate model pricing sync after config sync failed", {
-      versionHash: loaded.versionHash,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  if (options?.syncPricing !== false) {
+    try {
+      await syncModelPricing();
+      logger.info("Triggered immediate model pricing sync after config sync", {
+        versionHash: loaded.versionHash,
+      });
+    } catch (error) {
+      logger.error("Immediate model pricing sync after config sync failed", {
+        versionHash: loaded.versionHash,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 
-export async function syncGlobalModelGatewayConfig() {
+export async function syncGlobalModelGatewayConfig(options?: {
+  syncPricing?: boolean;
+}) {
   if (modelConfigSyncPromise) {
     return modelConfigSyncPromise;
   }
 
   modelConfigSyncPromise = (async () => {
     const globalConfigPath = resolveGlobalModelGatewayConfigPath();
-    await syncGlobalModelGatewayConfigFromFile(globalConfigPath);
+    await syncGlobalModelGatewayConfigFromFile(globalConfigPath, options);
   })().catch((error) => {
     modelConfigSyncPromise = null;
     throw error;

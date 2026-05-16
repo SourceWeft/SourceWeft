@@ -17,7 +17,7 @@ import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { processThreadChatRunJob } from "./processors/thread-chat-run";
 
-await syncGlobalModelGatewayConfig();
+await syncGlobalModelGatewayConfig({ syncPricing: false });
 await ensureModelConfigAvailable();
 
 type JobPayload = Record<string, unknown>;

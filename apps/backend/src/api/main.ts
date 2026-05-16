@@ -10,7 +10,7 @@ import { closeQueue } from "../shared/queue";
 import { createApp } from "./app";
 import { contentSkillsService } from "../modules/content/skills";
 
-await syncGlobalModelGatewayConfig();
+await syncGlobalModelGatewayConfig({ syncPricing: false });
 await ensureModelConfigAvailable();
 await contentSkillsService.syncBuiltinCatalog();
 
