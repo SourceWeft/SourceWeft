@@ -1,10 +1,11 @@
 "use client";
 
-type DesktopEvent<TPayload> = {
-  event: string;
-  id: number;
-  payload: TPayload;
-};
+import {
+  getNativeBridge,
+  nativeBridge,
+  type DeepLinkPayload,
+  type NativeEvent,
+} from "./native-bridge";
 
 type SourceWeftDesktopBridge = {
   isDesktop: true;
@@ -14,29 +15,19 @@ type SourceWeftDesktopBridge = {
   ) => Promise<TResult>;
   listen: <TPayload>(
     event: string,
-    handler: (event: DesktopEvent<TPayload>) => void,
+    handler: (event: NativeEvent<TPayload>) => void,
   ) => Promise<() => Promise<void>>;
-};
-
-type TauriInternals = {
-  invoke?: <TResult = unknown>(
-    command: string,
-    args?: Record<string, unknown>,
-  ) => Promise<TResult>;
-  transformCallback?: <TPayload>(
-    handler: (event: DesktopEvent<TPayload>) => void,
-  ) => number;
-  unregisterCallback?: (callbackId: number) => void;
 };
 
 declare global {
   interface Window {
     __SOURCEWEFT_DESKTOP__?: SourceWeftDesktopBridge;
-    __TAURI_INTERNALS__?: TauriInternals;
   }
 }
 
 export type DesktopInfo = {
+  kind?: "desktop";
+  isNative?: boolean;
   isDesktop: boolean;
   platform: string;
   arch: string;
@@ -52,10 +43,6 @@ export type AutostartState = {
   reason?: string | null;
 };
 
-export type DeepLinkPayload = {
-  url: string;
-};
-
 type DesktopListener<TPayload> = (payload: TPayload) => void;
 
 function getBridge() {
@@ -67,56 +54,16 @@ function getBridge() {
     return window.__SOURCEWEFT_DESKTOP__;
   }
 
-  const internals = window.__TAURI_INTERNALS__;
-  if (
-    typeof internals?.invoke !== "function" ||
-    typeof internals.transformCallback !== "function"
-  ) {
+  const native = getNativeBridge();
+  if (native?.kind !== "desktop") {
     return undefined;
   }
 
   return {
     isDesktop: true,
-    invoke: (command, args) => {
-      if (!internals.invoke) {
-        return Promise.reject(new Error("Tauri invoke is not available."));
-      }
-
-      return internals.invoke(command, args);
-    },
-    listen: async (event, handler) => {
-      const callbackId = internals.transformCallback?.(handler);
-      if (typeof callbackId !== "number") {
-        throw new Error("Tauri event callback registration failed.");
-      }
-
-      if (!internals.invoke) {
-        throw new Error("Tauri invoke is not available.");
-      }
-
-      const eventId = await internals.invoke("plugin:event|listen", {
-        event,
-        target: { kind: "Any" },
-        handler: callbackId,
-      });
-
-      return async () => {
-        internals.unregisterCallback?.(callbackId);
-        await internals.invoke?.("plugin:event|unlisten", { event, eventId });
-      };
-    },
+    invoke: native.invoke,
+    listen: native.listen,
   } satisfies SourceWeftDesktopBridge;
-}
-
-function hasTauriInternals() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  return (
-    typeof window.__TAURI_INTERNALS__?.invoke === "function" &&
-    typeof window.__TAURI_INTERNALS__?.transformCallback === "function"
-  );
 }
 
 async function invokeDesktop<TResult>(
@@ -145,7 +92,7 @@ async function listenDesktop<TPayload>(
 
 export const desktopBridge = {
   isAvailable() {
-    return Boolean(getBridge()?.isDesktop || hasTauriInternals());
+    return nativeBridge.isAvailable("desktop");
   },
   info() {
     return invokeDesktop<DesktopInfo>("desktop_info");

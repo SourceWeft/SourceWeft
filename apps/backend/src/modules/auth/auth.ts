@@ -524,8 +524,8 @@ export const auth: any = betterAuth({
     oauthProvider({
       loginPage: "/auth/login",
       consentPage: "/auth/consent",
-      allowDynamicClientRegistration: true,
-      allowUnauthenticatedClientRegistration: true,
+      allowDynamicClientRegistration: false,
+      allowUnauthenticatedClientRegistration: false,
       validAudiences: [config.auth.baseUrl],
       scopes: ["openid", "profile", "email", "offline_access"],
       cachedTrustedClients: new Set([config.auth.extensionClientId]),

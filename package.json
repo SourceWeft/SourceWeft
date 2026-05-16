@@ -8,6 +8,7 @@
     "dev:chrome": "pnpm --filter @sourceweft/extension dev",
     "dev:docs": "pnpm --filter docs dev",
     "dev:desktop": "turbo run dev --filter=@sourceweft/desktop",
+    "dev:mobile": "turbo run dev --filter=@sourceweft/mobile",
     "lint": "turbo run lint",
     "check-types": "turbo run check-types",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""

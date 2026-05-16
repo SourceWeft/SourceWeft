@@ -213,6 +213,7 @@ export async function requestJson<T>(
             method: input.method ?? "POST",
             headers,
             body: input.body ? JSON.stringify(input.body) : undefined,
+            redirect: "error",
             signal,
           }),
       });
@@ -333,6 +334,7 @@ export async function requestStream(
             method: input.method ?? "POST",
             headers,
             body: input.body ? JSON.stringify(input.body) : undefined,
+            redirect: "error",
             signal,
           }),
       });

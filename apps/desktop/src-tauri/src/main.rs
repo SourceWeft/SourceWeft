@@ -49,6 +49,8 @@ struct DesktopState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopInfo {
+    kind: &'static str,
+    is_native: bool,
     is_desktop: bool,
     platform: &'static str,
     arch: &'static str,
@@ -231,7 +233,7 @@ fn resolve_app_url(app: &AppHandle, path: &str) -> Result<Url, String> {
 fn desktop_bridge_script() -> &'static str {
     r#"
 (() => {
-  if (window.__SOURCEWEFT_DESKTOP__) return;
+  if (window.__SOURCEWEFT_NATIVE__ && window.__SOURCEWEFT_DESKTOP__) return;
 
   const getTauriInternals = () => {
     if (!window.__TAURI_INTERNALS__) {
@@ -256,6 +258,20 @@ fn desktop_bridge_script() -> &'static str {
     };
   };
 
+  const nativeBridge = Object.freeze({
+    kind: "desktop",
+    capabilities: ["deepLink", "desktopAutostart", "desktopWindow", "externalUrl", "hostInfo"],
+    invoke,
+    listen,
+  });
+
+  Object.defineProperty(window, "__SOURCEWEFT_NATIVE__", {
+    value: nativeBridge,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+
   Object.defineProperty(window, "__SOURCEWEFT_DESKTOP__", {
     value: Object.freeze({ isDesktop: true, invoke, listen }),
     configurable: false,
@@ -269,6 +285,8 @@ fn desktop_bridge_script() -> &'static str {
 #[tauri::command]
 fn desktop_info(app: AppHandle) -> DesktopInfo {
     DesktopInfo {
+        kind: "desktop",
+        is_native: true,
         is_desktop: true,
         platform: std::env::consts::OS,
         arch: std::env::consts::ARCH,

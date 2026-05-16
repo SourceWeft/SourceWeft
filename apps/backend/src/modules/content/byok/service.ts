@@ -1,4 +1,8 @@
 import { config } from "../../../shared/config";
+import {
+  sanitizeCustomHeaders,
+  validatePublicHttpsEndpoint,
+} from "../../../shared/security/public-endpoint";
 import { encryptSecret, decryptSecret } from "../../../shared/secrets";
 import { listCustomByokProviders } from "../../../shared/model-gateway/byok-provider-resolver";
 import { resolveModelCapabilitiesFromLitellm } from "../../../shared/model-gateway";
@@ -82,6 +86,10 @@ export class ContentByokService {
     metadata?: Record<string, unknown>;
   }) {
     const workspace = await requireContentWorkspace(input);
+    const baseUrl = input.baseUrl
+      ? await validateByokEndpoint(input.baseUrl)
+      : null;
+    const defaultHeaders = sanitizeByokHeaders(input.defaultHeaders);
 
     const item = await createByokCredentialRecord({
       teamId: workspace.organizationId,
@@ -94,8 +102,8 @@ export class ContentByokService {
         config.modelGatewayEncryptionSecret,
       ),
       providerKind: input.providerKind,
-      baseUrl: input.baseUrl,
-      defaultHeaders: input.defaultHeaders,
+      baseUrl,
+      defaultHeaders,
       metadata: input.metadata,
     });
 
@@ -236,6 +244,12 @@ export class ContentByokService {
         "BYOK credential could not be decrypted",
       );
     }
+    const baseUrl = resolved.credential.baseUrl
+      ? await validateByokEndpoint(resolved.credential.baseUrl)
+      : null;
+    const defaultHeaders = sanitizeByokHeaders(
+      resolved.credential.defaultHeaders,
+    );
 
     return {
       byokModelId: resolved.id,
@@ -243,8 +257,8 @@ export class ContentByokService {
       credentialAlias: resolved.credential.credentialAlias,
       providerName: resolved.providerName,
       providerKind: resolved.credential.providerKind,
-      baseUrl: resolved.credential.baseUrl,
-      defaultHeaders: resolved.credential.defaultHeaders,
+      baseUrl,
+      defaultHeaders,
       apiKey,
       modelName: resolved.modelName,
       displayName: resolved.displayName,
@@ -311,6 +325,34 @@ export class ContentByokService {
     return {
       capabilities: await resolveCapabilitySnapshot(input.modelName),
     };
+  }
+}
+
+async function validateByokEndpoint(input: string) {
+  try {
+    return await validatePublicHttpsEndpoint(input);
+  } catch (error) {
+    throw new ContentError(
+      400,
+      "BYOK_PROVIDER_ENDPOINT_NOT_ALLOWED",
+      error instanceof Error
+        ? error.message
+        : "BYOK provider endpoint is not allowed",
+    );
+  }
+}
+
+function sanitizeByokHeaders(input?: Record<string, string>) {
+  try {
+    return sanitizeCustomHeaders(input);
+  } catch (error) {
+    throw new ContentError(
+      400,
+      "BYOK_PROVIDER_HEADER_NOT_ALLOWED",
+      error instanceof Error
+        ? error.message
+        : "BYOK provider header is not allowed",
+    );
   }
 }
 

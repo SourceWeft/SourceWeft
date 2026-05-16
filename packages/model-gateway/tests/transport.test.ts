@@ -135,6 +135,23 @@ test("requestJson includes request metadata scope in observe spans", async () =>
   });
 });
 
+test("requestJson disables automatic redirects", async () => {
+  let redirect: RequestRedirect | undefined;
+  const config = resolveModelGatewayConfig({
+    baseUrl: "https://gateway.example.com",
+    fetch: async (_url, init) => {
+      redirect = init?.redirect;
+      return createJsonResponse({ ok: true });
+    },
+  });
+
+  await requestJson<Record<string, unknown>>(config, {
+    path: "/health",
+  });
+
+  assert.equal(redirect, "error");
+});
+
 test("requestJson converts aborts into timeout errors and emits an error span", async () => {
   const spans: ObserveSpan[] = [];
 

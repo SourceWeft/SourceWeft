@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "main",
+  "description": "Main SourceWeft mobile capability.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-mobile-info",
+    "allow-open-external-url"
+  ]
+}
