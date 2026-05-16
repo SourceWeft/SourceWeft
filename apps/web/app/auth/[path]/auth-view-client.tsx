@@ -2,17 +2,38 @@
 
 import { AuthView } from "@daveyplate/better-auth-ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { desktopBridge } from "../../../lib/desktop-bridge";
+import {
+  detectNativeHostKind,
+  type NativeHostKind,
+} from "../../../lib/native-bridge";
 import { DesktopConfirmView } from "./desktop-confirm-view";
 import { DesktopLoginView } from "./desktop-login-view";
+import { MobileLoginView } from "./mobile-login-view";
+
+function mobileLoginViewSupportsPath(path: string) {
+  return path === "sign-in" || path === "sign-up";
+}
 
 export function AuthViewClient({ path }: { path: string }) {
   const [refreshKey, setRefreshKey] = useState(0);
-  const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
+  const [nativeHostKind, setNativeHostKind] = useState<NativeHostKind | null>();
   const [showDesktopConfirm, setShowDesktopConfirm] = useState(false);
 
   useEffect(() => {
-    setIsDesktop(desktopBridge.isAvailable());
+    let cancelled = false;
+
+    detectNativeHostKind()
+      .then((kind) => {
+        if (!cancelled) {
+          setNativeHostKind(kind);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setNativeHostKind(null);
+        }
+      });
+
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       setShowDesktopConfirm(
@@ -29,6 +50,7 @@ export function AuthViewClient({ path }: { path: string }) {
 
     window.addEventListener("pageshow", handlePageShow);
     return () => {
+      cancelled = true;
       window.removeEventListener("pageshow", handlePageShow);
     };
   }, []);
@@ -38,12 +60,20 @@ export function AuthViewClient({ path }: { path: string }) {
     setShowDesktopConfirm(false);
   }, []);
 
-  if (isDesktop === null) {
+  if (nativeHostKind === undefined) {
     return <div className="min-h-40 w-full max-w-md" />;
   }
 
-  if (isDesktop && path !== "callback" && path !== "sign-out") {
+  if (
+    nativeHostKind === "desktop" &&
+    path !== "callback" &&
+    path !== "sign-out"
+  ) {
     return <DesktopLoginView path={path} />;
+  }
+
+  if (nativeHostKind === "mobile" && mobileLoginViewSupportsPath(path)) {
+    return <MobileLoginView path={path} />;
   }
 
   if (showDesktopConfirm && path === "sign-in") {

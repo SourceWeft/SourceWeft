@@ -400,6 +400,7 @@ export const config = {
     errorUrl: resolveAuthErrorUrl(),
     trustedOrigins: resolveTrustedOrigins(),
     googleClientId: process.env.AUTH_GOOGLE_CLIENT_ID || "",
+    googleMobileClientId: process.env.AUTH_GOOGLE_MOBILE_CLIENT_ID || "",
     googleClientSecret: process.env.AUTH_GOOGLE_CLIENT_SECRET || "",
     githubClientId: process.env.AUTH_GITHUB_CLIENT_ID || "",
     githubClientSecret: process.env.AUTH_GITHUB_CLIENT_SECRET || "",

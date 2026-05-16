@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
 import { GoogleOneTap } from "./google-one-tap";
+import { MobileRouteSheetProvider } from "./mobile-route-sheet-provider";
 import { authClient } from "../lib/auth-client";
 import {
   additionalFields,
@@ -145,7 +146,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         viewPaths={customAuthViewPaths}
       >
         <GoogleOneTap />
-        <TooltipProvider>{children}</TooltipProvider>
+        <TooltipProvider>
+          <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+        </TooltipProvider>
         <Toaster closeButton position="top-right" richColors />
       </AuthUIProvider>
     </ThemeProvider>

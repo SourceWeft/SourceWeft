@@ -49,6 +49,8 @@ declare global {
 export type NativeInfo = {
   kind: NativeHostKind;
   isNative: boolean;
+  isDesktop?: boolean;
+  isMobile?: boolean;
   platform: string;
   arch: string;
   appName: string;
@@ -69,59 +71,79 @@ function hasCapability(
   return Boolean(bridge?.capabilities.includes(capability));
 }
 
-function getTauriBridgeFallback(): SourceWeftNativeBridge | undefined {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-
-  const internals = window.__TAURI_INTERNALS__;
-  if (
-    typeof internals?.invoke !== "function" ||
-    typeof internals.transformCallback !== "function"
-  ) {
-    return undefined;
-  }
-
-  return {
-    kind: "desktop",
-    capabilities: ["deepLink", "desktopAutostart", "desktopWindow", "externalUrl", "hostInfo"],
-    invoke: (command, args) => {
-      if (!internals.invoke) {
-        return Promise.reject(new Error("Tauri invoke is not available."));
-      }
-
-      return internals.invoke(command, args);
-    },
-    listen: async (event, handler) => {
-      const callbackId = internals.transformCallback?.(handler);
-      if (typeof callbackId !== "number") {
-        throw new Error("Tauri event callback registration failed.");
-      }
-
-      if (!internals.invoke) {
-        throw new Error("Tauri invoke is not available.");
-      }
-
-      const eventId = await internals.invoke("plugin:event|listen", {
-        event,
-        target: { kind: "Any" },
-        handler: callbackId,
-      });
-
-      return async () => {
-        internals.unregisterCallback?.(callbackId);
-        await internals.invoke?.("plugin:event|unlisten", { event, eventId });
-      };
-    },
-  };
-}
-
 export function getNativeBridge() {
   if (typeof window === "undefined") {
     return undefined;
   }
 
-  return window.__SOURCEWEFT_NATIVE__ ?? getTauriBridgeFallback();
+  return window.__SOURCEWEFT_NATIVE__;
+}
+
+function getTauriInvoke() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  return typeof window.__TAURI_INTERNALS__?.invoke === "function"
+    ? window.__TAURI_INTERNALS__.invoke
+    : undefined;
+}
+
+function resolveInfoKind(info: NativeInfo | undefined) {
+  if (info?.kind === "mobile" || info?.isMobile === true) {
+    return "mobile";
+  }
+
+  if (info?.kind === "desktop" || info?.isDesktop === true) {
+    return "desktop";
+  }
+
+  return null;
+}
+
+function withTimeout<TResult>(promise: Promise<TResult>, timeoutMs: number) {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      window.setTimeout(() => {
+        reject(new Error("Native host detection timed out."));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
+export async function detectNativeHostKind(): Promise<NativeHostKind | null> {
+  const bridge = getNativeBridge();
+  if (bridge) {
+    return bridge.kind;
+  }
+
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+
+  try {
+    const info = await withTimeout(invoke<NativeInfo>("mobile_info"), 800);
+    const kind = resolveInfoKind(info);
+    if (kind === "mobile") {
+      return kind;
+    }
+  } catch {
+    // Absence of this command means this is not the mobile host.
+  }
+
+  try {
+    const info = await withTimeout(invoke<NativeInfo>("desktop_info"), 800);
+    const kind = resolveInfoKind(info);
+    if (kind === "desktop") {
+      return kind;
+    }
+  } catch {
+    // Absence of this command means this is not the desktop host.
+  }
+
+  return null;
 }
 
 async function invokeNative<TResult>(

@@ -1,1 +1,1 @@
-{"main":{"identifier":"main","description":"Main SourceWeft mobile capability.","local":true,"windows":["main"],"permissions":["core:default","allow-mobile-info","allow-open-external-url"]}}
+{"main":{"identifier":"main","description":"Main SourceWeft mobile capability.","local":true,"windows":["main"],"permissions":["core:default","google-auth:default","allow-mobile-info","allow-open-external-url"]}}

@@ -92,7 +92,10 @@ async function listenDesktop<TPayload>(
 
 export const desktopBridge = {
   isAvailable() {
-    return nativeBridge.isAvailable("desktop");
+    return Boolean(
+      (typeof window !== "undefined" && window.__SOURCEWEFT_DESKTOP__) ||
+        nativeBridge.isAvailable("desktop"),
+    );
   },
   info() {
     return invokeDesktop<DesktopInfo>("desktop_info");

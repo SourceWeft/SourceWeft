@@ -1,0 +1,487 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		004A734B26DCE76AC1D4786D /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0DD9527E72D8E7097C7A599 /* QuartzCore.framework */; };
+		04754A6BAE768CB1FB0A61ED /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 30787F4CCE67256177873748 /* main.mm */; };
+		45DEBB2AB8C27A30EB301A43 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7E621B3DCC4DBF481C9A11B9 /* Assets.xcassets */; };
+		6B488C0905CD57C3148843CC /* assets in Resources */ = {isa = PBXBuildFile; fileRef = F19F10E46948CF1E87C79FCC /* assets */; };
+		737CAC7449CB818DFAC2BE8B /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AE47274DE77BE3B9122ECCC /* libapp.a */; };
+		74043ABCF5F5F1F577150F81 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 55D8F44920F422ED6A43AFAA /* MetalKit.framework */; };
+		7767AB4BC1FC793BD7B9B313 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BC45108123C1963D2A324DCE /* UIKit.framework */; };
+		8831849C89202E19408B453C /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 95219DA8687301023075F4F0 /* LaunchScreen.storyboard */; };
+		89E0CA85646012D56C1FFE4E /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 31FF787CB11C2AE0624FC903 /* Metal.framework */; };
+		8BEC7228FD9C10032FC93082 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 79CE6F467FFAA0098BA4C2E5 /* WebKit.framework */; };
+		B2D5DA9178009E758101D5AB /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C88D0BB7A17D422D0F66211 /* CoreGraphics.framework */; };
+		E149FF3C60768F4D3CB9D6DD /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0218A91F2F8144575725ADB0 /* Security.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0218A91F2F8144575725ADB0 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		0AE47274DE77BE3B9122ECCC /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		125DFC156467EEE02065E5AD /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		2EB87F900E8743C2B518A603 /* main.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = main.rs; sourceTree = "<group>"; };
+		30787F4CCE67256177873748 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		31FF787CB11C2AE0624FC903 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		3E135E398C8F60799BE6DBB7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		55D8F44920F422ED6A43AFAA /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		79CE6F467FFAA0098BA4C2E5 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		7E621B3DCC4DBF481C9A11B9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		95219DA8687301023075F4F0 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		9C88D0BB7A17D422D0F66211 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		A0DD9527E72D8E7097C7A599 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		ADBA7B76B6CE3634A731896A /* sourceweft-mobile_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "sourceweft-mobile_iOS.entitlements"; sourceTree = "<group>"; };
+		BC45108123C1963D2A324DCE /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		F039953C2D9DAA39A2F2C8B2 /* lib.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = lib.rs; sourceTree = "<group>"; };
+		F19F10E46948CF1E87C79FCC /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		F1EDFF47004C6DED7065EE04 /* SourceWeft Mobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SourceWeft Mobile.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DC17D9D02A0F96FBD83C230F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				737CAC7449CB818DFAC2BE8B /* libapp.a in Frameworks */,
+				B2D5DA9178009E758101D5AB /* CoreGraphics.framework in Frameworks */,
+				89E0CA85646012D56C1FFE4E /* Metal.framework in Frameworks */,
+				74043ABCF5F5F1F577150F81 /* MetalKit.framework in Frameworks */,
+				004A734B26DCE76AC1D4786D /* QuartzCore.framework in Frameworks */,
+				E149FF3C60768F4D3CB9D6DD /* Security.framework in Frameworks */,
+				7767AB4BC1FC793BD7B9B313 /* UIKit.framework in Frameworks */,
+				8BEC7228FD9C10032FC93082 /* WebKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		07A5BB0614D21C229FC1A20A /* bindings */ = {
+			isa = PBXGroup;
+			children = (
+				125DFC156467EEE02065E5AD /* bindings.h */,
+			);
+			path = bindings;
+			sourceTree = "<group>";
+		};
+		0A16EAF8DB94FF5B9CA05EA0 = {
+			isa = PBXGroup;
+			children = (
+				F19F10E46948CF1E87C79FCC /* assets */,
+				7E621B3DCC4DBF481C9A11B9 /* Assets.xcassets */,
+				95219DA8687301023075F4F0 /* LaunchScreen.storyboard */,
+				751EEBC99BBDF3DF951C4657 /* Externals */,
+				96EA7AE2D6AC3AFD05EA4F76 /* Sources */,
+				45DB86F72328F0A416AAA8A0 /* sourceweft-mobile_iOS */,
+				A8907E7FF66C9E13391E9676 /* src */,
+				DD5DE41AE129A4F2F37795CC /* Frameworks */,
+				210F09F94477C88610CADBD3 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		210F09F94477C88610CADBD3 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F1EDFF47004C6DED7065EE04 /* SourceWeft Mobile.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		270C956DBAD1D048EB725B0D /* sourceweft-mobile */ = {
+			isa = PBXGroup;
+			children = (
+				30787F4CCE67256177873748 /* main.mm */,
+				07A5BB0614D21C229FC1A20A /* bindings */,
+			);
+			path = "sourceweft-mobile";
+			sourceTree = "<group>";
+		};
+		45DB86F72328F0A416AAA8A0 /* sourceweft-mobile_iOS */ = {
+			isa = PBXGroup;
+			children = (
+				3E135E398C8F60799BE6DBB7 /* Info.plist */,
+				ADBA7B76B6CE3634A731896A /* sourceweft-mobile_iOS.entitlements */,
+			);
+			path = "sourceweft-mobile_iOS";
+			sourceTree = "<group>";
+		};
+		751EEBC99BBDF3DF951C4657 /* Externals */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Externals;
+			sourceTree = "<group>";
+		};
+		96EA7AE2D6AC3AFD05EA4F76 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				270C956DBAD1D048EB725B0D /* sourceweft-mobile */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A8907E7FF66C9E13391E9676 /* src */ = {
+			isa = PBXGroup;
+			children = (
+				F039953C2D9DAA39A2F2C8B2 /* lib.rs */,
+				2EB87F900E8743C2B518A603 /* main.rs */,
+			);
+			name = src;
+			path = ../../src;
+			sourceTree = "<group>";
+		};
+		DD5DE41AE129A4F2F37795CC /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				9C88D0BB7A17D422D0F66211 /* CoreGraphics.framework */,
+				0AE47274DE77BE3B9122ECCC /* libapp.a */,
+				31FF787CB11C2AE0624FC903 /* Metal.framework */,
+				55D8F44920F422ED6A43AFAA /* MetalKit.framework */,
+				A0DD9527E72D8E7097C7A599 /* QuartzCore.framework */,
+				0218A91F2F8144575725ADB0 /* Security.framework */,
+				BC45108123C1963D2A324DCE /* UIKit.framework */,
+				79CE6F467FFAA0098BA4C2E5 /* WebKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		80FCB5BF1DFB0E183AF45CA6 /* sourceweft-mobile_iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 873EF06AA533F27BFCA84C6C /* Build configuration list for PBXNativeTarget "sourceweft-mobile_iOS" */;
+			buildPhases = (
+				C309E77D416352D61C607CDA /* Build Rust Code */,
+				D919C9D93480C47011B29735 /* Sources */,
+				93BBC6471D77CF62C6069882 /* Resources */,
+				DC17D9D02A0F96FBD83C230F /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "sourceweft-mobile_iOS";
+			packageProductDependencies = (
+			);
+			productName = "sourceweft-mobile_iOS";
+			productReference = F1EDFF47004C6DED7065EE04 /* SourceWeft Mobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3357A79E681426AF5378ACC5 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					80FCB5BF1DFB0E183AF45CA6 = {
+						DevelopmentTeam = PBML833M58;
+					};
+				};
+			};
+			buildConfigurationList = 120C1E3465CE0F0E18E206B0 /* Build configuration list for PBXProject "sourceweft-mobile" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 0A16EAF8DB94FF5B9CA05EA0;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 210F09F94477C88610CADBD3 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				80FCB5BF1DFB0E183AF45CA6 /* sourceweft-mobile_iOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		93BBC6471D77CF62C6069882 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				45DEBB2AB8C27A30EB301A43 /* Assets.xcassets in Resources */,
+				8831849C89202E19408B453C /* LaunchScreen.storyboard in Resources */,
+				6B488C0905CD57C3148843CC /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		C309E77D416352D61C607CDA /* Build Rust Code */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust Code";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a",
+				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "APPLE_DEVELOPMENT_TEAM=${DEVELOPMENT_TEAM:?} pnpm tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D919C9D93480C47011B29735 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				04754A6BAE768CB1FB0A61ED /* main.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0A5E46F2EB5B82EAF42A83AD /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = release;
+		};
+		0A5EEEEC17E192B4023553AA /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "sourceweft-mobile_iOS/sourceweft-mobile_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "PBML833M58";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "sourceweft-mobile_iOS/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SourceWeft;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = nicelab.sourceweft.mobile;
+				PRODUCT_NAME = "SourceWeft Mobile";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = release;
+		};
+		2AAE71AFE4A7AE69C0B09916 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "sourceweft-mobile_iOS/sourceweft-mobile_iOS.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "PBML833M58";
+				ENABLE_BITCODE = NO;
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".\"",
+				);
+				INFOPLIST_FILE = "sourceweft-mobile_iOS/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SourceWeft;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = nicelab.sourceweft.mobile;
+				PRODUCT_NAME = "SourceWeft Mobile";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALID_ARCHS = arm64;
+			};
+			name = debug;
+		};
+		B06BC88AF4143DF922B873B0 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		120C1E3465CE0F0E18E206B0 /* Build configuration list for PBXProject "sourceweft-mobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B06BC88AF4143DF922B873B0 /* debug */,
+				0A5E46F2EB5B82EAF42A83AD /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		873EF06AA533F27BFCA84C6C /* Build configuration list for PBXNativeTarget "sourceweft-mobile_iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2AAE71AFE4A7AE69C0B09916 /* debug */,
+				0A5EEEEC17E192B4023553AA /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 3357A79E681426AF5378ACC5 /* Project object */;
+}

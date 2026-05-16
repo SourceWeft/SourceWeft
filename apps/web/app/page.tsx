@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { headers } from "next/headers";
 import LandingV1 from "./_landing/v1";
+import { MobileHomeGate } from "./mobile-home-gate";
 import type {
   LandingAuthState,
   LandingAuthUser,
@@ -75,5 +76,9 @@ export default async function RootPage() {
   const LandingPage = VERSIONS[version] ?? LandingV1;
   const initialAuthState = await resolveInitialAuthState();
 
-  return <LandingPage initialAuthState={initialAuthState} />;
+  return (
+    <MobileHomeGate>
+      <LandingPage initialAuthState={initialAuthState} />
+    </MobileHomeGate>
+  );
 }

@@ -18,6 +18,7 @@
     "@better-auth/oauth-provider": "1.6.10",
     "@better-auth/passkey": "1.6.10",
     "@better-auth/utils": "0.4.0",
+    "@choochmeque/tauri-plugin-google-auth-api": "^0.5.1",
     "@creem_io/better-auth": "^1.1.0",
     "@daveyplate/better-auth-ui": "^3.4.0",
     "@fontsource-variable/geist": "^5.2.8",

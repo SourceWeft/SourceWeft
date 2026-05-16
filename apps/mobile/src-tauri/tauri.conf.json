@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "nicelab.sourceweft.mobile",
   "build": {
-    "devUrl": "http://localhost:3000/dashboard",
+    "devUrl": "http://localhost:3000",
     "frontendDist": "../placeholder-dist"
   },
   "bundle": {

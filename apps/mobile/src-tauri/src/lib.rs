@@ -2,6 +2,7 @@
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_opener::init())
         .append_invoke_initialization_script(mobile_bridge_script())
         .invoke_handler(tauri::generate_handler![mobile_info, open_external_url])

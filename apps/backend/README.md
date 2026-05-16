@@ -29,7 +29,7 @@ Auth and workspace MVP notes:
 
 - Better Auth is mounted at `/api/auth/*`.
 - Workspace APIs are exposed at `/v1/teams/:teamId/workspaces` and `/v1/context/*`.
-- Run `pnpm migrate` to apply Better Auth, Drizzle migrations, and billing backfill.
+- Run `pnpm migrate` to apply Better Auth migrations followed by Drizzle business migrations.
 - Run `pnpm db:generate` after schema changes to generate new Drizzle migration files.
 - Scheduler example queue jobs are disabled by default; set `BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED=true` to enable.
 

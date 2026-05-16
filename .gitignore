@@ -48,6 +48,19 @@ dist/
 # rust
 target/
 
+# Tauri mobile iOS local/build artifacts. Keep generated project sources under
+# apps/mobile/src-tauri/gen/apple tracked; only ignore local Xcode/CocoaPods
+# output and user state.
+apps/mobile/src-tauri/gen/apple/xcuserdata/
+apps/mobile/src-tauri/gen/apple/**/xcuserdata/
+apps/mobile/src-tauri/gen/apple/build/
+apps/mobile/src-tauri/gen/apple/DerivedData/
+apps/mobile/src-tauri/gen/apple/Pods/
+apps/mobile/src-tauri/gen/apple/Externals/
+apps/mobile/src-tauri/gen/apple/**/*.xcuserstate
+apps/mobile/src-tauri/gen/apple/*.ipa
+apps/mobile/src-tauri/gen/apple/*.dSYM.zip
+
 
 .agents
 .claude
