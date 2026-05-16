@@ -196,8 +196,6 @@ export const createSourceRequestSchema = z.object({
     ])
     .optional(),
   parentSourceId: z.string().nullable().optional(),
-  estimatedPages: z.number().int().positive().optional(),
-  parsedTokens: z.number().int().positive().optional(),
 });
 
 export const createSourceResponseSchema = z.object({
@@ -293,8 +291,6 @@ export const updateSourceRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   contentText: z.string().max(100000).optional(),
   parentSourceId: z.string().nullable().optional(),
-  estimatedPages: z.number().int().positive().nullable().optional(),
-  parsedTokens: z.number().int().positive().nullable().optional(),
 });
 
 export const updateSourceResponseSchema = z.object({
@@ -307,8 +303,6 @@ export const deleteSourceResponseSchema = z.object({
 });
 
 export const indexSourceRequestSchema = z.object({
-  estimatedPages: z.number().int().positive().optional(),
-  parsedTokens: z.number().int().positive().optional(),
   idempotencyKey: z.string().trim().min(1).max(256).optional(),
 });
 

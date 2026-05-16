@@ -91,28 +91,6 @@ async function assertUserHardDeleteAllowed(userId: string) {
   });
 }
 
-async function syncOrganizationSeatsAfterMembershipChange(input: {
-  organizationId: string;
-  actorUserId?: string | null;
-  reason: string;
-}) {
-  try {
-    await billingService.syncTeamSubscriptionSeatsToMembers(
-      input.organizationId,
-      {
-        actorUserId: input.actorUserId ?? null,
-        reason: input.reason,
-      },
-    );
-  } catch (error) {
-    logger.error("Failed to sync billing seats after membership change", {
-      organizationId: input.organizationId,
-      reason: input.reason,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
 export const auth: any = betterAuth({
   appName: "SourceWeft",
   baseURL: config.auth.baseUrl,
@@ -359,10 +337,9 @@ export const auth: any = betterAuth({
           });
         },
         async afterAddMember({ organization, user }) {
-          await syncOrganizationSeatsAfterMembershipChange({
+          logger.info("Team member added; paid seat count unchanged", {
             organizationId: organization.id,
             actorUserId: user.id,
-            reason: "member_added",
           });
         },
         async afterRemoveMember({ organization, user }) {
@@ -376,10 +353,9 @@ export const auth: any = betterAuth({
             organizationId: organization.id,
             userId: user.id,
           });
-          await syncOrganizationSeatsAfterMembershipChange({
+          logger.info("Team invitation accepted; paid seat count unchanged", {
             organizationId: organization.id,
             actorUserId: user.id,
-            reason: "invitation_accepted",
           });
         },
       },

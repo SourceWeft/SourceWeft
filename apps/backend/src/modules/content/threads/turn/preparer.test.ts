@@ -36,6 +36,8 @@ function billingSummary() {
       used: 1,
       limit: 1,
       remaining: 0,
+      activeMembers: 1,
+      pendingInvitations: 0,
     },
     spendLimits: {
       softCapUsd: null,

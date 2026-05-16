@@ -653,62 +653,13 @@ export class BillingSubscriptionService {
   }
 
   async syncTeamSubscriptionSeatsToMembers(
-    teamId: string,
-    input?: {
+    _teamId: string,
+    _input?: {
       actorUserId?: string | null;
       reason?: string;
     },
   ): Promise<UpdateTeamSubscriptionSeatsResponse | null> {
-    if (!this.runtimeConfig.teamBillingEnabled) {
-      return null;
-    }
-
-    const operation = await this.accountService.withLockedAccount(
-      teamId,
-      async ({ account, client }) => {
-        const subscription = await this.store.getSubscriptionByTeam(
-          account.teamId,
-          client,
-        );
-
-        if (
-          !subscription ||
-          subscription.planFamily !== TEAM_STANDARD_PLAN ||
-          !isActiveSubscriptionStatus(subscription.status)
-        ) {
-          return null;
-        }
-
-        const seatsUsed = await this.store.countTeamMembers(
-          account.teamId,
-          client,
-        );
-        const pendingInvitations =
-          await this.store.countPendingTeamInvitations(account.teamId, client);
-        const seatCount = Math.max(
-          TEAM_SEAT_MIN,
-          seatsUsed + pendingInvitations,
-        );
-        return {
-          seatCount,
-          currentSeatCount: account.seatCount,
-        };
-      },
-    );
-
-    if (operation === null) {
-      return null;
-    }
-
-    if (operation.seatCount <= operation.currentSeatCount) {
-      return null;
-    }
-
-    return this.syncTeamSubscriptionSeats(teamId, {
-      seatCount: operation.seatCount,
-      actorUserId: input?.actorUserId,
-      reason: input?.reason ?? "member_count_changed",
-    });
+    return null;
   }
 
   async createBillingPortal(
@@ -1212,7 +1163,7 @@ export class BillingSubscriptionService {
       return;
     }
 
-    const target = await this.accountService.withLockedAccount(
+    const result = await this.accountService.withLockedAccount(
       teamId,
       async ({ account, client }) => {
         const subscription = await this.store.getSubscriptionByTeam(
@@ -1232,12 +1183,11 @@ export class BillingSubscriptionService {
           account.teamId,
           client,
         );
-        const pendingInvites = await this.store.countPendingTeamInvitations(
+        const pendingInvitations = await this.store.countPendingTeamInvitations(
           account.teamId,
           client,
         );
-        const allocatedSeats =
-          mode === "add_member" ? seatsUsed : seatsUsed + pendingInvites;
+        const allocatedSeats = seatsUsed + pendingInvitations;
         const requestedSeats =
           mode === "accept_invitation" ? allocatedSeats : allocatedSeats + 1;
 
@@ -1245,23 +1195,29 @@ export class BillingSubscriptionService {
           return null;
         }
 
-        return requestedSeats;
+        return {
+          seatCount: account.seatCount,
+          seatsUsed,
+          pendingInvitations,
+          allocatedSeats,
+          requestedSeats,
+        };
       },
     );
 
-    if (target === null) {
+    if (result === null) {
       return;
     }
 
-    await this.syncTeamSubscriptionSeats(teamId, {
-      seatCount: target,
-      reason:
-        mode === "invite"
-          ? "invitation_created"
-          : mode === "accept_invitation"
-            ? "invitation_accepted"
-            : "member_added",
-    });
+    throw new BillingError(
+      "TEAM_SEAT_LIMIT_REACHED",
+      409,
+      "No team seats are available. Add seats before inviting or adding another member.",
+      {
+        ...result,
+        mode,
+      },
+    );
   }
 
   private seatSyncAlertKey(teamId: string) {

@@ -113,8 +113,6 @@ export function registerSourceRoutes(app: Hono) {
       contentText: parsed.data.contentText,
       sourceType: parsed.data.sourceType,
       parentSourceId: parsed.data.parentSourceId,
-      estimatedPages: parsed.data.estimatedPages,
-      parsedTokens: parsed.data.parsedTokens,
     });
 
     return ApiResponse.success(c, result, 201);
@@ -246,8 +244,6 @@ export function registerSourceRoutes(app: Hono) {
       title: parsed.data.title,
       contentText: parsed.data.contentText,
       parentSourceId: parsed.data.parentSourceId,
-      estimatedPages: parsed.data.estimatedPages,
-      parsedTokens: parsed.data.parsedTokens,
     });
 
     return ApiResponse.success(c, result);
@@ -286,8 +282,6 @@ export function registerSourceRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
-      estimatedPages: parsed.data.estimatedPages,
-      parsedTokens: parsed.data.parsedTokens,
       idempotencyKey: parsed.data.idempotencyKey,
     });
 

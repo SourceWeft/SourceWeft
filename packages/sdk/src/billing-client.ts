@@ -12,10 +12,6 @@ import type {
   CreateTeamSubscriptionCheckoutResponse,
   CreateTopupCheckoutRequest,
   CreateTopupCheckoutResponse,
-  MeterConsumeRequest,
-  MeterConsumeResponse,
-  MeterIngestionRequest,
-  MeterIngestionResponse,
   PreviewTeamSubscriptionSeatsResponse,
   UpdateTeamSubscriptionSeatsRequest,
   UpdateTeamSubscriptionSeatsResponse,
@@ -143,17 +139,4 @@ export class BillingClient {
     );
   }
 
-  meterConsume(teamId: string, input: MeterConsumeRequest) {
-    return this.http.post<MeterConsumeResponse>(
-      `/v1/teams/${encodeTeamId(teamId)}/billing/meter/consume`,
-      input,
-    );
-  }
-
-  meterIngestion(teamId: string, input: MeterIngestionRequest) {
-    return this.http.post<MeterIngestionResponse>(
-      `/v1/teams/${encodeTeamId(teamId)}/billing/meter/ingestion`,
-      input,
-    );
-  }
 }

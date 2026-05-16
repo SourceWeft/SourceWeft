@@ -3,8 +3,6 @@ import {
   createPricingCheckoutRequestSchema,
   createTeamSubscriptionCheckoutRequestSchema,
   createTopupCheckoutRequestSchema,
-  meterConsumeRequestSchema,
-  meterIngestionRequestSchema,
   updateTeamSubscriptionSeatsRequestSchema,
   updateSpendLimitsRequestSchema,
 } from "@sourceweft/contracts";
@@ -430,59 +428,4 @@ export function registerBillingRoutes(app: Hono) {
     return ApiResponse.success(c, response);
   });
 
-  app.post("/v1/teams/:teamId/billing/meter/consume", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const teamId = c.req.param("teamId");
-    const userId = getSessionUserId(session);
-    await requireTeamMembership(teamId, userId, {
-      requireBillingManager: true,
-    });
-
-    const body = ensureObjectBody(await c.req.json().catch(() => null));
-    const parsed = meterConsumeRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw ApiError.validation(
-        parsed.error.flatten() as Record<string, unknown>,
-      );
-    }
-
-    const response = await billingService.meterConsume(
-      teamId,
-      parsed.data,
-      userId,
-    );
-    return ApiResponse.success(c, response);
-  });
-
-  app.post("/v1/teams/:teamId/billing/meter/ingestion", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const teamId = c.req.param("teamId");
-    const userId = getSessionUserId(session);
-    await requireTeamMembership(teamId, userId, {
-      requireBillingManager: true,
-    });
-
-    const body = ensureObjectBody(await c.req.json().catch(() => null));
-    const parsed = meterIngestionRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw ApiError.validation(
-        parsed.error.flatten() as Record<string, unknown>,
-      );
-    }
-
-    const response = await billingService.meterIngestion(
-      teamId,
-      parsed.data,
-      userId,
-    );
-    return ApiResponse.success(c, response);
-  });
 }

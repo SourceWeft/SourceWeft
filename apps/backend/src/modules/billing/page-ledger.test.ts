@@ -1742,7 +1742,7 @@ test("team subscription seat sync failure leaves local seat count unchanged", as
   assert.equal(alerts[0]?.alertKey, "billing:seat-sync:failed:team_1");
 });
 
-test("team subscription seat sync includes pending invitations when expanding seats", async () => {
+test("team subscription member sync ignores pending invitations", async () => {
   const store = new MemoryBillingStore();
   store.teamMemberCount = 2;
   store.pendingInvitationCount = 1;
@@ -1763,7 +1763,7 @@ test("team subscription seat sync includes pending invitations when expanding se
           seatCount: input.seatCount,
           updateBehavior: input.updateBehavior,
         });
-        return { provider: "creem" };
+        return { provider: "creem", seatCount: input.seatCount };
       },
     },
   );
@@ -1773,14 +1773,9 @@ test("team subscription seat sync includes pending invitations when expanding se
     { reason: "invitation_created" },
   );
 
-  assert.ok(result);
-  assert.equal(result.seatCount, 3);
-  assert.equal(result.seatsUsed, 2);
-  assert.equal(result.pendingInvitations, 1);
-  assert.equal(store.account?.seatCount, 3);
-  assert.deepEqual(updates, [
-    { seatCount: 3, updateBehavior: "proration-charge-immediately" },
-  ]);
+  assert.equal(result, null);
+  assert.equal(store.account?.seatCount, 2);
+  assert.deepEqual(updates, []);
 
   store.pendingInvitationCount = 0;
   const noDowngrade = await billingService.syncTeamSubscriptionSeatsToMembers(
@@ -1789,11 +1784,11 @@ test("team subscription seat sync includes pending invitations when expanding se
   );
 
   assert.equal(noDowngrade, null);
-  assert.equal(store.account?.seatCount, 3);
-  assert.equal(updates.length, 1);
+  assert.equal(store.account?.seatCount, 2);
+  assert.equal(updates.length, 0);
 });
 
-test("active team subscription expands seats before creating invitations at capacity", async () => {
+test("active team subscription rejects invitations at allocated seat capacity", async () => {
   const store = new MemoryBillingStore();
   store.teamMemberCount = 2;
   store.pendingInvitationCount = 1;
@@ -1845,15 +1840,79 @@ test("active team subscription expands seats before creating invitations at capa
       ...noopProvider,
       async updateSubscriptionSeats(input) {
         updates.push(input.seatCount);
-        return { provider: "creem" };
+        return { provider: "creem", seatCount: input.seatCount };
       },
     },
   );
 
-  await billingService.assertCanInviteTeamMember("team_1");
+  await assertRejectsWithBillingCode(
+    () => billingService.assertCanInviteTeamMember("team_1"),
+    "TEAM_SEAT_LIMIT_REACHED",
+  );
 
-  assert.equal(store.account?.seatCount, 4);
-  assert.deepEqual(updates, [4]);
+  assert.equal(store.account?.seatCount, 3);
+  assert.deepEqual(updates, []);
+});
+
+test("active team subscription accepts preallocated invitation without expanding seats", async () => {
+  const store = new MemoryBillingStore();
+  store.teamMemberCount = 2;
+  store.pendingInvitationCount = 1;
+  store.account = createActiveTeamAccount({ seatCount: 3 });
+  store.subscription = createActiveTeamSubscription();
+  const updates: number[] = [];
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async updateSubscriptionSeats(input) {
+        updates.push(input.seatCount);
+        return { provider: "creem", seatCount: input.seatCount };
+      },
+    },
+  );
+
+  await billingService.assertCanAcceptTeamInvitation("team_1");
+
+  assert.equal(store.account?.seatCount, 3);
+  assert.deepEqual(updates, []);
+});
+
+test("active team subscription rejects direct member add when invites occupy remaining seats", async () => {
+  const store = new MemoryBillingStore();
+  store.teamMemberCount = 2;
+  store.pendingInvitationCount = 1;
+  store.account = createActiveTeamAccount({ seatCount: 3 });
+  store.subscription = createActiveTeamSubscription();
+  const updates: number[] = [];
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      teamBillingEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async updateSubscriptionSeats(input) {
+        updates.push(input.seatCount);
+        return { provider: "creem", seatCount: input.seatCount };
+      },
+    },
+  );
+
+  await assertRejectsWithBillingCode(
+    () => billingService.assertCanAddTeamMember("team_1"),
+    "TEAM_SEAT_LIMIT_REACHED",
+  );
+
+  assert.equal(store.account?.seatCount, 3);
+  assert.deepEqual(updates, []);
 });
 
 test("creem expired event status overrides active payload status", async () => {

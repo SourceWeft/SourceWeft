@@ -906,6 +906,8 @@ class ContentThreadStreamService {
             used: 0,
             limit: 0,
             remaining: 0,
+            activeMembers: 0,
+            pendingInvitations: 0,
           },
           spendLimits: {
             softCapUsd: null,
