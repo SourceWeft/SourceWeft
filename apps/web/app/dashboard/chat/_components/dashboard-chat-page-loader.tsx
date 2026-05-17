@@ -9,7 +9,7 @@ const DashboardChatPageClient = dynamic(
       (mod) => mod.DashboardChatPageClient,
     ),
   {
-    loading: () => <ChatRouteSkeleton />,
+    loading: () => <ChatRouteSkeleton variant="new" />,
     ssr: false,
   },
 );

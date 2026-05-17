@@ -399,10 +399,6 @@ export const config = {
     false,
   ),
   modelGatewayEncryptionSecret: requireEnv("MODEL_GATEWAY_ENCRYPTION_SECRET"),
-  modelGatewaySyncOpenRouterCatalog: parseBoolean(
-    process.env.MODEL_GATEWAY_SYNC_OPENROUTER_CATALOG,
-    true,
-  ),
   auth: {
     secret: process.env.BETTER_AUTH_SECRET || "replace_with_dev_secret_only",
     baseUrl: resolveApiBaseUrl(),

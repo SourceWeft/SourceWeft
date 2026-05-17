@@ -30,7 +30,13 @@ export function buildProfilePricingConfigJson(
     pricing?.outputCostPerToken !== undefined ||
     pricing?.cacheReadInputTokenCost !== undefined ||
     pricing?.cacheCreationInputTokenCost !== undefined ||
-    pricing?.outputCostPerReasoningToken !== undefined;
+    pricing?.outputCostPerReasoningToken !== undefined ||
+    pricing?.inputCostPerImageToken !== undefined ||
+    pricing?.outputCostPerImageToken !== undefined ||
+    pricing?.inputCostPerAudioToken !== undefined ||
+    pricing?.outputCostPerAudioToken !== undefined ||
+    pricing?.inputCostPerImage !== undefined ||
+    pricing?.outputCostPerImage !== undefined;
 
   if (hasManualPrice) {
     const manualPricing: ModelPricing = {
@@ -39,7 +45,12 @@ export function buildProfilePricingConfigJson(
       cache_read_input_token_cost: pricing?.cacheReadInputTokenCost ?? null,
       cache_creation_input_token_cost: pricing?.cacheCreationInputTokenCost ?? null,
       output_cost_per_reasoning_token: pricing?.outputCostPerReasoningToken ?? null,
-      ...emptyExtendedPricingFields(),
+      input_cost_per_image_token: pricing?.inputCostPerImageToken ?? null,
+      output_cost_per_image_token: pricing?.outputCostPerImageToken ?? null,
+      input_cost_per_audio_token: pricing?.inputCostPerAudioToken ?? null,
+      output_cost_per_audio_token: pricing?.outputCostPerAudioToken ?? null,
+      input_cost_per_image: pricing?.inputCostPerImage ?? null,
+      output_cost_per_image: pricing?.outputCostPerImage ?? null,
       price_source: pricing?.source ?? "manual",
       litellm_key: pricing?.litellmKey ?? null,
       price_updated_at: now.toISOString(),

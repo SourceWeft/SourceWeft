@@ -9,13 +9,11 @@ import type { ModelPricing } from "../db/schema-types";
 import { logger } from "../logger";
 import {
   autoMatchModelAlias,
+  fetchLiteLLMPricing,
   resolveLiteLLMCapabilities,
   type LiteLLMData,
   type ModelAliasMatch,
 } from "../model-gateway/litellm-capabilities";
-
-const LITELLM_PRICING_URL =
-  "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
 function toRouteKey(kind: string, alias: string) {
   return `${kind}:${alias}`;
@@ -97,14 +95,6 @@ function resolveMatchFromCandidates(
   }
 
   return { type: "unmatched" };
-}
-
-async function fetchLiteLLMPricing(): Promise<LiteLLMData> {
-  const response = await fetch(LITELLM_PRICING_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch LiteLLM pricing: ${response.statusText}`);
-  }
-  return response.json() as Promise<LiteLLMData>;
 }
 
 function normalizePriceNumber(value: number | null | undefined): number | null {

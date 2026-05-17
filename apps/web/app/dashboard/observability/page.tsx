@@ -60,6 +60,7 @@ const TRACE_TREE_ROW_HEIGHT_PX = 48;
 const TRACE_LOG_ROW_HEIGHT_PX = 49;
 const TRACE_VIRTUALIZE_THRESHOLD = 120;
 const ALL_WORKSPACES = "__all__";
+const EMPTY_TREE_ROWS: TreeRow[] = [];
 const NOISY_MESSAGE_FIELDS = new Set([
   "additional_kwargs",
   "artifact",
@@ -1952,7 +1953,7 @@ function TraceTree({
   onSelect: (node: SelectedNode) => void;
   viewModel: TraceDetailViewModel | null;
 }) {
-  const rows = viewModel?.treeRows ?? [];
+  const rows = viewModel?.treeRows ?? EMPTY_TREE_ROWS;
   const defaultCollapsedIds = React.useMemo(
     () => new Set(rows.filter((row) => row.defaultCollapsed).map((row) => row.id)),
     [rows],
@@ -2119,12 +2120,9 @@ function TraceLogView({
   onSelect: (node: SelectedNode) => void;
   viewModel: TraceDetailViewModel | null;
 }) {
-  const rows = viewModel?.logRows ?? [];
-  const traceStart = viewModel?.traceStartMs ?? Date.now();
-  if (!detail) {
-    return <EmptySection label="Select a trace to view the timeline." />;
-  }
-  const traceDuration = Math.max(detail.trace.latencyMs ?? 1, 1);
+  const rows = viewModel?.logRows ?? EMPTY_TREE_ROWS;
+  const traceStart = viewModel?.traceStartMs ?? 0;
+  const traceDuration = Math.max(detail?.trace.latencyMs ?? 1, 1);
   const shouldVirtualize = rows.length > TRACE_VIRTUALIZE_THRESHOLD;
   const virtualRows = useVirtualRows({
     enabled: shouldVirtualize,
@@ -2134,6 +2132,10 @@ function TraceLogView({
   const renderedRows = shouldVirtualize
     ? rows.slice(virtualRows.startIndex, virtualRows.endIndex)
     : rows;
+
+  if (!detail) {
+    return <EmptySection label="Select a trace to view the timeline." />;
+  }
 
   const renderRow = (row: TreeRow) => {
     const Icon = row.icon;
@@ -2796,7 +2798,7 @@ export default function ObservabilityPage() {
         }}
       >
         <SheetContent
-          className="w-[min(1120px,94vw)] gap-0 p-0 sm:max-w-none"
+          className="w-[min(1280px,96vw)] gap-0 p-0 sm:max-w-none"
           overlayClassName="bg-black/30"
           side="right"
         >
@@ -2814,14 +2816,36 @@ export default function ObservabilityPage() {
             onLoadMoreObservations={loadMoreObservations}
             viewModel={detailViewModel}
           />
-          <div className="min-h-0 flex-1">
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
+          <div className="flex min-h-0 flex-1">
+            <aside className="hidden w-[340px] shrink-0 flex-col border-r border-border bg-muted/20 md:flex">
+              <div className="flex h-[49px] shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
+                <div className="min-w-0">
+                  <h3 className="truncate text-xs font-medium text-foreground">
+                    Timeline
+                  </h3>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {detail ? detail.trace.name : selectedTraceKey ?? "Trace detail"}
+                  </p>
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <TraceTree
+                  detail={detail}
+                  loading={loadingDetail}
+                  onSelect={setSelectedNode}
+                  selected={selectedNode}
+                  viewModel={detailViewModel}
+                />
+              </div>
+            </aside>
+
+            <div className="flex h-full min-w-0 flex-1 flex-col">
+              <div className="flex h-[49px] shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
                 <div className="min-w-0 text-xs font-medium text-muted-foreground">
                   Detail
                 </div>
                 <Button
-                  className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                  className="h-8 shrink-0 gap-1.5 px-2 text-xs md:hidden"
                   onClick={() => setTimelineDialogOpen(true)}
                   size="sm"
                   type="button"

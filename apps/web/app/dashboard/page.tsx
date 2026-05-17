@@ -29,7 +29,11 @@ import {
 } from "../../lib/dashboard-workspace-context";
 import { useDashboardChatState } from "./_components/dashboard-chat-state";
 import { DashboardTeamSwitcher } from "./_components/dashboard-team-switcher";
-import { DashboardHomeRouteSkeleton } from "../_components/route-loading-skeleton";
+import {
+  DashboardHomeOverviewPanelSkeleton,
+  DashboardHomeRouteSkeleton,
+  DashboardHomeWorkspaceRailSkeleton,
+} from "../_components/route-loading-skeleton";
 
 type Workspace = {
   id: string;
@@ -749,9 +753,7 @@ export default function DashboardPage() {
             <SectionTitle title="Home" />
 
             {loading ? (
-              <div className="flex min-h-[340px] items-center justify-center rounded-[28px] border border-border/80 bg-card">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
+              <DashboardHomeOverviewPanelSkeleton />
             ) : (
               <OverviewPanel
                 canCreate={canCreateWorkspace}
@@ -795,9 +797,7 @@ export default function DashboardPage() {
             </div>
 
             {loading ? (
-              <div className="flex min-h-[240px] items-center justify-center rounded-[28px] border border-border/80 bg-card md:hidden">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
+              <DashboardHomeWorkspaceRailSkeleton includeCreate={false} />
             ) : filteredWorkspaces.length === 0 ? (
               <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 rounded-[28px] border border-dashed border-border/80 bg-card px-6 py-12 text-center">
                 <div className="rounded-full border border-border bg-background p-4 text-muted-foreground">

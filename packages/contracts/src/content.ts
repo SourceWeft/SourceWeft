@@ -1146,6 +1146,15 @@ export const resolveByokModelCapabilitiesResponseSchema = z.object({
   capabilities: resolvedByokModelCapabilitiesSchema.nullable(),
 });
 
+export const byokModelCandidateSchema = z.object({
+  modelId: z.string(),
+  displayName: z.string(),
+});
+
+export const listByokModelCandidatesResponseSchema = z.object({
+  items: z.array(byokModelCandidateSchema),
+});
+
 export const byokModelSchema = z.object({
   id: z.string(),
   credentialId: z.string(),
@@ -1370,6 +1379,10 @@ export type ListByokCredentialsResponse = z.infer<
 >;
 export type ListByokModelsResponse = z.infer<
   typeof listByokModelsResponseSchema
+>;
+export type ByokModelCandidate = z.infer<typeof byokModelCandidateSchema>;
+export type ListByokModelCandidatesResponse = z.infer<
+  typeof listByokModelCandidatesResponseSchema
 >;
 export type ListByokProvidersResponse = z.infer<
   typeof listByokProvidersResponseSchema

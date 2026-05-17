@@ -68,6 +68,21 @@ export function registerByokRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get("/model-gateway/byok-credentials/:credentialId/models", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentByokService.listByokModelCandidates({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      credentialId: requireRouteParam(c, "credentialId"),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/model-gateway/byok-models", async (c) => {
     const session = await requireSession(c);
     if (!session) {

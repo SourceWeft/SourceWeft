@@ -47,6 +47,12 @@ import {
   getVisibleTeamOrganizations,
   isPersonalOrganization,
 } from "./dashboard-team-selector-shared";
+import {
+  BillingPanelSkeleton,
+  SettingsSkeletonBlock,
+  TeamPanelSkeleton,
+  UsagePanelSkeleton,
+} from "./dashboard-settings-center-modal-skeleton";
 
 export type SettingsCenterTab = "account" | "team" | "usage" | "billing";
 type BillingScope = "personal" | "team";
@@ -1162,6 +1168,11 @@ export function TeamPanel({
   const teamPlan = getPricingConfig().find((plan) => plan.id === "team");
   const monthlyTeamSeatPrice = teamPlan?.monthlyPrice ?? 0;
   const yearlyTeamSeatPrice = teamPlan?.yearlyPrice ?? 0;
+  const loadingTeamData = orgs === undefined || activeOrg === undefined;
+
+  if (loadingTeamData) {
+    return <TeamPanelSkeleton />;
+  }
 
   return (
     <div className="w-full max-w-2xl divide-y divide-border/60">
@@ -1502,7 +1513,9 @@ export function UsagePanel() {
   const [activityCursor, setActivityCursor] = React.useState<string | null>(
     null,
   );
-  const [loading, setLoading] = React.useState(false);
+  const [loading, setLoading] = React.useState(
+    () => Boolean(teamId) || resolvingPersonalTeamId,
+  );
   const [loadingMoreActivity, setLoadingMoreActivity] = React.useState(false);
   const [billingPeriod, setBillingPeriod] =
     React.useState<BillingInterval>("yearly");
@@ -1691,6 +1704,11 @@ export function UsagePanel() {
     subscription,
     teamId,
   });
+  const loadingInitialUsage = loading && !summary && ledger.length === 0;
+
+  if (loadingInitialUsage) {
+    return <UsagePanelSkeleton />;
+  }
 
   return (
     <div className="w-full max-w-2xl divide-y divide-border/60">
@@ -1797,7 +1815,21 @@ export function UsagePanel() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {activityRows.length > 0 ? (
+              {loading ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <tr key={index}>
+                    <td className="px-4 py-2.5">
+                      <SettingsSkeletonBlock className="h-3 w-44 max-w-full" />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <SettingsSkeletonBlock className="h-3 w-24" />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <SettingsSkeletonBlock className="ml-auto h-3 w-14" />
+                    </td>
+                  </tr>
+                ))
+              ) : activityRows.length > 0 ? (
                 activityRows.map((row) => (
                   <tr key={row.key}>
                     <td className="px-4 py-2.5 text-foreground">
@@ -1871,7 +1903,9 @@ export function BillingPanel() {
   const [summary, setSummary] = React.useState<BillingSummary | null>(null);
   const [subscription, setSubscription] =
     React.useState<BillingSubscription | null>(null);
-  const [loading, setLoading] = React.useState(false);
+  const [loading, setLoading] = React.useState(
+    () => Boolean(teamId) || resolvingPersonalTeamId,
+  );
   const [seatActionLoading, setSeatActionLoading] = React.useState(false);
   const [seatPreviewOpen, setSeatPreviewOpen] = React.useState(false);
   const [seatPreview, setSeatPreview] = React.useState<SeatPreview | null>(
@@ -2059,6 +2093,12 @@ export function BillingPanel() {
     teamSeatCount: targetSeatCount,
   });
   const { isSubscriptionActive } = planAction;
+  const loadingInitialBilling = loading && !summary && !subscription;
+
+  if (loadingInitialBilling) {
+    return <BillingPanelSkeleton />;
+  }
+
   const canUpdateSeats =
     !isPersonal &&
     isSubscriptionActive &&

@@ -5,6 +5,7 @@ import {
 } from "../../../shared/security/public-endpoint";
 import { encryptSecret, decryptSecret } from "../../../shared/secrets";
 import { listCustomByokProviders } from "../../../shared/model-gateway/byok-provider-resolver";
+import { discoverByokModelCandidates } from "../../../shared/model-gateway/catalog-discovery";
 import { resolveModelCapabilitiesFromLitellm } from "../../../shared/model-gateway";
 import { loadRoutedGatewayConfig } from "../../../shared/model-gateway/runtime";
 import { ContentError } from "../errors";
@@ -15,6 +16,7 @@ import {
   createByokModelRecord,
   deleteByokCredentialRecord,
   deleteByokModelRecord,
+  getByokCredentialWithSecretRecord,
   getByokModelRuntimeRecord,
   listByokCredentialRecords,
   listByokModelRecords,
@@ -133,6 +135,71 @@ export class ContentByokService {
     }
 
     return { deleted: true as const, credentialId: input.credentialId };
+  }
+
+  async listByokModelCandidates(input: {
+    workspaceId: string;
+    userId: string;
+    credentialId: string;
+  }) {
+    const workspace = await requireContentWorkspace(input);
+    const credential = await getByokCredentialWithSecretRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      credentialId: input.credentialId,
+    });
+
+    if (!credential) {
+      throw new ContentError(
+        404,
+        "BYOK_CREDENTIAL_NOT_FOUND",
+        "BYOK credential not found",
+      );
+    }
+
+    const apiKey =
+      decryptSecret(
+        credential.apiKeyEncrypted,
+        config.modelGatewayEncryptionSecret,
+      ) || null;
+    if (!apiKey) {
+      throw new ContentError(
+        400,
+        "BYOK_CREDENTIAL_INVALID",
+        "BYOK credential could not be decrypted",
+      );
+    }
+
+    const baseUrl = credential.baseUrl
+      ? await validateByokEndpoint(credential.baseUrl)
+      : null;
+    if (!baseUrl) {
+      throw new ContentError(
+        400,
+        "BYOK_PROVIDER_ENDPOINT_REQUIRED",
+        "BYOK model discovery requires a provider base URL",
+      );
+    }
+
+    try {
+      const items = await discoverByokModelCandidates({
+        providerKind: credential.providerKind,
+        providerName: credential.providerName,
+        baseUrl,
+        apiKey,
+        defaultHeaders: credential.defaultHeaders,
+      });
+      return { items };
+    } catch (error) {
+      throw new ContentError(
+        502,
+        "BYOK_MODEL_DISCOVERY_FAILED",
+        error instanceof Error
+          ? error.message
+          : "Failed to discover BYOK provider models",
+      );
+    }
   }
 
   async listByokModels(input: {

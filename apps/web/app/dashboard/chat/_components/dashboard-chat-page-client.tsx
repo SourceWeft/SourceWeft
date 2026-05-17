@@ -163,11 +163,11 @@ const HeaderModelSelector = dynamic(
 );
 
 function ChatCanvasSkeleton() {
-  return <ChatCanvasPanelSkeleton />;
+  return <ChatCanvasPanelSkeleton variant="new" />;
 }
 
 function SourcesHubSkeleton() {
-  return <SourcesHubPanelSkeleton className="h-full w-full border-l" />;
+  return <SourcesHubPanelSkeleton className="hidden h-full w-[410px] shrink-0 border-l md:flex" />;
 }
 
 function useMediaQuery(query: string) {

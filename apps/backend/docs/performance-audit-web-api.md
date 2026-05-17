@@ -1,6 +1,7 @@
 # Web 页面与 API 性能审查报告
 
 审查时间：2026-05-17  
+最近更新：2026-05-18
 范围：`apps/web/app` 全部页面入口、`apps/backend/src/api/routes` 全部 Hono API 路由、相关 `packages/sdk`/`packages/contracts` 调用面。
 
 ## 摘要
@@ -41,7 +42,7 @@
 
 ### 大组件热点
 
-- `apps/web/app/dashboard/chat/[threadId]/page.tsx`：约 4883 行。
+- `apps/web/app/dashboard/chat/[threadId]/dashboard-chat-thread-page-client.tsx`：承接原 thread 页客户端实现；`page.tsx` 已收敛为动态导入入口。
 - `apps/web/app/dashboard/chat/_components/sources-hub.tsx`：约 4518 行。
 - `apps/web/app/dashboard/observability/page.tsx`：约 2336 行。
 - `apps/web/app/dashboard/_components/dashboard-settings-center-modal.tsx`：约 2475 行。
@@ -323,6 +324,7 @@
 - `apps/web/app/dashboard/chat/_components/dashboard-chat-page-client.tsx:109`
 - `apps/web/app/dashboard/chat/_components/dashboard-chat-page-client.tsx:120`
 - `apps/web/app/dashboard/chat/[threadId]/page.tsx`
+- `apps/web/app/dashboard/chat/[threadId]/dashboard-chat-thread-page-client.tsx`
 
 触发场景：
 
@@ -331,7 +333,8 @@
 性能影响：
 
 - 新建聊天页已经对 ChatCanvas、SourcesHub、HeaderModelSelector 做动态导入。
-- `[threadId]/page.tsx` 仍直接导入多个重组件，且自身包含大量聊天逻辑。
+- 原 `[threadId]/page.tsx` 直接导入多个重组件，且自身包含大量聊天逻辑。
+- 2026-05-18 已将 route entry 收敛为薄入口，并把重客户端实现迁移到动态导入的 client module。
 
 建议改法：
 
@@ -419,21 +422,21 @@
 
 ## 当前推进进展
 
-截至 2026-05-17，已落地的优化：
+截至 2026-05-18，已落地的优化：
 
-- `P0-1`：聊天流式输出已移除非必要 `flushSync`，delta 改为批量 commit，降低高 token 速率下的 React commit 压力。
+- `P0-1`：聊天流式输出已移除非必要 `flushSync`，delta 改为批量 commit；streaming assistant message 已从主 `messages` 数组拆成 `streamingAssistantSnapshot` transient state，流式过程只更新当前 assistant snapshot，结束或失败时再合并回 `messages`，并处理临时 id 到服务端 id 的替换去重；本轮进一步把流式 delta 队列、renderBlocks 拼装和 SSE chunk 解析拆到独立轻量模块，页面侧只保留网络事件分发与 React state 同步。
 - `P0-2`：`/sources` 已支持 `includeContent=false`、`limit/cursor`、`parentSourceId` 兼容参数；SourcesHub 首屏只加载根目录分页，目录展开时再按 `parentSourceId` 懒加载子节点，并为每个目录独立维护 cursor/loading/error 状态；README 编辑改为按需拉取详情。
 - `P0-3`：`/threads/:id/messages` 已支持 `limit/cursor/include`，聊天页首屏默认只加载最近消息，并提供历史消息加载入口。
-- `P1-1`：SourcesHub 搜索已使用 deferred query；sources tree 复用父子索引，选择态改为一次性 state map 计算；超大 tree 增加窗口化渲染路径。
-- `P1-2`：MessageList 已完成部分 memo 与重复计算收敛；超长历史消息列表增加保守折叠，避免极长 thread 一次性渲染全部历史节点。
-- `P1-3`：Observability trace list 已使用 summary payload；detail 前端已复用 trace view model，JSON/Formatted/Log tab 改为激活后渲染；详情接口已支持 `summaryOnly/includePayload/observationLimit/observationCursor` 兼容参数，前端默认轻量加载 trace detail，observations 支持 cursor 加载更多，`observationLimit` 已下推到 repository 查询层。
+- `P1-1`：SourcesHub 搜索已使用 deferred query；sources tree 复用父子索引，选择态改为一次性 state map 计算；超大 tree 增加窗口化渲染路径；tab 级组件拆分已完成，`SourcesTab`、`WorkfilesTab`、`ArtifactsTab`、`SkillsTab`、`CitationsTab`、`ConnectorsTab` 均已从主组件渲染体中拆出；Add Source、Create Folder、Move Source、README、Workfile Preview、删除确认等弹窗 JSX 已下沉为独立局部组件；本轮进一步把 Add Source 表单 open/tab/text/url/files/progress/drag state 抽到 `useAddSourceDialogState` hook。
+- `P1-2`：MessageList 已完成 message group 级 `React.memo` 拆分，并增加自定义 props 比较，避免流式输出和高亮变化时无关历史 group 跟随重渲染；超长历史消息列表增加保守折叠；source expansion 结果已缓存，避免每个 version render 重复展开同一批 selected sources。更深一层的 version/body 级拆分可作为后续可维护性优化。
+- `P1-3`：Observability trace list 已使用 summary payload；detail 前端已复用 trace view model，JSON/Formatted/Log tab 改为激活后渲染；详情接口已支持 `summaryOnly/includePayload/observationLimit/observationCursor` 兼容参数，前端默认轻量加载 trace detail，observations 支持 cursor 加载更多，`observationLimit` 已下推到 repository 查询层；本轮为 trace tree 与 trace log/timeline 增加前端虚拟行渲染。
 - `P2-1`：pending source 状态轮询已改为批量 status 接口。
 - `P2-2`：artifacts 已支持 cursor 分页，SourcesHub Artifacts tab 已支持加载更多。
 - `P2-3`：dashboard bootstrap 已支持 `includeModelCatalog=false` 轻量模式，前端首屏延迟加载 model catalog，workspace 切换保留轻量线程列表策略。
-- `P2-4`：聊天页多个重组件已动态导入，模型选择器纯工具已拆到轻量模块。
+- `P2-4`：聊天页多个重组件已动态导入，模型选择器纯工具已拆到轻量模块；`dashboard/chat/[threadId]/page.tsx` 已瘦身为 route skeleton + 动态 client 入口，重实现迁移到 `dashboard-chat-thread-page-client.tsx`；流式 assistant transient snapshot/alias 合并状态已拆到 `streaming-assistant-state.ts` hook，delta/render buffer 已拆到 `streaming-render-buffer.ts`，SSE parser 已拆到 `streaming-event-parser.ts`；run/stop 控制面已拆到 `chat-stream-runner-control.ts`，stream request body 构造已拆到 `streaming-request-body.ts`；`start`、`text-delta/text-replace/text-interrupted`、`tool-call-*`、`thinking-step`、`reasoning`、`citations`、`thread-title-*`、`error`、`assistant-message`、`finish` 事件分支已拆到 `streaming-event-handlers.ts`，并通过 `createStreamingEventHandlerContext` 收敛共享依赖，避免页面侧为高频分支重复传递大批状态和 normalizer。
 - `P2-5`：主要 App Router 页面已补齐 route-level skeleton loading，包括首页、dashboard、chat/new、chat/thread、observability、skills、billing、auth、account、organization、join、privacy、terms；聊天页动态导入 fallback 也换成结构化 SourcesHub/Chat skeleton。
 - `P3-2`：API 已增加慢请求/大响应 threshold logging，统一 JSON 响应会设置 `content-length`，便于记录 payload 大小；schema 与 Drizzle migration 已补 sources/messages/observability cursor 查询关键组合索引。
 
 仍待继续推进：
 
-- 用本地大数据 fixture 跑 React Profiler / Web Vitals / API P95 latency 基线。
+- 代码层面的审查报告事项已基本收尾；剩余为度量型验收：用本地大数据 fixture 跑 React Profiler / Web Vitals / API P95 latency 基线，并保存可回归对比的指标。可维护性层面完整 stream 事件分支和共享依赖 context 已从 `dashboard-chat-thread-page-client` 外移，后续若继续瘦身，可把网络 read loop 与少量同步函数再迁成更独立的 runner module。

@@ -23,16 +23,28 @@ export type GlobalGatewayEntry = {
   isDefault: boolean;
   isActive: boolean;
   isBYOK: boolean;
+  modelCatalog?: {
+    enabled: boolean;
+    kinds?: Array<
+      "chat" | "rerank" | "embedding" | "asr" | "tts" | "vision" | "image" | "video"
+    >;
+  };
 };
 
 export type GlobalProfilePricingEntry = {
-  source?: "manual" | "openrouter";
+  source?: "manual" | "openrouter" | "litellm";
   litellmKey?: string | null;
   inputCostPerToken?: number | null;
   outputCostPerToken?: number | null;
   cacheReadInputTokenCost?: number | null;
   cacheCreationInputTokenCost?: number | null;
   outputCostPerReasoningToken?: number | null;
+  inputCostPerImageToken?: number | null;
+  outputCostPerImageToken?: number | null;
+  inputCostPerAudioToken?: number | null;
+  outputCostPerAudioToken?: number | null;
+  inputCostPerImage?: number | null;
+  outputCostPerImage?: number | null;
 };
 
 export type GlobalModelProfileEntry = {
@@ -105,6 +117,7 @@ type RawGlobalGatewayEntry = {
   isDefault?: unknown;
   isActive?: unknown;
   isBYOK?: unknown;
+  modelCatalog?: unknown;
 };
 
 type RawGlobalModelProfileEntry = {
@@ -126,6 +139,40 @@ type RawGlobalModelProfileEntry = {
 };
 
 const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const MODEL_CATALOG_KINDS = [
+  "chat",
+  "rerank",
+  "embedding",
+  "asr",
+  "tts",
+  "vision",
+  "image",
+  "video",
+] as const;
+
+function asModelCatalogKinds(value: unknown, field: string) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${field}`);
+  }
+
+  return Array.from(
+    new Set(
+      value.map((item, index) => {
+        if (typeof item !== "string") {
+          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+        }
+        const normalized = item.trim().toLowerCase();
+        if (!MODEL_CATALOG_KINDS.includes(normalized as (typeof MODEL_CATALOG_KINDS)[number])) {
+          throw new Error(`Invalid global model gateway config field: ${field}[${index}]`);
+        }
+        return normalized as (typeof MODEL_CATALOG_KINDS)[number];
+      }),
+    ),
+  );
+}
 
 function asReasoningEffortArray(value: unknown, field: string) {
   if (value === undefined || value === null) {
@@ -169,6 +216,7 @@ type RawGlobalEmbeddingProfileEntry = {
 };
 
 type RawGlobalModelGatewayConfig = {
+  _comment?: unknown;
   gateways?: unknown;
   chatProfiles?: unknown;
   imageProfiles?: unknown;
@@ -391,6 +439,30 @@ function parsePricingEntry(
     record.outputCostPerReasoningToken,
     `${fieldName}.outputCostPerReasoningToken`,
   );
+  parsed.inputCostPerImageToken = asOptionalNullableNumber(
+    record.inputCostPerImageToken,
+    `${fieldName}.inputCostPerImageToken`,
+  );
+  parsed.outputCostPerImageToken = asOptionalNullableNumber(
+    record.outputCostPerImageToken,
+    `${fieldName}.outputCostPerImageToken`,
+  );
+  parsed.inputCostPerAudioToken = asOptionalNullableNumber(
+    record.inputCostPerAudioToken,
+    `${fieldName}.inputCostPerAudioToken`,
+  );
+  parsed.outputCostPerAudioToken = asOptionalNullableNumber(
+    record.outputCostPerAudioToken,
+    `${fieldName}.outputCostPerAudioToken`,
+  );
+  parsed.inputCostPerImage = asOptionalNullableNumber(
+    record.inputCostPerImage,
+    `${fieldName}.inputCostPerImage`,
+  );
+  parsed.outputCostPerImage = asOptionalNullableNumber(
+    record.outputCostPerImage,
+    `${fieldName}.outputCostPerImage`,
+  );
 
   return parsed;
 }
@@ -410,6 +482,21 @@ function parseGatewayEntry(
   }
 
   const slug = asNonEmptyString(entry.slug, `gateways[${index}].slug`);
+
+  const modelCatalog =
+    entry.modelCatalog && typeof entry.modelCatalog === "object" &&
+      !Array.isArray(entry.modelCatalog)
+      ? {
+          enabled: asBoolean(
+            (entry.modelCatalog as Record<string, unknown>).enabled,
+            false,
+          ),
+          kinds: asModelCatalogKinds(
+            (entry.modelCatalog as Record<string, unknown>).kinds,
+            `gateways[${index}].modelCatalog.kinds`,
+          ),
+        }
+      : undefined;
 
   return {
     slug,
@@ -440,6 +527,7 @@ function parseGatewayEntry(
     isDefault: asBoolean(entry.isDefault, false),
     isActive: asBoolean(entry.isActive, true),
     isBYOK: asBoolean(entry.isBYOK, false),
+    ...(modelCatalog ? { modelCatalog } : {}),
   };
 }
 

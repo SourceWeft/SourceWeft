@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import {
   BookOpenIcon,
   Copy,
@@ -546,6 +546,579 @@ type MessageListProps = {
 const MESSAGE_HISTORY_COLLAPSE_THRESHOLD = 140;
 const MESSAGE_HISTORY_VISIBLE_TAIL_COUNT = 100;
 
+type SelectedSourceIdsResolver = {
+  resolve: (version: MessageVersion) => string[];
+};
+
+type MessageVersionEntry = {
+  originalIndex: number;
+  version: MessageVersion;
+};
+
+function resolveVersionEntries(input: {
+  group: VersionedMessageGroup;
+  selectedUserVersionIdForAssistant: string | null;
+}) {
+  const allEntries = input.group.versions.map((version, originalIndex) => ({
+    originalIndex,
+    version,
+  }));
+
+  if (
+    input.group.role !== "assistant" ||
+    !input.selectedUserVersionIdForAssistant
+  ) {
+    return allEntries;
+  }
+
+  const scopedEntries = allEntries.filter(
+    (entry) =>
+      entry.version.sourceUserMessageId ===
+      input.selectedUserVersionIdForAssistant,
+  );
+
+  return scopedEntries.length > 0 ? scopedEntries : allEntries;
+}
+
+function resolveActiveOriginalBranchIndex(input: {
+  desiredOriginalBranchIndexRaw?: number;
+  versionEntries: MessageVersionEntry[];
+}) {
+  const latestVisibleVersionIndex = Math.max(input.versionEntries.length - 1, 0);
+  const defaultOriginalBranchIndex =
+    input.versionEntries[latestVisibleVersionIndex]?.originalIndex ?? 0;
+  const desiredOriginalBranchIndex =
+    typeof input.desiredOriginalBranchIndexRaw === "number"
+      ? input.desiredOriginalBranchIndexRaw
+      : defaultOriginalBranchIndex;
+  const matchedVisibleIndex = input.versionEntries.findIndex(
+    (entry) => entry.originalIndex === desiredOriginalBranchIndex,
+  );
+  const activeVisibleBranchIndex =
+    matchedVisibleIndex >= 0 ? matchedVisibleIndex : latestVisibleVersionIndex;
+  const activeOriginalBranchIndex =
+    input.versionEntries[activeVisibleBranchIndex]?.originalIndex ?? 0;
+
+  return { activeOriginalBranchIndex, activeVisibleBranchIndex };
+}
+
+function resolveSelectedUserVersionIdForAssistant(input: {
+  activeVersionByGroup: Record<string, number>;
+  group: VersionedMessageGroup;
+  messageGroups: VersionedMessageGroup[];
+}) {
+  if (input.group.role !== "assistant" || !input.group.turnId) {
+    return null;
+  }
+
+  const userGroup = input.messageGroups.find(
+    (candidate) =>
+      candidate.role === "user" && candidate.turnId === input.group.turnId,
+  );
+  if (!userGroup) {
+    return null;
+  }
+
+  const latestUserVersionIndex = Math.max(userGroup.versions.length - 1, 0);
+  const desiredUserBranchIndexRaw =
+    input.activeVersionByGroup[userGroup.groupId];
+  const activeUserBranchIndex = Math.min(
+    Math.max(desiredUserBranchIndexRaw ?? latestUserVersionIndex, 0),
+    latestUserVersionIndex,
+  );
+  return userGroup.versions[activeUserBranchIndex]?.id ?? null;
+}
+
+function resolveSelectedAssistantVersionForUser(input: {
+  activeVersionByGroup: Record<string, number>;
+  messageGroups: VersionedMessageGroup[];
+  selectedUserVersionId: string | null;
+}) {
+  if (!input.selectedUserVersionId) {
+    return null;
+  }
+
+  const assistantGroup = input.messageGroups.find(
+    (candidate) =>
+      candidate.role === "assistant" &&
+      candidate.versions.some(
+        (version) =>
+          version.sourceUserMessageId === input.selectedUserVersionId,
+      ),
+  );
+  if (!assistantGroup) {
+    return null;
+  }
+
+  const maxAssistantIndex = Math.max(assistantGroup.versions.length - 1, 0);
+  const preferredAssistantIndex = Math.min(
+    Math.max(
+      input.activeVersionByGroup[assistantGroup.groupId] ?? maxAssistantIndex,
+      0,
+    ),
+    maxAssistantIndex,
+  );
+  const preferredAssistantVersion =
+    assistantGroup.versions[preferredAssistantIndex] ?? null;
+  if (
+    preferredAssistantVersion?.sourceUserMessageId === input.selectedUserVersionId
+  ) {
+    return preferredAssistantVersion;
+  }
+
+  for (let index = assistantGroup.versions.length - 1; index >= 0; index -= 1) {
+    const candidate = assistantGroup.versions[index];
+    if (candidate?.sourceUserMessageId === input.selectedUserVersionId) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function copyMessageText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success("Message copied.");
+  } catch {
+    toast.error("Couldn't copy the message.");
+  }
+}
+
+function versionContainsHighlight(
+  group: VersionedMessageGroup,
+  highlightedMessageId: string | null | undefined,
+) {
+  return Boolean(
+    highlightedMessageId &&
+      group.versions.some((version) => version.id === highlightedMessageId),
+  );
+}
+
+function shallowArrayEqual(left?: string[], right?: string[]) {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+  return left.every((item, index) => item === right[index]);
+}
+
+function summarizeToolCalls(toolCalls: MessageVersion["toolCalls"]) {
+  return (toolCalls ?? [])
+    .map(
+      (toolCall) =>
+        `${toolCall.id}:${toolCall.tool}:${toolCall.status}:${toolCall.error ?? ""}`,
+    )
+    .join("|");
+}
+
+function summarizeThinkingSteps(steps: MessageVersion["thinkingSteps"]) {
+  return (steps ?? [])
+    .map(
+      (step) =>
+        `${step.id}:${step.status}:${step.title}:${step.description ?? ""}:${step.detail ?? ""}:${step.items.length}`,
+    )
+    .join("|");
+}
+
+function summarizeRenderBlocks(blocks: MessageVersion["renderBlocks"]) {
+  return (blocks ?? [])
+    .map((block) => {
+      if (block.type === "text") {
+        return `${block.id}:text:${block.text.length}`;
+      }
+      if (block.type === "generated_image") {
+        return `${block.id}:generated_image:${block.toolCallId}`;
+      }
+      return "";
+    })
+    .join("|");
+}
+
+function areMessageVersionsRenderEqual(
+  left: MessageVersion,
+  right: MessageVersion,
+) {
+  return (
+    left.id === right.id &&
+    left.renderKey === right.renderKey &&
+    left.content === right.content &&
+    left.error === right.error &&
+    left.errorCode === right.errorCode &&
+    left.isCancelled === right.isCancelled &&
+    left.isError === right.isError &&
+    left.isTextInterrupted === right.isTextInterrupted &&
+    left.isTextPaused === right.isTextPaused &&
+    left.modelReasoning === right.modelReasoning &&
+    left.sourceAssistantMessageId === right.sourceAssistantMessageId &&
+    left.sourceUserMessageId === right.sourceUserMessageId &&
+    shallowArrayEqual(left.sourceIds, right.sourceIds) &&
+    shallowArrayEqual(left.effectiveSourceIds, right.effectiveSourceIds) &&
+    shallowArrayEqual(left.mentionedSourceIds, right.mentionedSourceIds) &&
+    shallowArrayEqual(
+      left.effectiveMentionedSourceIds,
+      right.effectiveMentionedSourceIds,
+    ) &&
+    summarizeToolCalls(left.toolCalls) === summarizeToolCalls(right.toolCalls) &&
+    summarizeThinkingSteps(left.thinkingSteps) ===
+      summarizeThinkingSteps(right.thinkingSteps) &&
+    summarizeRenderBlocks(left.renderBlocks) ===
+      summarizeRenderBlocks(right.renderBlocks) &&
+    (left.citations?.length ?? 0) === (right.citations?.length ?? 0) &&
+    (left.availableCitations?.length ?? 0) ===
+      (right.availableCitations?.length ?? 0) &&
+    (left.modelReasoningSegments?.length ?? 0) ===
+      (right.modelReasoningSegments?.length ?? 0)
+  );
+}
+
+function areMessageGroupsRenderEqual(
+  left: VersionedMessageGroup,
+  right: VersionedMessageGroup,
+) {
+  return (
+    left.groupId === right.groupId &&
+    left.latestVersionId === right.latestVersionId &&
+    left.role === right.role &&
+    left.turnId === right.turnId &&
+    left.versions.length === right.versions.length &&
+    left.versions.every((version, index) =>
+      areMessageVersionsRenderEqual(version, right.versions[index] as MessageVersion),
+    )
+  );
+}
+
+type MessageGroupItemProps = {
+  activeOriginalBranchIndexRaw?: number;
+  group: VersionedMessageGroup;
+  highlightedMessageId: string | null;
+  isLatestAssistantGroup: boolean;
+  isLatestUserGroup: boolean;
+  isStreaming: boolean;
+  onActiveVersionChange?: MessageListProps["onActiveVersionChange"];
+  onArtifactPreview?: MessageListProps["onArtifactPreview"];
+  onCitationClick?: MessageListProps["onCitationClick"];
+  onRefreshLatest?: MessageListProps["onRefreshLatest"];
+  onRestartFromMessage?: MessageListProps["onRestartFromMessage"];
+  onSourcePreview?: MessageListProps["onSourcePreview"];
+  onWorkfileClick?: MessageListProps["onWorkfileClick"];
+  selectedAssistantVersionForUser: MessageVersion | null;
+  selectedUserVersionIdForAssistant: string | null;
+  selectedSourceIdsByKey: SelectedSourceIdsResolver;
+  sourceById: Map<string, SourceItem>;
+  workspaceId?: string | null;
+};
+
+const MessageGroupItem = memo(function MessageGroupItem({
+  activeOriginalBranchIndexRaw,
+  group,
+  highlightedMessageId,
+  isLatestAssistantGroup,
+  isLatestUserGroup,
+  isStreaming,
+  onActiveVersionChange,
+  onArtifactPreview,
+  onCitationClick,
+  onRefreshLatest,
+  onRestartFromMessage,
+  onSourcePreview,
+  onWorkfileClick,
+  selectedAssistantVersionForUser,
+  selectedSourceIdsByKey,
+  selectedUserVersionIdForAssistant,
+  sourceById,
+  workspaceId,
+}: MessageGroupItemProps) {
+  const isAssistant = group.role === "assistant";
+  const versionEntries = resolveVersionEntries({
+    group,
+    selectedUserVersionIdForAssistant,
+  });
+  const { activeOriginalBranchIndex, activeVisibleBranchIndex } =
+    resolveActiveOriginalBranchIndex({
+      desiredOriginalBranchIndexRaw: activeOriginalBranchIndexRaw,
+      versionEntries,
+    });
+  const toolbarVisibilityClass =
+    "invisible pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:visible group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:visible group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100";
+
+  return (
+    <MessageBranch
+      className="group/message flex w-full flex-col gap-1"
+      defaultBranch={activeVisibleBranchIndex}
+      onBranchChange={(branchIndex) => {
+        const selectedEntry = versionEntries[branchIndex];
+        if (!selectedEntry) {
+          return;
+        }
+
+        onActiveVersionChange?.({
+          groupId: group.groupId,
+          branchIndex: selectedEntry.originalIndex,
+        });
+      }}
+    >
+      <MessageBranchContent>
+        {versionEntries.map(({ version }, versionIndex) => {
+          const messageText = getMessageText({
+            version,
+            workspaceId,
+          });
+          const userMessageImages = !isAssistant
+            ? getMessageImageParts(version)
+            : [];
+          const isStreamingThisVersion =
+            isStreaming &&
+            isAssistant &&
+            isLatestAssistantGroup &&
+            versionIndex === activeVisibleBranchIndex;
+          const referencedSources = !isAssistant
+            ? selectedSourceIdsByKey
+                .resolve(version)
+                .map((sourceId) => sourceById.get(sourceId))
+                .filter((source): source is SourceItem => Boolean(source))
+            : [];
+          const mentionSources = !isAssistant
+            ? mergeSourceIds(
+                version.mentionedSourceIds,
+                version.effectiveMentionedSourceIds,
+              )
+                .map((sourceId) => sourceById.get(sourceId))
+                .filter((source): source is SourceItem => Boolean(source))
+            : [];
+
+          return (
+            <div
+              className={cn(
+                "flex w-full flex-col gap-1 rounded-2xl transition-colors duration-700",
+                highlightedMessageId === version.id &&
+                  "bg-primary/10 ring-1 ring-primary/25",
+              )}
+              data-chat-message-id={version.id}
+              key={version.renderKey ?? version.id}
+            >
+              {!isAssistant ? (
+                <UserMessageReferences
+                  images={userMessageImages}
+                  sources={referencedSources}
+                />
+              ) : null}
+              <Message from={group.role}>
+                <MessageContent
+                  className={
+                    isAssistant
+                      ? "max-w-none"
+                      : "w-fit max-w-full rounded-3xl bg-secondary px-4 py-3 text-foreground shadow-sm"
+                  }
+                >
+                  {!isAssistant ? (
+                    <div className="whitespace-pre-wrap break-words leading-6">
+                      <UserMessageContent
+                        content={messageText}
+                        onSourcePreview={onSourcePreview}
+                        sourceById={sourceById}
+                        sources={mentionSources}
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <ReasoningTrace
+                        isCancelled={version.isCancelled === true}
+                        isStreaming={isStreamingThisVersion}
+                        modelReasoning={version.modelReasoning}
+                        modelReasoningSegments={version.modelReasoningSegments}
+                        onArtifactPreview={onArtifactPreview}
+                        steps={version.thinkingSteps}
+                        toolCalls={version.toolCalls}
+                        workspaceId={workspaceId}
+                      />
+                      <WebToolResults
+                        availableCitations={version.availableCitations}
+                        onCitationClick={onCitationClick}
+                        toolCalls={version.toolCalls}
+                      />
+                      <AssistantMessageBody
+                        isStreaming={isStreamingThisVersion}
+                        messageText={messageText}
+                        onCitationClick={onCitationClick}
+                        onWorkfileClick={onWorkfileClick}
+                        version={version}
+                        workspaceId={workspaceId}
+                      />
+                      {version.isError && !version.isCancelled ? (
+                        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                          <p className="font-medium">Message failed</p>
+                          <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
+                            {version.error ?? messageText}
+                          </p>
+                          {version.errorCode ? (
+                            <p className="mt-1 text-xs text-destructive/70">
+                              {version.errorCode}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </MessageContent>
+              </Message>
+
+              <MessageToolbar
+                className={cn(
+                  "mt-0.5 min-h-7 px-1 text-xs text-muted-foreground transition-opacity duration-150",
+                  isAssistant ? "justify-start" : "justify-end",
+                  toolbarVisibilityClass,
+                )}
+              >
+                <div className="flex items-center gap-1">
+                  <MessageActions>
+                    <MessageAction
+                      className="text-muted-foreground hover:text-foreground"
+                      label="Copy"
+                      onClick={() => void copyMessageText(messageText)}
+                      size="icon-sm"
+                      tooltip="Copy"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Copy className="size-3" />
+                    </MessageAction>
+
+                    {!isAssistant &&
+                    isLatestUserGroup &&
+                    versionIndex === activeVisibleBranchIndex &&
+                    !isStreaming ? (
+                      <MessageAction
+                        className="text-muted-foreground hover:text-foreground"
+                        label="Edit prompt"
+                        onClick={() => {
+                          onRestartFromMessage?.({
+                            groupId: group.groupId,
+                            message: messageText,
+                            messageId: version.id,
+                            assistantMessageId:
+                              selectedAssistantVersionForUser?.id ?? null,
+                            branchIndex: activeOriginalBranchIndex,
+                          });
+                        }}
+                        size="icon-sm"
+                        tooltip="Edit and restart"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Pencil className="size-3" />
+                      </MessageAction>
+                    ) : null}
+
+                    {isAssistant &&
+                    isLatestAssistantGroup &&
+                    versionIndex === activeVisibleBranchIndex &&
+                    !isStreaming ? (
+                      <MessageAction
+                        className="text-muted-foreground hover:text-foreground"
+                        label="Refresh"
+                        onClick={() => {
+                          onRefreshLatest?.({
+                            groupId: group.groupId,
+                            assistantMessageId: version.id,
+                            branchIndex: activeOriginalBranchIndex,
+                          });
+                        }}
+                        size="icon-sm"
+                        tooltip="Refresh"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <RotateCcw className="size-3" />
+                      </MessageAction>
+                    ) : null}
+                  </MessageActions>
+
+                  <MessageBranchSelector>
+                    <MessageBranchPrevious className="text-muted-foreground hover:text-foreground" />
+                    <MessageBranchPage />
+                    <MessageBranchNext className="text-muted-foreground hover:text-foreground" />
+                  </MessageBranchSelector>
+                </div>
+              </MessageToolbar>
+            </div>
+          );
+        })}
+      </MessageBranchContent>
+    </MessageBranch>
+  );
+}, areMessageGroupItemPropsEqual);
+
+function areMessageGroupItemPropsEqual(
+  previous: MessageGroupItemProps,
+  next: MessageGroupItemProps,
+) {
+  if (!areMessageGroupsRenderEqual(previous.group, next.group)) {
+    return false;
+  }
+  if (
+    previous.activeOriginalBranchIndexRaw !==
+      next.activeOriginalBranchIndexRaw ||
+    previous.isLatestAssistantGroup !== next.isLatestAssistantGroup ||
+    previous.isLatestUserGroup !== next.isLatestUserGroup ||
+    previous.selectedUserVersionIdForAssistant !==
+      next.selectedUserVersionIdForAssistant ||
+    previous.sourceById !== next.sourceById ||
+    previous.selectedSourceIdsByKey !== next.selectedSourceIdsByKey ||
+    previous.workspaceId !== next.workspaceId ||
+    previous.onActiveVersionChange !== next.onActiveVersionChange ||
+    previous.onArtifactPreview !== next.onArtifactPreview ||
+    previous.onCitationClick !== next.onCitationClick ||
+    previous.onRefreshLatest !== next.onRefreshLatest ||
+    previous.onRestartFromMessage !== next.onRestartFromMessage ||
+    previous.onSourcePreview !== next.onSourcePreview ||
+    previous.onWorkfileClick !== next.onWorkfileClick
+  ) {
+    return false;
+  }
+  if (
+    previous.isStreaming !== next.isStreaming &&
+    (previous.isLatestAssistantGroup ||
+      next.isLatestAssistantGroup ||
+      previous.isLatestUserGroup ||
+      next.isLatestUserGroup)
+  ) {
+    return false;
+  }
+  if (
+    !areNullableMessageVersionsRenderEqual(
+      previous.selectedAssistantVersionForUser,
+      next.selectedAssistantVersionForUser,
+    )
+  ) {
+    return false;
+  }
+  if (
+    previous.highlightedMessageId !== next.highlightedMessageId &&
+    (versionContainsHighlight(previous.group, previous.highlightedMessageId) ||
+      versionContainsHighlight(previous.group, next.highlightedMessageId))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function areNullableMessageVersionsRenderEqual(
+  previous: MessageVersion | null,
+  next: MessageVersion | null,
+) {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return false;
+  }
+  return areMessageVersionsRenderEqual(previous, next);
+}
+
 export function MessageList({
   activeVersionByGroup = {},
   allSources = [],
@@ -625,15 +1198,6 @@ export function MessageList({
       ? messageGroups.slice(collapsedHistoryCount)
       : messageGroups;
 
-  async function handleCopyMessage(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success("Message copied.");
-    } catch {
-      toast.error("Couldn't copy the message.");
-    }
-  }
-
   return (
     <Conversation className="min-h-0 flex-1">
       <ConversationContent className="px-6 py-8">
@@ -671,357 +1235,63 @@ export function MessageList({
             </div>
           ) : null}
           {visibleMessageGroups.map((group) => {
-            const isAssistant = group.role === "assistant";
-            const selectedUserVersionIdForAssistant = isAssistant
-              ? (() => {
-                  const userGroup = group.turnId
-                    ? messageGroups.find(
-                        (candidate) =>
-                          candidate.role === "user" &&
-                          candidate.turnId === group.turnId,
-                      )
-                    : null;
-                  if (!userGroup) {
-                    return null;
-                  }
-
-                  const latestUserVersionIndex = Math.max(
-                    userGroup.versions.length - 1,
-                    0,
-                  );
-                  const desiredUserBranchIndexRaw =
-                    activeVersionByGroup[userGroup.groupId];
-                  const activeUserBranchIndex = Math.min(
-                    Math.max(
-                      desiredUserBranchIndexRaw ?? latestUserVersionIndex,
-                      0,
-                    ),
-                    latestUserVersionIndex,
-                  );
-                  return userGroup.versions[activeUserBranchIndex]?.id ?? null;
-                })()
-              : null;
-
-            const versionEntries = (() => {
-              const allEntries = group.versions.map(
-                (version, originalIndex) => ({
-                  version,
-                  originalIndex,
-                }),
-              );
-
-              if (!isAssistant || !selectedUserVersionIdForAssistant) {
-                return allEntries;
-              }
-
-              const scopedEntries = allEntries.filter(
-                (entry) =>
-                  entry.version.sourceUserMessageId ===
-                  selectedUserVersionIdForAssistant,
-              );
-
-              return scopedEntries.length > 0 ? scopedEntries : allEntries;
-            })();
-
-            const latestVisibleVersionIndex = Math.max(
-              versionEntries.length - 1,
-              0,
-            );
-            const desiredOriginalBranchIndexRaw =
-              activeVersionByGroup[group.groupId];
-            const defaultOriginalBranchIndex =
-              versionEntries[latestVisibleVersionIndex]?.originalIndex ?? 0;
-            const desiredOriginalBranchIndex =
-              typeof desiredOriginalBranchIndexRaw === "number"
-                ? desiredOriginalBranchIndexRaw
-                : defaultOriginalBranchIndex;
-            const matchedVisibleIndex = versionEntries.findIndex(
-              (entry) => entry.originalIndex === desiredOriginalBranchIndex,
-            );
-            const activeVisibleBranchIndex =
-              matchedVisibleIndex >= 0
-                ? matchedVisibleIndex
-                : latestVisibleVersionIndex;
-            const activeOriginalBranchIndex =
-              versionEntries[activeVisibleBranchIndex]?.originalIndex ?? 0;
-
+            const selectedUserVersionIdForAssistant =
+              resolveSelectedUserVersionIdForAssistant({
+                activeVersionByGroup,
+                group,
+                messageGroups,
+              });
+            const versionEntries = resolveVersionEntries({
+              group,
+              selectedUserVersionIdForAssistant,
+            });
+            const { activeOriginalBranchIndex } =
+              resolveActiveOriginalBranchIndex({
+                desiredOriginalBranchIndexRaw: activeVersionByGroup[group.groupId],
+                versionEntries,
+              });
+            const selectedUserVersionId =
+              group.role === "user"
+                ? (group.versions[activeOriginalBranchIndex]?.id ?? null)
+                : null;
+            const selectedAssistantVersionForUser =
+              resolveSelectedAssistantVersionForUser({
+                activeVersionByGroup,
+                messageGroups,
+                selectedUserVersionId,
+              });
             const isLatestUserGroup = group.groupId === latestUserGroupId;
             const isLatestAssistantGroup =
               group.groupId === latestAssistantGroupId;
-            const selectedUserVersionId = !isAssistant
-              ? (group.versions[activeOriginalBranchIndex]?.id ?? null)
-              : null;
-            const assistantGroupForUser =
-              !isAssistant && selectedUserVersionId
-                ? messageGroups.find(
-                    (candidate) =>
-                      candidate.role === "assistant" &&
-                      candidate.versions.some(
-                        (version) =>
-                          version.sourceUserMessageId === selectedUserVersionId,
-                      ),
-                  )
-                : null;
-            const selectedAssistantVersionForUser = (() => {
-              if (!assistantGroupForUser || !selectedUserVersionId) {
-                return null;
-              }
-
-              const maxAssistantIndex = Math.max(
-                assistantGroupForUser.versions.length - 1,
-                0,
-              );
-              const preferredAssistantIndex = Math.min(
-                Math.max(
-                  activeVersionByGroup[assistantGroupForUser.groupId] ??
-                    maxAssistantIndex,
-                  0,
-                ),
-                maxAssistantIndex,
-              );
-              const preferredAssistantVersion =
-                assistantGroupForUser.versions[preferredAssistantIndex] ?? null;
-              if (
-                preferredAssistantVersion?.sourceUserMessageId ===
-                selectedUserVersionId
-              ) {
-                return preferredAssistantVersion;
-              }
-
-              for (
-                let index = assistantGroupForUser.versions.length - 1;
-                index >= 0;
-                index -= 1
-              ) {
-                const candidate = assistantGroupForUser.versions[index];
-                if (candidate?.sourceUserMessageId === selectedUserVersionId) {
-                  return candidate;
-                }
-              }
-
-              return null;
-            })();
-            const toolbarVisibilityClass =
-              "invisible pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:visible group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:visible group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100";
 
             return (
-              <MessageBranch
-                className="group/message flex w-full flex-col gap-1"
-                defaultBranch={activeVisibleBranchIndex}
+              <MessageGroupItem
+                activeOriginalBranchIndexRaw={
+                  activeVersionByGroup[group.groupId]
+                }
+                group={group}
+                highlightedMessageId={highlightedMessageId}
+                isLatestAssistantGroup={isLatestAssistantGroup}
+                isLatestUserGroup={isLatestUserGroup}
+                isStreaming={isStreaming}
                 key={`${group.groupId}:${group.latestVersionId}:${selectedUserVersionIdForAssistant ?? "all"}:${activeOriginalBranchIndex}`}
-                onBranchChange={(branchIndex) => {
-                  const selectedEntry = versionEntries[branchIndex];
-                  if (!selectedEntry) {
-                    return;
-                  }
-
-                  onActiveVersionChange?.({
-                    groupId: group.groupId,
-                    branchIndex: selectedEntry.originalIndex,
-                  });
-                }}
-              >
-                <MessageBranchContent>
-                  {versionEntries.map(({ version }, versionIndex) => {
-                    const messageText = getMessageText({
-                      version,
-                      workspaceId,
-                    });
-                    const userMessageImages = !isAssistant
-                      ? getMessageImageParts(version)
-                      : [];
-                    const isStreamingThisVersion =
-                      isStreaming &&
-                      isAssistant &&
-                      isLatestAssistantGroup &&
-                      versionIndex === activeVisibleBranchIndex;
-                    const referencedSources = !isAssistant
-                      ? selectedSourceIdsByKey
-                          .resolve(version)
-                          .map((sourceId) => sourceById.get(sourceId))
-                          .filter((source): source is SourceItem =>
-                            Boolean(source),
-                          )
-                      : [];
-                    const mentionSources = !isAssistant
-                      ? mergeSourceIds(
-                          version.mentionedSourceIds,
-                          version.effectiveMentionedSourceIds,
-                        )
-                          .map((sourceId) => sourceById.get(sourceId))
-                          .filter((source): source is SourceItem =>
-                            Boolean(source),
-                          )
-                      : [];
-
-                    return (
-                      <div
-                        className={cn(
-                          "flex w-full flex-col gap-1 rounded-2xl transition-colors duration-700",
-                          highlightedMessageId === version.id &&
-                            "bg-primary/10 ring-1 ring-primary/25",
-                        )}
-                        data-chat-message-id={version.id}
-                        key={version.renderKey ?? version.id}
-                      >
-                        {!isAssistant ? (
-                          <UserMessageReferences
-                            images={userMessageImages}
-                            sources={referencedSources}
-                          />
-                        ) : null}
-                        <Message from={group.role}>
-                          <MessageContent
-                            className={
-                              isAssistant
-                                ? "max-w-none"
-                                : "w-fit max-w-full rounded-3xl bg-secondary px-4 py-3 text-foreground shadow-sm"
-                            }
-                          >
-                            {!isAssistant ? (
-                              <div className="whitespace-pre-wrap break-words leading-6">
-                                <UserMessageContent
-                                  content={messageText}
-                                  onSourcePreview={onSourcePreview}
-                                  sourceById={sourceById}
-                                  sources={mentionSources}
-                                />
-                              </div>
-                            ) : (
-                              <div className="space-y-3">
-                                <ReasoningTrace
-                                  isCancelled={version.isCancelled === true}
-                                  isStreaming={isStreamingThisVersion}
-                                  modelReasoning={version.modelReasoning}
-                                  modelReasoningSegments={
-                                    version.modelReasoningSegments
-                                  }
-                                  onArtifactPreview={onArtifactPreview}
-                                  steps={version.thinkingSteps}
-                                  toolCalls={version.toolCalls}
-                                  workspaceId={workspaceId}
-                                />
-                                <WebToolResults
-                                  availableCitations={
-                                    version.availableCitations
-                                  }
-                                  onCitationClick={onCitationClick}
-                                  toolCalls={version.toolCalls}
-                                />
-                                <AssistantMessageBody
-                                  isStreaming={isStreamingThisVersion}
-                                  messageText={messageText}
-                                  onCitationClick={onCitationClick}
-                                  onWorkfileClick={onWorkfileClick}
-                                  version={version}
-                                  workspaceId={workspaceId}
-                                />
-                                {version.isError && !version.isCancelled ? (
-                                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                    <p className="font-medium">
-                                      Message failed
-                                    </p>
-                                    <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
-                                      {version.error ?? messageText}
-                                    </p>
-                                    {version.errorCode ? (
-                                      <p className="mt-1 text-xs text-destructive/70">
-                                        {version.errorCode}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                            )}
-                          </MessageContent>
-                        </Message>
-
-                        <MessageToolbar
-                          className={cn(
-                            "mt-0.5 min-h-7 px-1 text-xs text-muted-foreground transition-opacity duration-150",
-                            isAssistant ? "justify-start" : "justify-end",
-                            toolbarVisibilityClass,
-                          )}
-                        >
-                          <div className="flex items-center gap-1">
-                            <MessageActions>
-                              <MessageAction
-                                className="text-muted-foreground hover:text-foreground"
-                                label="Copy"
-                                onClick={() =>
-                                  void handleCopyMessage(messageText)
-                                }
-                                size="icon-sm"
-                                tooltip="Copy"
-                                type="button"
-                                variant="ghost"
-                              >
-                                <Copy className="size-3" />
-                              </MessageAction>
-
-                              {!isAssistant &&
-                          isLatestUserGroup &&
-                          versionIndex === activeVisibleBranchIndex &&
-                          !isStreaming ? (
-                                <MessageAction
-                                  className="text-muted-foreground hover:text-foreground"
-                                  label="Edit prompt"
-                                  onClick={() => {
-                                    onRestartFromMessage?.({
-                                      groupId: group.groupId,
-                                      message: messageText,
-                                      messageId: version.id,
-                                      assistantMessageId:
-                                        selectedAssistantVersionForUser?.id ??
-                                        null,
-                                      branchIndex: activeOriginalBranchIndex,
-                                    });
-                                  }}
-                                  size="icon-sm"
-                                  tooltip="Edit and restart"
-                                  type="button"
-                                  variant="ghost"
-                                >
-                                  <Pencil className="size-3" />
-                                </MessageAction>
-                              ) : null}
-
-                              {isAssistant &&
-                              isLatestAssistantGroup &&
-                              versionIndex === activeVisibleBranchIndex &&
-                              !isStreaming ? (
-                                <MessageAction
-                                  className="text-muted-foreground hover:text-foreground"
-                                  label="Refresh"
-                                  onClick={() => {
-                                    onRefreshLatest?.({
-                                      groupId: group.groupId,
-                                      assistantMessageId: version.id,
-                                      branchIndex: activeOriginalBranchIndex,
-                                    });
-                                  }}
-                                  size="icon-sm"
-                                  tooltip="Refresh"
-                                  type="button"
-                                  variant="ghost"
-                                >
-                                  <RotateCcw className="size-3" />
-                                </MessageAction>
-                              ) : null}
-                            </MessageActions>
-
-                            <MessageBranchSelector>
-                              <MessageBranchPrevious className="text-muted-foreground hover:text-foreground" />
-                              <MessageBranchPage />
-                              <MessageBranchNext className="text-muted-foreground hover:text-foreground" />
-                            </MessageBranchSelector>
-                          </div>
-                        </MessageToolbar>
-                      </div>
-                    );
-                  })}
-                </MessageBranchContent>
-              </MessageBranch>
+                onActiveVersionChange={onActiveVersionChange}
+                onArtifactPreview={onArtifactPreview}
+                onCitationClick={onCitationClick}
+                onRefreshLatest={onRefreshLatest}
+                onRestartFromMessage={onRestartFromMessage}
+                onSourcePreview={onSourcePreview}
+                onWorkfileClick={onWorkfileClick}
+                selectedAssistantVersionForUser={
+                  selectedAssistantVersionForUser
+                }
+                selectedSourceIdsByKey={selectedSourceIdsByKey}
+                selectedUserVersionIdForAssistant={
+                  selectedUserVersionIdForAssistant
+                }
+                sourceById={sourceById}
+                workspaceId={workspaceId}
+              />
             );
           })}
         </div>

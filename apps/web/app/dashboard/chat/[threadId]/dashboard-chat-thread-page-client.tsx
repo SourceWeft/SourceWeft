@@ -38,7 +38,6 @@ import {
   useDashboardShortcutPlatform,
   type DashboardShortcutDefinition,
 } from "../../_components/dashboard-shortcuts";
-import { dispatchDashboardBillingSummaryRefresh } from "../../_components/dashboard-billing-summary-refresh";
 import {
   emptyModelCatalog,
   mapCatalogKindsToModelItems,
@@ -115,13 +114,38 @@ import { contentClient } from "../../../../lib/sdk";
 import {
   HttpClientError,
   SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,
-  SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
 } from "@sourceweft/sdk";
 import { SourcesHubPanelSkeleton } from "../../../_components/route-loading-skeleton";
+import {
+  useChatStreamRunnerControl,
+  type ActiveThreadRun,
+} from "./chat-stream-runner-control";
+import {
+  buildStreamingThreadRequestBody,
+  type RequestThinkingConfig,
+} from "./streaming-request-body";
+import {
+  createStreamingEventHandlerContext,
+  handleStreamingAssistantMessage,
+  handleStreamingCitations,
+  handleStreamingError,
+  handleStreamingFinish,
+  handleStreamingReasoning,
+  handleStreamingStart,
+  handleStreamingTextDelta,
+  handleStreamingTextInterrupted,
+  handleStreamingTextReplace,
+  handleStreamingThinkingStep,
+  handleStreamingThreadTitlePending,
+  handleStreamingThreadTitleUpdate,
+  handleStreamingToolCallEvent,
+} from "./streaming-event-handlers";
 import {
   useStreamingAssistantTransientState,
   type ChatMessageItem,
 } from "./streaming-assistant-state";
+import { createStreamingEventParser } from "./streaming-event-parser";
+import { createStreamingRenderBuffer } from "./streaming-render-buffer";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -281,22 +305,6 @@ type PendingLatestVersionSelection = {
   turnId?: string;
 };
 
-type RequestThinkingConfig = {
-  mode: "auto" | "off" | "effort";
-  enabled?: boolean;
-  effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
-  includeReasoning?: boolean;
-};
-
-type ActiveThreadRun = {
-  id?: string;
-  idempotencyKey: string;
-  status: "queued" | "running" | "cancel_requested";
-  mode?: "send" | "refresh" | "edit";
-  userMessageId?: string | null;
-  assistantMessageId?: string | null;
-};
-
 function parseStoredThinkingSettings(
   value: string | null,
 ): PromptThinkingSettings | null {
@@ -324,46 +332,6 @@ function parseStoredThinkingSettings(
   } catch {
     return null;
   }
-}
-
-function buildRequestThinking(input: {
-  capabilities: ModelItem["capabilities"] | undefined;
-  settings: PromptThinkingSettings;
-}): RequestThinkingConfig | undefined {
-  if (input.capabilities?.supportsThinking !== true) {
-    return undefined;
-  }
-
-  if (input.settings.mode === "off") {
-    return {
-      mode: "off",
-      enabled: false,
-      includeReasoning: false,
-    };
-  }
-
-  if (input.settings.mode === "effort") {
-    if (
-      !(input.capabilities?.supportedEfforts ?? []).includes(
-        input.settings.effort,
-      )
-    ) {
-      return {
-        mode: "auto",
-      };
-    }
-
-    return {
-      mode: "effort",
-      enabled: true,
-      effort: input.settings.effort,
-      includeReasoning: true,
-    };
-  }
-
-  return {
-    mode: "auto",
-  };
 }
 
 function resolveClientTimezone() {
@@ -1828,12 +1796,23 @@ export function DashboardChatThreadPageClient({
     null,
   );
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const [activeThreadRun, setActiveThreadRun] =
-    useState<ActiveThreadRun | null>(null);
-  const activeThreadRunRef = useRef<ActiveThreadRun | null>(null);
-  const attachedRunKeyRef = useRef<string | null>(null);
+  const {
+    activeThreadRun,
+    attachedRunKeyRef,
+    clearAttachedRunKeyIfCurrent,
+    clearRunIfCurrent,
+    isStopping,
+    isStreaming,
+    markRunStarted,
+    markRunTerminal,
+    setActiveThreadRun,
+    stopStreaming: handleStopStreaming,
+  } = useChatStreamRunnerControl({
+    getDisplayErrorMessage,
+    threadId,
+    throwStreamRequestError,
+    workspaceId,
+  });
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingAssistantMessageId, setEditingAssistantMessageId] = useState<
     string | null
@@ -1872,10 +1851,6 @@ export function DashboardChatThreadPageClient({
   const threadMessagesLoadGenerationRef = useRef(0);
   const pendingLatestVersionSelectionRef =
     useRef<PendingLatestVersionSelection | null>(null);
-
-  useEffect(() => {
-    activeThreadRunRef.current = activeThreadRun;
-  }, [activeThreadRun]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -2897,9 +2872,8 @@ export function DashboardChatThreadPageClient({
         return;
       }
 
-      setIsStreaming(true);
       const durableRunKey = input.durableRunKey ?? createDurableRunKey();
-      setActiveThreadRun({
+      markRunStarted({
         idempotencyKey: durableRunKey,
         status: "running",
         mode: input.mode,
@@ -3049,8 +3023,9 @@ export function DashboardChatThreadPageClient({
       let pendingTitleJobId: string | null = null;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
-      const streamRenderBlocks: MessageRenderBlock[] = [];
-      let nextStreamTextBlockId = 1;
+      const streamRenderBuffer = createStreamingRenderBuffer({
+        maxDeltaBatchChars: STREAM_DELTA_MAX_BATCH_CHARS,
+      });
       const refreshedWorkfileToolIds = new Set<string>();
       const refreshedArtifactToolIds = new Set<string>();
       let streamingAssistantMessageId = input.attachOnly
@@ -3062,12 +3037,10 @@ export function DashboardChatThreadPageClient({
         streamingAssistantMessageId,
       ]);
       let preparedEffectiveSourceIds: string[] | null = null;
-      let buffer = "";
       let assistantText = "";
       let latestAssistantMessageContent = "";
       let streamError: Error | null = null;
       let hasRenderedDelta = false;
-      const deltaQueue: string[] = [];
       let streamEnded = false;
       let receivedFinishEvent = false;
       let detachedWithoutFinish = false;
@@ -3096,10 +3069,9 @@ export function DashboardChatThreadPageClient({
             streamThinkingStepsById.set(step.id, step);
           },
         );
-        streamRenderBlocks.push(
-          ...resolveRenderBlocksFromMetadata(latestAssistantMessage.metadata),
+        streamRenderBuffer.replaceRenderBlocks(
+          resolveRenderBlocksFromMetadata(latestAssistantMessage.metadata),
         );
-        nextStreamTextBlockId = streamRenderBlocks.length + 1;
       }
 
       if (streamingAssistantMessage) {
@@ -3115,56 +3087,6 @@ export function DashboardChatThreadPageClient({
         new Promise<void>((resolve) => {
           window.requestAnimationFrame(() => resolve());
         });
-
-      function consumeQueuedDeltaBatch() {
-        let batch = "";
-        while (
-          deltaQueue.length > 0 &&
-          batch.length < STREAM_DELTA_MAX_BATCH_CHARS
-        ) {
-          batch += deltaQueue.shift() ?? "";
-        }
-        return batch;
-      }
-
-      function appendStreamRenderText(text: string) {
-        if (!text) {
-          return;
-        }
-        const last = streamRenderBlocks[streamRenderBlocks.length - 1];
-        if (last?.type === "text") {
-          last.text += text;
-          return;
-        }
-        streamRenderBlocks.push({
-          id: `stream-text-${nextStreamTextBlockId}`,
-          type: "text",
-          text,
-        });
-        nextStreamTextBlockId += 1;
-      }
-
-      function appendStreamGeneratedImageBlock(toolCallId: string) {
-        if (
-          streamRenderBlocks.some(
-            (block) =>
-              block.type === "generated_image" &&
-              block.toolCallId === toolCallId,
-          )
-        ) {
-          return;
-        }
-
-        streamRenderBlocks.push({
-          id: `stream-generated-image-${toolCallId}`,
-          type: "generated_image",
-          toolCallId,
-        });
-      }
-
-      function snapshotStreamRenderBlocks() {
-        return streamRenderBlocks.map((block) => ({ ...block }));
-      }
 
       const updateStreamingAssistantMessage = (
         updater: (message: ChatMessageItem) => ChatMessageItem,
@@ -3209,23 +3131,21 @@ export function DashboardChatThreadPageClient({
       };
 
       const drainQueuedDeltasNow = () => {
-        if (deltaQueue.length === 0) {
+        if (!streamRenderBuffer.hasQueuedDeltas()) {
           syncLatestAssistantMessageContent();
           return;
         }
 
-        while (deltaQueue.length > 0) {
-          const nextDelta = deltaQueue.shift() ?? "";
-          assistantText += nextDelta;
-          appendStreamRenderText(nextDelta);
-        }
+        const nextDelta = streamRenderBuffer.drainQueuedDeltas();
+        assistantText += nextDelta;
+        streamRenderBuffer.appendText(nextDelta);
         latestAssistantMessageContent = assistantText;
         updateStreamingAssistantMessage((message) => ({
           ...message,
           content: assistantText,
           metadata: {
             ...message.metadata,
-            renderBlocks: snapshotStreamRenderBlocks(),
+            renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
             threadRun: {
               ...(toObjectRecord(message.metadata.threadRun) ?? {}),
               idempotencyKey: durableRunKey,
@@ -3313,7 +3233,7 @@ export function DashboardChatThreadPageClient({
               ]),
             ),
             thinkingSteps: [...streamThinkingStepsById.values()],
-            renderBlocks: snapshotStreamRenderBlocks(),
+            renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
             threadRun: {
               ...(toObjectRecord(message.metadata.threadRun) ?? {}),
               idempotencyKey: durableRunKey,
@@ -3326,105 +3246,29 @@ export function DashboardChatThreadPageClient({
       };
 
       try {
-        const requestBody: Record<string, unknown> = {
+        const requestBody = buildStreamingThreadRequestBody({
           mode: input.mode,
-          ...(input.mentionedSourceIds && input.mentionedSourceIds.length > 0
-            ? { mentionedSourceIds: input.mentionedSourceIds }
-            : {}),
-          ...(input.sourceIds ? { sourceIds: input.sourceIds } : {}),
+          mentionedSourceIds: input.mentionedSourceIds,
+          sourceIds: input.sourceIds,
           timezone: resolveClientTimezone(),
-          idempotencyKey: durableRunKey,
-        };
-        if (input.command) {
-          requestBody.command = input.command;
-        }
-        const selectedSkillIds = input.skillIds ?? [];
-        const effectiveByokSelections = input.byokSelections ?? selectedByokModels;
-
-        requestBody.tools = buildChatToolsRequest({
-          imageExecution:
-            effectiveByokSelections.image?.mode === "byok"
-              ? buildByokModelExecution({
-                  selection: effectiveByokSelections.image,
-                })
-              : null,
-          invokedSkillIds: input.tools?.invokedSkillIds,
-          skillIds: selectedSkillIds,
+          durableRunKey,
+          command: input.command,
+          skillIds: input.skillIds,
           searchEnabled: input.searchEnabled ?? searchEnabled,
           tools: input.tools,
-          forceImageGenerate:
-            input.command?.kind === "tool" &&
-            input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
+          thinking: input.thinking,
+          byokSelections: input.byokSelections,
+          selectedByokModels,
+          selectedModels,
+          catalogKindEnabled,
+          streamWithSelectedLlm,
+          thinkingSettings,
+          attachOnly: input.attachOnly,
+          content: input.content,
+          images: input.images,
+          userMessageId: input.userMessageId,
+          assistantMessageId: input.assistantMessageId,
         });
-        const selectedLlmProfileAlias =
-          streamWithSelectedLlm && catalogKindEnabled.llm
-            ? selectedModels.llm?.profileAlias ?? selectedModels.llm?.id
-            : undefined;
-        const requestThinking =
-          input.thinking ??
-          buildRequestThinking({
-            capabilities: selectedModels.llm?.capabilities,
-            settings: thinkingSettings,
-          });
-        const byokLlmRequest = buildByokModelExecution({
-          selection: effectiveByokSelections.llm,
-          thinking: requestThinking,
-        });
-        if (effectiveByokSelections.llm?.mode === "byok") {
-          requestBody.llm = byokLlmRequest;
-        } else if (
-          typeof selectedLlmProfileAlias === "string" &&
-          selectedLlmProfileAlias.length > 0
-        ) {
-          requestBody.llm = {
-            profileAlias: selectedLlmProfileAlias,
-            ...(requestThinking ? { thinking: requestThinking } : {}),
-          };
-        } else if (requestThinking) {
-          requestBody.llm = {
-            thinking: requestThinking,
-          };
-        }
-        if (
-          !input.attachOnly &&
-          (input.mode === "send" || input.mode === "edit")
-        ) {
-          requestBody.content = input.content ?? "";
-          if (
-            input.mode === "edit" ||
-            (input.images && input.images.length > 0)
-          ) {
-            requestBody.images = input.images;
-          }
-        }
-        const modelSettings: Record<string, string> = {};
-        const byokVisionRequest = buildByokModelExecution({
-          selection: effectiveByokSelections.vision,
-        });
-        if (effectiveByokSelections.vision?.mode === "byok") {
-          requestBody.vision = byokVisionRequest;
-        } else if (catalogKindEnabled.vision && selectedModels.vision) {
-          modelSettings.visionProfileAlias =
-            selectedModels.vision.profileAlias ?? selectedModels.vision.id;
-        }
-        if (effectiveByokSelections.image?.mode === "byok") {
-          requestBody.image = buildByokModelExecution({
-            selection: effectiveByokSelections.image,
-          });
-        } else if (catalogKindEnabled.image && selectedModels.image?.profileAlias) {
-          modelSettings.imageProfileAlias = selectedModels.image.profileAlias;
-        }
-        if (Object.keys(modelSettings).length > 0) {
-          requestBody.modelSettings = modelSettings;
-        }
-        if (input.mode === "refresh" || input.mode === "edit") {
-          if (input.userMessageId) {
-            requestBody.userMessageId = input.userMessageId;
-          }
-          if (input.assistantMessageId) {
-            requestBody.assistantMessageId = input.assistantMessageId;
-          }
-        }
 
         const response = await fetch(
           `${apiBaseUrl}/v1/workspaces/${workspaceId}/threads/${threadId}/stream`,
@@ -3445,7 +3289,11 @@ export function DashboardChatThreadPageClient({
           throw new Error("No response body");
         }
 
-        const decoder = new TextDecoder();
+        const streamEventParser = createStreamingEventParser<StreamEventPayload>(
+          {
+            parseEvent: (input) => input as StreamEventPayload,
+          },
+        );
         const pollThreadTitleJob = async (jobId: string) => {
           const startedAt = Date.now();
           while (Date.now() - startedAt < TITLE_POLL_TIMEOUT_MS) {
@@ -3482,26 +3330,27 @@ export function DashboardChatThreadPageClient({
           }
 
           drainPromise = (async () => {
-            while (!streamEnded || deltaQueue.length > 0) {
-              if (deltaQueue.length === 0) {
+            while (!streamEnded || streamRenderBuffer.hasQueuedDeltas()) {
+              if (!streamRenderBuffer.hasQueuedDeltas()) {
                 await waitForAnimationFrame();
                 continue;
               }
 
-              const nextDeltaBatch = consumeQueuedDeltaBatch();
+              const nextDeltaBatch =
+                streamRenderBuffer.consumeQueuedDeltaBatch();
               if (!nextDeltaBatch) {
                 continue;
               }
 
               assistantText += nextDeltaBatch;
-              appendStreamRenderText(nextDeltaBatch);
+              streamRenderBuffer.appendText(nextDeltaBatch);
               latestAssistantMessageContent = assistantText;
               updateStreamingAssistantMessage((message) => ({
                 ...message,
                 content: assistantText,
                 metadata: {
                   ...message.metadata,
-                  renderBlocks: snapshotStreamRenderBlocks(),
+                  renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
                   threadRun: {
                     ...(toObjectRecord(message.metadata.threadRun) ?? {}),
                     idempotencyKey: durableRunKey,
@@ -3525,7 +3374,7 @@ export function DashboardChatThreadPageClient({
             return;
           }
 
-          deltaQueue.push(delta);
+          streamRenderBuffer.enqueueDelta(delta);
         };
 
         const syncStreamingToolCalls = () => {
@@ -3542,7 +3391,7 @@ export function DashboardChatThreadPageClient({
               ...message.metadata,
               [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
               toolCalls,
-              renderBlocks: snapshotStreamRenderBlocks(),
+              renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
               threadRun: {
                 ...(toObjectRecord(message.metadata.threadRun) ?? {}),
                 idempotencyKey: durableRunKey,
@@ -3569,7 +3418,7 @@ export function DashboardChatThreadPageClient({
               [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
               thinkingSteps,
               toolCalls,
-              renderBlocks: snapshotStreamRenderBlocks(),
+              renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
               threadRun: {
                 ...(toObjectRecord(message.metadata.threadRun) ?? {}),
                 idempotencyKey: durableRunKey,
@@ -3604,406 +3453,203 @@ export function DashboardChatThreadPageClient({
           }));
         };
 
+        const streamingEventHandlerContext =
+          createStreamingEventHandlerContext({
+            appendReasoningChunk,
+            durableRunKey,
+            isCompletedImageArtifactToolCall: (toolCall, event) =>
+              isCompletedImageArtifactToolCall(
+                toolCall,
+                event as StreamEventPayload & { type: ToolCallEventType },
+              ),
+            isCompletedWorkfileWriteToolCall: (toolCall, event) =>
+              isCompletedWorkfileWriteToolCall(
+                toolCall,
+                event as StreamEventPayload & { type: ToolCallEventType },
+              ),
+            isGeneratedImageArtifactToolName,
+            mergeThinkingStepRecords,
+            mode: input.mode,
+            normalizeCitationRecords,
+            normalizeModelReasoningSegmentRecord,
+            normalizeThinkingStepRecord,
+            normalizeThreadCommandRequest,
+            resolveToolCallFromStreamEvent: ({ event, streamToolCallsById }) =>
+              resolveToolCallFromStreamEvent({
+                event: event as StreamEventPayload & {
+                  type: ToolCallEventType;
+                },
+                streamToolCallsById,
+              }),
+            streamRenderBuffer,
+            streamThinkingStepsById,
+            streamToolCallsById,
+            syncStreamingCitations,
+            syncStreamingThinkingSteps,
+            syncStreamingToolCalls,
+            toNullableString,
+            toObjectRecord,
+            updateChatTitle,
+            updateStreamingAssistantMessage,
+          });
+
         readLoop: while (true) {
           const { done, value } = await reader.read();
           if (done) {
             break;
           }
 
-          buffer += decoder.decode(value, { stream: true });
-          const events = buffer.split("\n\n");
-          buffer = events.pop() ?? "";
-
-          for (const event of events) {
-            const line = event.trim();
-            if (!line.startsWith("data: ")) {
-              continue;
-            }
-
-            let data: StreamEventPayload;
-            try {
-              data = JSON.parse(line.slice(6)) as typeof data;
-            } catch {
-              continue;
-            }
-
+          for (const data of streamEventParser.parseChunk(value)) {
             if (data.type === "start" && typeof data.messageId === "string") {
-              const previousUserMessageId = tempUserId;
-              const serverUserMessageId = data.messageId;
-              const serverSourceIds = Array.isArray(data.sourceIds)
-                ? data.sourceIds.filter(
-                    (sourceId): sourceId is string =>
-                      typeof sourceId === "string",
-                  )
-                : null;
-              const serverMentionedSourceIds = Array.isArray(
-                data.mentionedSourceIds,
-              )
-                ? data.mentionedSourceIds.filter(
-                    (sourceId): sourceId is string =>
-                      typeof sourceId === "string",
-                  )
-                : null;
-              const serverEffectiveMentionedSourceIds = Array.isArray(
-                data.effectiveMentionedSourceIds,
-              )
-                ? data.effectiveMentionedSourceIds.filter(
-                    (sourceId): sourceId is string =>
-                      typeof sourceId === "string",
-                  )
-                : null;
-              const serverEffectiveSourceIds = Array.isArray(
-                data.effectiveSourceIds,
-              )
-                ? data.effectiveSourceIds.filter(
-                    (sourceId): sourceId is string =>
-                      typeof sourceId === "string",
-                  )
-                : null;
-              const serverContentJson = toObjectRecord(data.contentJson);
-              const serverCommand = normalizeThreadCommandRequest(data.command);
-              preparedEffectiveSourceIds = serverEffectiveSourceIds;
-              persistedUserMessageId = serverUserMessageId;
-              if (tempUserId && createdUserMessageId === tempUserId) {
-                createdUserMessageId = serverUserMessageId;
-              }
-              setMessages((previous) =>
-                previous.map((message) =>
-                  previousUserMessageId && message.id === previousUserMessageId
-                    ? {
-                        ...message,
-                        id: serverUserMessageId,
-                        contentJson: serverContentJson
-                          ? serverContentJson
-                          : message.contentJson,
-                        metadata: {
-                          ...message.metadata,
-                          ...(serverCommand ? { command: serverCommand } : {}),
-                          ...(serverSourceIds ? { sourceIds: serverSourceIds } : {}),
-                          ...(serverMentionedSourceIds
-                            ? { mentionedSourceIds: serverMentionedSourceIds }
-                            : {}),
-                          ...(serverEffectiveSourceIds
-                            ? { effectiveSourceIds: serverEffectiveSourceIds }
-                            : {}),
-                          ...(serverEffectiveMentionedSourceIds
-                            ? {
-                                effectiveMentionedSourceIds:
-                                  serverEffectiveMentionedSourceIds,
-                              }
-                            : {}),
-                        },
-                      }
-                    : message,
-                ),
-              );
-              updateStreamingAssistantMessage((message) => ({
-                ...message,
-                metadata: {
-                  ...message.metadata,
-                  userMessageId: serverUserMessageId,
-                  sourceUserMessageId: serverUserMessageId,
-                  threadRun: {
-                    ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                    idempotencyKey: durableRunKey,
-                    status: "running",
-                    mode: input.mode,
-                  },
+              handleStreamingStart({
+                context: streamingEventHandlerContext,
+                event: {
+                  ...data,
+                  messageId: data.messageId,
                 },
-              }));
+                tempUserId,
+                setMessages,
+                setPreparedEffectiveSourceIds: (sourceIds) => {
+                  preparedEffectiveSourceIds = sourceIds;
+                },
+                setPersistedUserMessageId: (messageId) => {
+                  persistedUserMessageId = messageId;
+                },
+                setCreatedUserMessageId: (messageId) => {
+                  if (createdUserMessageId === tempUserId) {
+                    createdUserMessageId = messageId;
+                  }
+                },
+              });
             } else if (
               data.type === "text-delta" &&
               typeof data.delta === "string"
             ) {
-              const hasVisibleDelta = data.delta.trim().length > 0;
-              const hasRunningTool = [...streamToolCallsById.values()].some(
-                (toolCall) => toolCall.status === "running",
-              );
-              const hasRunningStep = [...streamThinkingStepsById.values()].some(
-                (step) => step.status === "in_progress",
-              );
-              if (
-                assistantText.length > 0 &&
-                hasVisibleDelta &&
-                !hasRunningTool &&
-                !hasRunningStep
-              ) {
-                updateStreamingAssistantMessage((message) => ({
-                  ...message,
-                  metadata: {
-                    ...message.metadata,
-                    [STREAM_TEXT_PAUSED_KEY]: false,
-                    renderBlocks: snapshotStreamRenderBlocks(),
-                  },
-                }));
-              }
-              enqueueDelta(data.delta);
-              startDeltaDrain();
+              handleStreamingTextDelta({
+                context: streamingEventHandlerContext,
+                assistantText,
+                delta: data.delta,
+                enqueueDelta,
+                startDeltaDrain,
+              });
             } else if (
               data.type === "text-replace" &&
               typeof data.text === "string"
             ) {
-              deltaQueue.length = 0;
-              assistantText = data.text;
-              latestAssistantMessageContent = assistantText;
-              hasRenderedDelta = assistantText.length > 0;
-              streamRenderBlocks.length = 0;
-              updateStreamingAssistantMessage((message) => ({
-                ...message,
-                content: assistantText,
-                metadata: {
-                  ...message.metadata,
-                  [STREAM_TEXT_PAUSED_KEY]: false,
-                  renderBlocks: [],
+              handleStreamingTextReplace({
+                context: streamingEventHandlerContext,
+                text: data.text,
+                setAssistantText: (text) => {
+                  assistantText = text;
                 },
-              }));
-            } else if (data.type === "text-interrupted") {
-              updateStreamingAssistantMessage((message) => ({
-                ...message,
-                metadata: {
-                  ...message.metadata,
-                  [STREAM_TEXT_INTERRUPTED_KEY]: true,
-                  [STREAM_TEXT_PAUSED_KEY]: true,
+                setLatestAssistantMessageContent: (content) => {
+                  latestAssistantMessageContent = content;
                 },
-              }));
-            } else if (isToolCallEvent(data)) {
-              const nextToolCall = resolveToolCallFromStreamEvent({
-                event: data,
-                streamToolCallsById,
+                setHasRenderedDelta: (nextHasRenderedDelta) => {
+                  hasRenderedDelta = nextHasRenderedDelta;
+                },
               });
-
-              if (
-                typeof data.id === "string" &&
-                data.id.length > 0 &&
-                data.id !== nextToolCall.id
-              ) {
-                streamToolCallsById.delete(data.id);
-              }
-
-              streamToolCallsById.set(nextToolCall.id, nextToolCall);
-              if (
-                data.type === "tool-call-start" &&
-                isGeneratedImageArtifactToolName(nextToolCall.tool)
-              ) {
-                drainQueuedDeltasNow();
-                appendStreamGeneratedImageBlock(nextToolCall.id);
-              }
-              syncStreamingToolCalls();
-              if (
-                isCompletedWorkfileWriteToolCall(nextToolCall, data) &&
-                !refreshedWorkfileToolIds.has(nextToolCall.id)
-              ) {
-                refreshedWorkfileToolIds.add(nextToolCall.id);
-                setWorkfilesRefreshKey((value) => value + 1);
-              }
-              if (
-                isCompletedImageArtifactToolCall(nextToolCall, data) &&
-                !refreshedArtifactToolIds.has(nextToolCall.id)
-              ) {
-                refreshedArtifactToolIds.add(nextToolCall.id);
-                setArtifactsRefreshKey((value) => value + 1);
-              }
+            } else if (data.type === "text-interrupted") {
+              handleStreamingTextInterrupted({
+                context: streamingEventHandlerContext,
+              });
+            } else if (isToolCallEvent(data)) {
+              handleStreamingToolCallEvent({
+                context: streamingEventHandlerContext,
+                event: data,
+                drainQueuedDeltasNow,
+                refreshedArtifactToolIds,
+                refreshedWorkfileToolIds,
+                setArtifactsRefreshKey,
+                setWorkfilesRefreshKey,
+              });
             } else if (data.type === "thinking-step") {
-              const nextStep = normalizeThinkingStepRecord(data.step);
-              if (nextStep) {
-                mergeThinkingStepRecords(streamThinkingStepsById, nextStep);
-                syncStreamingThinkingSteps();
-              }
+              handleStreamingThinkingStep({
+                context: streamingEventHandlerContext,
+                step: data.step,
+              });
             } else if (
               data.type === "reasoning" &&
               typeof data.reasoning === "string"
             ) {
-              const reasoning = data.reasoning;
-              if (reasoning.length > 0) {
-                const nextSegment = normalizeModelReasoningSegmentRecord(
-                  data.segment,
-                );
-                updateStreamingAssistantMessage((message) => {
-                  const currentReasoning = appendReasoningChunk(
-                    toNullableString(message.metadata.reasoning) ?? undefined,
-                    reasoning,
-                  );
-                  const currentSegments = Array.isArray(
-                    message.metadata.reasoningSegments,
-                  )
-                    ? message.metadata.reasoningSegments
-                        .map((item, index) =>
-                          normalizeModelReasoningSegmentRecord(item, index),
-                        )
-                        .filter(
-                          (item): item is ModelReasoningSegmentRecord =>
-                            item !== null,
-                        )
-                    : [];
-                  const reasoningSegments = nextSegment
-                    ? [
-                        ...currentSegments.filter(
-                          (segment) => segment.id !== nextSegment.id,
-                        ),
-                        nextSegment,
-                      ].sort(
-                        (left, right) =>
-                          (left.sequence ?? Number.MAX_SAFE_INTEGER) -
-                          (right.sequence ?? Number.MAX_SAFE_INTEGER),
-                      )
-                    : currentSegments;
-
-                  return {
-                    ...message,
-                    metadata: {
-                      ...message.metadata,
-                      reasoning: currentReasoning,
-                      reasoningSegments,
-                      threadRun: {
-                        ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                        idempotencyKey: durableRunKey,
-                        status: "running",
-                        mode: input.mode,
-                      },
-                    },
-                  };
-                });
-              }
+              handleStreamingReasoning({
+                context: streamingEventHandlerContext,
+                reasoning: data.reasoning,
+                segment: data.segment,
+              });
             } else if (data.type === "citations") {
-              const citations = normalizeCitationRecords(data.citations);
-              const availableCitations = normalizeCitationRecords(
-                data.availableCitations,
-              );
-              syncStreamingCitations({
-                citations,
-                availableCitations:
-                  availableCitations.length > 0
-                    ? availableCitations
-                    : citations,
+              handleStreamingCitations({
+                context: streamingEventHandlerContext,
+                citations: data.citations,
+                availableCitations: data.availableCitations,
               });
             } else if (
               data.type === "thread-title-update" &&
               typeof data.threadId === "string" &&
               typeof data.title === "string"
             ) {
-              updateChatTitle(data.threadId, data.title);
+              handleStreamingThreadTitleUpdate({
+                context: streamingEventHandlerContext,
+                threadId: data.threadId,
+                title: data.title,
+              });
               shouldPollThreadTitle = false;
             } else if (
               data.type === "thread-title-pending" &&
               typeof data.threadId === "string"
             ) {
-              shouldPollThreadTitle = data.threadId === threadId;
-              pendingTitleJobId =
-                typeof data.jobId === "string" ? data.jobId : null;
-            } else if (data.type === "error") {
-              const errorMessage = data.error ?? "Model error";
-              suppressErrorToast = data.code === "CLIENT_CANCELLED";
-              markStreamingAssistantAsError({
-                code: data.code ?? null,
-                error: errorMessage,
-                messageId:
-                  typeof data.messageId === "string" ? data.messageId : null,
-                parentMessageId:
-                  data.parentMessageId === undefined
-                    ? null
-                    : data.parentMessageId,
-                parentMessageIdProvided: data.parentMessageId !== undefined,
-                serverPersisted: typeof data.messageId === "string",
-                userMessageId: data.userMessageId ?? persistedUserMessageId,
+              handleStreamingThreadTitlePending({
+                eventThreadId: data.threadId,
+                jobId: data.jobId,
+                threadId,
+                setShouldPollThreadTitle: (shouldPoll) => {
+                  shouldPollThreadTitle = shouldPoll;
+                },
+                setPendingTitleJobId: (jobId) => {
+                  pendingTitleJobId = jobId;
+                },
               });
-              streamError = new Error(errorMessage);
+            } else if (data.type === "error") {
+              handleStreamingError({
+                event: data,
+                persistedUserMessageId,
+                markStreamingAssistantAsError,
+                setSuppressErrorToast: (nextSuppressErrorToast) => {
+                  suppressErrorToast = nextSuppressErrorToast;
+                },
+                setStreamError: (error) => {
+                  streamError = error;
+                },
+              });
             } else if (
               data.type === "assistant-message" &&
               typeof data.messageId === "string"
             ) {
-              persistedAssistantMessageId = data.messageId;
-              const userMessageId =
-                data.userMessageId ?? persistedUserMessageId;
-              const previousAssistantMessageId = streamingAssistantMessageId;
-              streamingAssistantMessageIds.add(previousAssistantMessageId);
-              streamingAssistantMessageIds.add(data.messageId);
-              streamingAssistantMessageId = data.messageId;
-              if (
-                streamingAssistantMessage &&
-                streamingAssistantMessage.id !== previousAssistantMessageId
-              ) {
-                streamingAssistantMessage = {
-                  ...streamingAssistantMessage,
-                  id: previousAssistantMessageId,
-                };
-              }
-              updateStreamingAssistantMessage((message) => ({
-                ...message,
-                id: data.messageId as string,
-                content: message.content,
-                parentMessageId:
-                  data.parentMessageId === undefined
-                    ? message.parentMessageId
-                    : data.parentMessageId,
-                metadata: {
-                  ...message.metadata,
-                  isError: false,
-                  excludeFromContext: false,
-                  userMessageId,
-                  sourceUserMessageId: userMessageId,
-                  [STREAM_TEXT_PAUSED_KEY]: false,
-                  renderBlocks: snapshotStreamRenderBlocks(),
-                  threadRun: {
-                    ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                    idempotencyKey: durableRunKey,
-                    status: "completed",
-                    mode: input.mode,
-                  },
+              handleStreamingAssistantMessage({
+                context: streamingEventHandlerContext,
+                messageId: data.messageId,
+                parentMessageId: data.parentMessageId,
+                userMessageId: data.userMessageId,
+                persistedUserMessageId,
+                streamingAssistantMessage,
+                streamingAssistantMessageId,
+                streamingAssistantMessageIds,
+                setPersistedAssistantMessageId: (messageId) => {
+                  persistedAssistantMessageId = messageId;
                 },
-              }));
-            } else if (data.type === "finish") {
-              receivedFinishEvent = true;
-              if (streamToolCallsById.size > 0) {
-                for (const [
-                  toolId,
-                  toolCall,
-                ] of streamToolCallsById.entries()) {
-                  if (toolCall.status === "running") {
-                    streamToolCallsById.set(toolId, {
-                      ...toolCall,
-                      status: "completed",
-                    });
-                  }
-                }
-                syncStreamingToolCalls();
-              }
-              if (streamThinkingStepsById.size > 0) {
-                for (const [
-                  stepId,
-                  step,
-                ] of streamThinkingStepsById.entries()) {
-                  if (step.status === "in_progress") {
-                    streamThinkingStepsById.set(stepId, {
-                      ...step,
-                      status: "completed",
-                    });
-                  }
-                }
-                syncStreamingThinkingSteps();
-              }
-              streamEnded = true;
-              updateStreamingAssistantMessage((message) => {
-                const existingRun = toObjectRecord(message.metadata.threadRun);
-                const existingStatus = toNullableString(existingRun?.status);
-                const nextStatus =
-                  existingStatus === "failed" || existingStatus === "cancelled"
-                    ? existingStatus
-                    : "completed";
-                return {
-                  ...message,
-                  metadata: {
-                    ...message.metadata,
-                    [STREAM_TEXT_PAUSED_KEY]: false,
-                    renderBlocks: snapshotStreamRenderBlocks(),
-                    threadRun: {
-                      ...(existingRun ?? {}),
-                      idempotencyKey: durableRunKey,
-                      status: nextStatus,
-                      mode: input.mode,
-                    },
-                  },
-                };
+                setStreamingAssistantMessageId: (messageId) => {
+                  streamingAssistantMessageId = messageId;
+                },
+                setStreamingAssistantMessage: (message) => {
+                  streamingAssistantMessage = message;
+                },
               });
+            } else if (data.type === "finish") {
+              const finishState = handleStreamingFinish({
+                context: streamingEventHandlerContext,
+              });
+              receivedFinishEvent = finishState.receivedFinishEvent;
+              streamEnded = finishState.streamEnded;
               break readLoop;
             }
           }
@@ -4052,13 +3698,8 @@ export function DashboardChatThreadPageClient({
         if (shouldPollThreadTitle && pendingTitleJobId) {
           void pollThreadTitleJob(pendingTitleJobId);
         }
-        setActiveThreadRun((current) =>
-          current?.idempotencyKey === durableRunKey ? null : current,
-        );
-        attachedRunKeyRef.current =
-          attachedRunKeyRef.current === durableRunKey
-            ? null
-            : attachedRunKeyRef.current;
+        clearRunIfCurrent(durableRunKey);
+        clearAttachedRunKeyIfCurrent(durableRunKey);
       } catch (error) {
         const errorMessage = getDisplayErrorMessage(error);
         const hadServerPersistedAssistantMessage =
@@ -4114,18 +3755,7 @@ export function DashboardChatThreadPageClient({
           toast.error(errorMessage);
         }
       } finally {
-        if (!detachedWithoutFinish) {
-          setIsStreaming(false);
-          setIsStopping(false);
-          setActiveThreadRun((current) =>
-            current?.idempotencyKey === durableRunKey ? null : current,
-          );
-          dispatchDashboardBillingSummaryRefresh({
-            reason: "chat-turn-terminal",
-          });
-        } else {
-          setIsStopping(false);
-        }
+        markRunTerminal({ detachedWithoutFinish, durableRunKey });
       }
     },
     [
@@ -4133,8 +3763,12 @@ export function DashboardChatThreadPageClient({
       catalogKindEnabled.llm,
       catalogKindEnabled.vision,
       clearEditingState,
+      clearAttachedRunKeyIfCurrent,
+      clearRunIfCurrent,
       loadThreadMessages,
       librarySources,
+      markRunStarted,
+      markRunTerminal,
       messages,
       selectedByokModels,
       selectedModels,
@@ -4158,43 +3792,6 @@ export function DashboardChatThreadPageClient({
   useBrowserLayoutEffect(() => {
     loadThreadMessagesRef.current = loadThreadMessages;
   }, [loadThreadMessages]);
-
-  const handleStopStreaming = useCallback(() => {
-    const run = activeThreadRunRef.current;
-    if (!workspaceId || !run || isStopping) {
-      return;
-    }
-
-    setIsStopping(true);
-    setActiveThreadRun({
-      ...run,
-      status: "cancel_requested",
-    });
-    void fetch(
-      `${apiBaseUrl}/v1/workspaces/${workspaceId}/threads/${threadId}/stream`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          idempotencyKey: `${run.idempotencyKey}${SOURCEWEFT_WEB_RUN_STOP_SUFFIX}`,
-          stream: false,
-        }),
-      },
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          await throwStreamRequestError(response);
-        }
-      })
-      .catch((error) => {
-        toast.error(getDisplayErrorMessage(error));
-        setIsStopping(false);
-        setActiveThreadRun((current) =>
-          current?.idempotencyKey === run.idempotencyKey ? run : current,
-        );
-      });
-  }, [isStopping, threadId, workspaceId]);
 
   useEffect(() => {
     clearEditingState();

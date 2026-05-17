@@ -1,4 +1,5 @@
 {
+  "_comment": "Set modelCatalog.enabled on a gateway to dynamically sync provider models. When kinds is omitted, SourceWeft syncs every reliably classified and supported kind. Static profiles remain available even when catalog sync is disabled.",
   "gateways": [
     {
       "slug": "openrouter-default",
@@ -14,9 +15,13 @@
         "chat",
         "embeddings",
         "rerank",
+        "image",
         "tool_calling",
         "json_schema"
       ],
+      "modelCatalog": {
+        "enabled": true
+      },
       "timeoutMs": 30000,
       "maxRetries": 2,
       "isDefault": true,

@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import dynamic from "next/dynamic";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
   CreditCard,
@@ -43,13 +42,13 @@ import {
   useDashboardTeamSelector,
 } from "./dashboard-team-selector-shared";
 import { dispatchDashboardShortcutsOpen } from "./dashboard-shortcuts";
+import { DashboardSettingsCenterModalSkeleton } from "./dashboard-settings-center-modal-skeleton";
 
-const DashboardSettingsCenterModal = dynamic(
-  () =>
-    import("./dashboard-settings-center-modal").then(
-      (module) => module.DashboardSettingsCenterModal,
-    ),
-  { ssr: false },
+const DashboardSettingsCenterModal = React.lazy(
+  async () => {
+    const settingsModal = await import("./dashboard-settings-center-modal");
+    return { default: settingsModal.DashboardSettingsCenterModal };
+  },
 );
 
 function getInitials(name?: string, email?: string) {
@@ -246,17 +245,23 @@ export function DashboardAccountMenu({
         </SidebarMenuItem>
       </SidebarMenu>
 
-      <DashboardSettingsCenterModal
-        hasTeam={orgList.length > 0}
-        initialTab={initialTab}
-        initials={initials}
-        onOpenChange={setSettingsOpen}
-        open={settingsOpen}
-        teamName={activeOrg?.name || orgList[0]?.name}
-        userEmail={userEmail}
-        userImage={userImage}
-        userName={userName}
-      />
+      {settingsOpen ? (
+        <React.Suspense
+          fallback={<DashboardSettingsCenterModalSkeleton activeTab={initialTab} />}
+        >
+          <DashboardSettingsCenterModal
+            hasTeam={orgList.length > 0}
+            initialTab={initialTab}
+            initials={initials}
+            onOpenChange={setSettingsOpen}
+            open={settingsOpen}
+            teamName={activeOrg?.name || orgList[0]?.name}
+            userEmail={userEmail}
+            userImage={userImage}
+            userName={userName}
+          />
+        </React.Suspense>
+      ) : null}
     </>
   );
 }

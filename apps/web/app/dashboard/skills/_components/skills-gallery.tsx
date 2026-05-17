@@ -35,14 +35,38 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 
-type SkillCatalogItem = Awaited<
+type SkillsCatalogResponse = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
->["items"][number];
+>;
+type SkillCatalogItem = SkillsCatalogResponse["items"][number];
+
+const catalogRequestsByWorkspace = new Map<
+  string,
+  Promise<SkillsCatalogResponse>
+>();
 
 type ResolvedWorkspace = {
   id: string;
   name: string;
 };
+
+function fetchSkillsCatalog(targetWorkspaceId: string) {
+  const pending = catalogRequestsByWorkspace.get(targetWorkspaceId);
+  if (pending) {
+    return pending;
+  }
+
+  const promise = contentClient
+    .listSkillsCatalog(targetWorkspaceId)
+    .finally(() => {
+      if (catalogRequestsByWorkspace.get(targetWorkspaceId) === promise) {
+        catalogRequestsByWorkspace.delete(targetWorkspaceId);
+      }
+    });
+
+  catalogRequestsByWorkspace.set(targetWorkspaceId, promise);
+  return promise;
+}
 
 type CategoryKey = "all" | "learn" | "research" | "write" | "review" | "operate";
 type StatusFilter = "all" | "installed" | "not_installed";
@@ -606,6 +630,7 @@ export function SkillsGallery({
   const [error, setError] = React.useState<string | null>(null);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
   const workspaceIdRef = React.useRef<string | null>(null);
+  const loadedCatalogWorkspaceIdRef = React.useRef<string | null>(null);
   const catalogGenerationRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -656,8 +681,16 @@ export function SkillsGallery({
 
   const loadCatalog = React.useCallback(async () => {
     const generation = ++catalogGenerationRef.current;
+    const currentCatalogWorkspaceId = workspaceIdRef.current;
+    const hasCurrentCatalog =
+      Boolean(currentCatalogWorkspaceId) &&
+      loadedCatalogWorkspaceIdRef.current === currentCatalogWorkspaceId;
+
     setError(null);
-    setIsResolvingWorkspace(true);
+    if (!hasCurrentCatalog) {
+      setIsResolvingWorkspace(true);
+    }
+
     try {
       const resolved = await resolveWorkspace();
       if (catalogGenerationRef.current !== generation) {
@@ -666,20 +699,34 @@ export function SkillsGallery({
       setWorkspace(resolved);
       if (!resolved) {
         setItems([]);
+        loadedCatalogWorkspaceIdRef.current = null;
         return;
       }
 
+      const hasResolvedCatalog =
+        loadedCatalogWorkspaceIdRef.current === resolved.id;
+      if (hasResolvedCatalog) {
+        return;
+      }
+
+      if (workspaceIdRef.current && workspaceIdRef.current !== resolved.id) {
+        setItems([]);
+      }
+
+      setIsResolvingWorkspace(false);
       setIsLoading(true);
-      const result = await contentClient.listSkillsCatalog(resolved.id);
+      const result = await fetchSkillsCatalog(resolved.id);
       if (catalogGenerationRef.current !== generation) {
         return;
       }
+      loadedCatalogWorkspaceIdRef.current = resolved.id;
       setItems(result.items);
     } catch (loadError) {
       if (catalogGenerationRef.current !== generation) {
         return;
       }
       setItems([]);
+      loadedCatalogWorkspaceIdRef.current = null;
       setError(loadError instanceof Error ? loadError.message : "Failed to load skills.");
     } finally {
       if (catalogGenerationRef.current === generation) {
@@ -747,6 +794,8 @@ export function SkillsGallery({
         return;
       }
 
+      workspaceIdRef.current = nextWorkspaceId;
+      loadedCatalogWorkspaceIdRef.current = null;
       setWorkspace({ id: nextWorkspaceId, name: nextWorkspaceName });
       setItems([]);
       setError(null);
@@ -756,13 +805,15 @@ export function SkillsGallery({
         if (workspaceIdRef.current !== nextWorkspaceId) {
           return;
         }
-        const result = await contentClient.listSkillsCatalog(nextWorkspaceId);
+        const result = await fetchSkillsCatalog(nextWorkspaceId);
         if (workspaceIdRef.current !== nextWorkspaceId) {
           return;
         }
+        loadedCatalogWorkspaceIdRef.current = nextWorkspaceId;
         setItems(result.items);
       } catch (changeError) {
         setItems([]);
+        loadedCatalogWorkspaceIdRef.current = null;
         setError(
           changeError instanceof Error
             ? changeError.message

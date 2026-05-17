@@ -2518,6 +2518,806 @@ function DirectoryPicker({
   );
 }
 
+function AddSourceDialog({
+  addParentSourceId,
+  addTab,
+  files,
+  fileInputRef,
+  isDragActive,
+  isOpen,
+  isSubmitting,
+  onAddFiles,
+  onAddTabChange,
+  onClose,
+  onCreateTextSource,
+  onCreateUrlSource,
+  onDragEnter,
+  onDragLeave,
+  onDragOver,
+  onDrop,
+  onRemoveFile,
+  onTextContentChange,
+  onTextTitleChange,
+  onUploadFiles,
+  onUrlTitleChange,
+  onUrlValueChange,
+  sources,
+  textContent,
+  textTitle,
+  uploadProgress,
+  urlTitle,
+  urlValue,
+}: {
+  addParentSourceId: string | null;
+  addTab: AddTab;
+  files: File[];
+  fileInputRef: { current: HTMLInputElement | null };
+  isDragActive: boolean;
+  isOpen: boolean;
+  isSubmitting: boolean;
+  onAddFiles: (files: File[]) => void;
+  onAddTabChange: (tab: AddTab) => void;
+  onClose: (open: boolean) => void;
+  onCreateTextSource: () => void;
+  onCreateUrlSource: () => void;
+  onDragEnter: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
+  onRemoveFile: (index: number) => void;
+  onTextContentChange: (value: string) => void;
+  onTextTitleChange: (value: string) => void;
+  onUploadFiles: () => void;
+  onUrlTitleChange: (value: string) => void;
+  onUrlValueChange: (value: string) => void;
+  sources: SourceItem[];
+  textContent: string;
+  textTitle: string;
+  uploadProgress: number;
+  urlTitle: string;
+  urlValue: string;
+}) {
+  return (
+    <Dialog onOpenChange={onClose} open={isOpen}>
+      <DialogContent
+        className="w-[640px] max-w-[calc(100%-2rem)]"
+        constrainWidth={false}
+      >
+        <DialogHeader>
+          <DialogTitle>Add source</DialogTitle>
+          <DialogDescription>
+            Add web pages, text notes, or uploaded files as sources.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {addParentSourceId ? (
+            <div className="flex items-center gap-1.5 rounded-lg border bg-muted/25 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <Folder className="size-3.5" />
+              <span className="truncate">
+                {sources.find((source) => source.id === addParentSourceId)
+                  ?.title ?? "Selected folder"}
+              </span>
+            </div>
+          ) : null}
+          <div className="flex gap-1 rounded-lg border bg-muted/30 p-1">
+            {addTabs.map((tab) => (
+              <button
+                className={cn(
+                  "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                  addTab === tab
+                    ? "bg-background text-foreground shadow-xs ring-1 ring-border"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                key={tab}
+                onClick={() => onAddTabChange(tab)}
+                type="button"
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          <div className="h-72">
+            {addTab === "Text" ? (
+              <div className="flex h-full flex-col gap-2">
+                <Input
+                  onChange={(event) => onTextTitleChange(event.target.value)}
+                  placeholder="Title (optional)"
+                  value={textTitle}
+                />
+                <Textarea
+                  className="min-h-0 flex-1"
+                  onChange={(event) => onTextContentChange(event.target.value)}
+                  placeholder="Paste or write source content..."
+                  value={textContent}
+                />
+              </div>
+            ) : addTab === "URL" ? (
+              <div className="flex h-full flex-col gap-2">
+                <Input
+                  onChange={(event) => onUrlValueChange(event.target.value)}
+                  placeholder="https://example.com/article"
+                  type="url"
+                  value={urlValue}
+                />
+                <Input
+                  onChange={(event) => onUrlTitleChange(event.target.value)}
+                  placeholder="Title (optional)"
+                  value={urlTitle}
+                />
+                <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-6 text-center text-xs text-muted-foreground">
+                  SourceWeft will fetch the page content and index it for search.
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-0 flex-col gap-2">
+                <div
+                  className={cn(
+                    "rounded-lg border border-dashed px-4 py-5 text-center text-xs transition-colors",
+                    isDragActive
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-accent/40",
+                  )}
+                  onDragEnter={onDragEnter}
+                  onDragLeave={onDragLeave}
+                  onDragOver={onDragOver}
+                  onDrop={onDrop}
+                >
+                  <input
+                    accept={SOURCE_FILE_ACCEPT}
+                    className="hidden"
+                    ref={fileInputRef}
+                    multiple
+                    onChange={(event) => {
+                      onAddFiles(Array.from(event.target.files ?? []));
+                      event.currentTarget.value = "";
+                    }}
+                    type="file"
+                  />
+                  <span className="inline-flex items-center gap-1.5 text-foreground">
+                    <Upload className="size-3.5" />
+                    {isDragActive ? "Drop files here" : "Drag files here"}
+                  </span>
+                  <p className="mt-1 text-[10px]">
+                    or
+                    <button
+                      className="mx-1 inline font-medium text-foreground underline underline-offset-2"
+                      onClick={() => fileInputRef.current?.click()}
+                      type="button"
+                    >
+                      browse
+                    </button>
+                    files
+                  </p>
+                  <p className="mt-1 text-[10px]">
+                    Up to {MAX_FILES} files, {MAX_FILE_SIZE_MB}MB each
+                  </p>
+                </div>
+
+                <div className="min-h-0 flex-1 rounded-lg border p-2">
+                  {files.length > 0 ? (
+                    <div className="h-full space-y-1.5 overflow-y-auto">
+                      {files.map((file, index) => (
+                        <div
+                          className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5"
+                          key={`${file.name}-${file.size}-${index}`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate text-xs text-foreground">
+                              {file.name}
+                            </span>
+                          </div>
+                          <TypeBadge label={getUploadFileLabel(file)} />
+                          <Button
+                            onClick={() => onRemoveFile(index)}
+                            size="icon-xs"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <X className="size-3.5" />
+                            <span className="sr-only">Remove file</span>
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
+                      No files selected
+                    </div>
+                  )}
+                </div>
+
+                {isSubmitting ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                      <span>Uploading</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <Progress className="h-1.5" value={uploadProgress} />
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            disabled={isSubmitting}
+            onClick={() => onClose(false)}
+            type="button"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            disabled={
+              isSubmitting ||
+              (addTab === "Text" && !textContent.trim()) ||
+              (addTab === "URL" && !urlValue.trim()) ||
+              (addTab === "File" && files.length === 0)
+            }
+            onClick={() =>
+              addTab === "Text"
+                ? onCreateTextSource()
+                : addTab === "URL"
+                  ? onCreateUrlSource()
+                  : onUploadFiles()
+            }
+            type="button"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Working...
+              </>
+            ) : (
+              <>
+                {addTab === "Text"
+                  ? "Create source"
+                  : addTab === "URL"
+                    ? "Add URL"
+                    : "Upload files"}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreateDirectoryDialog({
+  directoryContext,
+  directoryParentSourceId,
+  directoryTitle,
+  isOpen,
+  isSubmitting,
+  onContextChange,
+  onCreate,
+  onOpenChange,
+  onParentChange,
+  onTitleChange,
+  sources,
+}: {
+  directoryContext: string;
+  directoryParentSourceId: string | null;
+  directoryTitle: string;
+  isOpen: boolean;
+  isSubmitting: boolean;
+  onContextChange: (value: string) => void;
+  onCreate: () => void;
+  onOpenChange: (open: boolean) => void;
+  onParentChange: (value: string | null) => void;
+  onTitleChange: (value: string) => void;
+  sources: SourceItem[];
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={isOpen}>
+      <DialogContent
+        className="w-[520px] max-w-[calc(100%-2rem)]"
+        constrainWidth={false}
+      >
+        <DialogHeader>
+          <DialogTitle>Create folder</DialogTitle>
+          <DialogDescription>Add a folder to organize Sources.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Input
+            autoFocus
+            onChange={(event) => onTitleChange(event.target.value)}
+            placeholder="Folder name"
+            value={directoryTitle}
+          />
+          <Textarea
+            className="min-h-28"
+            onChange={(event) => onContextChange(event.target.value)}
+            placeholder="README context (optional)"
+            value={directoryContext}
+          />
+          <DirectoryPicker
+            onChange={onParentChange}
+            sources={sources}
+            value={directoryParentSourceId}
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={isSubmitting}
+            onClick={() => onOpenChange(false)}
+            type="button"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button
+            disabled={isSubmitting || !directoryTitle.trim()}
+            onClick={onCreate}
+            type="button"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Working...
+              </>
+            ) : (
+              "Create folder"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MoveSourceDialog({
+  isSubmitting,
+  moveParentSourceId,
+  moveSource,
+  onMove,
+  onMoveSourceChange,
+  onOpenChange,
+  sources,
+}: {
+  isSubmitting: boolean;
+  moveParentSourceId: string | null;
+  moveSource: SourceItem | null;
+  onMove: () => void;
+  onMoveSourceChange: (value: string | null) => void;
+  onOpenChange: (open: boolean) => void;
+  sources: SourceItem[];
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={Boolean(moveSource)}>
+      <DialogContent
+        className="w-[520px] max-w-[calc(100%-2rem)]"
+        constrainWidth={false}
+      >
+        <DialogHeader>
+          <DialogTitle>Move source</DialogTitle>
+          <DialogDescription>
+            Choose a destination under the root directory.
+          </DialogDescription>
+        </DialogHeader>
+        {moveSource ? (
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/25 px-3 py-2">
+            <SourceTypeIcon
+              isPartiallySelected={false}
+              isSelected={false}
+              source={moveSource}
+            />
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Moving
+              </div>
+              <div className="truncate text-sm font-medium text-foreground">
+                {moveSource.title}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <DirectoryPicker
+          excludeSourceId={moveSource?.id}
+          framed={false}
+          onChange={onMoveSourceChange}
+          sources={sources}
+          value={moveParentSourceId}
+        />
+        <DialogFooter>
+          <Button
+            disabled={isSubmitting}
+            onClick={() => onOpenChange(false)}
+            type="button"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button disabled={isSubmitting} onClick={onMove} type="button">
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Moving...
+              </>
+            ) : (
+              "Move"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReadmeDialog({
+  isSubmitting,
+  onContentChange,
+  onOpenChange,
+  onSave,
+  readmeContent,
+  readmeSource,
+}: {
+  isSubmitting: boolean;
+  onContentChange: (value: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onSave: () => void;
+  readmeContent: string;
+  readmeSource: SourceItem | null;
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={Boolean(readmeSource)}>
+      <DialogContent
+        className="w-[640px] max-w-[calc(100%-2rem)]"
+        constrainWidth={false}
+      >
+        <DialogHeader>
+          <DialogTitle>Edit README</DialogTitle>
+          <DialogDescription>
+            Update the context attached to this folder.
+          </DialogDescription>
+        </DialogHeader>
+        {readmeSource ? (
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/25 px-3 py-2">
+            <SourceTypeIcon
+              isPartiallySelected={false}
+              isSelected={false}
+              source={readmeSource}
+            />
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Folder
+              </div>
+              <div className="truncate text-sm font-medium text-foreground">
+                {readmeSource.title}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <Textarea
+          className="min-h-52 text-sm"
+          onChange={(event) => onContentChange(event.target.value)}
+          placeholder="README context for this folder..."
+          value={readmeContent}
+        />
+        <DialogFooter>
+          <Button
+            disabled={isSubmitting}
+            onClick={() => onOpenChange(false)}
+            type="button"
+            variant="outline"
+          >
+            Cancel
+          </Button>
+          <Button disabled={isSubmitting} onClick={onSave} type="button">
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Save README"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WorkfilePreviewDialog({
+  onOpenChange,
+  previewWorkfile,
+}: {
+  onOpenChange: (open: boolean) => void;
+  previewWorkfile: WorkfileDetail | null;
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={Boolean(previewWorkfile)}>
+      <DialogContent
+        className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
+        constrainWidth={false}
+      >
+        <DialogHeader className="border-b px-5 py-4 text-left">
+          <DialogTitle>
+            {previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}
+          </DialogTitle>
+          <DialogDescription>
+            {previewWorkfile
+              ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
+              : "Assistant-created working material from this thread."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto px-5 py-5">
+          {previewWorkfile ? (
+            <MessageResponse className="text-sm leading-7 text-foreground [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted/30 [&_pre]:p-3">
+              {previewWorkfile.contentText}
+            </MessageResponse>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteSourceDialog({
+  deleteSource,
+  onConfirm,
+  onOpenChange,
+  rowBusyById,
+}: {
+  deleteSource: SourceItem | null;
+  onConfirm: (source: SourceItem) => void;
+  onOpenChange: (open: boolean) => void;
+  rowBusyById: Record<string, boolean>;
+}) {
+  const isDeleting = Boolean(deleteSource && rowBusyById[deleteSource.id]);
+
+  return (
+    <AlertDialog onOpenChange={onOpenChange} open={Boolean(deleteSource)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            Delete {deleteSource?.sourceType === "directory" ? "folder" : "source"}?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {deleteSource?.sourceType === "directory"
+              ? "This will remove the folder and its sources from this workspace. This action cannot be undone."
+              : "This will remove the source from this workspace. This action cannot be undone."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {deleteSource ? (
+          <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
+            <span className="line-clamp-2 break-words">{deleteSource.title}</span>
+          </div>
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={buttonVariants({ variant: "destructive" })}
+            disabled={isDeleting}
+            onClick={(event) => {
+              event.preventDefault();
+              if (deleteSource) {
+                onConfirm(deleteSource);
+              }
+            }}
+          >
+            {isDeleting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              "Delete"
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function DeleteWorkfileDialog({
+  deleteWorkfile,
+  onConfirm,
+  onOpenChange,
+  workfileBusyByPath,
+}: {
+  deleteWorkfile: WorkfileListItem | null;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  workfileBusyByPath: Record<string, boolean>;
+}) {
+  const isDeleting = Boolean(
+    deleteWorkfile && workfileBusyByPath[deleteWorkfile.path],
+  );
+
+  return (
+    <AlertDialog onOpenChange={onOpenChange} open={Boolean(deleteWorkfile)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete workfile?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will remove the Workfile from this thread. This action cannot
+            be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {deleteWorkfile ? (
+          <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
+            <span className="line-clamp-2 break-words">{deleteWorkfile.path}</span>
+          </div>
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={buttonVariants({ variant: "destructive" })}
+            disabled={isDeleting}
+            onClick={(event) => {
+              event.preventDefault();
+              onConfirm();
+            }}
+          >
+            {isDeleting ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              "Delete"
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function useAddSourceDialogState() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [parentSourceId, setParentSourceId] = useState<string | null>(null);
+  const [tab, setTab] = useState<AddTab>("File");
+  const [textTitle, setTextTitle] = useState("");
+  const [textContent, setTextContent] = useState("");
+  const [urlValue, setUrlValue] = useState("");
+  const [urlTitle, setUrlTitle] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
+
+  const reset = useCallback(() => {
+    setTextTitle("");
+    setTextContent("");
+    setUrlValue("");
+    setUrlTitle("");
+    setFiles([]);
+    setUploadProgress(0);
+    setTab("File");
+    setIsDragActive(false);
+    setParentSourceId(null);
+    dragDepthRef.current = 0;
+  }, []);
+
+  const open = useCallback((nextParentSourceId: string | null = null) => {
+    setParentSourceId(nextParentSourceId);
+    setIsOpen(true);
+  }, []);
+
+  const close = useCallback(
+    (openState: boolean) => {
+      setIsOpen(openState);
+      if (!openState) {
+        reset();
+      }
+    },
+    [reset],
+  );
+
+  const addFiles = useCallback(
+    (incoming: File[] | null) => {
+      if (!incoming || incoming.length === 0) return;
+
+      const nextFiles = [...files];
+      for (const file of incoming) {
+        if (!isSupportedUploadFile(file)) {
+          toast.error(`"${file.name}" is not a supported source file.`);
+          continue;
+        }
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          toast.error(`"${file.name}" exceeds ${MAX_FILE_SIZE_MB}MB.`);
+          continue;
+        }
+        if (nextFiles.length >= MAX_FILES) {
+          toast.error(`You can upload up to ${MAX_FILES} files at once.`);
+          break;
+        }
+        nextFiles.push(file);
+      }
+      setFiles(nextFiles);
+    },
+    [files],
+  );
+
+  const removeFile = useCallback((index: number) => {
+    setFiles((prev) =>
+      prev.filter((_, currentIndex) => currentIndex !== index),
+    );
+  }, []);
+
+  const handleDragEnter = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepthRef.current += 1;
+      setIsDragActive(true);
+    },
+    [],
+  );
+
+  const handleDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [],
+  );
+
+  const handleDragLeave = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsDragActive(false);
+      }
+    },
+    [],
+  );
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setIsDragActive(false);
+      dragDepthRef.current = 0;
+      addFiles(Array.from(event.dataTransfer.files ?? []));
+    },
+    [addFiles],
+  );
+
+  return {
+    addFiles,
+    close,
+    fileInputRef,
+    files,
+    handleDragEnter,
+    handleDragLeave,
+    handleDragOver,
+    handleDrop,
+    isDragActive,
+    isOpen,
+    open,
+    parentSourceId,
+    removeFile,
+    reset,
+    setIsOpen,
+    setParentSourceId,
+    setTab,
+    setTextContent,
+    setTextTitle,
+    setUploadProgress,
+    setUrlTitle,
+    setUrlValue,
+    tab,
+    textContent,
+    textTitle,
+    uploadProgress,
+    urlTitle,
+    urlValue,
+  };
+}
+
 function SkillRow({
   skill,
   selected,
@@ -3164,9 +3964,7 @@ export function SourcesHub({
   const activeCitationChunkId = activeCitationIndex
     ? (citations[activeCitationIndex - 1]?.chunkId ?? null)
     : null;
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [addParentSourceId, setAddParentSourceId] = useState<string | null>(null);
-  const [addTab, setAddTab] = useState<AddTab>("File");
+  const addSourceDialog = useAddSourceDialogState();
   const [isCreateDirectoryOpen, setIsCreateDirectoryOpen] = useState(false);
   const [directoryTitle, setDirectoryTitle] = useState("");
   const [directoryContext, setDirectoryContext] = useState("");
@@ -3176,15 +3974,6 @@ export function SourcesHub({
   const [moveSource, setMoveSource] = useState<SourceItem | null>(null);
   const [moveParentSourceId, setMoveParentSourceId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [textTitle, setTextTitle] = useState("");
-  const [textContent, setTextContent] = useState("");
-  const [urlValue, setUrlValue] = useState("");
-  const [urlTitle, setUrlTitle] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isDragActive, setIsDragActive] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const dragDepthRef = useRef(0);
   const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
   const loadedSourcesWorkspaceIdRef = useRef<string | null>(null);
   const initializedSourcesWorkspaceIdRef = useRef<string | null>(null);
@@ -3736,7 +4525,7 @@ export function SourcesHub({
     setMoveParentSourceId(null);
     setReadmeSource(null);
     setReadmeContent("");
-    setAddParentSourceId(null);
+    addSourceDialog.reset();
     setDirectoryParentSourceId(null);
 
       if (initialSourcesLoaded) {
@@ -3752,6 +4541,7 @@ export function SourcesHub({
     replaceRootSources,
     refreshSources,
     resetSourcePagingState,
+    addSourceDialog.reset,
   ]);
 
   useEffect(() => {
@@ -4297,108 +5087,13 @@ export function SourcesHub({
     }
   }, [deleteWorkfile, previewWorkfile?.path, refreshWorkfiles, threadId, workspaceId]);
 
-  const resetAddForm = useCallback(() => {
-    setTextTitle("");
-    setTextContent("");
-    setUrlValue("");
-    setUrlTitle("");
-    setFiles([]);
-    setUploadProgress(0);
-    setAddTab("File");
-    setIsDragActive(false);
-    setAddParentSourceId(null);
-    dragDepthRef.current = 0;
-  }, []);
-
-  const handleOpenAddDialog = useCallback((parentSourceId: string | null = null) => {
-    setAddParentSourceId(parentSourceId);
-    setIsAddOpen(true);
-  }, []);
-
-  const handleCloseAddDialog = useCallback(
-    (open: boolean) => {
-      setIsAddOpen(open);
-      if (!open) {
-        resetAddForm();
-      }
-    },
-    [resetAddForm],
-  );
-
-  const handleAddFiles = useCallback(
-    (incoming: File[] | null) => {
-      if (!incoming || incoming.length === 0) return;
-
-      const nextFiles = [...files];
-      for (const file of incoming) {
-        if (!isSupportedUploadFile(file)) {
-          toast.error(`"${file.name}" is not a supported source file.`);
-          continue;
-        }
-        if (file.size > MAX_FILE_SIZE_BYTES) {
-          toast.error(`"${file.name}" exceeds ${MAX_FILE_SIZE_MB}MB.`);
-          continue;
-        }
-        if (nextFiles.length >= MAX_FILES) {
-          toast.error(`You can upload up to ${MAX_FILES} files at once.`);
-          break;
-        }
-        nextFiles.push(file);
-      }
-      setFiles(nextFiles);
-    },
-    [files],
-  );
-
-  const handleDragEnter = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      dragDepthRef.current += 1;
-      setIsDragActive(true);
-    },
-    [],
-  );
-
-  const handleDragOver = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    [],
-  );
-
-  const handleDragLeave = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-      if (dragDepthRef.current === 0) {
-        setIsDragActive(false);
-      }
-    },
-    [],
-  );
-
-  const handleDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setIsDragActive(false);
-      dragDepthRef.current = 0;
-      const dropped = Array.from(event.dataTransfer.files ?? []);
-      handleAddFiles(dropped);
-    },
-    [handleAddFiles],
-  );
-
   const handleCreateTextSource = useCallback(async () => {
     if (!workspaceId) {
       toast.error("No workspace selected yet.");
       return;
     }
 
-    const contentText = textContent.trim();
+    const contentText = addSourceDialog.textContent.trim();
     if (!contentText) {
       toast.error("Source content cannot be empty.");
       return;
@@ -4407,9 +5102,9 @@ export function SourcesHub({
     setIsSubmitting(true);
     try {
       const created = await contentClient.createSource(workspaceId, {
-        title: textTitle.trim() || undefined,
+        title: addSourceDialog.textTitle.trim() || undefined,
         contentText,
-        parentSourceId: addParentSourceId,
+        parentSourceId: addSourceDialog.parentSourceId,
       });
 
       await contentClient.indexSource(workspaceId, created.source.id, {});
@@ -4418,15 +5113,14 @@ export function SourcesHub({
       );
 
       toast.success("Source added and indexing started.");
-      setIsAddOpen(false);
-      resetAddForm();
+      addSourceDialog.close(false);
       await refreshSources();
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to create source."));
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, textTitle, textContent, addParentSourceId, resetAddForm, refreshSources]);
+  }, [workspaceId, addSourceDialog, refreshSources]);
 
   const handleCreateUrlSource = useCallback(async () => {
     if (!workspaceId) {
@@ -4434,7 +5128,7 @@ export function SourcesHub({
       return;
     }
 
-    const url = urlValue.trim();
+    const url = addSourceDialog.urlValue.trim();
     if (!url) {
       toast.error("URL cannot be empty.");
       return;
@@ -4444,8 +5138,8 @@ export function SourcesHub({
     try {
       const created = await contentClient.createUrlSource(workspaceId, {
         url,
-        title: urlTitle.trim() || undefined,
-        parentSourceId: addParentSourceId,
+        title: addSourceDialog.urlTitle.trim() || undefined,
+        parentSourceId: addSourceDialog.parentSourceId,
       });
 
       setPendingSourceIds((prev) =>
@@ -4453,40 +5147,39 @@ export function SourcesHub({
       );
 
       toast.success("URL source added. Processing started.");
-      setIsAddOpen(false);
-      resetAddForm();
+      addSourceDialog.close(false);
       await refreshSources();
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to add URL source."));
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, urlValue, urlTitle, addParentSourceId, resetAddForm, refreshSources]);
+  }, [workspaceId, addSourceDialog, refreshSources]);
 
   const handleUploadFiles = useCallback(async () => {
     if (!workspaceId) {
       toast.error("No workspace selected yet.");
       return;
     }
-    if (files.length === 0) {
+    if (addSourceDialog.files.length === 0) {
       toast.error("Select files to upload first.");
       return;
     }
 
     setIsSubmitting(true);
-    setUploadProgress(0);
+    addSourceDialog.setUploadProgress(0);
     const createdSourceIds: string[] = [];
-    const total = files.length;
+    const total = addSourceDialog.files.length;
     let processed = 0;
 
     try {
-      for (const file of files) {
+      for (const file of addSourceDialog.files) {
         const result = await contentClient.uploadSource(workspaceId, file, {
-          parentSourceId: addParentSourceId,
+          parentSourceId: addSourceDialog.parentSourceId,
         });
         createdSourceIds.push(result.source.id);
         processed += 1;
-        setUploadProgress(Math.round((processed / total) * 100));
+        addSourceDialog.setUploadProgress(Math.round((processed / total) * 100));
       }
 
       if (createdSourceIds.length > 0) {
@@ -4500,15 +5193,14 @@ export function SourcesHub({
           ? "1 source uploaded. Processing started."
           : `${createdSourceIds.length} sources uploaded. Processing started.`,
       );
-      setIsAddOpen(false);
-      resetAddForm();
+      addSourceDialog.close(false);
       await refreshSources();
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to upload files."));
     } finally {
       setIsSubmitting(false);
     }
-  }, [workspaceId, files, addParentSourceId, resetAddForm, refreshSources]);
+  }, [workspaceId, addSourceDialog, refreshSources]);
 
   return (
     <>
@@ -4661,7 +5353,7 @@ export function SourcesHub({
                     <span className="sr-only">Create folder</span>
                   </Button>
                   <Button
-                    onClick={() => handleOpenAddDialog(null)}
+                    onClick={() => addSourceDialog.open(null)}
                     size="xs"
                     type="button"
                     variant="outline"
@@ -4699,7 +5391,7 @@ export function SourcesHub({
                   onDownload={handleDownloadSource}
                   onEditReadme={handleOpenReadmeDialog}
                   onEditTitleChange={setEditingTitle}
-                  onAddSource={handleOpenAddDialog}
+                  onAddSource={addSourceDialog.open}
                   onCreateDirectory={handleOpenCreateDirectory}
                   onLoadChildren={handleLoadSourceChildren}
                   onLoadMore={handleLoadMoreRootSources}
@@ -4885,406 +5577,79 @@ export function SourcesHub({
         </div>
       </aside>
 
-      <Dialog onOpenChange={handleCloseAddDialog} open={isAddOpen}>
-        <DialogContent
-          className="w-[640px] max-w-[calc(100%-2rem)]"
-          constrainWidth={false}
-        >
-          <DialogHeader>
-            <DialogTitle>Add source</DialogTitle>
-            <DialogDescription>
-              Add web pages, text notes, or uploaded files as sources.
-            </DialogDescription>
-          </DialogHeader>
+      <AddSourceDialog
+        addParentSourceId={addSourceDialog.parentSourceId}
+        addTab={addSourceDialog.tab}
+        fileInputRef={addSourceDialog.fileInputRef}
+        files={addSourceDialog.files}
+        isDragActive={addSourceDialog.isDragActive}
+        isOpen={addSourceDialog.isOpen}
+        isSubmitting={isSubmitting}
+        onAddFiles={addSourceDialog.addFiles}
+        onAddTabChange={addSourceDialog.setTab}
+        onClose={addSourceDialog.close}
+        onCreateTextSource={() => void handleCreateTextSource()}
+        onCreateUrlSource={() => void handleCreateUrlSource()}
+        onDragEnter={addSourceDialog.handleDragEnter}
+        onDragLeave={addSourceDialog.handleDragLeave}
+        onDragOver={addSourceDialog.handleDragOver}
+        onDrop={addSourceDialog.handleDrop}
+        onRemoveFile={addSourceDialog.removeFile}
+        onTextContentChange={addSourceDialog.setTextContent}
+        onTextTitleChange={addSourceDialog.setTextTitle}
+        onUploadFiles={() => void handleUploadFiles()}
+        onUrlTitleChange={addSourceDialog.setUrlTitle}
+        onUrlValueChange={addSourceDialog.setUrlValue}
+        sources={sources}
+        textContent={addSourceDialog.textContent}
+        textTitle={addSourceDialog.textTitle}
+        uploadProgress={addSourceDialog.uploadProgress}
+        urlTitle={addSourceDialog.urlTitle}
+        urlValue={addSourceDialog.urlValue}
+      />
 
-          <div className="space-y-3">
-            {addParentSourceId ? (
-              <div className="flex items-center gap-1.5 rounded-lg border bg-muted/25 px-2.5 py-1.5 text-xs text-muted-foreground">
-                <Folder className="size-3.5" />
-                <span className="truncate">
-                  {sources.find((source) => source.id === addParentSourceId)?.title ?? "Selected folder"}
-                </span>
-              </div>
-            ) : null}
-            <div className="flex gap-1 rounded-lg border bg-muted/30 p-1">
-              {addTabs.map((tab) => (
-                <button
-                  className={cn(
-                    "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
-                    addTab === tab
-                      ? "bg-background text-foreground shadow-xs ring-1 ring-border"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  key={tab}
-                  onClick={() => setAddTab(tab)}
-                  type="button"
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
+      <CreateDirectoryDialog
+        directoryContext={directoryContext}
+        directoryParentSourceId={directoryParentSourceId}
+        directoryTitle={directoryTitle}
+        isOpen={isCreateDirectoryOpen}
+        isSubmitting={isSubmitting}
+        onContextChange={setDirectoryContext}
+        onCreate={() => void handleCreateDirectory()}
+        onOpenChange={setIsCreateDirectoryOpen}
+        onParentChange={setDirectoryParentSourceId}
+        onTitleChange={setDirectoryTitle}
+        sources={sources}
+      />
 
-            <div className="h-72">
-              {addTab === "Text" ? (
-                <div className="flex h-full flex-col gap-2">
-                  <Input
-                    onChange={(e) => setTextTitle(e.target.value)}
-                    placeholder="Title (optional)"
-                    value={textTitle}
-                  />
-                  <Textarea
-                    className="min-h-0 flex-1"
-                    onChange={(e) => setTextContent(e.target.value)}
-                    placeholder="Paste or write source content..."
-                    value={textContent}
-                  />
-                </div>
-              ) : addTab === "URL" ? (
-                <div className="flex h-full flex-col gap-2">
-                  <Input
-                    onChange={(e) => setUrlValue(e.target.value)}
-                    placeholder="https://example.com/article"
-                    type="url"
-                    value={urlValue}
-                  />
-                  <Input
-                    onChange={(e) => setUrlTitle(e.target.value)}
-                    placeholder="Title (optional)"
-                    value={urlTitle}
-                  />
-                  <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-6 text-center text-xs text-muted-foreground">
-                    SourceWeft will fetch the page content and index it for search.
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-full min-h-0 flex-col gap-2">
-                  <div
-                    className={cn(
-                      "rounded-lg border border-dashed px-4 py-5 text-center text-xs transition-colors",
-                      isDragActive
-                        ? "border-primary bg-primary/5 text-foreground"
-                        : "border-border text-muted-foreground hover:bg-accent/40",
-                    )}
-                    onDragEnter={handleDragEnter}
-                    onDragLeave={handleDragLeave}
-                    onDragOver={handleDragOver}
-                    onDrop={handleDrop}
-                  >
-                    <input
-                      accept={SOURCE_FILE_ACCEPT}
-                      className="hidden"
-                      ref={fileInputRef}
-                      multiple
-                      onChange={(e) => {
-                        handleAddFiles(Array.from(e.target.files ?? []));
-                        e.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                    <span className="inline-flex items-center gap-1.5 text-foreground">
-                      <Upload className="size-3.5" />
-                      {isDragActive ? "Drop files here" : "Drag files here"}
-                    </span>
-                    <p className="mt-1 text-[10px]">
-                      or
-                      <button
-                        className="mx-1 inline font-medium text-foreground underline underline-offset-2"
-                        onClick={() => fileInputRef.current?.click()}
-                        type="button"
-                      >
-                        browse
-                      </button>
-                      files
-                    </p>
-                    <p className="mt-1 text-[10px]">
-                      Up to {MAX_FILES} files, {MAX_FILE_SIZE_MB}MB each
-                    </p>
-                  </div>
-
-                  <div className="min-h-0 flex-1 rounded-lg border p-2">
-                    {files.length > 0 ? (
-                      <div className="h-full space-y-1.5 overflow-y-auto">
-                        {files.map((file, idx) => (
-                          <div
-                            className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5"
-                            key={`${file.name}-${file.size}-${idx}`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <span className="block truncate text-xs text-foreground">
-                                {file.name}
-                              </span>
-                            </div>
-                            <TypeBadge label={getUploadFileLabel(file)} />
-                            <Button
-                              onClick={() =>
-                                setFiles((prev) =>
-                                  prev.filter((_, i) => i !== idx),
-                                )
-                              }
-                              size="icon-xs"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <X className="size-3.5" />
-                              <span className="sr-only">Remove file</span>
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
-                        No files selected
-                      </div>
-                    )}
-                  </div>
-
-                  {isSubmitting ? (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                        <span>Uploading</span>
-                        <span>{uploadProgress}%</span>
-                      </div>
-                      <Progress className="h-1.5" value={uploadProgress} />
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              disabled={isSubmitting}
-              onClick={() => handleCloseAddDialog(false)}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={
-                isSubmitting ||
-                (addTab === "Text" && !textContent.trim()) ||
-                (addTab === "URL" && !urlValue.trim()) ||
-                (addTab === "File" && files.length === 0)
-              }
-              onClick={() =>
-                addTab === "Text"
-                  ? void handleCreateTextSource()
-                  : addTab === "URL"
-                    ? void handleCreateUrlSource()
-                  : void handleUploadFiles()
-              }
-              type="button"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  Working...
-                </>
-              ) : (
-                <>
-                  {addTab === "Text"
-                    ? "Create source"
-                    : addTab === "URL"
-                      ? "Add URL"
-                      : "Upload files"}
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog onOpenChange={setIsCreateDirectoryOpen} open={isCreateDirectoryOpen}>
-        <DialogContent className="w-[520px] max-w-[calc(100%-2rem)]" constrainWidth={false}>
-          <DialogHeader>
-            <DialogTitle>Create folder</DialogTitle>
-            <DialogDescription>
-              Add a folder to organize Sources.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              autoFocus
-              onChange={(event) => setDirectoryTitle(event.target.value)}
-              placeholder="Folder name"
-              value={directoryTitle}
-            />
-            <Textarea
-              className="min-h-28"
-              onChange={(event) => setDirectoryContext(event.target.value)}
-              placeholder="README context (optional)"
-              value={directoryContext}
-            />
-            <DirectoryPicker
-              onChange={setDirectoryParentSourceId}
-              sources={sources}
-              value={directoryParentSourceId}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              disabled={isSubmitting}
-              onClick={() => setIsCreateDirectoryOpen(false)}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={isSubmitting || !directoryTitle.trim()}
-              onClick={() => void handleCreateDirectory()}
-              type="button"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  Working...
-                </>
-              ) : (
-                "Create folder"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
+      <MoveSourceDialog
+        isSubmitting={isSubmitting}
+        moveParentSourceId={moveParentSourceId}
+        moveSource={moveSource}
+        onMove={() => void handleMoveSource()}
+        onMoveSourceChange={setMoveParentSourceId}
         onOpenChange={(open) => {
           if (!open) {
             setMoveSource(null);
             setMoveParentSourceId(null);
           }
         }}
-        open={Boolean(moveSource)}
-      >
-        <DialogContent className="w-[520px] max-w-[calc(100%-2rem)]" constrainWidth={false}>
-          <DialogHeader>
-            <DialogTitle>Move source</DialogTitle>
-            <DialogDescription>
-              Choose a destination under the root directory.
-            </DialogDescription>
-          </DialogHeader>
-          {moveSource ? (
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/25 px-3 py-2">
-              <SourceTypeIcon
-                isPartiallySelected={false}
-                isSelected={false}
-                source={moveSource}
-              />
-              <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Moving
-                </div>
-                <div className="truncate text-sm font-medium text-foreground">
-                  {moveSource.title}
-                </div>
-              </div>
-            </div>
-          ) : null}
-          <DirectoryPicker
-            excludeSourceId={moveSource?.id}
-            framed={false}
-            onChange={setMoveParentSourceId}
-            sources={sources}
-            value={moveParentSourceId}
-          />
-          <DialogFooter>
-            <Button
-              disabled={isSubmitting}
-              onClick={() => setMoveSource(null)}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={isSubmitting}
-              onClick={() => void handleMoveSource()}
-              type="button"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  Moving...
-                </>
-              ) : (
-                "Move"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        sources={sources}
+      />
 
-      <Dialog
+      <ReadmeDialog
+        isSubmitting={isSubmitting}
+        onContentChange={setReadmeContent}
         onOpenChange={(open) => {
           if (!open) {
             setReadmeSource(null);
             setReadmeContent("");
           }
         }}
-        open={Boolean(readmeSource)}
-      >
-        <DialogContent className="w-[640px] max-w-[calc(100%-2rem)]" constrainWidth={false}>
-          <DialogHeader>
-            <DialogTitle>Edit README</DialogTitle>
-            <DialogDescription>
-              Update the context attached to this folder.
-            </DialogDescription>
-          </DialogHeader>
-          {readmeSource ? (
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/25 px-3 py-2">
-              <SourceTypeIcon
-                isPartiallySelected={false}
-                isSelected={false}
-                source={readmeSource}
-              />
-              <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Folder
-                </div>
-                <div className="truncate text-sm font-medium text-foreground">
-                  {readmeSource.title}
-                </div>
-              </div>
-            </div>
-          ) : null}
-          <Textarea
-            className="min-h-52 text-sm"
-            onChange={(event) => setReadmeContent(event.target.value)}
-            placeholder="README context for this folder..."
-            value={readmeContent}
-          />
-          <DialogFooter>
-            <Button
-              disabled={isSubmitting}
-              onClick={() => {
-                setReadmeSource(null);
-                setReadmeContent("");
-              }}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={isSubmitting}
-              onClick={() => void handleUpdateReadme()}
-              type="button"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                "Save README"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onSave={() => void handleUpdateReadme()}
+        readmeContent={readmeContent}
+        readmeSource={readmeSource}
+      />
 
       <SourcePreviewPanel
         onOpenChange={(open) => {
@@ -5297,131 +5662,36 @@ export function SourcesHub({
         workspaceId={workspaceId}
       />
 
-      <Dialog
+      <WorkfilePreviewDialog
         onOpenChange={(open) => {
           if (!open) {
             setPreviewWorkfile(null);
           }
         }}
-        open={Boolean(previewWorkfile)}
-      >
-        <DialogContent
-          className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
-          constrainWidth={false}
-        >
-          <DialogHeader className="border-b px-5 py-4 text-left">
-            <DialogTitle>{previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}</DialogTitle>
-            <DialogDescription>
-              {previewWorkfile
-                ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
-                : "Assistant-created working material from this thread."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 overflow-y-auto px-5 py-5">
-            {previewWorkfile ? (
-              <MessageResponse className="text-sm leading-7 text-foreground [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted/30 [&_pre]:p-3">
-                {previewWorkfile.contentText}
-              </MessageResponse>
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+        previewWorkfile={previewWorkfile}
+      />
 
-      <AlertDialog
+      <DeleteSourceDialog
+        deleteSource={deleteSource}
+        onConfirm={(source) => void handleConfirmDeleteSource(source)}
         onOpenChange={(open) => {
           if (!open) {
             setDeleteSource(null);
           }
         }}
-        open={Boolean(deleteSource)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete {deleteSource?.sourceType === "directory" ? "folder" : "source"}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteSource?.sourceType === "directory"
-                ? "This will remove the folder and its sources from this workspace. This action cannot be undone."
-                : "This will remove the source from this workspace. This action cannot be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {deleteSource ? (
-            <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
-              <span className="line-clamp-2 break-words">{deleteSource.title}</span>
-            </div>
-          ) : null}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={Boolean(deleteSource && rowBusyById[deleteSource.id])}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
-              disabled={Boolean(deleteSource && rowBusyById[deleteSource.id])}
-              onClick={(event) => {
-                event.preventDefault();
-                if (deleteSource) {
-                  void handleConfirmDeleteSource(deleteSource);
-                }
-              }}
-            >
-              {deleteSource && rowBusyById[deleteSource.id] ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete"
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        rowBusyById={rowBusyById}
+      />
 
-      <AlertDialog
+      <DeleteWorkfileDialog
+        deleteWorkfile={deleteWorkfile}
+        onConfirm={() => void handleConfirmDeleteWorkfile()}
         onOpenChange={(open) => {
           if (!open) {
             setDeleteWorkfile(null);
           }
         }}
-        open={Boolean(deleteWorkfile)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete workfile?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will remove the Workfile from this thread. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {deleteWorkfile ? (
-            <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
-              <span className="line-clamp-2 break-words">{deleteWorkfile.path}</span>
-            </div>
-          ) : null}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={Boolean(deleteWorkfile && workfileBusyByPath[deleteWorkfile.path])}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
-              disabled={Boolean(deleteWorkfile && workfileBusyByPath[deleteWorkfile.path])}
-              onClick={(event) => {
-                event.preventDefault();
-                void handleConfirmDeleteWorkfile();
-              }}
-            >
-              {deleteWorkfile && workfileBusyByPath[deleteWorkfile.path] ? (
-                <>
-                  <Loader2 className="size-3.5 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete"
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        workfileBusyByPath={workfileBusyByPath}
+      />
 
       <SkillReadmeDialog
         catalogId={previewSkillCatalogId}

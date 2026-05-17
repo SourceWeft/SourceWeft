@@ -145,6 +145,31 @@ export async function listByokCredentialRecords(input: {
     .map(mapByokCredential);
 }
 
+export async function getByokCredentialWithSecretRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  credentialId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(modelGatewayByokCredentials)
+    .where(
+      and(
+        eq(modelGatewayByokCredentials.teamId, input.teamId),
+        eq(modelGatewayByokCredentials.workspaceId, input.workspaceId),
+        eq(modelGatewayByokCredentials.id, input.credentialId),
+        eq(modelGatewayByokCredentials.isActive, true),
+      ),
+    )
+    .limit(1);
+  const row = rows.find(
+    (candidate) => candidate.userId === null || candidate.userId === input.userId,
+  );
+
+  return row ? mapByokCredentialWithSecret(row) : null;
+}
+
 export async function createByokCredentialRecord(input: {
   teamId: string;
   workspaceId: string;

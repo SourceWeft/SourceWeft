@@ -34,3 +34,16 @@ Auth and workspace MVP notes:
 - Scheduler example queue jobs are disabled by default; set `BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED=true` to enable.
 
 Environment template: `apps/backend/.env.example`.
+
+Model gateway catalog sync:
+
+- Global provider keys remain optional environment variables.
+- Dynamic provider model discovery is configured per gateway in
+  `apps/backend/config/model-gateway.global.json` with
+  `modelCatalog.enabled`; the removed `MODEL_GATEWAY_SYNC_OPENROUTER_CATALOG`
+  environment variable is no longer used.
+- If `modelCatalog.kinds` is omitted, the scheduler imports every model kind
+  that the catalog adapter can classify and the gateway transport supports.
+- Hand-written profiles in the JSON remain available when catalog sync is
+  disabled. Global dynamic catalog import skips models that cannot be matched
+  to LiteLLM pricing/capabilities; BYOK still allows manual unknown models.

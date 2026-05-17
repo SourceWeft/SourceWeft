@@ -153,6 +153,11 @@ export function ByokModelConfigDialog({
   const [credentialAlias, setCredentialAlias] = useState("");
   const [credentialMode, setCredentialMode] = useState<"existing" | "new">("new");
   const [apiKey, setApiKey] = useState("");
+  const [modelCandidates, setModelCandidates] = useState<Array<{
+    displayName: string;
+    modelId: string;
+  }>>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const selectedProvider =
@@ -237,6 +242,38 @@ export function ByokModelConfigDialog({
       }
     }
   }, [credentialId, credentialMode, open, providerCredentials]);
+
+  useEffect(() => {
+    if (!open || !workspaceId || credentialMode !== "existing" || !credentialId) {
+      setModelCandidates([]);
+      setLoadingModels(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingModels(true);
+    contentClient
+      .listByokModelCandidates(workspaceId, credentialId)
+      .then((result) => {
+        if (!cancelled) {
+          setModelCandidates(result.items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setModelCandidates([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingModels(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [credentialId, credentialMode, open, workspaceId]);
 
   const refreshByokState = async () => {
     if (!workspaceId) {
@@ -391,11 +428,42 @@ export function ByokModelConfigDialog({
                 >
                   Model ID
                 </label>
+                {credentialMode === "existing" && modelCandidates.length > 0 ? (
+                  <Select
+                    disabled={saving}
+                    onValueChange={(value) => {
+                      setModelName(value);
+                      const candidate = modelCandidates.find(
+                        (item) => item.modelId === value,
+                      );
+                      setDisplayName(candidate?.displayName ?? value);
+                    }}
+                    value={modelName}
+                  >
+                    <SelectTrigger className="h-9 w-full rounded-md">
+                      <SelectValue placeholder="Select a model" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {modelCandidates.map((candidate) => (
+                        <SelectItem
+                          key={candidate.modelId}
+                          value={candidate.modelId}
+                        >
+                          {candidate.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
                 <Input
                   disabled={saving}
                   id="byok-model-name"
                   onChange={(event) => setModelName(event.target.value)}
-                  placeholder="openai/gpt-oss-120b:free"
+                  placeholder={
+                    loadingModels
+                      ? "Loading provider models..."
+                      : "openai/gpt-oss-120b:free"
+                  }
                   value={modelName}
                 />
               </div>

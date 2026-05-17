@@ -26,11 +26,32 @@ export type LiteLLMEntry = {
 };
 
 export type LiteLLMData = Record<string, LiteLLMEntry>;
+export type LiteLLMGatewayKind =
+  | "chat"
+  | "rerank"
+  | "embedding"
+  | "asr"
+  | "tts"
+  | "vision"
+  | "image"
+  | "video";
 
 export type ModelAliasMatch =
   | { type: "matched"; key: string }
   | { type: "unmatched" }
   | { type: "ambiguous"; candidates: string[] };
+
+export type LiteLLMModelMatch =
+  | {
+      type: "matched";
+      key: string;
+      entry: LiteLLMEntry;
+      kind: LiteLLMGatewayKind | null;
+      provider: string | null;
+    }
+  | { type: "unmatched" }
+  | { type: "ambiguous"; candidates: string[] }
+  | { type: "provider_mismatch"; key: string; entryProvider: string | null };
 
 export type LiteLLMResolvedCapabilities = Pick<
   ModelPricing,
@@ -57,6 +78,266 @@ function normalizeModelPart(alias: string): string {
   }
   const parts = trimmed.split("/").filter((part) => part.length > 0);
   return (parts.at(-1) ?? trimmed).toLowerCase();
+}
+
+const LITELLM_PRICING_URL =
+  "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+
+export async function fetchLiteLLMPricing(): Promise<LiteLLMData> {
+  const response = await fetch(LITELLM_PRICING_URL);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch LiteLLM pricing: ${response.statusText}`);
+  }
+  return response.json() as Promise<LiteLLMData>;
+}
+
+function normalizeLiteLLMProvider(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, "_")
+    .replace(/_+/g, "_");
+}
+
+export function resolveLiteLLMProviderForGateway(input: {
+  providerKind: string;
+  providerName?: string | null;
+  baseUrl?: string | null;
+}) {
+  const providerKind = normalizeLiteLLMProvider(input.providerKind);
+  const providerName = normalizeLiteLLMProvider(input.providerName);
+  const baseUrl = input.baseUrl?.trim().toLowerCase() ?? "";
+
+  if (providerKind === "openrouter") return "openrouter";
+  if (providerKind === "deepinfra") return "deepinfra";
+  if (providerKind === "siliconflow_cn") return "siliconflow";
+  if (providerKind === "openai") return "openai";
+  if (providerKind === "azure_openai") return "azure";
+  if (providerKind === "gemini") return "gemini";
+  if (providerKind === "anthropic") return "anthropic";
+
+  if (baseUrl.includes("api.together.ai")) return "together_ai";
+  if (baseUrl.includes("api.deepinfra.com")) return "deepinfra";
+  if (baseUrl.includes("api.siliconflow.cn")) return "siliconflow";
+  if (baseUrl.includes("openrouter.ai")) return "openrouter";
+  if (baseUrl.includes("api.openai.com")) return "openai";
+
+  if (providerName === "together" || providerName === "togetherai") {
+    return "together_ai";
+  }
+  if (providerName === "siliconflow_cn" || providerName === "siliconflow") {
+    return "siliconflow";
+  }
+
+  return providerName;
+}
+
+function stripModelVersion(value: string) {
+  const [model, suffix] = value.split(":", 2);
+  const stripped = (model ?? value)
+    .replace(/[-_.]?(20\d{2})[-_.]?(0[1-9]|1[0-2])[-_.]?([0-2]\d|3[01])$/i, "")
+    .replace(/[-_.]?v\d+(\.\d+)*$/i, "")
+    .replace(/[-_.]?(latest|preview|beta|alpha)$/i, "");
+  return suffix && suffix !== "free" ? `${stripped}:${suffix}` : stripped;
+}
+
+function buildLiteLLMLookup(litellmKeys: string[]) {
+  const lookup = new Map<string, string[]>();
+  for (const key of litellmKeys) {
+    const normalized = key.trim().toLowerCase();
+    const entries = lookup.get(normalized) ?? [];
+    entries.push(key);
+    lookup.set(normalized, entries);
+  }
+  return lookup;
+}
+
+function lookupUniqueKey(
+  lookup: Map<string, string[]>,
+  key: string,
+): ModelAliasMatch {
+  const matches = lookup.get(key.trim().toLowerCase()) ?? [];
+  if (matches.length === 0) {
+    return { type: "unmatched" };
+  }
+  if (matches.length === 1 && matches[0]) {
+    return { type: "matched", key: matches[0] };
+  }
+  return { type: "ambiguous", candidates: matches };
+}
+
+function mergeLiteLLMEntries(
+  primary: LiteLLMEntry,
+  fallback: LiteLLMEntry | null,
+): LiteLLMEntry {
+  if (!fallback) {
+    return primary;
+  }
+
+  return Object.fromEntries(
+    Array.from(
+      new Set([...Object.keys(fallback), ...Object.keys(primary)]),
+    ).map((key) => {
+      const primaryValue = primary[key as keyof LiteLLMEntry];
+      return [
+        key,
+        primaryValue === undefined || primaryValue === null
+          ? fallback[key as keyof LiteLLMEntry]
+          : primaryValue,
+      ];
+    }),
+  ) as LiteLLMEntry;
+}
+
+function providerCompatible(input: {
+  entry: LiteLLMEntry;
+  key: string;
+  modelId: string;
+  provider: string | null;
+}) {
+  if (!input.provider) {
+    return false;
+  }
+  const entryProvider = normalizeLiteLLMProvider(input.entry.litellm_provider);
+  const provider = normalizeLiteLLMProvider(input.provider);
+  if (entryProvider) {
+    return entryProvider === provider;
+  }
+  return input.key.toLowerCase().startsWith(`${provider}/`);
+}
+
+function resolveLiteLLMKind(entry: LiteLLMEntry): LiteLLMGatewayKind | null {
+  const mode = normalizeMode(entry.mode);
+  if (!mode) {
+    return null;
+  }
+
+  if (mode.includes("embedding")) return "embedding";
+  if (mode.includes("rerank")) return "rerank";
+  if (
+    mode.includes("speech_to_text") ||
+    mode.includes("transcription") ||
+    mode.includes("audio_transcription") ||
+    mode === "asr"
+  ) {
+    return "asr";
+  }
+  if (
+    mode.includes("text_to_speech") ||
+    mode.includes("audio_speech") ||
+    mode === "tts"
+  ) {
+    return "tts";
+  }
+  if (mode.includes("video")) return "video";
+  if (mode.includes("image_generation") || mode === "image") return "image";
+
+  const textMode =
+    mode === "chat" ||
+    mode === "completion" ||
+    mode === "responses" ||
+    mode.includes("text_generation") ||
+    mode.includes("text-generation") ||
+    mode.includes("chat");
+
+  if (!textMode) {
+    return null;
+  }
+
+  return entry.supports_vision === true ? "vision" : "chat";
+}
+
+export function resolveLiteLLMModelMatch(input: {
+  modelId: string;
+  provider: string | null;
+  litellmData: LiteLLMData;
+}): LiteLLMModelMatch {
+  const modelId = input.modelId.trim();
+  const provider = normalizeLiteLLMProvider(input.provider);
+  if (!modelId || !provider) {
+    return { type: "unmatched" };
+  }
+
+  const litellmKeys = Object.keys(input.litellmData);
+  const lookup = buildLiteLLMLookup(litellmKeys);
+  const splitModelId = normalizeModelPart(modelId);
+  const strippedModelId = stripModelVersion(modelId);
+  const strippedSplitModelId = stripModelVersion(splitModelId);
+  const candidates = Array.from(
+    new Set([
+      `${provider}/${modelId}`,
+      modelId,
+      `${provider}/${strippedModelId}`,
+      strippedModelId,
+      splitModelId,
+      strippedSplitModelId,
+    ].filter((candidate) => candidate.trim().length > 0)),
+  );
+
+  for (const candidate of candidates) {
+    const matched = lookupUniqueKey(lookup, candidate);
+    if (matched.type === "ambiguous") {
+      return matched;
+    }
+    if (matched.type !== "matched") {
+      continue;
+    }
+
+    const entry = input.litellmData[matched.key];
+    if (!entry) {
+      continue;
+    }
+    const bareEntry =
+      input.litellmData[modelId] ??
+      input.litellmData[strippedModelId] ??
+      input.litellmData[splitModelId] ??
+      input.litellmData[strippedSplitModelId] ??
+      null;
+    const mergedEntry = mergeLiteLLMEntries(entry, bareEntry);
+    if (
+      !providerCompatible({
+        entry: mergedEntry,
+        key: matched.key,
+        modelId,
+        provider,
+      })
+    ) {
+      return {
+        type: "provider_mismatch",
+        key: matched.key,
+        entryProvider: normalizeLiteLLMProvider(mergedEntry.litellm_provider),
+      };
+    }
+
+    return {
+      type: "matched",
+      key: matched.key,
+      entry: mergedEntry,
+      kind: resolveLiteLLMKind(mergedEntry),
+      provider,
+    };
+  }
+
+  return { type: "unmatched" };
+}
+
+export function hasLiteLLMPricing(entry: LiteLLMEntry) {
+  return [
+    entry.input_cost_per_token,
+    entry.output_cost_per_token,
+    entry.cache_read_input_token_cost,
+    entry.cache_creation_input_token_cost,
+    entry.output_cost_per_reasoning_token,
+    entry.input_cost_per_image_token,
+    entry.output_cost_per_image_token,
+    entry.input_cost_per_audio_token,
+    entry.output_cost_per_audio_token,
+    entry.input_cost_per_image,
+    entry.output_cost_per_image,
+  ].some((value) => typeof value === "number" && Number.isFinite(value));
 }
 
 export function autoMatchModelAlias(

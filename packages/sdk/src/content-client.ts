@@ -36,6 +36,7 @@ import type {
   ListArtifactsResponse,
   ListThreadModelCatalogResponse,
   ListByokProvidersResponse,
+  ListByokModelCandidatesResponse,
   ListByokCredentialsResponse,
   ListByokModelsResponse,
   ListSourceMentionsRequest,
@@ -513,6 +514,12 @@ export class ContentClient {
   deleteByokCredential(workspaceId: string, credentialId: string) {
     return this.http.delete<DeleteByokCredentialResponse>(
       `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-credentials/${encode(credentialId)}`,
+    );
+  }
+
+  listByokModelCandidates(workspaceId: string, credentialId: string) {
+    return this.http.get<ListByokModelCandidatesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-credentials/${encode(credentialId)}/models`,
     );
   }
 
