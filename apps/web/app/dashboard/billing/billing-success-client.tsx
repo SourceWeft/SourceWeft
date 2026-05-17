@@ -3,6 +3,7 @@
 import * as React from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { trackPurchase } from "../../../lib/analytics-events";
 import { billingClient } from "../../../lib/sdk";
 
 type SyncState = "finalizing" | "setting_up" | "ready" | "syncing";
@@ -30,6 +31,16 @@ const labels: Record<SyncState, string> = {
   syncing: "Still syncing",
 };
 
+function trackPurchaseOnce(input: Parameters<typeof trackPurchase>[0]) {
+  const storageKey = `sourceweft:ga4:purchase:${input.orderId}`;
+  if (window.sessionStorage.getItem(storageKey)) {
+    return;
+  }
+
+  trackPurchase(input);
+  window.sessionStorage.setItem(storageKey, "1");
+}
+
 export function BillingSuccessClient({ orderId }: { orderId?: string | null }) {
   const [state, setState] = React.useState<SyncState>("finalizing");
 
@@ -52,6 +63,15 @@ export function BillingSuccessClient({ orderId }: { orderId?: string | null }) {
 
         const nextState = resolveState(order.status);
         setState(nextState);
+        if (nextState === "ready") {
+          trackPurchaseOnce({
+            amountTotal: order.amountTotal,
+            billingInterval: order.billingInterval,
+            currency: order.currency,
+            orderId: order.id,
+            planFamily: order.planFamily,
+          });
+        }
         if (nextState === "ready" || attempts >= 8) {
           if (nextState !== "ready") {
             setState("syncing");

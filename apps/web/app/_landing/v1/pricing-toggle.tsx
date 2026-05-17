@@ -3,6 +3,10 @@
 import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 import { TeamCheckoutDialog } from "../../_components/team-checkout-dialog";
+import {
+  trackBeginCheckout,
+  trackCheckoutError,
+} from "../../../lib/analytics-events";
 import { authClient } from "../../../lib/auth-client";
 import { billingClient } from "../../../lib/sdk";
 import {
@@ -210,8 +214,18 @@ export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
         source: "landing",
         clientReferenceKey: createReferenceKey(planId, billingInterval),
       });
+      trackBeginCheckout({
+        billingInterval,
+        plan: planId,
+        source: "landing",
+      });
       window.location.assign(result.checkoutUrl);
     } catch (error) {
+      trackCheckoutError({
+        billingInterval,
+        plan: planId,
+        source: "landing",
+      });
       toast.error(
         error instanceof Error ? error.message : "Unable to start checkout.",
       );

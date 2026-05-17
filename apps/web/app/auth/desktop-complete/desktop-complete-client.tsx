@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { trackAuthError, trackLogin } from "../../../lib/analytics-events";
 import { authClient } from "../../../lib/auth-client";
 import { buildDesktopCompleteDeepLink } from "../../../lib/desktop-auth";
 import { apiBaseUrl } from "../../../lib/sdk";
@@ -80,6 +81,11 @@ export function DesktopAuthCompleteClient() {
         }
 
         if (!session.data?.session) {
+          trackAuthError({
+            action: "login",
+            method: "desktop",
+            surface: "desktop",
+          });
           window.location.replace(buildSignInUrl(desktopState));
           return;
         }
@@ -102,11 +108,17 @@ export function DesktopAuthCompleteClient() {
           token,
         });
         if (!cancelled) {
+          trackLogin("desktop");
           setState({ kind: "ready", deepLink: nextDeepLink });
         }
         window.location.href = nextDeepLink;
       } catch (value) {
         if (!cancelled) {
+          trackAuthError({
+            action: "login",
+            method: "desktop",
+            surface: "desktop",
+          });
           setState({
             kind: "expired",
             text: getMessage(value),

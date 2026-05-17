@@ -56,6 +56,9 @@ import type {
 
 const LIST_LIMIT = 50;
 const TRACE_DETAIL_OBSERVATION_LIMIT = 200;
+const TRACE_TREE_ROW_HEIGHT_PX = 48;
+const TRACE_LOG_ROW_HEIGHT_PX = 49;
+const TRACE_VIRTUALIZE_THRESHOLD = 120;
 const ALL_WORKSPACES = "__all__";
 const NOISY_MESSAGE_FIELDS = new Set([
   "additional_kwargs",
@@ -284,6 +287,74 @@ function TraceTreeSkeleton() {
       ))}
     </div>
   );
+}
+
+function useVirtualRows({
+  enabled,
+  rowCount,
+  rowHeight,
+}: {
+  enabled: boolean;
+  rowCount: number;
+  rowHeight: number;
+}) {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [viewportHeight, setViewportHeight] = React.useState(0);
+  const [scrollTop, setScrollTop] = React.useState(0);
+
+  React.useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node || !enabled) {
+      return;
+    }
+
+    const updateHeight = () => setViewportHeight(node.clientHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [enabled]);
+
+  React.useEffect(() => {
+    if (!enabled) {
+      setScrollTop(0);
+    }
+  }, [enabled, rowCount]);
+
+  const onScroll = React.useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!enabled) {
+        return;
+      }
+      setScrollTop(event.currentTarget.scrollTop);
+    },
+    [enabled],
+  );
+
+  if (!enabled) {
+    return {
+      containerRef,
+      endIndex: rowCount,
+      onScroll,
+      startIndex: 0,
+      topPadding: 0,
+      totalHeight: rowCount * rowHeight,
+    };
+  }
+
+  const overscan = 8;
+  const visibleCount = Math.ceil(viewportHeight / rowHeight) || 1;
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const endIndex = Math.min(rowCount, startIndex + visibleCount + overscan * 2);
+
+  return {
+    containerRef,
+    endIndex,
+    onScroll,
+    startIndex,
+    topPadding: startIndex * rowHeight,
+    totalHeight: rowCount * rowHeight,
+  };
 }
 
 function buildTree(detail: LlmTraceDetailResponse | null) {
@@ -1914,6 +1985,15 @@ function TraceTree({
       return true;
     });
   }, [defaultCollapsedIds, expandedIds, rows]);
+  const shouldVirtualize = visibleRows.length > TRACE_VIRTUALIZE_THRESHOLD;
+  const virtualRows = useVirtualRows({
+    enabled: shouldVirtualize,
+    rowCount: visibleRows.length,
+    rowHeight: TRACE_TREE_ROW_HEIGHT_PX,
+  });
+  const renderedRows = shouldVirtualize
+    ? visibleRows.slice(virtualRows.startIndex, virtualRows.endIndex)
+    : visibleRows;
 
   const toggleExpanded = React.useCallback((id: string) => {
     setExpandedIds((current) => {
@@ -1943,55 +2023,87 @@ function TraceTree({
     );
   }
 
+  const renderRow = (row: TreeRow) => {
+    const Icon = row.icon;
+    const collapsed =
+      row.hasChildren &&
+      defaultCollapsedIds.has(row.id) &&
+      !expandedIds.has(row.id);
+    return (
+      <button
+        className={cn(
+          "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent/40",
+          selected?.kind === row.node.kind &&
+            selected.id === row.node.id &&
+            "bg-accent/60",
+        )}
+        key={`${row.kind}:${row.id}`}
+        onClick={() => onSelect(row.node)}
+        style={{ paddingLeft: `${12 + row.depth * 24}px` }}
+        type="button"
+      >
+        {row.hasChildren && row.defaultCollapsed ? (
+          <span
+            className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground"
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleExpanded(row.id);
+            }}
+            role="button"
+            tabIndex={-1}
+            title={collapsed ? "Show child observations" : "Hide child observations"}
+          >
+            <ChevronRight
+              className={cn(
+                "h-3.5 w-3.5 transition-transform",
+                !collapsed && "rotate-90",
+              )}
+            />
+          </span>
+        ) : (
+          <span className="h-3.5 w-3.5 shrink-0" />
+        )}
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium text-foreground">
+              {row.label}
+            </span>
+          </div>
+          <p className="truncate text-xs text-muted-foreground">
+            {row.kind} · {formatLatency(row.latencyMs)} ·{" "}
+            {formatTime(row.startedAt)}
+          </p>
+        </div>
+      </button>
+    );
+  };
+
+  if (shouldVirtualize) {
+    return (
+      <div
+        className="h-full overflow-y-auto pr-2"
+        onScroll={virtualRows.onScroll}
+        ref={virtualRows.containerRef}
+      >
+        <div
+          className="relative"
+          style={{ height: `${virtualRows.totalHeight}px` }}
+        >
+          <div
+            className="absolute inset-x-0 top-0 space-y-0.5"
+            style={{ transform: `translateY(${virtualRows.topPadding}px)` }}
+          >
+            {renderedRows.map(renderRow)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-0.5 pr-2">
-        {visibleRows.map((row) => {
-          const Icon = row.icon;
-          const collapsed =
-            row.hasChildren &&
-            defaultCollapsedIds.has(row.id) &&
-            !expandedIds.has(row.id);
-          return (
-            <button
-              className={cn(
-                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent/40",
-                selected?.kind === row.node.kind && selected.id === row.node.id && "bg-accent/60",
-              )}
-              key={`${row.kind}:${row.id}`}
-              onClick={() => onSelect(row.node)}
-              style={{ paddingLeft: `${12 + row.depth * 24}px` }}
-              type="button"
-            >
-              {row.hasChildren && row.defaultCollapsed ? (
-                <span
-                  className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleExpanded(row.id);
-                  }}
-                  role="button"
-                  tabIndex={-1}
-                  title={collapsed ? "Show child observations" : "Hide child observations"}
-                >
-                  <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", !collapsed && "rotate-90")} />
-                </span>
-              ) : (
-                <span className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate font-medium text-foreground">{row.label}</span>
-                </div>
-                <p className="truncate text-xs text-muted-foreground">
-                  {row.kind} · {formatLatency(row.latencyMs)} · {formatTime(row.startedAt)}
-                </p>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      <div className="space-y-0.5 pr-2">{renderedRows.map(renderRow)}</div>
     </ScrollArea>
   );
 }
@@ -2013,6 +2125,64 @@ function TraceLogView({
     return <EmptySection label="Select a trace to view the timeline." />;
   }
   const traceDuration = Math.max(detail.trace.latencyMs ?? 1, 1);
+  const shouldVirtualize = rows.length > TRACE_VIRTUALIZE_THRESHOLD;
+  const virtualRows = useVirtualRows({
+    enabled: shouldVirtualize,
+    rowCount: rows.length,
+    rowHeight: TRACE_LOG_ROW_HEIGHT_PX,
+  });
+  const renderedRows = shouldVirtualize
+    ? rows.slice(virtualRows.startIndex, virtualRows.endIndex)
+    : rows;
+
+  const renderRow = (row: TreeRow) => {
+    const Icon = row.icon;
+    const isSelected =
+      selected?.kind === row.node.kind && selected.id === row.node.id;
+    const rowStart = row.startedAt
+      ? new Date(row.startedAt).getTime()
+      : traceStart;
+    const offset = Math.max(0, ((rowStart - traceStart) / traceDuration) * 100);
+    const width = Math.max(
+      1.5,
+      Math.min(100 - offset, ((row.latencyMs ?? 1) / traceDuration) * 100),
+    );
+    return (
+      <button
+        className={cn(
+          "grid w-full grid-cols-[260px_96px_minmax(240px,1fr)_92px] items-center gap-2 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent/40",
+          isSelected && "bg-accent/60",
+        )}
+        key={`${row.kind}:${row.id}`}
+        onClick={() => onSelect(row.node)}
+        type="button"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="truncate font-medium text-foreground">
+            {row.label}
+          </span>
+        </div>
+        <div className="truncate text-xs text-muted-foreground">{row.kind}</div>
+        <div className="relative h-6 rounded bg-muted">
+          <div
+            className={cn(
+              "absolute top-1 h-4 rounded",
+              row.node.kind === "generation"
+                ? "bg-blue-500/70"
+                : row.kind === "tool"
+                  ? "bg-purple-500/70"
+                  : "bg-emerald-500/70",
+            )}
+            style={{ left: `${offset}%`, width: `${width}%` }}
+          />
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {formatLatency(row.latencyMs)}
+        </div>
+      </button>
+    );
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-background">
@@ -2029,40 +2199,27 @@ function TraceLogView({
         <div>Timeline</div>
         <div>Latency</div>
       </div>
-      {rows.map((row) => {
-        const Icon = row.icon;
-        const isSelected = selected?.kind === row.node.kind && selected.id === row.node.id;
-        const rowStart = row.startedAt ? new Date(row.startedAt).getTime() : traceStart;
-        const offset = Math.max(0, ((rowStart - traceStart) / traceDuration) * 100);
-        const width = Math.max(1.5, Math.min(100 - offset, ((row.latencyMs ?? 1) / traceDuration) * 100));
-        return (
-          <button
-            className={cn(
-              "grid w-full grid-cols-[260px_96px_minmax(240px,1fr)_92px] items-center gap-2 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent/40",
-              isSelected && "bg-accent/60",
-            )}
-            key={`${row.kind}:${row.id}`}
-            onClick={() => onSelect(row.node)}
-            type="button"
+      {shouldVirtualize ? (
+        <div
+          className="max-h-[520px] overflow-y-auto"
+          onScroll={virtualRows.onScroll}
+          ref={virtualRows.containerRef}
+        >
+          <div
+            className="relative"
+            style={{ height: `${virtualRows.totalHeight}px` }}
           >
-            <div className="flex min-w-0 items-center gap-2">
-              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate font-medium text-foreground">{row.label}</span>
+            <div
+              className="absolute inset-x-0 top-0"
+              style={{ transform: `translateY(${virtualRows.topPadding}px)` }}
+            >
+              {renderedRows.map(renderRow)}
             </div>
-            <div className="truncate text-xs text-muted-foreground">{row.kind}</div>
-            <div className="relative h-6 rounded bg-muted">
-              <div
-                className={cn(
-                  "absolute top-1 h-4 rounded",
-                  row.node.kind === "generation" ? "bg-blue-500/70" : row.kind === "tool" ? "bg-purple-500/70" : "bg-emerald-500/70",
-                )}
-                style={{ left: `${offset}%`, width: `${width}%` }}
-              />
-            </div>
-            <div className="text-xs text-muted-foreground">{formatLatency(row.latencyMs)}</div>
-          </button>
-        );
-      })}
+          </div>
+        </div>
+      ) : (
+        renderedRows.map(renderRow)
+      )}
     </div>
   );
 }

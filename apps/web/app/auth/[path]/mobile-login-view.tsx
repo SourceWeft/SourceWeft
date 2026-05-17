@@ -15,6 +15,11 @@ import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Logo } from "@sourceweft/ui-web/logo";
 import { authClient } from "../../../lib/auth-client";
 import {
+  trackAuthError,
+  trackLogin,
+  trackSignUp,
+} from "../../../lib/analytics-events";
+import {
   getMobileGoogleSignInError,
   signInWithMobileGoogle,
 } from "../../../lib/mobile-google-auth";
@@ -187,12 +192,27 @@ export function MobileLoginView({ path }: { path: string }) {
 
       const resultError = getAuthResultError(result);
       if (resultError) {
+        trackAuthError({
+          action: mode === "sign-up" ? "sign_up" : "login",
+          method: "email",
+          surface: "mobile",
+        });
         setNotice({ message: resultError, variant: "error" });
         return;
       }
 
+      if (mode === "sign-up") {
+        trackSignUp("email");
+      } else {
+        trackLogin("email");
+      }
       await completeAuthSuccess(mode);
     } catch (caughtError) {
+      trackAuthError({
+        action: mode === "sign-up" ? "sign_up" : "login",
+        method: "email",
+        surface: "mobile",
+      });
       setNotice({
         message: getErrorMessage(
           caughtError,
@@ -217,8 +237,14 @@ export function MobileLoginView({ path }: { path: string }) {
 
     try {
       await signInWithMobileGoogle();
+      trackLogin("mobile_google");
       await completeAuthSuccess("google");
     } catch (caughtError) {
+      trackAuthError({
+        action: "login",
+        method: "mobile_google",
+        surface: "mobile",
+      });
       const message = getMobileGoogleSignInError(caughtError);
       if (message) {
         setNotice({ message, variant: "error" });

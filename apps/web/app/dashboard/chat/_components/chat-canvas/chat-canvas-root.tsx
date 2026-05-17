@@ -1,7 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import type { FileUIPart } from "ai";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
+import {
+  trackChatMessageSent,
+  trackSkillSelected,
+  trackSourceAttached,
+} from "../../../../../lib/analytics-events";
 import type { SourceItem } from "../source-types";
 import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
@@ -64,6 +69,24 @@ function messageImagesToInitialAttachments(
     type: "file" as const,
     url: normalizeAssetUrl(image.url),
   }));
+}
+
+function countSelectedTools(tools: ChatSendInput["tools"]) {
+  if (!tools) {
+    return 0;
+  }
+
+  return Object.values(tools).filter((value) => {
+    if (!value || typeof value !== "object") {
+      return Boolean(value);
+    }
+
+    if ("enabled" in value && value.enabled === false) {
+      return false;
+    }
+
+    return true;
+  }).length;
 }
 
 export function ChatCanvas({
@@ -171,6 +194,8 @@ export function ChatCanvas({
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
   void sourcesVisible;
+  const lastTrackedSkillCountRef = useRef(selectedSkillIds.length);
+  const lastTrackedSourceCountRef = useRef(selectedSources.length);
   const editingInitialAttachments = useMemo(() => {
     if (!isEditing || !editingMessageId) {
       return [];
@@ -197,12 +222,50 @@ export function ChatCanvas({
     return [];
   }, [editingMessageId, isEditing, messageGroups]);
 
+  useEffect(() => {
+    if (
+      selectedSources.length > 0 &&
+      selectedSources.length !== lastTrackedSourceCountRef.current
+    ) {
+      trackSourceAttached(selectedSources.length);
+    }
+    lastTrackedSourceCountRef.current = selectedSources.length;
+  }, [selectedSources.length]);
+
   function handleSendMessage(input: ChatSendInput) {
     if (!workspaceId) {
       toast.error("No workspace selected yet.");
       return;
     }
+    const sourceCount =
+      input.mentionedSourceIds?.length ?? selectedSources.length;
+    const skillCount = input.skillIds?.length ?? selectedSkillIds.length;
+    trackChatMessageSent({
+      commandUsed: Boolean(input.command),
+      hasImages: Boolean(input.images?.length),
+      hasSources: sourceCount > 0,
+      skillCount,
+      sourceCount,
+      surface: mode === "new" ? "empty_state" : "thread",
+      toolCount: countSelectedTools(input.tools),
+    });
     onSendMessage?.(input);
+  }
+
+  function handleRemoveSource(id: string) {
+    lastTrackedSourceCountRef.current = Math.max(selectedSources.length - 1, 0);
+    onRemoveSource?.(id);
+  }
+
+  function handleSkillSelectionChange(skillIds: string[]) {
+    if (
+      skillIds.length > 0 &&
+      skillIds.length !== lastTrackedSkillCountRef.current
+    ) {
+      trackSkillSelected(skillIds.length);
+    }
+    lastTrackedSkillCountRef.current = skillIds.length;
+    onSkillSelectionChange?.(skillIds);
   }
 
   if (mode === "new") {
@@ -212,8 +275,8 @@ export function ChatCanvas({
         composerResetKey={composerResetKey}
         allSources={allSources}
         sourceMentionLoader={sourceMentionLoader}
-        onRemoveSource={onRemoveSource ?? (() => undefined)}
-        onSkillSelectionChange={onSkillSelectionChange}
+        onRemoveSource={handleRemoveSource}
+        onSkillSelectionChange={handleSkillSelectionChange}
         onSearchEnabledChange={onSearchEnabledChange}
         onSendMessage={handleSendMessage}
         onThinkingSettingsChange={onThinkingSettingsChange}
@@ -267,8 +330,8 @@ export function ChatCanvas({
             isEditing={isEditing}
             inputKey={threadTitle + "-" + (composerResetKey ?? 0)}
             onCancelEditing={onCancelEditing}
-            onRemoveSource={onRemoveSource}
-            onSkillSelectionChange={onSkillSelectionChange}
+            onRemoveSource={handleRemoveSource}
+            onSkillSelectionChange={handleSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
             onSubmit={(
               message,

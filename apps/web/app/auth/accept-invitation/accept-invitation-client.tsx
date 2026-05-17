@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@sourceweft/ui-web/components/ui/card";
 import { Logo } from "@sourceweft/ui-web/logo";
+import { trackTeamInvitationAccepted } from "../../../lib/analytics-events";
 import { authClient } from "../../../lib/auth-client";
 
 type InvitationRecord = {
@@ -268,6 +269,7 @@ export function AcceptInvitationClient() {
 
       await refreshOrganizationState(organizationId);
 
+      trackTeamInvitationAccepted();
       setStatus("accepted");
       toast.success("Invitation accepted.");
       router.replace(redirectTo);

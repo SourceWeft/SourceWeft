@@ -4,6 +4,10 @@ import * as React from "react";
 import Link from "next/link";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  trackBeginCheckout,
+  trackCheckoutError,
+} from "../../../../lib/analytics-events";
 import { billingClient } from "../../../../lib/sdk";
 
 type BillingInterval = "monthly" | "yearly";
@@ -156,9 +160,21 @@ export function BillingCheckoutClient({
             ? { seatCount: normalizedSeatCount }
             : {}),
         });
+        trackBeginCheckout({
+          billingInterval: checkoutBillingInterval,
+          plan: checkoutPlan,
+          seatCount:
+            checkoutPlan === "team" ? (normalizedSeatCount ?? undefined) : undefined,
+          source: normalizedSource,
+        });
         setState("opening");
         window.location.assign(result.checkoutUrl);
       } catch (checkoutError) {
+        trackCheckoutError({
+          billingInterval: checkoutBillingInterval,
+          plan: checkoutPlan,
+          source: normalizedSource,
+        });
         setError(
           checkoutError instanceof Error
             ? checkoutError.message

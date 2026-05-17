@@ -10,6 +10,10 @@ import {
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { toast } from "sonner";
+import {
+  trackBeginCheckout,
+  trackCheckoutError,
+} from "../../lib/analytics-events";
 import { authClient } from "../../lib/auth-client";
 import { billingClient } from "../../lib/sdk";
 
@@ -207,8 +211,19 @@ export function TeamCheckoutDialog({
         source,
         teamName: normalizedTeamName,
       });
+      trackBeginCheckout({
+        billingInterval: currentBillingInterval,
+        plan: "team",
+        seatCount: requestedSeatCount,
+        source,
+      });
       window.location.assign(result.checkoutUrl);
     } catch (error) {
+      trackCheckoutError({
+        billingInterval: currentBillingInterval,
+        plan: "team",
+        source,
+      });
       toast.error(
         error instanceof Error ? error.message : "Unable to start checkout.",
       );

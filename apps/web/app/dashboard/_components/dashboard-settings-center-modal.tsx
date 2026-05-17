@@ -33,6 +33,11 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
 import { billingCheckoutEnabled } from "../../../lib/deployment-config";
+import {
+  trackBeginCheckout,
+  trackBillingPortalOpened,
+  trackCheckoutError,
+} from "../../../lib/analytics-events";
 import { billingClient } from "../../../lib/sdk";
 import { useTheme } from "next-themes";
 import { TeamCheckoutDialog } from "../../_components/team-checkout-dialog";
@@ -264,6 +269,10 @@ function useBillingPlanAction(input: {
         const result = await billingClient.createBillingPortal(input.teamId);
 
         if (result.portalUrl) {
+          trackBillingPortalOpened({
+            scope: input.isPersonal ? "personal" : "team",
+            source: "settings",
+          });
           openBillingPortalWindow(result.portalUrl);
           return;
         }
@@ -295,6 +304,11 @@ function useBillingPlanAction(input: {
             input.billingPeriod,
           ),
         });
+        trackBeginCheckout({
+          billingInterval: input.billingPeriod,
+          plan: "pro",
+          source: "settings",
+        });
         window.location.assign(result.checkoutUrl);
         return;
       }
@@ -315,8 +329,23 @@ function useBillingPlanAction(input: {
           ),
         },
       );
+      trackBeginCheckout({
+        billingInterval: input.billingPeriod,
+        plan: "team",
+        seatCount: Math.max(
+          input.teamSeatCount ?? 2,
+          input.summary?.seats.used ?? 2,
+          2,
+        ),
+        source: "settings",
+      });
       window.location.assign(result.checkoutUrl);
     } catch (err) {
+      trackCheckoutError({
+        billingInterval: input.billingPeriod,
+        plan: input.isPersonal ? "pro" : "team",
+        source: "settings",
+      });
       toast.error(
         err instanceof Error ? err.message : "Unable to start checkout.",
       );

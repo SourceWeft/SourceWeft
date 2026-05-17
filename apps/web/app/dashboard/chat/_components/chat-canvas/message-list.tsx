@@ -568,6 +568,27 @@ export function MessageList({
     () => new Map(allSources.map((source) => [source.id, source])),
     [allSources],
   );
+  const selectedSourceIdsByKey = useMemo(() => {
+    const cache = new Map<string, string[]>();
+    return {
+      resolve(version: MessageVersion) {
+        if (version.effectiveSourceIds) {
+          return version.effectiveSourceIds;
+        }
+        const key = `${version.id}:${(version.sourceIds ?? []).join(",")}`;
+        const cached = cache.get(key);
+        if (cached) {
+          return cached;
+        }
+        const resolved = expandSelectedSources(
+          allSources,
+          version.sourceIds ?? [],
+        ).map((source) => source.id);
+        cache.set(key, resolved);
+        return resolved;
+      },
+    };
+  }, [allSources]);
   const latestGroups = useMemo(() => {
     let latestUserGroup: VersionedMessageGroup | undefined;
     let latestAssistantGroup: VersionedMessageGroup | undefined;
@@ -815,13 +836,8 @@ export function MessageList({
                       isLatestAssistantGroup &&
                       versionIndex === activeVisibleBranchIndex;
                     const referencedSources = !isAssistant
-                      ? (
-                          version.effectiveSourceIds ??
-                          expandSelectedSources(
-                            allSources,
-                            version.sourceIds ?? [],
-                          ).map((source) => source.id)
-                        )
+                      ? selectedSourceIdsByKey
+                          .resolve(version)
                           .map((sourceId) => sourceById.get(sourceId))
                           .filter((source): source is SourceItem =>
                             Boolean(source),
@@ -944,9 +960,9 @@ export function MessageList({
                               </MessageAction>
 
                               {!isAssistant &&
-                              isLatestUserGroup &&
-                              versionIndex === activeVisibleBranchIndex &&
-                              !isStreaming ? (
+                          isLatestUserGroup &&
+                          versionIndex === activeVisibleBranchIndex &&
+                          !isStreaming ? (
                                 <MessageAction
                                   className="text-muted-foreground hover:text-foreground"
                                   label="Edit prompt"

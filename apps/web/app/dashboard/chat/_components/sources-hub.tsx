@@ -2670,6 +2670,301 @@ function SkillsTab({
   );
 }
 
+function ConnectorsTab({
+  connectors,
+  connectorBusyById,
+  isConnectingNotion,
+  isLoading,
+  loadingError,
+  onConnectNotion,
+  onCreateNotionConnector,
+  onSyncConnector,
+  searchQuery,
+  workspaceId,
+}: {
+  connectors: ConnectorItem[];
+  connectorBusyById: Record<string, boolean>;
+  isConnectingNotion: boolean;
+  isLoading: boolean;
+  loadingError: string | null;
+  onConnectNotion: () => void;
+  onCreateNotionConnector: () => void;
+  onSyncConnector: (connector: ConnectorItem) => void;
+  searchQuery: string;
+  workspaceId?: string | null;
+}) {
+  const filtered = useMemo(
+    () => filterConnectors(connectors, searchQuery),
+    [connectors, searchQuery],
+  );
+
+  return (
+    <section className="space-y-1">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-medium text-foreground">Connectors</h3>
+          <span className="text-[10px] text-muted-foreground">
+            {connectors.length} connectors
+          </span>
+          {searchQuery ? (
+            <span className="text-[10px] text-primary">
+              {filtered.length} found
+            </span>
+          ) : null}
+        </div>
+        <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                disabled={isConnectingNotion || !workspaceId}
+                size="xs"
+                type="button"
+                variant="outline"
+              >
+                {isConnectingNotion ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Link2 className="size-3.5" />
+                )}
+                Connect
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onSelect={onConnectNotion}>
+                <Link2 className="size-3.5" />
+                Connect Notion
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onCreateNotionConnector}>
+                <Upload className="size-3.5" />
+                Create Notion connector
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {loadingError ? (
+        <Alert className="mb-2" variant="destructive">
+          <AlertDescription>{loadingError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
+          <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+          Loading connectors...
+        </div>
+      ) : filtered.length === 0 ? (
+        <HubEmptyState
+          description={
+            searchQuery
+              ? "Try a different connector name, status, or provider."
+              : "Connect external apps and storage to pull project sources into the Hub."
+          }
+          icon={Link2}
+          title={
+            searchQuery
+              ? `No connectors match "${searchQuery}"`
+              : "Connectors will appear here."
+          }
+        />
+      ) : (
+        <div className="space-y-1.5">
+          {filtered.map((connector) => (
+            <article
+              className="rounded-lg border bg-background p-2.5 shadow-xs"
+              key={connector.id}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">
+                  {connector.name}
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  {connector.status}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {connector.meta}
+              </p>
+              <div className="mt-3 flex items-center gap-1.5">
+                <Button
+                  disabled={
+                    connector.status !== "active" ||
+                    Boolean(connectorBusyById[connector.id])
+                  }
+                  onClick={() => onSyncConnector(connector)}
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  {connectorBusyById[connector.id] ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-3.5" />
+                  )}
+                  Sync now
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CitationsTab({
+  activeCitationChunkId,
+  activeCitationIndex,
+  activeCitationItems,
+  citationScope,
+  currentCitationItems,
+  currentCitationMessageId,
+  filteredCitationItems,
+  mode,
+  onCitationLocate,
+  onCitationOpen,
+  onScopeChange,
+  searchQuery,
+  threadCitationItems,
+}: {
+  activeCitationChunkId: string | null;
+  activeCitationIndex: number | null;
+  activeCitationItems: DisplayCitationItem[];
+  citationScope: CitationScope;
+  currentCitationItems: DisplayCitationItem[];
+  currentCitationMessageId: string | null;
+  filteredCitationItems: DisplayCitationItem[];
+  mode: "thread" | "new";
+  onCitationLocate?: (messageId: string) => void;
+  onCitationOpen?: (
+    citation: CitationRecord,
+    context?: CitationOpenContext,
+  ) => void;
+  onScopeChange: (scope: CitationScope) => void;
+  searchQuery: string;
+  threadCitationItems: DisplayCitationItem[];
+}) {
+  return (
+    <section className="space-y-1">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-medium text-foreground">Citations</h3>
+          <span className="text-[10px] text-muted-foreground">
+            {citationScope === "thread"
+              ? `${threadCitationItems.length} in thread`
+              : `${currentCitationItems.length} current`}
+          </span>
+          {searchQuery ? (
+            <span className="text-[10px] text-primary">
+              {filteredCitationItems.length} found
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {mode === "thread" ? (
+        <div className="mb-2 grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
+          {([
+            ["current", `Current (${currentCitationItems.length})`],
+            ["thread", `Thread (${threadCitationItems.length})`],
+          ] as const).map(([scope, label]) => (
+            <button
+              className={cn(
+                "rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                citationScope === scope
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              key={scope}
+              onClick={() => onScopeChange(scope)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {filteredCitationItems.length === 0 ? (
+        <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+          {searchQuery
+            ? `No citations match "${searchQuery}".`
+            : citationScope === "thread"
+              ? "No citations found in this thread."
+              : "No citations used in the selected answer."}
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {filteredCitationItems.map((citation) => {
+            const citationRecord = citation.citationRecord;
+            const displayIndex =
+              activeCitationItems.findIndex((item) => item.id === citation.id) +
+              1;
+            const isActive =
+              citationScope === "current"
+                ? activeCitationIndex === displayIndex
+                : activeCitationChunkId === citationRecord.chunkId;
+            const locateMessageId =
+              citation.messageId ??
+              (citationScope === "current" ? currentCitationMessageId : null);
+            const canLocate = Boolean(locateMessageId);
+
+            return (
+              <article
+                className={cn(
+                  "rounded-xl border bg-background p-3 shadow-xs transition-colors",
+                  isActive && "border-primary/45 bg-primary/5 shadow-sm",
+                  canLocate && "cursor-pointer hover:border-primary/30 hover:bg-primary/5",
+                )}
+                key={citation.id}
+                onClick={() => {
+                  if (locateMessageId) {
+                    onCitationLocate?.(locateMessageId);
+                  }
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <span className="mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary">
+                      {displayIndex}
+                    </span>
+                    <div className="min-w-0">
+                      <h4 className="truncate text-sm font-medium text-foreground">
+                        {citation.sourceTitle}
+                      </h4>
+                      <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                        {citation.messageLabel}
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCitationOpen?.(citationRecord, {
+                        messageId: locateMessageId ?? undefined,
+                      });
+                    }}
+                    size="xs"
+                    type="button"
+                    variant="outline"
+                  >
+                    <FileText className="size-3.5" />
+                    Open
+                  </Button>
+                </div>
+                <div className="mt-2 line-clamp-4 rounded-lg border border-input bg-muted/20 px-2.5 py-2 text-sm leading-6 text-foreground/90">
+                  {citation.excerpt}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function filterCitations(items: DisplayCitationItem[], searchQuery: string) {
   const q = searchQuery.trim().toLowerCase();
   if (!q) {
@@ -2846,10 +3141,6 @@ export function SourcesHub({
     () => filterCitations(activeCitationItems, deferredSearchQueries.Citations),
     [activeCitationItems, deferredSearchQueries.Citations],
   );
-  const filteredConnectors = useMemo(
-    () => filterConnectors(connectors, deferredSearchQueries.Connectors),
-    [connectors, deferredSearchQueries.Connectors],
-  );
   const filteredSourceCount = useMemo(
     () => countFilteredSources(sources, deferredSearchQueries.Sources),
     [deferredSearchQueries.Sources, sources],
@@ -2871,7 +3162,7 @@ export function SourcesHub({
       : artifacts.length;
   }, [artifacts, deferredSearchQueries.Artifacts]);
   const activeCitationChunkId = activeCitationIndex
-    ? citations[activeCitationIndex - 1]?.chunkId
+    ? (citations[activeCitationIndex - 1]?.chunkId ?? null)
     : null;
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addParentSourceId, setAddParentSourceId] = useState<string | null>(null);
@@ -4558,248 +4849,38 @@ export function SourcesHub({
           )}
 
           {activeTab === "Citations" && (
-            <section className="space-y-1">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">
-                    Citations
-                  </h3>
-                  <span className="text-[10px] text-muted-foreground">
-                    {citationScope === "thread"
-                      ? `${threadCitationItems.length} in thread`
-                      : `${currentCitationItems.length} current`}
-                  </span>
-                  {deferredSearchQueries.Citations ? (
-                    <span className="text-[10px] text-primary">
-                      {filteredCitationItems.length} found
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              {mode === "thread" ? (
-                <div className="mb-2 grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
-                  {([
-                    ["current", `Current (${currentCitationItems.length})`],
-                    ["thread", `Thread (${threadCitationItems.length})`],
-                  ] as const).map(([scope, label]) => (
-                    <button
-                      className={cn(
-                        "rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
-                        citationScope === scope
-                          ? "bg-background text-foreground shadow-xs"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      key={scope}
-                      onClick={() => setCitationScope(scope)}
-                      type="button"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {filteredCitationItems.length === 0 ? (
-                <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                  {deferredSearchQueries.Citations
-                    ? `No citations match "${deferredSearchQueries.Citations}".`
-                    : citationScope === "thread"
-                    ? "No citations found in this thread."
-                    : "No citations used in the selected answer."}
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {filteredCitationItems.map((citation) => {
-                    const citationRecord = citation.citationRecord;
-                    const displayIndex = activeCitationItems.findIndex(
-                      (item) => item.id === citation.id,
-                    ) + 1;
-                    const isActive =
-                      citationScope === "current"
-                        ? activeCitationIndex === displayIndex
-                        : activeCitationChunkId === citationRecord.chunkId;
-                    const locateMessageId =
-                      citation.messageId ??
-                      (citationScope === "current" ? currentCitationMessageId : null);
-                    const canLocate = Boolean(locateMessageId);
-
-                    return (
-                      <article
-                        className={cn(
-                          "rounded-xl border bg-background p-3 shadow-xs transition-colors",
-                          isActive &&
-                            "border-primary/45 bg-primary/5 shadow-sm",
-                          canLocate && "cursor-pointer hover:border-primary/30 hover:bg-primary/5",
-                        )}
-                        key={citation.id}
-                        onClick={() => {
-                          if (locateMessageId) {
-                            onCitationLocate?.(locateMessageId);
-                          }
-                        }}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex min-w-0 items-start gap-2.5">
-                            <span className="mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary">
-                              {displayIndex}
-                            </span>
-                            <div className="min-w-0">
-                              <h4 className="truncate text-sm font-medium text-foreground">
-                                {citation.sourceTitle}
-                              </h4>
-                              <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                                {citation.messageLabel}
-                              </div>
-                            </div>
-                          </div>
-                          <Button
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onCitationOpen?.(citationRecord, {
-                                messageId: locateMessageId ?? undefined,
-                              });
-                            }}
-                            size="xs"
-                            type="button"
-                            variant="outline"
-                          >
-                            <FileText className="size-3.5" />
-                            Open
-                          </Button>
-                        </div>
-                        <div className="mt-2 line-clamp-4 rounded-lg border border-input bg-muted/20 px-2.5 py-2 text-sm leading-6 text-foreground/90">
-                          {citation.excerpt}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
+            <CitationsTab
+              activeCitationChunkId={activeCitationChunkId}
+              activeCitationIndex={activeCitationIndex}
+              activeCitationItems={activeCitationItems}
+              citationScope={citationScope}
+              currentCitationItems={currentCitationItems}
+              currentCitationMessageId={currentCitationMessageId}
+              filteredCitationItems={filteredCitationItems}
+              mode={mode}
+              onCitationLocate={onCitationLocate}
+              onCitationOpen={onCitationOpen}
+              onScopeChange={setCitationScope}
+              searchQuery={deferredSearchQueries.Citations}
+              threadCitationItems={threadCitationItems}
+            />
           )}
 
           {activeTab === "Connectors" && (
-            <section className="space-y-1">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-medium text-foreground">
-                    Connectors
-                  </h3>
-                  <span className="text-[10px] text-muted-foreground">
-                    {connectors.length} connectors
-                  </span>
-                  {deferredSearchQueries.Connectors ? (
-                    <span className="text-[10px] text-primary">
-                      {filteredConnectors.length} found
-                    </span>
-                  ) : null}
-                </div>
-                <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        disabled={isConnectingNotion || !workspaceId}
-                        size="xs"
-                        type="button"
-                        variant="outline"
-                      >
-                        {isConnectingNotion ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <Link2 className="size-3.5" />
-                        )}
-                        Connect
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          void handleConnectNotion();
-                        }}
-                      >
-                        <Link2 className="size-3.5" />
-                        Connect Notion
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          void handleCreateNotionConnector();
-                        }}
-                      >
-                        <Upload className="size-3.5" />
-                        Create Notion connector
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-              {connectorsLoadingError ? (
-                <Alert className="mb-2" variant="destructive">
-                  <AlertDescription>{connectorsLoadingError}</AlertDescription>
-                </Alert>
-              ) : null}
-
-              {isLoadingConnectors ? (
-                <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
-                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                  Loading connectors...
-                </div>
-              ) : filteredConnectors.length === 0 ? (
-                <HubEmptyState
-                  description={
-                    deferredSearchQueries.Connectors
-                      ? "Try a different connector name, status, or provider."
-                      : "Connect external apps and storage to pull project sources into the Hub."
-                  }
-                  icon={Link2}
-                  title={
-                    deferredSearchQueries.Connectors
-                      ? `No connectors match "${deferredSearchQueries.Connectors}"`
-                      : "Connectors will appear here."
-                  }
-                />
-              ) : (
-                <div className="space-y-1.5">
-                  {filteredConnectors.map((connector: ConnectorItem) => (
-                  <article
-                    className="rounded-lg border bg-background p-2.5 shadow-xs"
-                    key={connector.id}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-foreground">
-                        {connector.name}
-                      </p>
-                      <span className="text-[11px] text-muted-foreground">
-                        {connector.status}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {connector.meta}
-                    </p>
-                    <div className="mt-3 flex items-center gap-1.5">
-                      <Button
-                        disabled={
-                          connector.status !== "active" ||
-                          Boolean(connectorBusyById[connector.id])
-                        }
-                        onClick={() => void handleSyncConnector(connector)}
-                        size="xs"
-                        type="button"
-                        variant="outline"
-                      >
-                        {connectorBusyById[connector.id] ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <RotateCcw className="size-3.5" />
-                        )}
-                        Sync now
-                      </Button>
-                    </div>
-                  </article>
-                  ))}
-                </div>
-              )}
-            </section>
+            <ConnectorsTab
+              connectorBusyById={connectorBusyById}
+              connectors={connectors}
+              isConnectingNotion={isConnectingNotion}
+              isLoading={isLoadingConnectors}
+              loadingError={connectorsLoadingError}
+              onConnectNotion={() => void handleConnectNotion()}
+              onCreateNotionConnector={() =>
+                void handleCreateNotionConnector()
+              }
+              onSyncConnector={(connector) => void handleSyncConnector(connector)}
+              searchQuery={deferredSearchQueries.Connectors}
+              workspaceId={workspaceId}
+            />
           )}
         </div>
       </aside>

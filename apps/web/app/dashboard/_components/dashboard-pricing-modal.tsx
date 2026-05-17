@@ -5,6 +5,10 @@ import { Check, Sparkles } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { toast } from "sonner";
 import { TeamCheckoutDialog } from "../../_components/team-checkout-dialog";
+import {
+  trackBeginCheckout,
+  trackCheckoutError,
+} from "../../../lib/analytics-events";
 import { billingClient } from "../../../lib/sdk";
 import {
   planFamilyToPricingPlanId,
@@ -76,8 +80,18 @@ export function DashboardPricingModal({
         source: "dashboard",
         clientReferenceKey: createReferenceKey(planId, billingPeriod),
       });
+      trackBeginCheckout({
+        billingInterval: billingPeriod,
+        plan: planId,
+        source: "dashboard",
+      });
       window.location.assign(result.checkoutUrl);
     } catch (error) {
+      trackCheckoutError({
+        billingInterval: billingPeriod,
+        plan: planId,
+        source: "dashboard",
+      });
       toast.error(
         error instanceof Error ? error.message : "Unable to start checkout.",
       );

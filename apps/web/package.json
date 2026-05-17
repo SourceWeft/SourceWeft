@@ -31,6 +31,7 @@
     "@fontsource-variable/noto-sans-tc": "^5.2.10",
     "@fontsource-variable/noto-sans-thai": "^5.2.8",
     "@fontsource-variable/sora": "^5.2.8",
+    "@next/third-parties": "^16.2.6",
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/sdk": "workspace:*",
     "@sourceweft/ui-web": "workspace:*",
