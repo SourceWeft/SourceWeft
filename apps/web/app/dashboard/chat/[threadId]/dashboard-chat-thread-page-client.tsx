@@ -118,6 +118,10 @@ import {
   SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
 } from "@sourceweft/sdk";
 import { SourcesHubPanelSkeleton } from "../../../_components/route-loading-skeleton";
+import {
+  useStreamingAssistantTransientState,
+  type ChatMessageItem,
+} from "./streaming-assistant-state";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -238,16 +242,6 @@ type WorkfileDetail = Awaited<
   ReturnType<typeof contentClient.getWorkingFile>
 >["file"];
 
-type ChatMessageItem = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  contentJson: Record<string, unknown>;
-  parentMessageId: string | null;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-};
-
 function mapThreadMessagesToChatMessages(messages: ThreadMessageItem[]) {
   return messages
     .filter(
@@ -301,13 +295,6 @@ type ActiveThreadRun = {
   mode?: "send" | "refresh" | "edit";
   userMessageId?: string | null;
   assistantMessageId?: string | null;
-};
-
-type StreamingAssistantSnapshot = {
-  message: ChatMessageItem;
-  messageId: string;
-  messageIds: string[];
-  renderVersion: number;
 };
 
 function parseStoredThinkingSettings(
@@ -736,30 +723,6 @@ function resolveMessageEffectiveSourceIds(message: ChatMessageItem) {
   return rawSourceIds.filter(
     (sourceId): sourceId is string => typeof sourceId === "string",
   );
-}
-
-function mergeStreamingMessageIntoMessages(
-  messages: ChatMessageItem[],
-  snapshot: StreamingAssistantSnapshot | null,
-) {
-  if (!snapshot) {
-    return messages;
-  }
-
-  const snapshotIds = new Set([...snapshot.messageIds, snapshot.messageId]);
-  let found = false;
-  const merged = messages.flatMap((message) => {
-    if (!snapshotIds.has(message.id)) {
-      return message;
-    }
-    if (found) {
-      return [];
-    }
-    found = true;
-    return [snapshot.message];
-  });
-
-  return found ? merged : [...merged, snapshot.message];
 }
 
 function resolveMessageMentionedSourceIds(message: ChatMessageItem) {
@@ -1857,8 +1820,10 @@ export function DashboardChatThreadPageClient({
 
   // ── Messaging state ────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
-  const [streamingAssistantSnapshot, setStreamingAssistantSnapshot] =
-    useState<StreamingAssistantSnapshot | null>(null);
+  const {
+    mergeStreamingAssistantIntoMessages,
+    setStreamingAssistantSnapshot,
+  } = useStreamingAssistantTransientState();
   const [olderMessagesCursor, setOlderMessagesCursor] = useState<string | null>(
     null,
   );
@@ -2353,11 +2318,8 @@ export function DashboardChatThreadPageClient({
   }, [loadAvailableSkills]);
 
   const messageGroups = useMemo(
-    () =>
-      buildVersionedMessageGroups(
-        mergeStreamingMessageIntoMessages(messages, streamingAssistantSnapshot),
-      ),
-    [messages, streamingAssistantSnapshot],
+    () => buildVersionedMessageGroups(mergeStreamingAssistantIntoMessages(messages)),
+    [mergeStreamingAssistantIntoMessages, messages],
   );
 
   const activeAssistantVersion = useMemo(() => {
