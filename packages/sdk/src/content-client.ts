@@ -40,6 +40,9 @@ import type {
   ListByokModelsResponse,
   ListSourceMentionsRequest,
   ListSourceMentionsResponse,
+  ListSourcesRequest,
+  ListSourceStatusesRequest,
+  ListSourceStatusesResponse,
   ListSkillsCatalogResponse,
   ListThreadsRequest,
   ListSourcesResponse,
@@ -66,6 +69,7 @@ import type {
   UpdateThreadModelSettingsResponse,
   UpdateCustomSkillVersionRequest,
   ListThreadMessagesResponse,
+  ListThreadMessagesRequest,
   UpdateSourceRequest,
   UpdateSourceResponse,
   UpdateWorkspaceSkillRequest,
@@ -94,16 +98,40 @@ export class ContentClient {
     );
   }
 
-  listSources(workspaceId: string) {
+  listSources(
+    workspaceId: string,
+    input: ListSourcesRequest = {},
+  ) {
+    const params = new URLSearchParams();
+    if (typeof input.includeContent === "boolean") {
+      params.set("includeContent", String(input.includeContent));
+    }
+    if (typeof input.limit === "number") {
+      params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    if (input.parentSourceId !== undefined) {
+      params.set("parentSourceId", input.parentSourceId ?? "__root");
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+
     return this.http.get<ListSourcesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/sources`,
+      `/v1/workspaces/${encode(workspaceId)}/sources${suffix}`,
     );
   }
 
-  listArtifacts(workspaceId: string, input: { limit?: number } = {}) {
+  listArtifacts(
+    workspaceId: string,
+    input: { cursor?: string; limit?: number } = {},
+  ) {
     const params = new URLSearchParams();
     if (input.limit) {
       params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
     }
     const suffix = params.size > 0 ? `?${params.toString()}` : "";
 
@@ -165,6 +193,16 @@ export class ContentClient {
   getSourceStatus(workspaceId: string, sourceId: string) {
     return this.http.get<SourceStatusResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/status`,
+    );
+  }
+
+  listSourceStatuses(
+    workspaceId: string,
+    input: ListSourceStatusesRequest,
+  ) {
+    return this.http.post<ListSourceStatusesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/status`,
+      input,
     );
   }
 
@@ -247,9 +285,25 @@ export class ContentClient {
     );
   }
 
-  listThreadMessages(workspaceId: string, threadId: string) {
+  listThreadMessages(
+    workspaceId: string,
+    threadId: string,
+    input: ListThreadMessagesRequest = {},
+  ) {
+    const params = new URLSearchParams();
+    if (typeof input.limit === "number") {
+      params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    if (input.include) {
+      params.set("include", input.include);
+    }
+
+    const query = params.toString();
     return this.http.get<ListThreadMessagesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/messages`,
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/messages${query ? `?${query}` : ""}`,
     );
   }
 

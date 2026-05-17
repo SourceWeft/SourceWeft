@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import {
   createThreadRequestSchema,
+  listThreadMessagesRequestSchema,
   listThreadsRequestSchema,
   startThreadTurnRequestSchema,
   streamThreadRequestSchema,
@@ -287,6 +288,19 @@ export function registerThreadRoutes(app: Hono) {
     }
 
     const result = await contentService.listThreadMessages({
+      ...(() => {
+        const parsed = listThreadMessagesRequestSchema.safeParse({
+          cursor: c.req.query("cursor"),
+          include: c.req.query("include"),
+          limit: c.req.query("limit"),
+        });
+        if (!parsed.success) {
+          throw ApiError.validation(
+            parsed.error.flatten() as Record<string, unknown>,
+          );
+        }
+        return parsed.data;
+      })(),
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),

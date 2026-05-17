@@ -17,6 +17,7 @@ import {
   updateThreadModelSettingsRecord,
 } from "./thread/repository";
 import {
+  listMessageRecordPageByThread,
   findMessageRecord,
   listMessageRecordsByThread,
 } from "./message-repository";
@@ -36,6 +37,30 @@ import type { ChatThreadRunMode } from "./durable/types";
 import type { StreamThreadEventInput } from "./turn/types";
 
 const DEFAULT_THREAD_PAGE_LIMIT = 20;
+
+function decodeMessagesCursor(cursor: string | undefined) {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as { createdAt?: unknown; id?: unknown };
+    if (typeof parsed.id !== "string" || typeof parsed.createdAt !== "string") {
+      return null;
+    }
+
+    const createdAt = new Date(parsed.createdAt);
+    if (Number.isNaN(createdAt.getTime())) {
+      return null;
+    }
+
+    return { createdAt, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
 
 function findImagePart(input: { contentJson: unknown; imageId: string }) {
   const contentJson =
@@ -404,6 +429,9 @@ class ContentThreadService {
   }
 
   async listThreadMessages(input: {
+    cursor?: string;
+    include?: string;
+    limit?: number;
     workspaceId: string;
     threadId: string;
     userId: string;
@@ -422,14 +450,39 @@ class ContentThreadService {
     if (!thread) {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
+    const includeFields = new Set(
+      (input.include ?? "metadata,contentJson,citations")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    );
+    const include = {
+      citations: includeFields.has("citations"),
+      contentJson: includeFields.has("contentJson"),
+      metadata: includeFields.has("metadata"),
+    };
+
+    if (input.limit) {
+      const page = await listMessageRecordPageByThread({
+        include,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: thread.id,
+        before: decodeMessagesCursor(input.cursor),
+        limit: input.limit,
+      });
+
+      return page;
+    }
 
     const items = await listMessageRecordsByThread({
+      include,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       threadId: thread.id,
     });
 
-    return { items };
+    return { items, nextCursor: null };
   }
 
   async getMessageImageFile(input: {

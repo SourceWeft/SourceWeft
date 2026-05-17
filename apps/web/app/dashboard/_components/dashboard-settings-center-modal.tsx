@@ -72,7 +72,6 @@ type UsageActivityRow = {
 type UsageActivityKind = "image" | "vision" | "chat" | "video" | "other";
 
 const USAGE_ACTIVITY_PAGE_SIZE = 20;
-const USAGE_ACTIVITY_FETCH_LIMIT = 200;
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
 const usageActivityFilters = [
   { label: "All", value: "all" },
@@ -1471,7 +1470,11 @@ export function UsagePanel() {
   const [subscription, setSubscription] =
     React.useState<BillingSubscription | null>(null);
   const [ledger, setLedger] = React.useState<BillingLedgerEntry[]>([]);
+  const [activityCursor, setActivityCursor] = React.useState<string | null>(
+    null,
+  );
   const [loading, setLoading] = React.useState(false);
+  const [loadingMoreActivity, setLoadingMoreActivity] = React.useState(false);
   const [billingPeriod, setBillingPeriod] =
     React.useState<BillingInterval>("yearly");
   const [error, setError] = React.useState<string | null>(null);
@@ -1489,6 +1492,7 @@ export function UsagePanel() {
         setSummary(null);
         setSubscription(null);
         setLedger([]);
+        setActivityCursor(null);
         setLoading(resolvingPersonalTeamId);
         setError(null);
         return;
@@ -1502,7 +1506,7 @@ export function UsagePanel() {
           billingClient.getSummary(teamId),
           billingClient.getSubscription(teamId),
           billingClient.getActivity(teamId, {
-            limit: USAGE_ACTIVITY_FETCH_LIMIT,
+            limit: USAGE_ACTIVITY_PAGE_SIZE,
           }),
         ]);
 
@@ -1513,6 +1517,7 @@ export function UsagePanel() {
         setSummary(nextSummary);
         setSubscription(nextSubscription);
         setLedger(nextLedger.items);
+        setActivityCursor(nextLedger.nextCursor ?? null);
       } catch (err) {
         if (cancelled) {
           return;
@@ -1521,6 +1526,7 @@ export function UsagePanel() {
         setSummary(null);
         setSubscription(null);
         setLedger([]);
+        setActivityCursor(null);
         setError(err instanceof Error ? err.message : "Failed to load usage");
       } finally {
         if (!cancelled) {
@@ -1538,7 +1544,35 @@ export function UsagePanel() {
 
   React.useEffect(() => {
     setActivityVisibleCount(USAGE_ACTIVITY_PAGE_SIZE);
-  }, [teamId]);
+  }, [activityFilter, teamId]);
+
+  const loadMoreActivity = React.useCallback(async () => {
+    if (!teamId || !activityCursor || loadingMoreActivity) {
+      return;
+    }
+
+    setLoadingMoreActivity(true);
+    setError(null);
+    try {
+      const nextLedger = await billingClient.getActivity(teamId, {
+        cursor: activityCursor,
+        limit: USAGE_ACTIVITY_PAGE_SIZE,
+      });
+      setLedger((current) => {
+        const mergedById = new Map(
+          [...current, ...nextLedger.items].map((entry) => [entry.id, entry]),
+        );
+        return Array.from(mergedById.values());
+      });
+      setActivityCursor(nextLedger.nextCursor ?? null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load usage activity",
+      );
+    } finally {
+      setLoadingMoreActivity(false);
+    }
+  }, [activityCursor, loadingMoreActivity, teamId]);
 
   const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
   const creditsLimit = summary?.credits.monthlyGrant ?? 0;
@@ -1572,7 +1606,8 @@ export function UsagePanel() {
     }));
   const activityRows = ledgerActivityRows;
   const totalActivityRowCount = filteredLedgerEntries.length;
-  const hasMoreActivityRows = activityRows.length < totalActivityRowCount;
+  const hasMoreActivityRows =
+    activityRows.length < totalActivityRowCount || Boolean(activityCursor);
   const data = {
     plan: summary
       ? formatPlanName(summary.planFamily, isPersonal)
@@ -1764,20 +1799,25 @@ export function UsagePanel() {
         {hasMoreActivityRows && (
           <div className="px-4 py-2">
             <Button
+              disabled={loadingMoreActivity}
               className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
-              onClick={() =>
-                setActivityVisibleCount((count) =>
-                  Math.min(
-                    count + USAGE_ACTIVITY_PAGE_SIZE,
-                    totalActivityRowCount,
-                  ),
-                )
-              }
+              onClick={() => {
+                if (activityRows.length < totalActivityRowCount) {
+                  setActivityVisibleCount((count) =>
+                    Math.min(
+                      count + USAGE_ACTIVITY_PAGE_SIZE,
+                      totalActivityRowCount,
+                    ),
+                  );
+                  return;
+                }
+                void loadMoreActivity();
+              }}
               size="xs"
               type="button"
               variant="ghost"
             >
-              Load more
+              {loadingMoreActivity ? "Loading..." : "Load more"}
             </Button>
           </div>
         )}
@@ -1786,7 +1826,6 @@ export function UsagePanel() {
     </div>
   );
 }
-
 // ── Billing panel ─────────────────────────────────────────────────────────────
 
 export function BillingPanel() {

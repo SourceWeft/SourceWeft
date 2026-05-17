@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, lt, lte, or, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   llmGenerations,
@@ -32,6 +32,8 @@ type GenerationListInput = TraceListInput & {
   modelAlias?: string;
 };
 
+type ObservationKind = "span" | "generation";
+
 type UserDisplayRow = {
   id: string;
   name: string | null;
@@ -59,6 +61,25 @@ function generationCursorFilter(cursor?: ListCursor) {
   return or(
     lt(llmGenerations.startedAt, cursor.startedAt),
     and(eq(llmGenerations.startedAt, cursor.startedAt), lt(llmGenerations.id, cursor.id)),
+  );
+}
+
+function spanObservationCursorFilter(cursor?: ListCursor) {
+  if (!cursor) return undefined;
+  return or(
+    gt(llmSpans.startedAt, cursor.startedAt),
+    and(eq(llmSpans.startedAt, cursor.startedAt), gt(llmSpans.id, cursor.id)),
+  );
+}
+
+function generationObservationCursorFilter(cursor?: ListCursor) {
+  if (!cursor) return undefined;
+  return or(
+    gt(llmGenerations.startedAt, cursor.startedAt),
+    and(
+      eq(llmGenerations.startedAt, cursor.startedAt),
+      gt(llmGenerations.id, cursor.id),
+    ),
   );
 }
 
@@ -98,6 +119,18 @@ function generationFilters(input: GenerationListInput) {
 
 function generationModel(generation: { providerModel: string | null; modelAlias: string | null }) {
   return generation.modelAlias ?? generation.providerModel ?? null;
+}
+
+function compareObservationTime(
+  left: { id: string; startedAt: Date | string | number | null },
+  right: { id: string; startedAt: Date | string | number | null },
+) {
+  const leftTime = left.startedAt ? new Date(left.startedAt).getTime() : 0;
+  const rightTime = right.startedAt ? new Date(right.startedAt).getTime() : 0;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return left.id.localeCompare(right.id);
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -308,6 +341,8 @@ export async function listLlmTraces(input: TraceListInput) {
 }
 
 export async function getLlmTrace(input: {
+  observationCursor?: ListCursor;
+  observationLimit?: number;
   teamId: string;
   workspaceId: string;
   traceId: string;
@@ -328,42 +363,113 @@ export async function getLlmTrace(input: {
     return null;
   }
 
+  const observationQueryLimit =
+    input.observationLimit === undefined ? undefined : input.observationLimit + 1;
+  const spanQuery = db
+    .select()
+    .from(llmSpans)
+    .where(and(
+      eq(llmSpans.teamId, input.teamId),
+      eq(llmSpans.workspaceId, input.workspaceId),
+      eq(llmSpans.traceId, input.traceId),
+      spanObservationCursorFilter(input.observationCursor),
+    ))
+    .orderBy(asc(llmSpans.startedAt), asc(llmSpans.id));
+  const generationQuery = db
+    .select()
+    .from(llmGenerations)
+    .where(and(
+      eq(llmGenerations.teamId, input.teamId),
+      eq(llmGenerations.workspaceId, input.workspaceId),
+      eq(llmGenerations.traceId, input.traceId),
+      generationObservationCursorFilter(input.observationCursor),
+    ))
+    .orderBy(asc(llmGenerations.startedAt), asc(llmGenerations.id));
   const [spans, generations] = await Promise.all([
-    db
-      .select()
-      .from(llmSpans)
-      .where(and(
-        eq(llmSpans.teamId, input.teamId),
-        eq(llmSpans.workspaceId, input.workspaceId),
-        eq(llmSpans.traceId, input.traceId),
-      ))
-      .orderBy(llmSpans.startedAt),
-    db
-      .select()
-      .from(llmGenerations)
-      .where(and(
-        eq(llmGenerations.teamId, input.teamId),
-        eq(llmGenerations.workspaceId, input.workspaceId),
-        eq(llmGenerations.traceId, input.traceId),
-      ))
-      .orderBy(llmGenerations.startedAt),
+    observationQueryLimit === undefined
+      ? spanQuery
+      : spanQuery.limit(observationQueryLimit),
+    observationQueryLimit === undefined
+      ? generationQuery
+      : generationQuery.limit(observationQueryLimit),
   ]);
+  const observationsTruncated =
+    input.observationLimit !== undefined &&
+    spans.length + generations.length > input.observationLimit;
+  const limitedObservationIds =
+    input.observationLimit === undefined
+      ? null
+      : new Set(
+          [
+            ...spans.map((span) => ({
+              id: span.id,
+              kind: "span" as const,
+              startedAt: span.startedAt,
+            })),
+            ...generations.map((generation) => ({
+              id: generation.id,
+              kind: "generation" as const,
+              startedAt: generation.startedAt,
+            })),
+          ]
+            .sort(compareObservationTime)
+            .slice(0, input.observationLimit)
+            .map((observation) => `${observation.kind}:${observation.id}`),
+        );
+  const limitedSpans = limitedObservationIds
+    ? spans.filter((span) => limitedObservationIds.has(`span:${span.id}`))
+    : spans;
+  const limitedGenerations = limitedObservationIds
+    ? generations.filter((generation) =>
+        limitedObservationIds.has(`generation:${generation.id}`),
+      )
+    : generations;
+  const loadedObservationCount = limitedSpans.length + limitedGenerations.length;
+  const loadedTotalTokens = limitedGenerations.reduce(
+    (sum, generation) => sum + (generation.totalTokens ?? 0),
+    0,
+  );
+  const loadedModel =
+    traceMetadataModel(trace) ??
+    limitedGenerations.map(generationModel).find(Boolean) ??
+    null;
+  const observationPageItems = [
+    ...limitedSpans.map((span) => ({
+      id: span.id,
+      kind: "span" as ObservationKind,
+      startedAt: span.startedAt,
+    })),
+    ...limitedGenerations.map((generation) => ({
+      id: generation.id,
+      kind: "generation" as ObservationKind,
+      startedAt: generation.startedAt,
+    })),
+  ].sort(compareObservationTime);
+  const returnedSpans = [...limitedSpans].sort(compareObservationTime);
+  const returnedGenerations = [...limitedGenerations].sort(compareObservationTime);
 
   const userDisplayNames = await getTraceUserDisplayNames([trace]);
-  const observationSummaries = await summarizeTraceObservations([trace]);
 
   return {
     trace: {
       ...trace,
       userDisplayName: trace.userId ? userDisplayNames.get(trace.userId) ?? null : null,
-      ...(observationSummaries.get(observationScopeKey(trace)) ?? {
-        observationCount: spans.length + generations.length,
-        totalTokens: null,
-        model: traceMetadataModel(trace),
-      }),
+      observationCount: observationsTruncated
+        ? (trace.metadataJson.observationCount ?? null)
+        : loadedObservationCount,
+      totalTokens: observationsTruncated
+        ? (trace.metadataJson.totalTokens ?? null)
+        : loadedTotalTokens > 0
+          ? loadedTotalTokens
+          : null,
+      model: loadedModel,
     },
-    spans,
-    generations,
+    generations: returnedGenerations,
+    nextObservationCursor: observationsTruncated
+      ? cursorValue(observationPageItems.at(-1) ?? null)
+      : null,
+    observationsTruncated,
+    spans: returnedSpans,
   };
 }
 

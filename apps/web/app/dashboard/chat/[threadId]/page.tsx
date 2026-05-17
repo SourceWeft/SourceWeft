@@ -9,9 +9,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { flushSync } from "react-dom";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { Keyboard, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -34,13 +34,13 @@ import {
   DashboardShortcutsDialog,
   getDashboardWorkspaceShortcutKeys,
   useDashboardShortcuts,
+  useDashboardShortcutsOpenListener,
   useDashboardShortcutPlatform,
   type DashboardShortcutDefinition,
 } from "../../_components/dashboard-shortcuts";
 import { dispatchDashboardBillingSummaryRefresh } from "../../_components/dashboard-billing-summary-refresh";
 import {
   emptyModelCatalog,
-  HeaderModelSelector,
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
   resolveSelectedModelsWithByok,
@@ -48,7 +48,7 @@ import {
   type ModelItem,
   type SelectedModels,
   type ModelType,
-} from "../_components/header-model-selector";
+} from "../_components/model-catalog-utils";
 import {
   buildByokModelExecution,
   normalizeByokProviderOptions,
@@ -60,10 +60,7 @@ import {
   type ByokSavedModelItem,
 } from "../_components/byok-state";
 import { writeStoredModelSelection } from "../_components/model-selection-storage";
-import {
-  ByokModelConfigDialog,
-  type ByokModelConfigDefaults,
-} from "../_components/byok-model-config-dialog";
+import type { ByokModelConfigDefaults } from "../_components/byok-model-config-dialog";
 import {
   applySkillModelPresetState,
   DEFAULT_MODEL_SELECTION_SOURCES,
@@ -92,13 +89,10 @@ import {
   isGeneratedImageArtifactToolName,
   isWorkfileWriteToolName,
 } from "@sourceweft/sdk";
-import {
-  ArtifactPreviewPanel,
-  SourcesHub,
-  type ArtifactListItem,
-  type ThreadCitationRecord,
+import type {
+  ArtifactListItem,
+  ThreadCitationRecord,
 } from "../_components/sources-hub";
-import { SourcePreviewPanel } from "../_components/source-preview-panel";
 import {
   expandSelectedSources,
   type SourceItem,
@@ -123,9 +117,66 @@ import {
   SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,
   SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
 } from "@sourceweft/sdk";
+import { SourcesHubPanelSkeleton } from "../../../_components/route-loading-skeleton";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
+const SourcesHub = dynamic(
+  () => import("../_components/sources-hub").then((mod) => mod.SourcesHub),
+  {
+    loading: () => (
+      <SourcesHubSkeleton className="hidden w-[min(420px,34vw)] shrink-0 md:block" />
+    ),
+    ssr: false,
+  },
+);
+
+const ArtifactPreviewPanel = dynamic(
+  () =>
+    import("../_components/sources-hub").then(
+      (mod) => mod.ArtifactPreviewPanel,
+    ),
+  {
+    loading: () => (
+      <SourcesHubSkeleton className="hidden w-[min(640px,45vw)] shrink-0 md:block" />
+    ),
+    ssr: false,
+  },
+);
+
+const SourcePreviewPanel = dynamic(
+  () =>
+    import("../_components/source-preview-panel").then(
+      (mod) => mod.SourcePreviewPanel,
+    ),
+  { ssr: false },
+);
+
+const ByokModelConfigDialog = dynamic(
+  () =>
+    import("../_components/byok-model-config-dialog").then(
+      (mod) => mod.ByokModelConfigDialog,
+    ),
+  { ssr: false },
+);
+
+const HeaderModelSelector = dynamic(
+  () =>
+    import("../_components/header-model-selector").then(
+      (mod) => mod.HeaderModelSelector,
+    ),
+  {
+    loading: () => (
+      <div className="h-10 w-36 shrink-0 animate-pulse rounded-md bg-muted" />
+    ),
+    ssr: false,
+  },
+);
+
+function SourcesHubSkeleton({ className }: { className?: string }) {
+  return <SourcesHubPanelSkeleton className={className} />;
+}
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
@@ -197,12 +248,38 @@ type ChatMessageItem = {
   createdAt: string;
 };
 
+function mapThreadMessagesToChatMessages(messages: ThreadMessageItem[]) {
+  return messages
+    .filter(
+      (
+        message,
+      ): message is ThreadMessageItem & {
+        role: "user" | "assistant";
+      } => message.role === "user" || message.role === "assistant",
+    )
+    .map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      contentJson: message.contentJson,
+      parentMessageId: message.parentMessageId,
+      metadata: message.metadata,
+      createdAt: message.createdAt,
+    }))
+    .sort(
+      (left, right) =>
+        new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+    );
+}
+
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
 const STREAM_TEXT_INTERRUPTED_KEY = "isTextInterrupted";
 const STREAM_RENDER_KEY = "renderKey";
 const TITLE_POLL_INTERVAL_MS = 1000;
 const TITLE_POLL_TIMEOUT_MS = 60000;
 const THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS = [300, 1000, 2500] as const;
+const THREAD_MESSAGES_INITIAL_PAGE_SIZE = 80;
+const STREAM_DELTA_MAX_BATCH_CHARS = 800;
 
 type PendingLatestVersionSelection = {
   userGroupId?: string;
@@ -1749,6 +1826,10 @@ export default function DashboardChatThreadPage({
 
   // ── Messaging state ────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
+  const [olderMessagesCursor, setOlderMessagesCursor] = useState<string | null>(
+    null,
+  );
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [activeThreadRun, setActiveThreadRun] =
@@ -1854,6 +1935,7 @@ export default function DashboardChatThreadPage({
   const [byokModelConfig, setByokModelConfig] =
     useState<ByokModelConfigDefaults | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const shortcutPlatform = useDashboardShortcutPlatform();
   const [catalogKindEnabled, setCatalogKindEnabled] = useState<
@@ -2136,6 +2218,15 @@ export default function DashboardChatThreadPage({
     },
     [workspaceId],
   );
+  const handleLibrarySourcesMerge = useCallback((sources: SourceItem[]) => {
+    setLibrarySources((current) => {
+      const mergedById = new Map(current.map((source) => [source.id, source]));
+      for (const source of sources) {
+        mergedById.set(source.id, source);
+      }
+      return Array.from(mergedById.values());
+    });
+  }, []);
 
   useEffect(() => {
     if (!currentSearchStorageKey) {
@@ -2506,6 +2597,7 @@ export default function DashboardChatThreadPage({
     if (!workspaceId) {
       loadedThreadMessagesKeyRef.current = null;
       setMessages([]);
+      setOlderMessagesCursor(null);
       return;
     }
 
@@ -2518,31 +2610,15 @@ export default function DashboardChatThreadPage({
     ) {
       try {
         const [messagesResult, activeRunResult] = await Promise.all([
-          contentClient.listThreadMessages(workspaceId, threadId),
+          contentClient.listThreadMessages(workspaceId, threadId, {
+            include: "metadata,contentJson,citations",
+            limit: THREAD_MESSAGES_INITIAL_PAGE_SIZE,
+          }),
           contentClient.getActiveThreadRun(workspaceId, threadId),
         ]);
-        let serverMessages = messagesResult.items
-          .filter(
-            (
-              message,
-            ): message is ThreadMessageItem & {
-              role: "user" | "assistant";
-            } => message.role === "user" || message.role === "assistant",
-          )
-          .map((message) => ({
-            id: message.id,
-            role: message.role,
-            content: message.content,
-            contentJson: message.contentJson,
-            parentMessageId: message.parentMessageId,
-            metadata: message.metadata,
-            createdAt: message.createdAt,
-          }))
-          .sort(
-            (left, right) =>
-              new Date(left.createdAt).getTime() -
-              new Date(right.createdAt).getTime(),
-          );
+        let serverMessages = mapThreadMessagesToChatMessages(
+          messagesResult.items,
+        );
         const activeRun = activeRunResult.threadRun;
 
         if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
@@ -2550,6 +2626,7 @@ export default function DashboardChatThreadPage({
         }
 
         loadedThreadMessagesKeyRef.current = threadMessagesKey;
+        setOlderMessagesCursor(messagesResult.nextCursor ?? null);
         let runningAssistant = findLatestActiveThreadRunMessage(serverMessages);
         const runningRun = runningAssistant?.run ?? activeRun;
         if (runningRun && !runningAssistant) {
@@ -2589,6 +2666,7 @@ export default function DashboardChatThreadPage({
         if (retryDelay === undefined || !shouldRetryThreadMessagesLoad(error)) {
           if (loadedThreadMessagesKeyRef.current !== threadMessagesKey) {
             setMessages([]);
+            setOlderMessagesCursor(null);
           }
           return;
         }
@@ -2600,6 +2678,44 @@ export default function DashboardChatThreadPage({
       }
     }
   }, [threadId, workspaceId]);
+
+  const loadOlderThreadMessages = useCallback(async () => {
+    if (!workspaceId || !olderMessagesCursor || isLoadingOlderMessages) {
+      return;
+    }
+
+    setIsLoadingOlderMessages(true);
+    try {
+      const result = await contentClient.listThreadMessages(
+        workspaceId,
+        threadId,
+        {
+          cursor: olderMessagesCursor,
+          include: "metadata,contentJson,citations",
+          limit: THREAD_MESSAGES_INITIAL_PAGE_SIZE,
+        },
+      );
+      const olderMessages = mapThreadMessagesToChatMessages(result.items);
+      setMessages((current) => {
+        const mergedById = new Map(
+          [...olderMessages, ...current].map((message) => [
+            message.id,
+            message,
+          ]),
+        );
+        return Array.from(mergedById.values()).sort(
+          (left, right) =>
+            new Date(left.createdAt).getTime() -
+            new Date(right.createdAt).getTime(),
+        );
+      });
+      setOlderMessagesCursor(result.nextCursor ?? null);
+    } catch {
+      toast.error("Failed to load earlier messages.");
+    } finally {
+      setIsLoadingOlderMessages(false);
+    }
+  }, [isLoadingOlderMessages, olderMessagesCursor, threadId, workspaceId]);
 
   const loadThreadModelState = useCallback(async () => {
     if (!workspaceId) {
@@ -2978,6 +3094,17 @@ export default function DashboardChatThreadPage({
           window.requestAnimationFrame(() => resolve());
         });
 
+      function consumeQueuedDeltaBatch() {
+        let batch = "";
+        while (
+          deltaQueue.length > 0 &&
+          batch.length < STREAM_DELTA_MAX_BATCH_CHARS
+        ) {
+          batch += deltaQueue.shift() ?? "";
+        }
+        return batch;
+      }
+
       function appendStreamRenderText(text: string) {
         if (!text) {
           return;
@@ -3017,6 +3144,18 @@ export default function DashboardChatThreadPage({
         return streamRenderBlocks.map((block) => ({ ...block }));
       }
 
+      const updateStreamingAssistantMessage = (
+        updater: (message: ChatMessageItem) => ChatMessageItem,
+      ) => {
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === streamingAssistantMessageId
+              ? updater(message)
+              : message,
+          ),
+        );
+      };
+
       const syncLatestAssistantMessageContent = () => {
         setMessages((previous) => {
           const message = previous.find(
@@ -3039,28 +3178,20 @@ export default function DashboardChatThreadPage({
           appendStreamRenderText(nextDelta);
         }
         latestAssistantMessageContent = assistantText;
-        flushSync(() => {
-          setMessages((previous) =>
-            previous.map((message) =>
-              message.id === streamingAssistantMessageId
-                ? {
-                    ...message,
-                    content: assistantText,
-                    metadata: {
-                      ...message.metadata,
-                      renderBlocks: snapshotStreamRenderBlocks(),
-                      threadRun: {
-                        ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                        idempotencyKey: durableRunKey,
-                        status: "running",
-                        mode: input.mode,
-                      },
-                    },
-                  }
-                : message,
-            ),
-          );
-        });
+        updateStreamingAssistantMessage((message) => ({
+          ...message,
+          content: assistantText,
+          metadata: {
+            ...message.metadata,
+            renderBlocks: snapshotStreamRenderBlocks(),
+            threadRun: {
+              ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+              idempotencyKey: durableRunKey,
+              status: "running",
+              mode: input.mode,
+            },
+          },
+        }));
       };
 
       const markStreamingAssistantAsError = (errorInput: {
@@ -3104,49 +3235,47 @@ export default function DashboardChatThreadPage({
         hasServerPersistedAssistantMessage =
           errorInput.serverPersisted === true;
         streamingAssistantMessageId = messageId;
-        flushSync(() => {
-          setMessages((previous) =>
-            previous.map((message) =>
-              message.id === previousAssistantMessageId
-                ? {
-                    ...message,
-                    id: messageId,
-                    content: latestAssistantMessageContent,
-                    parentMessageId:
-                      errorInput.parentMessageIdProvided === true
-                        ? (errorInput.parentMessageId ?? null)
-                        : message.parentMessageId,
-                    metadata: {
-                      ...message.metadata,
-                      isError: !isClientCancelled,
-                      isCancelled: isClientCancelled,
-                      excludeFromContext: true,
-                      error: errorInput.error,
-                      errorCode: errorInput.code ?? null,
-                      userMessageId,
-                      sourceUserMessageId: userMessageId,
-                      [STREAM_TEXT_PAUSED_KEY]: false,
-                      [STREAM_TEXT_INTERRUPTED_KEY]: false,
-                      toolCalls: [...streamToolCallsById.values()].filter(
-                        (toolCall) =>
-                          shouldRenderToolCall(toolCall, [
-                            ...streamThinkingStepsById.values(),
-                          ]),
-                      ),
-                      thinkingSteps: [...streamThinkingStepsById.values()],
-                      renderBlocks: snapshotStreamRenderBlocks(),
-                      threadRun: {
-                        ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                        idempotencyKey: durableRunKey,
-                        status: isClientCancelled ? "cancelled" : "failed",
-                        mode: input.mode,
-                      },
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === previousAssistantMessageId
+              ? {
+                  ...message,
+                  id: messageId,
+                  content: latestAssistantMessageContent,
+                  parentMessageId:
+                    errorInput.parentMessageIdProvided === true
+                      ? (errorInput.parentMessageId ?? null)
+                      : message.parentMessageId,
+                  metadata: {
+                    ...message.metadata,
+                    isError: !isClientCancelled,
+                    isCancelled: isClientCancelled,
+                    excludeFromContext: true,
+                    error: errorInput.error,
+                    errorCode: errorInput.code ?? null,
+                    userMessageId,
+                    sourceUserMessageId: userMessageId,
+                    [STREAM_TEXT_PAUSED_KEY]: false,
+                    [STREAM_TEXT_INTERRUPTED_KEY]: false,
+                    toolCalls: [...streamToolCallsById.values()].filter(
+                      (toolCall) =>
+                        shouldRenderToolCall(toolCall, [
+                          ...streamThinkingStepsById.values(),
+                        ]),
+                    ),
+                    thinkingSteps: [...streamThinkingStepsById.values()],
+                    renderBlocks: snapshotStreamRenderBlocks(),
+                    threadRun: {
+                      ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+                      idempotencyKey: durableRunKey,
+                      status: isClientCancelled ? "cancelled" : "failed",
+                      mode: input.mode,
                     },
-                  }
-                : message,
-            ),
-          );
-        });
+                  },
+                }
+              : message,
+          ),
+        );
       };
 
       try {
@@ -3312,37 +3441,28 @@ export default function DashboardChatThreadPage({
                 continue;
               }
 
-              const nextDelta = deltaQueue.shift();
-              if (!nextDelta) {
+              const nextDeltaBatch = consumeQueuedDeltaBatch();
+              if (!nextDeltaBatch) {
                 continue;
               }
 
-              assistantText += nextDelta;
-              appendStreamRenderText(nextDelta);
+              assistantText += nextDeltaBatch;
+              appendStreamRenderText(nextDeltaBatch);
               latestAssistantMessageContent = assistantText;
-              flushSync(() => {
-                setMessages((previous) =>
-                  previous.map((message) =>
-                    message.id === streamingAssistantMessageId
-                      ? {
-                          ...message,
-                          content: assistantText,
-                          metadata: {
-                            ...message.metadata,
-                            renderBlocks: snapshotStreamRenderBlocks(),
-                            threadRun: {
-                              ...(toObjectRecord(message.metadata.threadRun) ??
-                                {}),
-                              idempotencyKey: durableRunKey,
-                              status: "running",
-                              mode: input.mode,
-                            },
-                          },
-                        }
-                      : message,
-                  ),
-                );
-              });
+              updateStreamingAssistantMessage((message) => ({
+                ...message,
+                content: assistantText,
+                metadata: {
+                  ...message.metadata,
+                  renderBlocks: snapshotStreamRenderBlocks(),
+                  threadRun: {
+                    ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+                    idempotencyKey: durableRunKey,
+                    status: "running",
+                    mode: input.mode,
+                  },
+                },
+              }));
 
               if (!hasRenderedDelta && assistantText.length > 0) {
                 hasRenderedDelta = true;
@@ -3358,17 +3478,7 @@ export default function DashboardChatThreadPage({
             return;
           }
 
-          const maxChunkSize = 24;
-          const chars = Array.from(delta);
-          if (chars.length <= maxChunkSize) {
-            deltaQueue.push(delta);
-            return;
-          }
-
-          for (let index = 0; index < chars.length; index += maxChunkSize) {
-            const chunk = chars.slice(index, index + maxChunkSize).join("");
-            deltaQueue.push(chunk);
-          }
+          deltaQueue.push(delta);
         };
 
         const syncStreamingToolCalls = () => {
@@ -3379,29 +3489,21 @@ export default function DashboardChatThreadPage({
           const shouldShowTextPause =
             assistantText.length > 0 &&
             toolCalls.some((toolCall) => toolCall.status === "running");
-          flushSync(() => {
-            setMessages((previous) =>
-              previous.map((message) =>
-                message.id === streamingAssistantMessageId
-                  ? {
-                      ...message,
-                      metadata: {
-                        ...message.metadata,
-                        [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
-                        toolCalls,
-                        renderBlocks: snapshotStreamRenderBlocks(),
-                        threadRun: {
-                          ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                          idempotencyKey: durableRunKey,
-                          status: "running",
-                          mode: input.mode,
-                        },
-                      },
-                    }
-                  : message,
-              ),
-            );
-          });
+          updateStreamingAssistantMessage((message) => ({
+            ...message,
+            metadata: {
+              ...message.metadata,
+              [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
+              toolCalls,
+              renderBlocks: snapshotStreamRenderBlocks(),
+              threadRun: {
+                ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+                idempotencyKey: durableRunKey,
+                status: "running",
+                mode: input.mode,
+              },
+            },
+          }));
         };
 
         const syncStreamingThinkingSteps = () => {
@@ -3413,63 +3515,46 @@ export default function DashboardChatThreadPage({
             assistantText.length > 0 &&
             (toolCalls.some((toolCall) => toolCall.status === "running") ||
               thinkingSteps.some((step) => step.status === "in_progress"));
-          flushSync(() => {
-            setMessages((previous) =>
-              previous.map((message) =>
-                message.id === streamingAssistantMessageId
-                  ? {
-                      ...message,
-                      metadata: {
-                        ...message.metadata,
-                        [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
-                        thinkingSteps,
-                        toolCalls,
-                        renderBlocks: snapshotStreamRenderBlocks(),
-                        threadRun: {
-                          ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                          idempotencyKey: durableRunKey,
-                          status: "running",
-                          mode: input.mode,
-                        },
-                      },
-                    }
-                  : message,
-              ),
-            );
-          });
+          updateStreamingAssistantMessage((message) => ({
+            ...message,
+            metadata: {
+              ...message.metadata,
+              [STREAM_TEXT_PAUSED_KEY]: shouldShowTextPause,
+              thinkingSteps,
+              toolCalls,
+              renderBlocks: snapshotStreamRenderBlocks(),
+              threadRun: {
+                ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+                idempotencyKey: durableRunKey,
+                status: "running",
+                mode: input.mode,
+              },
+            },
+          }));
         };
 
         const syncStreamingCitations = (citationInput: {
           citations: CitationRecord[];
           availableCitations?: CitationRecord[];
         }) => {
-          flushSync(() => {
-            setMessages((previous) =>
-              previous.map((message) =>
-                message.id === streamingAssistantMessageId
-                  ? {
-                      ...message,
-                      metadata: {
-                        ...message.metadata,
-                        retrieval: {
-                          ...(toObjectRecord(message.metadata.retrieval) ?? {}),
-                          citations: citationInput.citations,
-                          availableCitations:
-                            citationInput.availableCitations ??
-                            citationInput.citations,
-                        },
-                        threadRun: {
-                          ...(toObjectRecord(message.metadata.threadRun) ?? {}),
-                          idempotencyKey: durableRunKey,
-                          status: "running",
-                          mode: input.mode,
-                        },
-                      },
-                    }
-                  : message,
-              ),
-            );
-          });
+          updateStreamingAssistantMessage((message) => ({
+            ...message,
+            metadata: {
+              ...message.metadata,
+              retrieval: {
+                ...(toObjectRecord(message.metadata.retrieval) ?? {}),
+                citations: citationInput.citations,
+                availableCitations:
+                  citationInput.availableCitations ?? citationInput.citations,
+              },
+              threadRun: {
+                ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+                idempotencyKey: durableRunKey,
+                status: "running",
+                mode: input.mode,
+              },
+            },
+          }));
         };
 
         readLoop: while (true) {
@@ -3535,58 +3620,52 @@ export default function DashboardChatThreadPage({
               if (tempUserId && createdUserMessageId === tempUserId) {
                 createdUserMessageId = serverUserMessageId;
               }
-              flushSync(() => {
-                setMessages((previous) =>
-                  previous.map((message) =>
-                    previousUserMessageId &&
-                    message.id === previousUserMessageId
+              setMessages((previous) =>
+                previous.map((message) =>
+                  previousUserMessageId && message.id === previousUserMessageId
+                    ? {
+                        ...message,
+                        id: serverUserMessageId,
+                        contentJson: serverContentJson
+                          ? serverContentJson
+                          : message.contentJson,
+                        metadata: {
+                          ...message.metadata,
+                          ...(serverCommand ? { command: serverCommand } : {}),
+                          ...(serverSourceIds ? { sourceIds: serverSourceIds } : {}),
+                          ...(serverMentionedSourceIds
+                            ? { mentionedSourceIds: serverMentionedSourceIds }
+                            : {}),
+                          ...(serverEffectiveSourceIds
+                            ? { effectiveSourceIds: serverEffectiveSourceIds }
+                            : {}),
+                          ...(serverEffectiveMentionedSourceIds
+                            ? {
+                                effectiveMentionedSourceIds:
+                                  serverEffectiveMentionedSourceIds,
+                              }
+                            : {}),
+                        },
+                      }
+                    : message.id === streamingAssistantMessageId
                       ? {
                           ...message,
-                          id: serverUserMessageId,
-                          contentJson: serverContentJson
-                            ? serverContentJson
-                            : message.contentJson,
                           metadata: {
                             ...message.metadata,
-                            ...(serverCommand ? { command: serverCommand } : {}),
-                            ...(serverSourceIds
-                              ? { sourceIds: serverSourceIds }
-                              : {}),
-                            ...(serverMentionedSourceIds
-                              ? { mentionedSourceIds: serverMentionedSourceIds }
-                              : {}),
-                            ...(serverEffectiveSourceIds
-                              ? { effectiveSourceIds: serverEffectiveSourceIds }
-                              : {}),
-                            ...(serverEffectiveMentionedSourceIds
-                              ? {
-                                  effectiveMentionedSourceIds:
-                                    serverEffectiveMentionedSourceIds,
-                                }
-                              : {}),
+                            userMessageId: serverUserMessageId,
+                            sourceUserMessageId: serverUserMessageId,
+                            threadRun: {
+                              ...(toObjectRecord(message.metadata.threadRun) ??
+                                {}),
+                              idempotencyKey: durableRunKey,
+                              status: "running",
+                              mode: input.mode,
+                            },
                           },
                         }
-                      : message.id === streamingAssistantMessageId
-                        ? {
-                            ...message,
-                            metadata: {
-                              ...message.metadata,
-                              userMessageId: serverUserMessageId,
-                              sourceUserMessageId: serverUserMessageId,
-                              threadRun: {
-                                ...(toObjectRecord(
-                                  message.metadata.threadRun,
-                                ) ?? {}),
-                                idempotencyKey: durableRunKey,
-                                status: "running",
-                                mode: input.mode,
-                              },
-                            },
-                          }
-                        : message,
-                  ),
-                );
-              });
+                      : message,
+                ),
+              );
             } else if (
               data.type === "text-delta" &&
               typeof data.delta === "string"
@@ -3604,22 +3683,14 @@ export default function DashboardChatThreadPage({
                 !hasRunningTool &&
                 !hasRunningStep
               ) {
-                flushSync(() => {
-                  setMessages((previous) =>
-                    previous.map((message) =>
-                      message.id === streamingAssistantMessageId
-                        ? {
-                            ...message,
-                            metadata: {
-                              ...message.metadata,
-                              [STREAM_TEXT_PAUSED_KEY]: false,
-                              renderBlocks: snapshotStreamRenderBlocks(),
-                            },
-                          }
-                        : message,
-                    ),
-                  );
-                });
+                updateStreamingAssistantMessage((message) => ({
+                  ...message,
+                  metadata: {
+                    ...message.metadata,
+                    [STREAM_TEXT_PAUSED_KEY]: false,
+                    renderBlocks: snapshotStreamRenderBlocks(),
+                  },
+                }));
               }
               enqueueDelta(data.delta);
               startDeltaDrain();
@@ -3632,40 +3703,24 @@ export default function DashboardChatThreadPage({
               latestAssistantMessageContent = assistantText;
               hasRenderedDelta = assistantText.length > 0;
               streamRenderBlocks.length = 0;
-              flushSync(() => {
-                setMessages((previous) =>
-                  previous.map((message) =>
-                    message.id === streamingAssistantMessageId
-                      ? {
-                          ...message,
-                          content: assistantText,
-                          metadata: {
-                            ...message.metadata,
-                            [STREAM_TEXT_PAUSED_KEY]: false,
-                            renderBlocks: [],
-                          },
-                        }
-                      : message,
-                  ),
-                );
-              });
+              updateStreamingAssistantMessage((message) => ({
+                ...message,
+                content: assistantText,
+                metadata: {
+                  ...message.metadata,
+                  [STREAM_TEXT_PAUSED_KEY]: false,
+                  renderBlocks: [],
+                },
+              }));
             } else if (data.type === "text-interrupted") {
-              flushSync(() => {
-                setMessages((previous) =>
-                  previous.map((message) =>
-                    message.id === streamingAssistantMessageId
-                      ? {
-                          ...message,
-                          metadata: {
-                            ...message.metadata,
-                            [STREAM_TEXT_INTERRUPTED_KEY]: true,
-                            [STREAM_TEXT_PAUSED_KEY]: true,
-                          },
-                        }
-                      : message,
-                  ),
-                );
-              });
+              updateStreamingAssistantMessage((message) => ({
+                ...message,
+                metadata: {
+                  ...message.metadata,
+                  [STREAM_TEXT_INTERRUPTED_KEY]: true,
+                  [STREAM_TEXT_PAUSED_KEY]: true,
+                },
+              }));
             } else if (isToolCallEvent(data)) {
               const nextToolCall = resolveToolCallFromStreamEvent({
                 event: data,
@@ -3718,60 +3773,50 @@ export default function DashboardChatThreadPage({
                 const nextSegment = normalizeModelReasoningSegmentRecord(
                   data.segment,
                 );
-                flushSync(() => {
-                  setMessages((previous) =>
-                    previous.map((message) => {
-                      if (message.id !== streamingAssistantMessageId) {
-                        return message;
-                      }
-
-                      const currentReasoning = appendReasoningChunk(
-                        toNullableString(message.metadata.reasoning) ??
-                          undefined,
-                        reasoning,
-                      );
-                      const currentSegments = Array.isArray(
-                        message.metadata.reasoningSegments,
-                      )
-                        ? message.metadata.reasoningSegments
-                            .map((item, index) =>
-                              normalizeModelReasoningSegmentRecord(item, index),
-                            )
-                            .filter(
-                              (item): item is ModelReasoningSegmentRecord =>
-                                item !== null,
-                            )
-                        : [];
-                      const reasoningSegments = nextSegment
-                        ? [
-                            ...currentSegments.filter(
-                              (segment) => segment.id !== nextSegment.id,
-                            ),
-                            nextSegment,
-                          ].sort(
-                            (left, right) =>
-                              (left.sequence ?? Number.MAX_SAFE_INTEGER) -
-                              (right.sequence ?? Number.MAX_SAFE_INTEGER),
-                          )
-                        : currentSegments;
-
-                      return {
-                        ...message,
-                        metadata: {
-                          ...message.metadata,
-                          reasoning: currentReasoning,
-                          reasoningSegments,
-                          threadRun: {
-                            ...(toObjectRecord(message.metadata.threadRun) ??
-                              {}),
-                            idempotencyKey: durableRunKey,
-                            status: "running",
-                            mode: input.mode,
-                          },
-                        },
-                      };
-                    }),
+                updateStreamingAssistantMessage((message) => {
+                  const currentReasoning = appendReasoningChunk(
+                    toNullableString(message.metadata.reasoning) ?? undefined,
+                    reasoning,
                   );
+                  const currentSegments = Array.isArray(
+                    message.metadata.reasoningSegments,
+                  )
+                    ? message.metadata.reasoningSegments
+                        .map((item, index) =>
+                          normalizeModelReasoningSegmentRecord(item, index),
+                        )
+                        .filter(
+                          (item): item is ModelReasoningSegmentRecord =>
+                            item !== null,
+                        )
+                    : [];
+                  const reasoningSegments = nextSegment
+                    ? [
+                        ...currentSegments.filter(
+                          (segment) => segment.id !== nextSegment.id,
+                        ),
+                        nextSegment,
+                      ].sort(
+                        (left, right) =>
+                          (left.sequence ?? Number.MAX_SAFE_INTEGER) -
+                          (right.sequence ?? Number.MAX_SAFE_INTEGER),
+                      )
+                    : currentSegments;
+
+                  return {
+                    ...message,
+                    metadata: {
+                      ...message.metadata,
+                      reasoning: currentReasoning,
+                      reasoningSegments,
+                      threadRun: {
+                        ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+                        idempotencyKey: durableRunKey,
+                        status: "running",
+                        mode: input.mode,
+                      },
+                    },
+                  };
                 });
               }
             } else if (data.type === "citations") {
@@ -3826,39 +3871,36 @@ export default function DashboardChatThreadPage({
                 data.userMessageId ?? persistedUserMessageId;
               const previousAssistantMessageId = streamingAssistantMessageId;
               streamingAssistantMessageId = data.messageId;
-              flushSync(() => {
-                setMessages((previous) =>
-                  previous.map((message) =>
-                    message.id === previousAssistantMessageId
-                      ? {
-                          ...message,
-                          id: data.messageId as string,
-                          content: message.content,
-                          parentMessageId:
-                            data.parentMessageId === undefined
-                              ? message.parentMessageId
-                              : data.parentMessageId,
-                          metadata: {
-                            ...message.metadata,
-                            isError: false,
-                            excludeFromContext: false,
-                            userMessageId,
-                            sourceUserMessageId: userMessageId,
-                            [STREAM_TEXT_PAUSED_KEY]: false,
-                            renderBlocks: snapshotStreamRenderBlocks(),
-                            threadRun: {
-                              ...(toObjectRecord(message.metadata.threadRun) ??
-                                {}),
-                              idempotencyKey: durableRunKey,
-                              status: "completed",
-                              mode: input.mode,
-                            },
+              setMessages((previous) =>
+                previous.map((message) =>
+                  message.id === previousAssistantMessageId
+                    ? {
+                        ...message,
+                        id: data.messageId as string,
+                        content: message.content,
+                        parentMessageId:
+                          data.parentMessageId === undefined
+                            ? message.parentMessageId
+                            : data.parentMessageId,
+                        metadata: {
+                          ...message.metadata,
+                          isError: false,
+                          excludeFromContext: false,
+                          userMessageId,
+                          sourceUserMessageId: userMessageId,
+                          [STREAM_TEXT_PAUSED_KEY]: false,
+                          renderBlocks: snapshotStreamRenderBlocks(),
+                          threadRun: {
+                            ...(toObjectRecord(message.metadata.threadRun) ?? {}),
+                            idempotencyKey: durableRunKey,
+                            status: "completed",
+                            mode: input.mode,
                           },
-                        }
-                      : message,
-                  ),
-                );
-              });
+                        },
+                      }
+                    : message,
+                ),
+              );
             } else if (data.type === "finish") {
               receivedFinishEvent = true;
               if (streamToolCallsById.size > 0) {
@@ -3890,39 +3932,27 @@ export default function DashboardChatThreadPage({
                 syncStreamingThinkingSteps();
               }
               streamEnded = true;
-              flushSync(() => {
-                setMessages((previous) =>
-                  previous.map((message) =>
-                    message.id === streamingAssistantMessageId
-                      ? (() => {
-                          const existingRun = toObjectRecord(
-                            message.metadata.threadRun,
-                          );
-                          const existingStatus =
-                            toNullableString(existingRun?.status);
-                          const nextStatus =
-                            existingStatus === "failed" ||
-                            existingStatus === "cancelled"
-                              ? existingStatus
-                              : "completed";
-                          return {
-                            ...message,
-                            metadata: {
-                              ...message.metadata,
-                              [STREAM_TEXT_PAUSED_KEY]: false,
-                              renderBlocks: snapshotStreamRenderBlocks(),
-                              threadRun: {
-                                ...(existingRun ?? {}),
-                                idempotencyKey: durableRunKey,
-                                status: nextStatus,
-                                mode: input.mode,
-                              },
-                            },
-                          };
-                        })()
-                      : message,
-                  ),
-                );
+              updateStreamingAssistantMessage((message) => {
+                const existingRun = toObjectRecord(message.metadata.threadRun);
+                const existingStatus = toNullableString(existingRun?.status);
+                const nextStatus =
+                  existingStatus === "failed" || existingStatus === "cancelled"
+                    ? existingStatus
+                    : "completed";
+                return {
+                  ...message,
+                  metadata: {
+                    ...message.metadata,
+                    [STREAM_TEXT_PAUSED_KEY]: false,
+                    renderBlocks: snapshotStreamRenderBlocks(),
+                    threadRun: {
+                      ...(existingRun ?? {}),
+                      idempotencyKey: durableRunKey,
+                      status: nextStatus,
+                      mode: input.mode,
+                    },
+                  },
+                };
               });
               break readLoop;
             }
@@ -4538,16 +4568,19 @@ export default function DashboardChatThreadPage({
     <div className="flex h-full w-full overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
-          <div className="flex min-h-16 items-center justify-between gap-2 px-3 py-2 md:h-16 md:gap-3 md:px-6 md:py-0 xl:px-8">
-            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden md:gap-2.5">
+          <div className="flex min-h-16 flex-wrap items-start justify-between gap-2 px-3 py-2 md:h-16 md:flex-nowrap md:items-center md:gap-3 md:px-6 md:py-0 xl:px-8">
+            <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 overflow-hidden md:gap-2.5">
               <div className="shrink-0 md:hidden">
                 <SidebarTrigger />
               </div>
-              <div className="min-w-0 flex-1 md:flex-none">
-                <h1 className="truncate text-base font-semibold text-foreground">
+              <div className="flex min-w-0 flex-1 items-center md:flex-none">
+                <h1 className="truncate text-base leading-none font-semibold text-foreground">
                   {threadTitle}
                 </h1>
               </div>
+            </div>
+
+            <div className="contents md:ml-auto md:flex md:h-10 md:shrink-0 md:items-center md:gap-2">
               <HeaderModelSelector
                 availableModels={availableModels}
                 byokCredentials={byokCredentials}
@@ -4583,20 +4616,8 @@ export default function DashboardChatThreadPage({
                 selectedModels={selectedModels}
                 setSelectedModels={setSelectedModels}
               />
-            </div>
-
-            <div className="ml-auto flex shrink-0 items-center gap-1.5 md:gap-2">
               <Button
-                onClick={() => setShortcutsOpen(true)}
-                size="icon-sm"
-                title="Keyboard shortcuts"
-                type="button"
-                variant="outline"
-              >
-                <Keyboard className="h-4 w-4" />
-                <span className="sr-only">Keyboard shortcuts</span>
-              </Button>
-              <Button
+                className="size-8 md:h-10 md:w-10 md:border-border/60 md:bg-background md:shadow-xs"
                 onClick={() => {
                   if (isPersistentLayout) {
                     toggleSourcesVisible();
@@ -4641,7 +4662,9 @@ export default function DashboardChatThreadPage({
           composerResetKey={composerResetKey}
           editingMessageId={editingMessageId}
           highlightedMessageId={highlightedMessageId}
+          hasOlderMessages={Boolean(olderMessagesCursor)}
           isEditing={Boolean(editingMessageId && editingGroupId)}
+          isLoadingOlderMessages={isLoadingOlderMessages}
           isStreaming={isStreaming}
           isStopping={isStopping}
           messageGroups={messageGroups}
@@ -4674,6 +4697,7 @@ export default function DashboardChatThreadPage({
           imageModelAlias={selectedModels.image?.modelAlias ?? null}
           disabledToolNames={disabledToolNames}
           onDisabledToolNamesChange={setDisabledToolNames}
+          onLoadOlderMessages={() => void loadOlderThreadMessages()}
           thinkingSettings={thinkingSettings}
           onThinkingSettingsChange={handleThinkingSettingsChange}
           threadTitle={threadTitle}
@@ -4699,6 +4723,7 @@ export default function DashboardChatThreadPage({
           onSelectionChange={persistActiveSourceIds}
           onSkillsCatalogChange={loadAvailableSkills}
           onSourceLoad={handleLibrarySourcesLoad}
+          onSourceMerge={handleLibrarySourcesMerge}
           selectedIds={activeSourceIds}
           selectedSkillIds={activeSkillIds}
           threadCitations={threadCitations}
@@ -4822,6 +4847,7 @@ export default function DashboardChatThreadPage({
             onSelectionChange={persistActiveSourceIds}
             onSkillsCatalogChange={loadAvailableSkills}
             onSourceLoad={handleLibrarySourcesLoad}
+            onSourceMerge={handleLibrarySourcesMerge}
             selectedIds={activeSourceIds}
             selectedSkillIds={activeSkillIds}
             threadCitations={threadCitations}

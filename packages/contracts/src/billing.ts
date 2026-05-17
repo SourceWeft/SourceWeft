@@ -175,6 +175,7 @@ export const billingLedgerEntrySchema = z.object({
 export const billingLedgerResponseSchema = z.object({
   teamId: z.string(),
   items: z.array(billingLedgerEntrySchema),
+  nextCursor: z.string().nullable().optional(),
 });
 
 export const updateSpendLimitsRequestSchema = z

@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ChatRouteSkeleton } from "../../../_components/route-loading-skeleton";
 
 const DashboardChatPageClient = dynamic(
   () =>
@@ -8,7 +9,7 @@ const DashboardChatPageClient = dynamic(
       (mod) => mod.DashboardChatPageClient,
     ),
   {
-    loading: () => <div className="min-h-0 flex-1 bg-background" />,
+    loading: () => <ChatRouteSkeleton />,
     ssr: false,
   },
 );

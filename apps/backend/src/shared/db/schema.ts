@@ -1799,10 +1799,23 @@ export const sources = pgTable(
       table.status,
       desc(table.updatedAt),
     ),
+    index("sources_team_workspace_updated_id_idx").on(
+      table.teamId,
+      table.workspaceId,
+      desc(table.updatedAt),
+      desc(table.id),
+    ),
     index("sources_team_workspace_parent_idx").on(
       table.teamId,
       table.workspaceId,
       table.parentSourceId,
+    ),
+    index("sources_team_workspace_parent_updated_id_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.parentSourceId,
+      desc(table.updatedAt),
+      desc(table.id),
     ),
     index("sources_workspace_created_idx").on(
       table.workspaceId,
@@ -2180,6 +2193,13 @@ export const messages = pgTable(
       sql`${table.creditsConsumed} is null or ${table.creditsConsumed} >= 0`,
     ),
     index("messages_thread_created_idx").on(table.threadId, table.createdAt),
+    index("messages_scope_thread_created_id_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.threadId,
+      desc(table.createdAt),
+      desc(table.id),
+    ),
     index("messages_thread_role_created_idx").on(
       table.threadId,
       table.role,
@@ -2867,6 +2887,13 @@ export const llmSpans = pgTable(
       table.traceId,
       table.startedAt,
     ),
+    index("llm_spans_scope_trace_started_id_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.traceId,
+      table.startedAt,
+      table.id,
+    ),
     index("llm_spans_parent_idx").on(
       table.traceId,
       table.parentSpanId,
@@ -3011,6 +3038,13 @@ export const llmGenerations = pgTable(
       table.workspaceId,
       table.traceId,
       table.startedAt,
+    ),
+    index("llm_generations_scope_trace_started_id_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.traceId,
+      table.startedAt,
+      table.id,
     ),
     index("llm_generations_parent_idx").on(
       table.traceId,

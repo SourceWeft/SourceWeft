@@ -322,6 +322,16 @@ const effectiveBillingProvider: BillingProvider =
 export const config = {
   apiHost: process.env.BACKEND_API_HOST || "0.0.0.0",
   apiPort: Number(process.env.PORT || process.env.BACKEND_API_PORT || 3001),
+  apiPerformance: {
+    largeResponseThresholdBytes: parsePositiveNumber(
+      process.env.BACKEND_API_LARGE_RESPONSE_THRESHOLD_BYTES,
+      512 * 1024,
+    ),
+    slowRequestThresholdMs: parsePositiveNumber(
+      process.env.BACKEND_API_SLOW_REQUEST_THRESHOLD_MS,
+      1000,
+    ),
+  },
   databaseUrl:
     process.env.DATABASE_URL ||
     "postgres://postgres:postgres@127.0.0.1:5432/sourceweft",

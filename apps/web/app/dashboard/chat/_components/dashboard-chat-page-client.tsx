@@ -10,7 +10,7 @@ import {
 } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { Keyboard, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -25,6 +25,7 @@ import {
   DashboardShortcutsDialog,
   getDashboardWorkspaceShortcutKeys,
   useDashboardShortcuts,
+  useDashboardShortcutsOpenListener,
   useDashboardShortcutPlatform,
   type DashboardShortcutDefinition,
 } from "../../_components/dashboard-shortcuts";
@@ -37,7 +38,7 @@ import {
   type ModelItem,
   type SelectedModels,
   type ModelType,
-} from "./header-model-selector";
+} from "./model-catalog-utils";
 import {
   buildByokModelExecution,
   buildThreadCreateModelSettings,
@@ -96,6 +97,10 @@ import {
 } from "../../../../lib/desktop-bridge";
 import { contentClient } from "../../../../lib/sdk";
 import { SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX } from "@sourceweft/sdk";
+import {
+  ChatCanvasPanelSkeleton,
+  SourcesHubPanelSkeleton,
+} from "../../../_components/route-loading-skeleton";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
@@ -112,7 +117,7 @@ const ChatCanvas = dynamic(
       (mod) => mod.ChatCanvas,
     ),
   {
-    loading: () => <div className="min-h-0 flex-1 bg-background" />,
+    loading: () => <ChatCanvasSkeleton />,
     ssr: false,
   },
 );
@@ -120,7 +125,7 @@ const ChatCanvas = dynamic(
 const SourcesHub = dynamic(
   () => import("./sources-hub").then((mod) => mod.SourcesHub),
   {
-    loading: () => <div className="h-full w-full bg-background" />,
+    loading: () => <SourcesHubSkeleton />,
     ssr: false,
   },
 );
@@ -131,7 +136,7 @@ const ArtifactPreviewPanel = dynamic(
       (mod) => mod.ArtifactPreviewPanel,
     ),
   {
-    loading: () => <div className="h-full w-full bg-background" />,
+    loading: () => <SourcesHubSkeleton />,
     ssr: false,
   },
 );
@@ -150,10 +155,20 @@ const HeaderModelSelector = dynamic(
       (mod) => mod.HeaderModelSelector,
     ),
   {
-    loading: () => <div className="h-9 w-36 shrink-0" />,
+    loading: () => (
+      <div className="h-10 w-36 shrink-0 animate-pulse rounded-md bg-muted" />
+    ),
     ssr: false,
   },
 );
+
+function ChatCanvasSkeleton() {
+  return <ChatCanvasPanelSkeleton />;
+}
+
+function SourcesHubSkeleton() {
+  return <SourcesHubPanelSkeleton className="h-full w-full border-l" />;
+}
 
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(false);
@@ -370,6 +385,7 @@ export function DashboardChatPageClient() {
     string | null
   >(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const shortcutPlatform = useDashboardShortcutPlatform();
   const handleArtifactPreview = useCallback(
@@ -651,6 +667,15 @@ export function DashboardChatPageClient() {
     },
     [workspaceId],
   );
+  const handleLibrarySourcesMerge = useCallback((sources: SourceItem[]) => {
+    setLibrarySources((current) => {
+      const mergedById = new Map(current.map((source) => [source.id, source]));
+      for (const source of sources) {
+        mergedById.set(source.id, source);
+      }
+      return Array.from(mergedById.values());
+    });
+  }, []);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -978,16 +1003,19 @@ export function DashboardChatPageClient() {
     <div className="flex h-full w-full overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
-          <div className="flex min-h-16 items-center justify-between gap-2 px-3 py-2 md:h-16 md:gap-3 md:px-6 md:py-0 xl:px-8">
-            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden md:gap-2.5">
+          <div className="flex min-h-16 flex-wrap items-start justify-between gap-2 px-3 py-2 md:h-16 md:flex-nowrap md:items-center md:gap-3 md:px-6 md:py-0 xl:px-8">
+            <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 overflow-hidden md:gap-2.5">
               <div className="shrink-0 md:hidden">
                 <SidebarTrigger />
               </div>
-              <div className="min-w-0 flex-1 md:flex-none">
-                <h1 className="truncate text-base font-semibold text-foreground">
+              <div className="flex min-w-0 flex-1 items-center md:flex-none">
+                <h1 className="truncate text-base leading-none font-semibold text-foreground">
                   New chat
                 </h1>
               </div>
+            </div>
+
+            <div className="contents md:ml-auto md:flex md:h-10 md:shrink-0 md:items-center md:gap-2">
               <HeaderModelSelector
                 availableModels={availableModels}
                 byokCredentials={byokCredentials}
@@ -1040,20 +1068,8 @@ export function DashboardChatPageClient() {
                 selectedModels={selectedModels}
                 setSelectedModels={setSelectedModels}
               />
-            </div>
-
-            <div className="ml-auto flex shrink-0 items-center gap-1.5 md:gap-2">
               <Button
-                onClick={() => setShortcutsOpen(true)}
-                size="icon-sm"
-                title="Keyboard shortcuts"
-                type="button"
-                variant="outline"
-              >
-                <Keyboard className="h-4 w-4" />
-                <span className="sr-only">Keyboard shortcuts</span>
-              </Button>
-              <Button
+                className="size-8 md:h-10 md:w-10 md:border-border/60 md:bg-background md:shadow-xs"
                 onClick={() => {
                   if (isPersistentLayout) {
                     toggleSourcesVisible();
@@ -1131,6 +1147,7 @@ export function DashboardChatPageClient() {
             initialSources={initialSourcesForWorkspace}
             initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
             onSourceLoad={handleLibrarySourcesLoad}
+            onSourceMerge={handleLibrarySourcesMerge}
             selectedIds={activeSourceIds}
             selectedSkillIds={activeSkillIds}
             workspaceId={workspaceId}
@@ -1244,6 +1261,7 @@ export function DashboardChatPageClient() {
             initialSources={initialSourcesForWorkspace}
             initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
             onSourceLoad={handleLibrarySourcesLoad}
+            onSourceMerge={handleLibrarySourcesMerge}
             selectedIds={activeSourceIds}
             selectedSkillIds={activeSkillIds}
             variant="drawer"

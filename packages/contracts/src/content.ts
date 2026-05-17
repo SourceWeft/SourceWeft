@@ -159,6 +159,19 @@ export const sourceStatusResponseSchema = z.object({
   jobId: z.string().nullable(),
 });
 
+export const listSourceStatusesRequestSchema = z.object({
+  ids: z.array(z.string().trim().min(1)).min(1).max(100),
+});
+
+export const listSourceStatusesResponseSchema = z.object({
+  items: z.array(
+    z.object({
+      id: z.string(),
+      status: sourceStatusResponseSchema,
+    }),
+  ),
+});
+
 export const uploadSourceResponseSchema = z.object({
   source: sourceSchema,
   status: sourceStatusResponseSchema,
@@ -216,6 +229,19 @@ export const createUrlSourceResponseSchema = z.object({
 
 export const listSourcesResponseSchema = z.object({
   items: z.array(sourceSchema),
+  nextCursor: z.string().nullable().optional(),
+});
+
+export const listSourcesRequestSchema = z.object({
+  includeContent: z
+    .union([
+      z.boolean(),
+      z.enum(["true", "false"]).transform((value) => value === "true"),
+    ])
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().trim().min(1).max(1024).optional(),
+  parentSourceId: z.string().trim().min(1).nullable().optional(),
 });
 
 export const artifactSchema = z.object({
@@ -253,6 +279,7 @@ export const artifactSchema = z.object({
 
 export const listArtifactsResponseSchema = z.object({
   items: z.array(artifactSchema),
+  nextCursor: z.string().nullable().optional(),
 });
 
 const sourceMentionSchema = sourceSchema.pick({
@@ -693,6 +720,17 @@ export const editThreadResponseSchema = streamThreadResponseSchema;
 
 export const listThreadMessagesResponseSchema = z.object({
   items: z.array(messageSchema),
+  nextCursor: z.string().nullable().optional(),
+});
+
+export const listThreadMessagesRequestSchema = z.object({
+  cursor: z.string().trim().min(1).max(1024).optional(),
+  include: z
+    .string()
+    .trim()
+    .max(128)
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
 export const workingFilePurposeSchema = z.enum([
@@ -1164,6 +1202,7 @@ export type CreateUrlSourceResponse = z.infer<
   typeof createUrlSourceResponseSchema
 >;
 export type ListSourcesResponse = z.infer<typeof listSourcesResponseSchema>;
+export type ListSourcesRequest = z.infer<typeof listSourcesRequestSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
 export type ListArtifactsResponse = z.infer<
   typeof listArtifactsResponseSchema
@@ -1180,6 +1219,12 @@ export type GetSourceDocumentResponse = z.infer<
   typeof getSourceDocumentResponseSchema
 >;
 export type SourceStatusResponse = z.infer<typeof sourceStatusResponseSchema>;
+export type ListSourceStatusesRequest = z.infer<
+  typeof listSourceStatusesRequestSchema
+>;
+export type ListSourceStatusesResponse = z.infer<
+  typeof listSourceStatusesResponseSchema
+>;
 export type UploadSourceResponse = z.infer<typeof uploadSourceResponseSchema>;
 export type UpdateSourceRequest = z.infer<typeof updateSourceRequestSchema>;
 export type UpdateSourceResponse = z.infer<typeof updateSourceResponseSchema>;
@@ -1236,6 +1281,9 @@ export type EditThreadRequest = z.infer<typeof editThreadRequestSchema>;
 export type EditThreadResponse = z.infer<typeof editThreadResponseSchema>;
 export type ListThreadMessagesResponse = z.infer<
   typeof listThreadMessagesResponseSchema
+>;
+export type ListThreadMessagesRequest = z.infer<
+  typeof listThreadMessagesRequestSchema
 >;
 export type WorkingFilePurpose = z.infer<typeof workingFilePurposeSchema>;
 export type WorkingFile = z.infer<typeof workingFileSchema>;

@@ -28,6 +28,20 @@ function warningFromError(field: string, error: unknown): BootstrapWarning {
   };
 }
 
+function parseBooleanQuery(value: string | undefined, fallback: boolean) {
+  if (value === undefined || value === "") {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0") {
+    return false;
+  }
+  throw new ApiError(400, "INVALID_BOOLEAN", "boolean query parameter must be true or false");
+}
+
 export function registerDashboardRoutes(app: Hono) {
   const routes = new Hono();
 
@@ -38,6 +52,10 @@ export function registerDashboardRoutes(app: Hono) {
     }
 
     const userId = getSessionUserId(session);
+    const includeModelCatalog = parseBooleanQuery(
+      c.req.query("includeModelCatalog"),
+      true,
+    );
     const requestedWorkspaceId = c.req.query("workspaceId")?.trim() || null;
     const sessionOrganizationId = getActiveOrganizationId(session);
     const personalMembership =
@@ -117,10 +135,12 @@ export function registerDashboardRoutes(app: Hono) {
         userId,
         limit: THREADS_PAGE_SIZE,
       }),
-      contentService.listThreadModelCatalog({
-        workspaceId: activeWorkspace.id,
-        userId,
-      }),
+      includeModelCatalog
+        ? contentService.listThreadModelCatalog({
+            workspaceId: activeWorkspace.id,
+            userId,
+          })
+        : Promise.resolve(null),
     ]);
 
     if (privateChatsResult.status === "rejected") {
@@ -142,6 +162,7 @@ export function registerDashboardRoutes(app: Hono) {
       workspaces,
       privateChats: privateChatsResult.value,
       modelCatalog,
+      modelCatalogDeferred: !includeModelCatalog,
       warnings,
     });
   });

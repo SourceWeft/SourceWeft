@@ -15,6 +15,15 @@ const hiddenRetentionPayload = {
   reason: "retention_expired",
 } as const;
 
+const excludedPayload = {
+  redacted: true,
+  reason: "payload_excluded",
+} as const;
+
+type DetailPresentationOptions = {
+  includePayload?: boolean;
+};
+
 function dateValue(value: Date | string | number | null | undefined) {
   if (!value) {
     return null;
@@ -113,7 +122,11 @@ function payload(
   value: unknown,
   access: LlmObservabilityAccess,
   startedAt?: Date | string | number | null,
+  options?: DetailPresentationOptions,
 ) {
+  if (options?.includePayload === false) {
+    return excludedPayload;
+  }
   if (!access.payloadAccess) {
     return hiddenPermissionPayload;
   }
@@ -162,10 +175,13 @@ function fullPayloadRetentionExpired(
   return (parsed as Record<string, unknown>).mode === "full";
 }
 
-export function presentTraceSummary(trace: Record<string, unknown>) {
+export function presentTraceSummary(
+  trace: Record<string, unknown>,
+  options?: { includeMetadata?: boolean },
+) {
   const startedAt = dateValue(trace.startedAt as Date | string | number | null);
   const endedAt = dateValue(trace.endedAt as Date | string | number | null);
-  return {
+  const summary = {
     id: trace.id,
     traceId: trace.traceId,
     teamId: trace.teamId,
@@ -192,21 +208,34 @@ export function presentTraceSummary(trace: Record<string, unknown>) {
     endedAt,
     latencyMs: trace.latencyMs,
     durationMs: trace.latencyMs,
-    tags: trace.tagsJson,
-    metadata: trace.metadataJson,
   };
+  return options?.includeMetadata
+    ? {
+        ...summary,
+        tags: trace.tagsJson,
+        metadata: trace.metadataJson,
+      }
+    : summary;
 }
 
-export function presentTrace(trace: Record<string, unknown>, access: LlmObservabilityAccess) {
+export function presentTrace(
+  trace: Record<string, unknown>,
+  access: LlmObservabilityAccess,
+  options?: DetailPresentationOptions,
+) {
   const startedAt = trace.startedAt as Date | string | number | null;
   return {
-    ...presentTraceSummary(trace),
-    input: payload(trace.inputJson, access, startedAt),
-    output: payload(trace.outputJson, access, startedAt),
+    ...presentTraceSummary(trace, { includeMetadata: true }),
+    input: payload(trace.inputJson, access, startedAt, options),
+    output: payload(trace.outputJson, access, startedAt, options),
   };
 }
 
-export function presentSpan(span: Record<string, unknown>, access: LlmObservabilityAccess) {
+export function presentSpan(
+  span: Record<string, unknown>,
+  access: LlmObservabilityAccess,
+  options?: DetailPresentationOptions,
+) {
   const startedAt = span.startedAt as Date | string | number | null;
   const startTime = dateValue(startedAt);
   const endTime = dateValue(span.endedAt as Date | string | number | null);
@@ -232,8 +261,8 @@ export function presentSpan(span: Record<string, unknown>, access: LlmObservabil
     endedAt: endTime,
     latencyMs: span.latencyMs,
     durationMs: span.latencyMs,
-    input: payload(span.inputJson, access, startedAt),
-    output: payload(span.outputJson, access, startedAt),
+    input: payload(span.inputJson, access, startedAt, options),
+    output: payload(span.outputJson, access, startedAt, options),
     metadata: span.metadataJson,
     errorCode: span.errorCode,
     errorMessage: span.errorMessage,
@@ -243,6 +272,7 @@ export function presentSpan(span: Record<string, unknown>, access: LlmObservabil
 export function presentGeneration(
   generation: Record<string, unknown>,
   access: LlmObservabilityAccess,
+  options?: DetailPresentationOptions,
 ) {
   const startedAt = generation.startedAt as Date | string | number | null;
   const startTime = dateValue(startedAt);
@@ -271,12 +301,12 @@ export function presentGeneration(
     routeStrategy: generation.routeStrategy,
     routeDecision: generation.routeDecisionJson,
     modelParameters: generation.modelParametersJson,
-    input: payload(generation.inputJson, access, startedAt),
-    output: payload(generation.outputJson, access, startedAt),
-    outputText: payload(generation.outputText, access, startedAt),
+    input: payload(generation.inputJson, access, startedAt, options),
+    output: payload(generation.outputJson, access, startedAt, options),
+    outputText: payload(generation.outputText, access, startedAt, options),
     finishReason: generation.finishReason,
-    reasoningText: payload(generation.reasoningText, access, startedAt),
-    providerFields: payload(generation.providerFieldsJson, access, startedAt),
+    reasoningText: payload(generation.reasoningText, access, startedAt, options),
+    providerFields: payload(generation.providerFieldsJson, access, startedAt, options),
     usage: generation.usageJson,
     usageDetails: usage,
     promptTokens: usage.promptTokens,
@@ -285,10 +315,10 @@ export function presentGeneration(
     outputTokens: generation.outputTokens,
     totalTokens: generation.totalTokens,
     rawCaptureMode: generation.rawCaptureMode,
-    providerRequest: payload(generation.providerRequestJson, access, startedAt),
-    providerResponse: payload(generation.providerResponseJson, access, startedAt),
-    providerRequestHeaders: payload(generation.providerRequestHeadersJson, access, startedAt),
-    providerResponseHeaders: payload(generation.providerResponseHeadersJson, access, startedAt),
+    providerRequest: payload(generation.providerRequestJson, access, startedAt, options),
+    providerResponse: payload(generation.providerResponseJson, access, startedAt, options),
+    providerRequestHeaders: payload(generation.providerRequestHeadersJson, access, startedAt, options),
+    providerResponseHeaders: payload(generation.providerResponseHeadersJson, access, startedAt, options),
     providerStatusCode: generation.providerStatusCode,
     providerRequestId: generation.providerRequestId,
     rawCaptureError: generation.rawCaptureError,

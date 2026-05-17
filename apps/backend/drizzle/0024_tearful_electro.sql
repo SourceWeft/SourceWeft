@@ -1,0 +1,5 @@
+CREATE INDEX "llm_generations_scope_trace_started_id_idx" ON "llm_generations" USING btree ("team_id","workspace_id","trace_id","started_at","id");--> statement-breakpoint
+CREATE INDEX "llm_spans_scope_trace_started_id_idx" ON "llm_spans" USING btree ("team_id","workspace_id","trace_id","started_at","id");--> statement-breakpoint
+CREATE INDEX "messages_scope_thread_created_id_idx" ON "messages" USING btree ("team_id","workspace_id","thread_id","created_at" desc,"id" desc);--> statement-breakpoint
+CREATE INDEX "sources_team_workspace_updated_id_idx" ON "sources" USING btree ("team_id","workspace_id","updated_at" desc,"id" desc);--> statement-breakpoint
+CREATE INDEX "sources_team_workspace_parent_updated_id_idx" ON "sources" USING btree ("team_id","workspace_id","parent_source_id","updated_at" desc,"id" desc);

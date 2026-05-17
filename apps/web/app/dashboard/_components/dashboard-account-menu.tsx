@@ -1,8 +1,16 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { useAuthenticate } from "@daveyplate/better-auth-ui";
-import { CreditCard, LayoutGrid, LogOut, Plus, User } from "lucide-react";
+import {
+  CreditCard,
+  Keyboard,
+  LayoutGrid,
+  LogOut,
+  Plus,
+  User,
+} from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -27,16 +35,22 @@ import {
 } from "@sourceweft/ui-web/components/ui/sidebar";
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
-import {
-  DashboardSettingsCenterModal,
-  type SettingsCenterTab,
-} from "./dashboard-settings-center-modal";
+import type { SettingsCenterTab } from "./dashboard-settings-center-modal";
 import { DashboardRailTeamSwitcher } from "./dashboard-team-switcher";
 import {
   DashboardTeamDisplay,
   type DashboardTeamItem,
   useDashboardTeamSelector,
 } from "./dashboard-team-selector-shared";
+import { dispatchDashboardShortcutsOpen } from "./dashboard-shortcuts";
+
+const DashboardSettingsCenterModal = dynamic(
+  () =>
+    import("./dashboard-settings-center-modal").then(
+      (module) => module.DashboardSettingsCenterModal,
+    ),
+  { ssr: false },
+);
 
 function getInitials(name?: string, email?: string) {
   const value = name || email || "SW";
@@ -222,6 +236,10 @@ export function DashboardAccountMenu({
               <DropdownMenuItem onClick={() => void handleSignOut()}>
                 <LogOut />
                 Log out
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={dispatchDashboardShortcutsOpen}>
+                <Keyboard />
+                Keyboard shortcuts
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

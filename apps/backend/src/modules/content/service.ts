@@ -82,7 +82,14 @@ export class ContentService {
     return contentSourceService.createUrlSource(input);
   }
 
-  async listSources(input: { workspaceId: string; userId: string }) {
+  async listSources(input: {
+    includeContent?: boolean;
+    limit?: number;
+    cursor?: string;
+    parentSourceId?: string | null;
+    workspaceId: string;
+    userId: string;
+  }) {
     return contentSourceService.listSources(input);
   }
 
@@ -94,6 +101,14 @@ export class ContentService {
     cursor?: string;
   }) {
     return contentSourceService.listSourceMentions(input);
+  }
+
+  async listSourceStatuses(input: {
+    workspaceId: string;
+    userId: string;
+    sourceIds: string[];
+  }) {
+    return contentSourceService.listSourceStatuses(input);
   }
 
   async listSkillsCatalog(input: { workspaceId: string; userId: string }) {
@@ -489,6 +504,9 @@ export class ContentService {
   }
 
   async listThreadMessages(input: {
+    cursor?: string;
+    include?: string;
+    limit?: number;
     workspaceId: string;
     threadId: string;
     userId: string;
@@ -514,6 +532,7 @@ export class ContentService {
   }
 
   async listArtifacts(input: {
+    cursor?: string;
     workspaceId: string;
     userId: string;
     limit?: number;

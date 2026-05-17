@@ -4,7 +4,7 @@ import {
   type ModelItem,
   type ModelType,
   type SelectedModels,
-} from "./header-model-selector";
+} from "./model-catalog-utils";
 
 export type ModelSelectionSource = "system" | "skill" | "user";
 

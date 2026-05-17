@@ -55,6 +55,7 @@ import type {
 } from "@sourceweft/sdk";
 
 const LIST_LIMIT = 50;
+const TRACE_DETAIL_OBSERVATION_LIMIT = 200;
 const ALL_WORKSPACES = "__all__";
 const NOISY_MESSAGE_FIELDS = new Set([
   "additional_kwargs",
@@ -86,6 +87,17 @@ type SelectedNode =
   | { kind: "trace"; id: string }
   | { kind: "span"; id: string }
   | { kind: "generation"; id: string };
+
+type TraceDetailViewModel = {
+  finalGeneration: LlmGenerationDetail | null;
+  generationById: Map<string, LlmGenerationDetail>;
+  logRows: TreeRow[];
+  rootGeneration: LlmGenerationDetail | null;
+  spanById: Map<string, LlmSpanDetail>;
+  traceStartMs: number;
+  totalTokens: number;
+  treeRows: TreeRow[];
+};
 
 const statusFilters = ["all", "ok", "running", "error", "cancelled"] as const;
 type StatusFilter = "all" | LlmObservationStatus;
@@ -138,6 +150,142 @@ function ErrorMessageBlock({ children, compact = false }: { children: React.Reac
   );
 }
 
+function TraceSkeletonBlock({ className }: { className?: string }) {
+  return (
+    <div className={cn("animate-pulse rounded-md bg-muted/80", className)} />
+  );
+}
+
+function TraceSkeletonLine({ className }: { className?: string }) {
+  return <TraceSkeletonBlock className={cn("h-3", className)} />;
+}
+
+function TraceListSkeletonRows({
+  allWorkspacesSelected,
+}: {
+  allWorkspacesSelected: boolean;
+}) {
+  return (
+    <>
+      <div className="md:hidden">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div className="border-b border-border px-3 py-2.5" key={index}>
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-2">
+                <TraceSkeletonLine className="w-44" />
+                <TraceSkeletonLine className="w-64 max-w-full" />
+              </div>
+              <TraceSkeletonBlock className="h-5 w-14 rounded-full" />
+            </div>
+            <div className="mt-2 flex min-w-0 gap-2">
+              <TraceSkeletonLine className="w-16" />
+              <TraceSkeletonLine className="w-14" />
+              <TraceSkeletonLine className="w-28" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="hidden min-w-0 overflow-x-auto md:block">
+        <table
+          className={cn(
+            "w-full table-fixed text-xs",
+            allWorkspacesSelected ? "min-w-[1680px]" : "min-w-[1520px]",
+          )}
+        >
+          <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
+            <tr>
+              <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
+              <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
+              {allWorkspacesSelected ? (
+                <th className="w-[160px] px-3 py-1.5 font-medium">
+                  Workspace
+                </th>
+              ) : null}
+              <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
+              <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
+              <th className="w-[150px] px-3 py-1.5 font-medium">Model</th>
+              <th className="w-[90px] px-3 py-1.5 font-medium">Tokens</th>
+              <th className="w-[90px] px-3 py-1.5 font-medium">Obs.</th>
+              <th className="w-[190px] px-3 py-1.5 font-medium">Session ID</th>
+              <th className="w-[140px] px-3 py-1.5 font-medium">User</th>
+              <th className="w-[190px] px-3 py-1.5 font-medium">Trace ID</th>
+              <th className="w-[36px] px-3 py-1.5 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: 12 }).map((_, index) => (
+              <tr className="border-b border-border" key={index}>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-28" />
+                </td>
+                <td className="px-3 py-2">
+                  <div className="space-y-2">
+                    <TraceSkeletonLine className="w-48" />
+                    <TraceSkeletonLine className="w-36" />
+                  </div>
+                </td>
+                {allWorkspacesSelected ? (
+                  <td className="px-3 py-2">
+                    <TraceSkeletonLine className="w-28" />
+                  </td>
+                ) : null}
+                <td className="px-3 py-2">
+                  <TraceSkeletonBlock className="h-5 w-16 rounded-full" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-14" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-28" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-12" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-10" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-36" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-24" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonLine className="w-36" />
+                </td>
+                <td className="px-3 py-2">
+                  <TraceSkeletonBlock className="ml-auto size-4 rounded-sm" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function TraceTreeSkeleton() {
+  return (
+    <div className="h-full space-y-1 pr-2">
+      {Array.from({ length: 12 }).map((_, index) => (
+        <div
+          className="flex items-center gap-2 rounded px-2 py-1.5"
+          key={index}
+          style={{ paddingLeft: 8 + (index % 4) * 14 }}
+        >
+          <TraceSkeletonBlock className="size-3 shrink-0 rounded-sm" />
+          <TraceSkeletonLine
+            className={index % 3 === 0 ? "w-52" : "w-36"}
+          />
+          <TraceSkeletonBlock className="h-5 w-14 rounded-full" />
+          <TraceSkeletonLine className="w-12" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function buildTree(detail: LlmTraceDetailResponse | null) {
   if (!detail) {
     return [] as TreeRow[];
@@ -163,11 +311,21 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
 
   for (const span of detail.spans) {
     const key = span.parentSpanId ?? null;
-    spansByParent.set(key, [...(spansByParent.get(key) ?? []), span]);
+    const spans = spansByParent.get(key);
+    if (spans) {
+      spans.push(span);
+    } else {
+      spansByParent.set(key, [span]);
+    }
   }
   for (const generation of detail.generations) {
     const key = generation.parentSpanId ?? null;
-    generationsByParent.set(key, [...(generationsByParent.get(key) ?? []), generation]);
+    const generations = generationsByParent.get(key);
+    if (generations) {
+      generations.push(generation);
+    } else {
+      generationsByParent.set(key, [generation]);
+    }
   }
 
   const hasChildren = (spanId: string | null) =>
@@ -237,6 +395,87 @@ function buildTree(detail: LlmTraceDetailResponse | null) {
 
   pushChildren(null, 1);
   return rows;
+}
+
+function buildTraceDetailViewModel(
+  detail: LlmTraceDetailResponse | null,
+): TraceDetailViewModel | null {
+  if (!detail) {
+    return null;
+  }
+
+  const generationById = new Map(
+    detail.generations.map((generation) => [generation.id, generation]),
+  );
+  const spanById = new Map(detail.spans.map((span) => [span.spanId, span]));
+  const treeRows = buildTree(detail);
+  const logRows = [...treeRows].sort((a, b) => {
+    const left = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+    const right = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+    return left - right;
+  });
+  const rootGeneration =
+    detail.generations.find((generation) => !generation.parentSpanId) ??
+    detail.generations[detail.generations.length - 1] ??
+    null;
+  const finalGeneration =
+    [...detail.generations]
+      .reverse()
+      .find((generation) => generation.outputText || generation.output) ??
+    null;
+  const totalTokens =
+    detail.trace.totalTokens ??
+    detail.generations.reduce(
+      (sum, generation) => sum + (generation.totalTokens ?? 0),
+      0,
+    );
+  const traceStartMs = detail.trace.startedAt
+    ? new Date(detail.trace.startedAt).getTime()
+    : logRows.reduce((earliest, row) => {
+        if (!row.startedAt) {
+          return earliest;
+        }
+        return Math.min(earliest, new Date(row.startedAt).getTime());
+      }, Date.now());
+
+  return {
+    finalGeneration,
+    generationById,
+    logRows,
+    rootGeneration,
+    spanById,
+    traceStartMs,
+    totalTokens,
+    treeRows,
+  };
+}
+
+function mergeTraceDetail(
+  current: LlmTraceDetailResponse,
+  nextPage: LlmTraceDetailResponse,
+): LlmTraceDetailResponse {
+  const spansById = new Map(current.spans.map((span) => [span.id, span]));
+  for (const span of nextPage.spans) {
+    spansById.set(span.id, span);
+  }
+  const generationsById = new Map(
+    current.generations.map((generation) => [generation.id, generation]),
+  );
+  for (const generation of nextPage.generations) {
+    generationsById.set(generation.id, generation);
+  }
+
+  return {
+    ...nextPage,
+    spans: Array.from(spansById.values()),
+    generations: Array.from(generationsById.values()),
+    nextObservationCursor: nextPage.nextObservationCursor ?? null,
+    observationsTruncated: Boolean(nextPage.nextObservationCursor),
+    trace: {
+      ...current.trace,
+      ...nextPage.trace,
+    },
+  };
 }
 
 function traceMatchesNameFilter(trace: LlmTraceSummary, selectedNames: string[]) {
@@ -1078,9 +1317,14 @@ function normalizeToolMessage(value: unknown) {
 function RedactionNotice({ value }: { value: unknown }) {
   const unwrapped = unwrapPayload(value);
   if (!unwrapped || typeof unwrapped !== "object" || !("redacted" in unwrapped)) return null;
+  const reason = (unwrapped as { reason?: string }).reason ?? "redacted";
+  const message =
+    reason === "payload_excluded"
+      ? "Payload was excluded from this lightweight trace load."
+      : `Payload hidden by observability access policy: ${reason}`;
   return (
     <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-      Payload hidden by observability access policy: {(unwrapped as { reason?: string }).reason ?? "redacted"}
+      {message}
     </div>
   );
 }
@@ -1213,17 +1457,18 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
-function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: SelectedNode | null) {
+function selectedNodeData(
+  detail: LlmTraceDetailResponse | null,
+  selected: SelectedNode | null,
+  viewModel: TraceDetailViewModel | null,
+) {
   if (!detail || !selected) {
     return null;
   }
   if (selected.kind === "trace") {
     const metadata = detail.trace.metadata ?? {};
-    const agentRun = detail.spans.find((item) => item.spanId === "agent_run");
-    const finalGeneration = [...detail.generations]
-      .reverse()
-      .find((generation) => generation.outputText || generation.output);
-    const fallbackOutput = agentRun?.output ?? finalGeneration?.outputText ?? finalGeneration?.output;
+    const agentRun = viewModel?.spanById.get("agent_run");
+    const fallbackOutput = agentRun?.output ?? viewModel?.finalGeneration?.outputText ?? viewModel?.finalGeneration?.output;
     return {
       kind: "trace",
       title: detail.trace.name,
@@ -1239,7 +1484,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
       metrics: {
         durationMs: detail.trace.durationMs ?? detail.trace.latencyMs,
         observationCount: detail.trace.observationCount ?? detail.spans.length + detail.generations.length,
-        totalTokens: detail.trace.totalTokens ?? detail.generations.reduce((sum, generation) => sum + (generation.totalTokens ?? 0), 0),
+        totalTokens: viewModel?.totalTokens ?? 0,
       },
       parameters: {},
       metadata,
@@ -1247,7 +1492,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
     };
   }
   if (selected.kind === "span") {
-    const span = detail.spans.find((item) => item.spanId === selected.id);
+    const span = viewModel?.spanById.get(selected.id);
     if (!span) return null;
     return {
       kind: span.kind,
@@ -1269,7 +1514,7 @@ function selectedNodeData(detail: LlmTraceDetailResponse | null, selected: Selec
       raw: span,
     };
   }
-  const generation = detail.generations.find((item) => item.id === selected.id);
+  const generation = viewModel?.generationById.get(selected.id);
   if (!generation) return null;
   return {
     kind: generation.operation,
@@ -1566,11 +1811,20 @@ function FilterPanel({
   );
 }
 
-function TraceSummaryBar({ detail }: { detail: LlmTraceDetailResponse | null }) {
+function TraceSummaryBar({
+  detail,
+  isLoadingMoreObservations = false,
+  onLoadMoreObservations,
+  viewModel,
+}: {
+  detail: LlmTraceDetailResponse | null;
+  isLoadingMoreObservations?: boolean;
+  onLoadMoreObservations?: () => void;
+  viewModel: TraceDetailViewModel | null;
+}) {
   if (!detail) return null;
-  const rootGeneration = detail.generations.find((generation) => !generation.parentSpanId)
-    ?? detail.generations[detail.generations.length - 1];
-  const totalTokens = detail.trace.totalTokens ?? detail.generations.reduce((sum, generation) => sum + (generation.totalTokens ?? 0), 0);
+  const rootGeneration = viewModel?.rootGeneration;
+  const totalTokens = viewModel?.totalTokens ?? 0;
   const reason = statusReason(detail.trace);
   return (
     <div className="border-b border-border px-4 py-3">
@@ -1582,6 +1836,26 @@ function TraceSummaryBar({ detail }: { detail: LlmTraceDetailResponse | null }) 
         <span>User: <span className="font-medium text-foreground">{detail.trace.userDisplayName ?? detail.trace.userId ?? "--"}</span></span>
         <span>Env: <span className="font-medium text-foreground">{detail.trace.environment ?? "--"}</span></span>
         <span>Observations: <span className="font-medium text-foreground">{detail.trace.observationCount ?? detail.spans.length + detail.generations.length}</span></span>
+        {detail.observationsTruncated ? (
+          <span className="font-medium text-amber-600 dark:text-amber-300">
+            Showing {detail.spans.length + detail.generations.length}
+          </span>
+        ) : null}
+        {detail.nextObservationCursor ? (
+          <Button
+            className="h-6 gap-1 px-2 text-[11px]"
+            disabled={isLoadingMoreObservations}
+            onClick={onLoadMoreObservations}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {isLoadingMoreObservations ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : null}
+            Load more
+          </Button>
+        ) : null}
         <span>Model: <span className="font-medium text-foreground">{detail.trace.model ?? rootGeneration?.model ?? "--"}</span></span>
         <span>Tokens: <span className="font-medium text-foreground">{totalTokens > 0 ? totalTokens : "--"}</span></span>
       </div>
@@ -1599,13 +1873,15 @@ function TraceTree({
   loading,
   selected,
   onSelect,
+  viewModel,
 }: {
   detail: LlmTraceDetailResponse | null;
   loading: boolean;
   selected: SelectedNode | null;
   onSelect: (node: SelectedNode) => void;
+  viewModel: TraceDetailViewModel | null;
 }) {
-  const rows = React.useMemo(() => buildTree(detail), [detail]);
+  const rows = viewModel?.treeRows ?? [];
   const defaultCollapsedIds = React.useMemo(
     () => new Set(rows.filter((row) => row.defaultCollapsed).map((row) => row.id)),
     [rows],
@@ -1653,9 +1929,8 @@ function TraceTree({
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading trace tree...
+      <div className="h-full p-2">
+        <TraceTreeSkeleton />
       </div>
     );
   }
@@ -1725,20 +2000,18 @@ function TraceLogView({
   detail,
   selected,
   onSelect,
+  viewModel,
 }: {
   detail: LlmTraceDetailResponse | null;
   selected: SelectedNode | null;
   onSelect: (node: SelectedNode) => void;
+  viewModel: TraceDetailViewModel | null;
 }) {
+  const rows = viewModel?.logRows ?? [];
+  const traceStart = viewModel?.traceStartMs ?? Date.now();
   if (!detail) {
     return <EmptySection label="Select a trace to view the timeline." />;
   }
-  const rows = buildTree(detail).sort((a, b) => {
-    const left = a.startedAt ? new Date(a.startedAt).getTime() : 0;
-    const right = b.startedAt ? new Date(b.startedAt).getTime() : 0;
-    return left - right;
-  });
-  const traceStart = detail.trace.startedAt ? new Date(detail.trace.startedAt).getTime() : Math.min(...rows.map((row) => row.startedAt ? new Date(row.startedAt).getTime() : Date.now()));
   const traceDuration = Math.max(detail.trace.latencyMs ?? 1, 1);
 
   return (
@@ -1798,12 +2071,22 @@ function NodeDetail({
   detail,
   onSelect,
   selected,
+  viewModel,
 }: {
   detail: LlmTraceDetailResponse | null;
   onSelect: (node: SelectedNode) => void;
   selected: SelectedNode | null;
+  viewModel: TraceDetailViewModel | null;
 }) {
-  const node = selectedNodeData(detail, selected);
+  const [activeTab, setActiveTab] = React.useState("preview");
+  const node = React.useMemo(
+    () => selectedNodeData(detail, selected, viewModel),
+    [detail, selected, viewModel],
+  );
+
+  React.useEffect(() => {
+    setActiveTab("preview");
+  }, [selected?.kind, selected?.id]);
 
   if (!node) {
     return (
@@ -1857,7 +2140,11 @@ function NodeDetail({
         ) : null}
       </div>
 
-      <Tabs className="min-h-0 flex-1 p-2 md:p-3" defaultValue="preview">
+      <Tabs
+        className="min-h-0 flex-1 p-2 md:p-3"
+        onValueChange={setActiveTab}
+        value={activeTab}
+      >
         <TabsList className="h-auto max-w-full overflow-x-auto">
           <TabsTrigger value="preview">Preview</TabsTrigger>
           <TabsTrigger value="log">Log View</TabsTrigger>
@@ -1899,18 +2186,29 @@ function NodeDetail({
           ) : null}
         </TabsContent>
         <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2" value="log">
-          <TraceLogView detail={detail} onSelect={onSelect} selected={selected} />
+          {activeTab === "log" ? (
+            <TraceLogView
+              detail={detail}
+              onSelect={onSelect}
+              selected={selected}
+              viewModel={viewModel}
+            />
+          ) : null}
         </TabsContent>
         <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 space-y-4 overflow-auto pr-1 md:pr-2" value="formatted">
-          <Section title="Input"><StructuredValue value={node.input} /></Section>
-          {hasReasoning ? <Section title="Reasoning"><ReasoningView reasoning={node.reasoning} segments={node.reasoningSegments} /></Section> : null}
-          <Section title="Output"><StructuredValue fallbackRole="assistant" unwrapToolOutput={node.kind === "tool"} value={outputWithoutReasoning} /></Section>
-          {hasUsefulPayload(node.parameters) ? <Section title="Model parameters"><KeyValueTable value={node.parameters} /></Section> : null}
-          {hasUsefulPayload(node.metrics) ? <Section title="Metrics"><KeyValueTable value={node.metrics} /></Section> : null}
-          {hasUsefulPayload(node.metadata) ? <Section title="Metadata"><KeyValueTable value={node.metadata} /></Section> : null}
+          {activeTab === "formatted" ? (
+            <>
+              <Section title="Input"><StructuredValue value={node.input} /></Section>
+              {hasReasoning ? <Section title="Reasoning"><ReasoningView reasoning={node.reasoning} segments={node.reasoningSegments} /></Section> : null}
+              <Section title="Output"><StructuredValue fallbackRole="assistant" unwrapToolOutput={node.kind === "tool"} value={outputWithoutReasoning} /></Section>
+              {hasUsefulPayload(node.parameters) ? <Section title="Model parameters"><KeyValueTable value={node.parameters} /></Section> : null}
+              {hasUsefulPayload(node.metrics) ? <Section title="Metrics"><KeyValueTable value={node.metrics} /></Section> : null}
+              {hasUsefulPayload(node.metadata) ? <Section title="Metadata"><KeyValueTable value={node.metadata} /></Section> : null}
+            </>
+          ) : null}
         </TabsContent>
         <TabsContent className="mt-3 max-h-[calc(100vh-280px)] min-w-0 overflow-auto pr-1 md:pr-2" value="json">
-          <JsonBlock value={node.raw} />
+          {activeTab === "json" ? <JsonBlock value={node.raw} /> : null}
         </TabsContent>
       </Tabs>
     </div>
@@ -1927,6 +2225,7 @@ export default function ObservabilityPage() {
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   const [loadingList, setLoadingList] = React.useState(false);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
+  const [loadingMoreObservations, setLoadingMoreObservations] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<StatusFilter>("all");
   const [selectedTraceNames, setSelectedTraceNames] = React.useState<string[]>([]);
@@ -1993,6 +2292,12 @@ export default function ObservabilityPage() {
     }
   }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope, status, threadId, traceId, userId]);
 
+  const loadTracesRef = React.useRef(loadTraces);
+
+  React.useEffect(() => {
+    loadTracesRef.current = loadTraces;
+  }, [loadTraces]);
+
   const traceNameOptions = React.useMemo(
     () => Array.from(new Set(traces.map((trace) => trace.name))).sort((a, b) => a.localeCompare(b)),
     [traces],
@@ -2003,6 +2308,10 @@ export default function ObservabilityPage() {
     [selectedTraceNames, traces],
   );
   const hasTraceNameFilter = selectedTraceNames.length > 0;
+  const detailViewModel = React.useMemo(
+    () => buildTraceDetailViewModel(detail),
+    [detail],
+  );
 
   React.useEffect(() => {
     listRequestIdRef.current += 1;
@@ -2013,8 +2322,9 @@ export default function ObservabilityPage() {
     setSelectedNode(null);
     setDrawerOpen(false);
     setNextCursor(null);
-    void loadTraces(null);
-  }, [loadTraces]);
+    setLoadingMoreObservations(false);
+    void loadTracesRef.current(null);
+  }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope]);
 
   const openTrace = React.useCallback(async (traceId: string, traceWorkspaceId?: string | null) => {
     if (!selectedWorkspaceScope) {
@@ -2034,13 +2344,21 @@ export default function ObservabilityPage() {
     setSelectedTraceKey(traceSelectionKey(traceId, detailWorkspaceId));
     setDrawerOpen(true);
     setLoadingDetail(true);
+    setLoadingMoreObservations(false);
     setError(null);
     const requestId = detailRequestIdRef.current + 1;
     detailRequestIdRef.current = requestId;
     try {
       const nextDetail = allWorkspacesSelected
-        ? await llmObservabilityClient.getTeamTrace(organizationId!, traceId, { workspaceId: detailWorkspaceId })
-        : await llmObservabilityClient.getWorkspaceTrace(detailWorkspaceId, traceId);
+        ? await llmObservabilityClient.getTeamTrace(organizationId!, traceId, {
+            includePayload: false,
+            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+            workspaceId: detailWorkspaceId,
+          })
+        : await llmObservabilityClient.getWorkspaceTrace(detailWorkspaceId, traceId, {
+            includePayload: false,
+            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+          });
       if (requestId !== detailRequestIdRef.current) {
         return;
       }
@@ -2058,6 +2376,45 @@ export default function ObservabilityPage() {
       }
     }
   }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope]);
+
+  const loadMoreObservations = React.useCallback(async () => {
+    if (!detail?.nextObservationCursor || loadingMoreObservations) {
+      return;
+    }
+    const detailWorkspaceId = detail.trace.workspaceId;
+    const traceIdValue = detail.trace.traceId;
+    const cursor = detail.nextObservationCursor;
+    setLoadingMoreObservations(true);
+    setError(null);
+    try {
+      const nextPage = allWorkspacesSelected
+        ? await llmObservabilityClient.getTeamTrace(organizationId!, traceIdValue, {
+            includePayload: false,
+            observationCursor: cursor,
+            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+            workspaceId: detailWorkspaceId,
+          })
+        : await llmObservabilityClient.getWorkspaceTrace(detailWorkspaceId, traceIdValue, {
+            includePayload: false,
+            observationCursor: cursor,
+            observationLimit: TRACE_DETAIL_OBSERVATION_LIMIT,
+          });
+      setDetail((current) =>
+        current && current.trace.traceId === traceIdValue
+          ? mergeTraceDetail(current, nextPage)
+          : current,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more observations");
+    } finally {
+      setLoadingMoreObservations(false);
+    }
+  }, [
+    allWorkspacesSelected,
+    detail,
+    loadingMoreObservations,
+    organizationId,
+  ]);
 
   const handleWorkspaceChange = React.useCallback((nextWorkspaceId: string) => {
     setSelectedWorkspaceScope(nextWorkspaceId);
@@ -2161,82 +2518,95 @@ export default function ObservabilityPage() {
             {error ? <p className="mt-2 text-xs text-red-600 dark:text-red-300">{error}</p> : null}
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            <div className="md:hidden">
-              {visibleTraces.map((trace) => (
-                <TraceMobileRow
-                  allWorkspacesSelected={allWorkspacesSelected}
-                  key={trace.id}
-                  onOpen={() => void openTrace(trace.traceId, trace.workspaceId)}
-                  selected={selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId)}
-                  trace={trace}
-                  workspaces={workspaces}
-                />
-              ))}
-            </div>
-            <div className="hidden min-w-0 overflow-x-auto md:block">
-              <table
-                className={cn(
-                  "w-full table-fixed text-xs",
-                  allWorkspacesSelected ? "min-w-[1680px]" : "min-w-[1520px]",
-                )}
-              >
-                <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
-                  <tr>
-                    <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
-                    <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
-                    {allWorkspacesSelected ? <th className="w-[160px] px-3 py-1.5 font-medium">Workspace</th> : null}
-                    <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
-                    <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
-                    <th className="w-[150px] px-3 py-1.5 font-medium">Model</th>
-                    <th className="w-[90px] px-3 py-1.5 font-medium">Tokens</th>
-                    <th className="w-[90px] px-3 py-1.5 font-medium">Obs.</th>
-                    <th className="w-[190px] px-3 py-1.5 font-medium">Session ID</th>
-                    <th className="w-[140px] px-3 py-1.5 font-medium">User</th>
-                    <th className="w-[190px] px-3 py-1.5 font-medium">Trace ID</th>
-                    <th className="w-[36px] px-3 py-1.5 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
+            {loadingList && visibleTraces.length === 0 ? (
+              <TraceListSkeletonRows
+                allWorkspacesSelected={allWorkspacesSelected}
+              />
+            ) : (
+              <>
+                <div className="md:hidden">
                   {visibleTraces.map((trace) => (
-                    <tr
-                      className={cn(
-                        "cursor-pointer border-b border-border transition-colors hover:bg-accent/40",
-                        selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId) && "bg-accent/60",
-                      )}
+                    <TraceMobileRow
+                      allWorkspacesSelected={allWorkspacesSelected}
                       key={trace.id}
-                      onClick={() => void openTrace(trace.traceId, trace.workspaceId)}
-                    >
-                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatTime(trace.startedAt)}</td>
-                      <td className="px-3 py-1.5">
-                        <div className="truncate font-medium text-foreground">{trace.name}</div>
-                        <div className="truncate font-mono text-[11px] text-muted-foreground">Session: {sessionLabel(trace)}</div>
-                      </td>
-                      {allWorkspacesSelected ? (
-                        <td className="truncate px-3 py-1.5 text-muted-foreground">{workspaceLabel(workspaces, trace.workspaceId)}</td>
-                      ) : null}
-                      <td className="px-3 py-1.5">
-                        <Badge className={cn("h-5 border px-1.5 text-[10px]", statusClassName(trace.status))} variant="outline">
-                          {trace.status}
-                        </Badge>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatLatency(trace.latencyMs)}</td>
-                      <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.model ?? "--"}</td>
-                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.totalTokens ?? "--"}</td>
-                      <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.observationCount ?? "--"}</td>
-                      <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{sessionLabel(trace)}</td>
-                      <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.userDisplayName ?? trace.userId ?? "--"}</td>
-                      <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{trace.traceId}</td>
-                      <td className="px-3 py-1.5 text-right text-muted-foreground">
-                        <ChevronRight className="ml-auto h-3.5 w-3.5" />
-                      </td>
-                    </tr>
+                      onOpen={() =>
+                        void openTrace(trace.traceId, trace.workspaceId)
+                      }
+                      selected={
+                        selectedTraceKey ===
+                        traceSelectionKey(trace.traceId, trace.workspaceId)
+                      }
+                      trace={trace}
+                      workspaces={workspaces}
+                    />
                   ))}
-                </tbody>
-              </table>
-            </div>
-            {visibleTraces.length === 0 ? (
+                </div>
+                <div className="hidden min-w-0 overflow-x-auto md:block">
+                  <table
+                    className={cn(
+                      "w-full table-fixed text-xs",
+                      allWorkspacesSelected ? "min-w-[1680px]" : "min-w-[1520px]",
+                    )}
+                  >
+                    <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
+                      <tr>
+                        <th className="w-[150px] px-3 py-1.5 font-medium">Timestamp</th>
+                        <th className="w-[300px] px-3 py-1.5 font-medium">Name</th>
+                        {allWorkspacesSelected ? <th className="w-[160px] px-3 py-1.5 font-medium">Workspace</th> : null}
+                        <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
+                        <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
+                        <th className="w-[150px] px-3 py-1.5 font-medium">Model</th>
+                        <th className="w-[90px] px-3 py-1.5 font-medium">Tokens</th>
+                        <th className="w-[90px] px-3 py-1.5 font-medium">Obs.</th>
+                        <th className="w-[190px] px-3 py-1.5 font-medium">Session ID</th>
+                        <th className="w-[140px] px-3 py-1.5 font-medium">User</th>
+                        <th className="w-[190px] px-3 py-1.5 font-medium">Trace ID</th>
+                        <th className="w-[36px] px-3 py-1.5 font-medium" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleTraces.map((trace) => (
+                        <tr
+                          className={cn(
+                            "cursor-pointer border-b border-border transition-colors hover:bg-accent/40",
+                            selectedTraceKey === traceSelectionKey(trace.traceId, trace.workspaceId) && "bg-accent/60",
+                          )}
+                          key={trace.id}
+                          onClick={() => void openTrace(trace.traceId, trace.workspaceId)}
+                        >
+                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatTime(trace.startedAt)}</td>
+                          <td className="px-3 py-1.5">
+                            <div className="truncate font-medium text-foreground">{trace.name}</div>
+                            <div className="truncate font-mono text-[11px] text-muted-foreground">Session: {sessionLabel(trace)}</div>
+                          </td>
+                          {allWorkspacesSelected ? (
+                            <td className="truncate px-3 py-1.5 text-muted-foreground">{workspaceLabel(workspaces, trace.workspaceId)}</td>
+                          ) : null}
+                          <td className="px-3 py-1.5">
+                            <Badge className={cn("h-5 border px-1.5 text-[10px]", statusClassName(trace.status))} variant="outline">
+                              {trace.status}
+                            </Badge>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatLatency(trace.latencyMs)}</td>
+                          <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.model ?? "--"}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.totalTokens ?? "--"}</td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{trace.observationCount ?? "--"}</td>
+                          <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{sessionLabel(trace)}</td>
+                          <td className="truncate px-3 py-1.5 text-muted-foreground">{trace.userDisplayName ?? trace.userId ?? "--"}</td>
+                          <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{trace.traceId}</td>
+                          <td className="px-3 py-1.5 text-right text-muted-foreground">
+                            <ChevronRight className="ml-auto h-3.5 w-3.5" />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {!loadingList && visibleTraces.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">
-                {loadingList ? "Loading traces..." : traces.length === 0 ? "No traces found." : "No traces match the current search."}
+                {traces.length === 0 ? "No traces found." : "No traces match the current search."}
               </div>
             ) : null}
             {nextCursor ? (
@@ -2281,7 +2651,12 @@ export default function ObservabilityPage() {
               {detail ? `Session ID: ${detail.trace.sessionId ?? detail.trace.threadId ?? "--"}` : selectedTraceKey ?? "Trace detail"}
             </SheetDescription>
           </SheetHeader>
-          <TraceSummaryBar detail={detail} />
+          <TraceSummaryBar
+            detail={detail}
+            isLoadingMoreObservations={loadingMoreObservations}
+            onLoadMoreObservations={loadMoreObservations}
+            viewModel={detailViewModel}
+          />
           <div className="min-h-0 flex-1">
             <div className="flex h-full min-h-0 flex-col">
               <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
@@ -2300,7 +2675,12 @@ export default function ObservabilityPage() {
                 </Button>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
-                <NodeDetail detail={detail} onSelect={setSelectedNode} selected={selectedNode} />
+                <NodeDetail
+                  detail={detail}
+                  onSelect={setSelectedNode}
+                  selected={selectedNode}
+                  viewModel={detailViewModel}
+                />
               </div>
             </div>
           </div>
@@ -2327,6 +2707,7 @@ export default function ObservabilityPage() {
                 setTimelineDialogOpen(false);
               }}
               selected={selectedNode}
+              viewModel={detailViewModel}
             />
           </div>
         </DialogContent>

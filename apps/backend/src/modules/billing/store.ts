@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import { and, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { db, database } from "../../shared/database";
 import * as schema from "../../shared/db/schema";
@@ -361,21 +361,34 @@ export class PostgresBillingStore implements BillingStore {
   async listLedger(
     teamId: string,
     limit?: number,
-    options?: { activityOnly?: boolean },
+    options?: {
+      activityOnly?: boolean;
+      cursor?: { createdAt: Date; id: string } | null;
+    },
     client?: PoolClient,
   ) {
+    const conditions = [
+      eq(usageLedgers.teamId, teamId),
+      options?.activityOnly
+        ? eq(usageLedgers.activityVisible, true)
+        : undefined,
+      options?.cursor
+        ? or(
+            lt(usageLedgers.createdAt, options.cursor.createdAt),
+            and(
+              eq(usageLedgers.createdAt, options.cursor.createdAt),
+              lt(usageLedgers.id, options.cursor.id),
+            ),
+          )
+        : undefined,
+    ].filter((condition): condition is NonNullable<typeof condition> =>
+      Boolean(condition),
+    );
     const query = pickDb(client)
       .select()
       .from(usageLedgers)
-      .where(
-        options?.activityOnly
-          ? and(
-              eq(usageLedgers.teamId, teamId),
-              eq(usageLedgers.activityVisible, true),
-            )
-          : eq(usageLedgers.teamId, teamId),
-      )
-      .orderBy(desc(usageLedgers.createdAt));
+      .where(and(...conditions))
+      .orderBy(desc(usageLedgers.createdAt), desc(usageLedgers.id));
 
     const rows = limit !== undefined ? await query.limit(limit) : await query;
 

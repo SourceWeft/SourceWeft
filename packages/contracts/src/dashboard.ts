@@ -17,6 +17,7 @@ export const dashboardChatBootstrapResponseSchema = z.object({
   workspaces: z.array(workspaceSchema),
   privateChats: listThreadsResponseSchema,
   modelCatalog: listThreadModelCatalogResponseSchema.nullable(),
+  modelCatalogDeferred: z.boolean().optional(),
   warnings: z.array(dashboardChatBootstrapWarningSchema),
 });
 

@@ -56,7 +56,7 @@ export class ApiError extends Error {
 
 export class ApiResponse {
   static success<T>(c: Context, data: T, statusCode = 200) {
-    return c.json(data, statusCode as never);
+    return jsonResponse(c, data, statusCode);
   }
 
   static error(c: Context, error: ApiError) {
@@ -69,8 +69,15 @@ export class ApiResponse {
       body.details = error.details;
     }
 
-    return c.json(body, error.statusCode as never);
+    return jsonResponse(c, body, error.statusCode);
   }
+}
+
+function jsonResponse(c: Context, body: unknown, statusCode: number) {
+  const payload = JSON.stringify(body);
+  c.header("content-type", "application/json; charset=UTF-8");
+  c.header("content-length", String(Buffer.byteLength(payload)));
+  return c.body(payload, statusCode as never);
 }
 
 export function toApiError(error: unknown): ApiError {

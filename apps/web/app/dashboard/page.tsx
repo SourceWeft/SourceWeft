@@ -29,6 +29,7 @@ import {
 } from "../../lib/dashboard-workspace-context";
 import { useDashboardChatState } from "./_components/dashboard-chat-state";
 import { DashboardTeamSwitcher } from "./_components/dashboard-team-switcher";
+import { DashboardHomeRouteSkeleton } from "../_components/route-loading-skeleton";
 
 type Workspace = {
   id: string;
@@ -703,11 +704,7 @@ export default function DashboardPage() {
   }
 
   if (authState.isPending) {
-    return (
-      <main className="flex min-h-svh items-center justify-center p-8 text-sm text-muted-foreground">
-        Loading dashboard...
-      </main>
-    );
+    return <DashboardHomeRouteSkeleton />;
   }
 
   if (!sessionState) {
@@ -830,7 +827,7 @@ export default function DashboardPage() {
                     ) : null}
 
                     {filteredWorkspaces.map((workspace) => (
-                      <div className="w-full max-w-[292px] md:w-[292px] md:shrink-0" key={workspace.id}>
+                      <div className="max-md:w-full md:w-[292px] md:shrink-0" key={workspace.id}>
                         <WorkspaceCard
                           onOpen={(workspaceId) =>
                             void handleOpenWorkspace(workspaceId)

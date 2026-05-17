@@ -20,6 +20,7 @@ export function registerArtifactRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       limit,
+      cursor: c.req.query("cursor"),
     });
 
     return ApiResponse.success(c, result);

@@ -35,6 +35,28 @@ function parseLedgerLimit(rawLimit: string | undefined) {
   return Math.floor(limit);
 }
 
+function parseLedgerCursor(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as { createdAt?: unknown; id?: unknown };
+    if (typeof parsed.createdAt !== "string" || typeof parsed.id !== "string") {
+      throw new Error("Invalid cursor payload");
+    }
+    const createdAt = new Date(parsed.createdAt);
+    if (Number.isNaN(createdAt.getTime())) {
+      throw new Error("Invalid cursor date");
+    }
+    return { createdAt, id: parsed.id };
+  } catch {
+    throw new ApiError(400, "INVALID_CURSOR", "cursor is invalid");
+  }
+}
+
 async function requireTeamMembership(
   teamId: string,
   userId: string,
@@ -187,6 +209,7 @@ export function registerBillingRoutes(app: Hono) {
     const activityOnly = c.req.query("activity") === "true";
     const ledger = await billingService.getLedger(teamId, limit, {
       activityOnly,
+      cursor: parseLedgerCursor(c.req.query("cursor")),
     });
     return ApiResponse.success(c, ledger);
   });
@@ -204,6 +227,7 @@ export function registerBillingRoutes(app: Hono) {
     const limit = parseLedgerLimit(c.req.query("limit"));
     const ledger = await billingService.getLedger(teamId, limit, {
       activityOnly: true,
+      cursor: parseLedgerCursor(c.req.query("cursor")),
     });
     return ApiResponse.success(c, ledger);
   });

@@ -37,6 +37,38 @@ export {
   updateSourceStatusForLatestRevision,
 } from "./status-repository";
 
+const sourceSummaryColumns = {
+  id: sources.id,
+  teamId: sources.teamId,
+  workspaceId: sources.workspaceId,
+  ingestKind: sources.ingestKind,
+  sourceType: sources.sourceType,
+  connectorId: sources.connectorId,
+  syncRunId: sources.syncRunId,
+  parentSourceId: sources.parentSourceId,
+  title: sources.title,
+  contentText: sql<string>`''`,
+  externalId: sources.externalId,
+  externalUri: sources.externalUri,
+  externalUpdatedAt: sources.externalUpdatedAt,
+  mimeType: sources.mimeType,
+  sizeBytes: sources.sizeBytes,
+  contentHash: sources.contentHash,
+  storageBucket: sources.storageBucket,
+  storageKey: sources.storageKey,
+  parserVersion: sources.parserVersion,
+  parsingConfig: sources.parsingConfig,
+  status: sources.status,
+  estimatedPages: sources.estimatedPages,
+  parsedTokens: sources.parsedTokens,
+  errorJson: sources.errorJson,
+  metadataJson: sources.metadataJson,
+  createdBy: sources.createdBy,
+  indexedAt: sources.indexedAt,
+  createdAt: sources.createdAt,
+  updatedAt: sources.updatedAt,
+};
+
 export async function createSourceRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -107,22 +139,73 @@ export async function createSourceRecord(input: {
 }
 
 export async function listSourceRecords(input: {
+  includeContent?: boolean;
+  limit?: number;
+  cursor?: string;
+  parentSourceId?: string | null;
   teamId: string;
   workspaceId: string;
 }) {
-  const rows = await db
-    .select()
-    .from(sources)
-    .where(
-      and(
-        eq(sources.teamId, input.teamId),
-        eq(sources.workspaceId, input.workspaceId),
-        ne(sources.status, "archived"),
-      ),
-    )
-    .orderBy(desc(sources.updatedAt), desc(sources.createdAt));
+  const cursor = decodeSourceMentionCursor(input.cursor);
+  const conditions = [
+    eq(sources.teamId, input.teamId),
+    eq(sources.workspaceId, input.workspaceId),
+    ne(sources.status, "archived"),
+  ];
 
-  return rows.map(mapSource);
+  if (input.parentSourceId !== undefined) {
+    conditions.push(
+      input.parentSourceId === null
+        ? sql`${sources.parentSourceId} is null` as never
+        : eq(sources.parentSourceId, input.parentSourceId),
+    );
+  }
+
+  if (cursor) {
+    conditions.push(
+      sql`(${sources.updatedAt}, ${sources.id}) < (${cursor.updatedAt}, ${cursor.id})` as never,
+    );
+  }
+
+  const where = and(...conditions);
+  const queryLimit = input.limit ? input.limit + 1 : undefined;
+
+  const rows =
+    input.includeContent === false
+      ? queryLimit
+        ? await db
+            .select(sourceSummaryColumns)
+            .from(sources)
+            .where(where)
+            .orderBy(desc(sources.updatedAt), desc(sources.id))
+            .limit(queryLimit)
+        : await db
+            .select(sourceSummaryColumns)
+            .from(sources)
+            .where(where)
+            .orderBy(desc(sources.updatedAt), desc(sources.id))
+      : queryLimit
+        ? await db
+            .select()
+            .from(sources)
+            .where(where)
+            .orderBy(desc(sources.updatedAt), desc(sources.id))
+            .limit(queryLimit)
+        : await db
+            .select()
+            .from(sources)
+            .where(where)
+            .orderBy(desc(sources.updatedAt), desc(sources.id));
+
+  const pageRows = input.limit ? rows.slice(0, input.limit) : rows;
+  const nextRow = input.limit ? rows[input.limit] ?? null : null;
+
+  return {
+    items: pageRows.map(mapSource),
+    nextCursor: nextRow
+      ? encodeSourceMentionCursor({ updatedAt: nextRow.updatedAt, id: nextRow.id })
+      : null,
+  };
 }
 
 function encodeSourceMentionCursor(input: { updatedAt: Date; id: string }) {

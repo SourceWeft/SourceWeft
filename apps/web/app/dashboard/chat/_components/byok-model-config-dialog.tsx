@@ -28,7 +28,7 @@ import {
   type ModelThinkingCapabilities,
   type ModelItem,
   type ModelType,
-} from "./header-model-selector";
+} from "./model-catalog-utils";
 import {
   DEFAULT_BYOK_PROVIDER_KIND,
   normalizeByokProviderOptions,

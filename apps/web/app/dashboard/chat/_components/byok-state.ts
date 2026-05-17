@@ -1,7 +1,10 @@
 "use client";
 
 import type { ContentClient } from "@sourceweft/sdk";
-import type { ModelThinkingCapabilities, ModelType } from "./header-model-selector";
+import type {
+  ModelThinkingCapabilities,
+  ModelType,
+} from "./model-catalog-utils";
 
 type CreateByokCredentialRequest = Parameters<
   ContentClient["createByokCredential"]

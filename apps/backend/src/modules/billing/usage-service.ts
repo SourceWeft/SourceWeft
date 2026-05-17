@@ -163,7 +163,10 @@ export class BillingUsageService {
   async getLedger(
     teamId: string,
     limit = 50,
-    options?: { activityOnly?: boolean },
+    options?: {
+      activityOnly?: boolean;
+      cursor?: { createdAt: Date; id: string } | null;
+    },
   ): Promise<BillingLedgerResponse> {
     return this.accountService.withLockedAccount(
       teamId,
@@ -172,14 +175,27 @@ export class BillingUsageService {
           ? Math.min(200, Math.max(1, Math.floor(limit)))
           : 50;
 
+        const rows = await this.store.listLedger(
+          account.teamId,
+          safeLimit + 1,
+          options,
+          client,
+        );
+        const items = rows.slice(0, safeLimit);
+        const nextRow = rows[safeLimit] ?? null;
+
         return {
           teamId: account.teamId,
-          items: await this.store.listLedger(
-            account.teamId,
-            safeLimit,
-            options,
-            client,
-          ),
+          items,
+          nextCursor: nextRow
+            ? Buffer.from(
+                JSON.stringify({
+                  createdAt: nextRow.createdAt,
+                  id: nextRow.id,
+                }),
+                "utf8",
+              ).toString("base64url")
+            : null,
         };
       },
     );

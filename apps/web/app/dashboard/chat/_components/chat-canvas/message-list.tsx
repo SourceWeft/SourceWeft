@@ -1,4 +1,12 @@
-import { BookOpenIcon, Copy, Pencil, RotateCcw, WrenchIcon } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  BookOpenIcon,
+  Copy,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  WrenchIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   Conversation,
@@ -29,6 +37,7 @@ import {
   getAttachmentLabel,
 } from "@sourceweft/ui-web/components/ai-elements/attachments";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import { WebToolResults } from "../web-tool-results";
 import {
@@ -267,13 +276,14 @@ function UserCommandSegmentView({
 function UserMessageContent({
   content,
   onSourcePreview,
+  sourceById,
   sources,
 }: {
   content: string;
   onSourcePreview?: (source: SourceItem) => void;
+  sourceById: Map<string, SourceItem>;
   sources: SourceItem[];
 }) {
-  const sourceById = new Map(sources.map((source) => [source.id, source]));
   const tokens = parseMarkerContent(content);
 
   const sourceFromToken = (token: Extract<UserContentToken, { type: "source" }>) =>
@@ -504,7 +514,9 @@ function AssistantMessageBody({
 type MessageListProps = {
   activeVersionByGroup?: Record<string, number>;
   allSources?: SourceItem[];
+  hasOlderMessages?: boolean;
   highlightedMessageId?: string | null;
+  isLoadingOlderMessages?: boolean;
   isStreaming?: boolean;
   messageGroups?: VersionedMessageGroup[];
   onActiveVersionChange?: (input: {
@@ -513,6 +525,7 @@ type MessageListProps = {
   }) => void;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCitationClick?: (citation: CitationRecord) => void;
+  onLoadOlderMessages?: () => void;
   onSourcePreview?: (source: SourceItem) => void;
   onWorkfileClick?: (path: string) => void;
   onRestartFromMessage?: (input: {
@@ -530,29 +543,66 @@ type MessageListProps = {
   workspaceId?: string | null;
 };
 
+const MESSAGE_HISTORY_COLLAPSE_THRESHOLD = 140;
+const MESSAGE_HISTORY_VISIBLE_TAIL_COUNT = 100;
+
 export function MessageList({
   activeVersionByGroup = {},
   allSources = [],
+  hasOlderMessages = false,
   highlightedMessageId = null,
+  isLoadingOlderMessages = false,
   isStreaming = false,
   messageGroups = [],
   onActiveVersionChange,
   onArtifactPreview,
   onCitationClick,
+  onLoadOlderMessages,
   onSourcePreview,
   onWorkfileClick,
   onRestartFromMessage,
   onRefreshLatest,
   workspaceId,
 }: MessageListProps) {
-  const latestUserGroup = [...messageGroups]
-    .reverse()
-    .find((group) => group.role === "user");
-  const latestAssistantGroup = [...messageGroups]
-    .reverse()
-    .find((group) => group.role === "assistant");
+  const sourceById = useMemo(
+    () => new Map(allSources.map((source) => [source.id, source])),
+    [allSources],
+  );
+  const latestGroups = useMemo(() => {
+    let latestUserGroup: VersionedMessageGroup | undefined;
+    let latestAssistantGroup: VersionedMessageGroup | undefined;
+    for (let index = messageGroups.length - 1; index >= 0; index -= 1) {
+      const group = messageGroups[index];
+      if (!group) {
+        continue;
+      }
+      if (!latestUserGroup && group.role === "user") {
+        latestUserGroup = group;
+      }
+      if (!latestAssistantGroup && group.role === "assistant") {
+        latestAssistantGroup = group;
+      }
+      if (latestUserGroup && latestAssistantGroup) {
+        break;
+      }
+    }
+    return { latestAssistantGroup, latestUserGroup };
+  }, [messageGroups]);
+  const latestUserGroup = latestGroups.latestUserGroup;
+  const latestAssistantGroup = latestGroups.latestAssistantGroup;
   const latestUserGroupId = latestUserGroup?.groupId;
   const latestAssistantGroupId = latestAssistantGroup?.groupId;
+  const [showCollapsedHistory, setShowCollapsedHistory] = useState(false);
+  const collapsedHistoryCount =
+    !showCollapsedHistory &&
+    !isStreaming &&
+    messageGroups.length > MESSAGE_HISTORY_COLLAPSE_THRESHOLD
+      ? messageGroups.length - MESSAGE_HISTORY_VISIBLE_TAIL_COUNT
+      : 0;
+  const visibleMessageGroups =
+    collapsedHistoryCount > 0
+      ? messageGroups.slice(collapsedHistoryCount)
+      : messageGroups;
 
   async function handleCopyMessage(text: string) {
     try {
@@ -567,7 +617,39 @@ export function MessageList({
     <Conversation className="min-h-0 flex-1">
       <ConversationContent className="px-6 py-8">
         <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-4">
-          {messageGroups.map((group) => {
+          {hasOlderMessages ? (
+            <div className="flex justify-center">
+              <Button
+                disabled={isLoadingOlderMessages}
+                onClick={onLoadOlderMessages}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isLoadingOlderMessages ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : null}
+                Load earlier messages
+              </Button>
+            </div>
+          ) : null}
+          {collapsedHistoryCount > 0 ? (
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed bg-muted/20 px-4 py-3 text-center text-xs text-muted-foreground">
+              <span>
+                {collapsedHistoryCount} older message groups hidden to keep this
+                long thread responsive.
+              </span>
+              <Button
+                onClick={() => setShowCollapsedHistory(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Show hidden history
+              </Button>
+            </div>
+          ) : null}
+          {visibleMessageGroups.map((group) => {
             const isAssistant = group.role === "assistant";
             const selectedUserVersionIdForAssistant = isAssistant
               ? (() => {
@@ -698,9 +780,6 @@ export function MessageList({
 
               return null;
             })();
-            const sourceById = new Map(
-              allSources.map((source) => [source.id, source]),
-            );
             const toolbarVisibilityClass =
               "invisible pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:visible group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:visible group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100";
 
@@ -788,6 +867,7 @@ export function MessageList({
                                 <UserMessageContent
                                   content={messageText}
                                   onSourcePreview={onSourcePreview}
+                                  sourceById={sourceById}
                                   sources={mentionSources}
                                 />
                               </div>

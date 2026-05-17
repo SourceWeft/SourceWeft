@@ -1,12 +1,51 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
 import { db } from "../../../shared/database";
 import { messages, threads } from "../../../shared/db/schema";
 import type { MessageRecord, MessageRole } from "../types";
 
 type MessageRow = typeof messages.$inferSelect;
+type MessageInclude = {
+  citations: boolean;
+  contentJson: boolean;
+  metadata: boolean;
+};
 
-function mapMessage(row: MessageRow): MessageRecord {
+const fullMessageInclude: MessageInclude = {
+  citations: true,
+  contentJson: true,
+  metadata: true,
+};
+
+function trimMetadata(
+  metadata: Record<string, unknown>,
+  include: MessageInclude,
+): Record<string, unknown> {
+  if (include.metadata) {
+    return metadata;
+  }
+  const trimmed: Record<string, unknown> = {};
+  for (const key of [
+    "effectiveMentionedSourceIds",
+    "effectiveSourceIds",
+    "mentionedSourceIds",
+    "sourceIds",
+    "turnId",
+  ]) {
+    if (key in metadata) {
+      trimmed[key] = metadata[key];
+    }
+  }
+  if (include.citations && "retrieval" in metadata) {
+    trimmed.retrieval = metadata.retrieval;
+  }
+  return trimmed;
+}
+
+function mapMessage(
+  row: MessageRow,
+  include: MessageInclude = fullMessageInclude,
+): MessageRecord {
   return {
     id: row.id,
     teamId: row.teamId,
@@ -18,8 +57,8 @@ function mapMessage(row: MessageRow): MessageRecord {
     createdBy: row.createdBy,
     model: row.model,
     creditsConsumed: row.creditsConsumed,
-    contentJson: row.contentJson ?? {},
-    metadata: row.metadata ?? {},
+    contentJson: include.contentJson ? row.contentJson ?? {} : {},
+    metadata: trimMetadata(row.metadata ?? {}, include),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -83,6 +122,7 @@ export async function createMessageRecord(input: {
 }
 
 export async function listMessageRecordsByThread(input: {
+  include?: MessageInclude;
   teamId: string;
   workspaceId: string;
   threadId: string;
@@ -99,7 +139,56 @@ export async function listMessageRecordsByThread(input: {
     )
     .orderBy(asc(messages.createdAt));
 
-  return rows.map(mapMessage);
+  return rows.map((row) => mapMessage(row, input.include));
+}
+
+export async function listMessageRecordPageByThread(input: {
+  include?: MessageInclude;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  before?: { createdAt: Date; id: string } | null;
+  limit: number;
+}) {
+  const conditions = [
+    eq(messages.teamId, input.teamId),
+    eq(messages.workspaceId, input.workspaceId),
+    eq(messages.threadId, input.threadId),
+    input.before
+      ? or(
+          lt(messages.createdAt, input.before.createdAt),
+          and(
+            eq(messages.createdAt, input.before.createdAt),
+            lt(messages.id, input.before.id),
+          ),
+        )
+      : undefined,
+  ].filter((condition): condition is NonNullable<typeof condition> =>
+    Boolean(condition),
+  );
+
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(and(...conditions))
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(input.limit + 1);
+
+  const pageRows = rows.slice(0, input.limit);
+  const nextRow = rows[input.limit] ?? null;
+
+  return {
+    items: pageRows.reverse().map((row) => mapMessage(row, input.include)),
+    nextCursor: nextRow
+      ? Buffer.from(
+          JSON.stringify({
+            createdAt: nextRow.createdAt.toISOString(),
+            id: nextRow.id,
+          }),
+          "utf8",
+        ).toString("base64url")
+      : null,
+  };
 }
 
 export async function findMessageRecord(input: {

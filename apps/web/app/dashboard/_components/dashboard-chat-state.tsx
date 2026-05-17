@@ -289,7 +289,9 @@ export function DashboardChatStateProvider({
       let shouldUseFallback = false;
 
       try {
-        const result = await dashboardClient.getChatBootstrap();
+        const result = await dashboardClient.getChatBootstrap({
+          includeModelCatalog: false,
+        });
         if (cancelled || hydrateGenerationRef.current !== generation) {
           return;
         }

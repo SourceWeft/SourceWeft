@@ -70,6 +70,47 @@ function parseLimit(value: string | undefined) {
   return Math.min(Math.floor(limit), 200);
 }
 
+function parseBooleanQuery(value: string | undefined, fallback: boolean) {
+  if (value === undefined || value === "") {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0") {
+    return false;
+  }
+  throw new ApiError(400, "INVALID_BOOLEAN", "boolean query parameter must be true or false");
+}
+
+function parseObservationLimit(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  const limit = Number.parseInt(value, 10);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw new ApiError(400, "INVALID_LIMIT", "observationLimit must be a positive number");
+  }
+  return Math.min(limit, 500);
+}
+
+function traceDetailQuery(c: Context) {
+  const summaryOnly = parseBooleanQuery(c.req.query("summaryOnly"), false);
+  return {
+    includePayload: summaryOnly
+      ? false
+      : parseBooleanQuery(c.req.query("includePayload"), true),
+    observationCursor: summaryOnly
+      ? undefined
+      : parseCursor(c.req.query("observationCursor")),
+    observationLimit: summaryOnly
+      ? 0
+      : parseObservationLimit(c.req.query("observationLimit")),
+    summaryOnly,
+  };
+}
+
 function requireParam(c: Context, name: string) {
   const value = c.req.param(name);
   if (!value) {
@@ -226,7 +267,7 @@ function registerRoutes(input: {
       ...commonTraceQuery(c),
     });
     return ApiResponse.success(c, {
-      items: result.items.map(presentTraceSummary),
+      items: result.items.map((trace) => presentTraceSummary(trace)),
       nextCursor: result.nextCursor,
     });
   });
@@ -235,27 +276,40 @@ function registerRoutes(input: {
     const access = await input.resolveAccess(c);
     requireDataAccess(access);
     const base = requireScopedBase(await input.baseInput(access, c, "traceDetail"));
+    const detailQuery = traceDetailQuery(c);
     const result = await getLlmTrace({
       ...base,
+      observationCursor: detailQuery.observationCursor,
+      observationLimit: detailQuery.observationLimit,
       traceId: requireParam(c, "traceId"),
     });
     if (!result) {
       throw ApiError.notFound("Trace not found");
     }
-    await auditPayloadView({
-      access,
-      workspaceId: result.trace.workspaceId,
-      targetType: "llm_trace",
-      targetId: result.trace.id,
-      action: "llm_trace.payload.viewed",
-      metadata: {
-        traceId: result.trace.traceId,
-      },
-    });
+    if (detailQuery.includePayload) {
+      await auditPayloadView({
+        access,
+        workspaceId: result.trace.workspaceId,
+        targetType: "llm_trace",
+        targetId: result.trace.id,
+        action: "llm_trace.payload.viewed",
+        metadata: {
+          traceId: result.trace.traceId,
+        },
+      });
+    }
     return ApiResponse.success(c, {
-      trace: presentTrace(result.trace, access),
-      spans: result.spans.map((span) => presentSpan(span, access)),
-      generations: result.generations.map((generation) => presentGeneration(generation, access)),
+      trace: presentTrace(result.trace, access, {
+        includePayload: detailQuery.includePayload,
+      }),
+      spans: result.spans.map((span) => presentSpan(span, access, {
+        includePayload: detailQuery.includePayload,
+      })),
+      generations: result.generations.map((generation) => presentGeneration(generation, access, {
+        includePayload: detailQuery.includePayload,
+      })),
+      nextObservationCursor: result.nextObservationCursor,
+      observationsTruncated: result.observationsTruncated,
     });
   });
 

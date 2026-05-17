@@ -1,6 +1,7 @@
 "use client";
 
 import type * as React from "react";
+import { usePathname } from "next/navigation";
 import {
   AuthLoading,
   RedirectToSignIn,
@@ -12,19 +13,20 @@ import { DashboardMobileBottomNav } from "./_components/dashboard-mobile-bottom-
 import { DashboardMobileContent } from "./_components/dashboard-mobile-content";
 import { DashboardMobileNavProvider } from "./_components/dashboard-mobile-nav-state";
 import { DashboardSidebar } from "./_components/dashboard-sidebar";
+import { DashboardShellRouteSkeleton } from "../_components/route-loading-skeleton";
 
 export function DashboardLayoutClient({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+
   return (
     <>
       <RedirectToSignIn />
       <AuthLoading>
-        <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center p-8 text-sm text-zinc-500">
-          Loading session...
-        </main>
+        <DashboardShellRouteSkeleton pathname={pathname} />
       </AuthLoading>
       <SignedIn>
         <SidebarProvider>

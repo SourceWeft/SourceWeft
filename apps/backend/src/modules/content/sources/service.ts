@@ -103,7 +103,7 @@ async function assertNoDirectoryNameConflict(input: {
     workspaceId: input.workspaceId,
   });
   const normalizedTitle = normalizeDirectoryTitleForConflict(input.title);
-  const conflict = siblings.find((candidate) =>
+  const conflict = siblings.items.find((candidate) =>
     candidate.sourceType === "directory" &&
     candidate.id !== input.sourceId &&
     candidate.parentSourceId === input.parentSourceId &&
@@ -639,14 +639,25 @@ export class ContentSourceService {
     };
   }
 
-  async listSources(input: { workspaceId: string; userId: string }) {
+  async listSources(input: {
+    includeContent?: boolean;
+    limit?: number;
+    cursor?: string;
+    parentSourceId?: string | null;
+    workspaceId: string;
+    userId: string;
+  }) {
     const workspace = await requireContentWorkspace(input);
-    const items = await listSourceRecords({
+    const result = await listSourceRecords({
+      includeContent: input.includeContent,
+      limit: input.limit,
+      cursor: input.cursor,
+      parentSourceId: input.parentSourceId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
     });
 
-    return { items };
+    return result;
   }
 
   async listSourceMentions(input: {
@@ -733,6 +744,59 @@ export class ContentSourceService {
     }
 
     return detail;
+  }
+
+  async listSourceStatuses(input: {
+    workspaceId: string;
+    sourceIds: string[];
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const sourceIds = Array.from(
+      new Set(input.sourceIds.map((id) => id.trim()).filter(Boolean)),
+    );
+    const sources = await listSourceRecordsByIds({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceIds,
+    });
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    const items = await Promise.all(
+      sourceIds
+        .filter((sourceId) => sourceById.has(sourceId))
+        .map(async (sourceId) => {
+          const detail = await getSourceStatusDetail({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            sourceId,
+          });
+          const source = sourceById.get(sourceId);
+          return detail || source
+            ? {
+                id: sourceId,
+                status: detail ?? {
+                  status: source?.status ?? "created",
+                  progress: source?.status === "indexed" ? 100 : 0,
+                  currentStep:
+                    source?.status === "indexed" ? "completed" : "created",
+                  parsedPages: null,
+                  totalPages: null,
+                  error: null,
+                  jobId: null,
+                },
+              }
+            : null;
+        }),
+    );
+
+    return {
+      items: items.filter(
+        (item): item is NonNullable<(typeof items)[number]> => item !== null,
+      ),
+    };
   }
 
   async getSourceContent(input: {

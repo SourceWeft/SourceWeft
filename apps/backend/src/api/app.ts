@@ -10,6 +10,7 @@ import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { describeError } from "./response/error-detail";
 import { ApiError, ApiResponse, toApiError } from "./response/api-response";
+import { performanceLoggingMiddleware } from "./middleware/performance-logging";
 import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
@@ -85,6 +86,8 @@ export function createApp() {
   app.get("/v1/health", (c) => {
     return ApiResponse.success(c, healthResponse(), 200);
   });
+
+  app.use("/v1/*", performanceLoggingMiddleware);
 
   registerAuthMetaRoutes(app);
   registerDesktopAuthRoutes(app);

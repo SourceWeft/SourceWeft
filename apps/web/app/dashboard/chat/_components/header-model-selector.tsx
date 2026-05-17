@@ -54,6 +54,20 @@ import {
 
 export type ModelType = "llm" | "image" | "vision";
 
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
+}
+
 export type ModelThinkingCapabilities = {
   supportsThinking: boolean;
   supportsImageInput?: boolean;
@@ -1220,132 +1234,138 @@ export function HeaderModelSelector({
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelType>("llm");
   const [openSequence, setOpenSequence] = useState(0);
+  const isCompactModelSelector = !useMediaQuery("(min-width: 768px)");
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (nextOpen) {
       setOpenSequence((current) => current + 1);
     }
   };
-  const compactByokSelection = byokSelections[activeTab] ?? null;
-  const compactByokModel =
-    compactByokSelection?.mode === "byok"
-      ? resolveByokSelectedModelItem({
-          availableModels,
-          selection: compactByokSelection,
-          type: activeTab,
-        })
-      : null;
-  const compactModel =
-    compactByokModel ??
-    selectedModels[activeTab] ??
-    availableModels[activeTab]?.[0] ??
-    null;
-  const compactShowByokBadge = compactByokSelection?.mode === "byok";
-
   return (
     <ModelSelector onOpenChange={handleOpenChange} open={open}>
       <TooltipProvider>
-        <div className="flex max-w-[58vw] shrink-0 items-center rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs lg:hidden">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <ModelSelectorTrigger asChild>
-                <button
-                  className="flex min-w-0 items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 aria-expanded:bg-muted/50"
-                  onClick={() => setActiveTab(activeTab)}
-                  type="button"
-                >
-                  <div className="flex size-5.5 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/35 text-muted-foreground">
-                    <ModelTypeIcon type={activeTab} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className={
-                        compactModel
-                          ? "truncate text-[11px] leading-4 font-medium text-foreground"
-                          : "truncate text-[11px] leading-4 font-medium text-muted-foreground"
-                      }
-                    >
-                      {compactModel?.name ?? `No ${modelTypeLabels[activeTab]}`}
-                    </div>
-                    {compactShowByokBadge ? (
-                      <div className="mt-0.5 flex items-center gap-1 text-[9px] leading-3 text-muted-foreground">
-                        <KeyRound className="size-2.5" />
-                        BYOK
-                      </div>
-                    ) : null}
-                  </div>
-                  <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-                </button>
-              </ModelSelectorTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>
-              {compactByokSelection?.mode === "byok"
-                ? `${modelTypeLabels[activeTab]}: ${compactModel?.name ?? "BYOK"} via ${compactByokSelection.providerName ?? "BYOK"}`
-                : compactModel
-                  ? `${modelTypeLabels[activeTab]}: ${compactModel.name}`
-                  : `No ${modelTypeLabels[activeTab]} model available`}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="hidden shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs lg:flex">
-          {(["llm", "image", "vision"] as ModelType[]).map((type) => {
-            const byokSelection = byokSelections[type] ?? null;
-            const byokModel =
-              byokSelection?.mode === "byok"
-                ? resolveByokSelectedModelItem({
-                    availableModels,
-                    selection: byokSelection,
-                    type,
-                  })
-                : null;
-            const model =
-              byokModel ?? selectedModels[type] ?? availableModels[type]?.[0] ?? null;
-            const showByokBadge = byokSelection?.mode === "byok";
+        {isCompactModelSelector ? (
+          <div className="order-last flex h-8 w-full min-w-0 basis-full items-center gap-0.5 rounded-md border border-border/50 bg-muted/20 px-1 py-0.5 md:order-none md:w-auto md:basis-auto">
+            {(["llm", "image", "vision"] as ModelType[]).map((type) => {
+              const byokSelection = byokSelections[type] ?? null;
+              const byokModel =
+                byokSelection?.mode === "byok"
+                  ? resolveByokSelectedModelItem({
+                      availableModels,
+                      selection: byokSelection,
+                      type,
+                    })
+                  : null;
+              const model =
+                byokModel ??
+                selectedModels[type] ??
+                availableModels[type]?.[0] ??
+                null;
+              const showByokBadge = byokSelection?.mode === "byok";
 
-            return (
-              <Tooltip key={type}>
-                <TooltipTrigger asChild>
-                  <ModelSelectorTrigger asChild>
-                    <button
-                      className="flex min-w-0 max-w-[152px] items-center gap-2 rounded-md border border-transparent px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 aria-expanded:bg-muted/50"
-                      onClick={() => setActiveTab(type)}
-                      type="button"
-                    >
-                      <div className="flex size-5.5 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/35 text-muted-foreground">
-                        <ModelTypeIcon type={type} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div
+              return (
+                <Tooltip key={type}>
+                  <TooltipTrigger asChild>
+                    <ModelSelectorTrigger asChild>
+                      <button
+                        aria-label={`${modelTypeLabels[type]} model: ${model?.name ?? "None"}`}
+                        className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-sm border border-transparent px-1.5 text-left text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:bg-background/70 focus-visible:text-foreground aria-expanded:bg-background/70 aria-expanded:text-foreground"
+                        onClick={() => setActiveTab(type)}
+                        type="button"
+                      >
+                        <span className="shrink-0">
+                          <ModelTypeIcon type={type} />
+                        </span>
+                        <span
                           className={
                             model
-                              ? "truncate text-[11px] leading-4 font-medium text-foreground"
-                              : "truncate text-[11px] leading-4 font-medium text-muted-foreground"
+                              ? "min-w-0 flex-1 truncate text-[10px] leading-3.5 font-medium text-foreground"
+                              : "min-w-0 flex-1 truncate text-[10px] leading-3.5 font-medium text-muted-foreground"
                           }
                         >
                           {model?.name ?? `No ${modelTypeLabels[type]}`}
-                        </div>
+                        </span>
                         {showByokBadge ? (
-                          <div className="mt-0.5 flex items-center gap-1 text-[9px] leading-3 text-muted-foreground">
-                            <KeyRound className="size-2.5" />
-                            BYOK
-                          </div>
+                          <KeyRound className="size-2.5 shrink-0 text-muted-foreground" />
                         ) : null}
-                      </div>
-                      <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-                    </button>
-                  </ModelSelectorTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={6}>
-                  {byokSelection?.mode === "byok"
-                    ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
-                    : model
-                      ? `${modelTypeLabels[type]}: ${model.name}`
-                      : `No ${modelTypeLabels[type]} model available`}
-                </TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </div>
+                      </button>
+                    </ModelSelectorTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6}>
+                    {byokSelection?.mode === "byok"
+                      ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
+                      : model
+                        ? `${modelTypeLabels[type]}: ${model.name}`
+                        : `No ${modelTypeLabels[type]} model available`}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-background px-1 py-0.5 shadow-xs">
+            {(["llm", "image", "vision"] as ModelType[]).map((type) => {
+              const byokSelection = byokSelections[type] ?? null;
+              const byokModel =
+                byokSelection?.mode === "byok"
+                  ? resolveByokSelectedModelItem({
+                      availableModels,
+                      selection: byokSelection,
+                      type,
+                    })
+                  : null;
+              const model =
+                byokModel ??
+                selectedModels[type] ??
+                availableModels[type]?.[0] ??
+                null;
+              const showByokBadge = byokSelection?.mode === "byok";
+
+              return (
+                <Tooltip key={type}>
+                  <TooltipTrigger asChild>
+                    <ModelSelectorTrigger asChild>
+                      <button
+                        className="flex min-w-0 max-w-[152px] items-center gap-2 rounded-md border border-transparent px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 aria-expanded:bg-muted/50"
+                        onClick={() => setActiveTab(type)}
+                        type="button"
+                      >
+                        <div className="flex size-5.5 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/35 text-muted-foreground">
+                          <ModelTypeIcon type={type} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className={
+                              model
+                                ? "truncate text-[11px] leading-4 font-medium text-foreground"
+                                : "truncate text-[11px] leading-4 font-medium text-muted-foreground"
+                            }
+                          >
+                            {model?.name ?? `No ${modelTypeLabels[type]}`}
+                          </div>
+                          {showByokBadge ? (
+                            <div className="mt-0.5 flex items-center gap-1 text-[9px] leading-3 text-muted-foreground">
+                              <KeyRound className="size-2.5" />
+                              BYOK
+                            </div>
+                          ) : null}
+                        </div>
+                        <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+                      </button>
+                    </ModelSelectorTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6}>
+                    {byokSelection?.mode === "byok"
+                      ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
+                      : model
+                        ? `${modelTypeLabels[type]}: ${model.name}`
+                        : `No ${modelTypeLabels[type]} model available`}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        )}
       </TooltipProvider>
 
       <ModelSelectorContent className="max-w-[92vw] sm:max-w-[520px]" title="Select model">

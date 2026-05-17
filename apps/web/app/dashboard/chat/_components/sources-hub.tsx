@@ -5,6 +5,7 @@ import {
   type MouseEvent,
   type ReactNode,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -97,6 +98,11 @@ const MAX_FILES = 20;
 const MAX_FILE_SIZE_MB = 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const SOURCE_TREE_INDENT_PX = 10;
+const SOURCES_PAGE_SIZE = 200;
+const SOURCE_ROOT_PARENT_KEY = "__root";
+const SOURCE_TREE_VIRTUALIZE_THRESHOLD = 400;
+const SOURCE_TREE_ROW_HEIGHT_PX = 40;
+const SOURCE_TREE_OVERSCAN_ROWS = 12;
 const SOURCE_FILE_EXTENSIONS = [
   "txt",
   "text",
@@ -247,6 +253,13 @@ type SourceTreeNode = {
   source: SourceItem;
   children: SourceTreeNode[];
 };
+
+type SourceTreeIndex = {
+  byParent: Map<string | null, SourceItem[]>;
+};
+type SourceParentCursorMap = Record<string, string | null>;
+type SourceParentStatusMap = Record<string, boolean>;
+type SourceParentErrorMap = Record<string, string>;
 type SourceSelectionState = boolean | "indeterminate";
 type WorkfileListItem = Awaited<
   ReturnType<typeof contentClient.listWorkingFiles>
@@ -259,6 +272,7 @@ export type ArtifactListItem = Awaited<
 >["items"][number];
 
 const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
+const workspaceArtifactsCursorCache = new Map<string, string | null>();
 const threadWorkfilesCache = new Map<string, WorkfileListItem[]>();
 
 function cloneArtifactItems(items: ArtifactListItem[]) {
@@ -519,6 +533,18 @@ function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
     contentText: item.contentText,
     storageKey: item.storageKey,
   }));
+}
+
+function getSourceParentKey(parentSourceId: string | null) {
+  return parentSourceId ?? SOURCE_ROOT_PARENT_KEY;
+}
+
+function appendUniqueSources(current: SourceItem[], incoming: SourceItem[]) {
+  const mergedById = new Map(current.map((source) => [source.id, source]));
+  for (const source of incoming) {
+    mergedById.set(source.id, source);
+  }
+  return Array.from(mergedById.values());
 }
 
 function mapCitationsToUi(citations: CitationRecord[]): DisplayCitationItem[] {
@@ -1095,16 +1121,11 @@ function sourceMatchesQuery(source: SourceItem, q: string) {
   );
 }
 
-function buildSourceTree(sources: SourceItem[], searchQuery: string) {
-  const q = searchQuery.trim().toLowerCase();
+function buildSourceTreeIndex(sources: SourceItem[]): SourceTreeIndex {
   const byParent = new Map<string | null, SourceItem[]>();
-  const byId = new Map(sources.map((source) => [source.id, source]));
 
   for (const source of sources) {
-    const parentId =
-      source.parentSourceId && byId.get(source.parentSourceId)?.sourceType === "directory"
-        ? source.parentSourceId
-        : null;
+    const parentId = source.parentSourceId ?? null;
     const items = byParent.get(parentId) ?? [];
     items.push(source);
     byParent.set(parentId, items);
@@ -1118,8 +1139,17 @@ function buildSourceTree(sources: SourceItem[], searchQuery: string) {
     });
   }
 
+  return { byParent };
+}
+
+function buildSourceTreeFromIndex(
+  index: SourceTreeIndex,
+  searchQuery: string,
+) {
+  const q = searchQuery.trim().toLowerCase();
+
   function build(parentId: string | null, ancestorsMatch = false): SourceTreeNode[] {
-    return (byParent.get(parentId) ?? [])
+    return (index.byParent.get(parentId) ?? [])
       .map((source) => {
         const selfMatch = !q || sourceMatchesQuery(source, q);
         const children = build(source.id, ancestorsMatch || selfMatch);
@@ -1132,6 +1162,10 @@ function buildSourceTree(sources: SourceItem[], searchQuery: string) {
   }
 
   return build(null);
+}
+
+function buildSourceTree(sources: SourceItem[], searchQuery: string) {
+  return buildSourceTreeFromIndex(buildSourceTreeIndex(sources), searchQuery);
 }
 
 function countTreeNodes(nodes: SourceTreeNode[]): number {
@@ -1191,6 +1225,124 @@ function getNodeSelectionState(
     return "indeterminate";
   }
   return false;
+}
+
+function buildSourceSelectionStateMap(
+  nodes: SourceTreeNode[],
+  selectedSet: Set<string>,
+) {
+  const selectionStateById = new Map<string, SourceSelectionState>();
+
+  function visit(
+    node: SourceTreeNode,
+    ancestorSelected = false,
+  ): SourceSelectionState {
+    const selectedByAncestorOrSelf =
+      ancestorSelected || selectedSet.has(node.source.id);
+
+    if (!isSelectableSource(node.source)) {
+      selectionStateById.set(node.source.id, false);
+      node.children.forEach((child) => visit(child, selectedByAncestorOrSelf));
+      return false;
+    }
+
+    if (selectedByAncestorOrSelf) {
+      selectionStateById.set(node.source.id, true);
+      node.children.forEach((child) => visit(child, true));
+      return true;
+    }
+
+    if (node.children.length === 0) {
+      selectionStateById.set(node.source.id, false);
+      return false;
+    }
+
+    const childStates = node.children.map((child) => visit(child, false));
+    const selectionState = childStates.every((state) => state === true)
+      ? true
+      : childStates.some((state) => state !== false)
+        ? "indeterminate"
+        : false;
+    selectionStateById.set(node.source.id, selectionState);
+    return selectionState;
+  }
+
+  nodes.forEach((node) => visit(node));
+  return selectionStateById;
+}
+
+type FlattenedSourceTreeRow = {
+  node: SourceTreeNode;
+  depth: number;
+};
+
+function flattenSourceTree(nodes: SourceTreeNode[]) {
+  const rows: FlattenedSourceTreeRow[] = [];
+
+  function visit(node: SourceTreeNode, depth: number) {
+    rows.push({ node, depth });
+    node.children.forEach((child) => visit(child, depth + 1));
+  }
+
+  nodes.forEach((node) => visit(node, 0));
+  return rows;
+}
+
+function useVirtualRows(input: {
+  enabled: boolean;
+  rowCount: number;
+  rowHeight: number;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+
+  useEffect(() => {
+    if (!input.enabled) {
+      setScrollTop(0);
+      return;
+    }
+
+    const element = containerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateViewportHeight = () => {
+      setViewportHeight(element.clientHeight);
+    };
+
+    updateViewportHeight();
+    const observer = new ResizeObserver(updateViewportHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [input.enabled]);
+
+  const startIndex = input.enabled
+    ? Math.max(0, Math.floor(scrollTop / input.rowHeight) - SOURCE_TREE_OVERSCAN_ROWS)
+    : 0;
+  const visibleCount = input.enabled
+    ? Math.ceil(viewportHeight / input.rowHeight) + SOURCE_TREE_OVERSCAN_ROWS * 2
+    : input.rowCount;
+  const endIndex = input.enabled
+    ? Math.min(input.rowCount, startIndex + visibleCount)
+    : input.rowCount;
+
+  return {
+    containerRef,
+    endIndex,
+    onScroll: input.enabled
+      ? () => {
+          const element = containerRef.current;
+          if (element) {
+            setScrollTop(element.scrollTop);
+          }
+        }
+      : undefined,
+    startIndex,
+    topPadding: input.enabled ? startIndex * input.rowHeight : 0,
+    totalHeight: input.rowCount * input.rowHeight,
+  };
 }
 
 function findNodePath(
@@ -1323,9 +1475,17 @@ function toggleSourceSelectionInTree(
 function SourceTreeRow({
   node,
   depth,
-  selectedIds,
-  sourceById,
+  autoExpand = false,
+  forceFlat = false,
+  loadedSourceParentIds,
+  loadingMoreSourceParentByKey,
+  loadingSourceParentByKey,
+  sourceParentCursorByKey,
+  sourceParentErrorByKey,
+  selectionStateById,
   onToggle,
+  onLoadChildren,
+  onLoadMoreChildren,
   rowBusyById,
   editingId,
   editingTitle,
@@ -1345,9 +1505,17 @@ function SourceTreeRow({
 }: {
   node: SourceTreeNode;
   depth: number;
-  selectedIds: string[];
-  sourceById: Map<string, SourceItem>;
+  autoExpand?: boolean;
+  forceFlat?: boolean;
+  loadedSourceParentIds: Set<string>;
+  loadingMoreSourceParentByKey: SourceParentStatusMap;
+  loadingSourceParentByKey: SourceParentStatusMap;
+  sourceParentCursorByKey: SourceParentCursorMap;
+  sourceParentErrorByKey: SourceParentErrorMap;
+  selectionStateById: Map<string, SourceSelectionState>;
   onToggle: (node: SourceTreeNode) => void;
+  onLoadChildren: (parentSourceId: string) => void;
+  onLoadMoreChildren: (parentSourceId: string) => void;
   rowBusyById: Record<string, boolean>;
   editingId: string | null;
   editingTitle: string;
@@ -1365,36 +1533,67 @@ function SourceTreeRow({
   onReindex: (source: SourceItem) => void;
   onRetry: (source: SourceItem) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [userOpen, setUserOpen] = useState(false);
   const source = node.source;
   const isDirectory = source.sourceType === "directory";
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const ancestorSelected = useMemo(() => {
-    let parentId = source.parentSourceId;
-    while (parentId) {
-      if (selectedSet.has(parentId)) {
-        return true;
-      }
-      parentId = sourceById.get(parentId)?.parentSourceId ?? null;
-    }
-    return false;
-  }, [source.parentSourceId, selectedSet, sourceById]);
-  const selectionState = getNodeSelectionState(
-    node,
-    selectedSet,
-    ancestorSelected,
+  const selectionState = selectionStateById.get(source.id) ?? false;
+  const childrenParentKey = getSourceParentKey(source.id);
+  const childrenLoaded = loadedSourceParentIds.has(childrenParentKey);
+  const isLoadingChildren = Boolean(loadingSourceParentByKey[childrenParentKey]);
+  const isLoadingMoreChildren = Boolean(
+    loadingMoreSourceParentByKey[childrenParentKey],
   );
+  const childrenError = sourceParentErrorByKey[childrenParentKey] ?? null;
+  const hasMoreChildren = Boolean(sourceParentCursorByKey[childrenParentKey]);
+  const open = autoExpand || userOpen;
 
-  if (!isDirectory) {
+  function handleDirectoryOpenChange(nextOpen: boolean) {
+    setUserOpen(nextOpen);
+    if (nextOpen && !childrenLoaded && !isLoadingChildren) {
+      onLoadChildren(source.id);
+    }
+  }
+
+  function handleFlatDirectoryLoad(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (!childrenLoaded && !isLoadingChildren) {
+      onLoadChildren(source.id);
+    }
+  }
+
+  if (!isDirectory || forceFlat) {
+    const noop = () => {};
     return (
       <SourceRow
+        childCount={isDirectory ? node.children.length : undefined}
         depth={depth}
         editTitle={editingTitle}
         isBusy={Boolean(rowBusyById[source.id])}
         isEditing={editingId === source.id}
+        leading={
+          isDirectory ? (
+            <button
+              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+              disabled={childrenLoaded || isLoadingChildren}
+              onClick={handleFlatDirectoryLoad}
+              title={childrenLoaded ? "Folder loaded" : "Load folder"}
+              type="button"
+            >
+              {isLoadingChildren ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : childrenLoaded ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              )}
+            </button>
+          ) : undefined
+        }
         onCancelRename={onCancelRename}
-        onAddSource={() => {}}
-        onCreateDirectory={() => {}}
+        onAddSource={isDirectory ? () => onAddSource(source.id) : noop}
+        onCreateDirectory={
+          isDirectory ? () => onCreateDirectory(source.id) : noop
+        }
         onDelete={() => onDelete(source)}
         onDownload={() => onDownload(source)}
         onEditReadme={() => onEditReadme(source)}
@@ -1413,7 +1612,7 @@ function SourceTreeRow({
   }
 
   return (
-    <Collapsible onOpenChange={setOpen} open={open}>
+    <Collapsible onOpenChange={handleDirectoryOpenChange} open={open}>
       <SourceRow
         childCount={node.children.length}
         depth={depth}
@@ -1427,7 +1626,11 @@ function SourceTreeRow({
               type="button"
             >
               {open ? (
-                <ChevronDown className="size-3.5" />
+                isLoadingChildren ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <ChevronDown className="size-3.5" />
+                )
               ) : (
                 <ChevronRight className="size-3.5" />
               )}
@@ -1462,10 +1665,14 @@ function SourceTreeRow({
         >
           {node.children.map((child) => (
             <SourceTreeRow
+              autoExpand={autoExpand}
               depth={depth + 1}
               editingId={editingId}
               editingTitle={editingTitle}
               key={child.source.id}
+              loadedSourceParentIds={loadedSourceParentIds}
+              loadingMoreSourceParentByKey={loadingMoreSourceParentByKey}
+              loadingSourceParentByKey={loadingSourceParentByKey}
               node={child}
               onCancelRename={onCancelRename}
               onAddSource={onAddSource}
@@ -1474,6 +1681,8 @@ function SourceTreeRow({
               onDownload={onDownload}
               onEditReadme={onEditReadme}
               onEditTitleChange={onEditTitleChange}
+              onLoadChildren={onLoadChildren}
+              onLoadMoreChildren={onLoadMoreChildren}
               onMove={onMove}
               onPreview={onPreview}
               onReindex={onReindex}
@@ -1482,10 +1691,60 @@ function SourceTreeRow({
               onSubmitRename={onSubmitRename}
               onToggle={onToggle}
               rowBusyById={rowBusyById}
-              selectedIds={selectedIds}
-              sourceById={sourceById}
+              selectionStateById={selectionStateById}
+              sourceParentCursorByKey={sourceParentCursorByKey}
+              sourceParentErrorByKey={sourceParentErrorByKey}
             />
           ))}
+          {isLoadingChildren ? (
+            <div
+              className="flex min-h-8 items-center gap-2 rounded-md px-1.5 py-1 text-xs text-muted-foreground"
+              style={{ paddingLeft: `${4 + (depth + 1) * SOURCE_TREE_INDENT_PX}px` }}
+            >
+              <Loader2 className="size-3.5 animate-spin" />
+              Loading folder...
+            </div>
+          ) : null}
+          {childrenError ? (
+            <div
+              className="rounded-md border border-destructive/25 bg-destructive/5 px-2 py-2 text-xs text-destructive"
+              style={{ marginLeft: `${4 + (depth + 1) * SOURCE_TREE_INDENT_PX}px` }}
+            >
+              <p>{childrenError}</p>
+              <Button
+                className="mt-2 h-7"
+                onClick={() => onLoadChildren(source.id)}
+                size="xs"
+                type="button"
+                variant="outline"
+              >
+                Retry
+              </Button>
+            </div>
+          ) : null}
+          {childrenLoaded && node.children.length === 0 && !childrenError ? (
+            <div
+              className="flex min-h-8 items-center rounded-md px-1.5 py-1 text-xs text-muted-foreground"
+              style={{ paddingLeft: `${4 + (depth + 1) * SOURCE_TREE_INDENT_PX}px` }}
+            >
+              Empty folder
+            </div>
+          ) : null}
+          {hasMoreChildren ? (
+            <Button
+              className="mt-1 w-full justify-center"
+              disabled={isLoadingMoreChildren}
+              onClick={() => onLoadMoreChildren(source.id)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {isLoadingMoreChildren ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : null}
+              Load more in folder
+            </Button>
+          ) : null}
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -1660,16 +1919,22 @@ function WorkfilesTab({
 
 function ArtifactsTab({
   artifacts,
+  hasMore,
   isLoading,
+  isLoadingMore,
   loadingError,
+  onLoadMore,
   onPreview,
   onRefresh,
   searchQuery,
   workspaceId,
 }: {
   artifacts: ArtifactListItem[];
+  hasMore: boolean;
   isLoading: boolean;
+  isLoadingMore: boolean;
   loadingError: string | null;
+  onLoadMore: () => void;
   onPreview: (artifact: ArtifactListItem) => void;
   onRefresh: () => void;
   searchQuery: string;
@@ -1713,19 +1978,36 @@ function ArtifactsTab({
 
   if (filtered.length === 0) {
     return (
-      <HubEmptyState
-        description={
-          searchQuery
-            ? "Try a different title, artifact type, or prompt."
-            : "Reports, slides, images, tables, audio briefs, and other finished deliverables will appear here."
-        }
-        icon={Sparkles}
-        title={
-          searchQuery
-            ? `No artifacts match "${searchQuery}"`
-            : "Finished artifacts will appear here."
-        }
-      />
+      <div className="space-y-2">
+        <HubEmptyState
+          description={
+            searchQuery
+              ? "Try a different title, artifact type, or prompt."
+              : "Reports, slides, images, tables, audio briefs, and other finished deliverables will appear here."
+          }
+          icon={Sparkles}
+          title={
+            searchQuery
+              ? `No artifacts match "${searchQuery}"`
+              : "Finished artifacts will appear here."
+          }
+        />
+        {hasMore && searchQuery ? (
+          <Button
+            className="w-full"
+            disabled={isLoadingMore}
+            onClick={onLoadMore}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {isLoadingMore ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : null}
+            Load more
+          </Button>
+        ) : null}
+      </div>
     );
   }
 
@@ -1782,15 +2064,40 @@ function ArtifactsTab({
           </button>
         );
       })}
+      {hasMore ? (
+        <Button
+          className="w-full"
+          disabled={isLoadingMore}
+          onClick={onLoadMore}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {isLoadingMore ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : null}
+          Load more
+        </Button>
+      ) : null}
     </div>
   );
 }
 
 function SourcesTab({
-  sources,
+  sourceTreeIndex,
   searchQuery,
   selectedIds,
+  hasMore,
+  isLoadingMore,
+  loadedSourceParentIds,
+  loadingMoreSourceParentByKey,
+  loadingSourceParentByKey,
+  sourceParentCursorByKey,
+  sourceParentErrorByKey,
+  onLoadMore,
   onToggle,
+  onLoadChildren,
+  onLoadMoreChildren,
   rowBusyById,
   editingId,
   editingTitle,
@@ -1808,10 +2115,20 @@ function SourcesTab({
   onReindex,
   onRetry,
 }: {
-  sources: SourceItem[];
+  sourceTreeIndex: SourceTreeIndex;
   searchQuery: string;
   selectedIds: string[];
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadedSourceParentIds: Set<string>;
+  loadingMoreSourceParentByKey: SourceParentStatusMap;
+  loadingSourceParentByKey: SourceParentStatusMap;
+  sourceParentCursorByKey: SourceParentCursorMap;
+  sourceParentErrorByKey: SourceParentErrorMap;
+  onLoadMore: () => void;
   onToggle: (node: SourceTreeNode) => void;
+  onLoadChildren: (parentSourceId: string) => void;
+  onLoadMoreChildren: (parentSourceId: string) => void;
   rowBusyById: Record<string, boolean>;
   editingId: string | null;
   editingTitle: string;
@@ -1830,15 +2147,27 @@ function SourcesTab({
   onRetry: (source: SourceItem) => void;
 }) {
   const tree = useMemo(
-    () => buildSourceTree(sources, searchQuery),
-    [sources, searchQuery],
+    () => buildSourceTreeFromIndex(sourceTreeIndex, searchQuery),
+    [sourceTreeIndex, searchQuery],
   );
-  const sourceById = useMemo(
-    () => new Map(sources.map((source) => [source.id, source])),
-    [sources],
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectionStateById = useMemo(
+    () => buildSourceSelectionStateMap(tree, selectedSet),
+    [selectedSet, tree],
   );
+  const treeNodeCount = useMemo(() => countTreeNodes(tree), [tree]);
+  const flatTreeRows = useMemo(() => flattenSourceTree(tree), [tree]);
+  const shouldVirtualize = flatTreeRows.length > SOURCE_TREE_VIRTUALIZE_THRESHOLD;
+  const virtualRows = useVirtualRows({
+    enabled: shouldVirtualize,
+    rowCount: flatTreeRows.length,
+    rowHeight: SOURCE_TREE_ROW_HEIGHT_PX,
+  });
+  const visibleFlatRows = shouldVirtualize
+    ? flatTreeRows.slice(virtualRows.startIndex, virtualRows.endIndex)
+    : flatTreeRows;
 
-  if (countTreeNodes(tree) === 0) {
+  if (treeNodeCount === 0) {
     return (
       <HubEmptyState
         description={
@@ -1856,34 +2185,161 @@ function SourcesTab({
     );
   }
 
+  if (shouldVirtualize) {
+    const virtualizedDirectoryRows = visibleFlatRows.filter(
+      ({ node }) => node.source.sourceType === "directory",
+    );
+    const directoryWithMore = virtualizedDirectoryRows.find(({ node }) =>
+      Boolean(sourceParentCursorByKey[getSourceParentKey(node.source.id)]),
+    )?.node.source;
+    const directoryLoadingMore = directoryWithMore
+      ? Boolean(
+          loadingMoreSourceParentByKey[
+            getSourceParentKey(directoryWithMore.id)
+          ],
+        )
+      : false;
+
+    return (
+      <div className="space-y-2">
+        <div
+          className="max-h-[min(58vh,680px)] overflow-y-auto pr-1"
+          onScroll={virtualRows.onScroll}
+          ref={virtualRows.containerRef}
+        >
+          <div
+            className="relative"
+            style={{ height: `${virtualRows.totalHeight}px` }}
+          >
+            <div
+              className="absolute inset-x-0 top-0 space-y-0.5"
+              style={{
+                transform: `translateY(${virtualRows.topPadding}px)`,
+              }}
+            >
+              {visibleFlatRows.map(({ depth, node }) => (
+                <SourceTreeRow
+                  autoExpand={Boolean(searchQuery)}
+                  depth={depth}
+                  editingId={editingId}
+                  editingTitle={editingTitle}
+                  forceFlat
+                  key={node.source.id}
+                  loadedSourceParentIds={loadedSourceParentIds}
+                  loadingMoreSourceParentByKey={loadingMoreSourceParentByKey}
+                  loadingSourceParentByKey={loadingSourceParentByKey}
+                  node={node}
+                  onCancelRename={onCancelRename}
+                  onAddSource={onAddSource}
+                  onCreateDirectory={onCreateDirectory}
+                  onDelete={onDelete}
+                  onDownload={onDownload}
+                  onEditReadme={onEditReadme}
+                  onEditTitleChange={onEditTitleChange}
+                  onLoadChildren={onLoadChildren}
+                  onLoadMoreChildren={onLoadMoreChildren}
+                  onMove={onMove}
+                  onPreview={onPreview}
+                  onReindex={onReindex}
+                  onRetry={onRetry}
+                  onStartRename={onStartRename}
+                  onSubmitRename={onSubmitRename}
+                  onToggle={onToggle}
+                  rowBusyById={rowBusyById}
+                  selectionStateById={selectionStateById}
+                  sourceParentCursorByKey={sourceParentCursorByKey}
+                  sourceParentErrorByKey={sourceParentErrorByKey}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+        {hasMore ? (
+          <Button
+            className="w-full"
+            disabled={isLoadingMore}
+            onClick={onLoadMore}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {isLoadingMore ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : null}
+            Load more sources
+          </Button>
+        ) : null}
+        {directoryWithMore ? (
+          <Button
+            className="w-full"
+            disabled={directoryLoadingMore}
+            onClick={() => onLoadMoreChildren(directoryWithMore.id)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {directoryLoadingMore ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : null}
+            Load more in visible folder
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-0.5">
-      {tree.map((node) => (
-        <SourceTreeRow
-          depth={0}
-          editingId={editingId}
-          editingTitle={editingTitle}
-          key={node.source.id}
-          node={node}
-          onCancelRename={onCancelRename}
-          onAddSource={onAddSource}
-          onCreateDirectory={onCreateDirectory}
-          onDelete={onDelete}
-          onDownload={onDownload}
-          onEditReadme={onEditReadme}
-          onEditTitleChange={onEditTitleChange}
-          onMove={onMove}
-          onPreview={onPreview}
-          onReindex={onReindex}
-          onRetry={onRetry}
-          onStartRename={onStartRename}
-          onSubmitRename={onSubmitRename}
-          onToggle={onToggle}
-          rowBusyById={rowBusyById}
-          selectedIds={selectedIds}
-          sourceById={sourceById}
-        />
-      ))}
+    <div className="space-y-2">
+      <div className="space-y-0.5">
+        {tree.map((node) => (
+          <SourceTreeRow
+            autoExpand={Boolean(searchQuery)}
+            depth={0}
+            editingId={editingId}
+            editingTitle={editingTitle}
+            key={node.source.id}
+            loadedSourceParentIds={loadedSourceParentIds}
+            loadingMoreSourceParentByKey={loadingMoreSourceParentByKey}
+            loadingSourceParentByKey={loadingSourceParentByKey}
+            node={node}
+            onCancelRename={onCancelRename}
+            onAddSource={onAddSource}
+            onCreateDirectory={onCreateDirectory}
+            onDelete={onDelete}
+            onDownload={onDownload}
+            onEditReadme={onEditReadme}
+            onEditTitleChange={onEditTitleChange}
+            onLoadChildren={onLoadChildren}
+            onLoadMoreChildren={onLoadMoreChildren}
+            onMove={onMove}
+            onPreview={onPreview}
+            onReindex={onReindex}
+            onRetry={onRetry}
+            onStartRename={onStartRename}
+            onSubmitRename={onSubmitRename}
+            onToggle={onToggle}
+            rowBusyById={rowBusyById}
+            selectionStateById={selectionStateById}
+            sourceParentCursorByKey={sourceParentCursorByKey}
+            sourceParentErrorByKey={sourceParentErrorByKey}
+          />
+        ))}
+      </div>
+      {hasMore ? (
+        <Button
+          className="w-full"
+          disabled={isLoadingMore}
+          onClick={onLoadMore}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {isLoadingMore ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : null}
+          Load more sources
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -2295,6 +2751,7 @@ export function SourcesHub({
   initialSources = [],
   initialSourcesLoaded = false,
   onSourceLoad,
+  onSourceMerge,
   onArtifactOpen,
   onSkillsCatalogChange,
   installedSkills = [],
@@ -2321,6 +2778,7 @@ export function SourcesHub({
   initialSources?: SourceItem[];
   initialSourcesLoaded?: boolean;
   onSourceLoad?: (sources: SourceItem[]) => void;
+  onSourceMerge?: (sources: SourceItem[]) => void;
   onArtifactOpen?: (artifact: ArtifactListItem) => void;
   onSkillsCatalogChange?: () => void | Promise<void>;
   installedSkills?: HubSkillItem[];
@@ -2341,15 +2799,31 @@ export function SourcesHub({
     Connectors: "",
   });
   const searchQuery = searchQueries[activeTab];
+  const deferredSearchQueries = useDeferredValue(searchQueries);
+  const deferredSearchQuery = deferredSearchQueries[activeTab];
   const [sources, setSources] = useState<SourceItem[]>(initialSources);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMoreSources, setIsLoadingMoreSources] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
+  const [sourceParentCursorByKey, setSourceParentCursorByKey] =
+    useState<SourceParentCursorMap>({});
+  const [loadedSourceParentIds, setLoadedSourceParentIds] = useState<Set<string>>(
+    () => new Set(initialSourcesLoaded ? [SOURCE_ROOT_PARENT_KEY] : []),
+  );
+  const [loadingSourceParentByKey, setLoadingSourceParentByKey] =
+    useState<SourceParentStatusMap>({});
+  const [loadingMoreSourceParentByKey, setLoadingMoreSourceParentByKey] =
+    useState<SourceParentStatusMap>({});
+  const [sourceParentErrorByKey, setSourceParentErrorByKey] =
+    useState<SourceParentErrorMap>({});
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
   const [isLoadingWorkfiles, setIsLoadingWorkfiles] = useState(false);
   const [workfilesLoadingError, setWorkfilesLoadingError] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
+  const [isLoadingMoreArtifacts, setIsLoadingMoreArtifacts] = useState(false);
   const [artifactsLoadingError, setArtifactsLoadingError] = useState<string | null>(null);
+  const [artifactsNextCursor, setArtifactsNextCursor] = useState<string | null>(null);
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
   const [isLoadingConnectors, setIsLoadingConnectors] = useState(false);
   const [connectorsLoadingError, setConnectorsLoadingError] = useState<string | null>(null);
@@ -2369,33 +2843,33 @@ export function SourcesHub({
   const activeCitationItems =
     citationScope === "thread" ? threadCitationItems : currentCitationItems;
   const filteredCitationItems = useMemo(
-    () => filterCitations(activeCitationItems, searchQueries.Citations),
-    [activeCitationItems, searchQueries.Citations],
+    () => filterCitations(activeCitationItems, deferredSearchQueries.Citations),
+    [activeCitationItems, deferredSearchQueries.Citations],
   );
   const filteredConnectors = useMemo(
-    () => filterConnectors(connectors, searchQueries.Connectors),
-    [connectors, searchQueries.Connectors],
+    () => filterConnectors(connectors, deferredSearchQueries.Connectors),
+    [connectors, deferredSearchQueries.Connectors],
   );
   const filteredSourceCount = useMemo(
-    () => countFilteredSources(sources, searchQueries.Sources),
-    [searchQueries.Sources, sources],
+    () => countFilteredSources(sources, deferredSearchQueries.Sources),
+    [deferredSearchQueries.Sources, sources],
   );
   const filteredSkillCount = useMemo(
-    () => countFilteredSkills(installedSkills, searchQueries.Skills),
-    [installedSkills, searchQueries.Skills],
+    () => countFilteredSkills(installedSkills, deferredSearchQueries.Skills),
+    [deferredSearchQueries.Skills, installedSkills],
   );
   const filteredWorkfileCount = useMemo(() => {
-    const q = searchQueries.Workfiles.trim().toLowerCase();
+    const q = deferredSearchQueries.Workfiles.trim().toLowerCase();
     return q
       ? workfiles.filter((file) => workfileMatchesQuery(file, q)).length
       : workfiles.length;
-  }, [searchQueries.Workfiles, workfiles]);
+  }, [deferredSearchQueries.Workfiles, workfiles]);
   const filteredArtifactCount = useMemo(() => {
-    const q = searchQueries.Artifacts.trim().toLowerCase();
+    const q = deferredSearchQueries.Artifacts.trim().toLowerCase();
     return q
       ? artifacts.filter((artifact) => artifactMatchesQuery(artifact, q)).length
       : artifacts.length;
-  }, [artifacts, searchQueries.Artifacts]);
+  }, [artifacts, deferredSearchQueries.Artifacts]);
   const activeCitationChunkId = activeCitationIndex
     ? citations[activeCitationIndex - 1]?.chunkId
     : null;
@@ -2423,6 +2897,12 @@ export function SourcesHub({
   const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
   const loadedSourcesWorkspaceIdRef = useRef<string | null>(null);
   const initializedSourcesWorkspaceIdRef = useRef<string | null>(null);
+  const sourceParentCursorRef = useRef<SourceParentCursorMap>({});
+  const loadedSourceParentIdsRef = useRef<Set<string>>(
+    new Set(initialSourcesLoaded ? [SOURCE_ROOT_PARENT_KEY] : []),
+  );
+  const loadingSourceParentKeysRef = useRef<Set<string>>(new Set());
+  const loadingMoreSourceParentKeysRef = useRef<Set<string>>(new Set());
 
   const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([]);
 
@@ -2433,7 +2913,11 @@ export function SourcesHub({
   const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
   const [isSkillsGalleryOpen, setIsSkillsGalleryOpen] = useState(false);
   const [deleteSource, setDeleteSource] = useState<SourceItem | null>(null);
-  const fullSourceTree = useMemo(() => buildSourceTree(sources, ""), [sources]);
+  const sourceTreeIndex = useMemo(() => buildSourceTreeIndex(sources), [sources]);
+  const fullSourceTree = useMemo(
+    () => buildSourceTreeFromIndex(sourceTreeIndex, ""),
+    [sourceTreeIndex],
+  );
   const selectableSourceIds = useMemo(
     () => collectSelectableSourceIds(fullSourceTree),
     [fullSourceTree],
@@ -2445,6 +2929,64 @@ export function SourcesHub({
   const allSelectableSourcesSelected =
     selectableSourceIds.length > 0 &&
     selectedLibrarySources.length >= selectableSourceIds.length;
+
+  const resetSourcePagingState = useCallback(() => {
+    sourceParentCursorRef.current = {};
+    loadedSourceParentIdsRef.current = new Set();
+    loadingSourceParentKeysRef.current = new Set();
+    loadingMoreSourceParentKeysRef.current = new Set();
+    setSourceParentCursorByKey({});
+    setLoadedSourceParentIds(new Set());
+    setLoadingSourceParentByKey({});
+    setLoadingMoreSourceParentByKey({});
+    setSourceParentErrorByKey({});
+    setIsLoadingMoreSources(false);
+  }, []);
+
+  const replaceRootSources = useCallback(
+    (items: SourceItem[], nextCursor: string | null) => {
+      const nextCursorByKey = {
+        [SOURCE_ROOT_PARENT_KEY]: nextCursor,
+      };
+      const nextLoadedParents = new Set([SOURCE_ROOT_PARENT_KEY]);
+
+      sourceParentCursorRef.current = nextCursorByKey;
+      loadedSourceParentIdsRef.current = nextLoadedParents;
+      setSourceParentCursorByKey(nextCursorByKey);
+      setLoadedSourceParentIds(nextLoadedParents);
+      setSourceParentErrorByKey({});
+      setSources(items);
+    },
+    [],
+  );
+
+  const appendSourcesForParent = useCallback(
+    (
+      parentSourceId: string | null,
+      items: SourceItem[],
+      nextCursor: string | null,
+    ) => {
+      const parentKey = getSourceParentKey(parentSourceId);
+      const nextCursorByKey = {
+        ...sourceParentCursorRef.current,
+        [parentKey]: nextCursor,
+      };
+      const nextLoadedParents = new Set(loadedSourceParentIdsRef.current);
+      nextLoadedParents.add(parentKey);
+
+      sourceParentCursorRef.current = nextCursorByKey;
+      loadedSourceParentIdsRef.current = nextLoadedParents;
+      setSourceParentCursorByKey(nextCursorByKey);
+      setLoadedSourceParentIds(nextLoadedParents);
+      setSourceParentErrorByKey((current) => {
+        if (!current[parentKey]) return current;
+        const next = { ...current };
+        delete next[parentKey];
+        return next;
+      });
+    },
+    [],
+  );
 
   function setActiveSearchQuery(value: string) {
     setSearchQueries((current) => ({
@@ -2479,22 +3021,30 @@ export function SourcesHub({
       setSources([]);
       onSourceLoad?.([]);
       loadedSourcesWorkspaceIdRef.current = null;
+      resetSourcePagingState();
       return;
     }
 
     const activeWorkspaceId = workspaceId;
     setIsLoading(true);
     setLoadingError(null);
+    resetSourcePagingState();
+    setSources([]);
     try {
-      const result = await contentClient.listSources(activeWorkspaceId);
+      const result = await contentClient.listSources(activeWorkspaceId, {
+        includeContent: false,
+        limit: SOURCES_PAGE_SIZE,
+        parentSourceId: null,
+      });
       if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
         return;
       }
 
       const mapped = mapSourcesToUi(result.items);
-      setSources(mapped);
+      replaceRootSources(mapped, result.nextCursor ?? null);
       loadedSourcesWorkspaceIdRef.current = activeWorkspaceId;
       onSourceLoad?.(mapped);
+      onSourceMerge?.(mapped);
 
       const syncing = result.items
         .filter(
@@ -2513,12 +3063,228 @@ export function SourcesHub({
 
       const message = getErrorMessage(error, "Failed to load sources.");
       setLoadingError(message);
+      resetSourcePagingState();
     } finally {
       if (currentWorkspaceIdRef.current === activeWorkspaceId) {
         setIsLoading(false);
       }
     }
-  }, [workspaceId, onSourceLoad]);
+  }, [
+    onSourceLoad,
+    onSourceMerge,
+    replaceRootSources,
+    resetSourcePagingState,
+    workspaceId,
+  ]);
+
+  const loadMoreSources = useCallback(async (parentSourceId: string | null = null) => {
+    if (!workspaceId) {
+      return;
+    }
+
+    const parentKey = getSourceParentKey(parentSourceId);
+    const nextCursor = sourceParentCursorRef.current[parentKey];
+    if (!nextCursor) {
+      return;
+    }
+
+    const isRoot = parentKey === SOURCE_ROOT_PARENT_KEY;
+    if (loadingMoreSourceParentKeysRef.current.has(parentKey)) {
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    loadingMoreSourceParentKeysRef.current.add(parentKey);
+    if (isRoot) {
+      setIsLoadingMoreSources(true);
+      setLoadingError(null);
+    } else {
+      setLoadingMoreSourceParentByKey((current) => ({
+        ...current,
+        [parentKey]: true,
+      }));
+    }
+    try {
+      const result = await contentClient.listSources(activeWorkspaceId, {
+        includeContent: false,
+        cursor: nextCursor,
+        limit: SOURCES_PAGE_SIZE,
+        parentSourceId,
+      });
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
+
+      const mapped = mapSourcesToUi(result.items);
+      appendSourcesForParent(parentSourceId, mapped, result.nextCursor ?? null);
+      setSources((current) => {
+        const merged = appendUniqueSources(current, mapped);
+        if (parentSourceId && selectedIds.includes(parentSourceId)) {
+          onSelectionChange(
+            normalizeSourceSelectionFromTree(
+              buildSourceTree(merged, ""),
+              Array.from(
+                new Set([
+                  ...selectedIds,
+                  ...mapped
+                    .filter(isSelectableSource)
+                    .map((source) => source.id),
+                ]),
+              ),
+            ),
+          );
+        }
+        onSourceLoad?.(merged);
+        return merged;
+      });
+      onSourceMerge?.(mapped);
+
+      const syncing = result.items
+        .filter(
+          (item) => item.status === "queued" || item.status === "processing",
+        )
+        .map((item) => item.id);
+      if (syncing.length > 0) {
+        setPendingSourceIds((prev) =>
+          Array.from(new Set([...prev, ...syncing])),
+        );
+      }
+      setSourceParentErrorByKey((current) => {
+        if (!current[parentKey]) return current;
+        const next = { ...current };
+        delete next[parentKey];
+        return next;
+      });
+    } catch (error) {
+      const message = getErrorMessage(error, "Failed to load more sources.");
+      if (isRoot) {
+        setLoadingError(message);
+      } else {
+        setSourceParentErrorByKey((current) => ({
+          ...current,
+          [parentKey]: message,
+        }));
+      }
+    } finally {
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        loadingMoreSourceParentKeysRef.current.delete(parentKey);
+        if (isRoot) {
+          setIsLoadingMoreSources(false);
+        } else {
+          setLoadingMoreSourceParentByKey((current) => {
+            const next = { ...current };
+            delete next[parentKey];
+            return next;
+          });
+        }
+      }
+    }
+  }, [
+    appendSourcesForParent,
+    onSelectionChange,
+    onSourceLoad,
+    onSourceMerge,
+    selectedIds,
+    workspaceId,
+  ]);
+
+  const loadSourceChildren = useCallback(async (parentSourceId: string) => {
+    if (!workspaceId) {
+      return;
+    }
+
+    const parentKey = getSourceParentKey(parentSourceId);
+    if (
+      loadedSourceParentIdsRef.current.has(parentKey) ||
+      loadingSourceParentKeysRef.current.has(parentKey)
+    ) {
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    loadingSourceParentKeysRef.current.add(parentKey);
+    setLoadingSourceParentByKey((current) => ({
+      ...current,
+      [parentKey]: true,
+    }));
+    setSourceParentErrorByKey((current) => {
+      if (!current[parentKey]) return current;
+      const next = { ...current };
+      delete next[parentKey];
+      return next;
+    });
+
+    try {
+      const result = await contentClient.listSources(activeWorkspaceId, {
+        includeContent: false,
+        limit: SOURCES_PAGE_SIZE,
+        parentSourceId,
+      });
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
+
+      const mapped = mapSourcesToUi(result.items);
+      appendSourcesForParent(parentSourceId, mapped, result.nextCursor ?? null);
+      setSources((current) => {
+        const merged = appendUniqueSources(current, mapped);
+        onSourceLoad?.(merged);
+        return merged;
+      });
+      onSourceMerge?.(mapped);
+
+      const syncing = result.items
+        .filter(
+          (item) => item.status === "queued" || item.status === "processing",
+        )
+        .map((item) => item.id);
+      if (syncing.length > 0) {
+        setPendingSourceIds((prev) =>
+          Array.from(new Set([...prev, ...syncing])),
+        );
+      }
+    } catch (error) {
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
+      setSourceParentErrorByKey((current) => ({
+        ...current,
+        [parentKey]: getErrorMessage(error, "Failed to load folder."),
+      }));
+    } finally {
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        loadingSourceParentKeysRef.current.delete(parentKey);
+        setLoadingSourceParentByKey((current) => {
+          const next = { ...current };
+          delete next[parentKey];
+          return next;
+        });
+      }
+    }
+  }, [
+    appendSourcesForParent,
+    onSourceLoad,
+    onSourceMerge,
+    workspaceId,
+  ]);
+
+  const handleLoadMoreRootSources = useCallback(() => {
+    void loadMoreSources();
+  }, [loadMoreSources]);
+
+  const handleLoadMoreSourceChildren = useCallback(
+    (parentSourceId: string) => {
+      void loadMoreSources(parentSourceId);
+    },
+    [loadMoreSources],
+  );
+
+  const handleLoadSourceChildren = useCallback(
+    (parentSourceId: string) => {
+      void loadSourceChildren(parentSourceId);
+    },
+    [loadSourceChildren],
+  );
 
   const refreshWorkfiles = useCallback(async () => {
     if (!workspaceId || !threadId || mode !== "thread") {
@@ -2548,26 +3314,85 @@ export function SourcesHub({
     if (!workspaceId) {
       setArtifacts([]);
       setArtifactsLoadingError(null);
+      setArtifactsNextCursor(null);
       return;
     }
 
+    const activeWorkspaceId = workspaceId;
     setIsLoadingArtifacts(true);
     setArtifactsLoadingError(null);
     try {
-      const result = await contentClient.listArtifacts(workspaceId, {
+      const result = await contentClient.listArtifacts(activeWorkspaceId, {
         limit: 100,
       });
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
+
       setArtifacts(result.items);
-      workspaceArtifactsCache.set(workspaceId, cloneArtifactItems(result.items));
+      setArtifactsNextCursor(result.nextCursor ?? null);
+      workspaceArtifactsCache.set(
+        activeWorkspaceId,
+        cloneArtifactItems(result.items),
+      );
+      workspaceArtifactsCursorCache.set(
+        activeWorkspaceId,
+        result.nextCursor ?? null,
+      );
     } catch (error) {
       setArtifacts([]);
+      setArtifactsNextCursor(null);
       setArtifactsLoadingError(
         getErrorMessage(error, "Failed to load artifacts."),
       );
     } finally {
-      setIsLoadingArtifacts(false);
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        setIsLoadingArtifacts(false);
+      }
     }
   }, [workspaceId]);
+
+  const loadMoreArtifacts = useCallback(async () => {
+    if (!workspaceId || !artifactsNextCursor || isLoadingMoreArtifacts) {
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    setIsLoadingMoreArtifacts(true);
+    setArtifactsLoadingError(null);
+    try {
+      const result = await contentClient.listArtifacts(activeWorkspaceId, {
+        cursor: artifactsNextCursor,
+        limit: 100,
+      });
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
+
+      setArtifacts((current) => {
+        const mergedById = new Map(current.map((artifact) => [artifact.id, artifact]));
+        for (const artifact of result.items) {
+          mergedById.set(artifact.id, artifact);
+        }
+        const merged = Array.from(mergedById.values());
+        workspaceArtifactsCache.set(activeWorkspaceId, cloneArtifactItems(merged));
+        return merged;
+      });
+      setArtifactsNextCursor(result.nextCursor ?? null);
+      workspaceArtifactsCursorCache.set(
+        activeWorkspaceId,
+        result.nextCursor ?? null,
+      );
+    } catch (error) {
+      setArtifactsLoadingError(
+        getErrorMessage(error, "Failed to load more artifacts."),
+      );
+    } finally {
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        setIsLoadingMoreArtifacts(false);
+      }
+    }
+  }, [artifactsNextCursor, isLoadingMoreArtifacts, workspaceId]);
 
   const refreshConnectors = useCallback(async () => {
     if (!workspaceId) {
@@ -2598,6 +3423,7 @@ export function SourcesHub({
       setSources([]);
       setLoadingError(null);
       setIsLoading(false);
+      resetSourcePagingState();
       setPendingSourceIds([]);
       return;
     }
@@ -2609,6 +3435,7 @@ export function SourcesHub({
 
     setLoadingError(null);
     setPendingSourceIds([]);
+    resetSourcePagingState();
     setEditingSourceId(null);
     setEditingTitle("");
     setRowBusyById({});
@@ -2621,13 +3448,19 @@ export function SourcesHub({
     setAddParentSourceId(null);
     setDirectoryParentSourceId(null);
 
-    setSources(initialSourcesLoaded ? initialSources : []);
-    void refreshSources();
+      if (initialSourcesLoaded) {
+        replaceRootSources(initialSources, null);
+      } else {
+        setSources([]);
+      }
+      void refreshSources();
   }, [
     workspaceId,
     initialSources,
     initialSourcesLoaded,
+    replaceRootSources,
     refreshSources,
+    resetSourcePagingState,
   ]);
 
   useEffect(() => {
@@ -2654,14 +3487,20 @@ export function SourcesHub({
     if (!workspaceId) {
       setArtifacts([]);
       setArtifactsLoadingError(null);
+      setArtifactsNextCursor(null);
+      setIsLoadingMoreArtifacts(false);
       return;
     }
 
     if (workspaceArtifactsCache.has(workspaceId)) {
       const cached = workspaceArtifactsCache.get(workspaceId) ?? [];
       setArtifacts(cloneArtifactItems(cached));
+      setArtifactsNextCursor(
+        workspaceArtifactsCursorCache.get(workspaceId) ?? null,
+      );
       setArtifactsLoadingError(null);
       setIsLoadingArtifacts(false);
+      setIsLoadingMoreArtifacts(false);
       return;
     }
 
@@ -2692,11 +3531,9 @@ export function SourcesHub({
     let cancelled = false;
     const timer = window.setInterval(async () => {
       try {
-        const statuses = await Promise.all(
-          pendingSourceIds.map(async (id) => ({
-            id,
-            status: await contentClient.getSourceStatus(workspaceId, id),
-          })),
+        const { items: statuses } = await contentClient.listSourceStatuses(
+          workspaceId,
+          { ids: pendingSourceIds },
         );
         if (cancelled) {
           return;
@@ -3006,11 +3843,20 @@ export function SourcesHub({
     onArtifactOpen?.(artifact);
   }, [onArtifactOpen]);
 
-  const handleOpenReadmeDialog = useCallback((source: SourceItem) => {
+  const handleOpenReadmeDialog = useCallback(async (source: SourceItem) => {
     if (source.sourceType !== "directory") return;
     setReadmeSource(source);
     setReadmeContent(source.contentText);
-  }, []);
+
+    if (!workspaceId) return;
+
+    try {
+      const detail = await contentClient.getSource(workspaceId, source.id);
+      setReadmeContent(detail.source.contentText);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to load README content."));
+    }
+  }, [workspaceId]);
 
   const handleOpenCreateDirectory = useCallback((parentSourceId: string | null = null) => {
     setDirectoryParentSourceId(parentSourceId);
@@ -3465,7 +4311,7 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {sources.length} sources
                   </span>
-                  {searchQueries.Sources ? (
+                  {deferredSearchQueries.Sources ? (
                     <span className="text-[10px] text-primary">
                       {filteredSourceCount} found
                     </span>
@@ -3550,6 +4396,13 @@ export function SourcesHub({
                 <SourcesTab
                   editingId={editingSourceId}
                   editingTitle={editingTitle}
+                  hasMore={Boolean(
+                    sourceParentCursorByKey[SOURCE_ROOT_PARENT_KEY],
+                  )}
+                  isLoadingMore={isLoadingMoreSources}
+                  loadedSourceParentIds={loadedSourceParentIds}
+                  loadingMoreSourceParentByKey={loadingMoreSourceParentByKey}
+                  loadingSourceParentByKey={loadingSourceParentByKey}
                   onCancelRename={handleCancelRename}
                   onDelete={handleRequestDeleteSource}
                   onDownload={handleDownloadSource}
@@ -3557,6 +4410,9 @@ export function SourcesHub({
                   onEditTitleChange={setEditingTitle}
                   onAddSource={handleOpenAddDialog}
                   onCreateDirectory={handleOpenCreateDirectory}
+                  onLoadChildren={handleLoadSourceChildren}
+                  onLoadMore={handleLoadMoreRootSources}
+                  onLoadMoreChildren={handleLoadMoreSourceChildren}
                   onMove={handleOpenMoveDialog}
                   onPreview={handlePreviewSource}
                   onReindex={handleReindexSource}
@@ -3565,9 +4421,11 @@ export function SourcesHub({
                   onSubmitRename={handleSubmitRename}
                   onToggle={handleToggle}
                   rowBusyById={rowBusyById}
-                  searchQuery={searchQuery}
+                  searchQuery={deferredSearchQuery}
                   selectedIds={selectedIds}
-                  sources={sources}
+                  sourceParentCursorByKey={sourceParentCursorByKey}
+                  sourceParentErrorByKey={sourceParentErrorByKey}
+                  sourceTreeIndex={sourceTreeIndex}
                 />
               )}
             </section>
@@ -3583,7 +4441,7 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {workfiles.length} workfiles
                   </span>
-                  {searchQueries.Workfiles ? (
+                  {deferredSearchQueries.Workfiles ? (
                     <span className="text-[10px] text-primary">
                       {filteredWorkfileCount} found
                     </span>
@@ -3608,7 +4466,7 @@ export function SourcesHub({
                 onOpen={handleOpenWorkfile}
                 onRefresh={() => void refreshWorkfiles()}
                 rowBusyByPath={workfileBusyByPath}
-                searchQuery={searchQuery}
+                searchQuery={deferredSearchQuery}
               />
             </section>
           )}
@@ -3623,7 +4481,7 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {artifacts.length} artifacts
                   </span>
-                  {searchQueries.Artifacts ? (
+                  {deferredSearchQueries.Artifacts ? (
                     <span className="text-[10px] text-primary">
                       {filteredArtifactCount} found
                     </span>
@@ -3643,11 +4501,14 @@ export function SourcesHub({
               </div>
               <ArtifactsTab
                 artifacts={artifacts}
+                hasMore={Boolean(artifactsNextCursor)}
                 isLoading={isLoadingArtifacts}
+                isLoadingMore={isLoadingMoreArtifacts}
                 loadingError={artifactsLoadingError}
+                onLoadMore={() => void loadMoreArtifacts()}
                 onPreview={handlePreviewArtifact}
                 onRefresh={() => void refreshArtifacts()}
-                searchQuery={searchQuery}
+                searchQuery={deferredSearchQuery}
                 workspaceId={workspaceId}
               />
             </section>
@@ -3663,7 +4524,7 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {installedSkills.length} installed
                   </span>
-                  {searchQueries.Skills ? (
+                  {deferredSearchQueries.Skills ? (
                     <span className="text-[10px] text-primary">
                       {filteredSkillCount} found
                     </span>
@@ -3689,7 +4550,7 @@ export function SourcesHub({
                 disabledToolNames={disabledToolNames}
                 onOpenSkill={setPreviewSkillCatalogId}
                 onSkillSelectionChange={onSkillSelectionChange}
-                searchQuery={searchQuery}
+                searchQuery={deferredSearchQuery}
                 selectedSkillIds={selectedSkillIds}
                 skills={installedSkills}
               />
@@ -3708,7 +4569,7 @@ export function SourcesHub({
                       ? `${threadCitationItems.length} in thread`
                       : `${currentCitationItems.length} current`}
                   </span>
-                  {searchQueries.Citations ? (
+                  {deferredSearchQueries.Citations ? (
                     <span className="text-[10px] text-primary">
                       {filteredCitationItems.length} found
                     </span>
@@ -3741,8 +4602,8 @@ export function SourcesHub({
 
               {filteredCitationItems.length === 0 ? (
                 <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                  {searchQueries.Citations
-                    ? `No citations match "${searchQueries.Citations}".`
+                  {deferredSearchQueries.Citations
+                    ? `No citations match "${deferredSearchQueries.Citations}".`
                     : citationScope === "thread"
                     ? "No citations found in this thread."
                     : "No citations used in the selected answer."}
@@ -3828,7 +4689,7 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {connectors.length} connectors
                   </span>
-                  {searchQueries.Connectors ? (
+                  {deferredSearchQueries.Connectors ? (
                     <span className="text-[10px] text-primary">
                       {filteredConnectors.length} found
                     </span>
@@ -3886,14 +4747,14 @@ export function SourcesHub({
               ) : filteredConnectors.length === 0 ? (
                 <HubEmptyState
                   description={
-                    searchQueries.Connectors
+                    deferredSearchQueries.Connectors
                       ? "Try a different connector name, status, or provider."
                       : "Connect external apps and storage to pull project sources into the Hub."
                   }
                   icon={Link2}
                   title={
-                    searchQueries.Connectors
-                      ? `No connectors match "${searchQueries.Connectors}"`
+                    deferredSearchQueries.Connectors
+                      ? `No connectors match "${deferredSearchQueries.Connectors}"`
                       : "Connectors will appear here."
                   }
                 />

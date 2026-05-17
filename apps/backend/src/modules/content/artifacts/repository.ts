@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import { db } from "../../../shared/database";
 import { artifactVersions, artifacts } from "../../../shared/db/schema";
 
@@ -97,19 +97,44 @@ export async function findArtifactRecord(input: {
 export async function listArtifactRecords(input: {
   teamId: string;
   workspaceId: string;
+  cursor?: { createdAt: Date; id: string } | null;
   limit?: number;
 }) {
+  const conditions = [
+    eq(artifacts.teamId, input.teamId),
+    eq(artifacts.workspaceId, input.workspaceId),
+    input.cursor
+      ? or(
+          lt(artifacts.createdAt, input.cursor.createdAt),
+          and(
+            eq(artifacts.createdAt, input.cursor.createdAt),
+            lt(artifacts.id, input.cursor.id),
+          ),
+        )
+      : undefined,
+  ].filter((condition): condition is NonNullable<typeof condition> =>
+    Boolean(condition),
+  );
   const rows = await db
     .select()
     .from(artifacts)
-    .where(
-      and(
-        eq(artifacts.teamId, input.teamId),
-        eq(artifacts.workspaceId, input.workspaceId),
-      ),
-    )
-    .orderBy(desc(artifacts.createdAt))
-    .limit(input.limit ?? 100);
+    .where(and(...conditions))
+    .orderBy(desc(artifacts.createdAt), desc(artifacts.id))
+    .limit((input.limit ?? 100) + 1);
 
-  return rows.map(mapArtifact);
+  const limit = input.limit ?? 100;
+  const items = rows.slice(0, limit).map(mapArtifact);
+  const nextRow = rows[limit] ?? null;
+  return {
+    items,
+    nextCursor: nextRow
+      ? Buffer.from(
+          JSON.stringify({
+            createdAt: nextRow.createdAt.toISOString(),
+            id: nextRow.id,
+          }),
+          "utf8",
+        ).toString("base64url")
+      : null,
+  };
 }

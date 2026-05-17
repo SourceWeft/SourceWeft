@@ -73,7 +73,9 @@ export function ChatCanvas({
   composerResetKey,
   editingMessageId = null,
   highlightedMessageId = null,
+  hasOlderMessages = false,
   isEditing = false,
+  isLoadingOlderMessages = false,
   isStreaming = false,
   isStopping = false,
   messageGroups = [],
@@ -84,6 +86,7 @@ export function ChatCanvas({
   onArtifactPreview,
   onCancelEditing,
   onCitationClick,
+  onLoadOlderMessages,
   onSourcePreview,
   onWorkfileClick,
   onRestartFromMessage,
@@ -115,7 +118,9 @@ export function ChatCanvas({
   composerResetKey?: number;
   editingMessageId?: string | null;
   highlightedMessageId?: string | null;
+  hasOlderMessages?: boolean;
   isEditing?: boolean;
+  isLoadingOlderMessages?: boolean;
   isStreaming?: boolean;
   isStopping?: boolean;
   messageGroups?: VersionedMessageGroup[];
@@ -129,6 +134,7 @@ export function ChatCanvas({
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCancelEditing?: () => void;
   onCitationClick?: (citation: CitationRecord) => void;
+  onLoadOlderMessages?: () => void;
   onSourcePreview?: (source: SourceItem) => void;
   onWorkfileClick?: (path: string) => void;
   onRestartFromMessage?: (input: {
@@ -231,12 +237,15 @@ export function ChatCanvas({
       <MessageList
         activeVersionByGroup={activeVersionByGroup}
         allSources={allSources}
+        hasOlderMessages={hasOlderMessages}
         highlightedMessageId={highlightedMessageId}
+        isLoadingOlderMessages={isLoadingOlderMessages}
         isStreaming={isStreaming}
         messageGroups={messageGroups}
         onActiveVersionChange={onActiveVersionChange}
         onArtifactPreview={onArtifactPreview}
         onCitationClick={onCitationClick}
+        onLoadOlderMessages={onLoadOlderMessages}
         onRefreshLatest={onRefreshLatest}
         onRestartFromMessage={onRestartFromMessage}
         onSourcePreview={onSourcePreview}

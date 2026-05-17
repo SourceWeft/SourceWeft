@@ -169,6 +169,13 @@
       "when": 1778918400000,
       "tag": "0023_pgvector_extension_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779028961317,
+      "tag": "0024_tearful_electro",
+      "breakpoints": true
     }
   ]
 }

@@ -38,6 +38,7 @@ export type DashboardShortcutDefinition = {
 export type DashboardShortcutPlatform = "mac" | "default";
 
 export const DASHBOARD_WORKSPACE_SHORTCUT_LIMIT = 9;
+const DASHBOARD_SHORTCUTS_OPEN_EVENT = "sourceweft:dashboard-shortcuts-open";
 
 const OVERLAY_SELECTOR = [
   "[data-slot='dialog-content']",
@@ -186,6 +187,30 @@ export function useDashboardShortcuts(
   }, []);
 }
 
+export function dispatchDashboardShortcutsOpen() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent(DASHBOARD_SHORTCUTS_OPEN_EVENT));
+}
+
+export function useDashboardShortcutsOpenListener(onOpen: () => void) {
+  const onOpenRef = React.useRef(onOpen);
+
+  React.useEffect(() => {
+    onOpenRef.current = onOpen;
+  }, [onOpen]);
+
+  React.useEffect(() => {
+    const handleOpen = () => onOpenRef.current();
+
+    window.addEventListener(DASHBOARD_SHORTCUTS_OPEN_EVENT, handleOpen);
+    return () =>
+      window.removeEventListener(DASHBOARD_SHORTCUTS_OPEN_EVENT, handleOpen);
+  }, []);
+}
+
 export function DashboardShortcutsDialog({
   definitions,
   onOpenChange,
@@ -209,7 +234,10 @@ export function DashboardShortcutsDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+      <DialogContent
+        className="w-[520px] max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-0"
+        constrainWidth={false}
+      >
         <DialogHeader className="border-b px-4 py-3">
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>

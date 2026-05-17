@@ -3,6 +3,8 @@ import {
   createSourceRequestSchema,
   createUrlSourceRequestSchema,
   indexSourceRequestSchema,
+  listSourcesRequestSchema,
+  listSourceStatusesRequestSchema,
   listSourceMentionsRequestSchema,
   reparseSourceRequestSchema,
   retrySourceRequestSchema,
@@ -56,7 +58,26 @@ export function registerSourceRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
+    const parsed = listSourcesRequestSchema.safeParse({
+      includeContent: c.req.query("includeContent"),
+      limit: c.req.query("limit"),
+      cursor: c.req.query("cursor"),
+      parentSourceId:
+        c.req.query("parentSourceId") === "__root"
+          ? null
+          : c.req.query("parentSourceId"),
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
     const result = await contentService.listSources({
+      includeContent: parsed.data.includeContent ?? true,
+      limit: parsed.data.limit,
+      cursor: parsed.data.cursor,
+      parentSourceId: parsed.data.parentSourceId,
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
     });
@@ -87,6 +108,29 @@ export function registerSourceRoutes(app: Hono) {
       query: parsed.data.query,
       limit: parsed.data.limit,
       cursor: parsed.data.cursor,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/sources/status", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = listSourceStatusesRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentService.listSourceStatuses({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      sourceIds: parsed.data.ids,
     });
 
     return ApiResponse.success(c, result);

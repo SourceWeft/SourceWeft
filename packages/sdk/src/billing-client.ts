@@ -39,10 +39,16 @@ export class BillingClient {
     );
   }
 
-  getLedger(teamId: string, input?: { limit?: number; activity?: boolean }) {
+  getLedger(
+    teamId: string,
+    input?: { cursor?: string; limit?: number; activity?: boolean },
+  ) {
     const params = new URLSearchParams();
     if (input?.limit) {
       params.set("limit", String(input.limit));
+    }
+    if (input?.cursor) {
+      params.set("cursor", input.cursor);
     }
     if (input?.activity) {
       params.set("activity", "true");
@@ -53,10 +59,15 @@ export class BillingClient {
     );
   }
 
-  getActivity(teamId: string, input?: { limit?: number }) {
-    const query = input?.limit
-      ? `?limit=${encodeURIComponent(input.limit)}`
-      : "";
+  getActivity(teamId: string, input?: { cursor?: string; limit?: number }) {
+    const params = new URLSearchParams();
+    if (input?.limit) {
+      params.set("limit", String(input.limit));
+    }
+    if (input?.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
     return this.http.get<BillingLedgerResponse>(
       `/v1/teams/${encodeTeamId(teamId)}/billing/activity${query}`,
     );

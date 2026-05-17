@@ -36,7 +36,10 @@ export type BillingStore = {
   listLedger(
     teamId: string,
     limit?: number,
-    options?: { activityOnly?: boolean },
+    options?: {
+      activityOnly?: boolean;
+      cursor?: { createdAt: Date; id: string } | null;
+    },
     client?: PoolClient,
   ): Promise<BillingLedgerRow[]>;
   getOrderById(

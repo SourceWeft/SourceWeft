@@ -40,8 +40,30 @@ function resolveArtifactContentType(artifact: Awaited<ReturnType<typeof findArti
     : "application/octet-stream";
 }
 
+function decodeArtifactCursor(cursor: string | undefined) {
+  if (!cursor) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as { createdAt?: unknown; id?: unknown };
+    if (typeof parsed.id !== "string" || typeof parsed.createdAt !== "string") {
+      return null;
+    }
+    const createdAt = new Date(parsed.createdAt);
+    if (Number.isNaN(createdAt.getTime())) {
+      return null;
+    }
+    return { createdAt, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
 export class ContentArtifactsService {
   async listArtifacts(input: {
+    cursor?: string;
     workspaceId: string;
     userId: string;
     limit?: number;
@@ -53,11 +75,12 @@ export class ContentArtifactsService {
     const artifacts = await listArtifactRecords({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
+      cursor: decodeArtifactCursor(input.cursor),
       limit: input.limit,
     });
 
     return {
-      items: artifacts.map((artifact) => ({
+      items: artifacts.items.map((artifact) => ({
         id: artifact.id,
         teamId: artifact.teamId,
         workspaceId: artifact.workspaceId,
@@ -83,6 +106,7 @@ export class ContentArtifactsService {
               })
             : null,
       })),
+      nextCursor: artifacts.nextCursor,
     };
   }
 

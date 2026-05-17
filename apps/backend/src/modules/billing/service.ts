@@ -93,7 +93,14 @@ export class BillingService {
     return this.usageService.getUsage(teamId);
   }
 
-  getLedger(teamId: string, limit = 50, options?: { activityOnly?: boolean }) {
+  getLedger(
+    teamId: string,
+    limit = 50,
+    options?: {
+      activityOnly?: boolean;
+      cursor?: { createdAt: Date; id: string } | null;
+    },
+  ) {
     return this.usageService.getLedger(teamId, limit, options);
   }
 

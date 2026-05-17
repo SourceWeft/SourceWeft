@@ -1,4 +1,4 @@
-import type { ModelAliasSettings } from "./header-model-selector";
+import type { ModelAliasSettings } from "./model-catalog-utils";
 
 const MODEL_SELECTION_STORAGE_PREFIX = "chat:models";
 

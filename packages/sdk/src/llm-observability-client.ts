@@ -15,6 +15,17 @@ function withQuery(path: string, input: Record<string, string | number | undefin
   return query ? `${path}?${query}` : path;
 }
 
+function traceDetailQuery(input: LlmTraceDetailInput) {
+  return {
+    includePayload:
+      input.includePayload === undefined ? undefined : String(input.includePayload),
+    observationCursor: input.observationCursor,
+    observationLimit: input.observationLimit,
+    summaryOnly:
+      input.summaryOnly === undefined ? undefined : String(input.summaryOnly),
+  };
+}
+
 export type LlmObservabilityListInput = {
   from?: string;
   to?: string;
@@ -33,6 +44,17 @@ export type LlmObservationStatus = "running" | "ok" | "error" | "cancelled";
 export type LlmGenerationListInput = Omit<LlmObservabilityListInput, "feature"> & {
   operation?: string;
   provider?: string;
+};
+
+export type LlmTraceDetailInput = {
+  includePayload?: boolean;
+  observationCursor?: string;
+  observationLimit?: number;
+  summaryOnly?: boolean;
+};
+
+export type LlmTeamTraceDetailInput = LlmTraceDetailInput & {
+  workspaceId: string;
 };
 
 export type LlmTraceSummary = {
@@ -62,13 +84,15 @@ export type LlmTraceSummary = {
   endedAt: string | null;
   latencyMs: number | null;
   durationMs: number | null;
-  tags: string[];
-  metadata: Record<string, unknown>;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
 };
 
 export type LlmTraceDetail = LlmTraceSummary & {
   input: unknown;
   output: unknown;
+  tags: string[];
+  metadata: Record<string, unknown>;
 };
 
 export type LlmSpanDetail = {
@@ -166,6 +190,8 @@ export type LlmTraceDetailResponse = {
   trace: LlmTraceDetail;
   spans: LlmSpanDetail[];
   generations: LlmGenerationDetail[];
+  nextObservationCursor?: string | null;
+  observationsTruncated?: boolean;
 };
 
 export class LlmObservabilityClient {
@@ -183,15 +209,25 @@ export class LlmObservabilityClient {
     );
   }
 
-  getWorkspaceTrace(workspaceId: string, traceId: string) {
+  getWorkspaceTrace(
+    workspaceId: string,
+    traceId: string,
+    input: LlmTraceDetailInput = {},
+  ) {
     return this.http.get<LlmTraceDetailResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/llm/traces/${encode(traceId)}`,
+      withQuery(
+        `/v1/workspaces/${encode(workspaceId)}/llm/traces/${encode(traceId)}`,
+        traceDetailQuery(input),
+      ),
     );
   }
 
-  getTeamTrace(teamId: string, traceId: string, input: { workspaceId: string }) {
+  getTeamTrace(teamId: string, traceId: string, input: LlmTeamTraceDetailInput) {
     return this.http.get<LlmTraceDetailResponse>(
-      withQuery(`/v1/teams/${encode(teamId)}/llm/traces/${encode(traceId)}`, input),
+      withQuery(`/v1/teams/${encode(teamId)}/llm/traces/${encode(traceId)}`, {
+        ...traceDetailQuery(input),
+        workspaceId: input.workspaceId,
+      }),
     );
   }
 

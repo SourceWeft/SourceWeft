@@ -1,11 +1,17 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import ObservabilityPage from "../observability/page";
+import { ObservabilityRouteSkeleton } from "../../_components/route-loading-skeleton";
 import { DashboardMobileMe } from "./dashboard-mobile-me";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
+
+const ObservabilityPage = dynamic(() => import("../observability/page"), {
+  loading: () => <ObservabilityRouteSkeleton />,
+  ssr: false,
+});
 
 export function DashboardMobileContent({
   children,
