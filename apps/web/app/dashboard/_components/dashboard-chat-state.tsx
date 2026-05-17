@@ -10,10 +10,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { ListThreadModelCatalogResponse } from "@sourceweft/contracts";
 import { authClient } from "../../../lib/auth-client";
 import { ensureDashboardWorkspace } from "../../../lib/dashboard-workspace-bootstrap";
 import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
-import { contentClient, workspaceClient } from "../../../lib/sdk";
+import {
+  contentClient,
+  dashboardClient,
+  workspaceClient,
+} from "../../../lib/sdk";
 import { clearStoredSourceSelection } from "../chat/_components/source-selection-storage";
 import type { ChatItem } from "./dashboard-chat-types";
 
@@ -41,6 +46,10 @@ type DashboardChatState = {
   archivedChats: ChatItem[];
   hasMorePrivateChats: boolean;
   isLoadingPrivateChats: boolean;
+  bootstrapModelCatalog: ListThreadModelCatalogResponse | null;
+  consumeBootstrapModelCatalog: (
+    workspaceId: string,
+  ) => ListThreadModelCatalogResponse | null;
   toggleSourcesVisible: () => void;
   setWorkspaceName: (workspaceName: string) => void;
   createWorkspace: (
@@ -160,6 +169,9 @@ export function DashboardChatStateProvider({
   );
   const [hasMorePrivateChats, setHasMorePrivateChats] = useState(false);
   const [isLoadingPrivateChats, setIsLoadingPrivateChats] = useState(false);
+  const [bootstrapModelCatalog, setBootstrapModelCatalog] =
+    useState<ListThreadModelCatalogResponse | null>(null);
+  const bootstrapModelCatalogWorkspaceRef = useRef<string | null>(null);
 
   const [activeChatId, setActiveChatId] = useState("");
   const [threadTitle, setThreadTitle] = useState("New chat");
@@ -168,6 +180,19 @@ export function DashboardChatStateProvider({
   const toggleSourcesVisible = useCallback(() => {
     setSourcesVisible((value) => !value);
   }, []);
+  const consumeBootstrapModelCatalog = useCallback(
+    (targetWorkspaceId: string) => {
+      if (bootstrapModelCatalogWorkspaceRef.current !== targetWorkspaceId) {
+        return null;
+      }
+
+      const catalog = bootstrapModelCatalog;
+      bootstrapModelCatalogWorkspaceRef.current = null;
+      setBootstrapModelCatalog(null);
+      return catalog;
+    },
+    [bootstrapModelCatalog],
+  );
 
   const fetchPrivateChatsPage = useCallback(
     async (targetWorkspaceId: string, cursor?: string | null) => {
@@ -237,7 +262,67 @@ export function DashboardChatStateProvider({
     let cancelled = false;
     const generation = ++hydrateGenerationRef.current;
 
+    function resetForOrganizationChange(resolvedOrganizationId: string) {
+      const organizationChanged =
+        activeOrganizationRef.current !== resolvedOrganizationId;
+      activeOrganizationRef.current = resolvedOrganizationId;
+
+      if (organizationChanged) {
+        setWorkspaceId(null);
+        setWorkspaceName("Workspace");
+        setWorkspaces([]);
+        setPrivateChats([]);
+        setPrivateChatsCursor(null);
+        setHasMorePrivateChats(false);
+        setSharedChats([]);
+        setArchivedChats([]);
+        setActiveChatId("");
+        setThreadTitle("New chat");
+        setMode("new");
+        setBootstrapModelCatalog(null);
+        bootstrapModelCatalogWorkspaceRef.current = null;
+        setIsLoadingPrivateChats(true);
+      }
+    }
+
     async function bootstrap() {
+      let shouldUseFallback = false;
+
+      try {
+        const result = await dashboardClient.getChatBootstrap();
+        if (cancelled || hydrateGenerationRef.current !== generation) {
+          return;
+        }
+
+        resetForOrganizationChange(result.activeOrganizationId);
+        setOrganizationId(result.activeOrganizationId);
+        setOrganizationName(result.activeOrganizationName);
+        setWorkspaces(
+          result.workspaces.map((item) => ({ id: item.id, name: item.name })),
+        );
+        setWorkspaceId(result.activeWorkspace.id);
+        setWorkspaceName(result.activeWorkspace.name);
+        setStoredDashboardWorkspaceId(
+          result.activeOrganizationId,
+          result.activeWorkspace.id,
+        );
+        setPrivateChats(result.privateChats.items.map(mapThreadToChatItem));
+        setPrivateChatsCursor(result.privateChats.nextCursor);
+        setHasMorePrivateChats(Boolean(result.privateChats.nextCursor));
+        setBootstrapModelCatalog(result.modelCatalog);
+        bootstrapModelCatalogWorkspaceRef.current = result.modelCatalog
+          ? result.activeWorkspace.id
+          : null;
+        setIsLoadingPrivateChats(false);
+        return;
+      } catch {
+        shouldUseFallback = true;
+      }
+
+      if (!shouldUseFallback || cancelled) {
+        return;
+      }
+
       try {
         const current = await workspaceClient.getCurrentContext();
         const orgList = (orgs ?? []) as Array<{
@@ -261,26 +346,9 @@ export function DashboardChatStateProvider({
         }
 
         if (!cancelled) {
-          const organizationChanged =
-            activeOrganizationRef.current !== resolvedOrganizationId;
-          activeOrganizationRef.current = resolvedOrganizationId;
+          resetForOrganizationChange(resolvedOrganizationId);
           setOrganizationId(resolvedOrganizationId);
           setOrganizationName(resolvedOrganizationName);
-
-          if (organizationChanged) {
-            setWorkspaceId(null);
-            setWorkspaceName("Workspace");
-            setWorkspaces([]);
-            setPrivateChats([]);
-            setPrivateChatsCursor(null);
-            setHasMorePrivateChats(false);
-            setSharedChats([]);
-            setArchivedChats([]);
-            setActiveChatId("");
-            setThreadTitle("New chat");
-            setMode("new");
-            setIsLoadingPrivateChats(true);
-          }
         }
 
         if (!activeOrg?.id) {
@@ -327,6 +395,8 @@ export function DashboardChatStateProvider({
       setWorkspaceId(nextWorkspace.id);
       setWorkspaceName(nextWorkspace.name);
       setStoredDashboardWorkspaceId(organizationId, nextWorkspace.id);
+      setBootstrapModelCatalog(null);
+      bootstrapModelCatalogWorkspaceRef.current = null;
       setPrivateChats([]);
       setPrivateChatsCursor(null);
       setHasMorePrivateChats(false);
@@ -393,6 +463,8 @@ export function DashboardChatStateProvider({
       setWorkspaceId(target.id);
       setWorkspaceName(target.name);
       setStoredDashboardWorkspaceId(organizationId, target.id);
+      setBootstrapModelCatalog(null);
+      bootstrapModelCatalogWorkspaceRef.current = null;
       setIsLoadingPrivateChats(true);
       setPrivateChats([]);
       setPrivateChatsCursor(null);
@@ -711,6 +783,8 @@ export function DashboardChatStateProvider({
       archivedChats,
       hasMorePrivateChats,
       isLoadingPrivateChats,
+      bootstrapModelCatalog,
+      consumeBootstrapModelCatalog,
       toggleSourcesVisible,
       setWorkspaceName,
       createWorkspace,
@@ -744,6 +818,8 @@ export function DashboardChatStateProvider({
       archivedChats,
       hasMorePrivateChats,
       isLoadingPrivateChats,
+      bootstrapModelCatalog,
+      consumeBootstrapModelCatalog,
       toggleSourcesVisible,
       createWorkspace,
       renameWorkspace,

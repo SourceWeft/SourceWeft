@@ -4,7 +4,6 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "predev": "pnpm --filter @sourceweft/ui-web build",
     "dev": "next dev --port 3003",
     "build": "next build",
     "start": "next start",

@@ -11,6 +11,7 @@
     "./pricing": "./src/pricing.ts",
     "./content": "./src/content.ts",
     "./connectors": "./src/connectors.ts",
+    "./dashboard": "./src/dashboard.ts",
     "./agent-tools": "./src/agent-tools.ts",
     "./workspace": "./src/workspace.ts",
     "./api-response": "./src/api-response.ts"
