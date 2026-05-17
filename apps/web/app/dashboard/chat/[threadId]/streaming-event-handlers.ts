@@ -11,12 +11,12 @@ type UpdateStreamingAssistantMessage = (
   updater: (message: ChatMessageItem) => ChatMessageItem,
 ) => void;
 
-type ToolCallEventPayload = {
+export type ToolCallEventPayload = {
   id?: string;
   type: string;
 };
 
-type StreamingEventHandlerContext<
+export type StreamingEventHandlerContext<
   TToolEvent extends ToolCallEventPayload = ToolCallEventPayload,
 > = {
   appendReasoningChunk: (current: string | undefined, next: string) => string;

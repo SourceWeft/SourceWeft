@@ -967,6 +967,7 @@ export function DashboardChatPageClient() {
             : {}),
         });
         adoptChat(result.thread);
+        writeStoredSourceSelection(workspaceId, result.thread.id, sourceIds);
         writeStoredByokState(
           workspaceId,
           {
