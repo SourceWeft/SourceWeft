@@ -1,4 +1,9 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+
+import { NO_INDEX_METADATA } from "../../seo";
+
+export const metadata: Metadata = NO_INDEX_METADATA;
 
 type SearchParams = Record<string, string | string[] | undefined>;
 

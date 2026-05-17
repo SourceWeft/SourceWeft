@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef } from "react";
 import { authClient } from "../lib/auth-client";
 import { resolveGoogleOneTapConfig } from "../lib/google-one-tap-config";
 
@@ -36,11 +36,29 @@ function shouldIgnoreOneTapError(error: unknown) {
   );
 }
 
+function resolveCallbackURL(redirectTo: string | null) {
+  if (
+    redirectTo &&
+    redirectTo.startsWith("/") &&
+    !redirectTo.startsWith("//") &&
+    !redirectTo.includes("\\")
+  ) {
+    return redirectTo;
+  }
+
+  return "/dashboard";
+}
+
 export function GoogleOneTap() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const promptedPathRef = useRef<string | null>(null);
   const { data, isPending } = authClient.useSession();
   const isSignedIn = hasActiveSession(data as SessionData | undefined);
+  const callbackURL = useMemo(
+    () => resolveCallbackURL(searchParams.get("redirectTo")),
+    [searchParams],
+  );
 
   useEffect(() => {
     if (!googleOneTapConfig.enabled) {
@@ -70,7 +88,7 @@ export function GoogleOneTap() {
     promptedPathRef.current = pathname;
     void (async () => {
       await authClient.oneTap({
-        callbackURL: "/dashboard",
+        callbackURL,
         cancelOnTapOutside: false,
         fetchOptions: {
           credentials: "include",
@@ -84,7 +102,7 @@ export function GoogleOneTap() {
 
       console.error("[Google One Tap] prompt failed", error);
     });
-  }, [isPending, isSignedIn, pathname]);
+  }, [callbackURL, isPending, isSignedIn, pathname]);
 
   return null;
 }

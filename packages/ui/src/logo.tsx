@@ -14,7 +14,7 @@ export const Logo = ({
     <img
       src="/logo-white-bg.svg"
       alt="SourceWeft logo"
-      className="h-[90%] w-[90%] object-contain"
+      className="h-[90%] w-[90%] object-contain dark:invert"
     />
   </div>
 );

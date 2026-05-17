@@ -454,6 +454,31 @@ export class ContentService {
     return contentThreadService.createThread(input);
   }
 
+  async startThreadTurn(input: {
+    workspaceId: string;
+    userId: string;
+    title?: string;
+    modelSettings?: {
+      llmProfileAlias?: string | null;
+      imageProfileAlias?: string | null;
+      visionProfileAlias?: string | null;
+    };
+    content: string;
+    images?: import("./threads").StartThreadTurnInput["images"];
+    mentionedSourceIds?: string[];
+    sourceIds?: string[];
+    tools?: import("./threads").StartThreadTurnInput["tools"];
+    command?: import("./threads").StartThreadTurnInput["command"];
+    timezone?: string;
+    idempotencyKey: string;
+    llm?: import("./threads").StartThreadTurnInput["llm"];
+    image?: import("./threads").StartThreadTurnInput["image"];
+    vision?: import("./threads").StartThreadTurnInput["vision"];
+    visionProfileAlias?: string;
+  }) {
+    return contentThreadService.startThreadTurn(input);
+  }
+
   async getCitationDetail(input: {
     workspaceId: string;
     messageId: string;

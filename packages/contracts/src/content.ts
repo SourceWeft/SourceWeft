@@ -657,6 +657,29 @@ export const refreshThreadRequestSchema = streamThreadRequestSchema;
 
 export const editThreadRequestSchema = streamThreadRequestSchema;
 
+export const threadRunSummarySchema = z.object({
+  id: z.string(),
+  idempotencyKey: z.string(),
+  status: z.enum(["queued", "running", "cancel_requested"]),
+  mode: streamThreadModeSchema,
+  userMessageId: z.string().nullable(),
+  assistantMessageId: z.string().nullable(),
+});
+
+export const startThreadTurnRequestSchema = createThreadRequestSchema.merge(
+  streamThreadRequestSchema.omit({
+    mode: true,
+    stream: true,
+    userMessageId: true,
+    assistantMessageId: true,
+  }),
+);
+
+export const startThreadTurnResponseSchema = z.object({
+  thread: threadSchema,
+  run: threadRunSummarySchema,
+});
+
 export const streamThreadResponseSchema = z.object({
   thread: threadSchema,
   userMessage: messageSchema,
@@ -1174,6 +1197,13 @@ export type ThreadModelSettingsPatch = z.infer<
 >;
 export type CreateThreadRequest = z.infer<typeof createThreadRequestSchema>;
 export type CreateThreadResponse = z.infer<typeof createThreadResponseSchema>;
+export type ThreadRunSummary = z.infer<typeof threadRunSummarySchema>;
+export type StartThreadTurnRequest = z.infer<
+  typeof startThreadTurnRequestSchema
+>;
+export type StartThreadTurnResponse = z.infer<
+  typeof startThreadTurnResponseSchema
+>;
 export type GetThreadResponse = z.infer<typeof getThreadResponseSchema>;
 export type DeleteThreadResponse = z.infer<typeof deleteThreadResponseSchema>;
 export type ListThreadsRequest = z.infer<typeof listThreadsRequestSchema>;

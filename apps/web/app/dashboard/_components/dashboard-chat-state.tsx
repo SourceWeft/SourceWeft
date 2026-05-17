@@ -11,10 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import { authClient } from "../../../lib/auth-client";
-import {
-  getStoredDashboardWorkspaceId,
-  setStoredDashboardWorkspaceId,
-} from "../../../lib/dashboard-workspace-context";
+import { ensureDashboardWorkspace } from "../../../lib/dashboard-workspace-bootstrap";
+import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
 import { contentClient, workspaceClient } from "../../../lib/sdk";
 import { clearStoredSourceSelection } from "../chat/_components/source-selection-storage";
 import type { ChatItem } from "./dashboard-chat-types";
@@ -62,6 +60,12 @@ type DashboardChatState = {
     title?: string;
     modelSettings?: ThreadModelSettingsInput;
   }) => Promise<{ id: string; title: string } | null>;
+  adoptChat: (thread: {
+    id: string;
+    title: string;
+    sourceCount?: number | null;
+    updatedAt?: string | null;
+  }) => void;
   updateChatTitle: (id: string, title: string) => void;
   updateChatSourceCount: (id: string, sourceCount: number) => void;
   refreshChatThread: (id: string) => Promise<{ title: string } | null>;
@@ -183,18 +187,11 @@ export function DashboardChatStateProvider({
   const hydrateWorkspace = useCallback(
     async (targetOrganizationId: string, generation: number) => {
       const isCurrent = () => hydrateGenerationRef.current === generation;
-      const listed = await workspaceClient.listWorkspaces(targetOrganizationId);
+      const { active, items: resolvedItems } =
+        await ensureDashboardWorkspace(targetOrganizationId);
       if (!isCurrent()) {
         return;
       }
-
-      const resolvedItems = listed.items;
-      const storedWorkspaceId =
-        getStoredDashboardWorkspaceId(targetOrganizationId);
-      const active =
-        resolvedItems.find((item) => item.id === storedWorkspaceId) ??
-        resolvedItems[0] ??
-        null;
 
       if (!active) {
         setWorkspaces([]);
@@ -218,16 +215,6 @@ export function DashboardChatStateProvider({
       setPrivateChats([]);
       setPrivateChatsCursor(null);
       setHasMorePrivateChats(false);
-
-      try {
-        await workspaceClient.setWorkspaceContext(active.id);
-      } catch {
-        // context persistence is best-effort for now
-      }
-
-      if (!isCurrent()) {
-        return;
-      }
 
       try {
         const threads = await fetchPrivateChatsPage(active.id);
@@ -567,6 +554,27 @@ export function DashboardChatStateProvider({
     [workspaceId],
   );
 
+  const adoptChat = useCallback(
+    (thread: {
+      id: string;
+      title: string;
+      sourceCount?: number | null;
+      updatedAt?: string | null;
+    }) => {
+      const item = mapThreadToChatItem(thread);
+      setPrivateChats((value) => {
+        const withoutExisting = value.filter((chat) => chat.id !== item.id);
+        return [item, ...withoutExisting];
+      });
+      setSharedChats((value) => value.filter((chat) => chat.id !== item.id));
+      setArchivedChats((value) => value.filter((chat) => chat.id !== item.id));
+      setMode("thread");
+      setActiveChatId(item.id);
+      setThreadTitle(item.title);
+    },
+    [],
+  );
+
   const archiveChat = useCallback(
     (id: string) => {
       const candidate = [...sharedChats, ...privateChats].find(
@@ -711,6 +719,7 @@ export function DashboardChatStateProvider({
       loadMorePrivateChats,
       startNewChat,
       createChat,
+      adoptChat,
       updateChatTitle,
       updateChatSourceCount,
       refreshChatThread,
@@ -741,6 +750,7 @@ export function DashboardChatStateProvider({
       switchWorkspace,
       openChat,
       createChat,
+      adoptChat,
       updateChatTitle,
       updateChatSourceCount,
       refreshChatThread,

@@ -30,6 +30,10 @@ import {
 import { decodeThreadsCursor, encodeThreadsCursor } from "./thread/cursor";
 import { listThreadModelCatalog } from "./thread/model-catalog";
 import { downloadChatImageObject } from "../storage";
+import { durableChatRunService } from "./durable/service";
+import { findChatThreadRunByIdempotencyKey } from "./durable/repository";
+import type { ChatThreadRunMode } from "./durable/types";
+import type { StreamThreadEventInput } from "./turn/types";
 
 const DEFAULT_THREAD_PAGE_LIMIT = 20;
 
@@ -68,6 +72,29 @@ function findImagePart(input: { contentJson: unknown; imageId: string }) {
 
   return null;
 }
+
+export type StartThreadTurnInput = {
+  workspaceId: string;
+  userId: string;
+  title?: string;
+  modelSettings?: {
+    llmProfileAlias?: string | null;
+    imageProfileAlias?: string | null;
+    visionProfileAlias?: string | null;
+  };
+  content: string;
+  images?: StreamThreadEventInput["images"];
+  mentionedSourceIds?: string[];
+  sourceIds?: string[];
+  tools?: StreamThreadEventInput["tools"];
+  command?: StreamThreadEventInput["command"];
+  timezone?: string;
+  idempotencyKey: string;
+  llm?: StreamThreadEventInput["llm"];
+  image?: StreamThreadEventInput["image"];
+  vision?: StreamThreadEventInput["vision"];
+  visionProfileAlias?: string;
+};
 
 class ContentThreadService {
   async listThreads(input: {
@@ -260,6 +287,76 @@ class ContentThreadService {
     });
 
     return { thread };
+  }
+
+  async startThreadTurn(input: StartThreadTurnInput) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const existingRun = await findChatThreadRunByIdempotencyKey({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (existingRun) {
+      if (existingRun.userId !== input.userId) {
+        throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
+      }
+      const existingThread = await findThreadRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: existingRun.threadId,
+      });
+      if (!existingThread) {
+        throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+      }
+      return { thread: existingThread, run: existingRun };
+    }
+
+    const modelSettings = normalizeThreadModelSettings(input.modelSettings);
+    await validateThreadModelSettings(modelSettings);
+    const resolvedModelSettings =
+      await resolveThreadModelSettingsSnapshots(modelSettings);
+
+    const thread = await createThreadRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      title: normalizeContentTitle(input.title, "New Thread"),
+      createdBy: input.userId,
+      modelSettings: resolvedModelSettings,
+    });
+
+    const mode: ChatThreadRunMode = "send";
+    const request: StreamThreadEventInput = {
+      workspaceId: input.workspaceId,
+      threadId: thread.id,
+      userId: input.userId,
+      content: input.content,
+      images: input.images,
+      mentionedSourceIds: input.mentionedSourceIds,
+      sourceIds: input.sourceIds,
+      tools: input.tools,
+      command: input.command,
+      timezone: input.timezone,
+      idempotencyKey: input.idempotencyKey,
+      llm: input.llm,
+      image: input.image,
+      vision: input.vision,
+      visionProfileAlias: input.visionProfileAlias,
+    };
+
+    const { run } = await durableChatRunService.getOrCreateRun({
+      workspaceId: input.workspaceId,
+      threadId: thread.id,
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      mode,
+      request,
+    });
+
+    return { thread, run };
   }
 
   async getCitationDetail(input: {

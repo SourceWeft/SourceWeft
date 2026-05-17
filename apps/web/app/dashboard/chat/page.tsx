@@ -69,6 +69,7 @@ import {
   type PromptInputMentionSourceLoader,
   type PromptThinkingSettings,
 } from "./_components/chat-canvas";
+import type { StreamThreadRequest } from "@sourceweft/contracts";
 import { AGENT_TOOL_NAMES } from "@sourceweft/sdk";
 import {
   ArtifactPreviewPanel,
@@ -97,6 +98,7 @@ import {
   handleDesktopAuthDeepLink,
 } from "../../../lib/desktop-bridge";
 import { contentClient } from "../../../lib/sdk";
+import { SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX } from "@sourceweft/sdk";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
@@ -182,7 +184,7 @@ function parseStoredThinkingSettings(
 function buildPendingThinking(input: {
   capabilities: ModelItem["capabilities"] | undefined;
   settings: PromptThinkingSettings;
-}) {
+}): NonNullable<StreamThreadRequest["llm"]>["thinking"] | undefined {
   if (input.capabilities?.supportsThinking !== true) {
     return undefined;
   }
@@ -217,6 +219,14 @@ function buildPendingThinking(input: {
   return {
     mode: "auto",
   };
+}
+
+function createDurableRunKey() {
+  const random =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX}${random}`;
 }
 
 function normalizeThinkingSettingsForModel(input: {
@@ -254,7 +264,7 @@ function normalizeThinkingSettingsForModel(input: {
 export default function DashboardChatPage() {
   const router = useRouter();
   const {
-    createChat,
+    adoptChat,
     sourcesVisible,
     startNewChat,
     switchWorkspace,
@@ -269,6 +279,7 @@ export default function DashboardChatPage() {
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
+  const [isStartingChat, setIsStartingChat] = useState(false);
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
   const isPersistentLayout = useMediaQuery("(min-width: 768px)");
@@ -767,6 +778,9 @@ export default function DashboardChatPage() {
 
   const handleSendMessage = useCallback(
     async (input: ChatSendInput) => {
+      if (isStartingChat) {
+        return;
+      }
       if (!workspaceId) {
         toast.error("No workspace selected yet.");
         return;
@@ -798,74 +812,100 @@ export default function DashboardChatPage() {
         visionByokSelection: selectedByokModels.vision,
         visionProfileAlias: modelSettings.visionProfileAlias ?? null,
       });
-      const thread = await createChat({
-        modelSettings: resolvedThreadModelSettings,
+      const tools = buildChatToolsRequest({
+        imageExecution:
+          selectedByokModels.image?.mode === "byok"
+            ? buildByokModelExecution({
+                selection: selectedByokModels.image,
+              })
+            : null,
+        invokedSkillIds: input.tools?.invokedSkillIds,
+        skillIds: selectedSkillIds,
+        searchEnabled,
+        tools: input.tools,
+        forceImageGenerate:
+          input.command?.kind === "tool" &&
+          input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
       });
-      if (!thread) {
-        toast.error("Failed to create conversation.");
-        return;
+      const thinking = buildPendingThinking({
+        capabilities: selectedModels.llm?.capabilities,
+        settings: thinkingSettings,
+      });
+      const requestModelSettings: ModelAliasSettings = {};
+      if (catalogKindEnabled.vision && selectedModels.vision) {
+        requestModelSettings.visionProfileAlias =
+          selectedModels.vision.profileAlias ?? selectedModels.vision.id;
       }
-      writeStoredByokState(
-        workspaceId,
-        {
-          imageByok: selectedByokModels.image ?? null,
-          llmByok: selectedByokModels.llm ?? null,
-          visionByok: selectedByokModels.vision ?? null,
-        },
-        thread.id,
-      );
+      if (catalogKindEnabled.image && selectedModels.image?.profileAlias) {
+        requestModelSettings.imageProfileAlias =
+          selectedModels.image.profileAlias;
+      }
 
-      // Pass the initial message + selected sources to the thread page via
-      // session storage (consumed once on mount).
-      sessionStorage.setItem(
-        `chat:pending:${thread.id}`,
-        JSON.stringify({
+      setIsStartingChat(true);
+      try {
+        const result = await contentClient.startThreadTurn(workspaceId, {
           content: text,
           images,
+          idempotencyKey: createDurableRunKey(),
           mentionedSourceIds,
-          sourceIds,
-          skillIds: selectedSkillIds,
-          command: input.command,
-          tools: buildChatToolsRequest({
-            imageExecution:
-              selectedByokModels.image?.mode === "byok"
-                ? buildByokModelExecution({
-                    selection: selectedByokModels.image,
-                  })
-                : null,
-            invokedSkillIds: input.tools?.invokedSkillIds,
-            skillIds: selectedSkillIds,
-            searchEnabled,
-            tools: input.tools,
-            forceImageGenerate:
-              input.command?.kind === "tool" &&
-              input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
-          }),
-          thinking: buildPendingThinking({
-            capabilities: selectedModels.llm?.capabilities,
-            settings: thinkingSettings,
-          }),
-          thinkingSettings,
-          searchEnabled,
-          modelState: {
-            availableModels,
-            catalogKindEnabled,
-            selectedModels,
-            byokSelections: selectedByokModels,
+          modelSettings: {
+            ...resolvedThreadModelSettings,
+            ...requestModelSettings,
           },
-        }),
-      );
-
-      router.push(`/dashboard/chat/${thread.id}`);
+          sourceIds,
+          command: input.command,
+          tools,
+          ...(catalogKindEnabled.llm && selectedModels.llm?.profileAlias
+            ? {
+                llm: {
+                  profileAlias: selectedModels.llm.profileAlias,
+                  ...(thinking ? { thinking } : {}),
+                },
+              }
+            : thinking
+              ? { llm: { thinking } }
+              : {}),
+          ...(selectedByokModels.image?.mode === "byok"
+            ? {
+                image: buildByokModelExecution({
+                  selection: selectedByokModels.image,
+                }),
+              }
+            : {}),
+          ...(selectedByokModels.vision?.mode === "byok"
+            ? {
+                vision: buildByokModelExecution({
+                  selection: selectedByokModels.vision,
+                }),
+              }
+            : {}),
+        });
+        adoptChat(result.thread);
+        writeStoredByokState(
+          workspaceId,
+          {
+            imageByok: selectedByokModels.image ?? null,
+            llmByok: selectedByokModels.llm ?? null,
+            visionByok: selectedByokModels.vision ?? null,
+          },
+          result.thread.id,
+        );
+        router.push(`/dashboard/chat/${result.thread.id}`);
+      } catch (error) {
+        console.error(error);
+        toast.error("Failed to create conversation.");
+      } finally {
+        setIsStartingChat(false);
+      }
     },
     [
+      isStartingChat,
       workspaceId,
-      createChat,
+      adoptChat,
       activeSourceIds,
       effectiveActiveSkillIds,
       router,
       catalogKindEnabled,
-      availableModels,
       selectedByokModels,
       selectedModels,
       thinkingSettings,
@@ -989,7 +1029,7 @@ export default function DashboardChatPage() {
         </header>
 
         <ChatCanvas
-          isStreaming={false}
+          isStreaming={isStartingChat}
           mode="new"
           availableSkills={availableSkills}
           onArtifactPreview={handleArtifactPreview}

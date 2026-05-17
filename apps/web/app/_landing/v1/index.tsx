@@ -156,8 +156,9 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
 
             <p className="mt-5 max-w-md text-base leading-relaxed text-zinc-500 md:text-lg dark:text-zinc-400">
               Upload sources, connect Notion, Google Drive, Gmail, Slack and
-              more. Generate audio overviews, study guides, FAQs, and deep AI
-              answers — all grounded in your own content.
+              more. Generate source-grounded answers with citations, audio
+              overviews, study guides, FAQs, and deep AI insights from your own
+              content.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -422,7 +423,7 @@ function FeaturesSection() {
       icon: <IconBrain />,
       title: "Multiple outputs from your sources",
       description:
-        "Ask questions, or generate an audio overview, study guide, FAQ, briefing doc, or timeline — all grounded in your uploaded sources, with inline citations. Never hallucinated.",
+        "Ask questions, or generate an audio overview, study guide, FAQ, briefing doc, or timeline — all grounded in your uploaded sources, with inline citations.",
       bullets: [
         "Audio overviews & podcasts",
         "Study guides, FAQs & timelines",
@@ -461,11 +462,12 @@ function FeaturesSection() {
             Features
           </p>
           <h2 className="text-3xl font-bold tracking-tight text-zinc-900 md:text-4xl dark:text-white">
-            Everything your second brain needs
+            Everything your AI knowledge workspace needs
           </h2>
           <p className="mt-3 text-zinc-500 dark:text-zinc-400">
             Upload sources. Connect your tools. Get answers, audio overviews,
-            study guides and more — all grounded in what you know.
+            study guides and more — all grounded in what you know, with
+            citations you can inspect.
           </p>
         </div>
 
@@ -587,7 +589,7 @@ function HowItWorks() {
     {
       num: "03",
       title: "Chat with your AI",
-      body: "Ask questions, get summaries, explore connections. Every answer is grounded in your own sources with inline citations — never hallucinated from thin air.",
+      body: "Ask questions, get summaries, explore connections. Every answer is grounded in your own sources with inline citations you can inspect.",
       visual: (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
           <div className="mb-2 flex justify-end">
@@ -695,7 +697,7 @@ function Footer({ authState }: { authState: LandingAuthState }) {
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
+        <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-3">
           {/* Brand */}
           <div>
             <SourceWeftBrandLockup size="footer" />
@@ -712,29 +714,6 @@ function Footer({ authState }: { authState: LandingAuthState }) {
             <ul className="space-y-2 text-sm">
               {productLinks.map(([href, label]) => (
                 <li key={href}>
-                  <a
-                    href={href}
-                    className="text-zinc-400 transition-colors hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white"
-                  >
-                    {label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Company */}
-          <div>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-600">
-              Company
-            </p>
-            <ul className="space-y-2 text-sm">
-              {[
-                ["#", "About"],
-                ["#", "Blog"],
-                ["#", "Changelog"],
-              ].map(([href, label]) => (
-                <li key={label}>
                   <a
                     href={href}
                     className="text-zinc-400 transition-colors hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white"

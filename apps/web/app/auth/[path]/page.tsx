@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { authStaticPaths } from "../../../lib/auth-ui-config";
+import { NO_INDEX_METADATA } from "../../seo";
 import { DesktopAuthListener } from "../desktop-auth-listener";
 import { AuthViewClient } from "./auth-view-client";
 
 export const dynamicParams = false;
+export const metadata: Metadata = NO_INDEX_METADATA;
 
 export function generateStaticParams() {
   return authStaticPaths.map((path) => ({ path }));

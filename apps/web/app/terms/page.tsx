@@ -4,7 +4,8 @@ import { LegalPage } from "../_landing/legal/legal-page";
 
 export const metadata: Metadata = {
   title: "Terms of Service | SourceWeft",
-  description: "Terms of Service for SourceWeft.",
+  description:
+    "The terms that govern SourceWeft accounts, organizations, workspace content, subscriptions, credits, AI outputs, and third-party services.",
   alternates: {
     canonical: "https://sourceweft.com/terms",
   },

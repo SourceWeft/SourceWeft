@@ -22,6 +22,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../lib/sdk";
+import { ensureDashboardWorkspace } from "../../lib/dashboard-workspace-bootstrap";
 import {
   getStoredDashboardWorkspaceId,
   setStoredDashboardWorkspaceId,
@@ -502,7 +503,7 @@ export default function DashboardPage() {
       setLoading(true);
 
       try {
-        const workspaceResponse = await workspaceClient.listWorkspaces(
+        const workspaceResponse = await ensureDashboardWorkspace(
           sessionActiveOrganizationId,
         );
 
@@ -567,6 +568,9 @@ export default function DashboardPage() {
         const resolvedWorkspace =
           withPreviews.find(
             (workspace) => workspace.id === storedWorkspaceId,
+          ) ??
+          withPreviews.find(
+            (workspace) => workspace.id === workspaceResponse.active?.id,
           ) ??
           withPreviews[0] ??
           null;
@@ -815,7 +819,7 @@ export default function DashboardPage() {
             ) : (
               <div onWheel={handleRecentWheel} ref={recentScrollRef}>
                 <ScrollArea className="w-full">
-                  <div className="grid min-w-0 grid-cols-1 gap-3 pb-3 md:flex md:items-stretch md:pr-1">
+                  <div className="flex min-w-0 flex-wrap items-stretch gap-3 pb-3 md:flex-nowrap md:pr-1">
                     {!search ? (
                       <div className="hidden w-[292px] shrink-0 md:block">
                         <CreateWorkspaceCard
@@ -826,7 +830,7 @@ export default function DashboardPage() {
                     ) : null}
 
                     {filteredWorkspaces.map((workspace) => (
-                      <div className="w-full md:w-[292px] md:shrink-0" key={workspace.id}>
+                      <div className="w-full max-w-[292px] md:w-[292px] md:shrink-0" key={workspace.id}>
                         <WorkspaceCard
                           onOpen={(workspaceId) =>
                             void handleOpenWorkspace(workspaceId)

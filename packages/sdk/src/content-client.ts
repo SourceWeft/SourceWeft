@@ -57,6 +57,8 @@ import type {
   RetrySourceResponse,
   SourceStatusResponse,
   ListThreadsResponse,
+  StartThreadTurnRequest,
+  StartThreadTurnResponse,
   StreamThreadRequest,
   StreamThreadResponse,
   UploadSourceResponse,
@@ -219,6 +221,13 @@ export class ContentClient {
   createThread(workspaceId: string, input: CreateThreadRequest = {}) {
     return this.http.post<CreateThreadResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads`,
+      input,
+    );
+  }
+
+  startThreadTurn(workspaceId: string, input: StartThreadTurnRequest) {
+    return this.http.post<StartThreadTurnResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/start-turn`,
       input,
     );
   }

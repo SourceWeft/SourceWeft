@@ -1149,6 +1149,10 @@ function isSelectableSource(source: SourceItem) {
   return source.status !== "Failed" && source.status !== "Syncing";
 }
 
+function isSyncingSource(source: SourceItem) {
+  return source.status === "Syncing";
+}
+
 function collectSelectableTreeIds(node: SourceTreeNode): string[] {
   return [
     ...(isSelectableSource(node.source) ? [node.source.id] : []),
@@ -2418,6 +2422,7 @@ export function SourcesHub({
   const dragDepthRef = useRef(0);
   const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
   const loadedSourcesWorkspaceIdRef = useRef<string | null>(null);
+  const initializedSourcesWorkspaceIdRef = useRef<string | null>(null);
 
   const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([]);
 
@@ -2589,12 +2594,18 @@ export function SourcesHub({
   useEffect(() => {
     if (!workspaceId) {
       loadedSourcesWorkspaceIdRef.current = null;
+      initializedSourcesWorkspaceIdRef.current = null;
       setSources([]);
       setLoadingError(null);
       setIsLoading(false);
       setPendingSourceIds([]);
       return;
     }
+
+    if (initializedSourcesWorkspaceIdRef.current === workspaceId) {
+      return;
+    }
+    initializedSourcesWorkspaceIdRef.current = workspaceId;
 
     setLoadingError(null);
     setPendingSourceIds([]);
@@ -2609,13 +2620,6 @@ export function SourcesHub({
     setReadmeContent("");
     setAddParentSourceId(null);
     setDirectoryParentSourceId(null);
-
-    if (
-      initialSourcesLoaded &&
-      loadedSourcesWorkspaceIdRef.current === workspaceId
-    ) {
-      return;
-    }
 
     setSources(initialSourcesLoaded ? initialSources : []);
     void refreshSources();
@@ -2727,6 +2731,18 @@ export function SourcesHub({
       window.clearInterval(timer);
     };
   }, [workspaceId, pendingSourceIds, refreshSources]);
+
+  useEffect(() => {
+    const syncingIds = sources.filter(isSyncingSource).map((source) => source.id);
+    if (syncingIds.length === 0) {
+      return;
+    }
+
+    setPendingSourceIds((prev) => {
+      const next = Array.from(new Set([...prev, ...syncingIds]));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [sources]);
 
   useEffect(() => {
     setEditingSourceId((prev) => {
@@ -2946,6 +2962,9 @@ export function SourcesHub({
       setRowBusy(source.id, true);
       try {
         await contentClient.retrySource(workspaceId, source.id, {});
+        setPendingSourceIds((prev) =>
+          prev.includes(source.id) ? prev : [...prev, source.id],
+        );
         toast.success("Source retry queued.");
         await refreshSources();
       } catch (error) {
@@ -2964,6 +2983,9 @@ export function SourcesHub({
       setRowBusy(source.id, true);
       try {
         await contentClient.indexSource(workspaceId, source.id, {});
+        setPendingSourceIds((prev) =>
+          prev.includes(source.id) ? prev : [...prev, source.id],
+        );
         toast.success("Re-index queued.");
         await refreshSources();
       } catch (error) {
@@ -3455,6 +3477,19 @@ export function SourcesHub({
                   ) : null}
                 </div>
                 <div className="flex min-h-8 shrink-0 items-center justify-end gap-1.5">
+                  <Button
+                    disabled={isLoading}
+                    onClick={() => void refreshSources()}
+                    size="icon-xs"
+                    title="Refresh sources"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <RotateCcw
+                      className={cn("size-3.5", isLoading && "animate-spin")}
+                    />
+                    <span className="sr-only">Refresh sources</span>
+                  </Button>
                   <Button
                     disabled={selectableSourceIds.length === 0}
                     onClick={handleToggleAllSources}

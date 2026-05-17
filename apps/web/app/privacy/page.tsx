@@ -4,7 +4,8 @@ import { LegalPage } from "../_landing/legal/legal-page";
 
 export const metadata: Metadata = {
   title: "Privacy Policy | SourceWeft",
-  description: "Privacy Policy for SourceWeft.",
+  description:
+    "How SourceWeft handles account information, connected knowledge sources, workspace content, AI provider processing, retention, and security.",
   alternates: {
     canonical: "https://sourceweft.com/privacy",
   },

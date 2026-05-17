@@ -2,7 +2,9 @@ import type { Hono } from "hono";
 import {
   createThreadRequestSchema,
   listThreadsRequestSchema,
+  startThreadTurnRequestSchema,
   streamThreadRequestSchema,
+  type ThreadRunSummary,
   updateThreadModelSettingsRequestSchema,
 } from "@sourceweft/contracts";
 import { contentService } from "../../../modules/content";
@@ -30,6 +32,27 @@ type DurableThreadRequestInput =
   | StreamThreadEventInput
   | RefreshThreadInput
   | EditThreadInput;
+
+function presentThreadRunSummary(run: {
+  id: string;
+  idempotencyKey: string;
+  status: "queued" | "running" | "cancel_requested" | string;
+  mode: "send" | "refresh" | "edit";
+  userMessageId: string | null;
+  assistantMessageId: string | null;
+}): ThreadRunSummary {
+  return {
+    id: run.id,
+    idempotencyKey: run.idempotencyKey,
+    status:
+      run.status === "running" || run.status === "cancel_requested"
+        ? run.status
+        : "queued",
+    mode: run.mode,
+    userMessageId: run.userMessageId,
+    assistantMessageId: run.assistantMessageId,
+  };
+}
 
 function assertJobStringField(data: unknown, field: string, expected: string) {
   const actual =
@@ -92,6 +115,66 @@ export function registerThreadRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result, 201);
+  });
+
+  app.post("/threads/start-turn", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = startThreadTurnRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const content = parsed.data.content?.trim() ?? "";
+    const images = parsed.data.images ?? [];
+    if (!content && images.length === 0) {
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "content or images is required",
+      );
+    }
+
+    const durableKey = parseDurableChatRunKey(parsed.data.idempotencyKey ?? "");
+    if (durableKey?.kind !== "run") {
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "valid idempotencyKey is required",
+      );
+    }
+
+    const result = await contentService.startThreadTurn({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      title: parsed.data.title,
+      modelSettings: parsed.data.modelSettings,
+      content,
+      images,
+      mentionedSourceIds: parsed.data.mentionedSourceIds,
+      sourceIds: parsed.data.sourceIds,
+      tools: parsed.data.tools,
+      command: parsed.data.command,
+      timezone: parsed.data.timezone,
+      idempotencyKey: durableKey.idempotencyKey,
+      llm: parsed.data.llm,
+      image: parsed.data.image,
+      vision: parsed.data.vision,
+      visionProfileAlias:
+        parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+    });
+
+    return ApiResponse.success(
+      c,
+      { thread: result.thread, run: presentThreadRunSummary(result.run) },
+      201,
+    );
   });
 
   app.get("/threads/:id", async (c) => {
@@ -225,16 +308,7 @@ export function registerThreadRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, {
-      threadRun: run
-        ? {
-            id: run.id,
-            idempotencyKey: run.idempotencyKey,
-            status: run.status,
-            mode: run.mode,
-            userMessageId: run.userMessageId,
-            assistantMessageId: run.assistantMessageId,
-          }
-        : null,
+      threadRun: run ? presentThreadRunSummary(run) : null,
     });
   });
 

@@ -8,11 +8,21 @@ import {
   resolveRequestLocale,
 } from "../lib/locale";
 
+import { SeoJsonLd } from "./_components/seo/json-ld";
 import { Providers } from "./providers";
+import {
+  DEFAULT_DESCRIPTION,
+  DEFAULT_TITLE,
+  OG_IMAGE,
+  SITE_NAME,
+  SITE_URL,
+} from "./seo";
 
 export const metadata: Metadata = {
-  title: "SourceWeft",
-  description: "SourceWeft Web",
+  alternates: {
+    canonical: SITE_URL,
+  },
+  description: DEFAULT_DESCRIPTION,
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
@@ -21,6 +31,25 @@ export const metadata: Metadata = {
       { url: "/icon-512.png", type: "image/png", sizes: "512x512" },
     ],
     apple: { url: "/apple-touch-icon.png", sizes: "180x180" },
+  },
+  metadataBase: new URL(SITE_URL),
+  openGraph: {
+    description: DEFAULT_DESCRIPTION,
+    images: [OG_IMAGE],
+    siteName: SITE_NAME,
+    title: DEFAULT_TITLE,
+    type: "website",
+    url: SITE_URL,
+  },
+  title: {
+    default: DEFAULT_TITLE,
+    template: `%s | ${SITE_NAME}`,
+  },
+  twitter: {
+    card: "summary_large_image",
+    description: DEFAULT_DESCRIPTION,
+    images: [OG_IMAGE.url],
+    title: DEFAULT_TITLE,
   },
 };
 
@@ -41,6 +70,9 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} dir={direction} suppressHydrationWarning>
+      <head>
+        <SeoJsonLd />
+      </head>
       <body className="flex min-h-svh flex-col antialiased">
         <Providers>{children}</Providers>
       </body>

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import {
   Card,
   CardContent,
@@ -6,7 +7,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@sourceweft/ui-web/components/ui/card";
+import { NO_INDEX_METADATA } from "../../seo";
 import { AcceptInvitationClient } from "./accept-invitation-client";
+
+export const metadata: Metadata = NO_INDEX_METADATA;
 
 function AcceptInvitationFallback() {
   return (
