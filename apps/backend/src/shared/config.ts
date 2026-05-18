@@ -405,12 +405,15 @@ export const config = {
     webBaseUrl: resolveWebBaseUrl(),
     errorUrl: resolveAuthErrorUrl(),
     trustedOrigins: resolveTrustedOrigins(),
-    googleClientId: process.env.AUTH_GOOGLE_CLIENT_ID || "",
+    googleSignInWebClientId:
+      process.env.AUTH_GOOGLE_SIGNIN_WEB_CLIENT_ID?.trim() || "",
+    googleSignInWebClientSecret:
+      process.env.AUTH_GOOGLE_SIGNIN_WEB_CLIENT_SECRET?.trim() || "",
+    googleOneTapClientId:
+      process.env.AUTH_GOOGLE_ONE_TAP_CLIENT_ID?.trim() || "",
     googleMobileClientId: process.env.AUTH_GOOGLE_MOBILE_CLIENT_ID || "",
-    googleClientSecret: process.env.AUTH_GOOGLE_CLIENT_SECRET || "",
     githubClientId: process.env.AUTH_GITHUB_CLIENT_ID || "",
     githubClientSecret: process.env.AUTH_GITHUB_CLIENT_SECRET || "",
-    oneTapClientId: process.env.AUTH_ONE_TAP_CLIENT_ID || "",
     passkey: {
       rpId: process.env.AUTH_PASSKEY_RP_ID || "localhost",
       rpName: process.env.AUTH_PASSKEY_RP_NAME || "SourceWeft",

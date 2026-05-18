@@ -28,6 +28,17 @@ Use `pnpm run dev` in this directory to start all three processes.
 Auth and workspace MVP notes:
 
 - Better Auth is mounted at `/api/auth/*`.
+- Google sign-in mirrors GitHub's Better Auth callback pattern. Configure
+  `AUTH_GOOGLE_SIGNIN_WEB_CLIENT_ID` and
+  `AUTH_GOOGLE_SIGNIN_WEB_CLIENT_SECRET`; the Google Cloud OAuth client must
+  allow `<NEXT_PUBLIC_API_BASE_URL>/api/auth/callback/google`.
+- Google One Tap and native mobile sign-in use ID tokens. Configure
+  `AUTH_GOOGLE_ONE_TAP_CLIENT_ID` and `AUTH_GOOGLE_MOBILE_CLIENT_ID` for those
+  audiences; they do not choose the browser OAuth redirect client.
+- Future Google Workspace connectors should use
+  `GOOGLE_CONNECTORS_OAUTH_CLIENT_ID` / `GOOGLE_CONNECTORS_OAUTH_CLIENT_SECRET`
+  plus connector-specific redirect URI envs instead of implicitly reusing
+  sign-in credentials.
 - Workspace APIs are exposed at `/v1/teams/:teamId/workspaces` and `/v1/context/*`.
 - Run `pnpm migrate` to apply Better Auth migrations followed by Drizzle business migrations.
 - Run `pnpm db:generate` after schema changes to generate new Drizzle migration files.

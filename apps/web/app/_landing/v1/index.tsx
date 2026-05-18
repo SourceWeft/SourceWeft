@@ -653,7 +653,7 @@ function HowItWorks() {
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
-function PricingSection() {
+function PricingSection({ authState }: { authState: LandingAuthState }) {
   const plans = getPricingConfig();
 
   return (
@@ -674,7 +674,7 @@ function PricingSection() {
           </p>
         </div>
 
-        <PricingToggle plans={plans} />
+        <PricingToggle authState={authState} plans={plans} />
       </div>
     </section>
   );
@@ -710,7 +710,7 @@ export default function LandingV1({
       <SocialProof />
       <FeaturesSection />
       <HowItWorks />
-      <PricingSection />
+      <PricingSection authState={authState} />
       <SourceWeftFooter authState={authState} />
     </div>
   );

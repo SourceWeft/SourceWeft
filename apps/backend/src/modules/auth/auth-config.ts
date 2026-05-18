@@ -34,16 +34,30 @@ function buildAcceptInvitationUrl(invitationId: string) {
 
 const socialProviders: Record<string, unknown> = {};
 
-if (config.auth.googleClientId && config.auth.googleClientSecret) {
-  const googleClientIds = [
-    config.auth.googleClientId,
-    config.auth.googleMobileClientId,
-  ].filter(Boolean);
+function uniqueGoogleClientIds() {
+  return Array.from(
+    new Set(
+      [
+        config.auth.googleSignInWebClientId,
+        config.auth.googleOneTapClientId,
+        config.auth.googleMobileClientId,
+      ].filter(Boolean),
+    ),
+  );
+}
+
+if (
+  config.auth.googleSignInWebClientId &&
+  config.auth.googleSignInWebClientSecret
+) {
+  const googleClientIds = uniqueGoogleClientIds();
 
   socialProviders.google = {
     clientId:
-      googleClientIds.length > 1 ? googleClientIds : config.auth.googleClientId,
-    clientSecret: config.auth.googleClientSecret,
+      googleClientIds.length > 1
+        ? googleClientIds
+        : config.auth.googleSignInWebClientId,
+    clientSecret: config.auth.googleSignInWebClientSecret,
     prompt: "select_account",
   };
 }
@@ -559,12 +573,10 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
             }),
           ]
         : []),
-      ...(isRuntimeMode &&
-      (config.auth.oneTapClientId || config.auth.googleClientId)
+      ...(isRuntimeMode && config.auth.googleOneTapClientId
         ? [
             oneTap({
-              clientId:
-                config.auth.oneTapClientId || config.auth.googleClientId,
+              clientId: config.auth.googleOneTapClientId,
             }),
           ]
         : []),

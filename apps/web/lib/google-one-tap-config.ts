@@ -1,7 +1,7 @@
 export function resolveGoogleOneTapConfig() {
   const enabled =
-    process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED?.trim().toLowerCase() !==
-    "false";
+    process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED?.trim().toLowerCase() ===
+    "true";
   const clientId =
     process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID?.trim() || "";
   const fedCmEnabled =

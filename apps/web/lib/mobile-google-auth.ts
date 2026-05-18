@@ -16,11 +16,7 @@ type GoogleAuthModule = {
 };
 
 function resolveMobileGoogleClientId() {
-  return (
-    process.env.NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID?.trim() ||
-    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID?.trim() ||
-    ""
-  );
+  return process.env.NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID?.trim() || "";
 }
 
 function isCancelledGoogleSignIn(error: unknown) {

@@ -45,8 +45,10 @@ function FooterColumn({
 
 export function SourceWeftFooter({
   authState,
+  containerClassName = "max-w-6xl px-6",
 }: {
   authState?: LandingAuthState;
+  containerClassName?: string;
 }) {
   const productLinks = [
     ["/#features", "Features"],
@@ -60,7 +62,7 @@ export function SourceWeftFooter({
 
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${containerClassName}`}>
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div>
             <SourceWeftBrandLockup size="footer" />

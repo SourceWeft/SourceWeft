@@ -19,6 +19,7 @@ import {
   type BlogCategory,
   type BlogPost,
 } from "./data";
+import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
 
 export const metadata: Metadata = {
   alternates: {
@@ -37,12 +38,7 @@ export const metadata: Metadata = {
   title: "Blog",
 };
 
-const signedOutHeaderState = {
-  isPending: false,
-  isSignedIn: false,
-  user: null,
-} as const;
-
+const blogContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
 type SelectedCategory = BlogCategory | "All Posts";
 
@@ -215,6 +211,7 @@ export default async function BlogIndexPage({
   searchParams: Promise<{ category?: string | string[] }>;
 }) {
   const { category } = await searchParams;
+  const initialAuthState = await resolveInitialLandingAuthState();
   const selectedCategory = getSelectedCategory(category);
   const visiblePosts =
     selectedCategory === "All Posts"
@@ -226,7 +223,10 @@ export default async function BlogIndexPage({
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <SourceWeftHeader authState={signedOutHeaderState} />
+      <SourceWeftHeader
+        authState={initialAuthState}
+        containerClassName={blogContainerClassName}
+      />
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
           aria-hidden
@@ -300,7 +300,7 @@ export default async function BlogIndexPage({
       </section>
 
       <NewsletterBand />
-      <SourceWeftFooter />
+      <SourceWeftFooter containerClassName={blogContainerClassName} />
     </main>
   );
 }

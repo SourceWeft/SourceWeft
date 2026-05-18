@@ -68,6 +68,10 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001' }}
             NEXT_PUBLIC_WEB_BASE_URL=${{ vars.NEXT_PUBLIC_WEB_BASE_URL || 'http://localhost:3000' }}
+            NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED || 'false' }}
+            NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID || '' }}
+            NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED=${{ vars.NEXT_PUBLIC_GOOGLE_ONE_TAP_FEDCM_ENABLED || 'false' }}
+            NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID || '' }}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

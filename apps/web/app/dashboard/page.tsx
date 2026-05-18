@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthenticate } from "@daveyplate/better-auth-ui";
 import {
   ArrowRight,
   ChevronLeft,
@@ -21,6 +20,7 @@ import {
   ScrollBar,
 } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { authClient } from "../../lib/auth-client";
 import { contentClient, workspaceClient } from "../../lib/sdk";
 import { ensureDashboardWorkspace } from "../../lib/dashboard-workspace-bootstrap";
 import {
@@ -474,7 +474,7 @@ function WorkspaceCard({
 
 export default function DashboardPage() {
   const router = useRouter();
-  const authState = useAuthenticate();
+  const authState = authClient.useSession();
   const dashboardState = useDashboardChatState();
   const sessionState = authState.data as
     | {
@@ -712,11 +712,7 @@ export default function DashboardPage() {
   }
 
   if (!sessionState) {
-    return (
-      <main className="flex min-h-svh items-center justify-center p-8 text-sm text-muted-foreground">
-        Unable to resolve session.
-      </main>
-    );
+    return <DashboardHomeRouteSkeleton />;
   }
 
   return (

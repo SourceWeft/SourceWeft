@@ -10,14 +10,22 @@ import {
   type LandingAuthState,
 } from "./use-landing-auth-state";
 
-export function SourceWeftHeader({ authState }: { authState: LandingAuthState }) {
+export function SourceWeftHeader({
+  authState,
+  containerClassName = "max-w-6xl px-6",
+}: {
+  authState: LandingAuthState;
+  containerClassName?: string;
+}) {
   const dashboardHref = "/dashboard";
   const signInHref = "/auth/sign-in";
   const userLabel = getLandingUserLabel(authState.user);
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-200/80 bg-white/85 backdrop-blur-[12px] dark:border-white/[0.06] dark:bg-zinc-950/85">
-      <nav className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
+      <nav
+        className={`mx-auto flex h-14 items-center justify-between ${containerClassName}`}
+      >
         <SourceWeftBrandLockup size="nav" />
 
         <div className="hidden items-center gap-6 md:flex">

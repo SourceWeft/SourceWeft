@@ -13,6 +13,7 @@ import {
   planFamilyToPricingPlanId,
   type PlanConfig,
 } from "../../_landing/pricing-config";
+import type { LandingAuthState } from "../components/use-landing-auth-state";
 
 type BillingInterval = "monthly" | "yearly";
 type PaidPlanId = Extract<PlanConfig["id"], "pro" | "team">;
@@ -121,15 +122,11 @@ function createPricingAuthHref(
   )}`;
 }
 
-export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
-  const [yearly, setYearly] = useState(false);
-  const [loadingPlan, setLoadingPlan] = useState<"pro" | "team" | null>(null);
-  const [summary, setSummary] = useState<BillingSummary | null>(null);
-  const [teamCheckoutOpen, setTeamCheckoutOpen] = useState(false);
+function useSignedInBillingTeamId() {
   const { data: activeOrg } = authClient.useActiveOrganization();
   const { data: orgs } = authClient.useListOrganizations();
 
-  const billingTeamId = useMemo(() => {
+  return useMemo(() => {
     const activeOrgRecord = activeOrg as PricingOrg | null | undefined;
     if (activeOrgRecord?.id) {
       return activeOrgRecord.id;
@@ -139,6 +136,39 @@ export function PricingToggle({ plans }: { plans: PlanConfig[] }) {
       ((orgs ?? []) as PricingOrg[]).find(isPersonalOrganization)?.id ?? null
     );
   }, [activeOrg, orgs]);
+}
+
+export function PricingToggle({
+  authState,
+  plans,
+}: {
+  authState: LandingAuthState;
+  plans: PlanConfig[];
+}) {
+  if (authState.isSignedIn) {
+    return <SignedInPricingToggle plans={plans} />;
+  }
+
+  return <PricingToggleInner billingTeamId={null} plans={plans} />;
+}
+
+function SignedInPricingToggle({ plans }: { plans: PlanConfig[] }) {
+  const billingTeamId = useSignedInBillingTeamId();
+
+  return <PricingToggleInner billingTeamId={billingTeamId} plans={plans} />;
+}
+
+function PricingToggleInner({
+  billingTeamId,
+  plans,
+}: {
+  billingTeamId: string | null;
+  plans: PlanConfig[];
+}) {
+  const [yearly, setYearly] = useState(false);
+  const [loadingPlan, setLoadingPlan] = useState<"pro" | "team" | null>(null);
+  const [summary, setSummary] = useState<BillingSummary | null>(null);
+  const [teamCheckoutOpen, setTeamCheckoutOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;

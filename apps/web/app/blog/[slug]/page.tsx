@@ -14,6 +14,7 @@ import {
 
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { SITE_NAME, SITE_URL } from "../../seo";
 import { BlogVisual } from "../blog-visual";
 import { blogPosts, getBlogPost, getRelatedPosts, type BlogPost } from "../data";
@@ -22,11 +23,7 @@ export function generateStaticParams() {
   return blogPosts.map((post) => ({ slug: post.slug }));
 }
 
-const signedOutHeaderState = {
-  isPending: false,
-  isSignedIn: false,
-  user: null,
-} as const;
+const blogContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
 export async function generateMetadata({
   params,
@@ -240,11 +237,15 @@ export default async function BlogArticlePage({
     notFound();
   }
 
+  const initialAuthState = await resolveInitialLandingAuthState();
   const Icon = post.icon;
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <SourceWeftHeader authState={signedOutHeaderState} />
+      <SourceWeftHeader
+        authState={initialAuthState}
+        containerClassName={blogContainerClassName}
+      />
       <section className="border-b border-zinc-300 dark:border-white/10">
         <div className="mx-auto max-w-7xl px-5 pb-10 pt-24 sm:px-6 lg:px-8 lg:pb-14 lg:pt-28">
           <Link
@@ -285,7 +286,7 @@ export default async function BlogArticlePage({
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-10 px-5 py-12 sm:px-6 lg:grid-cols-[1fr_17rem] lg:px-8 lg:py-16">
+      <section className="mx-auto grid max-w-7xl gap-10 px-5 py-12 sm:px-6 lg:grid-cols-[minmax(0,48rem)_17rem] lg:justify-between lg:px-8 lg:py-16">
         <div className="min-w-0">
           <ArticleBody post={post} />
           <div className="mt-12 flex flex-wrap items-center gap-3 border-t border-zinc-300 pt-8 text-sm text-zinc-500 dark:border-white/10 dark:text-zinc-400">
@@ -300,7 +301,7 @@ export default async function BlogArticlePage({
       </section>
 
       <ArticleFooter post={post} />
-      <SourceWeftFooter />
+      <SourceWeftFooter containerClassName={blogContainerClassName} />
     </main>
   );
 }
