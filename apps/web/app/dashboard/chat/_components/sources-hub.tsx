@@ -13,26 +13,43 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  BookOpen,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  Cloud,
+  Copy,
   Download,
   ExternalLink,
   FileText,
   Folder,
   FolderPlus,
+  Globe2,
+  HardDrive,
   Link2,
   Loader2,
+  Mail,
+  MessageSquare,
   Music2,
   MoreHorizontal,
   MoveRight,
   Pencil,
+  Play,
+  Power,
+  PowerOff,
   RotateCcw,
   Search,
+  Settings2,
   Sparkles,
   SquareCheckBig,
   SquareMinus,
+  Table2,
   Trash2,
   Upload,
+  Webhook,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -40,6 +57,7 @@ import { toast } from "sonner";
 import {
   HttpClientError,
   type ConnectorWebhookEvent,
+  type GetNotionWebhookConfigResponse,
   type SourceConnector,
 } from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
@@ -57,6 +75,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@sourceweft/ui-web/components/ui/alert-dialog";
+import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button, buttonVariants } from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
@@ -80,6 +99,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
+import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { apiBaseUrl, connectorsClient, contentClient } from "../../../../lib/sdk";
@@ -216,6 +236,132 @@ const SOURCE_FILE_EXTENSIONS = [
 ] as const;
 const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(",");
 const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
+const connectorCatalog: ConnectorCatalogItem[] = [
+  {
+    id: "notion",
+    name: "Notion",
+    category: "Knowledge & Docs",
+    description: "Sync pages, data sources, comments, and write approved outputs.",
+    capabilities: ["Pages", "Databases", "Webhooks", "Write actions"],
+    connectMode: "oauth_connector",
+    icon: BookOpen,
+  },
+  {
+    id: "google-drive",
+    name: "Google Drive",
+    category: "File Storage",
+    description: "Search and sync Drive files from shared workspaces.",
+    capabilities: ["Files", "Folders", "Permissions"],
+    connectMode: "coming_soon",
+    icon: HardDrive,
+  },
+  {
+    id: "onedrive",
+    name: "OneDrive",
+    category: "File Storage",
+    description: "Bring Microsoft 365 documents into SourceWeft.",
+    capabilities: ["Files", "Folders", "Microsoft 365"],
+    connectMode: "coming_soon",
+    icon: Cloud,
+  },
+  {
+    id: "dropbox",
+    name: "Dropbox",
+    category: "File Storage",
+    description: "Sync Dropbox folders and project documents.",
+    capabilities: ["Files", "Folders", "Sync"],
+    connectMode: "coming_soon",
+    icon: Cloud,
+  },
+  {
+    id: "gmail",
+    name: "Gmail",
+    category: "Communication",
+    description: "Search, read, draft, and send approved emails.",
+    capabilities: ["Mail", "Drafts", "Actions"],
+    connectMode: "coming_soon",
+    icon: Mail,
+  },
+  {
+    id: "slack",
+    name: "Slack",
+    category: "Communication",
+    description: "Index channels and route approved workspace updates.",
+    capabilities: ["Messages", "Channels", "Actions"],
+    connectMode: "coming_soon",
+    icon: MessageSquare,
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    category: "Projects & Data",
+    description: "Search, read, and manage issues and projects.",
+    capabilities: ["Issues", "Projects", "Actions"],
+    connectMode: "coming_soon",
+    icon: CircleAlert,
+  },
+  {
+    id: "airtable",
+    name: "Airtable",
+    category: "Projects & Data",
+    description: "Browse bases, tables, records, and structured knowledge.",
+    capabilities: ["Tables", "Records", "Query"],
+    connectMode: "coming_soon",
+    icon: Table2,
+  },
+  {
+    id: "google-calendar",
+    name: "Google Calendar",
+    category: "Projects & Data",
+    description: "Search and manage calendar context and events.",
+    capabilities: ["Events", "Schedules", "Actions"],
+    connectMode: "coming_soon",
+    icon: CalendarDays,
+  },
+  {
+    id: "wordpress",
+    name: "WordPress",
+    category: "Publishing",
+    description: "Use posts and pages as source material and outputs.",
+    capabilities: ["Posts", "Pages", "Publishing"],
+    connectMode: "coming_soon",
+    icon: Globe2,
+  },
+  {
+    id: "ghost",
+    name: "Ghost",
+    category: "Publishing",
+    description: "Read and draft publication content with approvals.",
+    capabilities: ["Posts", "Drafts", "Publishing"],
+    connectMode: "coming_soon",
+    icon: Globe2,
+  },
+  {
+    id: "devto",
+    name: "Dev.to",
+    category: "Publishing",
+    description: "Connect technical articles and publication workflows.",
+    capabilities: ["Articles", "Publishing", "Search"],
+    connectMode: "coming_soon",
+    icon: FileText,
+  },
+  {
+    id: "hashnode",
+    name: "Hashnode",
+    category: "Publishing",
+    description: "Bring developer blogs into the knowledge graph.",
+    capabilities: ["Posts", "Blogs", "Publishing"],
+    connectMode: "coming_soon",
+    icon: Globe2,
+  },
+];
+const connectorCatalogCategories: ConnectorCatalogCategory[] = [
+  "Knowledge & Docs",
+  "File Storage",
+  "Communication",
+  "Projects & Data",
+  "Publishing",
+];
 
 type HubTab = (typeof tabs)[number] | "Citations";
 type AddTab = (typeof addTabs)[number];
@@ -271,6 +417,9 @@ type WorkfileListItem = Awaited<
 type WorkfileDetail = Awaited<
   ReturnType<typeof contentClient.getWorkingFile>
 >["file"];
+type ConnectorAccountItem = Awaited<
+  ReturnType<typeof connectorsClient.listAccounts>
+>["items"][number];
 export type ArtifactListItem = Awaited<
   ReturnType<typeof contentClient.listArtifacts>
 >["items"][number];
@@ -309,6 +458,37 @@ type ConnectorItem = {
 };
 
 type ConnectorWebhookEventItem = ConnectorWebhookEvent;
+type NotionWebhookConfig = GetNotionWebhookConfigResponse;
+type ConnectorCatalogCategory =
+  | "Knowledge & Docs"
+  | "File Storage"
+  | "Communication"
+  | "Projects & Data"
+  | "Publishing";
+type ConnectorConnectMode = "oauth_connector" | "coming_soon";
+type ConnectorCatalogItem = {
+  id: string;
+  name: string;
+  category: ConnectorCatalogCategory;
+  description: string;
+  capabilities: string[];
+  connectMode: ConnectorConnectMode;
+  icon: LucideIcon;
+};
+type ManageConnectorsTab = "all" | "active";
+type ConnectorCatalogStatusKind =
+  | "available"
+  | "connected"
+  | "active"
+  | "needs_setup"
+  | "syncing"
+  | "error"
+  | "coming_soon";
+type ConnectorCatalogStatus = {
+  kind: ConnectorCatalogStatusKind;
+  label: string;
+  detail: string;
+};
 
 export type ThreadCitationRecord = {
   citation: CitationRecord;
@@ -3476,79 +3656,735 @@ function SkillsTab({
   );
 }
 
-function ConnectorsTab({
-  connectors,
+function formatConnectorDate(value: string | null) {
+  return value ? new Date(value).toLocaleString() : "Never";
+}
+
+function connectorCatalogMatches(item: ConnectorCatalogItem, searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return true;
+  return [
+    item.name,
+    item.category,
+    item.description,
+    item.connectMode,
+    ...item.capabilities,
+  ].some((value) => value.toLowerCase().includes(q));
+}
+
+function connectorMatchesSearch(connector: ConnectorItem, searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return true;
+  return [
+    connector.name,
+    connector.status,
+    connector.meta,
+    connector.raw.connectorType,
+    connector.raw.lastError ?? "",
+  ].some((value) => value.toLowerCase().includes(q));
+}
+
+function statusTone(status: ConnectorCatalogStatusKind) {
+  if (status === "active") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  if (status === "syncing") return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+  if (status === "connected" || status === "available") return "border-primary/30 bg-primary/10 text-primary";
+  if (status === "needs_setup") return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  if (status === "error") return "border-destructive/30 bg-destructive/10 text-destructive";
+  return "border-border bg-muted/50 text-muted-foreground";
+}
+
+function statusIcon(status: ConnectorCatalogStatusKind) {
+  if (status === "active") return CheckCircle2;
+  if (status === "syncing") return Loader2;
+  if (status === "needs_setup") return Webhook;
+  if (status === "error") return CircleAlert;
+  if (status === "coming_soon") return Clock3;
+  return PlugIcon;
+}
+
+function PlugIcon({ className }: { className?: string }) {
+  return <Link2 className={className} />;
+}
+
+function getCatalogConnector(item: ConnectorCatalogItem, connectors: ConnectorItem[]) {
+  if (item.id !== "notion") return null;
+  return (
+    connectors.find(
+      (connector) =>
+        connector.raw.connectorType === "notion" &&
+        connector.status !== "disabled",
+    ) ?? null
+  );
+}
+
+function getNotionConnectorStatus(input: {
+  connector: ConnectorItem | null;
+  hasActiveAccount: boolean;
+  isBusy: boolean;
+  webhookConfig: NotionWebhookConfig | null;
+}): ConnectorCatalogStatus {
+  if (input.isBusy) {
+    return {
+      kind: "syncing",
+      label: "Syncing",
+      detail: "A connector operation is running.",
+    };
+  }
+
+  const connector = input.connector;
+  if (connector) {
+    if (connector.status === "error" || connector.raw.lastError) {
+      return {
+        kind: "error",
+        label: "Error",
+        detail: connector.raw.lastError || "Connector needs attention.",
+      };
+    }
+    if (connector.status === "paused") {
+      return {
+        kind: "needs_setup",
+        label: "Paused",
+        detail: "Syncing is paused until you resume this connector.",
+      };
+    }
+    if (input.webhookConfig && !input.webhookConfig.isConfigured) {
+      return {
+        kind: "needs_setup",
+        label: "Needs setup",
+        detail: "Configure a public HTTPS webhook endpoint.",
+      };
+    }
+    return {
+      kind: "active",
+      label: "Active",
+      detail: `Last sync ${formatConnectorDate(connector.raw.lastIndexedAt)}`,
+    };
+  }
+
+  if (input.hasActiveAccount) {
+    return {
+      kind: "connected",
+      label: "Connected",
+      detail: "OAuth is connected. Enable syncing to create the connector.",
+    };
+  }
+
+  return {
+    kind: "available",
+    label: "Available",
+    detail: "Ready to connect with Notion OAuth.",
+  };
+}
+
+function getCatalogStatus(input: {
+  item: ConnectorCatalogItem;
+  connectors: ConnectorItem[];
+  hasActiveNotionAccount: boolean;
+  connectorBusyById: Record<string, boolean>;
+  webhookConfig: NotionWebhookConfig | null;
+}): ConnectorCatalogStatus {
+  if (input.item.connectMode === "coming_soon") {
+    return {
+      kind: "coming_soon",
+      label: "Coming soon",
+      detail: "This integration is on the roadmap.",
+    };
+  }
+  const connector = getCatalogConnector(input.item, input.connectors);
+  return getNotionConnectorStatus({
+    connector,
+    hasActiveAccount: input.hasActiveNotionAccount,
+    isBusy: Boolean(connector && input.connectorBusyById[connector.id]),
+    webhookConfig: input.webhookConfig,
+  });
+}
+
+function ConnectorStatusBadge({ status }: { status: ConnectorCatalogStatus }) {
+  const Icon = statusIcon(status.kind);
+  return (
+    <Badge
+      className={cn(
+        "h-5 max-w-full gap-1 border px-1.5 text-[10px]",
+        statusTone(status.kind),
+      )}
+      variant="outline"
+    >
+      <Icon
+        className={cn("size-3", status.kind === "syncing" && "animate-spin")}
+      />
+      {status.label}
+    </Badge>
+  );
+}
+
+function ConnectorLogo({
+  icon: Icon,
+  active,
+  className,
+}: {
+  icon: LucideIcon;
+  active?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background shadow-xs",
+        active && "border-primary/40 bg-primary/5 text-primary",
+        className,
+      )}
+    >
+      <Icon className="size-4" />
+    </div>
+  );
+}
+
+function ConnectorCatalogCard({
+  item,
+  status,
+  connector,
+  isConnectingNotion,
+  onConfigure,
+  onConnectNotion,
+  onCreateNotionConnector,
+  onRequestConnector,
+}: {
+  item: ConnectorCatalogItem;
+  status: ConnectorCatalogStatus;
+  connector: ConnectorItem | null;
+  isConnectingNotion: boolean;
+  onConfigure: () => void;
+  onConnectNotion: () => void;
+  onCreateNotionConnector: () => void;
+  onRequestConnector: (item: ConnectorCatalogItem) => void;
+}) {
+  const isNotion = item.connectMode === "oauth_connector";
+  const isBusy = isConnectingNotion && isNotion;
+  const cta =
+    item.connectMode === "coming_soon"
+      ? "Request"
+      : connector
+        ? "Configure"
+        : status.kind === "connected"
+          ? "Enable"
+          : "Connect";
+
+  function handleAction() {
+    if (item.connectMode === "coming_soon") {
+      onRequestConnector(item);
+      return;
+    }
+    if (connector) {
+      onConfigure();
+      return;
+    }
+    if (status.kind === "connected") {
+      onCreateNotionConnector();
+      return;
+    }
+    onConnectNotion();
+  }
+
+  return (
+    <article
+      className={cn(
+        "group flex min-h-[112px] flex-col justify-between rounded-lg border bg-background p-2.5 shadow-xs transition-colors hover:bg-accent/30",
+        status.kind === "needs_setup" && "border-amber-500/30",
+        status.kind === "error" && "border-destructive/30",
+      )}
+    >
+      <div className="flex items-start gap-2.5">
+        <ConnectorLogo
+          active={status.kind === "active" || status.kind === "connected"}
+          icon={item.icon}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-start justify-between gap-1.5">
+            <div className="min-w-0">
+              <h4 className="truncate text-sm font-medium text-foreground">
+                {item.name}
+              </h4>
+              <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
+                {item.description}
+              </p>
+            </div>
+            <div className="hidden max-w-[42%] shrink-0 sm:block">
+              <ConnectorStatusBadge status={status} />
+            </div>
+          </div>
+          <div className="mt-1.5 hidden flex-wrap gap-1 sm:flex">
+            {item.capabilities.slice(0, 2).map((capability) => (
+              <TypeBadge key={capability} label={capability} />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="truncate text-[10px] text-muted-foreground">
+          {status.detail}
+        </span>
+        <Button
+          className="shrink-0"
+          disabled={isBusy}
+          onClick={handleAction}
+          size="xs"
+          type="button"
+          variant={status.kind === "coming_soon" ? "outline" : "default"}
+        >
+          {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          {cta}
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+function ActiveConnectorCard({
+  connector,
   connectorBusyById,
+  webhookConfig,
+  webhookEvents,
+  onCopyWebhook,
+  onDisconnect,
+  onSyncConnector,
+  onToggleStatus,
+}: {
+  connector: ConnectorItem;
+  connectorBusyById: Record<string, boolean>;
+  webhookConfig: NotionWebhookConfig | null;
+  webhookEvents: ConnectorWebhookEventItem[];
+  onCopyWebhook: (value: string) => void;
+  onDisconnect: (connector: ConnectorItem) => void;
+  onSyncConnector: (connector: ConnectorItem) => void;
+  onToggleStatus: (connector: ConnectorItem) => void;
+}) {
+  const isBusy = Boolean(connectorBusyById[connector.id]);
+  const catalogItem =
+    connectorCatalog.find((item) => item.id === connector.raw.connectorType) ??
+    connectorCatalog.find((item) => item.id === "notion");
+  const icon = catalogItem?.icon ?? Link2;
+  const status = getNotionConnectorStatus({
+    connector,
+    hasActiveAccount: true,
+    isBusy,
+    webhookConfig:
+      connector.raw.connectorType === "notion" ? webhookConfig : null,
+  });
+  const pauseLabel = connector.status === "paused" ? "Resume" : "Pause";
+  const PauseIcon = connector.status === "paused" ? Play : PowerOff;
+
+  return (
+    <article className="rounded-lg border bg-background p-2.5 shadow-xs">
+      <div className="flex items-start gap-2.5">
+        <ConnectorLogo active icon={icon} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h4 className="truncate text-sm font-medium text-foreground">
+                {connector.name}
+              </h4>
+              <p className="mt-1 truncate text-xs text-muted-foreground">
+                {connector.raw.connectorType} · {connector.meta}
+              </p>
+            </div>
+            <div className="hidden shrink-0 sm:block">
+              <ConnectorStatusBadge status={status} />
+            </div>
+          </div>
+          {connector.raw.lastError ? (
+            <Alert className="mt-3" variant="destructive">
+              <AlertDescription>{connector.raw.lastError}</AlertDescription>
+            </Alert>
+          ) : null}
+          {connector.raw.connectorType === "notion" && webhookConfig ? (
+            <div className="mt-3 rounded-lg border bg-muted/25 p-2.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1 font-medium text-foreground">
+                  <Webhook className="size-3.5" />
+                  Webhook URL
+                </span>
+                {!webhookConfig.isConfigured ? (
+                  <Badge
+                    className="border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-300"
+                    variant="outline"
+                  >
+                    local
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="mt-2 flex min-w-0 items-center gap-1.5">
+                <code className="min-w-0 flex-1 truncate rounded-md bg-background px-2 py-1 text-[10px] text-muted-foreground">
+                  {webhookConfig.webhookUrl}
+                </code>
+                <Button
+                  className="size-7"
+                  onClick={() => onCopyWebhook(webhookConfig.webhookUrl)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Copy className="size-3.5" />
+                  <span className="sr-only">Copy webhook URL</span>
+                </Button>
+              </div>
+              <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
+                Add this URL in Notion connection settings after OAuth is
+                complete. Notion requires public HTTPS.
+              </p>
+              {webhookEvents.length > 0 ? (
+                <div className="mt-2 space-y-1 border-t pt-2">
+                  {webhookEvents.slice(0, 3).map((event) => (
+                    <div
+                      className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
+                      key={event.id}
+                    >
+                      <span className="truncate">{event.eventType}</span>
+                      <span className="shrink-0">{event.status}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <Button
+          disabled={connector.status !== "active" || isBusy}
+          onClick={() => onSyncConnector(connector)}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          {isBusy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="size-3.5" />
+          )}
+          Sync now
+        </Button>
+        <Button
+          disabled={isBusy}
+          onClick={() => onToggleStatus(connector)}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          <PauseIcon className="size-3.5" />
+          {pauseLabel}
+        </Button>
+        <Button
+          disabled={isBusy}
+          onClick={() => onDisconnect(connector)}
+          size="xs"
+          type="button"
+          variant="ghost"
+        >
+          <Power className="size-3.5" />
+          Disconnect
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+function ManageConnectorsDialog({
+  accounts,
+  connectorBusyById,
+  connectors,
   isConnectingNotion,
   isLoading,
   loadingError,
   onConnectNotion,
+  onCopyWebhook,
   onCreateNotionConnector,
+  onDisconnectConnector,
+  onOpenChange,
+  onRequestConnector,
   onSyncConnector,
-  searchQuery,
+  onToggleConnectorStatus,
+  open,
+  webhookConfig,
   webhookEvents,
-  workspaceId,
 }: {
-  connectors: ConnectorItem[];
+  accounts: ConnectorAccountItem[];
   connectorBusyById: Record<string, boolean>;
+  connectors: ConnectorItem[];
   isConnectingNotion: boolean;
   isLoading: boolean;
   loadingError: string | null;
   onConnectNotion: () => void;
+  onCopyWebhook: (value: string) => void;
   onCreateNotionConnector: () => void;
+  onDisconnectConnector: (connector: ConnectorItem) => void;
+  onOpenChange: (open: boolean) => void;
+  onRequestConnector: (item: ConnectorCatalogItem) => void;
   onSyncConnector: (connector: ConnectorItem) => void;
-  searchQuery: string;
+  onToggleConnectorStatus: (connector: ConnectorItem) => void;
+  open: boolean;
+  webhookConfig: NotionWebhookConfig | null;
   webhookEvents: ConnectorWebhookEventItem[];
-  workspaceId?: string | null;
 }) {
-  const filtered = useMemo(
-    () => filterConnectors(connectors, searchQuery),
-    [connectors, searchQuery],
+  const [tab, setTab] = useState<ManageConnectorsTab>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const activeConnectors = connectors.filter(
+    (connector) => connector.status !== "disabled",
   );
+  const hasActiveNotionAccount = accounts.some(
+    (account) =>
+      account.connectorType === "notion" && account.status === "active",
+  );
+  const visibleCatalog = connectorCatalog.filter((item) =>
+    connectorCatalogMatches(item, searchQuery),
+  );
+  const visibleActiveConnectors = activeConnectors.filter((connector) =>
+    connectorMatchesSearch(connector, searchQuery),
+  );
+  const filterLabel = tab === "active" ? "Active only" : "All connectors";
 
   return (
-    <section className="space-y-1">
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent
+        className="grid h-[min(860px,calc(100svh-1rem))] w-[min(980px,calc(100vw-1rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
+        constrainWidth={false}
+      >
+        <>
+          <DialogHeader className="border-b px-4 py-3 pr-11 text-left sm:px-5 sm:py-4 sm:pr-12">
+            <div className="min-w-0">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <DialogTitle className="text-lg sm:text-xl">
+                  Manage Connectors
+                </DialogTitle>
+                <Badge
+                  className="h-5 shrink-0 px-1.5 text-[10px]"
+                  variant="secondary"
+                >
+                  {activeConnectors.length} active
+                </Badge>
+              </div>
+              <DialogDescription className="mt-1 max-w-[680px] text-xs leading-5 sm:text-sm">
+                Connect SourceWeft to knowledge, project, and communication
+                tools.
+              </DialogDescription>
+            </div>
+            <div className="mt-3 grid min-w-0 gap-2 md:grid-cols-[minmax(0,auto)_minmax(220px,320px)] md:items-center md:justify-between">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="h-9 w-full justify-between gap-2 rounded-lg px-3 text-xs md:w-48"
+                    type="button"
+                    variant="outline"
+                  >
+                    <span className="min-w-0 truncate text-left">
+                      <span className="text-muted-foreground">Filter:</span>{" "}
+                      {filterLabel}
+                    </span>
+                    <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-48">
+                  <DropdownMenuItem onSelect={() => setTab("all")}>
+                    <CheckCircle2
+                      className={cn(
+                        "size-3.5",
+                        tab !== "all" && "opacity-0",
+                      )}
+                    />
+                    All connectors
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setTab("active")}>
+                    <CheckCircle2
+                      className={cn(
+                        "size-3.5",
+                        tab !== "active" && "opacity-0",
+                      )}
+                    />
+                    Active only
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <div className="relative min-w-0">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="h-9 rounded-lg bg-muted/35 pr-8 pl-8 text-sm"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search connectors"
+                  value={searchQuery}
+                />
+                {searchQuery ? (
+                  <button
+                    className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setSearchQuery("")}
+                    type="button"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </DialogHeader>
+
+          <ScrollArea className="min-h-0">
+            <div className="space-y-4 px-4 py-4 sm:px-5">
+              {loadingError ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{loadingError}</AlertDescription>
+                </Alert>
+              ) : null}
+              {isLoading ? (
+                <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  Loading connectors...
+                </div>
+              ) : null}
+
+              {tab === "all" ? (
+                <div className="mt-0 space-y-4">
+                  {connectorCatalogCategories.map((category) => {
+                    const items = visibleCatalog.filter(
+                      (item) => item.category === category,
+                    );
+                    if (items.length === 0) return null;
+                    return (
+                      <section className="space-y-2" key={category}>
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-xs font-medium text-muted-foreground">
+                            {category}
+                          </h3>
+                          <span className="text-[10px] text-muted-foreground">
+                            {items.length}
+                          </span>
+                        </div>
+                        <div className="grid gap-2.5 lg:grid-cols-2">
+                          {items.map((item) => {
+                            const connector = getCatalogConnector(
+                              item,
+                              connectors,
+                            );
+                            const status = getCatalogStatus({
+                              item,
+                              connectors,
+                              hasActiveNotionAccount,
+                              connectorBusyById,
+                              webhookConfig,
+                            });
+                            return (
+                              <ConnectorCatalogCard
+                                connector={connector}
+                                isConnectingNotion={isConnectingNotion}
+                                item={item}
+                                key={item.id}
+                                onConfigure={() => setTab("active")}
+                                onConnectNotion={onConnectNotion}
+                                onCreateNotionConnector={
+                                  onCreateNotionConnector
+                                }
+                                onRequestConnector={onRequestConnector}
+                                status={status}
+                              />
+                            );
+                          })}
+                        </div>
+                      </section>
+                    );
+                  })}
+                  {visibleCatalog.length === 0 ? (
+                    <HubEmptyState
+                      description="Try a different provider, capability, or category."
+                      icon={Search}
+                      title={`No connectors match "${searchQuery}"`}
+                    />
+                  ) : null}
+                </div>
+              ) : (
+                <div className="mt-0 space-y-3">
+                  {visibleActiveConnectors.length > 0 ? (
+                    visibleActiveConnectors.map((connector) => (
+                      <ActiveConnectorCard
+                        connector={connector}
+                        connectorBusyById={connectorBusyById}
+                        key={connector.id}
+                        onCopyWebhook={onCopyWebhook}
+                        onDisconnect={onDisconnectConnector}
+                        onSyncConnector={onSyncConnector}
+                        onToggleStatus={onToggleConnectorStatus}
+                        webhookConfig={webhookConfig}
+                        webhookEvents={webhookEvents}
+                      />
+                    ))
+                  ) : (
+                    <HubEmptyState
+                      description={
+                        searchQuery
+                          ? "Try another connector name or status."
+                          : "Connect Notion or choose an upcoming integration from the catalog."
+                      }
+                      icon={Link2}
+                      title={
+                        searchQuery
+                          ? `No active connectors match "${searchQuery}"`
+                          : "No active connectors yet."
+                      }
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConnectorsTab({
+  connectors,
+  isLoading,
+  loadingError,
+  onManageConnectors,
+  webhookConfig,
+}: {
+  connectors: ConnectorItem[];
+  isLoading: boolean;
+  loadingError: string | null;
+  onManageConnectors: () => void;
+  webhookConfig: NotionWebhookConfig | null;
+}) {
+  const activeConnectors = connectors.filter(
+    (connector) => connector.status !== "disabled",
+  );
+  const errorConnectors = activeConnectors.filter(
+    (connector) => connector.status === "error" || connector.raw.lastError,
+  );
+  const needsWebhookSetup =
+    activeConnectors.some((connector) => connector.raw.connectorType === "notion") &&
+    webhookConfig &&
+    !webhookConfig.isConfigured;
+  const recentConnector = activeConnectors[0] ?? null;
+
+  return (
+    <section className="space-y-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-medium text-foreground">Connectors</h3>
           <span className="text-[10px] text-muted-foreground">
-            {connectors.length} connectors
+            {activeConnectors.length} active
           </span>
-          {searchQuery ? (
-            <span className="text-[10px] text-primary">
-              {filtered.length} found
-            </span>
-          ) : null}
         </div>
-        <div className="flex min-h-8 w-[108px] items-center justify-end gap-1.5">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                disabled={isConnectingNotion || !workspaceId}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                {isConnectingNotion ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Link2 className="size-3.5" />
-                )}
-                Connect
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onSelect={onConnectNotion}>
-                <Link2 className="size-3.5" />
-                Connect Notion
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onCreateNotionConnector}>
-                <Upload className="size-3.5" />
-                Create Notion connector
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <Button
+          disabled={isLoading}
+          onClick={onManageConnectors}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          {isLoading ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Settings2 className="size-3.5" />
+          )}
+          Manage
+        </Button>
       </div>
 
       {loadingError ? (
@@ -3557,90 +4393,51 @@ function ConnectorsTab({
         </Alert>
       ) : null}
 
-      <div className="rounded-lg border bg-muted/30 p-2.5 text-xs text-muted-foreground">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-medium text-foreground">Notion webhook URL</span>
-          <code className="max-w-[62%] truncate rounded bg-background px-1.5 py-0.5 text-[10px]">
-            {apiBaseUrl}/v1/connectors/webhooks/notion
-          </code>
-        </div>
-        <p className="mt-1">
-          Create and verify this webhook in Notion connection settings.
-        </p>
-        {webhookEvents.length > 0 ? (
-          <div className="mt-2 space-y-1">
-            {webhookEvents.slice(0, 3).map((event) => (
-              <div
-                className="flex items-center justify-between gap-2"
-                key={event.id}
-              >
-                <span className="truncate">{event.eventType}</span>
-                <span className="shrink-0 text-[10px]">{event.status}</span>
-              </div>
-            ))}
+      <div className="rounded-lg border bg-muted/25 p-3">
+        <div className="flex items-start gap-2.5">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
+            <Link2 className="size-4 text-muted-foreground" />
           </div>
-        ) : null}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">
+              Connector catalog
+            </p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Connect Notion or preview upcoming integrations for your
+              workspace.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <TypeBadge label={`${activeConnectors.length} active`} />
+              <TypeBadge label={`${connectorCatalog.length} available`} />
+              {errorConnectors.length > 0 ? (
+                <TypeBadge label={`${errorConnectors.length} error`} />
+              ) : null}
+              {needsWebhookSetup ? <TypeBadge label="Webhook setup" /> : null}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
-          <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-          Loading connectors...
+      {recentConnector ? (
+        <div className="rounded-lg border bg-background p-2.5 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate font-medium text-foreground">
+              {recentConnector.name}
+            </span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {recentConnector.status}
+            </span>
+          </div>
+          <p className="mt-1 truncate text-muted-foreground">
+            {recentConnector.meta}
+          </p>
         </div>
-      ) : filtered.length === 0 ? (
-        <HubEmptyState
-          description={
-            searchQuery
-              ? "Try a different connector name, status, or provider."
-              : "Connect external apps and storage to pull project sources into the Hub."
-          }
-          icon={Link2}
-          title={
-            searchQuery
-              ? `No connectors match "${searchQuery}"`
-              : "Connectors will appear here."
-          }
-        />
       ) : (
-        <div className="space-y-1.5">
-          {filtered.map((connector) => (
-            <article
-              className="rounded-lg border bg-background p-2.5 shadow-xs"
-              key={connector.id}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-foreground">
-                  {connector.name}
-                </p>
-                <span className="text-[11px] text-muted-foreground">
-                  {connector.status}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {connector.meta}
-              </p>
-              <div className="mt-3 flex items-center gap-1.5">
-                <Button
-                  disabled={
-                    connector.status !== "active" ||
-                    Boolean(connectorBusyById[connector.id])
-                  }
-                  onClick={() => onSyncConnector(connector)}
-                  size="xs"
-                  type="button"
-                  variant="outline"
-                >
-                  {connectorBusyById[connector.id] ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <RotateCcw className="size-3.5" />
-                  )}
-                  Sync now
-                </Button>
-              </div>
-            </article>
-          ))}
-        </div>
+        <HubEmptyState
+          description="Open the catalog to connect Notion or preview upcoming integrations."
+          icon={Link2}
+          title="No active connectors yet."
+        />
       )}
     </section>
   );
@@ -3811,18 +4608,6 @@ function filterCitations(items: DisplayCitationItem[], searchQuery: string) {
   );
 }
 
-function filterConnectors(items: ConnectorItem[], searchQuery: string) {
-  const q = searchQuery.trim().toLowerCase();
-  if (!q) {
-    return items;
-  }
-  return items.filter((connector) =>
-    connector.name.toLowerCase().includes(q) ||
-    connector.status.toLowerCase().includes(q) ||
-    connector.meta.toLowerCase().includes(q),
-  );
-}
-
 function countFilteredSources(items: SourceItem[], searchQuery: string) {
   const q = searchQuery.trim().toLowerCase();
   if (!q) {
@@ -3953,13 +4738,21 @@ export function SourcesHub({
   const [artifactsLoadingError, setArtifactsLoadingError] = useState<string | null>(null);
   const [artifactsNextCursor, setArtifactsNextCursor] = useState<string | null>(null);
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
+  const [connectorAccounts, setConnectorAccounts] = useState<
+    ConnectorAccountItem[]
+  >([]);
   const [isLoadingConnectors, setIsLoadingConnectors] = useState(false);
   const [connectorsLoadingError, setConnectorsLoadingError] = useState<string | null>(null);
   const [connectorBusyById, setConnectorBusyById] = useState<Record<string, boolean>>({});
   const [isConnectingNotion, setIsConnectingNotion] = useState(false);
+  const [isManageConnectorsOpen, setIsManageConnectorsOpen] = useState(false);
+  const [pendingDisconnectConnector, setPendingDisconnectConnector] =
+    useState<ConnectorItem | null>(null);
   const [connectorWebhookEvents, setConnectorWebhookEvents] = useState<
     ConnectorWebhookEventItem[]
   >([]);
+  const [notionWebhookConfig, setNotionWebhookConfig] =
+    useState<NotionWebhookConfig | null>(null);
   const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(null);
   const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(null);
   const [workfileBusyByPath, setWorkfileBusyByPath] = useState<Record<string, boolean>>({});
@@ -4001,6 +4794,7 @@ export function SourcesHub({
     ? (citations[activeCitationIndex - 1]?.chunkId ?? null)
     : null;
   const addSourceDialog = useAddSourceDialogState();
+  const resetAddSourceDialog = addSourceDialog.reset;
   const [isCreateDirectoryOpen, setIsCreateDirectoryOpen] = useState(false);
   const [directoryTitle, setDirectoryTitle] = useState("");
   const [directoryContext, setDirectoryContext] = useState("");
@@ -4045,6 +4839,10 @@ export function SourcesHub({
   const allSelectableSourcesSelected =
     selectableSourceIds.length > 0 &&
     selectedLibrarySources.length >= selectableSourceIds.length;
+  const activeNotionAccount = connectorAccounts.find(
+    (account) =>
+      account.connectorType === "notion" && account.status === "active",
+  );
 
   const resetSourcePagingState = useCallback(() => {
     sourceParentCursorRef.current = {};
@@ -4513,7 +5311,9 @@ export function SourcesHub({
   const refreshConnectors = useCallback(async () => {
     if (!workspaceId) {
       setConnectors([]);
+      setConnectorAccounts([]);
       setConnectorWebhookEvents([]);
+      setNotionWebhookConfig(null);
       setConnectorsLoadingError(null);
       return;
     }
@@ -4521,17 +5321,44 @@ export function SourcesHub({
     setIsLoadingConnectors(true);
     setConnectorsLoadingError(null);
     try {
-      const [result, webhookEvents] = await Promise.all([
+      const [result, accounts] = await Promise.all([
         connectorsClient.list(workspaceId),
+        connectorsClient.listAccounts(workspaceId),
+      ]);
+      const uiConnectors = result.items.map(mapConnectorToUi);
+      const notionConnector =
+        uiConnectors.find(
+          (connector) =>
+            connector.raw.connectorType === "notion" &&
+            connector.status !== "disabled",
+        ) ?? null;
+
+      setConnectors(uiConnectors);
+      setConnectorAccounts(accounts.items);
+      if (!notionConnector) {
+        setConnectorWebhookEvents([]);
+        setNotionWebhookConfig(null);
+        return;
+      }
+
+      const [webhookConfig, webhookEvents] = await Promise.allSettled([
+        connectorsClient.getNotionWebhookConfig(workspaceId, notionConnector.id),
         connectorsClient.listWebhookEvents(workspaceId, {
           connectorType: "notion",
+          connectorId: notionConnector.id,
         }),
       ]);
-      setConnectors(result.items.map(mapConnectorToUi));
-      setConnectorWebhookEvents(webhookEvents.items);
+      setNotionWebhookConfig(
+        webhookConfig.status === "fulfilled" ? webhookConfig.value : null,
+      );
+      setConnectorWebhookEvents(
+        webhookEvents.status === "fulfilled" ? webhookEvents.value.items : [],
+      );
     } catch (error) {
       setConnectors([]);
+      setConnectorAccounts([]);
       setConnectorWebhookEvents([]);
+      setNotionWebhookConfig(null);
       setConnectorsLoadingError(
         getErrorMessage(error, "Failed to load connectors."),
       );
@@ -4569,7 +5396,7 @@ export function SourcesHub({
     setMoveParentSourceId(null);
     setReadmeSource(null);
     setReadmeContent("");
-    addSourceDialog.reset();
+    resetAddSourceDialog();
     setDirectoryParentSourceId(null);
 
       if (initialSourcesLoaded) {
@@ -4585,7 +5412,7 @@ export function SourcesHub({
     replaceRootSources,
     refreshSources,
     resetSourcePagingState,
-    addSourceDialog.reset,
+    resetAddSourceDialog,
   ]);
 
   useEffect(() => {
@@ -4801,43 +5628,101 @@ export function SourcesHub({
     }
   }, [workspaceId]);
 
+  const ensureNotionConnector = useCallback(
+    async (accountId?: string | null) => {
+      if (!workspaceId) {
+        return null;
+      }
+      const current = connectors.find(
+        (connector) =>
+          connector.raw.connectorType === "notion" &&
+          connector.status !== "disabled",
+      );
+      if (current) {
+        return current;
+      }
+
+      setIsConnectingNotion(true);
+      try {
+        const accounts = await connectorsClient.listAccounts(workspaceId, {
+          connectorType: "notion",
+        });
+        const account =
+          accounts.items.find((item) => item.id === accountId) ??
+          accounts.items.find((item) => item.status === "active");
+        if (!account) {
+          toast.error("Connect Notion before creating a connector.");
+          return null;
+        }
+
+        const created = await connectorsClient.create(workspaceId, {
+          connectorType: "notion",
+          name: account.displayName || "Notion",
+          oauthAccountId: account.id,
+          configJson: {
+            includePages: true,
+            includeDataSources: true,
+            includeDatabases: true,
+          },
+          periodicIndexingEnabled: true,
+          indexingFrequencyMinutes: 360,
+        });
+        toast.success("Notion connector enabled.");
+        await refreshConnectors();
+        return mapConnectorToUi(created.connector);
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to enable Notion connector."));
+        return null;
+      } finally {
+        setIsConnectingNotion(false);
+      }
+    },
+    [connectors, refreshConnectors, workspaceId],
+  );
+
   const handleCreateNotionConnector = useCallback(async () => {
     if (!workspaceId) {
       toast.error("No workspace selected yet.");
       return;
     }
+    await ensureNotionConnector(activeNotionAccount?.id);
+    setIsManageConnectorsOpen(true);
+  }, [activeNotionAccount?.id, ensureNotionConnector, workspaceId]);
 
-    setIsConnectingNotion(true);
-    try {
-      const accounts = await connectorsClient.listAccounts(workspaceId, {
-        connectorType: "notion",
-      });
-      const account = accounts.items.find((item) => item.status === "active");
-      if (!account) {
-        toast.error("Connect Notion before creating a connector.");
-        return;
-      }
-
-      await connectorsClient.create(workspaceId, {
-        connectorType: "notion",
-        name: account.displayName || "Notion",
-        oauthAccountId: account.id,
-        configJson: {
-          includePages: true,
-          includeDataSources: true,
-          includeDatabases: true,
-        },
-        periodicIndexingEnabled: true,
-        indexingFrequencyMinutes: 360,
-      });
-      toast.success("Notion connector created.");
-      await refreshConnectors();
-    } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to create Notion connector."));
-    } finally {
-      setIsConnectingNotion(false);
+  useEffect(() => {
+    if (!workspaceId || typeof window === "undefined") {
+      return;
     }
-  }, [refreshConnectors, workspaceId]);
+    const url = new URL(window.location.href);
+    if (
+      url.searchParams.get("connector_oauth") !== "success" ||
+      url.searchParams.get("connector_type") !== "notion"
+    ) {
+      return;
+    }
+
+    const accountId = url.searchParams.get("account_id");
+    url.searchParams.delete("connector_oauth");
+    url.searchParams.delete("connector_type");
+    url.searchParams.delete("account_id");
+    window.history.replaceState(null, "", url.toString());
+
+    setIsManageConnectorsOpen(true);
+    void ensureNotionConnector(accountId);
+  }, [ensureNotionConnector, workspaceId]);
+
+  const handleRequestConnector = useCallback((item: ConnectorCatalogItem) => {
+    toast.info(`${item.name} is on the roadmap.`);
+  }, []);
+
+  const handleCopyWebhook = useCallback(async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Webhook URL copied.");
+    } catch {
+      toast.error("Could not copy webhook URL.");
+    }
+  }, []);
 
   const handleSyncConnector = useCallback(
     async (connector: ConnectorItem) => {
@@ -4856,6 +5741,48 @@ export function SourcesHub({
     },
     [refreshConnectors, workspaceId],
   );
+
+  const handleToggleConnectorStatus = useCallback(
+    async (connector: ConnectorItem) => {
+      if (!workspaceId) return;
+      const nextStatus = connector.status === "paused" ? "active" : "paused";
+      setConnectorBusy(connector.id, true);
+      try {
+        await connectorsClient.update(workspaceId, connector.id, {
+          status: nextStatus,
+        });
+        toast.success(
+          nextStatus === "active"
+            ? "Connector resumed."
+            : "Connector paused.",
+        );
+        await refreshConnectors();
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to update connector."));
+      } finally {
+        setConnectorBusy(connector.id, false);
+      }
+    },
+    [refreshConnectors, workspaceId],
+  );
+
+  const handleConfirmDisconnectConnector = useCallback(async () => {
+    if (!workspaceId || !pendingDisconnectConnector) return;
+    const connector = pendingDisconnectConnector;
+    setConnectorBusy(connector.id, true);
+    try {
+      await connectorsClient.update(workspaceId, connector.id, {
+        status: "disabled",
+      });
+      toast.success("Connector disconnected.");
+      setPendingDisconnectConnector(null);
+      await refreshConnectors();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to disconnect connector."));
+    } finally {
+      setConnectorBusy(connector.id, false);
+    }
+  }, [pendingDisconnectConnector, refreshConnectors, workspaceId]);
 
   const handleStartRename = useCallback((source: SourceItem) => {
     setEditingSourceId(source.id);
@@ -5604,23 +6531,37 @@ export function SourcesHub({
 
           {activeTab === "Connectors" && (
             <ConnectorsTab
-              connectorBusyById={connectorBusyById}
               connectors={connectors}
-              isConnectingNotion={isConnectingNotion}
               isLoading={isLoadingConnectors}
               loadingError={connectorsLoadingError}
-              onConnectNotion={() => void handleConnectNotion()}
-              onCreateNotionConnector={() =>
-                void handleCreateNotionConnector()
-              }
-              onSyncConnector={(connector) => void handleSyncConnector(connector)}
-              searchQuery={deferredSearchQueries.Connectors}
-              webhookEvents={connectorWebhookEvents}
-              workspaceId={workspaceId}
+              onManageConnectors={() => setIsManageConnectorsOpen(true)}
+              webhookConfig={notionWebhookConfig}
             />
           )}
         </div>
       </aside>
+
+      <ManageConnectorsDialog
+        accounts={connectorAccounts}
+        connectorBusyById={connectorBusyById}
+        connectors={connectors}
+        isConnectingNotion={isConnectingNotion}
+        isLoading={isLoadingConnectors}
+        loadingError={connectorsLoadingError}
+        onConnectNotion={() => void handleConnectNotion()}
+        onCopyWebhook={handleCopyWebhook}
+        onCreateNotionConnector={() => void handleCreateNotionConnector()}
+        onDisconnectConnector={setPendingDisconnectConnector}
+        onOpenChange={setIsManageConnectorsOpen}
+        onRequestConnector={handleRequestConnector}
+        onSyncConnector={(connector) => void handleSyncConnector(connector)}
+        onToggleConnectorStatus={(connector) =>
+          void handleToggleConnectorStatus(connector)
+        }
+        open={isManageConnectorsOpen}
+        webhookConfig={notionWebhookConfig}
+        webhookEvents={connectorWebhookEvents}
+      />
 
       <AddSourceDialog
         addParentSourceId={addSourceDialog.parentSourceId}
@@ -5737,6 +6678,63 @@ export function SourcesHub({
         }}
         workfileBusyByPath={workfileBusyByPath}
       />
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDisconnectConnector(null);
+          }
+        }}
+        open={Boolean(pendingDisconnectConnector)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect connector?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This disables syncing for the connector. Existing indexed sources
+              remain in the knowledge base until you remove them separately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {pendingDisconnectConnector ? (
+            <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
+              <span className="line-clamp-2 break-words">
+                {pendingDisconnectConnector.name}
+              </span>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={Boolean(
+                pendingDisconnectConnector &&
+                  connectorBusyById[pendingDisconnectConnector.id],
+              )}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: "destructive" })}
+              disabled={Boolean(
+                pendingDisconnectConnector &&
+                  connectorBusyById[pendingDisconnectConnector.id],
+              )}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleConfirmDisconnectConnector();
+              }}
+            >
+              {pendingDisconnectConnector &&
+              connectorBusyById[pendingDisconnectConnector.id] ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Disconnecting...
+                </>
+              ) : (
+                "Disconnect"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <SkillReadmeDialog
         catalogId={previewSkillCatalogId}

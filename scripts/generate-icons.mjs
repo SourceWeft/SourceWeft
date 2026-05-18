@@ -5,7 +5,13 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  copyFileSync,
+} from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -66,10 +72,71 @@ async function genPNG(sharp, size, outPath, opts = {}) {
 
 async function genICO(sharp, outPath) {
   const sizes = [16, 32, 48];
-  const pngBuffers = await Promise.all(sizes.map((sz) => renderPngBuffer(sharp, sz)));
+  const pngBuffers = await Promise.all(
+    sizes.map((sz) => renderPngBuffer(sharp, sz)),
+  );
 
   const ico = buildICO(pngBuffers, sizes);
   writeFileSync(outPath, ico);
+  console.log(`  ✓ ${outPath.replace(ROOT + "/", "")}`);
+}
+
+function formatSvgNumber(value) {
+  return Number.parseFloat(value.toFixed(4)).toString();
+}
+
+function extractSvgBody(svg) {
+  return svg
+    .replace(/<\?xml[^>]*>\s*/i, "")
+    .replace(/^\s*<svg\b[^>]*>/i, "")
+    .replace(/<\/svg>\s*$/i, "")
+    .trim();
+}
+
+function getSvgViewBox(svg) {
+  const match = svg.match(/\bviewBox="([^"]+)"/);
+  if (!match) {
+    throw new Error(
+      `${SVG_PATH} must include a viewBox to generate square icons`,
+    );
+  }
+
+  const values = match[1]
+    .trim()
+    .split(/[,\s]+/)
+    .map(Number);
+  if (values.length !== 4 || values.some((value) => Number.isNaN(value))) {
+    throw new Error(`Invalid SVG viewBox in ${SVG_PATH}: ${match[1]}`);
+  }
+
+  return values;
+}
+
+function renderSquareSvgIcon() {
+  const source = readFileSync(SVG_PATH, "utf8");
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] =
+    getSvgViewBox(source);
+  const scale = SQUARE_ICON_SIZE / Math.max(viewBoxWidth, viewBoxHeight);
+  const translateX =
+    (SQUARE_ICON_SIZE - viewBoxWidth * scale) / 2 - viewBoxX * scale;
+  const translateY =
+    (SQUARE_ICON_SIZE - viewBoxHeight * scale) / 2 - viewBoxY * scale;
+  const body = extractSvgBody(source)
+    .split("\n")
+    .map((line) => `    ${line}`)
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${SQUARE_ICON_SIZE}" height="${SQUARE_ICON_SIZE}" viewBox="0 0 ${SQUARE_ICON_SIZE} ${SQUARE_ICON_SIZE}">
+  <g transform="translate(${formatSvgNumber(translateX)} ${formatSvgNumber(translateY)}) scale(${formatSvgNumber(scale)})">
+${body}
+  </g>
+</svg>
+`;
+}
+
+function genSquareSVG(outPath) {
+  writeFileSync(outPath, renderSquareSvgIcon());
   console.log(`  ✓ ${outPath.replace(ROOT + "/", "")}`);
 }
 
@@ -154,37 +221,47 @@ async function main() {
 
   const sharp = await loadSharp();
   Object.values(TARGETS).forEach(ensureDir);
+  const targets = new Set(process.argv.slice(2));
+  const shouldGenerate = (target) => targets.size === 0 || targets.has(target);
 
-  console.log("📱 Web (apps/web):");
-  copyFileSync(SVG_PATH, join(TARGETS.webPublic, "logo.svg"));
-  console.log(`  ✓ apps/web/public/logo.svg`);
-  await genPNG(sharp, 180, join(TARGETS.webPublic, "apple-touch-icon.png"));
-  await genPNG(sharp, 192, join(TARGETS.webPublic, "icon-192.png"));
-  await genPNG(sharp, 512, join(TARGETS.webPublic, "icon-512.png"));
-  copyFileSync(SVG_PATH, join(TARGETS.webPublic, "icon.svg"));
-  console.log(`  ✓ apps/web/public/icon.svg`);
-  await genICO(sharp, join(TARGETS.webApp, "favicon.ico"));
+  if (shouldGenerate("web")) {
+    console.log("📱 Web (apps/web):");
+    copyFileSync(SVG_PATH, join(TARGETS.webPublic, "logo.svg"));
+    console.log(`  ✓ apps/web/public/logo.svg`);
+    await genPNG(sharp, 180, join(TARGETS.webPublic, "apple-touch-icon.png"));
+    await genPNG(sharp, 192, join(TARGETS.webPublic, "icon-192.png"));
+    await genPNG(sharp, 512, join(TARGETS.webPublic, "icon-512.png"));
+    genSquareSVG(join(TARGETS.webPublic, "icon.svg"));
+    genSquareSVG(join(TARGETS.webApp, "icon.svg"));
+    await genICO(sharp, join(TARGETS.webApp, "favicon.ico"));
+  }
 
-  console.log("\n📚 Docs (apps/docs):");
-  copyFileSync(SVG_PATH, join(TARGETS.docsPublic, "logo.svg"));
-  console.log(`  ✓ apps/docs/public/logo.svg`);
-  await genPNG(sharp, 180, join(TARGETS.docsPublic, "apple-touch-icon.png"));
-  await genPNG(sharp, 192, join(TARGETS.docsPublic, "icon-192.png"));
-  await genICO(sharp, join(TARGETS.docsApp, "favicon.ico"));
+  if (shouldGenerate("docs")) {
+    console.log("\n📚 Docs (apps/docs):");
+    copyFileSync(SVG_PATH, join(TARGETS.docsPublic, "logo.svg"));
+    console.log(`  ✓ apps/docs/public/logo.svg`);
+    await genPNG(sharp, 180, join(TARGETS.docsPublic, "apple-touch-icon.png"));
+    await genPNG(sharp, 192, join(TARGETS.docsPublic, "icon-192.png"));
+    await genICO(sharp, join(TARGETS.docsApp, "favicon.ico"));
+  }
 
-  console.log("\n🧩 Extension (apps/extension):");
-  await genPNG(sharp, 16, join(TARGETS.extPublic, "icon-16.png"));
-  await genPNG(sharp, 32, join(TARGETS.extPublic, "icon-32.png"));
-  await genPNG(sharp, 48, join(TARGETS.extPublic, "icon-48.png"));
-  await genPNG(sharp, 128, join(TARGETS.extPublic, "icon-128.png"));
+  if (shouldGenerate("extension")) {
+    console.log("\n🧩 Extension (apps/extension):");
+    await genPNG(sharp, 16, join(TARGETS.extPublic, "icon-16.png"));
+    await genPNG(sharp, 32, join(TARGETS.extPublic, "icon-32.png"));
+    await genPNG(sharp, 48, join(TARGETS.extPublic, "icon-48.png"));
+    await genPNG(sharp, 128, join(TARGETS.extPublic, "icon-128.png"));
+  }
 
-  console.log("\n🖥️  Desktop (apps/desktop):");
-  await genPNG(sharp, 32, join(TARGETS.tauriIcons, "32x32.png"));
-  await genPNG(sharp, 128, join(TARGETS.tauriIcons, "128x128.png"));
-  await genPNG(sharp, 256, join(TARGETS.tauriIcons, "128x128@2x.png"));
-  await genPNG(sharp, 512, join(TARGETS.tauriIcons, "icon.png"));
-  await genICO(sharp, join(TARGETS.tauriIcons, "icon.ico"));
-  await genICNS(sharp, TARGETS.tauriIcons);
+  if (shouldGenerate("desktop")) {
+    console.log("\n🖥️  Desktop (apps/desktop):");
+    await genPNG(sharp, 32, join(TARGETS.tauriIcons, "32x32.png"));
+    await genPNG(sharp, 128, join(TARGETS.tauriIcons, "128x128.png"));
+    await genPNG(sharp, 256, join(TARGETS.tauriIcons, "128x128@2x.png"));
+    await genPNG(sharp, 512, join(TARGETS.tauriIcons, "icon.png"));
+    await genICO(sharp, join(TARGETS.tauriIcons, "icon.ico"));
+    await genICNS(sharp, TARGETS.tauriIcons);
+  }
 
   console.log("\n✅ All icons generated successfully!\n");
 }

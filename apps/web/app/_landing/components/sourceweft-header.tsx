@@ -26,6 +26,7 @@ export function SourceWeftHeader({ authState }: { authState: LandingAuthState })
               ["/#features", "Features"],
               ["/#how-it-works", "How it works"],
               ["/#pricing", "Pricing"],
+              ["/blog", "Blog"],
             ] as const
           ).map(([href, label]) => (
             <a

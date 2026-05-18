@@ -2,13 +2,9 @@
 
 import Link from "next/link";
 import { LayoutDashboard } from "lucide-react";
-import {
-  SourceWeftHeader,
-} from "../components/sourceweft-header";
-import {
-  SourceWeftBrandLockup,
-  SourceWeftBrandMark,
-} from "../components/sourceweft-brand";
+import { SourceWeftFooter } from "../components/sourceweft-footer";
+import { SourceWeftHeader } from "../components/sourceweft-header";
+import { SourceWeftBrandMark } from "../components/sourceweft-brand";
 import {
   type LandingAuthState,
   useLandingAuthState,
@@ -684,81 +680,6 @@ function PricingSection() {
   );
 }
 
-// ─── Footer ───────────────────────────────────────────────────────────────────
-
-function Footer({ authState }: { authState: LandingAuthState }) {
-  const productLinks = [
-    ["#features", "Features"],
-    ["#how-it-works", "How it works"],
-    ["#pricing", "Pricing"],
-    [authState.isSignedIn ? "/dashboard" : "/auth/sign-in", authState.isSignedIn ? "Dashboard" : "Get started"],
-  ] as const;
-
-  return (
-    <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
-      <div className="mx-auto max-w-6xl px-6">
-        <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-3">
-          {/* Brand */}
-          <div>
-            <SourceWeftBrandLockup size="footer" />
-            <p className="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
-              Your AI notebook workspace. Connect everything. Think deeper.
-            </p>
-          </div>
-
-          {/* Product */}
-          <div>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-600">
-              Product
-            </p>
-            <ul className="space-y-2 text-sm">
-              {productLinks.map(([href, label]) => (
-                <li key={href}>
-                  <a
-                    href={href}
-                    className="text-zinc-400 transition-colors hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white"
-                  >
-                    {label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Legal */}
-          <div>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-600">
-              Legal
-            </p>
-            <ul className="space-y-2 text-sm">
-              {[
-                ["/privacy", "Privacy"],
-                ["/terms", "Terms"],
-              ].map(([href, label]) => (
-                <li key={label}>
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-zinc-400 transition-colors hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white"
-                  >
-                    {label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-zinc-100 pt-8 text-xs text-zinc-400 dark:border-white/[0.06] dark:text-zinc-700">
-          <p>© {new Date().getFullYear()} SourceWeft. All rights reserved.</p>
-          <span className="transition-colors">Build By SourceWeft</span>
-        </div>
-      </div>
-    </footer>
-  );
-}
-
 // ─── Keyframe styles (injected via style tag) ────────────────────────────────
 
 function GlobalStyles() {
@@ -790,7 +711,7 @@ export default function LandingV1({
       <FeaturesSection />
       <HowItWorks />
       <PricingSection />
-      <Footer authState={authState} />
+      <SourceWeftFooter authState={authState} />
     </div>
   );
 }

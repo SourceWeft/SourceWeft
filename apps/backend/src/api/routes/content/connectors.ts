@@ -2,12 +2,14 @@ import type { Hono } from "hono";
 import {
   createConnectorActionRequestSchema,
   createConnectorRequestSchema,
+  getNotionWebhookConfigResponseSchema,
   listConnectorOAuthAccountsRequestSchema,
   listConnectorWebhookEventsRequestSchema,
   lookupNotionPagesRequestSchema,
   startConnectorOAuthRequestSchema,
   updateConnectorRequestSchema,
 } from "@sourceweft/contracts";
+import { config } from "../../../shared/config";
 import {
   connectorActionRunner,
   connectorOAuthService,
@@ -16,11 +18,22 @@ import {
   connectorWebhookService,
 } from "../../../modules/connectors";
 import { requireConnectorWorkspace } from "../../../modules/connectors/permissions";
-import { lookupConnectorSourceRecords } from "../../../modules/connectors/repository";
+import {
+  findSourceConnectorRecord,
+  lookupConnectorSourceRecords,
+} from "../../../modules/connectors/repository";
 import { enqueueConnectorSyncJob } from "../../../modules/content/queue";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
+
+function buildNotionWebhookUrl(connectorId?: string | null) {
+  const url = new URL("/v1/connectors/webhooks/notion", config.auth.baseUrl);
+  if (connectorId) {
+    url.searchParams.set("connectorId", connectorId);
+  }
+  return url.toString();
+}
 
 export function registerConnectorRoutes(app: Hono) {
   app.get("/connectors/manifests", async (c) => {
@@ -281,6 +294,55 @@ export function registerConnectorRoutes(app: Hono) {
       connectorId: requireRouteParam(c, "connectorId"),
     });
     return ApiResponse.success(c, result);
+  });
+
+  app.get("/connectors/notion/webhook-config", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const connectorId = c.req.query("connectorId")?.trim() || null;
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId,
+      userId: getSessionUserId(session),
+      permission: "connector.read",
+    });
+
+    if (connectorId) {
+      const connector = await findSourceConnectorRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId,
+      });
+      if (!connector || connector.connectorType !== "notion") {
+        throw new ApiError(
+          404,
+          "NOTION_CONNECTOR_NOT_FOUND",
+          "Notion connector not found",
+        );
+      }
+    }
+
+    const result = {
+      webhookUrl: buildNotionWebhookUrl(connectorId),
+      baseUrl: config.auth.baseUrl,
+      connectorId,
+      isConfigured: !config.auth.baseUrl.includes("localhost"),
+      setupRequired: true,
+    };
+
+    const parsed = getNotionWebhookConfigResponseSchema.safeParse(result);
+    if (!parsed.success) {
+      throw new ApiError(
+        500,
+        "NOTION_WEBHOOK_CONFIG_INVALID",
+        "Notion webhook config is invalid",
+      );
+    }
+
+    return ApiResponse.success(c, parsed.data);
   });
 
   app.get("/connectors/webhook-events", async (c) => {

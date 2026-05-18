@@ -292,6 +292,14 @@ export const listConnectorWebhookEventsResponseSchema = z.object({
   items: z.array(connectorWebhookEventSchema),
 });
 
+export const getNotionWebhookConfigResponseSchema = z.object({
+  webhookUrl: z.string().url(),
+  baseUrl: z.string().url(),
+  connectorId: z.string().nullable(),
+  isConfigured: z.boolean(),
+  setupRequired: z.boolean(),
+});
+
 export const connectorNotionWriteRequestSchema = z.object({
   target: z.object({
     connectorId: z.string().trim().min(1).optional(),
@@ -400,6 +408,9 @@ export type ListConnectorWebhookEventsRequest = z.infer<
 >;
 export type ListConnectorWebhookEventsResponse = z.infer<
   typeof listConnectorWebhookEventsResponseSchema
+>;
+export type GetNotionWebhookConfigResponse = z.infer<
+  typeof getNotionWebhookConfigResponseSchema
 >;
 export type LookupNotionPagesRequest = z.infer<
   typeof lookupNotionPagesRequestSchema

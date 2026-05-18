@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 530 422">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g transform="translate(-260.8302 -260.8302) scale(1.9321)">
     <g transform="matrix(2 0 0 2 -357.15 -356.65)">
         <g>
           <g>
@@ -21,4 +22,5 @@
           </g>
         </g>
       </g>
+  </g>
 </svg>

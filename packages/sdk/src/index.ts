@@ -12,6 +12,7 @@ export type {
   ChatMessagePart,
   ChatMessageTextPart,
   ConnectorWebhookEvent,
+  GetNotionWebhookConfigResponse,
   MessageContentJson,
   SourceConnector,
   SkillCommand,

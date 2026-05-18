@@ -6,6 +6,7 @@ import type {
   DeleteConnectorResponse,
   ExecuteConnectorActionResponse,
   FinishConnectorOAuthResponse,
+  GetNotionWebhookConfigResponse,
   ListConnectorActionsResponse,
   ListConnectorManifestsResponse,
   ListConnectorOAuthAccountsRequest,
@@ -176,6 +177,14 @@ export class ConnectorsClient {
       `/v1/workspaces/${encode(workspaceId)}/connectors/webhook-events${query({
         connectorType: input.connectorType,
         connectorId: input.connectorId,
+      })}`,
+    );
+  }
+
+  getNotionWebhookConfig(workspaceId: string, connectorId?: string | null) {
+    return this.http.get<GetNotionWebhookConfigResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/notion/webhook-config${query({
+        connectorId: connectorId ?? undefined,
       })}`,
     );
   }
