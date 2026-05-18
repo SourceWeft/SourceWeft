@@ -103,6 +103,12 @@ import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { apiBaseUrl, connectorsClient, contentClient } from "../../../../lib/sdk";
+import {
+  CONNECTOR_OAUTH_CHANNEL,
+  CONNECTOR_OAUTH_STORAGE_KEY,
+  parseConnectorOAuthCompletionMessage,
+  type ConnectorOAuthCompletionMessage,
+} from "../../connectors/oauth/_components/oauth-messaging";
 import { SkillsGallery } from "../../skills/_components/skills-gallery";
 import type { CitationRecord } from "./chat-canvas";
 import { GeneratedImagePreview } from "./chat-canvas/generated-image-preview";
@@ -244,6 +250,7 @@ const connectorCatalog: ConnectorCatalogItem[] = [
     description: "Sync pages, data sources, comments, and write approved outputs.",
     capabilities: ["Pages", "Databases", "Webhooks", "Write actions"],
     connectMode: "oauth_connector",
+    postOAuthMode: "auto_create",
     icon: BookOpen,
   },
   {
@@ -473,6 +480,7 @@ type ConnectorCatalogItem = {
   description: string;
   capabilities: string[];
   connectMode: ConnectorConnectMode;
+  postOAuthMode?: "auto_create" | "configure_required";
   icon: LucideIcon;
 };
 type ManageConnectorsTab = "all" | "active";
@@ -3706,21 +3714,25 @@ function PlugIcon({ className }: { className?: string }) {
   return <Link2 className={className} />;
 }
 
-function getCatalogConnector(item: ConnectorCatalogItem, connectors: ConnectorItem[]) {
-  if (item.id !== "notion") return null;
+function getCatalogConnector(
+  item: ConnectorCatalogItem,
+  connectors: ConnectorItem[],
+) {
+  if (item.connectMode !== "oauth_connector") return null;
   return (
     connectors.find(
       (connector) =>
-        connector.raw.connectorType === "notion" &&
+        connector.raw.connectorType === item.id &&
         connector.status !== "disabled",
     ) ?? null
   );
 }
 
-function getNotionConnectorStatus(input: {
+function getOAuthConnectorStatus(input: {
   connector: ConnectorItem | null;
   hasActiveAccount: boolean;
   isBusy: boolean;
+  item: ConnectorCatalogItem;
   webhookConfig: NotionWebhookConfig | null;
 }): ConnectorCatalogStatus {
   if (input.isBusy) {
@@ -3747,7 +3759,11 @@ function getNotionConnectorStatus(input: {
         detail: "Syncing is paused until you resume this connector.",
       };
     }
-    if (input.webhookConfig && !input.webhookConfig.isConfigured) {
+    if (
+      input.item.id === "notion" &&
+      input.webhookConfig &&
+      !input.webhookConfig.isConfigured
+    ) {
       return {
         kind: "needs_setup",
         label: "Needs setup",
@@ -3765,22 +3781,26 @@ function getNotionConnectorStatus(input: {
     return {
       kind: "connected",
       label: "Connected",
-      detail: "OAuth is connected. Enable syncing to create the connector.",
+      detail:
+        input.item.postOAuthMode === "auto_create"
+          ? "OAuth is connected. Enable syncing to create the connector."
+          : "OAuth is connected. Configure this connector to enable syncing.",
     };
   }
 
   return {
     kind: "available",
     label: "Available",
-    detail: "Ready to connect with Notion OAuth.",
+    detail: `Ready to connect with ${input.item.name} OAuth.`,
   };
 }
 
 function getCatalogStatus(input: {
   item: ConnectorCatalogItem;
   connectors: ConnectorItem[];
-  hasActiveNotionAccount: boolean;
+  accounts: ConnectorAccountItem[];
   connectorBusyById: Record<string, boolean>;
+  connectorWaitingByType: Record<string, boolean>;
   webhookConfig: NotionWebhookConfig | null;
 }): ConnectorCatalogStatus {
   if (input.item.connectMode === "coming_soon") {
@@ -3791,10 +3811,17 @@ function getCatalogStatus(input: {
     };
   }
   const connector = getCatalogConnector(input.item, input.connectors);
-  return getNotionConnectorStatus({
+  return getOAuthConnectorStatus({
     connector,
-    hasActiveAccount: input.hasActiveNotionAccount,
-    isBusy: Boolean(connector && input.connectorBusyById[connector.id]),
+    hasActiveAccount: input.accounts.some(
+      (account) =>
+        account.connectorType === input.item.id && account.status === "active",
+    ),
+    isBusy: Boolean(
+      input.connectorWaitingByType[input.item.id] ||
+        (connector && input.connectorBusyById[connector.id]),
+    ),
+    item: input.item,
     webhookConfig: input.webhookConfig,
   });
 }
@@ -3843,31 +3870,30 @@ function ConnectorCatalogCard({
   item,
   status,
   connector,
-  isConnectingNotion,
   onConfigure,
-  onConnectNotion,
-  onCreateNotionConnector,
+  onConnectConnector,
+  onCreateConnector,
   onRequestConnector,
 }: {
   item: ConnectorCatalogItem;
   status: ConnectorCatalogStatus;
   connector: ConnectorItem | null;
-  isConnectingNotion: boolean;
   onConfigure: () => void;
-  onConnectNotion: () => void;
-  onCreateNotionConnector: () => void;
+  onConnectConnector: (item: ConnectorCatalogItem) => void;
+  onCreateConnector: (item: ConnectorCatalogItem) => void;
   onRequestConnector: (item: ConnectorCatalogItem) => void;
 }) {
-  const isNotion = item.connectMode === "oauth_connector";
-  const isBusy = isConnectingNotion && isNotion;
+  const isBusy = status.kind === "syncing";
   const cta =
     item.connectMode === "coming_soon"
       ? "Request"
-      : connector
-        ? "Configure"
-        : status.kind === "connected"
-          ? "Enable"
-          : "Connect";
+      : isBusy
+        ? "Waiting..."
+        : connector
+          ? "Configure"
+          : status.kind === "connected"
+            ? "Enable"
+            : "Connect";
 
   function handleAction() {
     if (item.connectMode === "coming_soon") {
@@ -3879,10 +3905,10 @@ function ConnectorCatalogCard({
       return;
     }
     if (status.kind === "connected") {
-      onCreateNotionConnector();
+      onCreateConnector(item);
       return;
     }
-    onConnectNotion();
+    onConnectConnector(item);
   }
 
   return (
@@ -3963,10 +3989,21 @@ function ActiveConnectorCard({
     connectorCatalog.find((item) => item.id === connector.raw.connectorType) ??
     connectorCatalog.find((item) => item.id === "notion");
   const icon = catalogItem?.icon ?? Link2;
-  const status = getNotionConnectorStatus({
+  const status = getOAuthConnectorStatus({
     connector,
     hasActiveAccount: true,
     isBusy,
+    item:
+      catalogItem ?? {
+        id: connector.raw.connectorType,
+        name: connector.raw.connectorType,
+        category: "Knowledge & Docs",
+        description: connector.meta,
+        capabilities: [],
+        connectMode: "oauth_connector",
+        postOAuthMode: "configure_required",
+        icon: Link2,
+      },
     webhookConfig:
       connector.raw.connectorType === "notion" ? webhookConfig : null,
   });
@@ -4092,12 +4129,12 @@ function ManageConnectorsDialog({
   accounts,
   connectorBusyById,
   connectors,
-  isConnectingNotion,
+  connectorWaitingByType,
   isLoading,
   loadingError,
-  onConnectNotion,
+  onConnectConnector,
   onCopyWebhook,
-  onCreateNotionConnector,
+  onCreateConnector,
   onDisconnectConnector,
   onOpenChange,
   onRequestConnector,
@@ -4110,12 +4147,12 @@ function ManageConnectorsDialog({
   accounts: ConnectorAccountItem[];
   connectorBusyById: Record<string, boolean>;
   connectors: ConnectorItem[];
-  isConnectingNotion: boolean;
+  connectorWaitingByType: Record<string, boolean>;
   isLoading: boolean;
   loadingError: string | null;
-  onConnectNotion: () => void;
+  onConnectConnector: (item: ConnectorCatalogItem) => void;
   onCopyWebhook: (value: string) => void;
-  onCreateNotionConnector: () => void;
+  onCreateConnector: (item: ConnectorCatalogItem) => void;
   onDisconnectConnector: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
   onRequestConnector: (item: ConnectorCatalogItem) => void;
@@ -4129,10 +4166,6 @@ function ManageConnectorsDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
-  );
-  const hasActiveNotionAccount = accounts.some(
-    (account) =>
-      account.connectorType === "notion" && account.status === "active",
   );
   const visibleCatalog = connectorCatalog.filter((item) =>
     connectorCatalogMatches(item, searchQuery),
@@ -4264,21 +4297,19 @@ function ManageConnectorsDialog({
                             const status = getCatalogStatus({
                               item,
                               connectors,
-                              hasActiveNotionAccount,
+                              accounts,
                               connectorBusyById,
+                              connectorWaitingByType,
                               webhookConfig,
                             });
                             return (
                               <ConnectorCatalogCard
                                 connector={connector}
-                                isConnectingNotion={isConnectingNotion}
                                 item={item}
                                 key={item.id}
                                 onConfigure={() => setTab("active")}
-                                onConnectNotion={onConnectNotion}
-                                onCreateNotionConnector={
-                                  onCreateNotionConnector
-                                }
+                                onConnectConnector={onConnectConnector}
+                                onCreateConnector={onCreateConnector}
                                 onRequestConnector={onRequestConnector}
                                 status={status}
                               />
@@ -4744,7 +4775,9 @@ export function SourcesHub({
   const [isLoadingConnectors, setIsLoadingConnectors] = useState(false);
   const [connectorsLoadingError, setConnectorsLoadingError] = useState<string | null>(null);
   const [connectorBusyById, setConnectorBusyById] = useState<Record<string, boolean>>({});
-  const [isConnectingNotion, setIsConnectingNotion] = useState(false);
+  const [connectorWaitingByType, setConnectorWaitingByType] = useState<
+    Record<string, boolean>
+  >({});
   const [isManageConnectorsOpen, setIsManageConnectorsOpen] = useState(false);
   const [pendingDisconnectConnector, setPendingDisconnectConnector] =
     useState<ConnectorItem | null>(null);
@@ -4828,6 +4861,8 @@ export function SourcesHub({
     () => buildSourceTreeFromIndex(sourceTreeIndex, ""),
     [sourceTreeIndex],
   );
+  const processedConnectorOAuthMessageIdsRef = useRef<Set<string>>(new Set());
+  const connectorWaitingStartedAtRef = useRef<Record<string, number>>({});
   const selectableSourceIds = useMemo(
     () => collectSelectableSourceIds(fullSourceTree),
     [fullSourceTree],
@@ -4839,11 +4874,6 @@ export function SourcesHub({
   const allSelectableSourcesSelected =
     selectableSourceIds.length > 0 &&
     selectedLibrarySources.length >= selectableSourceIds.length;
-  const activeNotionAccount = connectorAccounts.find(
-    (account) =>
-      account.connectorType === "notion" && account.status === "active",
-  );
-
   const resetSourcePagingState = useCallback(() => {
     sourceParentCursorRef.current = {};
     loadedSourceParentIdsRef.current = new Set();
@@ -5609,107 +5639,266 @@ export function SourcesHub({
     });
   }
 
-  const handleConnectNotion = useCallback(async () => {
-    if (!workspaceId) {
-      toast.error("No workspace selected yet.");
-      return;
-    }
+  function setConnectorWaiting(connectorType: string, waiting: boolean) {
+    setConnectorWaitingByType((prev) => {
+      if (waiting) return { ...prev, [connectorType]: true };
+      const next = { ...prev };
+      delete next[connectorType];
+      return next;
+    });
+  }
 
-    setIsConnectingNotion(true);
-    try {
-      const result = await connectorsClient.startOAuth(workspaceId, "notion", {
-        redirectAfter: window.location.href,
-      });
-      window.location.href = result.authorizationUrl;
-    } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to start Notion connection."));
-    } finally {
-      setIsConnectingNotion(false);
-    }
-  }, [workspaceId]);
-
-  const ensureNotionConnector = useCallback(
-    async (accountId?: string | null) => {
+  const handleConnectConnector = useCallback(
+    (item: ConnectorCatalogItem) => {
       if (!workspaceId) {
+        toast.error("No workspace selected yet.");
+        return;
+      }
+
+      if (item.connectMode !== "oauth_connector") {
+        toast.error(`${item.name} is not available for OAuth yet.`);
+        return;
+      }
+
+      const startUrl = new URL(
+        "/dashboard/connectors/oauth/start",
+        window.location.origin,
+      );
+      startUrl.searchParams.set("workspace_id", workspaceId);
+      startUrl.searchParams.set("connector_type", item.id);
+      startUrl.searchParams.set("return_to", window.location.href);
+      const popup = window.open(
+        startUrl.toString(),
+        "_blank",
+        "noopener,noreferrer",
+      );
+      if (!popup) {
+        toast.error("Allow popups to connect this provider.");
+        return;
+      }
+
+      connectorWaitingStartedAtRef.current[item.id] = Date.now();
+      setConnectorWaiting(item.id, true);
+      setIsManageConnectorsOpen(true);
+      toast.info(`Complete ${item.name} authorization in the new tab.`);
+    },
+    [workspaceId],
+  );
+
+  const ensureConnector = useCallback(
+    async (
+      item: ConnectorCatalogItem,
+      accountId?: string | null,
+      options: { silentMissingAccount?: boolean } = {},
+    ) => {
+      if (!workspaceId) {
+        return null;
+      }
+      if (item.connectMode !== "oauth_connector") {
         return null;
       }
       const current = connectors.find(
         (connector) =>
-          connector.raw.connectorType === "notion" &&
+          connector.raw.connectorType === item.id &&
           connector.status !== "disabled",
       );
       if (current) {
         return current;
       }
 
-      setIsConnectingNotion(true);
+      if (item.postOAuthMode !== "auto_create") {
+        await refreshConnectors();
+        return null;
+      }
+
+      setConnectorWaiting(item.id, true);
       try {
         const accounts = await connectorsClient.listAccounts(workspaceId, {
-          connectorType: "notion",
+          connectorType: item.id,
         });
         const account =
           accounts.items.find((item) => item.id === accountId) ??
           accounts.items.find((item) => item.status === "active");
         if (!account) {
-          toast.error("Connect Notion before creating a connector.");
+          if (!options.silentMissingAccount) {
+            toast.error(`Connect ${item.name} before creating a connector.`);
+          }
           return null;
         }
 
-        const created = await connectorsClient.create(workspaceId, {
-          connectorType: "notion",
-          name: account.displayName || "Notion",
-          oauthAccountId: account.id,
-          configJson: {
-            includePages: true,
-            includeDataSources: true,
-            includeDatabases: true,
+        if (item.id !== "notion") {
+          toast.info(`${item.name} is connected. Configure syncing next.`);
+          await refreshConnectors();
+          return null;
+        }
+
+        const created = await connectorsClient.create(
+          workspaceId,
+          {
+            connectorType: "notion",
+            name: account.displayName || "Notion",
+            oauthAccountId: account.id,
+            configJson: {
+              includePages: true,
+              includeDataSources: true,
+              includeDatabases: true,
+            },
+            periodicIndexingEnabled: true,
+            indexingFrequencyMinutes: 360,
           },
-          periodicIndexingEnabled: true,
-          indexingFrequencyMinutes: 360,
-        });
-        toast.success("Notion connector enabled.");
+        );
+        toast.success(`${item.name} connector enabled.`);
         await refreshConnectors();
         return mapConnectorToUi(created.connector);
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to enable Notion connector."));
+        toast.error(
+          getErrorMessage(error, `Failed to enable ${item.name} connector.`),
+        );
         return null;
       } finally {
-        setIsConnectingNotion(false);
+        setConnectorWaiting(item.id, false);
       }
     },
     [connectors, refreshConnectors, workspaceId],
   );
 
-  const handleCreateNotionConnector = useCallback(async () => {
+  const handleCreateConnector = useCallback(async (item: ConnectorCatalogItem) => {
     if (!workspaceId) {
       toast.error("No workspace selected yet.");
       return;
     }
-    await ensureNotionConnector(activeNotionAccount?.id);
+    const account = connectorAccounts.find(
+      (candidate) =>
+        candidate.connectorType === item.id && candidate.status === "active",
+    );
+    await ensureConnector(item, account?.id);
     setIsManageConnectorsOpen(true);
-  }, [activeNotionAccount?.id, ensureNotionConnector, workspaceId]);
+  }, [connectorAccounts, ensureConnector, workspaceId]);
+
+  const handleConnectorOAuthCompletion = useCallback(
+    (message: ConnectorOAuthCompletionMessage) => {
+      if (!workspaceId || message.workspaceId !== workspaceId) return;
+      if (processedConnectorOAuthMessageIdsRef.current.has(message.id)) return;
+      processedConnectorOAuthMessageIdsRef.current.add(message.id);
+
+      const item = connectorCatalog.find(
+        (candidate) => candidate.id === message.connectorType,
+      );
+      if (!item || item.connectMode !== "oauth_connector") return;
+
+      setIsManageConnectorsOpen(true);
+
+      if (message.status === "error") {
+        setConnectorWaiting(item.id, false);
+        toast.error(message.error || `${item.name} authorization failed.`);
+        void refreshConnectors();
+        return;
+      }
+
+      if (item.postOAuthMode === "auto_create") {
+        void ensureConnector(item, message.accountId);
+        return;
+      }
+
+      setConnectorWaiting(item.id, false);
+      toast.success(`${item.name} connected. Configure syncing next.`);
+      void refreshConnectors();
+    },
+    [ensureConnector, refreshConnectors, workspaceId],
+  );
 
   useEffect(() => {
-    if (!workspaceId || typeof window === "undefined") {
-      return;
-    }
-    const url = new URL(window.location.href);
-    if (
-      url.searchParams.get("connector_oauth") !== "success" ||
-      url.searchParams.get("connector_type") !== "notion"
-    ) {
-      return;
+    if (typeof window === "undefined") return;
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(CONNECTOR_OAUTH_CHANNEL);
+      channel.onmessage = (event: MessageEvent) => {
+        const message = parseConnectorOAuthCompletionMessage(event.data);
+        if (message) handleConnectorOAuthCompletion(message);
+      };
+    } catch {
+      channel = null;
     }
 
-    const accountId = url.searchParams.get("account_id");
-    url.searchParams.delete("connector_oauth");
-    url.searchParams.delete("connector_type");
-    url.searchParams.delete("account_id");
-    window.history.replaceState(null, "", url.toString());
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== CONNECTOR_OAUTH_STORAGE_KEY || !event.newValue) return;
+      try {
+        const message = parseConnectorOAuthCompletionMessage(
+          JSON.parse(event.newValue) as unknown,
+        );
+        if (message) handleConnectorOAuthCompletion(message);
+      } catch {
+        // Ignore malformed cross-tab messages.
+      }
+    }
 
-    setIsManageConnectorsOpen(true);
-    void ensureNotionConnector(accountId);
-  }, [ensureNotionConnector, workspaceId]);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      channel?.close();
+    };
+  }, [handleConnectorOAuthCompletion]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const activeWorkspaceId = workspaceId;
+    const waitingTypes = Object.keys(connectorWaitingByType).filter(
+      (value): value is string => Boolean(value),
+    );
+    if (waitingTypes.length === 0) return;
+
+    function pollWaitingConnectors() {
+      const now = Date.now();
+      for (const connectorTypeValue of waitingTypes) {
+        const connectorType = connectorTypeValue;
+        const startedAt =
+          connectorWaitingStartedAtRef.current[connectorType] ?? now;
+        if (now - startedAt > 10 * 60 * 1000) {
+          setConnectorWaiting(connectorType, false);
+          continue;
+        }
+
+        const item = connectorCatalog.find(
+          (candidate) => candidate.id === connectorType,
+        );
+        if (!item || item.connectMode !== "oauth_connector") {
+          setConnectorWaiting(connectorType, false);
+          continue;
+        }
+
+        void connectorsClient
+          .listAccounts(activeWorkspaceId, { connectorType })
+          .then(async (accounts) => {
+            const account = accounts.items.find(
+              (candidate) => candidate.status === "active",
+            );
+            if (!account) return;
+            if (item.postOAuthMode === "auto_create") {
+              await ensureConnector(item, account.id, {
+                silentMissingAccount: true,
+              });
+              return;
+            }
+            setConnectorWaiting(connectorType, false);
+            await refreshConnectors();
+          })
+          .catch(() => {
+            // Polling is a fallback; the visible flow is driven by completion.
+          });
+      }
+    }
+
+    pollWaitingConnectors();
+    const timer = window.setInterval(pollWaitingConnectors, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [
+    connectorWaitingByType,
+    ensureConnector,
+    refreshConnectors,
+    workspaceId,
+  ]);
 
   const handleRequestConnector = useCallback((item: ConnectorCatalogItem) => {
     toast.info(`${item.name} is on the roadmap.`);
@@ -6545,12 +6734,12 @@ export function SourcesHub({
         accounts={connectorAccounts}
         connectorBusyById={connectorBusyById}
         connectors={connectors}
-        isConnectingNotion={isConnectingNotion}
+        connectorWaitingByType={connectorWaitingByType}
         isLoading={isLoadingConnectors}
         loadingError={connectorsLoadingError}
-        onConnectNotion={() => void handleConnectNotion()}
+        onConnectConnector={handleConnectConnector}
         onCopyWebhook={handleCopyWebhook}
-        onCreateNotionConnector={() => void handleCreateNotionConnector()}
+        onCreateConnector={(item) => void handleCreateConnector(item)}
         onDisconnectConnector={setPendingDisconnectConnector}
         onOpenChange={setIsManageConnectorsOpen}
         onRequestConnector={handleRequestConnector}

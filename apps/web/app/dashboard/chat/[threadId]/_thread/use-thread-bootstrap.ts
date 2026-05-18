@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useLayoutEffect, type RefObject } from "react";
-import type {
-  ChatSendInput,
-  PromptThinkingSettings,
-} from "../../_components/chat-canvas";
+import type { PromptThinkingSettings } from "../../_components/chat-canvas";
+import {
+  consumePendingThreadTurn,
+  type PendingThreadTurn,
+} from "../../_components/pending-thread-turn";
 import type {
   ModelItem,
   ModelType,
@@ -12,7 +13,6 @@ import type {
 } from "../../_components/model-catalog-utils";
 import type { ByokModelSelection } from "../../_components/byok-state";
 import { DEFAULT_MODEL_SELECTION_SOURCES } from "../../_components/skill-model-presets";
-import type { RequestThinkingConfig } from "../streaming-request-body";
 import type { ThreadStreamActionInput } from "./use-thread-stream-action";
 
 const useBrowserLayoutEffect =
@@ -76,10 +76,27 @@ export function useThreadBootstrap({
     bootstrappedThreadKeyRef.current = bootstrapKey;
 
     const pendingKey = `chat:pending:${threadId}`;
-    const raw = window.sessionStorage.getItem(pendingKey);
+    const pendingMemoryTurn = consumePendingThreadTurn(threadId);
+    const pendingTurn =
+      pendingMemoryTurn ??
+      (() => {
+        const raw = window.sessionStorage.getItem(pendingKey);
+        if (!raw) {
+          return null;
+        }
+        window.sessionStorage.removeItem(pendingKey);
+        try {
+          return JSON.parse(raw) as PendingThreadTurn;
+        } catch {
+          return null;
+        }
+      })();
 
-    if (raw) {
+    if (pendingMemoryTurn) {
       window.sessionStorage.removeItem(pendingKey);
+    }
+
+    if (pendingTurn) {
       try {
         const {
           content,
@@ -93,25 +110,7 @@ export function useThreadBootstrap({
           thinkingSettings: pendingThinkingSettings,
           searchEnabled: pendingSearchEnabled,
           modelState: pendingModelState,
-        } = JSON.parse(raw) as {
-          content: string;
-          images?: ChatSendInput["images"];
-          mentionedSourceIds?: string[];
-          sourceIds: string[];
-          skillIds?: string[];
-          tools?: ChatSendInput["tools"];
-          command?: ChatSendInput["command"];
-          thinking?: RequestThinkingConfig;
-          thinkingSettings?: PromptThinkingSettings;
-          searchEnabled?: boolean;
-          modelState?: {
-            availableModels?: Record<ModelType, ModelItem[]>;
-            catalogKindEnabled?: Record<ModelType, boolean>;
-            selectedModels?: SelectedModels;
-            byokSelection?: ByokModelSelection | null;
-            byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
-          };
-        };
+        } = pendingTurn;
         const pendingSourceIds = Array.isArray(sourceIds)
           ? sourceIds.filter(
               (sourceId): sourceId is string => typeof sourceId === "string",

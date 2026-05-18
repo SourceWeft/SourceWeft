@@ -72,6 +72,7 @@ type CategoryKey = "all" | "learn" | "research" | "write" | "review" | "operate"
 type StatusFilter = "all" | "installed" | "not_installed";
 type PublisherFilter = "all" | "official" | "not_official";
 type SortKey = "recommended" | "name_asc" | "installed_first" | "official_first";
+type CatalogStatus = "resolving_workspace" | "loading_catalog" | "ready" | "error";
 
 const categories: Array<{ key: CategoryKey; label: string }> = [
   { key: "all", label: "All" },
@@ -625,8 +626,8 @@ export function SkillsGallery({
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
   const [publisherFilter, setPublisherFilter] = React.useState<PublisherFilter>("all");
   const [sort, setSort] = React.useState<SortKey>("recommended");
-  const [isResolvingWorkspace, setIsResolvingWorkspace] = React.useState(true);
-  const [isLoading, setIsLoading] = React.useState(false);
+  const [catalogStatus, setCatalogStatus] =
+    React.useState<CatalogStatus>("resolving_workspace");
   const [error, setError] = React.useState<string | null>(null);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
   const workspaceIdRef = React.useRef<string | null>(null);
@@ -638,6 +639,10 @@ export function SkillsGallery({
   }, [workspace?.id]);
 
   const resolveWorkspace = React.useCallback(async () => {
+    if (!workspaceId && !dashboardState.workspaceId && !dashboardState.hasWorkspaceHydrated) {
+      return undefined;
+    }
+
     if (lockWorkspace) {
       const lockedId = workspaceId ?? dashboardState.workspaceId;
       if (!lockedId) {
@@ -674,6 +679,7 @@ export function SkillsGallery({
   }, [
     dashboardState.workspaceId,
     dashboardState.workspaceName,
+    dashboardState.hasWorkspaceHydrated,
     lockWorkspace,
     workspaceId,
     workspaceName,
@@ -688,7 +694,7 @@ export function SkillsGallery({
 
     setError(null);
     if (!hasCurrentCatalog) {
-      setIsResolvingWorkspace(true);
+      setCatalogStatus("resolving_workspace");
     }
 
     try {
@@ -696,43 +702,45 @@ export function SkillsGallery({
       if (catalogGenerationRef.current !== generation) {
         return;
       }
+
+      if (resolved === undefined) {
+        setCatalogStatus("resolving_workspace");
+        return;
+      }
+
       setWorkspace(resolved);
       if (!resolved) {
         setItems([]);
         loadedCatalogWorkspaceIdRef.current = null;
+        setCatalogStatus("ready");
         return;
       }
 
       const hasResolvedCatalog =
         loadedCatalogWorkspaceIdRef.current === resolved.id;
       if (hasResolvedCatalog) {
+        setCatalogStatus("ready");
         return;
       }
 
-      if (workspaceIdRef.current && workspaceIdRef.current !== resolved.id) {
-        setItems([]);
-      }
+      setItems([]);
 
-      setIsResolvingWorkspace(false);
-      setIsLoading(true);
+      setCatalogStatus("loading_catalog");
       const result = await fetchSkillsCatalog(resolved.id);
       if (catalogGenerationRef.current !== generation) {
         return;
       }
       loadedCatalogWorkspaceIdRef.current = resolved.id;
       setItems(result.items);
+      setCatalogStatus("ready");
     } catch (loadError) {
       if (catalogGenerationRef.current !== generation) {
         return;
       }
       setItems([]);
       loadedCatalogWorkspaceIdRef.current = null;
+      setCatalogStatus("error");
       setError(loadError instanceof Error ? loadError.message : "Failed to load skills.");
-    } finally {
-      if (catalogGenerationRef.current === generation) {
-        setIsResolvingWorkspace(false);
-        setIsLoading(false);
-      }
     }
   }, [resolveWorkspace]);
 
@@ -799,7 +807,7 @@ export function SkillsGallery({
       setWorkspace({ id: nextWorkspaceId, name: nextWorkspaceName });
       setItems([]);
       setError(null);
-      setIsLoading(true);
+      setCatalogStatus("loading_catalog");
       try {
         await dashboardState.switchWorkspace(nextWorkspaceId, nextWorkspaceName);
         if (workspaceIdRef.current !== nextWorkspaceId) {
@@ -811,17 +819,22 @@ export function SkillsGallery({
         }
         loadedCatalogWorkspaceIdRef.current = nextWorkspaceId;
         setItems(result.items);
+        setCatalogStatus("ready");
       } catch (changeError) {
         setItems([]);
         loadedCatalogWorkspaceIdRef.current = null;
+        setCatalogStatus("error");
         setError(
           changeError instanceof Error
             ? changeError.message
             : "Failed to switch workspace.",
         );
       } finally {
-        setIsLoading(false);
-        setIsResolvingWorkspace(false);
+        if (workspaceIdRef.current === nextWorkspaceId) {
+          setCatalogStatus((currentStatus) =>
+            currentStatus === "loading_catalog" ? "ready" : currentStatus,
+          );
+        }
       }
     },
     [dashboardState, lockWorkspace, workspace?.id],
@@ -893,9 +906,13 @@ export function SkillsGallery({
     }
   }
 
-  const pageLoading = isResolvingWorkspace || (isLoading && items.length === 0);
+  const pageLoading =
+    catalogStatus === "resolving_workspace" ||
+    catalogStatus === "loading_catalog";
   const currentWorkspaceName =
     workspace?.name ?? workspaceName ?? dashboardState.workspaceName;
+  const catalogReadyForWorkspace =
+    workspace ? loadedCatalogWorkspaceIdRef.current === workspace.id : false;
   const filtersPanel = (
     <SkillsFilterPanel
       category={category}
@@ -954,7 +971,7 @@ export function SkillsGallery({
                     <WorkspacePill workspaceName={currentWorkspaceName} />
                   ) : (
                     <WorkspaceMenu
-                      disabled={isResolvingWorkspace}
+                      disabled={catalogStatus === "resolving_workspace"}
                       onChange={(nextWorkspaceId, nextWorkspaceName) =>
                         void handleWorkspaceChange(nextWorkspaceId, nextWorkspaceName)
                       }
@@ -981,7 +998,9 @@ export function SkillsGallery({
                   <p className="font-medium">Skills could not be loaded</p>
                   <p className="mt-1 text-destructive/85">{error}</p>
                 </div>
-              ) : filteredItems.length === 0 ? (
+              ) : catalogStatus === "ready" &&
+                catalogReadyForWorkspace &&
+                filteredItems.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                   {items.length === 0
                     ? "No skills are available for this workspace."

@@ -34,13 +34,11 @@ import {
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
   resolveSelectedModelsWithByok,
-  type ModelAliasSettings,
   type ModelItem,
   type SelectedModels,
   type ModelType,
 } from "./model-catalog-utils";
 import {
-  buildByokModelExecution,
   buildThreadCreateModelSettings,
   normalizeByokProviderOptions,
   readStoredByokState,
@@ -57,7 +55,6 @@ import {
   type ModelSelectionSources,
 } from "./skill-model-presets";
 import {
-  buildChatToolsRequest,
   DEFAULT_PROMPT_THINKING_SETTINGS,
 } from "./chat-canvas/tool-selection";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
@@ -68,11 +65,8 @@ import type {
   ChatToolName,
   PromptThinkingSettings,
 } from "./chat-canvas/types";
-import type {
-  ListThreadModelCatalogResponse,
-  StreamThreadRequest,
-} from "@sourceweft/contracts";
-import { AGENT_TOOL_NAMES } from "@sourceweft/sdk";
+import type { ListThreadModelCatalogResponse } from "@sourceweft/contracts";
+import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body";
 import type { ArtifactListItem } from "./sources-hub";
 import {
   expandSelectedSources,
@@ -87,6 +81,11 @@ import {
   writeStoredModelSelection,
 } from "./model-selection-storage";
 import {
+  setPendingThreadTurn,
+  writePendingThreadTurnFallback,
+  type PendingThreadTurn,
+} from "./pending-thread-turn";
+import {
   getCachedWorkspaceSources,
   hasCachedWorkspaceSources,
   setCachedWorkspaceSources,
@@ -96,7 +95,6 @@ import {
   handleDesktopAuthDeepLink,
 } from "../../../../lib/desktop-bridge";
 import { contentClient } from "../../../../lib/sdk";
-import { SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX } from "@sourceweft/sdk";
 import {
   ChatCanvasPanelSkeleton,
   SourcesHubPanelSkeleton,
@@ -110,6 +108,13 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
 const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
+type IdleSchedulerWindow = Window & {
+  cancelIdleCallback?: (handle: number) => void;
+  requestIdleCallback?: (
+    callback: IdleRequestCallback,
+    options?: IdleRequestOptions,
+  ) => number;
+};
 
 const ChatCanvas = dynamic(
   () =>
@@ -245,7 +250,7 @@ function parseStoredThinkingSettings(
 function buildPendingThinking(input: {
   capabilities: ModelItem["capabilities"] | undefined;
   settings: PromptThinkingSettings;
-}): NonNullable<StreamThreadRequest["llm"]>["thinking"] | undefined {
+}): RequestThinkingConfig | undefined {
   if (input.capabilities?.supportsThinking !== true) {
     return undefined;
   }
@@ -280,14 +285,6 @@ function buildPendingThinking(input: {
   return {
     mode: "auto",
   };
-}
-
-function createDurableRunKey() {
-  const random =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `${SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX}${random}`;
 }
 
 function normalizeThinkingSettingsForModel(input: {
@@ -347,6 +344,7 @@ export function DashboardChatPageClient() {
     useState<ArtifactListItem | null>(null);
   const isPersistentLayout = useMediaQuery("(min-width: 768px)");
   const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
+  const isStartingChatRef = useRef(false);
   const skillsLoadGenerationRef = useRef(0);
   const initialSourcesForWorkspace = useMemo(
     () => getCachedWorkspaceSources(workspaceId) ?? librarySources,
@@ -429,6 +427,34 @@ export function DashboardChatPageClient() {
   useBrowserLayoutEffect(() => {
     startNewChat();
   }, [startNewChat]);
+
+  useEffect(() => {
+    const preloadThreadRoute = () => {
+      void import("../[threadId]/dashboard-chat-thread-page-client");
+    };
+    const idleWindow = window as IdleSchedulerWindow;
+
+    const scheduler =
+      typeof idleWindow.requestIdleCallback === "function"
+        ? {
+            kind: "idle" as const,
+            value: idleWindow.requestIdleCallback(preloadThreadRoute, {
+              timeout: 1500,
+            }),
+          }
+        : {
+            kind: "timeout" as const,
+            value: window.setTimeout(preloadThreadRoute, 250),
+          };
+
+    return () => {
+      if (scheduler.kind === "idle") {
+        idleWindow.cancelIdleCallback?.(scheduler.value);
+        return;
+      }
+      window.clearTimeout(scheduler.value);
+    };
+  }, []);
 
   useEffect(() => {
     setLibrarySources(getCachedWorkspaceSources(workspaceId) ?? []);
@@ -864,7 +890,7 @@ export function DashboardChatPageClient() {
 
   const handleSendMessage = useCallback(
     async (input: ChatSendInput) => {
-      if (isStartingChat) {
+      if (isStartingChatRef.current) {
         return;
       }
       if (!workspaceId) {
@@ -879,14 +905,6 @@ export function DashboardChatPageClient() {
       const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
       const selectedSkillIds = input.skillIds ?? effectiveActiveSkillIds;
 
-      const modelSettings: ModelAliasSettings = {};
-      if (catalogKindEnabled.image && selectedModels.image?.profileAlias) {
-        modelSettings.imageProfileAlias = selectedModels.image.profileAlias;
-      }
-      if (catalogKindEnabled.vision && selectedModels.vision?.profileAlias) {
-        modelSettings.visionProfileAlias = selectedModels.vision.profileAlias;
-      }
-
       const resolvedThreadModelSettings = buildThreadCreateModelSettings({
         byokSelection: selectedByokModels.llm,
         globalProfileAlias:
@@ -894,77 +912,27 @@ export function DashboardChatPageClient() {
             ? selectedModels.llm.profileAlias
             : null,
         imageByokSelection: selectedByokModels.image,
-        imageProfileAlias: modelSettings.imageProfileAlias ?? null,
-        visionByokSelection: selectedByokModels.vision,
-        visionProfileAlias: modelSettings.visionProfileAlias ?? null,
-      });
-      const tools = buildChatToolsRequest({
-        imageExecution:
-          selectedByokModels.image?.mode === "byok"
-            ? buildByokModelExecution({
-                selection: selectedByokModels.image,
-              })
+        imageProfileAlias:
+          catalogKindEnabled.image && selectedModels.image?.profileAlias
+            ? selectedModels.image.profileAlias
             : null,
-        invokedSkillIds: input.tools?.invokedSkillIds,
-        skillIds: selectedSkillIds,
-        searchEnabled,
-        tools: input.tools,
-        forceImageGenerate:
-          input.command?.kind === "tool" &&
-          input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
+        visionByokSelection: selectedByokModels.vision,
+        visionProfileAlias:
+          catalogKindEnabled.vision && selectedModels.vision?.profileAlias
+            ? selectedModels.vision.profileAlias
+            : null,
       });
       const thinking = buildPendingThinking({
         capabilities: selectedModels.llm?.capabilities,
         settings: thinkingSettings,
       });
-      const requestModelSettings: ModelAliasSettings = {};
-      if (catalogKindEnabled.vision && selectedModels.vision) {
-        requestModelSettings.visionProfileAlias =
-          selectedModels.vision.profileAlias ?? selectedModels.vision.id;
-      }
-      if (catalogKindEnabled.image && selectedModels.image?.profileAlias) {
-        requestModelSettings.imageProfileAlias =
-          selectedModels.image.profileAlias;
-      }
 
+      isStartingChatRef.current = true;
       setIsStartingChat(true);
       try {
-        const result = await contentClient.startThreadTurn(workspaceId, {
-          content: text,
-          images,
-          idempotencyKey: createDurableRunKey(),
-          mentionedSourceIds,
-          modelSettings: {
-            ...resolvedThreadModelSettings,
-            ...requestModelSettings,
-          },
-          sourceIds,
-          command: input.command,
-          tools,
-          ...(catalogKindEnabled.llm && selectedModels.llm?.profileAlias
-            ? {
-                llm: {
-                  profileAlias: selectedModels.llm.profileAlias,
-                  ...(thinking ? { thinking } : {}),
-                },
-              }
-            : thinking
-              ? { llm: { thinking } }
-              : {}),
-          ...(selectedByokModels.image?.mode === "byok"
-            ? {
-                image: buildByokModelExecution({
-                  selection: selectedByokModels.image,
-                }),
-              }
-            : {}),
-          ...(selectedByokModels.vision?.mode === "byok"
-            ? {
-                vision: buildByokModelExecution({
-                  selection: selectedByokModels.vision,
-                }),
-              }
-            : {}),
+        const result = await contentClient.createThread(workspaceId, {
+          title: "New chat",
+          modelSettings: resolvedThreadModelSettings,
         });
         adoptChat(result.thread);
         writeStoredSourceSelection(workspaceId, result.thread.id, sourceIds);
@@ -977,19 +945,44 @@ export function DashboardChatPageClient() {
           },
           result.thread.id,
         );
+        const pendingTurn: PendingThreadTurn = {
+          content: text,
+          images,
+          mentionedSourceIds,
+          sourceIds,
+          skillIds: selectedSkillIds,
+          tools: input.tools,
+          command: input.command,
+          thinking,
+          thinkingSettings,
+          searchEnabled,
+          modelState: {
+            availableModels,
+            catalogKindEnabled,
+            selectedModels,
+            byokSelections: selectedByokModels,
+          },
+        };
+        setPendingThreadTurn(result.thread.id, pendingTurn);
+        writePendingThreadTurnFallback(result.thread.id, pendingTurn);
+        router.prefetch(`/dashboard/chat/${result.thread.id}`);
         router.push(`/dashboard/chat/${result.thread.id}`);
       } catch (error) {
         console.error(error);
         toast.error("Failed to create conversation.");
-      } finally {
+        isStartingChatRef.current = false;
         setIsStartingChat(false);
+      } finally {
+        if (!isStartingChatRef.current) {
+          setIsStartingChat(false);
+        }
       }
     },
     [
-      isStartingChat,
       workspaceId,
       adoptChat,
       activeSourceIds,
+      availableModels,
       effectiveActiveSkillIds,
       router,
       catalogKindEnabled,

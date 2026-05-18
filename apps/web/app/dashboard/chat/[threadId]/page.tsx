@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ChatRouteSkeleton } from "../../../_components/route-loading-skeleton";
 
 const DashboardChatThreadPageClient = dynamic(
   () =>
@@ -9,7 +8,7 @@ const DashboardChatThreadPageClient = dynamic(
       (mod) => mod.DashboardChatThreadPageClient,
     ),
   {
-    loading: () => <ChatRouteSkeleton />,
+    loading: () => null,
     ssr: false,
   },
 );

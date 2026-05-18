@@ -46,6 +46,8 @@ type DashboardChatState = {
   archivedChats: ChatItem[];
   hasMorePrivateChats: boolean;
   isLoadingPrivateChats: boolean;
+  isWorkspaceHydrating: boolean;
+  hasWorkspaceHydrated: boolean;
   bootstrapModelCatalog: ListThreadModelCatalogResponse | null;
   consumeBootstrapModelCatalog: (
     workspaceId: string,
@@ -169,6 +171,8 @@ export function DashboardChatStateProvider({
   );
   const [hasMorePrivateChats, setHasMorePrivateChats] = useState(false);
   const [isLoadingPrivateChats, setIsLoadingPrivateChats] = useState(false);
+  const [isWorkspaceHydrating, setIsWorkspaceHydrating] = useState(true);
+  const [hasWorkspaceHydrated, setHasWorkspaceHydrated] = useState(false);
   const [bootstrapModelCatalog, setBootstrapModelCatalog] =
     useState<ListThreadModelCatalogResponse | null>(null);
   const bootstrapModelCatalogWorkspaceRef = useRef<string | null>(null);
@@ -226,6 +230,8 @@ export function DashboardChatStateProvider({
         setPrivateChatsCursor(null);
         setHasMorePrivateChats(false);
         setIsLoadingPrivateChats(false);
+        setHasWorkspaceHydrated(true);
+        setIsWorkspaceHydrating(false);
         return;
       }
 
@@ -252,6 +258,8 @@ export function DashboardChatStateProvider({
       } finally {
         if (isCurrent()) {
           setIsLoadingPrivateChats(false);
+          setHasWorkspaceHydrated(true);
+          setIsWorkspaceHydrating(false);
         }
       }
     },
@@ -261,6 +269,7 @@ export function DashboardChatStateProvider({
   useEffect(() => {
     let cancelled = false;
     const generation = ++hydrateGenerationRef.current;
+    setIsWorkspaceHydrating(true);
 
     function resetForOrganizationChange(resolvedOrganizationId: string) {
       const organizationChanged =
@@ -282,6 +291,7 @@ export function DashboardChatStateProvider({
         setBootstrapModelCatalog(null);
         bootstrapModelCatalogWorkspaceRef.current = null;
         setIsLoadingPrivateChats(true);
+        setHasWorkspaceHydrated(false);
       }
     }
 
@@ -316,12 +326,18 @@ export function DashboardChatStateProvider({
           ? result.activeWorkspace.id
           : null;
         setIsLoadingPrivateChats(false);
+        setHasWorkspaceHydrated(true);
+        setIsWorkspaceHydrating(false);
         return;
       } catch {
         shouldUseFallback = true;
       }
 
       if (!shouldUseFallback || cancelled) {
+        if (!cancelled && hydrateGenerationRef.current === generation) {
+          setHasWorkspaceHydrated(true);
+          setIsWorkspaceHydrating(false);
+        }
         return;
       }
 
@@ -343,7 +359,13 @@ export function DashboardChatStateProvider({
           orgList.find((org) => org.id === resolvedOrganizationId)?.name ??
           "SourceWeft";
 
+        if (cancelled || hydrateGenerationRef.current !== generation) {
+          return;
+        }
+
         if (!resolvedOrganizationId) {
+          setHasWorkspaceHydrated(true);
+          setIsWorkspaceHydrating(false);
           return;
         }
 
@@ -370,6 +392,8 @@ export function DashboardChatStateProvider({
         // keep UI usable; sidebar still renders local state
         if (!cancelled && hydrateGenerationRef.current === generation) {
           setIsLoadingPrivateChats(false);
+          setHasWorkspaceHydrated(true);
+          setIsWorkspaceHydrating(false);
         }
       }
     }
@@ -785,6 +809,8 @@ export function DashboardChatStateProvider({
       archivedChats,
       hasMorePrivateChats,
       isLoadingPrivateChats,
+      isWorkspaceHydrating,
+      hasWorkspaceHydrated,
       bootstrapModelCatalog,
       consumeBootstrapModelCatalog,
       toggleSourcesVisible,
@@ -820,6 +846,8 @@ export function DashboardChatStateProvider({
       archivedChats,
       hasMorePrivateChats,
       isLoadingPrivateChats,
+      isWorkspaceHydrating,
+      hasWorkspaceHydrated,
       bootstrapModelCatalog,
       consumeBootstrapModelCatalog,
       toggleSourcesVisible,

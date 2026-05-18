@@ -59,7 +59,12 @@ export class ContentSkillsService {
   }
 
   async listCatalog(input: { teamId: string; workspaceId: string }) {
-    const rows = await listCatalogSkillVersionsForWorkspace(input);
+    let rows = await listCatalogSkillVersionsForWorkspace(input);
+    if (rows.length === 0) {
+      await this.syncBuiltinCatalog();
+      rows = await listCatalogSkillVersionsForWorkspace(input);
+    }
+
     const items: SkillCatalogItem[] = rows.map((row) => {
       const manifest = row.version.manifestJson;
       return {
