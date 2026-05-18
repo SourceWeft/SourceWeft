@@ -10,8 +10,12 @@ import type {
   ListConnectorManifestsResponse,
   ListConnectorOAuthAccountsRequest,
   ListConnectorOAuthAccountsResponse,
+  ListConnectorWebhookEventsRequest,
+  ListConnectorWebhookEventsResponse,
   ListConnectorsResponse,
   ListConnectorSyncRunsResponse,
+  LookupNotionPagesRequest,
+  LookupNotionPagesResponse,
   StartConnectorOAuthRequest,
   StartConnectorOAuthResponse,
   TriggerConnectorSyncResponse,
@@ -161,6 +165,33 @@ export class ConnectorsClient {
   listActions(workspaceId: string, connectorId: string) {
     return this.http.get<ListConnectorActionsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/actions`,
+    );
+  }
+
+  listWebhookEvents(
+    workspaceId: string,
+    input: ListConnectorWebhookEventsRequest = {},
+  ) {
+    return this.http.get<ListConnectorWebhookEventsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/webhook-events${query({
+        connectorType: input.connectorType,
+        connectorId: input.connectorId,
+      })}`,
+    );
+  }
+
+  lookupNotionPages(
+    workspaceId: string,
+    input: LookupNotionPagesRequest = {},
+  ) {
+    return this.http.get<LookupNotionPagesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/notion/pages${query({
+        connectorId: input.connectorId,
+        title: input.title,
+        externalId: input.externalId,
+        externalUri: input.externalUri,
+        limit: input.limit ? String(input.limit) : undefined,
+      })}`,
     );
   }
 }

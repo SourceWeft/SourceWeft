@@ -28,6 +28,8 @@ export function mapSource(row: SourceRow): SourceRecord {
     workspaceId: row.workspaceId,
     ingestKind: row.ingestKind,
     sourceType: row.sourceType as SourceRecord["sourceType"],
+    connectorId: row.connectorId,
+    syncRunId: row.syncRunId,
     parentSourceId: row.parentSourceId,
     title: row.title,
     contentText: row.contentText,

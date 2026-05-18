@@ -15,6 +15,7 @@ import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
 import { registerConnectorOAuthRoutes } from "./routes/connectors-oauth";
+import { registerConnectorWebhookRoutes } from "./routes/connectors-webhooks";
 import { registerDashboardRoutes } from "./routes/dashboard";
 import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
 import { healthResponse } from "./routes/health";
@@ -92,6 +93,7 @@ export function createApp() {
   registerAuthMetaRoutes(app);
   registerDesktopAuthRoutes(app);
   registerConnectorOAuthRoutes(app);
+  registerConnectorWebhookRoutes(app);
   registerWorkspaceRoutes(app);
   registerDashboardRoutes(app);
   registerBillingRoutes(app);

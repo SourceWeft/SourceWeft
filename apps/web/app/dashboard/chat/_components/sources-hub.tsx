@@ -37,7 +37,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { HttpClientError, type SourceConnector } from "@sourceweft/sdk";
+import {
+  HttpClientError,
+  type ConnectorWebhookEvent,
+  type SourceConnector,
+} from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   Alert,
@@ -303,6 +307,8 @@ type ConnectorItem = {
   meta: string;
   raw: SourceConnector;
 };
+
+type ConnectorWebhookEventItem = ConnectorWebhookEvent;
 
 export type ThreadCitationRecord = {
   citation: CitationRecord;
@@ -3480,6 +3486,7 @@ function ConnectorsTab({
   onCreateNotionConnector,
   onSyncConnector,
   searchQuery,
+  webhookEvents,
   workspaceId,
 }: {
   connectors: ConnectorItem[];
@@ -3491,6 +3498,7 @@ function ConnectorsTab({
   onCreateNotionConnector: () => void;
   onSyncConnector: (connector: ConnectorItem) => void;
   searchQuery: string;
+  webhookEvents: ConnectorWebhookEventItem[];
   workspaceId?: string | null;
 }) {
   const filtered = useMemo(
@@ -3548,6 +3556,31 @@ function ConnectorsTab({
           <AlertDescription>{loadingError}</AlertDescription>
         </Alert>
       ) : null}
+
+      <div className="rounded-lg border bg-muted/30 p-2.5 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium text-foreground">Notion webhook URL</span>
+          <code className="max-w-[62%] truncate rounded bg-background px-1.5 py-0.5 text-[10px]">
+            {apiBaseUrl}/v1/connectors/webhooks/notion
+          </code>
+        </div>
+        <p className="mt-1">
+          Create and verify this webhook in Notion connection settings.
+        </p>
+        {webhookEvents.length > 0 ? (
+          <div className="mt-2 space-y-1">
+            {webhookEvents.slice(0, 3).map((event) => (
+              <div
+                className="flex items-center justify-between gap-2"
+                key={event.id}
+              >
+                <span className="truncate">{event.eventType}</span>
+                <span className="shrink-0 text-[10px]">{event.status}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
@@ -3924,6 +3957,9 @@ export function SourcesHub({
   const [connectorsLoadingError, setConnectorsLoadingError] = useState<string | null>(null);
   const [connectorBusyById, setConnectorBusyById] = useState<Record<string, boolean>>({});
   const [isConnectingNotion, setIsConnectingNotion] = useState(false);
+  const [connectorWebhookEvents, setConnectorWebhookEvents] = useState<
+    ConnectorWebhookEventItem[]
+  >([]);
   const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(null);
   const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(null);
   const [workfileBusyByPath, setWorkfileBusyByPath] = useState<Record<string, boolean>>({});
@@ -4477,6 +4513,7 @@ export function SourcesHub({
   const refreshConnectors = useCallback(async () => {
     if (!workspaceId) {
       setConnectors([]);
+      setConnectorWebhookEvents([]);
       setConnectorsLoadingError(null);
       return;
     }
@@ -4484,10 +4521,17 @@ export function SourcesHub({
     setIsLoadingConnectors(true);
     setConnectorsLoadingError(null);
     try {
-      const result = await connectorsClient.list(workspaceId);
+      const [result, webhookEvents] = await Promise.all([
+        connectorsClient.list(workspaceId),
+        connectorsClient.listWebhookEvents(workspaceId, {
+          connectorType: "notion",
+        }),
+      ]);
       setConnectors(result.items.map(mapConnectorToUi));
+      setConnectorWebhookEvents(webhookEvents.items);
     } catch (error) {
       setConnectors([]);
+      setConnectorWebhookEvents([]);
       setConnectorsLoadingError(
         getErrorMessage(error, "Failed to load connectors."),
       );
@@ -5571,6 +5615,7 @@ export function SourcesHub({
               }
               onSyncConnector={(connector) => void handleSyncConnector(connector)}
               searchQuery={deferredSearchQueries.Connectors}
+              webhookEvents={connectorWebhookEvents}
               workspaceId={workspaceId}
             />
           )}

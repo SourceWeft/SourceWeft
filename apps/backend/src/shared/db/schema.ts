@@ -61,6 +61,12 @@ type ConnectorActionRunStatus =
   | "succeeded"
   | "failed"
   | "canceled";
+type ConnectorWebhookEventStatus =
+  | "received"
+  | "queued"
+  | "processed"
+  | "ignored"
+  | "failed";
 type DocumentStatus = "pending" | "processing" | "ready" | "failed";
 type ModelGatewayProfileKind =
   | "chat"
@@ -1691,6 +1697,89 @@ export const connectorSyncRuns = pgTable(
       table.workspaceId,
       table.status,
       desc(table.createdAt),
+    ),
+  ],
+);
+
+export const connectorWebhookEvents = pgTable(
+  "connector_webhook_events",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id"),
+    workspaceId: text("workspace_id").references(() => workspaces.id, {
+      onDelete: "cascade",
+    }),
+    connectorId: text("connector_id").references(() => sourceConnectors.id, {
+      onDelete: "cascade",
+    }),
+    connectorType: text("connector_type").notNull(),
+    providerEventId: text("provider_event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    status: text("status").$type<ConnectorWebhookEventStatus>().notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    objectId: text("object_id"),
+    objectType: text("object_type"),
+    syncRunId: text("sync_run_id").references(() => connectorSyncRuns.id, {
+      onDelete: "set null",
+    }),
+    payloadMetadataJson: jsonb("payload_metadata_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    receivedAt: timestamp("received_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    processedAt: timestamp("processed_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "connector_webhook_events_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "connector_webhook_events_connector_workspace_team_fk",
+      columns: [table.connectorId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        sourceConnectors.id,
+        sourceConnectors.workspaceId,
+        sourceConnectors.teamId,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "connector_webhook_events_status_check",
+      sql`${table.status} in ('received', 'queued', 'processed', 'ignored', 'failed')`,
+    ),
+    check(
+      "connector_webhook_events_attempts_check",
+      sql`${table.attempts} >= 0`,
+    ),
+    uniqueIndex("connector_webhook_events_provider_event_uq").on(
+      table.connectorType,
+      table.providerEventId,
+    ),
+    index("connector_webhook_events_workspace_created_idx").on(
+      table.workspaceId,
+      desc(table.createdAt),
+    ),
+    index("connector_webhook_events_connector_created_idx").on(
+      table.connectorId,
+      desc(table.createdAt),
+    ),
+    index("connector_webhook_events_status_received_idx").on(
+      table.status,
+      desc(table.receivedAt),
     ),
   ],
 );

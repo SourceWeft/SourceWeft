@@ -9,6 +9,7 @@ import {
   GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
 } from "../tools/generate-image-tool";
 import { WorkingFilesBackend } from "../working-files-backend";
+import { createNotionTools } from "../tools/notion-tools";
 import { createWebTools } from "../tools/web-tools";
 import {
   AGENT_TOOL_NAMES,
@@ -1306,6 +1307,11 @@ export async function* invokeDeepAgentTurn(input: {
           }),
         ]
       : [];
+  const notionTools = createNotionTools({
+    teamId: input.prepared.workspace.organizationId,
+    workspaceId: input.prepared.workspace.id,
+    userId: input.prepared.userId,
+  });
   const toolCommand = resolveToolCommand(input.prepared);
   if (toolCommand?.name === AGENT_TOOL_NAMES.generateImage) {
     const generateImageTool = artifactTools.find(
@@ -1686,7 +1692,7 @@ export async function* invokeDeepAgentTurn(input: {
     modelAlias: input.prepared.modelAlias,
     providerModel: input.prepared.providerModel,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
-    tools: [retrievalTool, ...webTools, ...artifactTools],
+    tools: [retrievalTool, ...webTools, ...artifactTools, ...notionTools],
     backend,
     filesystemMounts,
     skills: skillsBackend ? ["/skills/"] : undefined,

@@ -45,6 +45,14 @@ export const connectorActionRunStatusSchema = z.enum([
   "canceled",
 ]);
 
+export const connectorWebhookEventStatusSchema = z.enum([
+  "received",
+  "queued",
+  "processed",
+  "ignored",
+  "failed",
+]);
+
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
 const connectorAuthManifestSchema = z.object({
@@ -163,6 +171,28 @@ export const connectorActionRunSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const connectorWebhookEventSchema = z.object({
+  id: z.string(),
+  teamId: z.string().nullable(),
+  workspaceId: z.string().nullable(),
+  connectorId: z.string().nullable(),
+  connectorType: z.string(),
+  providerEventId: z.string(),
+  eventType: z.string(),
+  status: connectorWebhookEventStatusSchema,
+  attempts: z.number().int().nonnegative(),
+  objectId: z.string().nullable(),
+  objectType: z.string().nullable(),
+  syncRunId: z.string().nullable(),
+  payloadMetadataJson: jsonObjectSchema,
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  receivedAt: z.string(),
+  processedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 export const listConnectorManifestsResponseSchema = z.object({
   items: z.array(connectorManifestSchema),
 });
@@ -253,11 +283,61 @@ export const listConnectorActionsResponseSchema = z.object({
   items: z.array(connectorActionRunSchema),
 });
 
+export const listConnectorWebhookEventsRequestSchema = z.object({
+  connectorType: z.string().trim().min(1).optional(),
+  connectorId: z.string().trim().min(1).optional(),
+});
+
+export const listConnectorWebhookEventsResponseSchema = z.object({
+  items: z.array(connectorWebhookEventSchema),
+});
+
+export const connectorNotionWriteRequestSchema = z.object({
+  target: z.object({
+    connectorId: z.string().trim().min(1).optional(),
+    pageId: z.string().trim().min(1).optional(),
+    pageTitle: z.string().trim().min(1).optional(),
+    parentPageId: z.string().trim().min(1).optional(),
+    dataSourceId: z.string().trim().min(1).optional(),
+  }),
+  title: z.string().trim().min(1).max(200).optional(),
+  contentMarkdown: z.string().max(200_000).optional(),
+  artifactId: z.string().trim().min(1).optional(),
+  mode: z.enum(["create", "append", "update"]),
+});
+
+export const lookupNotionPagesRequestSchema = z.object({
+  connectorId: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).optional(),
+  externalId: z.string().trim().min(1).optional(),
+  externalUri: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().max(50).optional(),
+});
+
+export const lookupNotionPagesResponseSchema = z.object({
+  items: z.array(
+    z.object({
+      sourceId: z.string(),
+      connectorId: z.string().nullable(),
+      title: z.string(),
+      externalId: z.string().nullable(),
+      externalUri: z.string().nullable(),
+      status: z.string(),
+      metadata: jsonObjectSchema,
+      updatedAt: z.string(),
+    }),
+  ),
+});
+
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
 export type ConnectorOAuthAccount = z.infer<typeof connectorOAuthAccountSchema>;
 export type SourceConnector = z.infer<typeof sourceConnectorSchema>;
 export type ConnectorSyncRun = z.infer<typeof connectorSyncRunSchema>;
 export type ConnectorActionRun = z.infer<typeof connectorActionRunSchema>;
+export type ConnectorWebhookEvent = z.infer<typeof connectorWebhookEventSchema>;
+export type ConnectorNotionWriteRequest = z.infer<
+  typeof connectorNotionWriteRequestSchema
+>;
 export type StartConnectorOAuthRequest = z.infer<
   typeof startConnectorOAuthRequestSchema
 >;
@@ -314,4 +394,16 @@ export type ListConnectorManifestsResponse = z.infer<
 >;
 export type ListConnectorActionsResponse = z.infer<
   typeof listConnectorActionsResponseSchema
+>;
+export type ListConnectorWebhookEventsRequest = z.infer<
+  typeof listConnectorWebhookEventsRequestSchema
+>;
+export type ListConnectorWebhookEventsResponse = z.infer<
+  typeof listConnectorWebhookEventsResponseSchema
+>;
+export type LookupNotionPagesRequest = z.infer<
+  typeof lookupNotionPagesRequestSchema
+>;
+export type LookupNotionPagesResponse = z.infer<
+  typeof lookupNotionPagesResponseSchema
 >;

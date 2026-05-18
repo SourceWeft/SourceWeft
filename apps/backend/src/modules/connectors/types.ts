@@ -26,6 +26,12 @@ export type ConnectorSyncRunStatus =
   | "succeeded"
   | "failed"
   | "canceled";
+export type ConnectorWebhookEventStatus =
+  | "received"
+  | "queued"
+  | "processed"
+  | "ignored"
+  | "failed";
 
 export type ConnectorManifest = {
   type: ConnectorType;
@@ -94,6 +100,37 @@ export type ConnectorItem = {
   metadata: Record<string, unknown>;
 };
 
+export type ConnectorWebhookVerifyInput = {
+  headers: Record<string, string>;
+  rawBody: string;
+  query: Record<string, string | undefined>;
+};
+
+export type ConnectorWebhookEvent = {
+  providerEventId: string;
+  eventType: string;
+  objectId: string | null;
+  objectType: string | null;
+  workspaceHint?: string | null;
+  connectorId?: string | null;
+  metadata: Record<string, unknown>;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ConnectorWebhookTargetAction =
+  | "sync"
+  | "archive_source"
+  | "record_only";
+
+export type ConnectorWebhookTarget = {
+  action: ConnectorWebhookTargetAction;
+  externalId?: string | null;
+  objectId?: string | null;
+  objectType?: string | null;
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 export type ConnectorExtractedContent = {
   item: ConnectorItem;
   contentText: string;
@@ -131,6 +168,29 @@ export type ConnectorActionResult = {
   externalId?: string | null;
   result: Record<string, unknown>;
   shouldResync?: boolean;
+  resyncExternalIds?: string[];
+};
+
+export type ConnectorWebhookEventRecord = {
+  id: string;
+  teamId: string | null;
+  workspaceId: string | null;
+  connectorId: string | null;
+  connectorType: string;
+  providerEventId: string;
+  eventType: string;
+  status: ConnectorWebhookEventStatus;
+  attempts: number;
+  objectId: string | null;
+  objectType: string | null;
+  syncRunId: string | null;
+  payloadMetadataJson: Record<string, unknown>;
+  errorCode: string | null;
+  errorMessage: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export interface ConnectorAdapter {
@@ -140,6 +200,13 @@ export interface ConnectorAdapter {
   discover(input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem>;
   extract(input: ConnectorExtractInput): Promise<ConnectorExtractedContent>;
   executeAction(input: ConnectorActionInput): Promise<ConnectorActionResult>;
+  verifyWebhook?(input: ConnectorWebhookVerifyInput): Promise<void>;
+  parseWebhookEvent?(
+    input: ConnectorWebhookVerifyInput,
+  ): Promise<ConnectorWebhookEvent>;
+  mapWebhookEventToSyncTargets?(
+    event: ConnectorWebhookEvent,
+  ): Promise<ConnectorWebhookTarget[]>;
 }
 
 export type ConnectorOAuthAccountRecord = {

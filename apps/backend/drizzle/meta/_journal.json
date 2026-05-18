@@ -176,6 +176,13 @@
       "when": 1779028961317,
       "tag": "0024_tearful_electro",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1779072690393,
+      "tag": "0025_connector_webhook_events",
+      "breakpoints": true
     }
   ]
 }

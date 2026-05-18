@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import { db } from "../../shared/database";
 import {
   connectorActionRuns,
   connectorOAuthAccounts,
   connectorOAuthStates,
   connectorSyncRuns,
+  connectorWebhookEvents,
   sourceConnectors,
+  sources,
 } from "../../shared/db/schema";
 import {
   mapActionRun,
@@ -14,7 +16,9 @@ import {
   mapOAuthAccountWithSecret,
   mapSourceConnector,
   mapSyncRun,
+  mapWebhookEvent,
 } from "./mappers";
+import { mapSource } from "../content/sources/mappers";
 import type {
   ConnectorActionRiskLevel,
   ConnectorActionRunStatus,
@@ -22,6 +26,7 @@ import type {
   ConnectorStatus,
   ConnectorSyncRunStatus,
   ConnectorSyncRunTriggerType,
+  ConnectorWebhookEventStatus,
 } from "./types";
 
 export async function createOAuthStateRecord(input: {
@@ -172,6 +177,24 @@ export async function findOAuthAccountRecord(input: {
   return row ? mapOAuthAccountWithSecret(row) : null;
 }
 
+export async function listOAuthAccountRecordsByProviderAccount(input: {
+  connectorType: string;
+  providerAccountId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(connectorOAuthAccounts)
+    .where(
+      and(
+        eq(connectorOAuthAccounts.connectorType, input.connectorType),
+        eq(connectorOAuthAccounts.providerAccountId, input.providerAccountId),
+        eq(connectorOAuthAccounts.status, "active"),
+      ),
+    );
+
+  return rows.map(mapOAuthAccount);
+}
+
 export async function updateOAuthAccountTokenRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -313,6 +336,37 @@ export async function findSourceConnectorRecord(input: {
   return row ? mapSourceConnector(row) : null;
 }
 
+export async function findSourceConnectorRecordById(input: {
+  connectorId: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(sourceConnectors)
+    .where(eq(sourceConnectors.id, input.connectorId))
+    .limit(1);
+
+  return row ? mapSourceConnector(row) : null;
+}
+
+export async function listSourceConnectorRecordsByOAuthAccount(input: {
+  connectorType: string;
+  oauthAccountId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(sourceConnectors)
+    .where(
+      and(
+        eq(sourceConnectors.connectorType, input.connectorType),
+        eq(sourceConnectors.oauthAccountId, input.oauthAccountId),
+        eq(sourceConnectors.status, "active"),
+      ),
+    )
+    .orderBy(desc(sourceConnectors.createdAt));
+
+  return rows.map(mapSourceConnector);
+}
+
 export async function updateSourceConnectorRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -390,6 +444,7 @@ export async function createSyncRunRecord(input: {
   triggerType: ConnectorSyncRunTriggerType;
   status: ConnectorSyncRunStatus;
   createdBy?: string | null;
+  metadataJson?: Record<string, unknown>;
 }) {
   const now = new Date();
   const [row] = await db
@@ -404,6 +459,7 @@ export async function createSyncRunRecord(input: {
       startedAt: input.status === "running" ? now : null,
       heartbeatAt: input.status === "running" ? now : null,
       createdBy: input.createdBy ?? null,
+      metadataJson: input.metadataJson ?? {},
     })
     .returning();
 
@@ -434,6 +490,204 @@ export async function findSyncRunRecord(input: {
     .limit(1);
 
   return row ? mapSyncRun(row) : null;
+}
+
+export async function insertWebhookEventRecord(input: {
+  teamId?: string | null;
+  workspaceId?: string | null;
+  connectorId?: string | null;
+  connectorType: string;
+  providerEventId: string;
+  eventType: string;
+  status: ConnectorWebhookEventStatus;
+  objectId?: string | null;
+  objectType?: string | null;
+  payloadMetadataJson?: Record<string, unknown>;
+}) {
+  const existing = await findWebhookEventByProviderEventId({
+    connectorType: input.connectorType,
+    providerEventId: input.providerEventId,
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const [row] = await db
+    .insert(connectorWebhookEvents)
+    .values({
+      id: randomUUID(),
+      teamId: input.teamId ?? null,
+      workspaceId: input.workspaceId ?? null,
+      connectorId: input.connectorId ?? null,
+      connectorType: input.connectorType,
+      providerEventId: input.providerEventId,
+      eventType: input.eventType,
+      status: input.status,
+      objectId: input.objectId ?? null,
+      objectType: input.objectType ?? null,
+      payloadMetadataJson: input.payloadMetadataJson ?? {},
+    })
+    .returning();
+
+  if (!row) {
+    throw new Error("Failed to insert connector webhook event");
+  }
+
+  return mapWebhookEvent(row);
+}
+
+export async function findWebhookEventByProviderEventId(input: {
+  connectorType: string;
+  providerEventId: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(connectorWebhookEvents)
+    .where(
+      and(
+        eq(connectorWebhookEvents.connectorType, input.connectorType),
+        eq(connectorWebhookEvents.providerEventId, input.providerEventId),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapWebhookEvent(row) : null;
+}
+
+export async function listWebhookEventRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorType?: string;
+  connectorId?: string;
+}) {
+  const conditions = [
+    eq(connectorWebhookEvents.teamId, input.teamId),
+    eq(connectorWebhookEvents.workspaceId, input.workspaceId),
+  ];
+  if (input.connectorType) {
+    conditions.push(eq(connectorWebhookEvents.connectorType, input.connectorType));
+  }
+  if (input.connectorId) {
+    conditions.push(eq(connectorWebhookEvents.connectorId, input.connectorId));
+  }
+
+  const rows = await db
+    .select()
+    .from(connectorWebhookEvents)
+    .where(and(...conditions))
+    .orderBy(desc(connectorWebhookEvents.createdAt))
+    .limit(50);
+
+  return rows.map(mapWebhookEvent);
+}
+
+export async function lookupConnectorSourceRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorType: string;
+  connectorId?: string;
+  title?: string;
+  externalId?: string;
+  externalUri?: string;
+  limit: number;
+}) {
+  const connectorRows = input.connectorId
+    ? await db
+        .select({ id: sourceConnectors.id })
+        .from(sourceConnectors)
+        .where(
+          and(
+            eq(sourceConnectors.id, input.connectorId),
+            eq(sourceConnectors.teamId, input.teamId),
+            eq(sourceConnectors.workspaceId, input.workspaceId),
+            eq(sourceConnectors.connectorType, input.connectorType),
+          ),
+        )
+    : await db
+        .select({ id: sourceConnectors.id })
+        .from(sourceConnectors)
+        .where(
+          and(
+            eq(sourceConnectors.teamId, input.teamId),
+            eq(sourceConnectors.workspaceId, input.workspaceId),
+            eq(sourceConnectors.connectorType, input.connectorType),
+            ne(sourceConnectors.status, "disabled"),
+          ),
+        );
+  const connectorIds = connectorRows.map((row) => row.id);
+  if (connectorIds.length === 0) {
+    return [];
+  }
+
+  const conditions = [
+    eq(sources.teamId, input.teamId),
+    eq(sources.workspaceId, input.workspaceId),
+    inArray(sources.connectorId, connectorIds),
+    eq(sources.ingestKind, "connector"),
+    ne(sources.status, "archived"),
+  ];
+  if (input.externalId) {
+    conditions.push(eq(sources.externalId, input.externalId));
+  }
+  if (input.externalUri) {
+    conditions.push(eq(sources.externalUri, input.externalUri));
+  }
+  if (input.title) {
+    conditions.push(
+      sql`lower(${sources.title}) = lower(${input.title})` as never,
+    );
+  }
+
+  const rows = await db
+    .select()
+    .from(sources)
+    .where(and(...conditions))
+    .orderBy(asc(sources.title), desc(sources.updatedAt))
+    .limit(input.limit);
+
+  return rows.map(mapSource);
+}
+
+export async function updateWebhookEventRecord(input: {
+  webhookEventId: string;
+  status?: ConnectorWebhookEventStatus;
+  attemptsDelta?: number;
+  teamId?: string | null;
+  workspaceId?: string | null;
+  connectorId?: string | null;
+  syncRunId?: string | null;
+  payloadMetadataJson?: Record<string, unknown>;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  processedAt?: Date | null;
+}) {
+  const updates: Partial<typeof connectorWebhookEvents.$inferInsert> = {
+    updatedAt: new Date(),
+  };
+  if (input.status !== undefined) updates.status = input.status;
+  if (input.teamId !== undefined) updates.teamId = input.teamId;
+  if (input.workspaceId !== undefined) updates.workspaceId = input.workspaceId;
+  if (input.connectorId !== undefined) updates.connectorId = input.connectorId;
+  if (input.syncRunId !== undefined) updates.syncRunId = input.syncRunId;
+  if (input.payloadMetadataJson !== undefined) {
+    updates.payloadMetadataJson = input.payloadMetadataJson;
+  }
+  if (input.errorCode !== undefined) updates.errorCode = input.errorCode;
+  if (input.errorMessage !== undefined) updates.errorMessage = input.errorMessage;
+  if (input.processedAt !== undefined) updates.processedAt = input.processedAt;
+
+  const setValues: Record<string, unknown> = { ...updates };
+  if (input.attemptsDelta !== undefined) {
+    setValues.attempts = sql`${connectorWebhookEvents.attempts} + ${input.attemptsDelta}`;
+  }
+
+  const [row] = await db
+    .update(connectorWebhookEvents)
+    .set(setValues)
+    .where(eq(connectorWebhookEvents.id, input.webhookEventId))
+    .returning();
+
+  return row ? mapWebhookEvent(row) : null;
 }
 
 export async function listSyncRunRecords(input: {

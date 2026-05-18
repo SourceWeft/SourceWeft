@@ -154,12 +154,48 @@ export class ConnectorSyncOrchestrator {
     });
   }
 
+  async createBackfillRun(input: {
+    teamId: string;
+    workspaceId: string;
+    connectorId: string;
+    createdBy?: string | null;
+    metadataJson?: Record<string, unknown>;
+  }) {
+    return createSyncRunRecord({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorId: input.connectorId,
+      triggerType: "backfill",
+      status: "queued",
+      createdBy: input.createdBy ?? null,
+      metadataJson: input.metadataJson,
+    });
+  }
+
+  async createWebhookRun(input: {
+    teamId: string;
+    workspaceId: string;
+    connectorId: string;
+    metadataJson?: Record<string, unknown>;
+  }) {
+    return createSyncRunRecord({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorId: input.connectorId,
+      triggerType: "webhook",
+      status: "queued",
+      createdBy: null,
+      metadataJson: input.metadataJson,
+    });
+  }
+
   async run(input: {
     runId: string;
     teamId: string;
     workspaceId: string;
     connectorId: string;
     userId: string;
+    targetExternalIds?: string[];
   }) {
     const connector = await findSourceConnectorRecord(input);
     if (!connector || connector.status !== "active") {
@@ -201,6 +237,9 @@ export class ConnectorSyncOrchestrator {
         accountId: connector.oauthAccountId,
         connectorType: connector.connectorType,
       });
+      const targetExternalIdSet = input.targetExternalIds?.length
+        ? new Set(input.targetExternalIds)
+        : null;
 
       for await (const item of adapter.discover({
         teamId: input.teamId,
@@ -210,6 +249,9 @@ export class ConnectorSyncOrchestrator {
         config: connector.configJson,
         accessToken,
       })) {
+        if (targetExternalIdSet && !targetExternalIdSet.has(item.externalId)) {
+          continue;
+        }
         discoveredCount += 1;
         await incrementSyncRunCounts({
           ...input,

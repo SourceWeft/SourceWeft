@@ -11,8 +11,9 @@ export type {
   ChatMessageImagePart,
   ChatMessagePart,
   ChatMessageTextPart,
-  SourceConnector,
+  ConnectorWebhookEvent,
   MessageContentJson,
+  SourceConnector,
   SkillCommand,
   ThreadCommandRequest,
 } from "@sourceweft/contracts";

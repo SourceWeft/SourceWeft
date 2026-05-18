@@ -81,6 +81,7 @@ export type ConnectorSyncJobPayload = {
   workspaceId: string;
   connectorId: string;
   userId: string;
+  targetExternalIds?: string[];
 };
 
 export type ThreadChatRunJobResult =

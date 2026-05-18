@@ -4,11 +4,13 @@ import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   createActionRunRecord,
+  createSyncRunRecord,
   findActionRunRecord,
   findSourceConnectorRecord,
   listActionRunRecords,
   updateActionRunRecord,
 } from "./repository";
+import { enqueueConnectorSyncJob } from "../content/queue";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
 import { buildRequestPreview, redactConnectorSecrets } from "./security";
@@ -264,6 +266,35 @@ export class ConnectorActionRunner {
         >,
         externalId: result.externalId ?? null,
       });
+      if (result.shouldResync) {
+        const targetExternalIds = result.resyncExternalIds?.length
+          ? result.resyncExternalIds
+          : result.externalId
+            ? [result.externalId]
+            : [];
+        const run = await createSyncRunRecord({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connectorId: connector.id,
+          triggerType: "backfill",
+          status: "queued",
+          createdBy: input.userId,
+          metadataJson: {
+            reason: "connector_action",
+            actionRunId: action.id,
+            actionType: action.actionType,
+            targetExternalIds,
+          },
+        });
+        await enqueueConnectorSyncJob({
+          runId: run.id,
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connectorId: connector.id,
+          userId: input.userId,
+          targetExternalIds,
+        });
+      }
       return { action: updated ?? action };
     } catch (error) {
       const connectorError = toConnectorError(error);

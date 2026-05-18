@@ -156,6 +156,8 @@ export type SourceRecord = {
     | "note"
     | "artifact";
   sourceType: SourceType;
+  connectorId: string | null;
+  syncRunId: string | null;
   parentSourceId: string | null;
   title: string;
   contentText: string;

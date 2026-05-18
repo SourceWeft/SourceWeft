@@ -8,6 +8,7 @@ import type {
 } from "./define";
 import { artifactTools } from "./tools/generate-image";
 import { filesystemTools } from "./tools/filesystem";
+import { notionTools } from "./tools/notion";
 import { retrievalTools } from "./tools/retrieval";
 import { webTools } from "./tools/web";
 
@@ -16,6 +17,7 @@ export const AGENT_TOOLS = [
   ...artifactTools,
   ...retrievalTools,
   ...webTools,
+  ...notionTools,
 ] as const;
 
 export type AgentToolDefinition = (typeof AGENT_TOOLS)[number];

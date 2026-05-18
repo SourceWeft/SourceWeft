@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { config } from "../../../shared/config";
 import { ConnectorError } from "../errors";
 import type {
@@ -10,6 +10,9 @@ import type {
   ConnectorExtractedContent,
   ConnectorItem,
   ConnectorManifest,
+  ConnectorWebhookEvent,
+  ConnectorWebhookTarget,
+  ConnectorWebhookVerifyInput,
   OAuthCodeExchangeInput,
   OAuthRefreshInput,
   OAuthTokenSet,
@@ -99,6 +102,18 @@ type NotionErrorResponse = {
   message?: string;
 };
 
+type NotionWebhookPayload = {
+  id?: string;
+  timestamp?: string;
+  type?: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  data?: unknown;
+  entity?: unknown;
+  object?: unknown;
+  [key: string]: unknown;
+};
+
 const jsonObjectSchema = { type: "object", additionalProperties: true };
 
 const actionInputSchemas: Record<string, Record<string, unknown>> = {
@@ -157,6 +172,52 @@ const actionInputSchemas: Record<string, Record<string, unknown>> = {
       dataSourceId: { type: "string" },
       filter: { type: "object" },
       sorts: { type: "array" },
+    },
+  },
+  "notion.page.find": {
+    type: "object",
+    required: ["query"],
+    additionalProperties: false,
+    properties: {
+      query: { type: "string" },
+    },
+  },
+  "notion.page.update_by_title": {
+    type: "object",
+    required: ["title", "content"],
+    additionalProperties: true,
+    properties: {
+      title: { type: "string" },
+      content: { type: "string" },
+    },
+  },
+  "notion.page.trash_by_title": {
+    type: "object",
+    required: ["title"],
+    additionalProperties: false,
+    properties: {
+      title: { type: "string" },
+      deleteFromKnowledgeBase: { type: "boolean" },
+    },
+  },
+  "notion.file_upload.create": {
+    type: "object",
+    required: ["fileName"],
+    additionalProperties: true,
+    properties: {
+      fileName: { type: "string" },
+      contentType: { type: "string" },
+      mode: { type: "string" },
+    },
+  },
+  "notion.file_upload.attach_to_page": {
+    type: "object",
+    required: ["pageId", "fileUploadId", "fileName"],
+    additionalProperties: true,
+    properties: {
+      pageId: { type: "string" },
+      fileUploadId: { type: "string" },
+      fileName: { type: "string" },
     },
   },
 };
@@ -241,6 +302,46 @@ const notionManifest: ConnectorManifest = {
       inputSchema:
         actionInputSchemas["notion.data_source.query"] ?? jsonObjectSchema,
     },
+    {
+      type: "notion.page.find",
+      displayName: "Find Notion page",
+      riskLevel: "low",
+      requiresApproval: false,
+      inputSchema: actionInputSchemas["notion.page.find"] ?? jsonObjectSchema,
+    },
+    {
+      type: "notion.page.update_by_title",
+      displayName: "Update Notion page by title",
+      riskLevel: "medium",
+      requiresApproval: true,
+      inputSchema:
+        actionInputSchemas["notion.page.update_by_title"] ?? jsonObjectSchema,
+    },
+    {
+      type: "notion.page.trash_by_title",
+      displayName: "Move Notion page to trash by title",
+      riskLevel: "high",
+      requiresApproval: true,
+      inputSchema:
+        actionInputSchemas["notion.page.trash_by_title"] ?? jsonObjectSchema,
+    },
+    {
+      type: "notion.file_upload.create",
+      displayName: "Create Notion file upload",
+      riskLevel: "medium",
+      requiresApproval: true,
+      inputSchema:
+        actionInputSchemas["notion.file_upload.create"] ?? jsonObjectSchema,
+    },
+    {
+      type: "notion.file_upload.attach_to_page",
+      displayName: "Attach Notion file upload to page",
+      riskLevel: "medium",
+      requiresApproval: true,
+      inputSchema:
+        actionInputSchemas["notion.file_upload.attach_to_page"] ??
+        jsonObjectSchema,
+    },
   ],
   configSchema: {
     type: "object",
@@ -278,6 +379,10 @@ function getNotionClientSecret() {
     );
   }
   return value;
+}
+
+function getNotionWebhookSecret() {
+  return process.env.NOTION_WEBHOOK_SECRET?.trim() || "";
 }
 
 function getNotionVersion(configJson?: Record<string, unknown>) {
@@ -448,46 +553,179 @@ function notionRichText(content: string) {
   ];
 }
 
+function richTextSegment(content: string, annotations?: Record<string, boolean>) {
+  return {
+    type: "text",
+    text: {
+      content: content.slice(0, 2000),
+    },
+    ...(annotations ? { annotations } : {}),
+  };
+}
+
+function parseInlineMarkdown(content: string) {
+  const output: Array<Record<string, unknown>> = [];
+  let remaining = content;
+  const pattern = /(\*\*([^*]+)\*\*|_([^_]+)_|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/;
+  while (remaining.length > 0) {
+    const match = remaining.match(pattern);
+    if (!match || match.index === undefined) {
+      output.push(richTextSegment(remaining));
+      break;
+    }
+    if (match.index > 0) {
+      output.push(richTextSegment(remaining.slice(0, match.index)));
+    }
+    if (match[2]) {
+      output.push(richTextSegment(match[2], { bold: true }));
+    } else if (match[3]) {
+      output.push(richTextSegment(match[3], { italic: true }));
+    } else if (match[4]) {
+      output.push(richTextSegment(match[4], { code: true }));
+    } else if (match[5]) {
+      output.push({
+        type: "text",
+        text: { content: match[5].slice(0, 2000), link: { url: match[6] } },
+      });
+    }
+    remaining = remaining.slice(match.index + match[0].length);
+  }
+  return output.length ? output : notionRichText("");
+}
+
+function createRichTextBlock(type: string, content: string) {
+  return {
+    object: "block",
+    type,
+    [type]: {
+      rich_text: parseInlineMarkdown(content),
+    },
+  };
+}
+
 function markdownToBlocks(markdown: string) {
-  const chunks = markdown
-    .replace(/\r\n/g, "\n")
-    .split(/\n{2,}/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return chunks.slice(0, 100).map((chunk) => {
-    const heading = chunk.match(/^(#{1,3})\s+(.+)$/);
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const blocks: Array<Record<string, unknown>> = [];
+  let paragraph: string[] = [];
+  let codeFence: { language: string; lines: string[] } | null = null;
+
+  const flushParagraph = () => {
+    const content = paragraph.join("\n").trim();
+    paragraph = [];
+    if (content) {
+      blocks.push(createRichTextBlock("paragraph", content));
+    }
+  };
+
+  for (const line of lines) {
+    const codeStart = line.match(/^```([A-Za-z0-9_-]+)?\s*$/);
+    if (codeStart) {
+      if (codeFence) {
+        blocks.push({
+          object: "block",
+          type: "code",
+          code: {
+            rich_text: notionRichText(codeFence.lines.join("\n")),
+            language: codeFence.language || "plain text",
+          },
+        });
+        codeFence = null;
+      } else {
+        flushParagraph();
+        codeFence = { language: codeStart[1] ?? "plain text", lines: [] };
+      }
+      continue;
+    }
+    if (codeFence) {
+      codeFence.lines.push(line);
+      continue;
+    }
+
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
     if (heading) {
+      flushParagraph();
       const level = heading[1]?.length ?? 1;
       const type =
         level === 1 ? "heading_1" : level === 2 ? "heading_2" : "heading_3";
-      return {
-        object: "block",
-        type,
-        [type]: {
-          rich_text: notionRichText(heading[2] ?? ""),
-        },
-      };
+      blocks.push(createRichTextBlock(type, heading[2] ?? ""));
+      continue;
     }
 
-    const bullet = chunk.match(/^[-*]\s+(.+)$/);
+    if (trimmed === "---" || trimmed === "***") {
+      flushParagraph();
+      blocks.push({ object: "block", type: "divider", divider: {} });
+      continue;
+    }
+
+    const todo = trimmed.match(/^[-*]\s+\[([ xX])\]\s+(.+)$/);
+    if (todo) {
+      flushParagraph();
+      blocks.push({
+        object: "block",
+        type: "to_do",
+        to_do: {
+          rich_text: parseInlineMarkdown(todo[2] ?? ""),
+          checked: todo[1]?.toLowerCase() === "x",
+        },
+      });
+      continue;
+    }
+
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
     if (bullet) {
-      return {
-        object: "block",
-        type: "bulleted_list_item",
-        bulleted_list_item: {
-          rich_text: notionRichText(bullet[1] ?? ""),
-        },
-      };
+      flushParagraph();
+      blocks.push(createRichTextBlock("bulleted_list_item", bullet[1] ?? ""));
+      continue;
     }
 
-    return {
+    const numbered = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (numbered) {
+      flushParagraph();
+      blocks.push(
+        createRichTextBlock("numbered_list_item", numbered[1] ?? ""),
+      );
+      continue;
+    }
+
+    const quote = trimmed.match(/^>\s+(.+)$/);
+    if (quote) {
+      flushParagraph();
+      blocks.push(createRichTextBlock("quote", quote[1] ?? ""));
+      continue;
+    }
+
+    const callout = trimmed.match(/^!\s+(.+)$/);
+    if (callout) {
+      flushParagraph();
+      blocks.push(createRichTextBlock("callout", callout[1] ?? ""));
+      continue;
+    }
+
+    if (trimmed.includes("|") && /^\|?[-:\s|]+\|?$/.test(trimmed)) {
+      continue;
+    }
+    paragraph.push(line);
+  }
+
+  if (codeFence) {
+    blocks.push({
       object: "block",
-      type: "paragraph",
-      paragraph: {
-        rich_text: notionRichText(chunk),
+      type: "code",
+      code: {
+        rich_text: notionRichText(codeFence.lines.join("\n")),
+        language: codeFence.language || "plain text",
       },
-    };
-  });
+    });
+  }
+  flushParagraph();
+
+  return blocks;
 }
 
 function propertyNameList(properties: Record<string, unknown> | undefined) {
@@ -610,6 +848,23 @@ async function parseNotionResponse<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
+function retryAfterMs(response: Response) {
+  const value = response.headers.get("retry-after");
+  if (!value) {
+    return null;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000);
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : Math.max(0, date.getTime() - Date.now());
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 class NotionApiClient {
   constructor(
     private readonly accessToken: string,
@@ -624,11 +879,30 @@ class NotionApiClient {
       headers.set("content-type", "application/json");
     }
 
-    const response = await fetch(`${NOTION_API_BASE_URL}${path}`, {
-      ...init,
-      headers,
-    });
-    return parseNotionResponse<T>(response);
+    let lastResponse: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await fetch(`${NOTION_API_BASE_URL}${path}`, {
+        ...init,
+        headers,
+      });
+      if (
+        response.ok ||
+        (response.status !== 429 && (response.status < 500 || response.status >= 600))
+      ) {
+        return parseNotionResponse<T>(response);
+      }
+      lastResponse = response;
+      const delayMs = retryAfterMs(response) ?? 500 * 2 ** attempt;
+      await sleep(delayMs);
+    }
+    if (lastResponse) {
+      return parseNotionResponse<T>(lastResponse);
+    }
+    throw new ConnectorError(
+      502,
+      "NOTION_REQUEST_FAILED",
+      "Notion request failed",
+    );
   }
 
   async *paginate<T>(
@@ -680,6 +954,13 @@ class NotionApiClient {
       {},
       "GET",
     );
+  }
+
+  appendBlockChildren(blockId: string, children: Array<Record<string, unknown>>) {
+    return this.request(`/blocks/${encodeURIComponent(blockId)}/children`, {
+      method: "PATCH",
+      body: JSON.stringify({ children }),
+    });
   }
 }
 
@@ -781,6 +1062,234 @@ function createNotionClient(input: {
   return new NotionApiClient(input.accessToken, getNotionVersion(input.config));
 }
 
+async function appendMarkdownInBatches(
+  client: NotionApiClient,
+  pageId: string,
+  markdown: string,
+) {
+  const blocks = markdownToBlocks(markdown);
+  for (let index = 0; index < blocks.length; index += 100) {
+    await client.appendBlockChildren(pageId, blocks.slice(index, index + 100));
+  }
+}
+
+function parseJsonObject(value: string) {
+  if (!value.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return asRecord(parsed);
+  } catch {
+    throw new ConnectorError(
+      400,
+      "NOTION_WEBHOOK_PAYLOAD_INVALID",
+      "Notion webhook payload must be JSON",
+    );
+  }
+}
+
+function signatureMatches(input: {
+  rawBody: string;
+  signature: string;
+  secret: string;
+}) {
+  const expected = createHmac("sha256", input.secret)
+    .update(input.rawBody)
+    .digest("hex");
+  const normalized = input.signature.replace(/^sha256=/, "");
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const actualBuffer = Buffer.from(normalized, "hex");
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(actualBuffer, expectedBuffer)
+  );
+}
+
+async function verifyNotionWebhook(input: ConnectorWebhookVerifyInput) {
+  const secret = getNotionWebhookSecret();
+  if (!secret) {
+    return;
+  }
+  const signature =
+    input.headers["x-notion-signature"] ||
+    input.headers["notion-signature"] ||
+    "";
+  if (!signature || !signatureMatches({ rawBody: input.rawBody, signature, secret })) {
+    throw new ConnectorError(
+      401,
+      "NOTION_WEBHOOK_SIGNATURE_INVALID",
+      "Notion webhook signature is invalid",
+    );
+  }
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function notionWebhookObject(payload: Record<string, unknown>) {
+  const data = asRecord(payload.data);
+  const entity = asRecord(payload.entity);
+  const object = asRecord(payload.object);
+  const nestedObject = asRecord(data.object);
+  const objectId = firstString(
+    data.id,
+    data.object_id,
+    data.page_id,
+    data.database_id,
+    data.data_source_id,
+    data.file_upload_id,
+    entity.id,
+    entity.object_id,
+    object.id,
+    nestedObject.id,
+    payload.object_id,
+  );
+  const objectType = firstString(
+    data.object,
+    data.object_type,
+    entity.type,
+    entity.object,
+    object.type,
+    nestedObject.object,
+    payload.object,
+  );
+  return {
+    objectId: objectId || null,
+    objectType: normalizeWebhookObjectType(objectType),
+  };
+}
+
+function normalizeWebhookObjectType(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("data_source")) return "data_source";
+  if (normalized.includes("database")) return "database";
+  if (normalized.includes("file_upload")) return "file_upload";
+  if (normalized.includes("comment")) return "comment";
+  if (normalized.includes("view")) return "view";
+  if (normalized.includes("page")) return "page";
+  return normalized;
+}
+
+function webhookExternalId(input: { objectType: string | null; objectId: string | null }) {
+  if (!input.objectType || !input.objectId) {
+    return null;
+  }
+  if (
+    input.objectType === "page" ||
+    input.objectType === "database" ||
+    input.objectType === "data_source"
+  ) {
+    return `${input.objectType}:${input.objectId}`;
+  }
+  return null;
+}
+
+async function parseNotionWebhookEvent(
+  input: ConnectorWebhookVerifyInput,
+): Promise<ConnectorWebhookEvent> {
+  const payload = parseJsonObject(input.rawBody) as NotionWebhookPayload;
+  const eventType = firstString(payload.type, payload.event_type, payload.event);
+  const verificationToken = firstString(payload.verification_token);
+  if (verificationToken && !eventType) {
+    return {
+      providerEventId: `verification:${computeHash(verificationToken)}`,
+      eventType: "webhook.verification",
+      objectId: null,
+      objectType: "webhook",
+      workspaceHint: firstString(payload.workspace_id),
+      connectorId: input.query.connectorId ?? null,
+      rawPayload: payload,
+      metadata: {
+        verificationToken,
+        workspaceId: firstString(payload.workspace_id) || null,
+      },
+    };
+  }
+  if (!eventType) {
+    throw new ConnectorError(
+      400,
+      "NOTION_WEBHOOK_EVENT_TYPE_MISSING",
+      "Notion webhook event type is missing",
+    );
+  }
+  const { objectId, objectType } = notionWebhookObject(payload);
+  return {
+    providerEventId: firstString(payload.id, payload.event_id),
+    eventType,
+    objectId,
+    objectType,
+    workspaceHint: firstString(payload.workspace_id),
+    connectorId: input.query.connectorId ?? null,
+    rawPayload: payload,
+    metadata: {
+      workspaceId: firstString(payload.workspace_id) || null,
+      workspaceName: firstString(payload.workspace_name) || null,
+      timestamp: firstString(payload.timestamp) || null,
+      objectId,
+      objectType,
+    },
+  };
+}
+
+async function mapNotionWebhookTargets(
+  event: ConnectorWebhookEvent,
+): Promise<ConnectorWebhookTarget[]> {
+  if (event.eventType === "webhook.verification") {
+    return [{ action: "record_only", reason: "verification" }];
+  }
+  const externalId = webhookExternalId(event);
+  if (event.eventType.includes(".deleted")) {
+    return externalId
+      ? [
+          {
+            action: "archive_source",
+            externalId,
+            objectId: event.objectId,
+            objectType: event.objectType,
+          },
+        ]
+      : [{ action: "record_only", reason: "deleted event without source target" }];
+  }
+
+  if (
+    event.objectType === "page" ||
+    event.objectType === "database" ||
+    event.objectType === "data_source"
+  ) {
+    return externalId
+      ? [
+          {
+            action: "sync",
+            externalId,
+            objectId: event.objectId,
+            objectType: event.objectType,
+          },
+        ]
+      : [{ action: "record_only", reason: "event without object id" }];
+  }
+
+  if (event.objectType === "comment" || event.objectType === "file_upload") {
+    const pageId = firstString(
+      asRecord(event.rawPayload.data).page_id,
+      asRecord(event.rawPayload.entity).page_id,
+      event.rawPayload.page_id,
+    );
+    return pageId
+      ? [{ action: "sync", externalId: `page:${pageId}`, objectId: pageId, objectType: "page" }]
+      : [{ action: "record_only", reason: `${event.objectType} event without page target` }];
+  }
+
+  return [{ action: "record_only", reason: "not indexable" }];
+}
+
 async function createPageAction(
   client: NotionApiClient,
   request: Record<string, unknown>,
@@ -800,6 +1309,7 @@ async function createPageAction(
   const parent = dataSourceId
     ? { data_source_id: dataSourceId }
     : { page_id: parentPageId };
+  const children = markdownToBlocks(content);
   const page = await client.request<NotionPage>("/pages", {
     method: "POST",
     body: JSON.stringify({
@@ -809,11 +1319,15 @@ async function createPageAction(
           title: notionRichText(title),
         },
       },
-      children: markdownToBlocks(content),
+      children: children.slice(0, 100),
     }),
   });
+  for (let index = 100; index < children.length; index += 100) {
+    await client.appendBlockChildren(page.id, children.slice(index, index + 100));
+  }
   return {
-    externalId: page.id,
+    externalId: `page:${page.id}`,
+    resyncExternalIds: [`page:${page.id}`],
     shouldResync: true,
     result: {
       pageId: page.id,
@@ -829,14 +1343,10 @@ async function appendPageAction(
 ): Promise<ConnectorActionResult> {
   const pageId = getRequestString(request, "pageId");
   const content = getRequestString(request, "content");
-  await client.request(`/blocks/${encodeURIComponent(pageId)}/children`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      children: markdownToBlocks(content),
-    }),
-  });
+  await appendMarkdownInBatches(client, pageId, content);
   return {
-    externalId: pageId,
+    externalId: `page:${pageId}`,
+    resyncExternalIds: [`page:${pageId}`],
     shouldResync: true,
     result: {
       pageId,
@@ -857,7 +1367,8 @@ async function updatePagePropertiesAction(
     body: JSON.stringify({ properties }),
   });
   return {
-    externalId: pageId,
+    externalId: `page:${pageId}`,
+    resyncExternalIds: [`page:${pageId}`],
     shouldResync: true,
     result: {
       pageId,
@@ -877,7 +1388,8 @@ async function trashPageAction(
     body: JSON.stringify({ in_trash: true }),
   });
   return {
-    externalId: pageId,
+    externalId: `page:${pageId}`,
+    resyncExternalIds: [`page:${pageId}`],
     shouldResync: true,
     result: {
       pageId,
@@ -910,7 +1422,8 @@ async function createCommentAction(
     }),
   });
   return {
-    externalId: asString(result.id) || pageId || discussionId,
+    externalId: pageId ? `page:${pageId}` : asString(result.id) || discussionId,
+    resyncExternalIds: pageId ? [`page:${pageId}`] : [],
     shouldResync: Boolean(pageId),
     result: {
       commentId: asString(result.id) || null,
@@ -951,9 +1464,195 @@ async function queryDataSourceAction(
   };
 }
 
+async function findPagesByTitle(client: NotionApiClient, title: string) {
+  const matches: NotionPage[] = [];
+  for await (const value of client.search({
+    query: title,
+    filter: { property: "object", value: "page" },
+  })) {
+    if (asString(value.object) !== "page") {
+      continue;
+    }
+    const page = value as NotionPage;
+    if (findPageTitle(page).toLowerCase() === title.toLowerCase()) {
+      matches.push(page);
+    }
+  }
+  return matches;
+}
+
+async function findPageAction(
+  client: NotionApiClient,
+  request: Record<string, unknown>,
+): Promise<ConnectorActionResult> {
+  const query = getRequestString(request, "query");
+  const pages: Array<Record<string, unknown>> = [];
+  for await (const value of client.search({
+    query,
+    filter: { property: "object", value: "page" },
+  })) {
+    if (asString(value.object) === "page") {
+      const page = value as NotionPage;
+      pages.push({
+        pageId: page.id,
+        title: findPageTitle(page),
+        url: buildNotionUri(page.id, page.url),
+        lastEditedTime: page.last_edited_time ?? null,
+      });
+    }
+    if (pages.length >= 10) {
+      break;
+    }
+  }
+  return {
+    result: {
+      query,
+      resultCount: pages.length,
+      pages,
+    },
+  };
+}
+
+async function resolveSinglePageByTitle(client: NotionApiClient, title: string) {
+  const pages = await findPagesByTitle(client, title);
+  if (pages.length === 0) {
+    throw new ConnectorError(
+      404,
+      "NOTION_PAGE_NOT_FOUND",
+      `No Notion page matched title '${title}'`,
+    );
+  }
+  if (pages.length > 1) {
+    throw new ConnectorError(
+      409,
+      "NOTION_PAGE_TITLE_AMBIGUOUS",
+      `Multiple Notion pages matched title '${title}'`,
+      {
+        candidates: pages.map((page) => ({
+          pageId: page.id,
+          title: findPageTitle(page),
+          url: buildNotionUri(page.id, page.url),
+        })),
+      },
+    );
+  }
+  return pages[0]!;
+}
+
+async function updatePageByTitleAction(
+  client: NotionApiClient,
+  request: Record<string, unknown>,
+): Promise<ConnectorActionResult> {
+  const title = getRequestString(request, "title");
+  const content = getRequestString(request, "content");
+  const page = await resolveSinglePageByTitle(client, title);
+  await appendMarkdownInBatches(client, page.id, content);
+  return {
+    externalId: `page:${page.id}`,
+    resyncExternalIds: [`page:${page.id}`],
+    shouldResync: true,
+    result: {
+      pageId: page.id,
+      title: findPageTitle(page),
+      updated: true,
+      contentHash: computeHash(content),
+    },
+  };
+}
+
+async function trashPageByTitleAction(
+  client: NotionApiClient,
+  request: Record<string, unknown>,
+): Promise<ConnectorActionResult> {
+  const title = getRequestString(request, "title");
+  const page = await resolveSinglePageByTitle(client, title);
+  await client.request(`/pages/${encodeURIComponent(page.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ in_trash: true }),
+  });
+  return {
+    externalId: `page:${page.id}`,
+    resyncExternalIds: [`page:${page.id}`],
+    shouldResync: true,
+    result: {
+      pageId: page.id,
+      title: findPageTitle(page),
+      trashed: true,
+      deleteFromKnowledgeBase: Boolean(request.deleteFromKnowledgeBase),
+    },
+  };
+}
+
+async function createFileUploadAction(
+  client: NotionApiClient,
+  request: Record<string, unknown>,
+): Promise<ConnectorActionResult> {
+  const fileName = getRequestString(request, "fileName");
+  const contentType = getRequestString(request, "contentType", false);
+  const result = await client.request<Record<string, unknown>>("/file_uploads", {
+    method: "POST",
+    body: JSON.stringify({
+      filename: fileName,
+      ...(contentType ? { content_type: contentType } : {}),
+      ...(request.mode ? { mode: request.mode } : {}),
+    }),
+  });
+  return {
+    externalId: asString(result.id) || null,
+    result: {
+      fileUploadId: asString(result.id) || null,
+      status: asString(result.status) || null,
+      uploadUrl: asString(result.upload_url) ? "[redacted]" : null,
+      fileName,
+    },
+  };
+}
+
+async function attachFileUploadToPageAction(
+  client: NotionApiClient,
+  request: Record<string, unknown>,
+): Promise<ConnectorActionResult> {
+  const pageId = getRequestString(request, "pageId");
+  const fileUploadId = getRequestString(request, "fileUploadId");
+  const fileName = getRequestString(request, "fileName");
+  await client.appendBlockChildren(pageId, [
+    {
+      object: "block",
+      type: "file",
+      file: {
+        caption: notionRichText(fileName),
+        type: "file_upload",
+        file_upload: { id: fileUploadId },
+      },
+    },
+  ]);
+  return {
+    externalId: `page:${pageId}`,
+    resyncExternalIds: [`page:${pageId}`],
+    shouldResync: true,
+    result: {
+      pageId,
+      fileUploadId,
+      attached: true,
+    },
+  };
+}
+
 export const notionAdapter: ConnectorAdapter = {
   getManifest() {
     return notionManifest;
+  },
+
+  verifyWebhook(input: ConnectorWebhookVerifyInput) {
+    return verifyNotionWebhook(input);
+  },
+
+  parseWebhookEvent(input: ConnectorWebhookVerifyInput) {
+    return parseNotionWebhookEvent(input);
+  },
+
+  mapWebhookEventToSyncTargets(event: ConnectorWebhookEvent) {
+    return mapNotionWebhookTargets(event);
   },
 
   async exchangeOAuthCode(input: OAuthCodeExchangeInput) {
@@ -1088,6 +1787,16 @@ export const notionAdapter: ConnectorAdapter = {
         return createCommentAction(client, input.request);
       case "notion.data_source.query":
         return queryDataSourceAction(client, input.request);
+      case "notion.page.find":
+        return findPageAction(client, input.request);
+      case "notion.page.update_by_title":
+        return updatePageByTitleAction(client, input.request);
+      case "notion.page.trash_by_title":
+        return trashPageByTitleAction(client, input.request);
+      case "notion.file_upload.create":
+        return createFileUploadAction(client, input.request);
+      case "notion.file_upload.attach_to_page":
+        return attachFileUploadToPageAction(client, input.request);
       default:
         throw new ConnectorError(
           400,

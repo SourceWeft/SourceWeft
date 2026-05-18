@@ -2,6 +2,7 @@ import type {
   connectorActionRuns,
   connectorOAuthAccounts,
   connectorSyncRuns,
+  connectorWebhookEvents,
   sourceConnectors,
 } from "../../shared/db/schema";
 import type {
@@ -9,6 +10,7 @@ import type {
   ConnectorOAuthAccountRecord,
   ConnectorOAuthAccountSecretRecord,
   ConnectorSyncRunRecord,
+  ConnectorWebhookEventRecord,
   SourceConnectorRecord,
 } from "./types";
 
@@ -16,6 +18,7 @@ type OAuthAccountRow = typeof connectorOAuthAccounts.$inferSelect;
 type SourceConnectorRow = typeof sourceConnectors.$inferSelect;
 type SyncRunRow = typeof connectorSyncRuns.$inferSelect;
 type ActionRunRow = typeof connectorActionRuns.$inferSelect;
+type WebhookEventRow = typeof connectorWebhookEvents.$inferSelect;
 
 function iso(value: Date | null) {
   return value ? value.toISOString() : null;
@@ -115,6 +118,32 @@ export function mapActionRun(row: ActionRunRow): ConnectorActionRunRecord {
     executedBy: row.executedBy,
     errorCode: row.errorCode,
     errorMessage: row.errorMessage,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function mapWebhookEvent(
+  row: WebhookEventRow,
+): ConnectorWebhookEventRecord {
+  return {
+    id: row.id,
+    teamId: row.teamId,
+    workspaceId: row.workspaceId,
+    connectorId: row.connectorId,
+    connectorType: row.connectorType,
+    providerEventId: row.providerEventId,
+    eventType: row.eventType,
+    status: row.status,
+    attempts: row.attempts,
+    objectId: row.objectId,
+    objectType: row.objectType,
+    syncRunId: row.syncRunId,
+    payloadMetadataJson: row.payloadMetadataJson ?? {},
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
+    receivedAt: row.receivedAt.toISOString(),
+    processedAt: iso(row.processedAt),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

@@ -20,7 +20,13 @@ export function registerConnectorOAuthRoutes(app: Hono) {
       code,
       state,
     });
+    if (result.redirectAfter) {
+      const redirectUrl = new URL(result.redirectAfter);
+      redirectUrl.searchParams.set("connector_oauth", "success");
+      redirectUrl.searchParams.set("connector_type", result.account.connectorType);
+      redirectUrl.searchParams.set("account_id", result.account.id);
+      return c.redirect(redirectUrl.toString());
+    }
     return ApiResponse.success(c, result);
   });
 }
-

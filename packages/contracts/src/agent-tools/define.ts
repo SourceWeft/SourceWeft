@@ -1,4 +1,9 @@
-export type AgentToolDomain = "filesystem" | "retrieval" | "web" | "artifact";
+export type AgentToolDomain =
+  | "filesystem"
+  | "retrieval"
+  | "web"
+  | "artifact"
+  | "connector";
 
 export type AgentToolCapability =
   | "artifact"
@@ -10,6 +15,10 @@ export type AgentToolCapability =
   | "read_tool_output"
   | "retrieval"
   | "citable_source"
+  | "connector"
+  | "notion"
+  | "connector_write"
+  | "connector_read"
   | "web"
   | "web_page_fetch"
   | "web_query";
