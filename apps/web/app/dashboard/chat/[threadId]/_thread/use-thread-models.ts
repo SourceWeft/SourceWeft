@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { HttpClientError } from "@sourceweft/sdk";
 import {
@@ -49,6 +49,8 @@ type UseThreadModelsInput = {
   workspaceId: string | null;
 };
 
+export type ModelCatalogStatus = "loading" | "ready" | "error";
+
 export function useThreadModels({
   availableSkills,
   effectiveActiveSkillIds,
@@ -65,6 +67,8 @@ export function useThreadModels({
     useState<ModelSelectionSources>(DEFAULT_MODEL_SELECTION_SOURCES);
   const [availableModels, setAvailableModels] =
     useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
+  const [modelCatalogStatus, setModelCatalogStatus] =
+    useState<ModelCatalogStatus>("loading");
   const [byokProviders, setByokProviders] = useState<ByokProviderOption[]>([]);
   const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>([]);
   const [byokModels, setByokModels] = useState<ByokSavedModelItem[]>([]);
@@ -88,6 +92,7 @@ export function useThreadModels({
   const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
     string | null
   >(null);
+  const modelLoadGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -272,7 +277,12 @@ export function useThreadModels({
   );
 
   const loadThreadModelState = useCallback(async () => {
+    const loadGeneration = modelLoadGenerationRef.current + 1;
+    modelLoadGenerationRef.current = loadGeneration;
+    const isStaleLoad = () => modelLoadGenerationRef.current !== loadGeneration;
+
     if (!workspaceId) {
+      setModelCatalogStatus("loading");
       setAvailableModels(emptyModelCatalog);
       const emptySelection = resolveSelectedModels({
         availableModels: emptyModelCatalog,
@@ -289,6 +299,7 @@ export function useThreadModels({
       return;
     }
 
+    setModelCatalogStatus("loading");
     setStreamWithSelectedLlm(false);
     const stored = readStoredByokState(workspaceId, threadId);
     const storedByokSelections = {
@@ -315,6 +326,10 @@ export function useThreadModels({
           items: [],
         })),
       ]);
+
+      if (isStaleLoad()) {
+        return;
+      }
 
       const catalogModels = mapCatalogKindsToModelItems(catalog.kinds);
       const kindEnabled = {
@@ -346,7 +361,13 @@ export function useThreadModels({
         normalizeByokProviderOptions(providerResult, credentialResult.items),
       );
       setStreamWithSelectedLlm(kindEnabled.llm);
+      setModelCatalogStatus("ready");
     } catch {
+      if (isStaleLoad()) {
+        return;
+      }
+
+      setModelCatalogStatus("error");
       setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
       setAvailableModels(emptyModelCatalog);
       const emptySelection = resolveSelectedModels({
@@ -471,6 +492,7 @@ export function useThreadModels({
     handleThreadByokSelect,
     handleThinkingSettingsChange,
     hasSavedThinkingPreference,
+    modelCatalogStatus,
     modelSelectionSources,
     searchEnabled,
     selectedByokModels,

@@ -18,6 +18,7 @@ import {
   findSourceRecordByConnectorExternalId,
   updateSourceRecord,
 } from "../content/sources/repository";
+import { logger } from "../../shared/logger";
 import type {
   ConnectorWebhookEvent,
   ConnectorWebhookTarget,
@@ -49,6 +50,12 @@ function fallbackEventId(input: {
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function hasTargetedSync(targets: ConnectorWebhookTarget[]) {
+  return targets.some(
+    (target) => target.action === "sync" && Boolean(target.externalId),
+  );
 }
 
 function buildExternalId(target: ConnectorWebhookTarget) {
@@ -156,10 +163,13 @@ export class ConnectorWebhookService {
 
       const syncRunIds: string[] = [];
       for (const connector of connectors) {
+        const shouldFullResync = meaningfulTargets.some(
+          (target) => target.action === "sync",
+        ) && !hasTargetedSync(meaningfulTargets);
         const syncExternalIds = uniqueStrings(
           meaningfulTargets
             .filter((target) => target.action === "sync")
-            .map(buildExternalId),
+            .map((target) => target.externalId),
         );
         const archiveExternalIds = uniqueStrings(
           meaningfulTargets
@@ -175,7 +185,7 @@ export class ConnectorWebhookService {
           });
         }
 
-        if (syncExternalIds.length > 0) {
+        if (syncExternalIds.length > 0 || shouldFullResync) {
           const run = await this.syncOrchestrator.createWebhookRun({
             teamId: connector.teamId,
             workspaceId: connector.workspaceId,
@@ -186,6 +196,8 @@ export class ConnectorWebhookService {
               eventType: event.eventType,
               notionObjectId: event.objectId,
               targetExternalIds: syncExternalIds,
+              targeted: syncExternalIds.length > 0,
+              fullResync: shouldFullResync,
             },
           });
           syncRunIds.push(run.id);
@@ -195,7 +207,9 @@ export class ConnectorWebhookService {
             workspaceId: connector.workspaceId,
             connectorId: connector.id,
             userId: connector.createdBy ?? "system",
-            targetExternalIds: syncExternalIds,
+            targetExternalIds: syncExternalIds.length
+              ? syncExternalIds
+              : undefined,
           });
         }
       }
@@ -236,13 +250,29 @@ export class ConnectorWebhookService {
       userId: input.userId,
       permission: "connector.read",
     });
-    const items = await listWebhookEventRecords({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      connectorType: input.connectorType,
-      connectorId: input.connectorId,
-    });
-    return { items };
+    try {
+      const items = await listWebhookEventRecords({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorType: input.connectorType,
+        connectorId: input.connectorId,
+      });
+      return { items };
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "";
+      if (
+        /relation .*connector_webhook_events.* does not exist/i.test(rawMessage) ||
+        /connector_webhook_events/i.test(rawMessage)
+      ) {
+        logger.warn("Connector webhook event storage is not ready", {
+          error,
+          workspaceId: workspace.id,
+          connectorId: input.connectorId,
+        });
+        return { items: [] };
+      }
+      throw error;
+    }
   }
 
   private async resolveConnectors(input: {
@@ -256,7 +286,7 @@ export class ConnectorWebhookService {
       });
       return connector &&
         connector.connectorType === input.connectorType &&
-        connector.status === "active"
+        connector.status !== "disabled"
         ? [connector]
         : [];
     }

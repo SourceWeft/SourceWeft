@@ -96,6 +96,63 @@ test("buildVirtualSourceTree nests sources under directory paths", () => {
   assert.equal(items[1]?.filePath, "/kb/Design/Design-System__src_source-1.md");
 });
 
+test("buildVirtualSourceTree projects Notion connector directories into nested kb paths", () => {
+  const items = buildVirtualSourceTree([
+    {
+      sourceId: "notion-root-123456",
+      sourceType: "directory",
+      parentSourceId: null,
+      title: "Notion",
+      fileName: null,
+      chunkCount: 0,
+      sizeBytes: null,
+      mimeType: "inode/directory",
+      updatedAt: "2026-04-29T00:00:00.000Z",
+    },
+    {
+      sourceId: "tasks-dir-123456",
+      sourceType: "directory",
+      parentSourceId: "notion-root-123456",
+      title: "Tasks",
+      fileName: null,
+      chunkCount: 0,
+      sizeBytes: null,
+      mimeType: "inode/directory",
+      updatedAt: "2026-04-29T00:00:00.000Z",
+    },
+    {
+      sourceId: "projects-dir-123456",
+      sourceType: "directory",
+      parentSourceId: "tasks-dir-123456",
+      title: "Projects & Tasks",
+      fileName: null,
+      chunkCount: 0,
+      sizeBytes: null,
+      mimeType: "inode/directory",
+      updatedAt: "2026-04-29T00:00:00.000Z",
+    },
+    {
+      sourceId: "source-abcdef1234",
+      sourceType: "connector",
+      parentSourceId: "projects-dir-123456",
+      title: "KW: instagram photo scraper",
+      fileName: null,
+      chunkCount: 1,
+      sizeBytes: null,
+      mimeType: "text/markdown",
+      updatedAt: "2026-04-29T00:00:00.000Z",
+    },
+  ]);
+
+  assert.equal(items[0]?.dirPath, "/kb/Notion");
+  assert.equal(items[1]?.dirPath, "/kb/Notion/Tasks");
+  assert.equal(items[2]?.dirPath, "/kb/Notion/Tasks/Projects-Tasks");
+  assert.equal(
+    items[3]?.filePath,
+    "/kb/Notion/Tasks/Projects-Tasks/KW-instagram-photo-scraper__src_source-a.md",
+  );
+});
+
 test("buildChunkFilePath pads chunk numbers under the chunks directory", () => {
   const item = source();
 

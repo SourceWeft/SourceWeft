@@ -15,7 +15,11 @@ export type SourceItem = {
   status: "Indexed" | "Syncing" | "Failed" | "Needs review";
   meta: string;
   contentText: string;
+  connectorId?: string | null;
+  externalUri?: string | null;
+  metadata?: Record<string, unknown>;
   storageKey?: string | null;
+  updatedAt?: string;
 };
 
 export function expandSelectedSources(

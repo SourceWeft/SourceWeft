@@ -12,11 +12,42 @@ import type {
 const MAX_GREP_TERM_TOP_K = 120;
 const MIN_GREP_TERM_TOP_K = 50;
 
-function sourceIdsClause(sourceIds: string[] | undefined) {
+function sourceIdsClause(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceIds: string[] | undefined;
+}) {
+  const sourceIds = input.sourceIds;
   if (!sourceIds || sourceIds.length === 0) {
     return sql`and false`;
   }
-  return sql`and s.id = any(${toPostgresTextArray(sourceIds)}::text[])`;
+  return sql`and s.id in (
+    with recursive visible_sources as (
+      select
+        selected_sources.id,
+        selected_sources.parent_source_id,
+        array[selected_sources.id]::text[] as path
+      from sources selected_sources
+      where selected_sources.team_id = ${input.teamId}
+        and selected_sources.workspace_id = ${input.workspaceId}
+        and selected_sources.status = 'indexed'
+        and selected_sources.id = any(${toPostgresTextArray(sourceIds)}::text[])
+      union all
+      select
+        parent_sources.id,
+        parent_sources.parent_source_id,
+        child_sources.path || parent_sources.id
+      from sources parent_sources
+      inner join visible_sources child_sources
+        on child_sources.parent_source_id = parent_sources.id
+      where parent_sources.team_id = ${input.teamId}
+        and parent_sources.workspace_id = ${input.workspaceId}
+        and parent_sources.status = 'indexed'
+        and parent_sources.source_type = 'directory'
+        and not parent_sources.id = any(child_sources.path)
+    )
+    select id from visible_sources
+  )`;
 }
 
 export async function listVirtualFsSources(input: {
@@ -72,7 +103,11 @@ export async function listVirtualFsSources(input: {
     where s.team_id = ${input.teamId}
       and s.workspace_id = ${input.workspaceId}
       and s.status = 'indexed'
-      ${sourceIdsClause(input.sourceIds)}
+      ${sourceIdsClause({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceIds: input.sourceIds,
+      })}
     group by s.id
     order by s.parent_source_id nulls first, s.source_type asc, s.title asc, s.updated_at desc
     limit ${input.limit ?? 500}
@@ -430,7 +465,11 @@ export async function grepVirtualFsChunks(input: {
       and c.workspace_id = ${input.workspaceId}
       and s.status = 'indexed'
       and c.content ||| ${input.queryText}
-      ${sourceIdsClause(input.sourceIds)}
+      ${sourceIdsClause({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceIds: input.sourceIds,
+      })}
       and not exists (
         select 1
         from documents newer_documents
@@ -574,7 +613,11 @@ export async function grepVirtualFsChunksByRegex(input: {
       and c.workspace_id = ${input.workspaceId}
       and s.status = 'indexed'
       and c.content ~* ${input.pattern}
-      ${sourceIdsClause(input.sourceIds)}
+      ${sourceIdsClause({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceIds: input.sourceIds,
+      })}
       and not exists (
         select 1
         from documents newer_documents

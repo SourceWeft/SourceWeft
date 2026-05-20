@@ -183,6 +183,13 @@
       "when": 1779072690393,
       "tag": "0025_connector_webhook_events",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1779134698354,
+      "tag": "0026_regular_mattie_franklin",
+      "breakpoints": true
     }
   ]
 }

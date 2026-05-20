@@ -105,6 +105,7 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   image: false,
   vision: false,
 };
+type ModelCatalogStatus = "loading" | "ready" | "error";
 const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -169,6 +170,21 @@ const HeaderModelSelector = dynamic(
 
 function ChatCanvasSkeleton() {
   return <ChatCanvasPanelSkeleton variant="new" />;
+}
+
+function ModelCatalogErrorState() {
+  return (
+    <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background px-6 py-10">
+      <div className="max-w-sm text-center">
+        <h2 className="text-sm font-semibold text-foreground">
+          Model catalog failed to load
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Refresh the page before sending a message.
+        </p>
+      </div>
+    </section>
+  );
 }
 
 function SourcesHubSkeleton() {
@@ -360,6 +376,8 @@ export function DashboardChatPageClient() {
     useState<ModelSelectionSources>(DEFAULT_MODEL_SELECTION_SOURCES);
   const [availableModels, setAvailableModels] =
     useState<Record<ModelType, ModelItem[]>>(emptyModelCatalog);
+  const [modelCatalogStatus, setModelCatalogStatus] =
+    useState<ModelCatalogStatus>("loading");
   const [byokProviders, setByokProviders] = useState<ByokProviderOption[]>([]);
   const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>([]);
   const [byokModels, setByokModels] = useState<ByokSavedModelItem[]>([]);
@@ -463,6 +481,7 @@ export function DashboardChatPageClient() {
   useEffect(() => {
     if (!workspaceId) {
       setLoadedByokStorageKey(null);
+      setModelCatalogStatus("loading");
       setAvailableModels(emptyModelCatalog);
       const emptySelection = resolveSelectedModels({
         availableModels: emptyModelCatalog,
@@ -490,6 +509,7 @@ export function DashboardChatPageClient() {
     const activeWorkspaceId = workspaceId;
 
     let cancelled = false;
+    setModelCatalogStatus("loading");
 
     function applyModelCatalog(catalog: ListThreadModelCatalogResponse) {
       const catalogModels = mapCatalogKindsToModelItems(catalog.kinds);
@@ -519,6 +539,7 @@ export function DashboardChatPageClient() {
       );
       setBaseSelectedModels(resolvedModels);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
+      setModelCatalogStatus("ready");
     }
 
     async function loadModelCatalog() {
@@ -557,6 +578,7 @@ export function DashboardChatPageClient() {
           return;
         }
 
+        setModelCatalogStatus("error");
         setCatalogKindEnabled(EMPTY_MODEL_KIND_FLAGS);
         setAvailableModels(emptyModelCatalog);
         const emptySelection = resolveSelectedModels({
@@ -897,6 +919,18 @@ export function DashboardChatPageClient() {
         toast.error("No workspace selected yet.");
         return;
       }
+      if (modelCatalogStatus !== "ready") {
+        toast.error(
+          modelCatalogStatus === "error"
+            ? "Model catalog failed to load. Refresh and try again."
+            : "Model catalog is still loading. Try again in a moment.",
+        );
+        return;
+      }
+      if (!selectedModels.llm?.capabilities) {
+        toast.error("Chat model capabilities are not loaded yet.");
+        return;
+      }
 
       const text = input.content.trim();
       const images = input.images ?? [];
@@ -959,6 +993,7 @@ export function DashboardChatPageClient() {
           modelState: {
             availableModels,
             catalogKindEnabled,
+            catalogReady: true,
             selectedModels,
             byokSelections: selectedByokModels,
           },
@@ -986,6 +1021,7 @@ export function DashboardChatPageClient() {
       effectiveActiveSkillIds,
       router,
       catalogKindEnabled,
+      modelCatalogStatus,
       selectedByokModels,
       selectedModels,
       thinkingSettings,
@@ -994,8 +1030,8 @@ export function DashboardChatPageClient() {
   );
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 w-full overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
           <div className="flex min-h-16 flex-wrap items-start justify-between gap-2 px-3 py-2 md:h-16 md:flex-nowrap md:items-center md:gap-3 md:px-6 md:py-0 xl:px-8">
             <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 overflow-hidden md:gap-2.5">
@@ -1099,34 +1135,40 @@ export function DashboardChatPageClient() {
           </div>
         </header>
 
-        <ChatCanvas
-          isStreaming={isStartingChat}
-          mode="new"
-          availableSkills={availableSkills}
-          onArtifactPreview={handleArtifactPreview}
-          onRemoveSource={(id) =>
-            persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
-          }
-          onSkillSelectionChange={setActiveSkillIds}
-          onSendMessage={handleSendMessage}
-          searchEnabled={searchEnabled}
-          onSearchEnabledChange={setSearchEnabled}
-          allSources={librarySources}
-          sourceMentionLoader={loadSourceMentions}
-          selectedSources={selectedSources}
-          selectedSkillIds={activeSkillIds}
-          sourcesVisible={sourcesVisible}
-          thinkingCapabilities={selectedModels.llm?.capabilities}
-          imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
-          imageModelAvailable={Boolean(selectedModels.image)}
-          imageModelAlias={selectedModels.image?.modelAlias ?? null}
-          disabledToolNames={disabledToolNames}
-          onDisabledToolNamesChange={setDisabledToolNames}
-          thinkingSettings={thinkingSettings}
-          onThinkingSettingsChange={handleThinkingSettingsChange}
-          threadTitle="New chat"
-          workspaceId={workspaceId}
-        />
+        {modelCatalogStatus === "ready" ? (
+          <ChatCanvas
+            isStreaming={isStartingChat}
+            mode="new"
+            availableSkills={availableSkills}
+            onArtifactPreview={handleArtifactPreview}
+            onRemoveSource={(id) =>
+              persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
+            }
+            onSkillSelectionChange={setActiveSkillIds}
+            onSendMessage={handleSendMessage}
+            searchEnabled={searchEnabled}
+            onSearchEnabledChange={setSearchEnabled}
+            allSources={librarySources}
+            sourceMentionLoader={loadSourceMentions}
+            selectedSources={selectedSources}
+            selectedSkillIds={activeSkillIds}
+            sourcesVisible={sourcesVisible}
+            thinkingCapabilities={selectedModels.llm?.capabilities}
+            imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
+            imageModelAvailable={Boolean(selectedModels.image)}
+            imageModelAlias={selectedModels.image?.modelAlias ?? null}
+            disabledToolNames={disabledToolNames}
+            onDisabledToolNamesChange={setDisabledToolNames}
+            thinkingSettings={thinkingSettings}
+            onThinkingSettingsChange={handleThinkingSettingsChange}
+            threadTitle="New chat"
+            workspaceId={workspaceId}
+          />
+        ) : modelCatalogStatus === "error" ? (
+          <ModelCatalogErrorState />
+        ) : (
+          <ChatCanvasSkeleton />
+        )}
       </div>
 
       {sourcesVisible && isPersistentLayout && !previewArtifact ? (

@@ -296,7 +296,7 @@ export function ChatCanvas({
   }
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <MessageList
         activeVersionByGroup={activeVersionByGroup}
         allSources={allSources}

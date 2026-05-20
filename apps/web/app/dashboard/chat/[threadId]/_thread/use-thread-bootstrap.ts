@@ -137,14 +137,17 @@ export function useThreadBootstrap({
         if (typeof pendingSearchEnabled === "boolean") {
           setSearchEnabled(pendingSearchEnabled);
         }
-        if (pendingModelState?.availableModels) {
+        if (pendingModelState?.catalogReady && pendingModelState.availableModels) {
           setAvailableModels(pendingModelState.availableModels);
         }
-        if (pendingModelState?.catalogKindEnabled) {
+        if (
+          pendingModelState?.catalogReady &&
+          pendingModelState.catalogKindEnabled
+        ) {
           setCatalogKindEnabled(pendingModelState.catalogKindEnabled);
           setStreamWithSelectedLlm(pendingModelState.catalogKindEnabled.llm);
         }
-        if (pendingModelState?.selectedModels) {
+        if (pendingModelState?.catalogReady && pendingModelState.selectedModels) {
           setSelectedModels(pendingModelState.selectedModels);
           setBaseSelectedModels(pendingModelState.selectedModels);
           setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);

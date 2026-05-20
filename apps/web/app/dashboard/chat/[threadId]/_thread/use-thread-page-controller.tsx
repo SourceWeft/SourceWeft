@@ -143,6 +143,7 @@ export function useThreadPageController({
     handleThreadByokSelect,
     handleThinkingSettingsChange,
     searchEnabled,
+    modelCatalogStatus,
     selectedByokModels,
     selectedModels,
     setAvailableModels,
@@ -368,6 +369,18 @@ export function useThreadPageController({
       if ((!text && images.length === 0) || isStreaming) {
         return;
       }
+      if (modelCatalogStatus !== "ready") {
+        toast.error(
+          modelCatalogStatus === "error"
+            ? "Model catalog failed to load. Refresh and try again."
+            : "Model catalog is still loading. Try again in a moment.",
+        );
+        return;
+      }
+      if (!selectedModels.llm?.capabilities) {
+        toast.error("Chat model capabilities are not loaded yet.");
+        return;
+      }
 
       const contextSourceIds = resolveContextSourceIds({
         messages,
@@ -464,11 +477,13 @@ export function useThreadPageController({
       editingGroupId,
       editingMessageId,
       isStreaming,
+      modelCatalogStatus,
       messageGroups,
       messages,
       activeSourceIds,
       effectiveActiveSkillIds,
       searchEnabled,
+      selectedModels.llm,
       pendingLatestVersionSelectionRef,
       setActiveVersionByGroup,
       streamThreadAction,
@@ -641,6 +656,7 @@ export function useThreadPageController({
     previewSource,
     previewWorkfile,
     searchEnabled,
+    modelCatalogStatus,
     selectedByokModels,
     selectedModels,
     selectedSources,

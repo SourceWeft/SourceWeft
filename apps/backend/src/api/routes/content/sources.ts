@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import {
+  bulkDeleteSourcesRequestSchema,
   createSourceRequestSchema,
   createUrlSourceRequestSchema,
   indexSourceRequestSchema,
@@ -59,6 +60,7 @@ export function registerSourceRoutes(app: Hono) {
     }
 
     const parsed = listSourcesRequestSchema.safeParse({
+      view: c.req.query("view"),
       includeContent: c.req.query("includeContent"),
       limit: c.req.query("limit"),
       cursor: c.req.query("cursor"),
@@ -66,6 +68,9 @@ export function registerSourceRoutes(app: Hono) {
         c.req.query("parentSourceId") === "__root"
           ? null
           : c.req.query("parentSourceId"),
+      connectorId: c.req.query("connectorId"),
+      syncRunId: c.req.query("syncRunId"),
+      updatedAfter: c.req.query("updatedAfter"),
     });
     if (!parsed.success) {
       throw ApiError.validation(
@@ -74,10 +79,14 @@ export function registerSourceRoutes(app: Hono) {
     }
 
     const result = await contentService.listSources({
+      view: parsed.data.view,
       includeContent: parsed.data.includeContent ?? true,
       limit: parsed.data.limit,
       cursor: parsed.data.cursor,
       parentSourceId: parsed.data.parentSourceId,
+      connectorId: parsed.data.connectorId,
+      syncRunId: parsed.data.syncRunId,
+      updatedAfter: parsed.data.updatedAfter,
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
     });
@@ -108,6 +117,29 @@ export function registerSourceRoutes(app: Hono) {
       query: parsed.data.query,
       limit: parsed.data.limit,
       cursor: parsed.data.cursor,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/sources/bulk-delete", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = bulkDeleteSourcesRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentService.bulkDeleteSources({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      sourceIds: parsed.data.sourceIds,
     });
 
     return ApiResponse.success(c, result);

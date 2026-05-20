@@ -1,12 +1,17 @@
 import type {
+  ConnectorWebhookConfigResponse,
   CreateConnectorActionRequest,
   CreateConnectorActionResponse,
   CreateConnectorRequest,
   CreateConnectorResponse,
+  DeleteConnectorAccountRequest,
+  DeleteConnectorAccountResponse,
+  DeleteConnectorRequest,
   DeleteConnectorResponse,
   ExecuteConnectorActionResponse,
   FinishConnectorOAuthResponse,
-  GetNotionWebhookConfigResponse,
+  ListConnectorActivityRequest,
+  ListConnectorActivityResponse,
   ListConnectorActionsResponse,
   ListConnectorManifestsResponse,
   ListConnectorOAuthAccountsRequest,
@@ -15,6 +20,8 @@ import type {
   ListConnectorWebhookEventsResponse,
   ListConnectorsResponse,
   ListConnectorSyncRunsResponse,
+  ListWorkspaceConnectorSyncRunsRequest,
+  ListWorkspaceConnectorSyncRunsResponse,
   LookupNotionPagesRequest,
   LookupNotionPagesResponse,
   StartConnectorOAuthRequest,
@@ -93,6 +100,17 @@ export class ConnectorsClient {
     );
   }
 
+  listWorkspaceSyncRuns(
+    workspaceId: string,
+    input: ListWorkspaceConnectorSyncRunsRequest = {},
+  ) {
+    return this.http.get<ListWorkspaceConnectorSyncRunsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/sync-runs${query({
+        status: input.status,
+      })}`,
+    );
+  }
+
   update(
     workspaceId: string,
     connectorId: string,
@@ -104,9 +122,27 @@ export class ConnectorsClient {
     );
   }
 
-  delete(workspaceId: string, connectorId: string) {
+  delete(
+    workspaceId: string,
+    connectorId: string,
+    input: DeleteConnectorRequest = {},
+  ) {
     return this.http.delete<DeleteConnectorResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}`,
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}${query({
+        purgeIndexedContent: input.purgeIndexedContent ? "true" : undefined,
+      })}`,
+    );
+  }
+
+  deleteAccount(
+    workspaceId: string,
+    accountId: string,
+    input: DeleteConnectorAccountRequest = {},
+  ) {
+    return this.http.delete<DeleteConnectorAccountResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/accounts/${encode(accountId)}${query({
+        force: input.force ? "true" : undefined,
+      })}`,
     );
   }
 
@@ -119,6 +155,20 @@ export class ConnectorsClient {
   listSyncRuns(workspaceId: string, connectorId: string) {
     return this.http.get<ListConnectorSyncRunsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/sync-runs`,
+    );
+  }
+
+  listActivity(
+    workspaceId: string,
+    connectorId: string,
+    input: ListConnectorActivityRequest = {},
+  ) {
+    return this.http.get<ListConnectorActivityResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/activity${query({
+        kind: input.kind,
+        limit: input.limit ? String(input.limit) : undefined,
+        cursor: input.cursor,
+      })}`,
     );
   }
 
@@ -181,11 +231,9 @@ export class ConnectorsClient {
     );
   }
 
-  getNotionWebhookConfig(workspaceId: string, connectorId?: string | null) {
-    return this.http.get<GetNotionWebhookConfigResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/connectors/notion/webhook-config${query({
-        connectorId: connectorId ?? undefined,
-      })}`,
+  getWebhookConfig(workspaceId: string, connectorId: string) {
+    return this.http.get<ConnectorWebhookConfigResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/webhook-config`,
     );
   }
 

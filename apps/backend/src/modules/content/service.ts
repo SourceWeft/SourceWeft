@@ -83,10 +83,14 @@ export class ContentService {
   }
 
   async listSources(input: {
+    view?: "tree" | "page";
     includeContent?: boolean;
     limit?: number;
     cursor?: string;
     parentSourceId?: string | null;
+    connectorId?: string;
+    syncRunId?: string;
+    updatedAfter?: string;
     workspaceId: string;
     userId: string;
   }) {
@@ -357,6 +361,14 @@ export class ContentService {
     userId: string;
   }) {
     return contentSourceService.deleteSource(input);
+  }
+
+  async bulkDeleteSources(input: {
+    workspaceId: string;
+    sourceIds: string[];
+    userId: string;
+  }) {
+    return contentSourceService.bulkDeleteSources(input);
   }
 
   async indexSource(input: {

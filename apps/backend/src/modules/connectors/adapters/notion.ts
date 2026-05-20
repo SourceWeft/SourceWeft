@@ -21,7 +21,10 @@ import type {
 const NOTION_API_BASE_URL = "https://api.notion.com/v1";
 const NOTION_AUTHORIZATION_URL = "https://www.notion.so/install-integration";
 const NOTION_TOKEN_URL = `${NOTION_API_BASE_URL}/oauth/token`;
-const DEFAULT_NOTION_VERSION = "2026-03-11";
+const NOTION_API_VERSION = "2026-03-11";
+const NOTION_RELATION_TITLE_RESOLVE_LIMIT = 10;
+const NOTION_LOCATION_MAX_DEPTH = 6;
+const NOTION_PROPERTY_SUMMARY_LIMIT = 4;
 
 function getNotionRedirectUri() {
   const configured = process.env.NOTION_REDIRECT_URI?.trim();
@@ -71,15 +74,60 @@ type NotionDataSource = {
   url?: string;
   created_time?: string;
   last_edited_time?: string;
+  parent?: Record<string, unknown>;
   properties?: Record<string, unknown>;
 };
 
 type NotionSearchResult = NotionPage | NotionDataSource | Record<string, unknown>;
 
+type NotionPropertyValue = {
+  type: string;
+  value: string;
+  raw?: unknown;
+};
+
+type NotionPropertyNormalization = {
+  values: Record<string, NotionPropertyValue>;
+  emptyPropertyNames: string[];
+  unsupportedPropertyTypes: string[];
+  markdownLines: string[];
+  summaryParts: string[];
+};
+
+type NotionBreadcrumbItem = {
+  type: "page" | "data_source" | "workspace" | "unknown";
+  id: string | null;
+  title: string;
+  url?: string | null;
+  isTitleResolved?: boolean;
+};
+
+type NotionLocation = {
+  parent: NotionBreadcrumbItem | null;
+  breadcrumb: NotionBreadcrumbItem[];
+  path: string | null;
+  parentType: string | null;
+  containerName: string | null;
+};
+
+type NotionTitleResolver = {
+  page: (pageId: string) => Promise<NotionPage | null>;
+  dataSource: (dataSourceId: string) => Promise<NotionDataSource | null>;
+  pageTitle: (pageId: string) => Promise<NotionBreadcrumbItem | null>;
+  dataSourceTitle: (dataSourceId: string) => Promise<NotionBreadcrumbItem | null>;
+};
+
 type NotionListResponse<T> = {
   results: T[];
   has_more?: boolean;
   next_cursor?: string | null;
+};
+
+type NotionSearchBody = {
+  query?: string;
+  filter?: Record<string, unknown>;
+  sort?: Record<string, unknown>;
+  page_size?: number;
 };
 
 type NotionTokenResponse = {
@@ -232,6 +280,7 @@ const notionManifest: ConnectorManifest = {
     scopes: [],
     redirectUri: getNotionRedirectUri(),
     authorizationParams: {
+      client_id: getNotionClientId(),
       owner: "user",
     },
     sendScope: false,
@@ -243,16 +292,6 @@ const notionManifest: ConnectorManifest = {
       {
         type: "notion_page",
         displayName: "Notion page",
-        supportsDeleteDetection: false,
-      },
-      {
-        type: "notion_data_source",
-        displayName: "Notion data source",
-        supportsDeleteDetection: false,
-      },
-      {
-        type: "notion_database",
-        displayName: "Notion database",
         supportsDeleteDetection: false,
       },
     ],
@@ -348,11 +387,8 @@ const notionManifest: ConnectorManifest = {
     additionalProperties: false,
     properties: {
       includePages: { type: "boolean" },
-      includeDataSources: { type: "boolean" },
-      includeDatabases: { type: "boolean" },
       rootPageIds: { type: "array" },
       defaultParentPageId: { type: "string" },
-      notionApiVersion: { type: "string" },
     },
   },
 };
@@ -385,18 +421,6 @@ function getNotionWebhookSecret() {
   return process.env.NOTION_WEBHOOK_SECRET?.trim() || "";
 }
 
-function getNotionVersion(configJson?: Record<string, unknown>) {
-  const configured =
-    typeof configJson?.notionApiVersion === "string"
-      ? configJson.notionApiVersion.trim()
-      : "";
-  return (
-    configured ||
-    process.env.NOTION_API_VERSION?.trim() ||
-    DEFAULT_NOTION_VERSION
-  );
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -405,6 +429,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function getRequestString(
@@ -433,6 +461,29 @@ function normalizeNotionId(value: string) {
 
 function buildNotionUri(id: string, fallback?: string | null) {
   return fallback || `https://www.notion.so/${normalizeNotionId(id)}`;
+}
+
+function sanitizedUrlLabel(value: string, fallback: string) {
+  try {
+    const url = new URL(value);
+    return url.hostname || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function sanitizedLinkTarget(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    url.hash = "";
+    url.search = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function richTextToPlainText(value: unknown): string {
@@ -483,6 +534,495 @@ function findDataSourceTitle(value: NotionDataSource) {
   return title.trim() || "Untitled Notion Data Source";
 }
 
+function titleFromPlainObject(value: unknown, fallback = "") {
+  const record = asRecord(value);
+  const name = asString(record.name).trim();
+  if (name) return name;
+  const plainText = asString(record.plain_text).trim();
+  if (plainText) return plainText;
+  const id = asString(record.id).trim();
+  return id || fallback;
+}
+
+function optionName(value: unknown) {
+  const record = asRecord(value);
+  return asString(record.name).trim();
+}
+
+function arrayOptionNames(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(optionName).filter((name) => name.length > 0)
+    : [];
+}
+
+function notionDateValue(value: unknown) {
+  const record = asRecord(value);
+  const start = asString(record.start).trim();
+  const end = asString(record.end).trim();
+  if (!start) return "";
+  return end ? `${start} to ${end}` : start;
+}
+
+function notionUserNames(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const record = asRecord(item);
+      return (
+        asString(record.name).trim() ||
+        asString(record.id).trim() ||
+        "Unknown user"
+      );
+    })
+    .filter((name) => name.length > 0);
+}
+
+function notionFilesValue(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const record = asRecord(item);
+      return (
+        asString(record.name).trim() ||
+        sanitizedUrlLabel(asString(asRecord(record.external).url), "") ||
+        "Notion file"
+      );
+    })
+    .filter((name) => name.length > 0);
+}
+
+function notionUniqueIdValue(value: unknown) {
+  const record = asRecord(value);
+  const prefix = asString(record.prefix).trim();
+  const number = asNumber(record.number);
+  if (number === null) return "";
+  return `${prefix}${number}`;
+}
+
+function formulaValue(value: unknown) {
+  const record = asRecord(value);
+  const type = asString(record.type);
+  switch (type) {
+    case "string":
+      return asString(record.string).trim();
+    case "number": {
+      const number = asNumber(record.number);
+      return number === null ? "" : String(number);
+    }
+    case "boolean":
+      return typeof record.boolean === "boolean" ? String(record.boolean) : "";
+    case "date":
+      return notionDateValue(record.date);
+    default:
+      return "";
+  }
+}
+
+function rollupValue(value: unknown) {
+  const record = asRecord(value);
+  const type = asString(record.type);
+  switch (type) {
+    case "number": {
+      const number = asNumber(record.number);
+      return number === null ? "" : String(number);
+    }
+    case "date":
+      return notionDateValue(record.date);
+    case "array": {
+      if (!Array.isArray(record.array)) return "";
+      return record.array
+        .map((item) => propertyDisplayValue(asRecord(item), null))
+        .filter((item) => item.value.length > 0)
+        .map((item) => item.value)
+        .join(", ");
+    }
+    case "incomplete":
+    case "unsupported":
+      return `[${type} rollup]`;
+    default:
+      return "";
+  }
+}
+
+function notionPropertySummaryLine(name: string, value: NotionPropertyValue) {
+  return `${name}: ${value.value.replace(/\s+/g, " ").trim()}`;
+}
+
+function notionPropertyMarkdownLine(name: string, value: NotionPropertyValue) {
+  const lines = value.value.replace(/\r\n?/g, "\n").split("\n");
+  const firstLine = lines.shift()?.trim() ?? "";
+  const continuationLines = lines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => `  ${line}`);
+
+  return [`- ${name}: ${firstLine}`, ...continuationLines].join("\n");
+}
+
+function propertyDisplayValue(
+  property: Record<string, unknown>,
+  resolver: NotionTitleResolver | null,
+): { type: string; value: string; raw?: unknown; unsupported?: boolean } {
+  const type = asString(property.type);
+  switch (type) {
+    case "title":
+      return { type, value: richTextToPlainText(property.title).trim() };
+    case "rich_text":
+      return { type, value: richTextToPlainText(property.rich_text).trim() };
+    case "status":
+      return { type, value: optionName(property.status) };
+    case "select":
+      return { type, value: optionName(property.select) };
+    case "multi_select":
+      return { type, value: arrayOptionNames(property.multi_select).join(", ") };
+    case "date":
+      return { type, value: notionDateValue(property.date) };
+    case "people":
+      return { type, value: notionUserNames(property.people).join(", ") };
+    case "relation": {
+      if (!Array.isArray(property.relation)) {
+        return { type, value: "" };
+      }
+      const ids = property.relation
+        .map((item) => asString(asRecord(item).id).trim())
+        .filter(Boolean);
+      const limitedIds = ids.slice(0, NOTION_RELATION_TITLE_RESOLVE_LIMIT);
+      const overflow = ids.length - limitedIds.length;
+      return {
+        type,
+        value:
+          overflow > 0
+            ? `${limitedIds.join(", ")} and ${overflow} more`
+            : limitedIds.join(", "),
+        raw: {
+          relationIds: ids,
+          resolverAvailable: Boolean(resolver),
+          overflow,
+        },
+      };
+    }
+    case "rollup":
+      return { type, value: rollupValue(property.rollup) };
+    case "number": {
+      const number = asNumber(property.number);
+      return { type, value: number === null ? "" : String(number) };
+    }
+    case "checkbox":
+      return {
+        type,
+        value: typeof property.checkbox === "boolean" ? String(property.checkbox) : "",
+      };
+    case "url":
+      return { type, value: asString(property.url).trim() };
+    case "email":
+      return { type, value: asString(property.email).trim() };
+    case "phone_number":
+      return { type, value: asString(property.phone_number).trim() };
+    case "files":
+      return { type, value: notionFilesValue(property.files).join(", ") };
+    case "formula":
+      return { type, value: formulaValue(property.formula) };
+    case "created_time":
+      return { type, value: asString(property.created_time).trim() };
+    case "created_by":
+      return { type, value: titleFromPlainObject(property.created_by, "Unknown user") };
+    case "last_edited_time":
+      return { type, value: asString(property.last_edited_time).trim() };
+    case "last_edited_by":
+      return {
+        type,
+        value: titleFromPlainObject(property.last_edited_by, "Unknown user"),
+      };
+    case "unique_id":
+      return { type, value: notionUniqueIdValue(property.unique_id) };
+    default:
+      return { type: type || "unknown", value: "", unsupported: true };
+  }
+}
+
+async function resolveRelationTitles(
+  value: NotionPropertyValue,
+  resolver: NotionTitleResolver | null,
+) {
+  const raw = asRecord(value.raw);
+  const ids = Array.isArray(raw.relationIds)
+    ? raw.relationIds.filter((id): id is string => typeof id === "string")
+    : [];
+  if (!ids.length || !resolver) {
+    return value;
+  }
+  const limitedIds = ids.slice(0, NOTION_RELATION_TITLE_RESOLVE_LIMIT);
+  const titles: string[] = [];
+  for (const id of limitedIds) {
+    try {
+      const related = await resolver.pageTitle(id);
+      titles.push(related?.title || id);
+    } catch {
+      titles.push(id);
+    }
+  }
+  const overflow = ids.length - limitedIds.length;
+  return {
+    ...value,
+    value: overflow > 0 ? `${titles.join(", ")} and ${overflow} more` : titles.join(", "),
+  };
+}
+
+async function normalizeNotionPageProperties(
+  properties: Record<string, unknown> | undefined,
+  resolver: NotionTitleResolver | null,
+): Promise<NotionPropertyNormalization> {
+  const values: Record<string, NotionPropertyValue> = {};
+  const emptyPropertyNames: string[] = [];
+  const unsupportedPropertyTypes = new Set<string>();
+
+  for (const [name, rawProperty] of Object.entries(properties ?? {})) {
+    const property = asRecord(rawProperty);
+    const display = propertyDisplayValue(property, resolver);
+    if (display.unsupported) {
+      unsupportedPropertyTypes.add(display.type);
+    }
+    let normalized: NotionPropertyValue = {
+      type: display.type,
+      value: display.value.trim(),
+      ...(display.raw ? { raw: display.raw } : {}),
+    };
+    if (normalized.type === "relation") {
+      normalized = await resolveRelationTitles(normalized, resolver);
+    }
+    if (normalized.value) {
+      values[name] = normalized;
+    } else {
+      emptyPropertyNames.push(name);
+    }
+  }
+
+  const summaryLines = Object.entries(values)
+    .filter(([, value]) => value.type !== "title")
+    .map(([name, value]) => notionPropertySummaryLine(name, value));
+  const markdownLines = Object.entries(values)
+    .filter(([, value]) => value.type !== "title")
+    .map(([name, value]) => notionPropertyMarkdownLine(name, value));
+  const summaryParts = summaryLines.slice(0, NOTION_PROPERTY_SUMMARY_LIMIT);
+
+  return {
+    values,
+    emptyPropertyNames: emptyPropertyNames.sort(),
+    unsupportedPropertyTypes: [...unsupportedPropertyTypes].sort(),
+    markdownLines,
+    summaryParts,
+  };
+}
+
+function parentInfoFromPage(page: NotionPage) {
+  return parentInfoFromRecord(asRecord(page.parent));
+}
+
+function parentInfoFromRecord(parent: Record<string, unknown>) {
+  const type = asString(parent.type);
+  if (type === "page_id") {
+    return { type: "page" as const, id: asString(parent.page_id) };
+  }
+  if (type === "data_source_id") {
+    return { type: "data_source" as const, id: asString(parent.data_source_id) };
+  }
+  if (type === "database_id") {
+    return { type: "data_source" as const, id: asString(parent.database_id) };
+  }
+  if (type === "workspace") {
+    return { type: "workspace" as const, id: null };
+  }
+  return { type: "unknown" as const, id: null };
+}
+
+function parentInfoFromDataSource(dataSource: NotionDataSource) {
+  return parentInfoFromRecord(asRecord(dataSource.parent));
+}
+
+function notionDirectoryExternalId(input: {
+  connectorId: string;
+  type: NotionBreadcrumbItem["type"] | "connector";
+  id: string | null;
+}) {
+  if (input.type === "connector") {
+    return `notion-dir:connector:${input.connectorId}`;
+  }
+  if (input.type === "workspace") {
+    return `notion-dir:workspace:${input.connectorId}`;
+  }
+  return `notion-dir:${input.type}:${input.id ?? "unknown"}`;
+}
+
+function rawNotionIdMatchesTitle(title: string, id: string | null) {
+  if (!id) return false;
+  const normalize = (value: string) => value.replaceAll("-", "").toLowerCase();
+  return normalize(title.trim()) === normalize(id);
+}
+
+function hasVisibleNotionDirectoryTitle(item: NotionBreadcrumbItem) {
+  const title = item.title.trim();
+  return (
+    item.isTitleResolved !== false &&
+    title.length > 0 &&
+    (item.isTitleResolved === true || !rawNotionIdMatchesTitle(title, item.id))
+  );
+}
+
+function unresolvedNotionParent(info: ReturnType<typeof parentInfoFromRecord>) {
+  return {
+    type: info.type,
+    id: info.id,
+    title: "",
+    isTitleResolved: false,
+  };
+}
+
+function buildNotionDirectoryPath(input: {
+  connectorId: string;
+  connectorName?: string | null;
+  location: NotionLocation;
+}) {
+  return [
+    {
+      externalId: notionDirectoryExternalId({
+        connectorId: input.connectorId,
+        type: "connector",
+        id: input.connectorId,
+      }),
+      title: "Notion",
+      externalUri: null,
+      metadata: {
+        provider: "notion",
+        connectorType: "notion",
+        notion: {
+          type: "connector_root",
+          connectorId: input.connectorId,
+          connectorName: input.connectorName ?? null,
+        },
+      },
+    },
+    ...input.location.breadcrumb
+      .filter(
+        (item) =>
+          item.type !== "workspace" && hasVisibleNotionDirectoryTitle(item),
+      )
+      .slice(0, -1)
+      .map((item) => ({
+        externalId: notionDirectoryExternalId({
+          connectorId: input.connectorId,
+          type: item.type,
+          id: item.id,
+        }),
+        title: item.title,
+        externalUri: item.url ?? null,
+        metadata: {
+          provider: "notion",
+          connectorType: "notion",
+          notion: {
+            type: item.type,
+            id: item.id,
+            url: item.url ?? null,
+          },
+        },
+      })),
+  ];
+}
+
+async function resolveNotionPageLocation(
+  page: NotionPage,
+  resolver: NotionTitleResolver,
+): Promise<NotionLocation> {
+  const breadcrumb: NotionBreadcrumbItem[] = [];
+  const visited = new Set<string>();
+  let parent: NotionBreadcrumbItem | null = null;
+  const directParentInfo = parentInfoFromPage(page);
+  let parentType: string | null = directParentInfo.type;
+  let currentInfo: ReturnType<typeof parentInfoFromRecord> = directParentInfo;
+
+  for (let depth = 0; depth < NOTION_LOCATION_MAX_DEPTH; depth += 1) {
+    const info = currentInfo;
+    if (info.type === "workspace") {
+      const workspace = {
+        type: "workspace" as const,
+        id: null,
+        title: "Workspace",
+        isTitleResolved: true,
+      };
+      parent = parent ?? workspace;
+      break;
+    }
+    if (!info.id || visited.has(info.id)) {
+      break;
+    }
+    visited.add(info.id);
+
+    try {
+      const resolved =
+        info.type === "page"
+          ? await resolver.pageTitle(info.id)
+          : info.type === "data_source"
+            ? await resolver.dataSourceTitle(info.id)
+            : null;
+      if (!resolved) {
+        const fallback = unresolvedNotionParent(info);
+        parent = parent ?? fallback;
+        breadcrumb.unshift(fallback);
+        break;
+      }
+      parent = parent ?? resolved;
+      breadcrumb.unshift(resolved);
+      if (info.type === "page") {
+        const parentPage = await resolver.page(info.id);
+        if (!parentPage) break;
+        currentInfo = parentInfoFromPage(parentPage);
+        continue;
+      }
+      if (info.type === "data_source") {
+        const dataSource = await resolver.dataSource(info.id);
+        if (!dataSource) break;
+        currentInfo = parentInfoFromDataSource(dataSource);
+        continue;
+      }
+      break;
+    } catch {
+      const fallback = unresolvedNotionParent(info);
+      parent = parent ?? fallback;
+      breadcrumb.unshift(fallback);
+      break;
+    }
+  }
+
+  const currentPage = {
+    type: "page" as const,
+    id: page.id,
+    title: findPageTitle(page),
+    url: page.url ?? null,
+    isTitleResolved: true,
+  };
+  const fullBreadcrumb = [...breadcrumb, currentPage].filter(
+    (item, index, items) =>
+      index === items.findIndex((candidate) => candidate.id === item.id),
+  );
+  return {
+    parent,
+    breadcrumb: fullBreadcrumb,
+    path:
+      fullBreadcrumb
+        .filter(hasVisibleNotionDirectoryTitle)
+        .map((item) => item.title)
+        .join(" / ") || null,
+    parentType,
+    containerName:
+      [...breadcrumb]
+        .reverse()
+        .find(
+          (item) =>
+            item.type === "data_source" && hasVisibleNotionDirectoryTitle(item),
+        )?.title ??
+      null,
+  };
+}
+
 function parseDate(value: unknown) {
   if (typeof value !== "string" || !value.trim()) {
     return null;
@@ -520,7 +1060,7 @@ function toNotionItem(value: NotionSearchResult): ConnectorItem | null {
     };
   }
 
-  if (object === "data_source" || object === "database") {
+  if (object === "data_source") {
     const dataSource = value as NotionDataSource;
     return {
       externalId: `${object}:${dataSource.id}`,
@@ -732,19 +1272,30 @@ function propertyNameList(properties: Record<string, unknown> | undefined) {
   return Object.keys(properties ?? {}).sort();
 }
 
-function pageToMarkdown(page: NotionPage, blocksMarkdown: string) {
+function formatMarkdownSection(title: string, lines: string[]) {
+  const body = lines.filter((line) => line.trim().length > 0);
+  if (!body.length) {
+    return "";
+  }
+  return [`## ${title}`, ...body].join("\n");
+}
+
+function pageToMarkdown(input: {
+  page: NotionPage;
+  accountLabel?: string | null;
+  properties: NotionPropertyNormalization;
+  location: NotionLocation;
+  blocksMarkdown: string;
+}) {
+  const { page, properties, blocksMarkdown } = input;
   const title = findPageTitle(page);
-  const metadata = [
+  const sections = [
     `# ${title}`,
     "",
-    `- Notion ID: ${page.id}`,
-    page.url ? `- URL: ${page.url}` : null,
-    page.created_time ? `- Created: ${page.created_time}` : null,
-    page.last_edited_time ? `- Last edited: ${page.last_edited_time}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  return `${metadata}\n\n${blocksMarkdown}`.trim();
+    formatMarkdownSection("Notion Properties", properties.markdownLines),
+    formatMarkdownSection("Content", [blocksMarkdown]),
+  ].filter((section) => section.trim().length > 0);
+  return sections.join("\n\n").trim();
 }
 
 function dataSourceToMarkdown(value: NotionDataSource) {
@@ -804,14 +1355,26 @@ function formatBlock(block: NotionBlock, childMarkdown = "") {
     case "pdf": {
       const file = asRecord(data.file);
       const external = asRecord(data.external);
-      const url = asString(file.url) || asString(external.url);
-      return url ? `[${caption || block.type}](${url})` : `[${block.type}]`;
+      const fileUrl = asString(file.url);
+      const externalUrl = asString(external.url);
+      if (externalUrl) {
+        const label = caption || `${block.type} from ${sanitizedUrlLabel(externalUrl, "external source")}`;
+        const safeUrl = sanitizedLinkTarget(externalUrl);
+        return safeUrl ? `[${label}](${safeUrl})` : `[${label}]`;
+      }
+      if (fileUrl) {
+        return `[Notion ${block.type}${caption ? `: ${caption}` : ""}]`;
+      }
+      return `[${block.type}]`;
     }
     case "bookmark":
     case "embed":
     case "link_preview": {
       const url = asString(data.url);
-      return url ? `[${url}](${url})` : `[${block.type}]`;
+      if (!url) return `[${block.type}]`;
+      const label = sanitizedUrlLabel(url, block.type);
+      const safeUrl = sanitizedLinkTarget(url);
+      return safeUrl ? `[${label}](${safeUrl})` : `[${label}]`;
     }
     case "child_page":
       return `## ${asString(data.title) || "Child page"}`;
@@ -866,15 +1429,12 @@ function sleep(ms: number) {
 }
 
 class NotionApiClient {
-  constructor(
-    private readonly accessToken: string,
-    private readonly notionVersion: string,
-  ) {}
+  constructor(private readonly accessToken: string) {}
 
   async request<T>(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${this.accessToken}`);
-    headers.set("notion-version", this.notionVersion);
+    headers.set("notion-version", NOTION_API_VERSION);
     if (init.body !== undefined && !headers.has("content-type")) {
       headers.set("content-type", "application/json");
     }
@@ -931,10 +1491,23 @@ class NotionApiClient {
     } while (startCursor);
   }
 
-  search(filter?: Record<string, unknown>) {
-    return this.paginate<NotionSearchResult>(
+  search(body: NotionSearchBody = {}) {
+    return this.paginate<NotionSearchResult>("/search", body);
+  }
+
+  async hasAccessiblePage() {
+    const payload = await this.request<NotionListResponse<NotionSearchResult>>(
       "/search",
-      filter ? { filter } : {},
+      {
+        method: "POST",
+        body: JSON.stringify({
+          filter: { property: "object", value: "page" },
+          page_size: 1,
+        }),
+      },
+    );
+    return (payload.results ?? []).some(
+      (value) => asString(value.object) === "page",
     );
   }
 
@@ -1020,22 +1593,60 @@ async function collectBlocksMarkdown(
   client: NotionApiClient,
   blockId: string,
   depth = 0,
-): Promise<string> {
+): Promise<{
+  markdown: string;
+  skippedBlockTypes: string[];
+  skippedBlockCount: number;
+}> {
   if (depth > 8) {
-    return "";
+    return {
+      markdown: "",
+      skippedBlockTypes: ["max_depth"],
+      skippedBlockCount: 1,
+    };
   }
   const output: string[] = [];
-  for await (const block of client.listBlockChildren(blockId)) {
-    let childMarkdown = "";
-    if (block.has_children) {
-      childMarkdown = await collectBlocksMarkdown(client, block.id, depth + 1);
+  const skippedBlockTypes = new Set<string>();
+  let skippedBlockCount = 0;
+
+  try {
+    for await (const block of client.listBlockChildren(blockId)) {
+      let childMarkdown = "";
+      if (block.has_children) {
+        const childBlocks = await collectBlocksMarkdown(
+          client,
+          block.id,
+          depth + 1,
+        );
+        childMarkdown = childBlocks.markdown;
+        for (const type of childBlocks.skippedBlockTypes) {
+          skippedBlockTypes.add(type);
+        }
+        skippedBlockCount += childBlocks.skippedBlockCount;
+      }
+      const formatted = formatBlock(block, childMarkdown);
+      if (formatted.includes("[Unsupported Notion block:")) {
+        skippedBlockTypes.add(block.type);
+        skippedBlockCount += 1;
+      }
+      if (formatted.trim()) {
+        output.push(formatted.trim());
+      }
     }
-    const formatted = formatBlock(block, childMarkdown);
-    if (formatted.trim()) {
-      output.push(formatted.trim());
+  } catch (error) {
+    if (error instanceof ConnectorError && error.statusCode === 404) {
+      skippedBlockTypes.add("inaccessible_children");
+      skippedBlockCount += 1;
+    } else {
+      throw error;
     }
   }
-  return output.join("\n\n");
+
+  return {
+    markdown: output.join("\n\n"),
+    skippedBlockTypes: [...skippedBlockTypes],
+    skippedBlockCount,
+  };
 }
 
 function getNotionObjectIdFromItem(item: ConnectorItem) {
@@ -1055,11 +1666,70 @@ function getNotionObjectIdFromItem(item: ConnectorItem) {
   return notionId;
 }
 
-function createNotionClient(input: {
-  accessToken: string;
-  config: Record<string, unknown>;
-}) {
-  return new NotionApiClient(input.accessToken, getNotionVersion(input.config));
+function createNotionClient(input: { accessToken: string }) {
+  return new NotionApiClient(input.accessToken);
+}
+
+function createNotionTitleResolver(client: NotionApiClient): NotionTitleResolver {
+  const pageCache = new Map<string, Promise<NotionPage | null>>();
+  const dataSourceCache = new Map<string, Promise<NotionDataSource | null>>();
+
+  const page = (pageId: string) => {
+    const existing = pageCache.get(pageId);
+    if (existing) return existing;
+    const next = client
+      .retrievePage(pageId)
+      .catch((error) => {
+        if (error instanceof ConnectorError && error.statusCode === 404) {
+          return null;
+        }
+        throw error;
+      });
+    pageCache.set(pageId, next);
+    return next;
+  };
+
+  const dataSource = (dataSourceId: string) => {
+    const existing = dataSourceCache.get(dataSourceId);
+    if (existing) return existing;
+    const next = client
+      .retrieveDataSource(dataSourceId)
+      .catch((error) => {
+        if (error instanceof ConnectorError && error.statusCode === 404) {
+          return null;
+        }
+        throw error;
+      });
+    dataSourceCache.set(dataSourceId, next);
+    return next;
+  };
+
+  return {
+    dataSource,
+    page,
+    async pageTitle(pageId: string) {
+      const value = await page(pageId);
+      if (!value) return null;
+      return {
+        type: "page",
+        id: value.id,
+        title: findPageTitle(value),
+        url: value.url ?? null,
+        isTitleResolved: true,
+      };
+    },
+    async dataSourceTitle(dataSourceId: string) {
+      const value = await dataSource(dataSourceId);
+      if (!value) return null;
+      return {
+        type: "data_source",
+        id: value.id,
+        title: findDataSourceTitle(value),
+        url: value.url ?? null,
+        isTitleResolved: true,
+      };
+    },
+  };
 }
 
 async function appendMarkdownInBatches(
@@ -1154,11 +1824,16 @@ function notionWebhookObject(payload: Record<string, unknown>) {
   const objectType = firstString(
     data.object,
     data.object_type,
+    data.type,
+    data.entity_type,
     entity.type,
     entity.object,
     object.type,
+    object.object,
     nestedObject.object,
+    nestedObject.type,
     payload.object,
+    payload.object_type,
   );
   return {
     objectId: objectId || null,
@@ -1184,7 +1859,6 @@ function webhookExternalId(input: { objectType: string | null; objectId: string 
   }
   if (
     input.objectType === "page" ||
-    input.objectType === "database" ||
     input.objectType === "data_source"
   ) {
     return `${input.objectType}:${input.objectId}`;
@@ -1247,7 +1921,17 @@ async function mapNotionWebhookTargets(
   }
   const externalId = webhookExternalId(event);
   if (event.eventType.includes(".deleted")) {
-    return externalId
+    if (event.objectType === "data_source") {
+      return [
+        {
+          action: "sync",
+          objectId: event.objectId,
+          objectType: event.objectType,
+          reason: "data source deletion requires page rediscovery",
+        },
+      ];
+    }
+    return event.objectType === "page" && externalId
       ? [
           {
             action: "archive_source",
@@ -1261,9 +1945,18 @@ async function mapNotionWebhookTargets(
 
   if (
     event.objectType === "page" ||
-    event.objectType === "database" ||
     event.objectType === "data_source"
   ) {
+    if (event.objectType === "data_source") {
+      return [
+        {
+          action: "sync",
+          objectId: event.objectId,
+          objectType: event.objectType,
+          reason: "data source event requires page rediscovery",
+        },
+      ];
+    }
     return externalId
       ? [
           {
@@ -1283,8 +1976,20 @@ async function mapNotionWebhookTargets(
       event.rawPayload.page_id,
     );
     return pageId
-      ? [{ action: "sync", externalId: `page:${pageId}`, objectId: pageId, objectType: "page" }]
-      : [{ action: "record_only", reason: `${event.objectType} event without page target` }];
+      ? [
+          {
+            action: "sync",
+            externalId: `page:${pageId}`,
+            objectId: pageId,
+            objectType: "page",
+          },
+        ]
+      : [
+          {
+            action: "record_only",
+            reason: `${event.objectType} event without page target`,
+          },
+        ];
   }
 
   return [{ action: "record_only", reason: "not indexable" }];
@@ -1655,6 +2360,20 @@ export const notionAdapter: ConnectorAdapter = {
     return mapNotionWebhookTargets(event);
   },
 
+  async checkSyncReadiness(input: ConnectorDiscoverInput) {
+    const client = createNotionClient(input);
+    const hasPages = await client.hasAccessiblePage();
+    if (hasPages) {
+      return { ready: true };
+    }
+    return {
+      ready: false,
+      reason: "notion_no_pages",
+      message:
+        "No Notion pages are shared with this integration. Share at least one page before syncing.",
+    };
+  },
+
   async exchangeOAuthCode(input: OAuthCodeExchangeInput) {
     const token = await exchangeToken({
       grantType: "authorization_code",
@@ -1675,37 +2394,13 @@ export const notionAdapter: ConnectorAdapter = {
   async *discover(input: ConnectorDiscoverInput) {
     const client = createNotionClient(input);
     const includePages = input.config.includePages !== false;
-    const includeDataSources = input.config.includeDataSources !== false;
-    const includeDatabases = input.config.includeDatabases !== false;
 
     if (includePages) {
       for await (const value of client.search({
-        property: "object",
-        value: "page",
-      })) {
-        const item = toNotionItem(value);
-        if (item) {
-          yield item;
-        }
-      }
-    }
-
-    if (includeDataSources) {
-      for await (const value of client.search({
-        property: "object",
-        value: "data_source",
-      })) {
-        const item = toNotionItem(value);
-        if (item) {
-          yield item;
-        }
-      }
-    }
-
-    if (includeDatabases) {
-      for await (const value of client.search({
-        property: "object",
-        value: "database",
+        filter: {
+          property: "object",
+          value: "page",
+        },
       })) {
         const item = toNotionItem(value);
         if (item) {
@@ -1722,8 +2417,25 @@ export const notionAdapter: ConnectorAdapter = {
 
     if (object === "page") {
       const page = await client.retrievePage(notionId);
-      const blocksMarkdown = await collectBlocksMarkdown(client, page.id);
-      const markdown = pageToMarkdown(page, blocksMarkdown);
+      const resolver = createNotionTitleResolver(client);
+      const properties = await normalizeNotionPageProperties(
+        page.properties,
+        resolver,
+      );
+      const location = await resolveNotionPageLocation(page, resolver);
+      const directoryPath = buildNotionDirectoryPath({
+        connectorId: input.connectorId,
+        connectorName: input.connectorName ?? null,
+        location,
+      });
+      const blocks = await collectBlocksMarkdown(client, page.id);
+      const markdown = pageToMarkdown({
+        page,
+        accountLabel: input.connectorName ?? null,
+        properties,
+        location,
+        blocksMarkdown: blocks.markdown,
+      });
       return {
         item: {
           ...input.item,
@@ -1733,13 +2445,37 @@ export const notionAdapter: ConnectorAdapter = {
           contentHash: computeHash(markdown),
           metadata: {
             ...input.item.metadata,
+            provider: "notion",
+            connectorName: input.connectorName ?? null,
+            notion: {
+              id: page.id,
+              url: page.url ?? null,
+              properties: properties.values,
+              emptyPropertyNames: properties.emptyPropertyNames,
+              propertySummary: properties.summaryParts,
+              parent: location.parent,
+              breadcrumb: location.breadcrumb,
+              path: location.path,
+              parentType: location.parentType,
+              containerName: location.containerName,
+              directoryExternalIds: directoryPath.map((node) => node.externalId),
+              unsupportedPropertyTypes: properties.unsupportedPropertyTypes,
+            },
             archived: Boolean(page.archived),
             inTrash: Boolean(page.in_trash),
             parent: page.parent ?? null,
+            notionPath: location.path,
+            notionPropertySummary: properties.summaryParts,
+            skippedBlockTypes: blocks.skippedBlockTypes,
+            skippedBlockCount: blocks.skippedBlockCount,
           },
         },
         contentText: markdown,
         markdown,
+        parentExternalId: location.parent?.id
+          ? `${location.parent.type}:${location.parent.id}`
+          : null,
+        directoryPath,
       };
     }
 

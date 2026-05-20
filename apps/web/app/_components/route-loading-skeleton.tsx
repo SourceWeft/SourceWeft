@@ -214,7 +214,7 @@ function DashboardHomeHeaderSkeleton() {
 
 export function DashboardHomeOverviewPanelSkeleton() {
   return (
-    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card">
+    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card lg:min-h-[430px]">
       <div className="grid lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
         <div className="border-b border-border/70 px-7 py-7 lg:border-b-0 lg:border-r lg:px-8 lg:py-8">
           <div className="flex h-full flex-col justify-center">
@@ -328,7 +328,7 @@ function DashboardHomeWorkspaceCardSkeleton({ create }: { create?: boolean }) {
 }
 
 export function DashboardHomeWorkspaceRailSkeleton({
-  includeCreate = true,
+  includeCreate = false,
 }: {
   includeCreate?: boolean;
 }) {
@@ -351,7 +351,7 @@ export function DashboardHomeWorkspaceRailSkeleton({
 
 function DashboardHomeSkeletonContent() {
   return (
-    <main className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/20">
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/20">
       <DashboardHomeHeaderSkeleton />
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-9 p-4 pb-10 md:p-6 md:pb-12 xl:p-8 xl:pb-16">

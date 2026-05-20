@@ -2495,6 +2495,7 @@ export function DashboardSettingsCenterModal({
         constrainWidth={false}
         showCloseButton={false}
       >
+        <DialogTitle className="sr-only">Settings center</DialogTitle>
         <div className="grid h-full grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)]">
           {/* ── Sidebar ── */}
           <aside className="flex min-h-0 flex-col border-b border-border/70 bg-muted/30 sm:border-b-0 sm:border-r">

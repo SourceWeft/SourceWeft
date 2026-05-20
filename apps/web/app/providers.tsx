@@ -5,8 +5,8 @@ import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import type { SocialProvider } from "better-auth/social-providers";
 import Link from "next/link";
 import { ThemeProvider } from "next-themes";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
 import { GoogleOneTap } from "./google-one-tap";
 import { MobileRouteSheetProvider } from "./mobile-route-sheet-provider";
@@ -62,7 +62,20 @@ function isCancelledPasskeyRejection(reason: unknown) {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const webBaseUrl = resolveWebBaseUrl();
+
+  const handleSessionChange = useCallback(() => {
+    const normalizedPathname = pathname?.replace(/\/+$/, "") || "/";
+    if (
+      normalizedPathname === "/dashboard" ||
+      normalizedPathname.startsWith("/dashboard/")
+    ) {
+      return;
+    }
+
+    router.refresh();
+  }, [pathname, router]);
 
   useEffect(() => {
     const handler = (event: PromiseRejectionEvent) => {
@@ -104,7 +117,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         magicLink
         multiSession
         navigate={router.push}
-        onSessionChange={() => router.refresh()}
+        onSessionChange={handleSessionChange}
         organization={{
           apiKey: true,
           basePath: "/organization",

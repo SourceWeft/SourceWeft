@@ -1,10 +1,26 @@
 "use client";
 
 import { ChatCanvas } from "../../_components/chat-canvas";
+import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-skeleton";
 import { ThreadDialogs } from "./thread-dialogs";
 import { ThreadHeader } from "./thread-header";
 import { ThreadSidePanels } from "./thread-side-panels";
 import type { useThreadPageController } from "./use-thread-page-controller";
+
+function ModelCatalogErrorState() {
+  return (
+    <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background px-6 py-10">
+      <div className="max-w-sm text-center">
+        <h2 className="text-sm font-semibold text-foreground">
+          Model catalog failed to load
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Refresh the page before sending a message.
+        </p>
+      </div>
+    </section>
+  );
+}
 
 export function DashboardChatThreadPageView({
   activeAssistantVersion,
@@ -56,6 +72,7 @@ export function DashboardChatThreadPageView({
   loadOlderThreadMessages,
   loadSourceMentions,
   messageGroups,
+  modelCatalogStatus,
   olderMessagesCursor,
   persistActiveSourceIds,
   previewArtifact,
@@ -94,8 +111,8 @@ export function DashboardChatThreadPageView({
   workspaceName,
 }: ReturnType<typeof useThreadPageController>) {
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 w-full overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ThreadHeader
           availableModels={availableModels}
           byokCredentials={byokCredentials}
@@ -114,56 +131,62 @@ export function DashboardChatThreadPageView({
           threadTitle={threadTitle}
         />
 
-        <ChatCanvas
-          activeVersionByGroup={activeVersionByGroup}
-          allSources={librarySources}
-          availableSkills={availableSkills}
-          composerInitialCommand={composerInitialCommand}
-          composerInitialInput={composerInitialInput}
-          composerResetKey={composerResetKey}
-          editingMessageId={editingMessageId}
-          highlightedMessageId={highlightedMessageId}
-          hasOlderMessages={Boolean(olderMessagesCursor)}
-          isEditing={Boolean(editingMessageId && editingGroupId)}
-          isLoadingOlderMessages={isLoadingOlderMessages}
-          isStreaming={isStreaming}
-          isStopping={isStopping}
-          messageGroups={messageGroups}
-          mode="thread"
-          onActiveVersionChange={handleActiveVersionChange}
-          onArtifactPreview={handleArtifactPreview}
-          onCancelEditing={cancelEditing}
-          onCitationClick={handleCitationClick}
-          onSourcePreview={handleSourcePreview}
-          onWorkfileClick={handleWorkfilePreview}
-          onRemoveSource={(id) =>
-            persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
-          }
-          onRefreshLatest={handleRefreshLatest}
-          onRestartFromMessage={handleRestartFromMessage}
-          onSendMessage={handleSendMessage}
-          onSkillSelectionChange={setActiveSkillIds}
-          onStopStreaming={handleStopStreaming}
-          searchEnabled={searchEnabled}
-          onSearchEnabledChange={setSearchEnabled}
-          sourceMentionLoader={loadSourceMentions}
-          selectedSources={selectedSources}
-          selectedSkillIds={activeSkillIds}
-          sourcesVisible={sourcesVisible}
-          thinkingCapabilities={selectedModels.llm?.capabilities}
-          imageCapabilities={
-            selectedModels.image?.capabilities?.imageGeneration
-          }
-          imageModelAvailable={Boolean(selectedModels.image)}
-          imageModelAlias={selectedModels.image?.modelAlias ?? null}
-          disabledToolNames={disabledToolNames}
-          onDisabledToolNamesChange={setDisabledToolNames}
-          onLoadOlderMessages={() => void loadOlderThreadMessages()}
-          thinkingSettings={thinkingSettings}
-          onThinkingSettingsChange={handleThinkingSettingsChange}
-          threadTitle={threadTitle}
-          workspaceId={workspaceId}
-        />
+        {modelCatalogStatus === "ready" ? (
+          <ChatCanvas
+            activeVersionByGroup={activeVersionByGroup}
+            allSources={librarySources}
+            availableSkills={availableSkills}
+            composerInitialCommand={composerInitialCommand}
+            composerInitialInput={composerInitialInput}
+            composerResetKey={composerResetKey}
+            editingMessageId={editingMessageId}
+            highlightedMessageId={highlightedMessageId}
+            hasOlderMessages={Boolean(olderMessagesCursor)}
+            isEditing={Boolean(editingMessageId && editingGroupId)}
+            isLoadingOlderMessages={isLoadingOlderMessages}
+            isStreaming={isStreaming}
+            isStopping={isStopping}
+            messageGroups={messageGroups}
+            mode="thread"
+            onActiveVersionChange={handleActiveVersionChange}
+            onArtifactPreview={handleArtifactPreview}
+            onCancelEditing={cancelEditing}
+            onCitationClick={handleCitationClick}
+            onSourcePreview={handleSourcePreview}
+            onWorkfileClick={handleWorkfilePreview}
+            onRemoveSource={(id) =>
+              persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
+            }
+            onRefreshLatest={handleRefreshLatest}
+            onRestartFromMessage={handleRestartFromMessage}
+            onSendMessage={handleSendMessage}
+            onSkillSelectionChange={setActiveSkillIds}
+            onStopStreaming={handleStopStreaming}
+            searchEnabled={searchEnabled}
+            onSearchEnabledChange={setSearchEnabled}
+            sourceMentionLoader={loadSourceMentions}
+            selectedSources={selectedSources}
+            selectedSkillIds={activeSkillIds}
+            sourcesVisible={sourcesVisible}
+            thinkingCapabilities={selectedModels.llm?.capabilities}
+            imageCapabilities={
+              selectedModels.image?.capabilities?.imageGeneration
+            }
+            imageModelAvailable={Boolean(selectedModels.image)}
+            imageModelAlias={selectedModels.image?.modelAlias ?? null}
+            disabledToolNames={disabledToolNames}
+            onDisabledToolNamesChange={setDisabledToolNames}
+            onLoadOlderMessages={() => void loadOlderThreadMessages()}
+            thinkingSettings={thinkingSettings}
+            onThinkingSettingsChange={handleThinkingSettingsChange}
+            threadTitle={threadTitle}
+            workspaceId={workspaceId}
+          />
+        ) : modelCatalogStatus === "error" ? (
+          <ModelCatalogErrorState />
+        ) : (
+          <ChatCanvasPanelSkeleton variant="thread" />
+        )}
       </div>
 
       <ThreadSidePanels
@@ -241,4 +264,3 @@ export function DashboardChatThreadPageView({
     </div>
   );
 }
-

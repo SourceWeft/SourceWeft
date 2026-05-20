@@ -26,6 +26,7 @@ export type PendingThreadTurn = {
   modelState?: {
     availableModels?: Record<ModelType, ModelItem[]>;
     catalogKindEnabled?: Record<ModelType, boolean>;
+    catalogReady?: boolean;
     selectedModels?: SelectedModels;
     byokSelection?: ByokModelSelection | null;
     byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;

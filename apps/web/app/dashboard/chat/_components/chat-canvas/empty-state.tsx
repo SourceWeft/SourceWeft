@@ -92,8 +92,8 @@ export function EmptyState({
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
   return (
-    <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <Conversation className="min-h-0 flex-1">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <Conversation className="h-full min-h-0 flex-1 overflow-hidden">
         <ConversationContent className="flex min-h-full items-center justify-center px-6 py-10">
           <div className="mx-auto flex w-full max-w-4xl flex-col items-start justify-center gap-8">
             <ConversationEmptyState className="w-full items-start gap-4 p-0 text-left">

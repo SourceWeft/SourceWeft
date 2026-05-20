@@ -1,9 +1,13 @@
 import type { Hono } from "hono";
 import {
+  connectorWebhookConfigResponseSchema,
   createConnectorActionRequestSchema,
   createConnectorRequestSchema,
-  getNotionWebhookConfigResponseSchema,
+  deleteConnectorAccountRequestSchema,
+  deleteConnectorRequestSchema,
+  listConnectorActivityRequestSchema,
   listConnectorOAuthAccountsRequestSchema,
+  listWorkspaceConnectorSyncRunsRequestSchema,
   listConnectorWebhookEventsRequestSchema,
   lookupNotionPagesRequestSchema,
   startConnectorOAuthRequestSchema,
@@ -20,6 +24,7 @@ import {
 import { requireConnectorWorkspace } from "../../../modules/connectors/permissions";
 import {
   findSourceConnectorRecord,
+  listConnectorActivityRecords,
   lookupConnectorSourceRecords,
 } from "../../../modules/connectors/repository";
 import { enqueueConnectorSyncJob } from "../../../modules/content/queue";
@@ -27,10 +32,53 @@ import { getSessionUserId, requireSession } from "../../middleware/auth-session"
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
-function buildNotionWebhookUrl(connectorId?: string | null) {
-  const url = new URL("/v1/connectors/webhooks/notion", config.auth.baseUrl);
-  if (connectorId) {
-    url.searchParams.set("connectorId", connectorId);
+function stripTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
+function resolveConnectorWebhookBaseUrl() {
+  const configured = process.env.CONNECTOR_WEBHOOK_PUBLIC_BASE_URL?.trim();
+  if (configured) {
+    return stripTrailingSlash(configured);
+  }
+
+  const notionRedirectUri = process.env.NOTION_REDIRECT_URI?.trim();
+  if (notionRedirectUri) {
+    try {
+      return new URL(notionRedirectUri).origin;
+    } catch {
+      // Fall back to the API base URL; response validation will catch bad values.
+    }
+  }
+
+  return config.auth.baseUrl;
+}
+
+function isPublicHttpsBaseUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    return (
+      url.protocol === "https:" &&
+      hostname !== "localhost" &&
+      hostname !== "127.0.0.1" &&
+      hostname !== "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildConnectorWebhookUrl(input: {
+  connectorType: string;
+  connectorId?: string | null;
+}) {
+  const url = new URL(
+    `/v1/connectors/webhooks/${encodeURIComponent(input.connectorType)}`,
+    resolveConnectorWebhookBaseUrl(),
+  );
+  if (input.connectorId) {
+    url.searchParams.set("connectorId", input.connectorId);
   }
   return url.toString();
 }
@@ -107,6 +155,28 @@ export function registerConnectorRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.delete("/connectors/accounts/:accountId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = deleteConnectorAccountRequestSchema.safeParse({
+      force: c.req.query("force") === "true" ? true : undefined,
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+    }
+
+    const result = await connectorService.deleteOAuthAccount({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      accountId: requireRouteParam(c, "accountId"),
+      force: parsed.data.force,
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.post("/connectors", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -145,6 +215,27 @@ export function registerConnectorRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get("/connectors/sync-runs", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = listWorkspaceConnectorSyncRunsRequestSchema.safeParse({
+      status: c.req.query("status"),
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+    }
+
+    const result = await connectorSyncOrchestrator.listWorkspaceRuns({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      status: parsed.data.status,
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.patch("/connectors/:connectorId", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -176,10 +267,19 @@ export function registerConnectorRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
+    const parsed = deleteConnectorRequestSchema.safeParse({
+      purgeIndexedContent:
+        c.req.query("purgeIndexedContent") === "true" ? true : undefined,
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+    }
+
     const result = await connectorService.deleteConnector({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       connectorId: requireRouteParam(c, "connectorId"),
+      purgeIndexedContent: parsed.data.purgeIndexedContent,
     });
     return ApiResponse.success(c, result);
   });
@@ -211,6 +311,97 @@ export function registerConnectorRoutes(app: Hono) {
       connectorId: requireRouteParam(c, "connectorId"),
     });
     return ApiResponse.success(c, result);
+  });
+
+  app.get("/connectors/:connectorId/activity", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = listConnectorActivityRequestSchema.safeParse({
+      kind: c.req.query("kind"),
+      limit: c.req.query("limit")
+        ? Number(c.req.query("limit"))
+        : undefined,
+      cursor: c.req.query("cursor"),
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+    }
+
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const connectorId = requireRouteParam(c, "connectorId");
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId,
+      userId: getSessionUserId(session),
+      permission: "connector.read",
+    });
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId,
+    });
+    if (!connector || connector.status === "disabled") {
+      throw new ApiError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+    }
+
+    const result = await listConnectorActivityRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId,
+      kind: parsed.data.kind,
+      limit: parsed.data.limit ?? 50,
+      cursor: parsed.data.cursor,
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/connectors/:connectorId/webhook-config", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const connectorId = requireRouteParam(c, "connectorId");
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId,
+      userId: getSessionUserId(session),
+      permission: "connector.read",
+    });
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId,
+    });
+    if (!connector) {
+      throw new ApiError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+    }
+
+    const webhookBaseUrl = resolveConnectorWebhookBaseUrl();
+    const result = {
+      webhookUrl: buildConnectorWebhookUrl({
+        connectorType: connector.connectorType,
+        connectorId: connector.id,
+      }),
+      baseUrl: webhookBaseUrl,
+      connectorId: connector.id,
+      connectorType: connector.connectorType,
+      isConfigured: isPublicHttpsBaseUrl(webhookBaseUrl),
+      setupRequired: true,
+    };
+
+    const parsed = connectorWebhookConfigResponseSchema.safeParse(result);
+    if (!parsed.success) {
+      throw new ApiError(
+        500,
+        "CONNECTOR_WEBHOOK_CONFIG_INVALID",
+        "Connector webhook config is invalid",
+      );
+    }
+
+    return ApiResponse.success(c, parsed.data);
   });
 
   app.post("/connectors/:connectorId/actions", async (c) => {
@@ -294,55 +485,6 @@ export function registerConnectorRoutes(app: Hono) {
       connectorId: requireRouteParam(c, "connectorId"),
     });
     return ApiResponse.success(c, result);
-  });
-
-  app.get("/connectors/notion/webhook-config", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const workspaceId = requireRouteParam(c, "workspaceId");
-    const connectorId = c.req.query("connectorId")?.trim() || null;
-    const { workspace } = await requireConnectorWorkspace({
-      workspaceId,
-      userId: getSessionUserId(session),
-      permission: "connector.read",
-    });
-
-    if (connectorId) {
-      const connector = await findSourceConnectorRecord({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        connectorId,
-      });
-      if (!connector || connector.connectorType !== "notion") {
-        throw new ApiError(
-          404,
-          "NOTION_CONNECTOR_NOT_FOUND",
-          "Notion connector not found",
-        );
-      }
-    }
-
-    const result = {
-      webhookUrl: buildNotionWebhookUrl(connectorId),
-      baseUrl: config.auth.baseUrl,
-      connectorId,
-      isConfigured: !config.auth.baseUrl.includes("localhost"),
-      setupRequired: true,
-    };
-
-    const parsed = getNotionWebhookConfigResponseSchema.safeParse(result);
-    if (!parsed.success) {
-      throw new ApiError(
-        500,
-        "NOTION_WEBHOOK_CONFIG_INVALID",
-        "Notion webhook config is invalid",
-      );
-    }
-
-    return ApiResponse.success(c, parsed.data);
   });
 
   app.get("/connectors/webhook-events", async (c) => {

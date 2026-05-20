@@ -13,17 +13,12 @@ export async function scheduleConnectorSyncs() {
 
   for (const connector of connectors) {
     try {
-      const run = await connectorSyncOrchestrator.createScheduledRun({
-        teamId: connector.teamId,
-        workspaceId: connector.workspaceId,
-        connectorId: connector.id,
-      });
-      await enqueueConnectorSyncJob({
-        runId: run.id,
+      await connectorSyncOrchestrator.enqueueScheduledRun({
         teamId: connector.teamId,
         workspaceId: connector.workspaceId,
         connectorId: connector.id,
         userId: connector.createdBy ?? "system",
+        enqueue: enqueueConnectorSyncJob,
       });
     } catch (error) {
       logger.error("Failed to schedule connector sync", {

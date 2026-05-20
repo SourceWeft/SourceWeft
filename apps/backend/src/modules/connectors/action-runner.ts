@@ -257,7 +257,7 @@ export class ConnectorActionRunner {
         accessToken,
         idempotencyKey: action.idempotencyKey,
       });
-      const updated = await updateActionRunRecord({
+      let updated = await updateActionRunRecord({
         ...lookup,
         status: "succeeded",
         resultJson: redactConnectorSecrets(result.result) as Record<
@@ -293,6 +293,13 @@ export class ConnectorActionRunner {
           connectorId: connector.id,
           userId: input.userId,
           targetExternalIds,
+        });
+        updated = await updateActionRunRecord({
+          ...lookup,
+          resultJson: redactConnectorSecrets({
+            ...result.result,
+            postActionSyncRunId: run.id,
+          }) as Record<string, unknown>,
         });
       }
       return { action: updated ?? action };

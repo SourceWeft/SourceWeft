@@ -79,6 +79,24 @@ export function DashboardLayoutClient({
   }, [redirectTo]);
 
   useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtmlOverflow = html.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyOverscroll = body.style.overscrollBehavior;
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
+
+    return () => {
+      html.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
+      body.style.overscrollBehavior = previousBodyOverscroll;
+    };
+  }, []);
+
+  useEffect(() => {
     if (
       isPending ||
       hasSession ||
@@ -148,10 +166,10 @@ export function DashboardLayoutClient({
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="!h-svh !min-h-0 overflow-hidden overscroll-none">
       <DashboardChatStateProvider>
         <DashboardMobileNavProvider>
-          <div className="flex h-svh min-h-0 w-full overflow-hidden bg-background text-foreground">
+          <div className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground">
             <DashboardSidebar />
             <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
               <DashboardMobileContent>{children}</DashboardMobileContent>

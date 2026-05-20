@@ -1199,7 +1199,7 @@ export function MessageList({
       : messageGroups;
 
   return (
-    <Conversation className="min-h-0 flex-1">
+    <Conversation className="h-full min-h-0 flex-1 overflow-hidden">
       <ConversationContent className="px-6 py-8">
         <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-4">
           {hasOlderMessages ? (

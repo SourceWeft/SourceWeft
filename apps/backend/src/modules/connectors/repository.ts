@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import { logger } from "../../shared/logger";
 import { db } from "../../shared/database";
 import {
+  citations,
+  chunks,
+  documents,
   connectorActionRuns,
   connectorOAuthAccounts,
   connectorOAuthStates,
@@ -19,9 +23,11 @@ import {
   mapWebhookEvent,
 } from "./mappers";
 import { mapSource } from "../content/sources/mappers";
+import { redactConnectorSecrets } from "./security";
 import type {
   ConnectorActionRiskLevel,
   ConnectorActionRunStatus,
+  ConnectorActivityItemRecord,
   ConnectorOAuthAccountStatus,
   ConnectorStatus,
   ConnectorSyncRunStatus,
@@ -260,6 +266,21 @@ export async function updateOAuthAccountStatusRecord(input: {
   return row ? mapOAuthAccount(row) : null;
 }
 
+export async function revokeOAuthAccountRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+  lastError?: string | null;
+}) {
+  return updateOAuthAccountStatusRecord({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    accountId: input.accountId,
+    status: "revoked",
+    lastError: input.lastError ?? null,
+  });
+}
+
 export async function createSourceConnectorRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -359,7 +380,28 @@ export async function listSourceConnectorRecordsByOAuthAccount(input: {
       and(
         eq(sourceConnectors.connectorType, input.connectorType),
         eq(sourceConnectors.oauthAccountId, input.oauthAccountId),
-        eq(sourceConnectors.status, "active"),
+        ne(sourceConnectors.status, "disabled"),
+      ),
+    )
+    .orderBy(desc(sourceConnectors.createdAt));
+
+  return rows.map(mapSourceConnector);
+}
+
+export async function listWorkspaceSourceConnectorRecordsByOAuthAccount(input: {
+  teamId: string;
+  workspaceId: string;
+  oauthAccountId: string;
+}) {
+  const rows = await db
+    .select()
+    .from(sourceConnectors)
+    .where(
+      and(
+        eq(sourceConnectors.teamId, input.teamId),
+        eq(sourceConnectors.workspaceId, input.workspaceId),
+        eq(sourceConnectors.oauthAccountId, input.oauthAccountId),
+        ne(sourceConnectors.status, "disabled"),
       ),
     )
     .orderBy(desc(sourceConnectors.createdAt));
@@ -417,6 +459,179 @@ export async function updateSourceConnectorRecord(input: {
   return row ? mapSourceConnector(row) : null;
 }
 
+export async function detachSourceConnectorOAuthAccount(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+}) {
+  const [row] = await db
+    .update(sourceConnectors)
+    .set({
+      oauthAccountId: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(sourceConnectors.id, input.connectorId),
+        eq(sourceConnectors.teamId, input.teamId),
+        eq(sourceConnectors.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+
+  return row ? mapSourceConnector(row) : null;
+}
+
+export async function disableAndDetachSourceConnectorsByOAuthAccount(input: {
+  teamId: string;
+  workspaceId: string;
+  oauthAccountId: string;
+}) {
+  const rows = await db
+    .update(sourceConnectors)
+    .set({
+      name: sql<string>`'removed:' || ${sourceConnectors.id}`,
+      oauthAccountId: null,
+      status: "disabled",
+      periodicIndexingEnabled: false,
+      indexingFrequencyMinutes: null,
+      nextScheduledAt: null,
+      lastError: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(sourceConnectors.teamId, input.teamId),
+        eq(sourceConnectors.workspaceId, input.workspaceId),
+        eq(sourceConnectors.oauthAccountId, input.oauthAccountId),
+        ne(sourceConnectors.status, "disabled"),
+      ),
+    )
+    .returning({ id: sourceConnectors.id });
+
+  return rows.map((row) => row.id);
+}
+
+function preserveConnectorSourceCitationsSql(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+}) {
+  return sql`
+    update ${citations} as citation
+    set
+      external_uri = coalesce(
+        citation.external_uri,
+        'sourceweft://deleted-connector/' || ${input.connectorId} || '/citation/' || citation.id
+      ),
+      metadata_json = citation.metadata_json || jsonb_strip_nulls(jsonb_build_object(
+        'sourceTitle', coalesce(
+          citation.metadata_json->>'sourceTitle',
+          (
+            select ${sources.title}
+            from ${sources}
+            where ${sources.id} = citation.source_id
+              and ${sources.teamId} = ${input.teamId}
+              and ${sources.workspaceId} = ${input.workspaceId}
+            limit 1
+          ),
+          (
+            select source_for_chunk.title
+            from ${chunks} as chunk_for_citation
+            inner join ${sources} as source_for_chunk
+              on source_for_chunk.id = chunk_for_citation.source_id
+            where chunk_for_citation.id = citation.chunk_id
+              and chunk_for_citation.team_id = ${input.teamId}
+              and chunk_for_citation.workspace_id = ${input.workspaceId}
+            limit 1
+          )
+        ),
+        'chunkNo', (
+          select ${chunks.chunkNo}
+          from ${chunks}
+          where ${chunks.id} = citation.chunk_id
+          limit 1
+        ),
+        'excerpt', coalesce(
+          citation.metadata_json->>'excerpt',
+          citation.quote_text,
+          left((
+            select ${chunks.content}
+            from ${chunks}
+            where ${chunks.id} = citation.chunk_id
+            limit 1
+          ), 320)
+        )
+      ))
+    where citation.team_id = ${input.teamId}
+      and citation.workspace_id = ${input.workspaceId}
+      and (
+        citation.source_id in (
+          select ${sources.id}
+          from ${sources}
+          where ${sources.teamId} = ${input.teamId}
+            and ${sources.workspaceId} = ${input.workspaceId}
+            and ${sources.connectorId} = ${input.connectorId}
+            and ${sources.ingestKind} = 'connector'
+        )
+        or citation.chunk_id in (
+          select ${chunks.id}
+          from ${chunks}
+          inner join ${sources}
+            on ${sources.id} = ${chunks.sourceId}
+          where ${chunks.teamId} = ${input.teamId}
+            and ${chunks.workspaceId} = ${input.workspaceId}
+            and ${sources.teamId} = ${input.teamId}
+            and ${sources.workspaceId} = ${input.workspaceId}
+            and ${sources.connectorId} = ${input.connectorId}
+            and ${sources.ingestKind} = 'connector'
+        )
+      )
+  `;
+}
+
+export async function purgeConnectorIndexedContent(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+}) {
+  return db.transaction(async (tx) => {
+    await tx.execute(preserveConnectorSourceCitationsSql(input));
+
+    const [documentCountRow] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(documents)
+      .innerJoin(sources, eq(documents.sourceId, sources.id))
+      .where(
+        and(
+          eq(documents.teamId, input.teamId),
+          eq(documents.workspaceId, input.workspaceId),
+          eq(sources.teamId, input.teamId),
+          eq(sources.workspaceId, input.workspaceId),
+          eq(sources.connectorId, input.connectorId),
+          eq(sources.ingestKind, "connector"),
+        ),
+      );
+
+    const deletedSources = await tx
+      .delete(sources)
+      .where(
+        and(
+          eq(sources.teamId, input.teamId),
+          eq(sources.workspaceId, input.workspaceId),
+          eq(sources.connectorId, input.connectorId),
+          eq(sources.ingestKind, "connector"),
+        ),
+      )
+      .returning({ id: sources.id });
+
+    return {
+      sourcesDeleted: deletedSources.length,
+      documentsDeleted: documentCountRow?.count ?? 0,
+    };
+  });
+}
+
 export async function listDueScheduledConnectorRecords(input: {
   now: Date;
   limit: number;
@@ -468,6 +683,76 @@ export async function createSyncRunRecord(input: {
   }
 
   return mapSyncRun(row);
+}
+
+export async function createSyncRunRecordIfNoActiveRun(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+  triggerType: ConnectorSyncRunTriggerType;
+  status: ConnectorSyncRunStatus;
+  createdBy?: string | null;
+  metadataJson?: Record<string, unknown>;
+}) {
+  return db.transaction(async (tx) => {
+    const [connector] = await tx
+      .select({ id: sourceConnectors.id })
+      .from(sourceConnectors)
+      .where(
+        and(
+          eq(sourceConnectors.id, input.connectorId),
+          eq(sourceConnectors.teamId, input.teamId),
+          eq(sourceConnectors.workspaceId, input.workspaceId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+
+    if (!connector) {
+      return { run: null, existing: false };
+    }
+
+    const [activeRun] = await tx
+      .select()
+      .from(connectorSyncRuns)
+      .where(
+        and(
+          eq(connectorSyncRuns.teamId, input.teamId),
+          eq(connectorSyncRuns.workspaceId, input.workspaceId),
+          eq(connectorSyncRuns.connectorId, input.connectorId),
+          inArray(connectorSyncRuns.status, ["queued", "running"]),
+        ),
+      )
+      .orderBy(desc(connectorSyncRuns.createdAt))
+      .limit(1);
+
+    if (activeRun) {
+      return { run: mapSyncRun(activeRun), existing: true };
+    }
+
+    const now = new Date();
+    const [created] = await tx
+      .insert(connectorSyncRuns)
+      .values({
+        id: randomUUID(),
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        connectorId: input.connectorId,
+        triggerType: input.triggerType,
+        status: input.status,
+        startedAt: input.status === "running" ? now : null,
+        heartbeatAt: input.status === "running" ? now : null,
+        createdBy: input.createdBy ?? null,
+        metadataJson: input.metadataJson ?? {},
+      })
+      .returning();
+
+    if (!created) {
+      throw new Error("Failed to create connector sync run");
+    }
+
+    return { run: mapSyncRun(created), existing: false };
+  });
 }
 
 export async function findSyncRunRecord(input: {
@@ -709,6 +994,358 @@ export async function listSyncRunRecords(input: {
     .limit(50);
 
   return rows.map(mapSyncRun);
+}
+
+export async function listWorkspaceSyncRunRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  status?: "active";
+}) {
+  const conditions = [
+    eq(connectorSyncRuns.teamId, input.teamId),
+    eq(connectorSyncRuns.workspaceId, input.workspaceId),
+  ];
+  if (input.status === "active") {
+    conditions.push(inArray(connectorSyncRuns.status, ["queued", "running"]));
+  }
+
+  const rows = await db
+    .select()
+    .from(connectorSyncRuns)
+    .where(and(...conditions))
+    .orderBy(desc(connectorSyncRuns.createdAt))
+    .limit(100);
+
+  return rows.map(mapSyncRun);
+}
+
+function parseActivityCursor(value?: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.createdAt === "string" &&
+      typeof parsed.kind === "string" &&
+      typeof parsed.id === "string"
+    ) {
+      const createdAt = new Date(parsed.createdAt);
+      if (!Number.isNaN(createdAt.getTime())) {
+        return {
+          createdAt: parsed.createdAt,
+          createdAtMs: createdAt.getTime(),
+          kind: parsed.kind,
+          id: parsed.id,
+        };
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function makeActivityCursor(item: ConnectorActivityItemRecord) {
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: item.createdAt,
+      kind: item.kind,
+      id: item.id,
+    }),
+    "utf8",
+  ).toString("base64url");
+}
+
+function dateMs(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+function durationMs(startedAt: string | null, finishedAt: string | null) {
+  const start = dateMs(startedAt);
+  const finish = dateMs(finishedAt);
+  if (start === null || finish === null || finish < start) {
+    return null;
+  }
+  return finish - start;
+}
+
+function redactedJson(value: Record<string, unknown>) {
+  return redactConnectorSecrets(value) as Record<string, unknown>;
+}
+
+function isActivityBeforeCursor(
+  item: ConnectorActivityItemRecord,
+  cursor: ReturnType<typeof parseActivityCursor>,
+) {
+  if (!cursor) return true;
+  const itemMs = dateMs(item.createdAt);
+  if (itemMs === null) return false;
+  if (itemMs < cursor.createdAtMs) return true;
+  if (itemMs > cursor.createdAtMs) return false;
+  const itemKey = `${item.kind}:${item.id}`;
+  const cursorKey = `${cursor.kind}:${cursor.id}`;
+  return itemKey < cursorKey;
+}
+
+function toSyncActivityItem(run: ReturnType<typeof mapSyncRun>): ConnectorActivityItemRecord {
+  const summaryJson = {
+    triggerType: run.triggerType,
+    eventType: run.metadataJson.eventType ?? null,
+    discoveredCount: run.discoveredCount,
+    indexedCount: run.indexedCount,
+    failedCount: run.failedCount,
+    heartbeatAt: run.heartbeatAt,
+    createdBy: run.createdBy,
+    targetExternalIds: run.metadataJson.targetExternalIds ?? null,
+    targetExternalIdCount: Array.isArray(run.metadataJson.targetExternalIds)
+      ? run.metadataJson.targetExternalIds.length
+      : null,
+    targeted: run.metadataJson.targeted ?? null,
+    fullResync: run.metadataJson.fullResync ?? null,
+    reason: run.metadataJson.reason ?? run.metadataJson.readinessReason ?? null,
+    providerEventId: run.metadataJson.providerEventId ?? null,
+  };
+  return {
+    id: run.id,
+    kind: "sync",
+    status: run.status,
+    title: `${run.triggerType} sync ${run.status}`,
+    summaryJson: redactedJson(summaryJson),
+    resultJson: redactedJson(run.metadataJson),
+    errorCode: run.errorCode,
+    errorMessage: run.errorMessage,
+    createdAt: run.createdAt,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    durationMs: durationMs(run.startedAt, run.finishedAt),
+    linkedRunId: run.id,
+    linkedActionId:
+      typeof run.metadataJson.actionRunId === "string"
+        ? run.metadataJson.actionRunId
+        : null,
+    linkedWebhookEventId:
+      typeof run.metadataJson.webhookEventId === "string"
+        ? run.metadataJson.webhookEventId
+        : typeof run.metadataJson.eventId === "string"
+          ? run.metadataJson.eventId
+          : null,
+  };
+}
+
+function toActionActivityItem(
+  action: ReturnType<typeof mapActionRun>,
+): ConnectorActivityItemRecord {
+  const postActionSyncRunId =
+    typeof action.resultJson.postActionSyncRunId === "string"
+      ? action.resultJson.postActionSyncRunId
+      : null;
+  return {
+    id: action.id,
+    kind: "action",
+    status: action.status,
+    title: `${action.actionType} ${action.status}`,
+    summaryJson: redactedJson({
+      actionType: action.actionType,
+      riskLevel: action.riskLevel,
+      requestPreview: action.requestPreview,
+      externalId: action.externalId,
+      approvedBy: action.approvedBy,
+      executedBy: action.executedBy,
+    }),
+    resultJson: redactedJson(action.resultJson),
+    errorCode: action.errorCode,
+    errorMessage: action.errorMessage,
+    createdAt: action.createdAt,
+    startedAt: action.status === "running" ? action.updatedAt : null,
+    finishedAt: ["succeeded", "failed", "canceled", "rejected"].includes(
+      action.status,
+    )
+      ? action.updatedAt
+      : null,
+    durationMs: null,
+    linkedRunId: postActionSyncRunId,
+    linkedActionId: action.id,
+    linkedWebhookEventId: null,
+  };
+}
+
+function toWebhookActivityItem(
+  event: ReturnType<typeof mapWebhookEvent>,
+): ConnectorActivityItemRecord {
+  return {
+    id: event.id,
+    kind: "webhook",
+    status: event.status,
+    title: `${event.eventType} ${event.status}`,
+    summaryJson: redactedJson({
+      eventType: event.eventType,
+      objectType: event.objectType,
+      objectId: event.objectId,
+      attempts: event.attempts,
+      providerEventId: event.providerEventId,
+      syncRunId: event.syncRunId,
+    }),
+    resultJson: redactedJson(event.payloadMetadataJson),
+    errorCode: event.errorCode,
+    errorMessage: event.errorMessage,
+    createdAt: event.receivedAt,
+    startedAt: event.receivedAt,
+    finishedAt: event.processedAt,
+    durationMs: durationMs(event.receivedAt, event.processedAt),
+    linkedRunId: event.syncRunId,
+    linkedActionId: null,
+    linkedWebhookEventId: event.id,
+  };
+}
+
+function connectorActivityQueryFailureItem(input: {
+  kind: "sync" | "action" | "webhook";
+  error: unknown;
+}): ConnectorActivityItemRecord {
+  const rawMessage = input.error instanceof Error ? input.error.message : "";
+  const missingTable =
+    /relation .*connector_webhook_events.* does not exist/i.test(rawMessage) ||
+    /connector_webhook_events/i.test(rawMessage);
+  const message =
+    input.kind === "webhook" && missingTable
+      ? "Webhook activity storage is not ready. Run backend migrations through 0025_connector_webhook_events."
+      : `Failed to load ${input.kind} activity records. Check backend logs for details.`;
+  const errorCode =
+    input.kind === "webhook" && missingTable
+      ? "CONNECTOR_WEBHOOK_MIGRATION_REQUIRED"
+      : "CONNECTOR_ACTIVITY_QUERY_FAILED";
+  const now = new Date().toISOString();
+  return {
+    id: `${input.kind}:activity-query-failed`,
+    kind: input.kind,
+    status: "failed",
+    title: `${input.kind} activity unavailable`,
+    summaryJson: {
+      source: input.kind,
+      reason:
+        input.kind === "webhook" && missingTable
+          ? "migration_required"
+          : "query_failed",
+    },
+    resultJson: {},
+    errorCode,
+    errorMessage: message,
+    createdAt: now,
+    startedAt: null,
+    finishedAt: now,
+    durationMs: null,
+    linkedRunId: null,
+    linkedActionId: null,
+    linkedWebhookEventId: null,
+  };
+}
+
+export async function listConnectorActivityRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+  kind?: "all" | "sync" | "action" | "webhook";
+  limit: number;
+  cursor?: string | null;
+}) {
+  const effectiveKind = input.kind ?? "all";
+  const fetchLimit = Math.min(Math.max(input.limit, 1), 100) + 1;
+  const items: ConnectorActivityItemRecord[] = [];
+
+  if (effectiveKind === "all" || effectiveKind === "sync") {
+    try {
+      const rows = await db
+        .select()
+        .from(connectorSyncRuns)
+        .where(
+          and(
+            eq(connectorSyncRuns.teamId, input.teamId),
+            eq(connectorSyncRuns.workspaceId, input.workspaceId),
+            eq(connectorSyncRuns.connectorId, input.connectorId),
+          ),
+        )
+        .orderBy(desc(connectorSyncRuns.createdAt))
+        .limit(fetchLimit);
+      items.push(...rows.map((row) => toSyncActivityItem(mapSyncRun(row))));
+    } catch (error) {
+      logger.warn("Failed to list connector sync activity", {
+        error,
+        connectorId: input.connectorId,
+        workspaceId: input.workspaceId,
+      });
+      items.push(connectorActivityQueryFailureItem({ kind: "sync", error }));
+    }
+  }
+
+  if (effectiveKind === "all" || effectiveKind === "action") {
+    try {
+      const rows = await db
+        .select()
+        .from(connectorActionRuns)
+        .where(
+          and(
+            eq(connectorActionRuns.teamId, input.teamId),
+            eq(connectorActionRuns.workspaceId, input.workspaceId),
+            eq(connectorActionRuns.connectorId, input.connectorId),
+          ),
+        )
+        .orderBy(desc(connectorActionRuns.createdAt))
+        .limit(fetchLimit);
+      items.push(...rows.map((row) => toActionActivityItem(mapActionRun(row))));
+    } catch (error) {
+      logger.warn("Failed to list connector action activity", {
+        error,
+        connectorId: input.connectorId,
+        workspaceId: input.workspaceId,
+      });
+      items.push(connectorActivityQueryFailureItem({ kind: "action", error }));
+    }
+  }
+
+  if (effectiveKind === "all" || effectiveKind === "webhook") {
+    try {
+      const rows = await db
+        .select()
+        .from(connectorWebhookEvents)
+        .where(
+          and(
+            eq(connectorWebhookEvents.teamId, input.teamId),
+            eq(connectorWebhookEvents.workspaceId, input.workspaceId),
+            eq(connectorWebhookEvents.connectorId, input.connectorId),
+          ),
+        )
+        .orderBy(desc(connectorWebhookEvents.receivedAt))
+        .limit(fetchLimit);
+      items.push(
+        ...rows.map((row) => toWebhookActivityItem(mapWebhookEvent(row))),
+      );
+    } catch (error) {
+      logger.warn("Failed to list connector webhook activity", {
+        error,
+        connectorId: input.connectorId,
+        workspaceId: input.workspaceId,
+      });
+      items.push(connectorActivityQueryFailureItem({ kind: "webhook", error }));
+    }
+  }
+
+  const cursor = parseActivityCursor(input.cursor);
+  const filtered = items
+    .filter((item) => isActivityBeforeCursor(item, cursor))
+    .sort((a, b) => {
+      const timeDelta = (dateMs(b.createdAt) ?? 0) - (dateMs(a.createdAt) ?? 0);
+      if (timeDelta !== 0) return timeDelta;
+      return `${b.kind}:${b.id}`.localeCompare(`${a.kind}:${a.id}`);
+    });
+  const page = filtered.slice(0, input.limit);
+  const hasMore = filtered.length > input.limit;
+  return {
+    items: page,
+    nextCursor: hasMore && page.length ? makeActivityCursor(page[page.length - 1]!) : null,
+  };
 }
 
 export async function updateSyncRunRecord(input: {

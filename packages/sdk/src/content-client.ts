@@ -1,6 +1,8 @@
 import type {
   AddByokModelRequest,
   AddByokModelResponse,
+  BulkDeleteSourcesRequest,
+  BulkDeleteSourcesResponse,
   CitationDetailResponse,
   CreateByokCredentialRequest,
   CreateByokCredentialResponse,
@@ -104,6 +106,9 @@ export class ContentClient {
     input: ListSourcesRequest = {},
   ) {
     const params = new URLSearchParams();
+    if (input.view) {
+      params.set("view", input.view);
+    }
     if (typeof input.includeContent === "boolean") {
       params.set("includeContent", String(input.includeContent));
     }
@@ -115,6 +120,15 @@ export class ContentClient {
     }
     if (input.parentSourceId !== undefined) {
       params.set("parentSourceId", input.parentSourceId ?? "__root");
+    }
+    if (input.connectorId) {
+      params.set("connectorId", input.connectorId);
+    }
+    if (input.syncRunId) {
+      params.set("syncRunId", input.syncRunId);
+    }
+    if (input.updatedAfter) {
+      params.set("updatedAfter", input.updatedAfter);
     }
     const suffix = params.size > 0 ? `?${params.toString()}` : "";
 
@@ -221,6 +235,13 @@ export class ContentClient {
   deleteSource(workspaceId: string, sourceId: string) {
     return this.http.delete<DeleteSourceResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}`,
+    );
+  }
+
+  bulkDeleteSources(workspaceId: string, input: BulkDeleteSourcesRequest) {
+    return this.http.post<BulkDeleteSourcesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/bulk-delete`,
+      input,
     );
   }
 

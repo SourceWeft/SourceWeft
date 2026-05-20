@@ -139,26 +139,40 @@ export async function createSourceRecord(input: {
 }
 
 export async function listSourceRecords(input: {
+  view?: "tree" | "page";
   includeContent?: boolean;
   limit?: number;
   cursor?: string;
   parentSourceId?: string | null;
+  connectorId?: string;
+  syncRunId?: string;
+  updatedAfter?: Date;
   teamId: string;
   workspaceId: string;
 }) {
-  const cursor = decodeSourceMentionCursor(input.cursor);
+  const treeView = input.view === "tree";
+  const cursor = treeView ? null : decodeSourceMentionCursor(input.cursor);
   const conditions = [
     eq(sources.teamId, input.teamId),
     eq(sources.workspaceId, input.workspaceId),
     ne(sources.status, "archived"),
   ];
 
-  if (input.parentSourceId !== undefined) {
+  if (!treeView && input.parentSourceId !== undefined) {
     conditions.push(
       input.parentSourceId === null
         ? sql`${sources.parentSourceId} is null` as never
         : eq(sources.parentSourceId, input.parentSourceId),
     );
+  }
+  if (input.connectorId) {
+    conditions.push(eq(sources.connectorId, input.connectorId));
+  }
+  if (input.syncRunId) {
+    conditions.push(eq(sources.syncRunId, input.syncRunId));
+  }
+  if (input.updatedAfter) {
+    conditions.push(sql`${sources.updatedAt} > ${input.updatedAfter}` as never);
   }
 
   if (cursor) {
@@ -168,10 +182,10 @@ export async function listSourceRecords(input: {
   }
 
   const where = and(...conditions);
-  const queryLimit = input.limit ? input.limit + 1 : undefined;
+  const queryLimit = !treeView && input.limit ? input.limit + 1 : undefined;
 
   const rows =
-    input.includeContent === false
+    treeView || input.includeContent === false
       ? queryLimit
         ? await db
             .select(sourceSummaryColumns)
@@ -197,8 +211,8 @@ export async function listSourceRecords(input: {
             .where(where)
             .orderBy(desc(sources.updatedAt), desc(sources.id));
 
-  const pageRows = input.limit ? rows.slice(0, input.limit) : rows;
-  const nextRow = input.limit ? rows[input.limit] ?? null : null;
+  const pageRows = !treeView && input.limit ? rows.slice(0, input.limit) : rows;
+  const nextRow = !treeView && input.limit ? rows[input.limit] ?? null : null;
 
   return {
     items: pageRows.map(mapSource),

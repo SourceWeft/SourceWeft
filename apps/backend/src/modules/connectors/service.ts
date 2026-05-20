@@ -1,16 +1,26 @@
 import { ConnectorError } from "./errors";
-import { validateObjectWithJsonSchema } from "./config-validation";
+import { config } from "../../shared/config";
+import { decryptSecret } from "../../shared/secrets";
+import {
+  normalizeConnectorConfigJson,
+  validateObjectWithJsonSchema,
+} from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   createSourceConnectorRecord,
+  detachSourceConnectorOAuthAccount,
+  disableAndDetachSourceConnectorsByOAuthAccount,
   findOAuthAccountRecord,
   findSourceConnectorRecord,
   listOAuthAccountRecords,
   listSourceConnectorRecords,
+  listWorkspaceSourceConnectorRecordsByOAuthAccount,
+  purgeConnectorIndexedContent,
+  revokeOAuthAccountRecord,
   updateSourceConnectorRecord,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
-import type { ConnectorStatus } from "./types";
+import type { ConnectorOAuthAccountSecretRecord, ConnectorStatus } from "./types";
 
 function resolveNextScheduledAt(input: {
   enabled: boolean;
@@ -63,7 +73,10 @@ export class ConnectorService {
       permission: "connector.manage",
     });
     const manifest = this.registry.getManifest(input.connectorType);
-    const configJson = input.configJson ?? {};
+    const configJson = normalizeConnectorConfigJson({
+      connectorType: input.connectorType,
+      value: input.configJson ?? {},
+    }).value;
     validateObjectWithJsonSchema({
       schema: manifest.configSchema,
       value: configJson,
@@ -88,6 +101,13 @@ export class ConnectorService {
     const frequency =
       input.indexingFrequencyMinutes ?? manifest.sync.defaultFrequencyMinutes;
     const periodicIndexingEnabled = input.periodicIndexingEnabled ?? false;
+    if (periodicIndexingEnabled && manifest.sync.resources.length === 0) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_PERIODIC_SYNC_UNSUPPORTED",
+        "This connector does not support periodic sync",
+      );
+    }
     const connector = await createSourceConnectorRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -145,7 +165,11 @@ export class ConnectorService {
     }
 
     const manifest = this.registry.getManifest(current.connectorType);
-    const nextConfig = input.configJson ?? current.configJson;
+    const normalizedConfig = normalizeConnectorConfigJson({
+      connectorType: current.connectorType,
+      value: input.configJson ?? current.configJson,
+    });
+    const nextConfig = normalizedConfig.value;
     validateObjectWithJsonSchema({
       schema: manifest.configSchema,
       value: nextConfig,
@@ -154,6 +178,13 @@ export class ConnectorService {
 
     const periodicIndexingEnabled =
       input.periodicIndexingEnabled ?? current.periodicIndexingEnabled;
+    if (periodicIndexingEnabled && manifest.sync.resources.length === 0) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_PERIODIC_SYNC_UNSUPPORTED",
+        "This connector does not support periodic sync",
+      );
+    }
     const frequency =
       input.indexingFrequencyMinutes === undefined
         ? current.indexingFrequencyMinutes ?? manifest.sync.defaultFrequencyMinutes
@@ -163,7 +194,9 @@ export class ConnectorService {
       workspaceId: workspace.id,
       connectorId: input.connectorId,
       name: input.name,
-      configJson: input.configJson,
+      configJson: input.configJson === undefined && !normalizedConfig.changed
+        ? undefined
+        : nextConfig,
       status: input.status,
       periodicIndexingEnabled,
       indexingFrequencyMinutes: periodicIndexingEnabled ? frequency : null,
@@ -180,24 +213,174 @@ export class ConnectorService {
     return { connector };
   }
 
-  async deleteConnector(input: {
+  async removeConnector(input: {
     workspaceId: string;
     userId: string;
     connectorId: string;
+    purgeIndexedContent?: boolean;
   }) {
     const { workspace } = await requireConnectorWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
       permission: "connector.manage",
     });
+    const current = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: input.connectorId,
+    });
+    if (!current) {
+      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+    }
+
     const connector = await updateSourceConnectorRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       connectorId: input.connectorId,
+      name: `removed:${input.connectorId}`,
       status: "disabled",
       periodicIndexingEnabled: false,
+      indexingFrequencyMinutes: null,
       nextScheduledAt: null,
+      lastError: null,
     });
-    return { deleted: Boolean(connector) };
+    if (!connector) {
+      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+    }
+    if (current.oauthAccountId) {
+      await detachSourceConnectorOAuthAccount({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId: input.connectorId,
+      });
+    }
+    let purgeCounts = {
+      sourcesDeleted: 0,
+      documentsDeleted: 0,
+    };
+    if (input.purgeIndexedContent) {
+      purgeCounts = await purgeConnectorIndexedContent({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId: input.connectorId,
+      });
+    }
+    return {
+      deleted: true,
+      connectorId: input.connectorId,
+      indexedContentDeleted: Boolean(input.purgeIndexedContent),
+      ...(input.purgeIndexedContent
+        ? {
+            sourcesDeleted: purgeCounts.sourcesDeleted,
+            documentsDeleted: purgeCounts.documentsDeleted,
+          }
+        : {}),
+    };
+  }
+
+  async deleteConnector(input: {
+    workspaceId: string;
+    userId: string;
+    connectorId: string;
+    purgeIndexedContent?: boolean;
+  }) {
+    return this.removeConnector(input);
+  }
+
+  async deleteOAuthAccount(input: {
+    workspaceId: string;
+    userId: string;
+    accountId: string;
+    force?: boolean;
+  }) {
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "connector.manage",
+    });
+    const account = await findOAuthAccountRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      accountId: input.accountId,
+    });
+    if (!account) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND",
+        "Connector OAuth account not found",
+      );
+    }
+
+    const referencingConnectors =
+      await listWorkspaceSourceConnectorRecordsByOAuthAccount({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        oauthAccountId: input.accountId,
+      });
+    if (referencingConnectors.length > 0 && !input.force) {
+      throw new ConnectorError(
+        409,
+        "CONNECTOR_OAUTH_ACCOUNT_IN_USE",
+        "Connector OAuth account is still used by active connectors",
+        { connectorIds: referencingConnectors.map((connector) => connector.id) },
+      );
+    }
+
+    const detachedConnectorIds = input.force
+      ? await disableAndDetachSourceConnectorsByOAuthAccount({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          oauthAccountId: input.accountId,
+        })
+      : [];
+    const providerRevokeWarning = await this.revokeProviderAccount(account);
+    const revoked = await revokeOAuthAccountRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      accountId: input.accountId,
+      lastError: providerRevokeWarning,
+    });
+    if (!revoked) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND",
+        "Connector OAuth account not found",
+      );
+    }
+
+    return {
+      deleted: true,
+      accountId: input.accountId,
+      accountStatus: revoked.status,
+      detachedConnectorIds,
+      providerRevokeWarning,
+    };
+  }
+
+  private async revokeProviderAccount(
+    account: ConnectorOAuthAccountSecretRecord,
+  ) {
+    try {
+      const adapter = this.registry.getAdapter(account.connectorType);
+      if (!adapter.revokeOAuthAccount) {
+        return null;
+      }
+      await adapter.revokeOAuthAccount({
+        accessToken: decryptSecret(
+          account.accessTokenEncrypted,
+          config.modelGatewayEncryptionSecret,
+        ),
+        refreshToken: account.refreshTokenEncrypted
+          ? decryptSecret(
+              account.refreshTokenEncrypted,
+              config.modelGatewayEncryptionSecret,
+            )
+          : null,
+        account,
+      });
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
   }
 }

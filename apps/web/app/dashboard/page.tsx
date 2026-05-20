@@ -20,7 +20,6 @@ import {
   ScrollBar,
 } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { authClient } from "../../lib/auth-client";
 import { contentClient, workspaceClient } from "../../lib/sdk";
 import { ensureDashboardWorkspace } from "../../lib/dashboard-workspace-bootstrap";
 import {
@@ -31,7 +30,6 @@ import { useDashboardChatState } from "./_components/dashboard-chat-state";
 import { DashboardTeamSwitcher } from "./_components/dashboard-team-switcher";
 import {
   DashboardHomeOverviewPanelSkeleton,
-  DashboardHomeRouteSkeleton,
   DashboardHomeWorkspaceRailSkeleton,
 } from "../_components/route-loading-skeleton";
 
@@ -292,7 +290,7 @@ function OverviewPanel({
   recentActivity: ActivityItem[];
 }) {
   return (
-    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card">
+    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card lg:min-h-[430px]">
       <div className="grid lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
         <div className="border-b border-border/70 px-7 py-7 lg:border-b-0 lg:border-r lg:px-8 lg:py-8">
           <div className="flex h-full flex-col justify-center">
@@ -474,19 +472,8 @@ function WorkspaceCard({
 
 export default function DashboardPage() {
   const router = useRouter();
-  const authState = authClient.useSession();
   const dashboardState = useDashboardChatState();
-  const sessionState = authState.data as
-    | {
-        user?: { email?: string; name?: string };
-        session?: { activeOrganizationId?: string | null };
-      }
-    | null
-    | undefined;
-
-  const hasSession = Boolean(sessionState);
-  const sessionActiveOrganizationId =
-    sessionState?.session?.activeOrganizationId || null;
+  const resolvedOrganizationId = dashboardState.organizationId;
 
   const [workspaces, setWorkspaces] = useState<WorkspaceWithPreview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -498,7 +485,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function loadWorkspaces() {
-      if (!sessionActiveOrganizationId) {
+      if (!resolvedOrganizationId) {
+        if (dashboardState.isWorkspaceHydrating) {
+          setLoading(true);
+          return;
+        }
+
         setWorkspaces([]);
         setActiveWorkspaceId(null);
         setLoading(false);
@@ -509,13 +501,13 @@ export default function DashboardPage() {
 
       try {
         const workspaceResponse = await ensureDashboardWorkspace(
-          sessionActiveOrganizationId,
+          resolvedOrganizationId,
         );
 
         const withPreviews = await Promise.all(
           workspaceResponse.items.map(async (workspace: Workspace) => {
             const [sourceResult, threadResult] = await Promise.allSettled([
-              contentClient.listSources(workspace.id),
+              contentClient.listSources(workspace.id, { view: "tree" }),
               contentClient.listThreads(workspace.id, { limit: 5 }),
             ]);
             const sourceResponse =
@@ -568,7 +560,7 @@ export default function DashboardPage() {
 
         setWorkspaces(withPreviews);
         const storedWorkspaceId = getStoredDashboardWorkspaceId(
-          sessionActiveOrganizationId,
+          resolvedOrganizationId,
         );
         const resolvedWorkspace =
           withPreviews.find(
@@ -588,24 +580,23 @@ export default function DashboardPage() {
       }
     }
 
-    if (hasSession) {
-      void loadWorkspaces();
-    }
-  }, [hasSession, sessionActiveOrganizationId]);
+    void loadWorkspaces();
+  }, [dashboardState.isWorkspaceHydrating, resolvedOrganizationId]);
 
-  const canCreateWorkspace = Boolean(sessionActiveOrganizationId);
+  const canCreateWorkspace = Boolean(resolvedOrganizationId);
   const workspaceCollection = workspaces;
+  const hasSearchQuery = Boolean(search.trim());
   const recentWorkspaces = useMemo(
     () => sortWorkspacesByRecent(workspaceCollection),
     [workspaceCollection],
   );
 
   const filteredWorkspaces = useMemo(() => {
-    if (!search.trim()) {
+    const query = search.trim().toLowerCase();
+
+    if (!query) {
       return recentWorkspaces;
     }
-
-    const query = search.toLowerCase();
 
     return recentWorkspaces.filter(
       (workspace) =>
@@ -670,7 +661,7 @@ export default function DashboardPage() {
   }
 
   async function handleCreateWorkspace() {
-    if (!sessionActiveOrganizationId) {
+    if (!resolvedOrganizationId) {
       toast.error("No active team selected.");
       return;
     }
@@ -680,12 +671,12 @@ export default function DashboardPage() {
     try {
       const name = `Workspace ${workspaces.length + 1}`;
       const workspace = await workspaceClient.createWorkspace(
-        sessionActiveOrganizationId,
+        resolvedOrganizationId,
         { name },
       );
 
       toast.success(`Created "${workspace.name}"`);
-      setStoredDashboardWorkspaceId(sessionActiveOrganizationId, workspace.id);
+      setStoredDashboardWorkspaceId(resolvedOrganizationId, workspace.id);
       setActiveWorkspaceId(workspace.id);
       await dashboardState.switchWorkspace(workspace.id, workspace.name);
       router.push("/dashboard/chat");
@@ -699,20 +690,12 @@ export default function DashboardPage() {
   async function handleOpenWorkspace(workspaceId: string) {
     const workspace = workspaces.find((item) => item.id === workspaceId);
 
-    setStoredDashboardWorkspaceId(sessionActiveOrganizationId, workspaceId);
+    setStoredDashboardWorkspaceId(resolvedOrganizationId, workspaceId);
     setActiveWorkspaceId(workspaceId);
 
     await dashboardState.switchWorkspace(workspaceId, workspace?.name);
 
     router.push("/dashboard/chat");
-  }
-
-  if (authState.isPending) {
-    return <DashboardHomeRouteSkeleton />;
-  }
-
-  if (!sessionState) {
-    return <DashboardHomeRouteSkeleton />;
   }
 
   return (
@@ -765,9 +748,14 @@ export default function DashboardPage() {
           </section>
 
           <section className="flex flex-col gap-4">
-            <div className={cn("items-center justify-between gap-3", search ? "flex" : "hidden md:flex")}>
+            <div
+              className={cn(
+                "items-center justify-between gap-3",
+                hasSearchQuery ? "flex" : "hidden md:flex",
+              )}
+            >
               <SectionTitle
-                title={search ? "Search results" : "Recent workspaces"}
+                title={hasSearchQuery ? "Search results" : "Recent workspaces"}
               />
 
               <div className="hidden items-center gap-2 md:flex">
@@ -797,23 +785,44 @@ export default function DashboardPage() {
             ) : filteredWorkspaces.length === 0 ? (
               <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 rounded-[28px] border border-dashed border-border/80 bg-card px-6 py-12 text-center">
                 <div className="rounded-full border border-border bg-background p-4 text-muted-foreground">
-                  <Search className="h-6 w-6" />
+                  {hasSearchQuery ? (
+                    <Search className="h-6 w-6" />
+                  ) : (
+                    <Folder className="h-6 w-6" />
+                  )}
                 </div>
                 <div>
                   <p className="text-base font-medium text-foreground">
-                    No workspaces match your search
+                    {hasSearchQuery
+                      ? "No workspaces match your search"
+                      : "No workspaces yet"}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Try a different term, or clear the search to browse recent
-                    workspaces again.
+                    {hasSearchQuery
+                      ? "Try a different term, or clear the search to browse recent workspaces again."
+                      : "Create a workspace to start organizing sources and chats."}
                   </p>
                 </div>
+                {!hasSearchQuery ? (
+                  <Button
+                    className="rounded-xl"
+                    disabled={!canCreateWorkspace || createLoading}
+                    onClick={() => void handleCreateWorkspace()}
+                  >
+                    {createLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    Create workspace
+                  </Button>
+                ) : null}
               </div>
             ) : (
               <div onWheel={handleRecentWheel} ref={recentScrollRef}>
                 <ScrollArea className="w-full">
                   <div className="flex min-w-0 flex-wrap items-stretch gap-3 pb-3 md:flex-nowrap md:pr-1">
-                    {!search ? (
+                    {!hasSearchQuery ? (
                       <div className="hidden w-[292px] shrink-0 md:block">
                         <CreateWorkspaceCard
                           disabled={!canCreateWorkspace || createLoading}
@@ -823,7 +832,10 @@ export default function DashboardPage() {
                     ) : null}
 
                     {filteredWorkspaces.map((workspace) => (
-                      <div className="max-md:w-full md:w-[292px] md:shrink-0" key={workspace.id}>
+                      <div
+                        className="max-md:w-full md:w-[292px] md:shrink-0"
+                        key={workspace.id}
+                      >
                         <WorkspaceCard
                           onOpen={(workspaceId) =>
                             void handleOpenWorkspace(workspaceId)

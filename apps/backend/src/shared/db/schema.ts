@@ -51,7 +51,13 @@ type ConnectorOAuthAccountStatus =
   | "revoked"
   | "disabled";
 type SyncRunTriggerType = "manual" | "scheduled" | "webhook" | "backfill";
-type SyncRunStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+type SyncRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "skipped";
 type ConnectorActionRiskLevel = "low" | "medium" | "high";
 type ConnectorActionRunStatus =
   | "proposed"
@@ -1675,7 +1681,7 @@ export const connectorSyncRuns = pgTable(
     ),
     check(
       "connector_sync_runs_status_check",
-      sql`${table.status} in ('queued', 'running', 'succeeded', 'failed', 'canceled')`,
+      sql`${table.status} in ('queued', 'running', 'succeeded', 'failed', 'canceled', 'skipped')`,
     ),
     check(
       "connector_sync_runs_discovered_count_check",

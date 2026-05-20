@@ -1,6 +1,6 @@
 "use client";
 
-import { sendGAEvent } from "@next/third-parties/google";
+import { sendGTMEvent } from "@next/third-parties/google";
 
 type AnalyticsPrimitive = string | number | boolean | null | undefined;
 export type AnalyticsParams = Record<
@@ -9,5 +9,5 @@ export type AnalyticsParams = Record<
 >;
 
 export function trackEvent(name: string, params?: AnalyticsParams) {
-  sendGAEvent("event", name, params ?? {});
+  sendGTMEvent({ ...(params ?? {}), event: name });
 }

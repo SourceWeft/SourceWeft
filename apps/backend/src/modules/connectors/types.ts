@@ -25,7 +25,8 @@ export type ConnectorSyncRunStatus =
   | "running"
   | "succeeded"
   | "failed"
-  | "canceled";
+  | "canceled"
+  | "skipped";
 export type ConnectorWebhookEventStatus =
   | "received"
   | "queued"
@@ -77,6 +78,12 @@ export type OAuthCodeExchangeInput = {
 export type OAuthRefreshInput = {
   refreshToken: string;
   scopes: string[];
+};
+
+export type OAuthRevokeInput = {
+  accessToken: string;
+  refreshToken?: string | null;
+  account: ConnectorOAuthAccountSecretRecord;
 };
 
 export type OAuthTokenSet = {
@@ -136,6 +143,14 @@ export type ConnectorExtractedContent = {
   contentText: string;
   markdown?: string;
   parentExternalId?: string | null;
+  directoryPath?: ConnectorDirectoryNode[];
+};
+
+export type ConnectorDirectoryNode = {
+  externalId: string;
+  title: string;
+  externalUri?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type ConnectorDiscoverInput = {
@@ -143,9 +158,17 @@ export type ConnectorDiscoverInput = {
   workspaceId: string;
   connectorId: string;
   connectorType: ConnectorType;
+  connectorName?: string;
   config: Record<string, unknown>;
   accessToken: string;
   cursor?: Record<string, unknown> | null;
+};
+
+export type ConnectorSyncReadinessResult = {
+  ready: boolean;
+  reason?: string;
+  message?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type ConnectorExtractInput = ConnectorDiscoverInput & {
@@ -169,6 +192,26 @@ export type ConnectorActionResult = {
   result: Record<string, unknown>;
   shouldResync?: boolean;
   resyncExternalIds?: string[];
+};
+
+export type ConnectorActivityKind = "sync" | "action" | "webhook";
+
+export type ConnectorActivityItemRecord = {
+  id: string;
+  kind: ConnectorActivityKind;
+  status: string;
+  title: string;
+  summaryJson: Record<string, unknown>;
+  resultJson: Record<string, unknown>;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  linkedRunId: string | null;
+  linkedActionId: string | null;
+  linkedWebhookEventId: string | null;
 };
 
 export type ConnectorWebhookEventRecord = {
@@ -197,6 +240,10 @@ export interface ConnectorAdapter {
   getManifest(): ConnectorManifest;
   exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
   refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
+  revokeOAuthAccount?(input: OAuthRevokeInput): Promise<void>;
+  checkSyncReadiness?(
+    input: ConnectorDiscoverInput,
+  ): Promise<ConnectorSyncReadinessResult>;
   discover(input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem>;
   extract(input: ConnectorExtractInput): Promise<ConnectorExtractedContent>;
   executeAction(input: ConnectorActionInput): Promise<ConnectorActionResult>;

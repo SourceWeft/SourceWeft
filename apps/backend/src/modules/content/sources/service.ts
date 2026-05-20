@@ -227,6 +227,71 @@ export async function resolveSourceIdsByTitles(input: {
     .filter((sourceId): sourceId is string => typeof sourceId === "string");
 }
 
+export function resolveRecursiveSourceDeleteOrder(input: {
+  requestedSourceIds: string[];
+  selectedSources: Pick<SourceRecord, "id" | "parentSourceId" | "sourceType">[];
+  descendants: Pick<SourceRecord, "id" | "parentSourceId">[];
+}) {
+  const selectedById = new Map(
+    input.selectedSources.map((source) => [source.id, source]),
+  );
+  const effectiveSources = new Map<
+    string,
+    Pick<SourceRecord, "id" | "parentSourceId">
+  >();
+
+  for (const source of [...input.selectedSources, ...input.descendants]) {
+    if (!effectiveSources.has(source.id)) {
+      effectiveSources.set(source.id, source);
+    }
+  }
+
+  const childrenByParentId = new Map<string, string[]>();
+  for (const source of effectiveSources.values()) {
+    if (!source.parentSourceId || !effectiveSources.has(source.parentSourceId)) {
+      continue;
+    }
+    const children = childrenByParentId.get(source.parentSourceId) ?? [];
+    children.push(source.id);
+    childrenByParentId.set(source.parentSourceId, children);
+  }
+
+  const selectedDirectoryIds = input.requestedSourceIds.filter(
+    (sourceId) => selectedById.get(sourceId)?.sourceType === "directory",
+  );
+  const roots = [
+    ...selectedDirectoryIds,
+    ...input.requestedSourceIds,
+    ...Array.from(effectiveSources.keys()),
+  ];
+  const visited = new Set<string>();
+  const ordered: string[] = [];
+
+  function visit(sourceId: string) {
+    if (visited.has(sourceId) || !effectiveSources.has(sourceId)) {
+      return;
+    }
+    visited.add(sourceId);
+    for (const childId of childrenByParentId.get(sourceId) ?? []) {
+      visit(childId);
+    }
+    ordered.push(sourceId);
+  }
+
+  for (const sourceId of roots) {
+    visit(sourceId);
+  }
+
+  return ordered;
+}
+
+export function shouldRejectSingleSourceDelete(input: {
+  sourceType: SourceRecord["sourceType"];
+  hasChildren: boolean;
+}) {
+  return input.sourceType === "directory" && input.hasChildren;
+}
+
 export class ContentSourceService {
   private async attachSourceUrls(source: SourceRecord) {
     if (!source.storageKey) {
@@ -640,19 +705,27 @@ export class ContentSourceService {
   }
 
   async listSources(input: {
+    view?: "tree" | "page";
     includeContent?: boolean;
     limit?: number;
     cursor?: string;
     parentSourceId?: string | null;
+    connectorId?: string;
+    syncRunId?: string;
+    updatedAfter?: string;
     workspaceId: string;
     userId: string;
   }) {
     const workspace = await requireContentWorkspace(input);
     const result = await listSourceRecords({
-      includeContent: input.includeContent,
-      limit: input.limit,
-      cursor: input.cursor,
-      parentSourceId: input.parentSourceId,
+      view: input.view,
+      includeContent: input.view === "tree" ? false : input.includeContent,
+      limit: input.view === "tree" ? undefined : input.limit,
+      cursor: input.view === "tree" ? undefined : input.cursor,
+      parentSourceId: input.view === "tree" ? undefined : input.parentSourceId,
+      connectorId: input.connectorId,
+      syncRunId: input.syncRunId,
+      updatedAfter: input.updatedAfter ? new Date(input.updatedAfter) : undefined,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
     });
@@ -924,12 +997,18 @@ export class ContentSourceService {
     userId: string;
   }) {
     const { workspace, source } = await requireContentSource(input);
+    const hasChildren =
+      source.sourceType === "directory"
+        ? await hasSourceChildren({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            sourceId: source.id,
+          })
+        : false;
     if (
-      source.sourceType === "directory" &&
-      await hasSourceChildren({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        sourceId: source.id,
+      shouldRejectSingleSourceDelete({
+        sourceType: source.sourceType,
+        hasChildren,
       })
     ) {
       throw new ContentError(
@@ -951,6 +1030,69 @@ export class ContentSourceService {
     return {
       deleted: true as const,
       sourceId: source.id,
+    };
+  }
+
+  async bulkDeleteSources(input: {
+    workspaceId: string;
+    sourceIds: string[];
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const requestedSourceIds = Array.from(new Set(input.sourceIds));
+    const selectedSources = await listSourceRecordsByIds({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      sourceIds: requestedSourceIds,
+    });
+    const selectedById = new Map(
+      selectedSources.map((source) => [source.id, source]),
+    );
+    const missingSourceId = requestedSourceIds.find(
+      (sourceId) => !selectedById.has(sourceId),
+    );
+    if (missingSourceId) {
+      throw new ContentError(404, "SOURCE_NOT_FOUND", "Source not found");
+    }
+
+    const selectedDirectoryIds = requestedSourceIds.filter(
+      (sourceId) => selectedById.get(sourceId)?.sourceType === "directory",
+    );
+    const descendants =
+      selectedDirectoryIds.length > 0
+        ? await listSourceDescendants({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            sourceIds: selectedDirectoryIds,
+            maxDepth: SOURCE_TREE_MAX_DEPTH,
+          })
+        : [];
+    const deleteOrder = resolveRecursiveSourceDeleteOrder({
+      requestedSourceIds,
+      selectedSources,
+      descendants,
+    });
+    const deletedSourceIds: string[] = [];
+
+    for (const sourceId of deleteOrder) {
+      const deleted = await deleteSourceRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        sourceId,
+      });
+      if (!deleted) {
+        throw new ContentError(404, "SOURCE_NOT_FOUND", "Source not found");
+      }
+      deletedSourceIds.push(sourceId);
+    }
+
+    return {
+      deleted: true as const,
+      sourceIds: deletedSourceIds,
+      deletedCount: deletedSourceIds.length,
     };
   }
 }

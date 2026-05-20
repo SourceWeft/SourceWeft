@@ -69,6 +69,7 @@ export function useThreadSources({
   useEffect(() => {
     if (!selectionLoaded || !workspaceId) return;
     writeStoredSourceSelection(workspaceId, threadId, activeSourceIds);
+    writeStoredSourceSelection(workspaceId, "current", activeSourceIds);
   }, [
     activeSourceIds,
     selectionLoaded,
@@ -82,6 +83,7 @@ export function useThreadSources({
       setActiveSourceIds(sourceIds);
       if (workspaceId) {
         writeStoredSourceSelection(workspaceId, threadId, sourceIds);
+        writeStoredSourceSelection(workspaceId, "current", sourceIds);
       }
     },
     [threadId, workspaceId],

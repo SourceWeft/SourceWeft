@@ -90,6 +90,8 @@ export const sourceSchema = z.object({
     "connector",
     "directory",
   ]),
+  connectorId: z.string().nullable(),
+  syncRunId: z.string().nullable(),
   parentSourceId: z.string().nullable(),
   title: z.string(),
   contentText: z.string(),
@@ -172,6 +174,16 @@ export const listSourceStatusesResponseSchema = z.object({
   ),
 });
 
+export const bulkDeleteSourcesRequestSchema = z.object({
+  sourceIds: z.array(z.string().trim().min(1)).min(1).max(100),
+});
+
+export const bulkDeleteSourcesResponseSchema = z.object({
+  deleted: z.literal(true),
+  sourceIds: z.array(z.string()),
+  deletedCount: z.number().int().nonnegative(),
+});
+
 export const uploadSourceResponseSchema = z.object({
   source: sourceSchema,
   status: sourceStatusResponseSchema,
@@ -233,6 +245,7 @@ export const listSourcesResponseSchema = z.object({
 });
 
 export const listSourcesRequestSchema = z.object({
+  view: z.enum(["tree", "page"]).optional(),
   includeContent: z
     .union([
       z.boolean(),
@@ -242,6 +255,9 @@ export const listSourcesRequestSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   cursor: z.string().trim().min(1).max(1024).optional(),
   parentSourceId: z.string().trim().min(1).nullable().optional(),
+  connectorId: z.string().trim().min(1).optional(),
+  syncRunId: z.string().trim().min(1).optional(),
+  updatedAfter: z.string().datetime().optional(),
 });
 
 export const artifactSchema = z.object({
@@ -1233,6 +1249,12 @@ export type ListSourceStatusesRequest = z.infer<
 >;
 export type ListSourceStatusesResponse = z.infer<
   typeof listSourceStatusesResponseSchema
+>;
+export type BulkDeleteSourcesRequest = z.infer<
+  typeof bulkDeleteSourcesRequestSchema
+>;
+export type BulkDeleteSourcesResponse = z.infer<
+  typeof bulkDeleteSourcesResponseSchema
 >;
 export type UploadSourceResponse = z.infer<typeof uploadSourceResponseSchema>;
 export type UpdateSourceRequest = z.infer<typeof updateSourceRequestSchema>;

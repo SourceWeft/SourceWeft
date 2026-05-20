@@ -1,5 +1,9 @@
 import { ConnectorError } from "./errors";
 
+const deprecatedConfigKeysByConnectorType: Record<string, readonly string[]> = {
+  notion: ["includeDataSources", "includeDatabases", "notionApiVersion"],
+};
+
 type JsonSchemaObject = {
   type?: unknown;
   properties?: unknown;
@@ -10,6 +14,30 @@ type JsonSchemaObject = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function normalizeConnectorConfigJson(input: {
+  connectorType: string;
+  value: Record<string, unknown>;
+}) {
+  const deprecatedKeys = deprecatedConfigKeysByConnectorType[input.connectorType];
+  if (!deprecatedKeys?.length) {
+    return { value: input.value, changed: false };
+  }
+
+  let nextValue = input.value;
+  let changed = false;
+  for (const key of deprecatedKeys) {
+    if (Object.prototype.hasOwnProperty.call(nextValue, key)) {
+      if (!changed) {
+        nextValue = { ...nextValue };
+        changed = true;
+      }
+      delete nextValue[key];
+    }
+  }
+
+  return { value: nextValue, changed };
 }
 
 function validateValue(input: {
