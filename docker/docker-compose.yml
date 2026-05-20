@@ -55,7 +55,8 @@ x-sourceweft-env: &sourceweft-env
 
 services:
   postgres:
-    image: paradedb/paradedb:latest-pg17
+    image: ${SOURCEWEFT_POSTGRES_IMAGE:-ghcr.io/sourceweft/sourceweft-postgres:17}
+    command: ["postgres", "-c", "shared_preload_libraries=pg_textsearch"]
     environment:
       POSTGRES_USER: ${DB_USER:-sourceweft}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-sourceweft}
