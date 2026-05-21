@@ -273,7 +273,7 @@ test("web_search rejects overly long queries", async () => {
 
   await assert.rejects(
     () => webSearch.invoke({ query: "x".repeat(241) }),
-    /Search query is too long|at most 240/,
+    /Search query is too long|at most 240|<=240/,
   );
 });
 
