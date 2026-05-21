@@ -1,4 +1,0 @@
-ALTER TABLE "model_gateway_byok_key_refs" ADD COLUMN "base_url" text;--> statement-breakpoint
-ALTER TABLE "model_gateway_byok_key_refs" ADD COLUMN "provider_kind" text DEFAULT 'openai-compatible' NOT NULL;--> statement-breakpoint
-ALTER TABLE "model_gateway_byok_key_refs" ADD COLUMN "default_headers" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint
-ALTER TABLE "model_gateway_byok_key_refs" ADD CONSTRAINT "model_gateway_byok_key_refs_kind_check" CHECK ("model_gateway_byok_key_refs"."provider_kind" in ('openai-compatible', 'openrouter', 'deepinfra', 'siliconflow-cn', 'openai', 'anthropic', 'gemini', 'azure-openai'));

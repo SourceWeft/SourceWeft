@@ -16,6 +16,7 @@ import type {
   ListConnectorManifestsResponse,
   ListConnectorOAuthAccountsRequest,
   ListConnectorOAuthAccountsResponse,
+  ListConnectorsRequest,
   ListConnectorWebhookEventsRequest,
   ListConnectorWebhookEventsResponse,
   ListConnectorsResponse,
@@ -94,9 +95,11 @@ export class ConnectorsClient {
     );
   }
 
-  list(workspaceId: string) {
+  list(workspaceId: string, input: ListConnectorsRequest = {}) {
     return this.http.get<ListConnectorsResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/connectors`,
+      `/v1/workspaces/${encode(workspaceId)}/connectors${query({
+        includeDisabled: input.includeDisabled ? "true" : undefined,
+      })}`,
     );
   }
 
@@ -128,21 +131,21 @@ export class ConnectorsClient {
     input: DeleteConnectorRequest = {},
   ) {
     return this.http.delete<DeleteConnectorResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}${query({
-        purgeIndexedContent: input.purgeIndexedContent ? "true" : undefined,
-      })}`,
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}${query(
+        {
+          disable: input.disable ? "true" : undefined,
+        },
+      )}`,
     );
   }
 
   deleteAccount(
     workspaceId: string,
     accountId: string,
-    input: DeleteConnectorAccountRequest = {},
+    _input: DeleteConnectorAccountRequest = {},
   ) {
     return this.http.delete<DeleteConnectorAccountResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/connectors/accounts/${encode(accountId)}${query({
-        force: input.force ? "true" : undefined,
-      })}`,
+      `/v1/workspaces/${encode(workspaceId)}/connectors/accounts/${encode(accountId)}`,
     );
   }
 
@@ -164,11 +167,13 @@ export class ConnectorsClient {
     input: ListConnectorActivityRequest = {},
   ) {
     return this.http.get<ListConnectorActivityResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/activity${query({
-        kind: input.kind,
-        limit: input.limit ? String(input.limit) : undefined,
-        cursor: input.cursor,
-      })}`,
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/activity${query(
+        {
+          kind: input.kind,
+          limit: input.limit ? String(input.limit) : undefined,
+          cursor: input.cursor,
+        },
+      )}`,
     );
   }
 
@@ -183,31 +188,19 @@ export class ConnectorsClient {
     );
   }
 
-  approveAction(
-    workspaceId: string,
-    connectorId: string,
-    actionRunId: string,
-  ) {
+  approveAction(workspaceId: string, connectorId: string, actionRunId: string) {
     return this.http.post<CreateConnectorActionResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/actions/${encode(actionRunId)}/approve`,
     );
   }
 
-  rejectAction(
-    workspaceId: string,
-    connectorId: string,
-    actionRunId: string,
-  ) {
+  rejectAction(workspaceId: string, connectorId: string, actionRunId: string) {
     return this.http.post<CreateConnectorActionResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/actions/${encode(actionRunId)}/reject`,
     );
   }
 
-  executeAction(
-    workspaceId: string,
-    connectorId: string,
-    actionRunId: string,
-  ) {
+  executeAction(workspaceId: string, connectorId: string, actionRunId: string) {
     return this.http.post<ExecuteConnectorActionResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/actions/${encode(actionRunId)}/execute`,
     );
@@ -237,10 +230,7 @@ export class ConnectorsClient {
     );
   }
 
-  lookupNotionPages(
-    workspaceId: string,
-    input: LookupNotionPagesRequest = {},
-  ) {
+  lookupNotionPages(workspaceId: string, input: LookupNotionPagesRequest = {}) {
     return this.http.get<LookupNotionPagesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/notion/pages${query({
         connectorId: input.connectorId,

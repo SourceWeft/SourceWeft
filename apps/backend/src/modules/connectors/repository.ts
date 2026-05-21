@@ -149,9 +149,12 @@ export async function listOAuthAccountRecords(input: {
   const conditions = [
     eq(connectorOAuthAccounts.teamId, input.teamId),
     eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+    eq(connectorOAuthAccounts.status, "active"),
   ];
   if (input.connectorType) {
-    conditions.push(eq(connectorOAuthAccounts.connectorType, input.connectorType));
+    conditions.push(
+      eq(connectorOAuthAccounts.connectorType, input.connectorType),
+    );
   }
 
   const rows = await db
@@ -199,6 +202,25 @@ export async function listOAuthAccountRecordsByProviderAccount(input: {
     );
 
   return rows.map(mapOAuthAccount);
+}
+
+export async function deleteOAuthAccountRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+}) {
+  const rows = await db
+    .delete(connectorOAuthAccounts)
+    .where(
+      and(
+        eq(connectorOAuthAccounts.id, input.accountId),
+        eq(connectorOAuthAccounts.teamId, input.teamId),
+        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning({ id: connectorOAuthAccounts.id });
+
+  return rows.length > 0;
 }
 
 export async function updateOAuthAccountTokenRecord(input: {
@@ -266,21 +288,6 @@ export async function updateOAuthAccountStatusRecord(input: {
   return row ? mapOAuthAccount(row) : null;
 }
 
-export async function revokeOAuthAccountRecord(input: {
-  teamId: string;
-  workspaceId: string;
-  accountId: string;
-  lastError?: string | null;
-}) {
-  return updateOAuthAccountStatusRecord({
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    accountId: input.accountId,
-    status: "revoked",
-    lastError: input.lastError ?? null,
-  });
-}
-
 export async function createSourceConnectorRecord(input: {
   teamId: string;
   workspaceId: string;
@@ -321,17 +328,20 @@ export async function createSourceConnectorRecord(input: {
 export async function listSourceConnectorRecords(input: {
   teamId: string;
   workspaceId: string;
+  includeDisabled?: boolean;
 }) {
+  const conditions = [
+    eq(sourceConnectors.teamId, input.teamId),
+    eq(sourceConnectors.workspaceId, input.workspaceId),
+  ];
+  if (!input.includeDisabled) {
+    conditions.push(ne(sourceConnectors.status, "disabled"));
+  }
+
   const rows = await db
     .select()
     .from(sourceConnectors)
-    .where(
-      and(
-        eq(sourceConnectors.teamId, input.teamId),
-        eq(sourceConnectors.workspaceId, input.workspaceId),
-        ne(sourceConnectors.status, "disabled"),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(desc(sourceConnectors.createdAt));
 
   return rows.map(mapSourceConnector);
@@ -350,6 +360,28 @@ export async function findSourceConnectorRecord(input: {
         eq(sourceConnectors.id, input.connectorId),
         eq(sourceConnectors.teamId, input.teamId),
         eq(sourceConnectors.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapSourceConnector(row) : null;
+}
+
+export async function findSourceConnectorRecordByName(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorType: string;
+  name: string;
+}) {
+  const [row] = await db
+    .select()
+    .from(sourceConnectors)
+    .where(
+      and(
+        eq(sourceConnectors.teamId, input.teamId),
+        eq(sourceConnectors.workspaceId, input.workspaceId),
+        eq(sourceConnectors.connectorType, input.connectorType),
+        eq(sourceConnectors.name, input.name),
       ),
     )
     .limit(1);
@@ -401,7 +433,6 @@ export async function listWorkspaceSourceConnectorRecordsByOAuthAccount(input: {
         eq(sourceConnectors.teamId, input.teamId),
         eq(sourceConnectors.workspaceId, input.workspaceId),
         eq(sourceConnectors.oauthAccountId, input.oauthAccountId),
-        ne(sourceConnectors.status, "disabled"),
       ),
     )
     .orderBy(desc(sourceConnectors.createdAt));
@@ -457,59 +488,6 @@ export async function updateSourceConnectorRecord(input: {
     .returning();
 
   return row ? mapSourceConnector(row) : null;
-}
-
-export async function detachSourceConnectorOAuthAccount(input: {
-  teamId: string;
-  workspaceId: string;
-  connectorId: string;
-}) {
-  const [row] = await db
-    .update(sourceConnectors)
-    .set({
-      oauthAccountId: null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(sourceConnectors.id, input.connectorId),
-        eq(sourceConnectors.teamId, input.teamId),
-        eq(sourceConnectors.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning();
-
-  return row ? mapSourceConnector(row) : null;
-}
-
-export async function disableAndDetachSourceConnectorsByOAuthAccount(input: {
-  teamId: string;
-  workspaceId: string;
-  oauthAccountId: string;
-}) {
-  const rows = await db
-    .update(sourceConnectors)
-    .set({
-      name: sql<string>`'removed:' || ${sourceConnectors.id}`,
-      oauthAccountId: null,
-      status: "disabled",
-      periodicIndexingEnabled: false,
-      indexingFrequencyMinutes: null,
-      nextScheduledAt: null,
-      lastError: null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(sourceConnectors.teamId, input.teamId),
-        eq(sourceConnectors.workspaceId, input.workspaceId),
-        eq(sourceConnectors.oauthAccountId, input.oauthAccountId),
-        ne(sourceConnectors.status, "disabled"),
-      ),
-    )
-    .returning({ id: sourceConnectors.id });
-
-  return rows.map((row) => row.id);
 }
 
 function preserveConnectorSourceCitationsSql(input: {
@@ -590,10 +568,11 @@ function preserveConnectorSourceCitationsSql(input: {
   `;
 }
 
-export async function purgeConnectorIndexedContent(input: {
+export async function hardDeleteSourceConnectorRecord(input: {
   teamId: string;
   workspaceId: string;
   connectorId: string;
+  oauthAccountId?: string | null;
 }) {
   return db.transaction(async (tx) => {
     await tx.execute(preserveConnectorSourceCitationsSql(input));
@@ -625,11 +604,87 @@ export async function purgeConnectorIndexedContent(input: {
       )
       .returning({ id: sources.id });
 
+    const deletedConnectorRows = await tx
+      .delete(sourceConnectors)
+      .where(
+        and(
+          eq(sourceConnectors.id, input.connectorId),
+          eq(sourceConnectors.teamId, input.teamId),
+          eq(sourceConnectors.workspaceId, input.workspaceId),
+        ),
+      )
+      .returning({
+        id: sourceConnectors.id,
+        oauthAccountId: sourceConnectors.oauthAccountId,
+      });
+
+    const deletedConnector = deletedConnectorRows[0] ?? null;
+    let authorizationDeleted = false;
+    const accountId =
+      input.oauthAccountId ?? deletedConnector?.oauthAccountId ?? null;
+    if (accountId) {
+      const deletedAccountRows = await tx
+        .delete(connectorOAuthAccounts)
+        .where(
+          and(
+            eq(connectorOAuthAccounts.id, accountId),
+            eq(connectorOAuthAccounts.teamId, input.teamId),
+            eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+          ),
+        )
+        .returning({ id: connectorOAuthAccounts.id });
+      authorizationDeleted = deletedAccountRows.length > 0;
+    }
+
     return {
+      connectorDeleted: Boolean(deletedConnector),
       sourcesDeleted: deletedSources.length,
       documentsDeleted: documentCountRow?.count ?? 0,
+      authorizationDeleted,
     };
   });
+}
+
+export async function hasSourceConnectorOAuthAccountReferences(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+}) {
+  const [row] = await db
+    .select({ id: sourceConnectors.id })
+    .from(sourceConnectors)
+    .where(
+      and(
+        eq(sourceConnectors.teamId, input.teamId),
+        eq(sourceConnectors.workspaceId, input.workspaceId),
+        eq(sourceConnectors.oauthAccountId, input.accountId),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(row);
+}
+
+export async function hasOtherSourceConnectorOAuthAccountReferences(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+  connectorId: string;
+}) {
+  const [row] = await db
+    .select({ id: sourceConnectors.id })
+    .from(sourceConnectors)
+    .where(
+      and(
+        eq(sourceConnectors.teamId, input.teamId),
+        eq(sourceConnectors.workspaceId, input.workspaceId),
+        eq(sourceConnectors.oauthAccountId, input.accountId),
+        ne(sourceConnectors.id, input.connectorId),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(row);
 }
 
 export async function listDueScheduledConnectorRecords(input: {
@@ -850,7 +905,9 @@ export async function listWebhookEventRecords(input: {
     eq(connectorWebhookEvents.workspaceId, input.workspaceId),
   ];
   if (input.connectorType) {
-    conditions.push(eq(connectorWebhookEvents.connectorType, input.connectorType));
+    conditions.push(
+      eq(connectorWebhookEvents.connectorType, input.connectorType),
+    );
   }
   if (input.connectorId) {
     conditions.push(eq(connectorWebhookEvents.connectorId, input.connectorId));
@@ -958,7 +1015,8 @@ export async function updateWebhookEventRecord(input: {
     updates.payloadMetadataJson = input.payloadMetadataJson;
   }
   if (input.errorCode !== undefined) updates.errorCode = input.errorCode;
-  if (input.errorMessage !== undefined) updates.errorMessage = input.errorMessage;
+  if (input.errorMessage !== undefined)
+    updates.errorMessage = input.errorMessage;
   if (input.processedAt !== undefined) updates.processedAt = input.processedAt;
 
   const setValues: Record<string, unknown> = { ...updates };
@@ -1090,7 +1148,9 @@ function isActivityBeforeCursor(
   return itemKey < cursorKey;
 }
 
-function toSyncActivityItem(run: ReturnType<typeof mapSyncRun>): ConnectorActivityItemRecord {
+function toSyncActivityItem(
+  run: ReturnType<typeof mapSyncRun>,
+): ConnectorActivityItemRecord {
   const summaryJson = {
     triggerType: run.triggerType,
     eventType: run.metadataJson.eventType ?? null,
@@ -1344,7 +1404,10 @@ export async function listConnectorActivityRecords(input: {
   const hasMore = filtered.length > input.limit;
   return {
     items: page,
-    nextCursor: hasMore && page.length ? makeActivityCursor(page[page.length - 1]!) : null,
+    nextCursor:
+      hasMore && page.length
+        ? makeActivityCursor(page[page.length - 1]!)
+        : null,
   };
 }
 
@@ -1369,11 +1432,14 @@ export async function updateSyncRunRecord(input: {
   if (input.discoveredCount !== undefined) {
     updates.discoveredCount = input.discoveredCount;
   }
-  if (input.indexedCount !== undefined) updates.indexedCount = input.indexedCount;
+  if (input.indexedCount !== undefined)
+    updates.indexedCount = input.indexedCount;
   if (input.failedCount !== undefined) updates.failedCount = input.failedCount;
   if (input.errorCode !== undefined) updates.errorCode = input.errorCode;
-  if (input.errorMessage !== undefined) updates.errorMessage = input.errorMessage;
-  if (input.metadataJson !== undefined) updates.metadataJson = input.metadataJson;
+  if (input.errorMessage !== undefined)
+    updates.errorMessage = input.errorMessage;
+  if (input.metadataJson !== undefined)
+    updates.metadataJson = input.metadataJson;
   if (input.startedAt !== undefined) updates.startedAt = input.startedAt;
   if (input.finishedAt !== undefined) updates.finishedAt = input.finishedAt;
   if (input.heartbeatAt !== undefined) updates.heartbeatAt = input.heartbeatAt;
@@ -1510,7 +1576,8 @@ export async function updateActionRunRecord(input: {
   if (input.approvedBy !== undefined) updates.approvedBy = input.approvedBy;
   if (input.executedBy !== undefined) updates.executedBy = input.executedBy;
   if (input.errorCode !== undefined) updates.errorCode = input.errorCode;
-  if (input.errorMessage !== undefined) updates.errorMessage = input.errorMessage;
+  if (input.errorMessage !== undefined)
+    updates.errorMessage = input.errorMessage;
 
   const [row] = await db
     .update(connectorActionRuns)

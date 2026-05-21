@@ -6,6 +6,7 @@ import {
   deleteConnectorAccountRequestSchema,
   deleteConnectorRequestSchema,
   listConnectorActivityRequestSchema,
+  listConnectorsRequestSchema,
   listConnectorOAuthAccountsRequestSchema,
   listWorkspaceConnectorSyncRunsRequestSchema,
   listConnectorWebhookEventsRequestSchema,
@@ -28,7 +29,10 @@ import {
   lookupConnectorSourceRecords,
 } from "../../../modules/connectors/repository";
 import { enqueueConnectorSyncJob } from "../../../modules/content/queue";
-import { getSessionUserId, requireSession } from "../../middleware/auth-session";
+import {
+  getSessionUserId,
+  requireSession,
+} from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
@@ -102,7 +106,9 @@ export function registerConnectorRoutes(app: Hono) {
     const body = ensureObjectBody(await c.req.json().catch(() => ({})));
     const parsed = startConnectorOAuthRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorOAuthService.start({
@@ -144,7 +150,9 @@ export function registerConnectorRoutes(app: Hono) {
       connectorType: c.req.query("connectorType"),
     });
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorService.listAccounts({
@@ -161,18 +169,17 @@ export function registerConnectorRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const parsed = deleteConnectorAccountRequestSchema.safeParse({
-      force: c.req.query("force") === "true" ? true : undefined,
-    });
+    const parsed = deleteConnectorAccountRequestSchema.safeParse({});
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorService.deleteOAuthAccount({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       accountId: requireRouteParam(c, "accountId"),
-      force: parsed.data.force,
     });
     return ApiResponse.success(c, result);
   });
@@ -186,7 +193,9 @@ export function registerConnectorRoutes(app: Hono) {
     const body = ensureObjectBody(await c.req.json().catch(() => null));
     const parsed = createConnectorRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorService.createConnector({
@@ -208,9 +217,20 @@ export function registerConnectorRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
+    const parsed = listConnectorsRequestSchema.safeParse({
+      includeDisabled:
+        c.req.query("includeDisabled") === "true" ? true : undefined,
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
     const result = await connectorService.listConnectors({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
+      includeDisabled: parsed.data.includeDisabled,
     });
     return ApiResponse.success(c, result);
   });
@@ -225,7 +245,9 @@ export function registerConnectorRoutes(app: Hono) {
       status: c.req.query("status"),
     });
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorSyncOrchestrator.listWorkspaceRuns({
@@ -245,7 +267,9 @@ export function registerConnectorRoutes(app: Hono) {
     const body = ensureObjectBody(await c.req.json().catch(() => null));
     const parsed = updateConnectorRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorService.updateConnector({
@@ -268,18 +292,19 @@ export function registerConnectorRoutes(app: Hono) {
     }
 
     const parsed = deleteConnectorRequestSchema.safeParse({
-      purgeIndexedContent:
-        c.req.query("purgeIndexedContent") === "true" ? true : undefined,
+      disable: c.req.query("disable") === "true" ? true : undefined,
     });
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorService.deleteConnector({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       connectorId: requireRouteParam(c, "connectorId"),
-      purgeIndexedContent: parsed.data.purgeIndexedContent,
+      disable: parsed.data.disable,
     });
     return ApiResponse.success(c, result);
   });
@@ -321,13 +346,13 @@ export function registerConnectorRoutes(app: Hono) {
 
     const parsed = listConnectorActivityRequestSchema.safeParse({
       kind: c.req.query("kind"),
-      limit: c.req.query("limit")
-        ? Number(c.req.query("limit"))
-        : undefined,
+      limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
       cursor: c.req.query("cursor"),
     });
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const workspaceId = requireRouteParam(c, "workspaceId");
@@ -413,7 +438,9 @@ export function registerConnectorRoutes(app: Hono) {
     const body = ensureObjectBody(await c.req.json().catch(() => null));
     const parsed = createConnectorActionRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorActionRunner.propose({
@@ -428,50 +455,59 @@ export function registerConnectorRoutes(app: Hono) {
     return ApiResponse.success(c, result, 201);
   });
 
-  app.post("/connectors/:connectorId/actions/:actionRunId/approve", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
+  app.post(
+    "/connectors/:connectorId/actions/:actionRunId/approve",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
 
-    const result = await connectorActionRunner.approve({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
-      connectorId: requireRouteParam(c, "connectorId"),
-      actionRunId: requireRouteParam(c, "actionRunId"),
-    });
-    return ApiResponse.success(c, result);
-  });
+      const result = await connectorActionRunner.approve({
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        userId: getSessionUserId(session),
+        connectorId: requireRouteParam(c, "connectorId"),
+        actionRunId: requireRouteParam(c, "actionRunId"),
+      });
+      return ApiResponse.success(c, result);
+    },
+  );
 
-  app.post("/connectors/:connectorId/actions/:actionRunId/reject", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
+  app.post(
+    "/connectors/:connectorId/actions/:actionRunId/reject",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
 
-    const result = await connectorActionRunner.reject({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
-      connectorId: requireRouteParam(c, "connectorId"),
-      actionRunId: requireRouteParam(c, "actionRunId"),
-    });
-    return ApiResponse.success(c, result);
-  });
+      const result = await connectorActionRunner.reject({
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        userId: getSessionUserId(session),
+        connectorId: requireRouteParam(c, "connectorId"),
+        actionRunId: requireRouteParam(c, "actionRunId"),
+      });
+      return ApiResponse.success(c, result);
+    },
+  );
 
-  app.post("/connectors/:connectorId/actions/:actionRunId/execute", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
+  app.post(
+    "/connectors/:connectorId/actions/:actionRunId/execute",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
 
-    const result = await connectorActionRunner.execute({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
-      connectorId: requireRouteParam(c, "connectorId"),
-      actionRunId: requireRouteParam(c, "actionRunId"),
-    });
-    return ApiResponse.success(c, result);
-  });
+      const result = await connectorActionRunner.execute({
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        userId: getSessionUserId(session),
+        connectorId: requireRouteParam(c, "connectorId"),
+        actionRunId: requireRouteParam(c, "actionRunId"),
+      });
+      return ApiResponse.success(c, result);
+    },
+  );
 
   app.get("/connectors/:connectorId/actions", async (c) => {
     const session = await requireSession(c);
@@ -498,7 +534,9 @@ export function registerConnectorRoutes(app: Hono) {
       connectorId: c.req.query("connectorId"),
     });
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const result = await connectorWebhookService.list({
@@ -524,7 +562,9 @@ export function registerConnectorRoutes(app: Hono) {
       limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
     });
     if (!parsed.success) {
-      throw ApiError.validation(parsed.error.flatten() as Record<string, unknown>);
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
     }
 
     const workspaceId = requireRouteParam(c, "workspaceId");

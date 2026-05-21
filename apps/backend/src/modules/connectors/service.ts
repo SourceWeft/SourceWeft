@@ -1,6 +1,4 @@
 import { ConnectorError } from "./errors";
-import { config } from "../../shared/config";
-import { decryptSecret } from "../../shared/secrets";
 import {
   normalizeConnectorConfigJson,
   validateObjectWithJsonSchema,
@@ -8,19 +6,20 @@ import {
 import { requireConnectorWorkspace } from "./permissions";
 import {
   createSourceConnectorRecord,
-  detachSourceConnectorOAuthAccount,
-  disableAndDetachSourceConnectorsByOAuthAccount,
+  deleteOAuthAccountRecord,
   findOAuthAccountRecord,
   findSourceConnectorRecord,
+  findSourceConnectorRecordByName,
+  hardDeleteSourceConnectorRecord,
+  hasOtherSourceConnectorOAuthAccountReferences,
+  hasSourceConnectorOAuthAccountReferences,
   listOAuthAccountRecords,
   listSourceConnectorRecords,
   listWorkspaceSourceConnectorRecordsByOAuthAccount,
-  purgeConnectorIndexedContent,
-  revokeOAuthAccountRecord,
   updateSourceConnectorRecord,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
-import type { ConnectorOAuthAccountSecretRecord, ConnectorStatus } from "./types";
+import type { ConnectorStatus } from "./types";
 
 function resolveNextScheduledAt(input: {
   enabled: boolean;
@@ -33,7 +32,9 @@ function resolveNextScheduledAt(input: {
 }
 
 export class ConnectorService {
-  constructor(private readonly registry: ConnectorRegistry = connectorRegistry) {}
+  constructor(
+    private readonly registry: ConnectorRegistry = connectorRegistry,
+  ) {}
 
   listManifests() {
     return { items: this.registry.listManifests() };
@@ -83,6 +84,29 @@ export class ConnectorService {
       label: "configJson",
     });
 
+    const existingConnector = await findSourceConnectorRecordByName({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorType: input.connectorType,
+      name: input.name,
+    });
+    if (existingConnector) {
+      if (existingConnector.status === "disabled") {
+        throw new ConnectorError(
+          409,
+          "CONNECTOR_DISABLED_CONFLICT",
+          "A disabled connector with this name already exists. Enable it or hard delete it before reconnecting.",
+          { connectorId: existingConnector.id },
+        );
+      }
+      throw new ConnectorError(
+        409,
+        "CONNECTOR_ALREADY_EXISTS",
+        "A connector with this name already exists",
+        { connectorId: existingConnector.id },
+      );
+    }
+
     if (input.oauthAccountId) {
       const account = await findOAuthAccountRecord({
         teamId: workspace.organizationId,
@@ -94,6 +118,25 @@ export class ConnectorService {
           400,
           "CONNECTOR_OAUTH_ACCOUNT_INVALID",
           "OAuth account does not belong to this connector type",
+        );
+      }
+      if (account.status !== "active") {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE",
+          "OAuth account is not active",
+        );
+      }
+      const accountInUse = await hasSourceConnectorOAuthAccountReferences({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: input.oauthAccountId,
+      });
+      if (accountInUse) {
+        throw new ConnectorError(
+          409,
+          "CONNECTOR_OAUTH_ACCOUNT_IN_USE",
+          "OAuth account is already attached to another connector",
         );
       }
     }
@@ -127,7 +170,11 @@ export class ConnectorService {
     return { connector };
   }
 
-  async listConnectors(input: { workspaceId: string; userId: string }) {
+  async listConnectors(input: {
+    workspaceId: string;
+    userId: string;
+    includeDisabled?: boolean;
+  }) {
     const { workspace } = await requireConnectorWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -136,6 +183,7 @@ export class ConnectorService {
     const items = await listSourceConnectorRecords({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
+      includeDisabled: input.includeDisabled,
     });
     return { items };
   }
@@ -161,7 +209,11 @@ export class ConnectorService {
       connectorId: input.connectorId,
     });
     if (!current) {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
 
     const manifest = this.registry.getManifest(current.connectorType);
@@ -187,16 +239,18 @@ export class ConnectorService {
     }
     const frequency =
       input.indexingFrequencyMinutes === undefined
-        ? current.indexingFrequencyMinutes ?? manifest.sync.defaultFrequencyMinutes
+        ? (current.indexingFrequencyMinutes ??
+          manifest.sync.defaultFrequencyMinutes)
         : input.indexingFrequencyMinutes;
     const connector = await updateSourceConnectorRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       connectorId: input.connectorId,
       name: input.name,
-      configJson: input.configJson === undefined && !normalizedConfig.changed
-        ? undefined
-        : nextConfig,
+      configJson:
+        input.configJson === undefined && !normalizedConfig.changed
+          ? undefined
+          : nextConfig,
       status: input.status,
       periodicIndexingEnabled,
       indexingFrequencyMinutes: periodicIndexingEnabled ? frequency : null,
@@ -208,16 +262,20 @@ export class ConnectorService {
     });
 
     if (!connector) {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
     return { connector };
   }
 
-  async removeConnector(input: {
+  async deleteConnector(input: {
     workspaceId: string;
     userId: string;
     connectorId: string;
-    purgeIndexedContent?: boolean;
+    disable?: boolean;
   }) {
     const { workspace } = await requireConnectorWorkspace({
       workspaceId: input.workspaceId,
@@ -230,68 +288,83 @@ export class ConnectorService {
       connectorId: input.connectorId,
     });
     if (!current) {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
 
-    const connector = await updateSourceConnectorRecord({
+    if (input.disable) {
+      const connector = await updateSourceConnectorRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId: input.connectorId,
+        status: "disabled",
+        periodicIndexingEnabled: false,
+        indexingFrequencyMinutes: null,
+        nextScheduledAt: null,
+        lastError: null,
+      });
+      if (!connector) {
+        throw new ConnectorError(
+          404,
+          "CONNECTOR_NOT_FOUND",
+          "Connector not found",
+        );
+      }
+      return {
+        disabled: true,
+        hardDeleted: false,
+        connectorId: input.connectorId,
+      };
+    }
+
+    if (current.oauthAccountId) {
+      const hasOtherReferences =
+        await hasOtherSourceConnectorOAuthAccountReferences({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          accountId: current.oauthAccountId,
+          connectorId: input.connectorId,
+        });
+      if (hasOtherReferences) {
+        throw new ConnectorError(
+          409,
+          "CONNECTOR_OAUTH_ACCOUNT_IN_USE",
+          "Connector OAuth account is attached to another connector",
+        );
+      }
+    }
+
+    const result = await hardDeleteSourceConnectorRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       connectorId: input.connectorId,
-      name: `removed:${input.connectorId}`,
-      status: "disabled",
-      periodicIndexingEnabled: false,
-      indexingFrequencyMinutes: null,
-      nextScheduledAt: null,
-      lastError: null,
+      oauthAccountId: current.oauthAccountId,
     });
-    if (!connector) {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
-    }
-    if (current.oauthAccountId) {
-      await detachSourceConnectorOAuthAccount({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        connectorId: input.connectorId,
-      });
-    }
-    let purgeCounts = {
-      sourcesDeleted: 0,
-      documentsDeleted: 0,
-    };
-    if (input.purgeIndexedContent) {
-      purgeCounts = await purgeConnectorIndexedContent({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        connectorId: input.connectorId,
-      });
+    if (!result.connectorDeleted) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
     return {
-      deleted: true,
+      disabled: false,
+      hardDeleted: true,
       connectorId: input.connectorId,
-      indexedContentDeleted: Boolean(input.purgeIndexedContent),
-      ...(input.purgeIndexedContent
-        ? {
-            sourcesDeleted: purgeCounts.sourcesDeleted,
-            documentsDeleted: purgeCounts.documentsDeleted,
-          }
-        : {}),
+      indexedContentDeleted: true,
+      sourcesDeleted: result.sourcesDeleted,
+      documentsDeleted: result.documentsDeleted,
+      authorizationDeleted: result.authorizationDeleted,
     };
-  }
-
-  async deleteConnector(input: {
-    workspaceId: string;
-    userId: string;
-    connectorId: string;
-    purgeIndexedContent?: boolean;
-  }) {
-    return this.removeConnector(input);
   }
 
   async deleteOAuthAccount(input: {
     workspaceId: string;
     userId: string;
     accountId: string;
-    force?: boolean;
   }) {
     const { workspace } = await requireConnectorWorkspace({
       workspaceId: input.workspaceId,
@@ -317,30 +390,23 @@ export class ConnectorService {
         workspaceId: workspace.id,
         oauthAccountId: input.accountId,
       });
-    if (referencingConnectors.length > 0 && !input.force) {
+    if (referencingConnectors.length > 0) {
       throw new ConnectorError(
         409,
         "CONNECTOR_OAUTH_ACCOUNT_IN_USE",
-        "Connector OAuth account is still used by active connectors",
-        { connectorIds: referencingConnectors.map((connector) => connector.id) },
+        "Connector OAuth account is still attached to a connector",
+        {
+          connectorIds: referencingConnectors.map((connector) => connector.id),
+        },
       );
     }
 
-    const detachedConnectorIds = input.force
-      ? await disableAndDetachSourceConnectorsByOAuthAccount({
-          teamId: workspace.organizationId,
-          workspaceId: workspace.id,
-          oauthAccountId: input.accountId,
-        })
-      : [];
-    const providerRevokeWarning = await this.revokeProviderAccount(account);
-    const revoked = await revokeOAuthAccountRecord({
+    const deleted = await deleteOAuthAccountRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       accountId: input.accountId,
-      lastError: providerRevokeWarning,
     });
-    if (!revoked) {
+    if (!deleted) {
       throw new ConnectorError(
         404,
         "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND",
@@ -351,36 +417,6 @@ export class ConnectorService {
     return {
       deleted: true,
       accountId: input.accountId,
-      accountStatus: revoked.status,
-      detachedConnectorIds,
-      providerRevokeWarning,
     };
-  }
-
-  private async revokeProviderAccount(
-    account: ConnectorOAuthAccountSecretRecord,
-  ) {
-    try {
-      const adapter = this.registry.getAdapter(account.connectorType);
-      if (!adapter.revokeOAuthAccount) {
-        return null;
-      }
-      await adapter.revokeOAuthAccount({
-        accessToken: decryptSecret(
-          account.accessTokenEncrypted,
-          config.modelGatewayEncryptionSecret,
-        ),
-        refreshToken: account.refreshTokenEncrypted
-          ? decryptSecret(
-              account.refreshTokenEncrypted,
-              config.modelGatewayEncryptionSecret,
-            )
-          : null,
-        account,
-      });
-      return null;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
   }
 }

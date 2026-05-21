@@ -17,6 +17,7 @@ import type {
   SourceRecord,
   SourceStatus,
 } from "../types";
+import { buildSearchParts } from "../search-tokenizer";
 import { currentDocumentCondition } from "./current-document-condition";
 import {
   mapChunk,
@@ -1101,6 +1102,7 @@ export async function createSourceDocumentChunksAndEmbeddings(input: {
           startOffset: segment.startIndex,
           endOffset: segment.endIndex,
           language: null,
+          searchParts: buildSearchParts(segment.text),
           chunkMetadata: {
             tokenCount: segment.tokenCount,
           },

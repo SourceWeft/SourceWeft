@@ -198,6 +198,13 @@ function asReasoningEffortArray(value: unknown, field: string) {
   );
 }
 
+function asOptionalReasoningEffortArray(value: unknown, field: string) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return asReasoningEffortArray(value, field);
+}
+
 type RawGlobalEmbeddingProfileEntry = {
   profileId?: unknown;
   profileAlias?: unknown;
@@ -283,6 +290,13 @@ function asStringArray(value: unknown, fieldName: string): string[] {
   return value.map((item, index) =>
     asNonEmptyString(item, `${fieldName}[${index}]`),
   );
+}
+
+function asOptionalStringArray(value: unknown, fieldName: string) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return asStringArray(value, fieldName);
 }
 
 function asStringRecord(value: unknown, fieldName: string): Record<string, string> {
@@ -404,9 +418,12 @@ function asOptionalNullableNumber(
 function parsePricingEntry(
   value: unknown,
   fieldName: string,
-): GlobalProfilePricingEntry | undefined {
-  if (value === undefined || value === null) {
+): GlobalProfilePricingEntry | null | undefined {
+  if (value === undefined) {
     return undefined;
+  }
+  if (value === null) {
+    return null;
   }
   if (!value || typeof value !== "object") {
     throw new Error(`Invalid global model gateway config field: ${fieldName}`);
@@ -546,6 +563,16 @@ function parseModelProfileEntry(
     `${field}[${index}].modelAlias`,
   );
 
+  const pricing = parsePricingEntry(entry.pricing, `${field}[${index}].pricing`);
+  const supportedParameters = asOptionalStringArray(
+    entry.supportedParameters,
+    `${field}[${index}].supportedParameters`,
+  );
+  const supportedEfforts = asOptionalReasoningEffortArray(
+    entry.supportedEfforts,
+    `${field}[${index}].supportedEfforts`,
+  );
+
   return {
     profileId:
       typeof entry.profileId === "string" && entry.profileId.trim().length > 0
@@ -582,15 +609,9 @@ function parseModelProfileEntry(
     ) ?? 0,
     isDefault: asBoolean(entry.isDefault, false),
     isActive: asBoolean(entry.isActive, true),
-    pricing: parsePricingEntry(entry.pricing, `${field}[${index}].pricing`) ?? null,
-    supportedParameters: asStringArray(
-      entry.supportedParameters,
-      `${field}[${index}].supportedParameters`,
-    ),
-    supportedEfforts: asReasoningEffortArray(
-      entry.supportedEfforts,
-      `${field}[${index}].supportedEfforts`,
-    ),
+    ...(pricing !== undefined ? { pricing } : {}),
+    ...(supportedParameters !== undefined ? { supportedParameters } : {}),
+    ...(supportedEfforts !== undefined ? { supportedEfforts } : {}),
     imageGeneration:
       entry.imageGeneration &&
       typeof entry.imageGeneration === "object" &&
@@ -671,7 +692,14 @@ function parseEmbeddingProfileEntry(
     vectorStrategy,
     isDefault: asBoolean(entry.isDefault, false),
     isActive: asBoolean(entry.isActive, true),
-    pricing: parsePricingEntry(entry.pricing, `embeddingProfiles[${index}].pricing`) ?? null,
+    ...(entry.pricing !== undefined
+      ? {
+          pricing: parsePricingEntry(
+            entry.pricing,
+            `embeddingProfiles[${index}].pricing`,
+          ),
+        }
+      : {}),
   };
 }
 

@@ -80,12 +80,6 @@ export type OAuthRefreshInput = {
   scopes: string[];
 };
 
-export type OAuthRevokeInput = {
-  accessToken: string;
-  refreshToken?: string | null;
-  account: ConnectorOAuthAccountSecretRecord;
-};
-
 export type OAuthTokenSet = {
   accessToken: string;
   refreshToken?: string | null;
@@ -240,7 +234,6 @@ export interface ConnectorAdapter {
   getManifest(): ConnectorManifest;
   exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
   refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
-  revokeOAuthAccount?(input: OAuthRevokeInput): Promise<void>;
   checkSyncReadiness?(
     input: ConnectorDiscoverInput,
   ): Promise<ConnectorSyncReadinessResult>;

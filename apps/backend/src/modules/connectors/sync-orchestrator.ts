@@ -14,6 +14,7 @@ import {
   createSyncRunRecordIfNoActiveRun,
   findSourceConnectorRecord,
   findSyncRunRecord,
+  hardDeleteSourceConnectorRecord,
   incrementSyncRunCounts,
   listSyncRunRecords,
   listWorkspaceSyncRunRecords,
@@ -116,13 +117,17 @@ function shouldSkipExtract(input: {
   if (input.item.metadata.provider === "notion") {
     return false;
   }
-  if (input.item.contentHash && input.existing.contentHash === input.item.contentHash) {
+  if (
+    input.item.contentHash &&
+    input.existing.contentHash === input.item.contentHash
+  ) {
     return true;
   }
   if (
     !input.item.contentHash &&
     input.item.externalUpdatedAt &&
-    input.existing.externalUpdatedAt === input.item.externalUpdatedAt.toISOString()
+    input.existing.externalUpdatedAt ===
+      input.item.externalUpdatedAt.toISOString()
   ) {
     return true;
   }
@@ -139,6 +144,11 @@ function finalConnectorStatusAfterSync(
   status: RunnableConnectorStatus,
 ): "active" | "paused" {
   return status === "paused" ? "paused" : "active";
+}
+
+function isConnectorMissingError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return /foreign key constraint/i.test(message) && /connector/i.test(message);
 }
 
 export class ConnectorSyncOrchestrator {
@@ -175,7 +185,11 @@ export class ConnectorSyncOrchestrator {
       connectorId: input.connectorId,
     });
     if (!connector || connector.status === "disabled") {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
     if (!canRunConnectorStatus(connector.status)) {
       throw new ConnectorError(
@@ -245,7 +259,11 @@ export class ConnectorSyncOrchestrator {
       createdBy: input.userId,
     });
     if (!runResult.run) {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
     if (runResult.existing) {
       return {
@@ -346,7 +364,7 @@ export class ConnectorSyncOrchestrator {
     });
     if (
       !connector ||
-      connector.status !== "active" && connector.status !== "error"
+      (connector.status !== "active" && connector.status !== "error")
     ) {
       return {
         run: null,
@@ -415,11 +433,24 @@ export class ConnectorSyncOrchestrator {
       });
     }
 
-    const run = await this.createScheduledRun({
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      connectorId: input.connectorId,
-    });
+    let run;
+    try {
+      run = await this.createScheduledRun({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        connectorId: input.connectorId,
+      });
+    } catch (error) {
+      if (isConnectorMissingError(error)) {
+        return {
+          run: null,
+          jobId: null,
+          skipped: true,
+          reason: "connector_deleted",
+        };
+      }
+      throw error;
+    }
     if (connector.status !== "active" || connector.lastError) {
       await updateSourceConnectorRecord({
         teamId: input.teamId,
@@ -483,10 +514,14 @@ export class ConnectorSyncOrchestrator {
     targetExternalIds?: string[];
   }) {
     const connector = await findSourceConnectorRecord(input);
-    if (
-      !connector ||
-      !canRunConnectorStatus(connector.status)
-    ) {
+    if (!connector || !canRunConnectorStatus(connector.status)) {
+      if (!connector) {
+        await hardDeleteSourceConnectorRecord({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connectorId: input.connectorId,
+        });
+      }
       throw new ConnectorError(
         409,
         "CONNECTOR_NOT_ACTIVE",
@@ -692,7 +727,8 @@ export class ConnectorSyncOrchestrator {
       item: input.item,
     });
     const contentText = extracted.markdown ?? extracted.contentText;
-    const contentHash = extracted.item.contentHash ?? computeContentHash(contentText);
+    const contentHash =
+      extracted.item.contentHash ?? computeContentHash(contentText);
     const title = normalizeSourceTitle(extracted.item.title);
     const parentSourceId = await this.upsertDirectoryPath({
       teamId: input.teamId,
@@ -842,7 +878,9 @@ export class ConnectorSyncOrchestrator {
             ...metadata,
           },
           status: "indexed",
-          indexedAt: existing.indexedAt ? new Date(existing.indexedAt) : new Date(),
+          indexedAt: existing.indexedAt
+            ? new Date(existing.indexedAt)
+            : new Date(),
         });
       } else {
         directory = await createSourceRecord({

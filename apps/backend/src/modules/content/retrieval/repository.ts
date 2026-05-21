@@ -15,11 +15,15 @@ import type {
   EmbeddingProfileRecord,
   EmbeddingVectorStrategy,
 } from "../types";
+import { logBm25Completed, logBm25Skipped } from "../bm25-debug";
 import { toPostgresTextArray } from "../sql";
+import { buildSearchQuery } from "../search-tokenizer";
 import {
   currentDocumentCondition,
   currentDocumentConditionForAlias,
 } from "../sources/current-document-condition";
+
+const CHUNKS_BM25_INDEX_NAME = "chunks_bm25_universal_idx";
 
 type EmbeddingProfileRow = typeof modelGatewayProfiles.$inferSelect;
 type ChunkRow = typeof chunks.$inferSelect;
@@ -186,9 +190,33 @@ export async function searchChunksByBm25(input: {
   sourceIds: string[];
 }) {
   if (input.sourceIds.length === 0) {
+    logBm25Skipped({
+      operation: "retrieval",
+      reason: "empty_source_ids",
+      queryText: input.queryText,
+      topK: input.topK,
+      sourceCount: 0,
+    });
     return [];
   }
 
+  const searchQuery = buildSearchQuery(input.queryText);
+  if (!searchQuery) {
+    logBm25Skipped({
+      operation: "retrieval",
+      reason: "empty_search_query",
+      queryText: input.queryText,
+      searchQuery,
+      topK: input.topK,
+      sourceCount: input.sourceIds.length,
+    });
+    return [];
+  }
+
+  const bm25Query = sql`to_bm25query(${searchQuery}, ${CHUNKS_BM25_INDEX_NAME})`;
+  const bm25Score = sql`c.search_parts <@> ${bm25Query}`;
+
+  const startedAt = Date.now();
   const rows = await db.execute<RetrievalSqlRow>(sql`
     select
       c.id as chunk_id,
@@ -197,21 +225,20 @@ export async function searchChunksByBm25(input: {
       s.title as source_title,
       c.chunk_no,
       c.content,
-      pdb.score(c.id) as score
+      -(${bm25Score}) as score
     from chunks c
     inner join sources s on s.id = c.source_id
     inner join documents d on d.id = c.document_id
     where c.workspace_id = ${input.workspaceId}
       and c.team_id = ${input.teamId}
       and s.status = 'indexed'
-      and c.content ||| ${input.queryText}
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
       and ${currentDocumentConditionForAlias("d")}
-    order by pdb.score(c.id) desc
+    order by ${bm25Score} asc
     limit ${input.topK}
   `);
 
-  return rows.rows.map((row) => ({
+  const candidates = rows.rows.map((row) => ({
     chunkId: row.chunk_id,
     documentId: row.document_id,
     sourceId: row.source_id,
@@ -221,6 +248,18 @@ export async function searchChunksByBm25(input: {
     score: Number(row.score),
     stage: "bm25" as const,
   }));
+
+  logBm25Completed({
+    operation: "retrieval",
+    queryText: input.queryText,
+    searchQuery,
+    topK: input.topK,
+    sourceCount: input.sourceIds.length,
+    durationMs: Date.now() - startedAt,
+    results: candidates,
+  });
+
+  return candidates;
 }
 
 export async function searchChunksByVectorExact(input: {

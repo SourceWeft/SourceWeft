@@ -80,7 +80,10 @@ import {
   AlertDialogTitle,
 } from "@sourceweft/ui-web/components/ui/alert-dialog";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
-import { Button, buttonVariants } from "@sourceweft/ui-web/components/ui/button";
+import {
+  Button,
+  buttonVariants,
+} from "@sourceweft/ui-web/components/ui/button";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
   Collapsible,
@@ -120,7 +123,11 @@ import {
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { apiBaseUrl, connectorsClient, contentClient } from "../../../../lib/sdk";
+import {
+  apiBaseUrl,
+  connectorsClient,
+  contentClient,
+} from "../../../../lib/sdk";
 import {
   CONNECTOR_OAUTH_CHANNEL,
   CONNECTOR_OAUTH_STORAGE_KEY,
@@ -258,7 +265,9 @@ const SOURCE_FILE_EXTENSIONS = [
   "wav",
   "webm",
 ] as const;
-const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(",");
+const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(
+  ",",
+);
 const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
 function oauthCatalogItem(
   item: Omit<
@@ -432,7 +441,8 @@ const connectorCatalog: ConnectorCatalogItem[] = [
     id: "github",
     name: "GitHub",
     category: "Projects & Data",
-    description: "Connect repositories, issues, pull requests, and discussions.",
+    description:
+      "Connect repositories, issues, pull requests, and discussions.",
     capabilities: ["Repos", "Issues", "Pull requests"],
     icon: Database,
     supportsActions: true,
@@ -941,7 +951,10 @@ function getUploadFileExtension(fileName: string) {
     return "makefile";
   }
   if (baseName.startsWith(".env")) return "env";
-  if (baseName.startsWith(".") && SOURCE_FILE_EXTENSION_SET.has(baseName.slice(1))) {
+  if (
+    baseName.startsWith(".") &&
+    SOURCE_FILE_EXTENSION_SET.has(baseName.slice(1))
+  ) {
     return baseName.slice(1);
   }
   const dotIndex = baseName.lastIndexOf(".");
@@ -960,16 +973,32 @@ function getUploadFileLabel(file: File) {
   if (extension === "json") return "JSON";
   if (extension === "srt") return "SRT";
   if (
-    ["avif", "png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp", "gif"].includes(
-      extension,
-    )
+    [
+      "avif",
+      "png",
+      "jpg",
+      "jpeg",
+      "webp",
+      "tif",
+      "tiff",
+      "bmp",
+      "gif",
+    ].includes(extension)
   ) {
     return "IMG";
   }
   if (
-    ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"].includes(
-      extension,
-    )
+    [
+      "flac",
+      "mp3",
+      "mp4",
+      "mpeg",
+      "mpga",
+      "m4a",
+      "ogg",
+      "wav",
+      "webm",
+    ].includes(extension)
   ) {
     return "AUDIO";
   }
@@ -978,7 +1007,8 @@ function getUploadFileLabel(file: File) {
 
 function formatBytes(sizeBytes: number) {
   if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 102.4) / 10} KB`;
+  if (sizeBytes < 1024 * 1024)
+    return `${Math.round(sizeBytes / 102.4) / 10} KB`;
   return `${Math.round(sizeBytes / 1024 / 102.4) / 10} MB`;
 }
 
@@ -1088,10 +1118,10 @@ function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
       item.sourceType === "directory"
         ? "Folder"
         : item.status === "failed"
-        ? "Processing failed"
-        : item.status === "queued" || item.status === "processing"
-        ? "Sync in progress"
-        : new Date(item.updatedAt).toLocaleString(),
+          ? "Processing failed"
+          : item.status === "queued" || item.status === "processing"
+            ? "Sync in progress"
+            : new Date(item.updatedAt).toLocaleString(),
     contentText: item.contentText,
     connectorId: item.connectorId,
     externalUri: item.externalUri,
@@ -1109,7 +1139,9 @@ function appendUniqueSources(current: SourceItem[], incoming: SourceItem[]) {
       mergedById.set(source.id, source);
       continue;
     }
-    const existingTime = existing.updatedAt ? Date.parse(existing.updatedAt) : 0;
+    const existingTime = existing.updatedAt
+      ? Date.parse(existing.updatedAt)
+      : 0;
     const incomingTime = source.updatedAt ? Date.parse(source.updatedAt) : 0;
     if (incomingTime >= existingTime) {
       mergedById.set(source.id, { ...existing, ...source });
@@ -1346,8 +1378,8 @@ export function ArtifactPreviewPanel({
                 Preview is not available
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                Image artifacts can be previewed here. This artifact type is kept
-                compatible for future preview renderers.
+                Image artifacts can be previewed here. This artifact type is
+                kept compatible for future preview renderers.
               </p>
             </div>
           </div>
@@ -1379,7 +1411,7 @@ function StatusDot({ status }: { status: SourceItem["status"] }) {
             ? "bg-amber-500"
             : status === "Failed"
               ? "bg-destructive"
-            : "bg-red-400",
+              : "bg-red-400",
       )}
     />
   );
@@ -1569,7 +1601,10 @@ function SourceRow({
     onToggle();
   }
 
-  function handleMenuAction(event: MouseEvent<HTMLElement>, action: () => void) {
+  function handleMenuAction(
+    event: MouseEvent<HTMLElement>,
+    action: () => void,
+  ) {
     event.stopPropagation();
     action();
   }
@@ -1824,8 +1859,10 @@ function buildSourceTreeIndex(sources: SourceItem[]): SourceTreeIndex {
 
   for (const items of byParent.values()) {
     items.sort((a, b) => {
-      if (a.sourceType === "directory" && b.sourceType !== "directory") return -1;
-      if (a.sourceType !== "directory" && b.sourceType === "directory") return 1;
+      if (a.sourceType === "directory" && b.sourceType !== "directory")
+        return -1;
+      if (a.sourceType !== "directory" && b.sourceType === "directory")
+        return 1;
       return a.title.localeCompare(b.title);
     });
   }
@@ -1833,13 +1870,13 @@ function buildSourceTreeIndex(sources: SourceItem[]): SourceTreeIndex {
   return { byParent };
 }
 
-function buildSourceTreeFromIndex(
-  index: SourceTreeIndex,
-  searchQuery: string,
-) {
+function buildSourceTreeFromIndex(index: SourceTreeIndex, searchQuery: string) {
   const q = searchQuery.trim().toLowerCase();
 
-  function build(parentId: string | null, ancestorsMatch = false): SourceTreeNode[] {
+  function build(
+    parentId: string | null,
+    ancestorsMatch = false,
+  ): SourceTreeNode[] {
     return (index.byParent.get(parentId) ?? [])
       .map((source) => {
         const selfMatch = !q || sourceMatchesQuery(source, q);
@@ -1860,7 +1897,10 @@ function buildSourceTree(sources: SourceItem[], searchQuery: string) {
 }
 
 function countTreeNodes(nodes: SourceTreeNode[]): number {
-  return nodes.reduce((sum, node) => sum + 1 + countTreeNodes(node.children), 0);
+  return nodes.reduce(
+    (sum, node) => sum + 1 + countTreeNodes(node.children),
+    0,
+  );
 }
 
 function collectTreeIds(node: SourceTreeNode): string[] {
@@ -2025,10 +2065,14 @@ function useVirtualRows(input: {
   }, [input.enabled]);
 
   const startIndex = input.enabled
-    ? Math.max(0, Math.floor(scrollTop / input.rowHeight) - SOURCE_TREE_OVERSCAN_ROWS)
+    ? Math.max(
+        0,
+        Math.floor(scrollTop / input.rowHeight) - SOURCE_TREE_OVERSCAN_ROWS,
+      )
     : 0;
   const visibleCount = input.enabled
-    ? Math.ceil(viewportHeight / input.rowHeight) + SOURCE_TREE_OVERSCAN_ROWS * 2
+    ? Math.ceil(viewportHeight / input.rowHeight) +
+      SOURCE_TREE_OVERSCAN_ROWS * 2
     : input.rowCount;
   const endIndex = input.enabled
     ? Math.min(input.rowCount, startIndex + visibleCount)
@@ -2069,7 +2113,10 @@ function findNodePath(
   return null;
 }
 
-function subtreeContainsSource(node: SourceTreeNode, sourceId: string): boolean {
+function subtreeContainsSource(
+  node: SourceTreeNode,
+  sourceId: string,
+): boolean {
   return (
     node.source.id === sourceId ||
     node.children.some((child) => subtreeContainsSource(child, sourceId))
@@ -2237,7 +2284,8 @@ function SourceTreeRow({
   const isDirectory = source.sourceType === "directory";
   const selectionState = selectionStateById.get(source.id) ?? false;
   const managedOpen =
-    expandedDirectoryIds.has(source.id) && !userCollapsedDirectoryIds.has(source.id);
+    expandedDirectoryIds.has(source.id) &&
+    !userCollapsedDirectoryIds.has(source.id);
   const open = autoExpand || managedOpen;
 
   function handleDirectoryOpenChange(nextOpen: boolean) {
@@ -2266,11 +2314,7 @@ function SourceTreeRow({
     const noop = () => {};
     return (
       <SourceRow
-        childCount={
-          isDirectory
-            ? node.children.length
-            : undefined
-        }
+        childCount={isDirectory ? node.children.length : undefined}
         depth={depth}
         editTitle={editingTitle}
         isBusy={Boolean(rowBusyById[source.id])}
@@ -2307,7 +2351,9 @@ function SourceTreeRow({
         editTitle={editingTitle}
         isBusy={Boolean(rowBusyById[source.id])}
         isEditing={editingId === source.id}
-        leading={<CollapsibleTrigger asChild>{directoryToggle}</CollapsibleTrigger>}
+        leading={
+          <CollapsibleTrigger asChild>{directoryToggle}</CollapsibleTrigger>
+        }
         onCancelRename={onCancelRename}
         onAddSource={() => onAddSource(source.id)}
         onCreateDirectory={() => onCreateDirectory(source.id)}
@@ -2368,7 +2414,9 @@ function SourceTreeRow({
           {node.children.length === 0 ? (
             <div
               className="flex min-h-8 items-center rounded-md px-1.5 py-1 text-xs text-muted-foreground"
-              style={{ paddingLeft: `${4 + (depth + 1) * SOURCE_TREE_INDENT_PX}px` }}
+              style={{
+                paddingLeft: `${4 + (depth + 1) * SOURCE_TREE_INDENT_PX}px`,
+              }}
             >
               Empty folder
             </div>
@@ -2676,7 +2724,9 @@ function ArtifactsTab({
               <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                 <span>{new Date(artifact.createdAt).toLocaleString()}</span>
                 {artifact.completedAt ? (
-                  <span>completed {new Date(artifact.completedAt).toLocaleString()}</span>
+                  <span>
+                    completed {new Date(artifact.completedAt).toLocaleString()}
+                  </span>
                 ) : null}
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -2701,9 +2751,7 @@ function ArtifactsTab({
           type="button"
           variant="outline"
         >
-          {isLoadingMore ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : null}
+          {isLoadingMore ? <Loader2 className="size-3.5 animate-spin" /> : null}
           Load more
         </Button>
       ) : null}
@@ -2782,7 +2830,8 @@ function SourcesTab({
       }),
     [autoExpandRows, expandedDirectoryIds, tree, userCollapsedDirectoryIds],
   );
-  const shouldVirtualize = flatTreeRows.length > SOURCE_TREE_VIRTUALIZE_THRESHOLD;
+  const shouldVirtualize =
+    flatTreeRows.length > SOURCE_TREE_VIRTUALIZE_THRESHOLD;
   const virtualRows = useVirtualRows({
     enabled: shouldVirtualize,
     rowCount: flatTreeRows.length,
@@ -2961,7 +3010,8 @@ function SkillReadmeDialog({
         <DialogHeader className="border-b px-5 py-4 text-left">
           <DialogTitle>{detail?.skill.displayName ?? "Skill"}</DialogTitle>
           <DialogDescription>
-            {detail?.skill.description ?? "Review this skill before selecting it."}
+            {detail?.skill.description ??
+              "Review this skill before selecting it."}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto px-5 py-5">
@@ -3006,7 +3056,11 @@ function DirectoryPicker({
     while (changed) {
       changed = false;
       for (const source of sources) {
-        if (source.parentSourceId && ids.has(source.parentSourceId) && !ids.has(source.id)) {
+        if (
+          source.parentSourceId &&
+          ids.has(source.parentSourceId) &&
+          !ids.has(source.id)
+        ) {
           ids.add(source.id);
           changed = true;
         }
@@ -3208,7 +3262,8 @@ function AddSourceDialog({
                   value={urlTitle}
                 />
                 <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-6 text-center text-xs text-muted-foreground">
-                  SourceWeft will fetch the page content and index it for search.
+                  SourceWeft will fetch the page content and index it for
+                  search.
                 </div>
               </div>
             ) : (
@@ -3382,7 +3437,9 @@ function CreateDirectoryDialog({
       >
         <DialogHeader>
           <DialogTitle>Create folder</DialogTitle>
-          <DialogDescription>Add a folder to organize Sources.</DialogDescription>
+          <DialogDescription>
+            Add a folder to organize Sources.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <Input
@@ -3638,7 +3695,8 @@ function DeleteSourceDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            Delete {deleteSource?.sourceType === "directory" ? "folder" : "source"}?
+            Delete{" "}
+            {deleteSource?.sourceType === "directory" ? "folder" : "source"}?
           </AlertDialogTitle>
           <AlertDialogDescription>
             {deleteSource?.sourceType === "directory"
@@ -3648,7 +3706,9 @@ function DeleteSourceDialog({
         </AlertDialogHeader>
         {deleteSource ? (
           <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
-            <span className="line-clamp-2 break-words">{deleteSource.title}</span>
+            <span className="line-clamp-2 break-words">
+              {deleteSource.title}
+            </span>
           </div>
         ) : null}
         <AlertDialogFooter>
@@ -3711,9 +3771,7 @@ function DeleteSelectedSourcesDialog({
               onConfirm();
             }}
           >
-            {isDeleting ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : null}
+            {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : null}
             Delete
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -3749,7 +3807,9 @@ function DeleteWorkfileDialog({
         </AlertDialogHeader>
         {deleteWorkfile ? (
           <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
-            <span className="line-clamp-2 break-words">{deleteWorkfile.path}</span>
+            <span className="line-clamp-2 break-words">
+              {deleteWorkfile.path}
+            </span>
           </div>
         ) : null}
         <AlertDialogFooter>
@@ -4009,7 +4069,10 @@ function SkillsTab({
   disabledToolNames?: string[];
 }) {
   const q = searchQuery.trim().toLowerCase();
-  const selectedSet = useMemo(() => new Set(selectedSkillIds), [selectedSkillIds]);
+  const selectedSet = useMemo(
+    () => new Set(selectedSkillIds),
+    [selectedSkillIds],
+  );
   const disabledToolSet = useMemo(
     () => new Set(disabledToolNames),
     [disabledToolNames],
@@ -4121,7 +4184,10 @@ function getConnectorFrequencyFormState(connector: SourceConnector) {
   };
 }
 
-function connectorCatalogMatches(item: ConnectorCatalogItem, searchQuery: string) {
+function connectorCatalogMatches(
+  item: ConnectorCatalogItem,
+  searchQuery: string,
+) {
   const q = searchQuery.trim().toLowerCase();
   if (!q) return true;
   return [
@@ -4148,11 +4214,16 @@ function connectorMatchesSearch(connector: ConnectorItem, searchQuery: string) {
 }
 
 function statusTone(status: ConnectorCatalogStatusKind) {
-  if (status === "active") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-  if (status === "syncing") return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
-  if (status === "connected" || status === "available") return "border-primary/30 bg-primary/10 text-primary";
-  if (status === "needs_setup") return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-  if (status === "error") return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (status === "active")
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  if (status === "syncing")
+    return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+  if (status === "connected" || status === "available")
+    return "border-primary/30 bg-primary/10 text-primary";
+  if (status === "needs_setup")
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  if (status === "error")
+    return "border-destructive/30 bg-destructive/10 text-destructive";
   return "border-border bg-muted/50 text-muted-foreground";
 }
 
@@ -4210,7 +4281,9 @@ function compactConnectorExecutionMeta(connector: ConnectorItem) {
   return [providerName, lastSync].filter(Boolean).join(" · ");
 }
 
-function formatConnectorReadinessSummary(readiness: ConnectorReadinessState | null) {
+function formatConnectorReadinessSummary(
+  readiness: ConnectorReadinessState | null,
+) {
   if (!readiness) {
     return null;
   }
@@ -4255,11 +4328,8 @@ function getCatalogConnector(
 ) {
   if (item.connectMode !== "oauth_connector") return null;
   return (
-    connectors.find(
-      (connector) =>
-        connector.raw.connectorType === item.id &&
-        connector.status !== "disabled",
-    ) ?? null
+    connectors.find((connector) => connector.raw.connectorType === item.id) ??
+    null
   );
 }
 
@@ -4281,6 +4351,13 @@ function getOAuthConnectorStatus(input: {
 
   const connector = input.connector;
   if (connector) {
+    if (connector.status === "disabled") {
+      return {
+        kind: "needs_setup",
+        label: "Disabled",
+        detail: "Syncing is disabled. Enable this connector to resume.",
+      };
+    }
     if (connector.status === "error" || connector.raw.lastError) {
       return {
         kind: "error",
@@ -4322,7 +4399,7 @@ function getOAuthConnectorStatus(input: {
       label: "Connected",
       detail:
         input.item.postOAuthMode === "auto_create"
-          ? "OAuth is connected. Enable syncing to create the connector."
+          ? "Authorization exists without an active connector. Reconnect to create a connector."
           : "OAuth is connected. Configure this connector to enable syncing.",
     };
   }
@@ -4367,12 +4444,13 @@ function getCatalogStatus(input: {
     };
   }
   const connector = getCatalogConnector(input.item, input.connectors);
+  const hasActiveAccount = input.accounts.some(
+    (account) =>
+      account.connectorType === input.item.id && account.status === "active",
+  );
   return getOAuthConnectorStatus({
     connector,
-    hasActiveAccount: input.accounts.some(
-      (account) =>
-        account.connectorType === input.item.id && account.status === "active",
-    ),
+    hasActiveAccount: hasActiveAccount && !connector,
     isBusy: Boolean(
       input.connectorWaitingByType[input.item.id] ||
         (connector && input.connectorBusyById[connector.id]),
@@ -4499,10 +4577,7 @@ function formatConnectorActivityValue(value: unknown) {
   }
   if (typeof value === "string") {
     const date = new Date(value);
-    if (
-      /^\d{4}-\d{2}-\d{2}T/.test(value) &&
-      !Number.isNaN(date.getTime())
-    ) {
+    if (/^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(date.getTime())) {
       return date.toLocaleString();
     }
     return value;
@@ -4698,8 +4773,8 @@ function ConnectorCatalogCard({
         ? "Connecting..."
         : connector
           ? "Connected"
-          : status.kind === "connected"
-            ? "Enable"
+          : status.kind === "connected" && item.postOAuthMode !== "auto_create"
+            ? "Configure"
             : "Connect";
 
   function handleAction() {
@@ -4710,7 +4785,7 @@ function ConnectorCatalogCard({
     if (connector) {
       return;
     }
-    if (status.kind === "connected") {
+    if (status.kind === "connected" && item.postOAuthMode !== "auto_create") {
       onCreateConnector(item);
       return;
     }
@@ -4851,28 +4926,35 @@ function ActiveConnectorCard({
     connector,
     hasActiveAccount: true,
     isBusy,
-    item:
-      catalogItem ?? {
-        id: connector.raw.connectorType,
-        name: connector.raw.connectorType,
-        category: "Knowledge & Docs",
-        description: connector.meta,
-        capabilities: [],
-        connectMode: "oauth_connector",
-        postOAuthMode: "configure_required",
-        icon: Link2,
-        isIndexable: true,
-        authKind: "oauth",
-        supportsPeriodicSync: true,
-        supportsActions: false,
-        supportsWebhook: false,
-        statusKind: "coming_soon",
-      },
+    item: catalogItem ?? {
+      id: connector.raw.connectorType,
+      name: connector.raw.connectorType,
+      category: "Knowledge & Docs",
+      description: connector.meta,
+      capabilities: [],
+      connectMode: "oauth_connector",
+      postOAuthMode: "configure_required",
+      icon: Link2,
+      isIndexable: true,
+      authKind: "oauth",
+      supportsPeriodicSync: true,
+      supportsActions: false,
+      supportsWebhook: false,
+      statusKind: "coming_soon",
+    },
     readiness: connectorReadinessById[connector.id] ?? null,
     webhookConfig: catalogItem?.supportsWebhook ? webhookConfig : null,
   });
-  const pauseLabel = connector.status === "paused" ? "Resume" : "Pause";
-  const PauseIcon = connector.status === "paused" ? Play : PowerOff;
+  const statusToggleLabel =
+    connector.status === "disabled"
+      ? "Enable"
+      : connector.status === "paused"
+        ? "Resume"
+        : "Pause";
+  const StatusToggleIcon =
+    connector.status === "disabled" || connector.status === "paused"
+      ? Play
+      : PowerOff;
   const providerName = getConnectorDisplayName(connector);
 
   return (
@@ -5003,7 +5085,7 @@ function ActiveConnectorCard({
               ? `Sync paused ${providerName} manually`
               : connector.status === "disabled"
                 ? `${providerName} is disabled`
-              : `Sync ${providerName}`
+                : `Sync ${providerName}`
           }
           type="button"
           variant="outline"
@@ -5020,12 +5102,12 @@ function ActiveConnectorCard({
           disabled={isBusy}
           onClick={() => onToggleStatus(connector)}
           size="xs"
-          title={`${pauseLabel} ${providerName}`}
+          title={`${statusToggleLabel} ${providerName}`}
           type="button"
           variant="outline"
         >
-          <PauseIcon className="size-3.5" />
-          {pauseLabel}
+          <StatusToggleIcon className="size-3.5" />
+          {statusToggleLabel}
         </Button>
         <Button
           className={disabledConnectorIconButtonClass}
@@ -5086,10 +5168,13 @@ function ConnectorSettingsDialog({
   const connectorType = connector?.raw.connectorType ?? "connector";
   const catalogItem =
     connectorCatalog.find((item) => item.id === connectorType) ?? null;
-  const providerName = connector ? getConnectorDisplayName(connector) : connectorType;
+  const providerName = connector
+    ? getConnectorDisplayName(connector)
+    : connectorType;
   const isBusy = connector ? Boolean(connectorBusyById[connector.id]) : false;
   const readiness = connector
-    ? (connectorReadinessById[connector.id] ?? getConnectorReadinessFromConfig(connector.raw))
+    ? (connectorReadinessById[connector.id] ??
+      getConnectorReadinessFromConfig(connector.raw))
     : null;
   const latestActivity = activity[0] ?? null;
   const latestSuccessfulSync = activity.find(
@@ -5098,8 +5183,16 @@ function ConnectorSettingsDialog({
   const overviewStatus = connector?.raw.lastError
     ? "Needs attention"
     : (formatConnectorReadinessSummary(readiness) ?? connector?.status);
-  const pauseLabel = connector?.status === "paused" ? "Resume" : "Pause";
-  const PauseIcon = connector?.status === "paused" ? Play : PowerOff;
+  const statusToggleLabel =
+    connector?.status === "disabled"
+      ? "Enable"
+      : connector?.status === "paused"
+        ? "Resume"
+        : "Pause";
+  const StatusToggleIcon =
+    connector?.status === "disabled" || connector?.status === "paused"
+      ? Play
+      : PowerOff;
   const initialFrequencyState = connector
     ? getConnectorFrequencyFormState(connector.raw)
     : { frequencyValue: "manual", customFrequencyMinutes: "360" };
@@ -5139,13 +5232,13 @@ function ConnectorSettingsDialog({
     (frequencyValue !== "custom" || hasValidCustomFrequency);
   const settingsChanged =
     settingsName.trim() !== connector.name ||
-    (frequencyValue === "manual" &&
-      connector.raw.periodicIndexingEnabled) ||
+    (frequencyValue === "manual" && connector.raw.periodicIndexingEnabled) ||
     (frequencyValue !== "manual" &&
       (!connector.raw.periodicIndexingEnabled ||
         (frequencyValue === "custom"
           ? parsedCustomFrequency
-          : Number(frequencyValue)) !== connector.raw.indexingFrequencyMinutes));
+          : Number(frequencyValue)) !==
+          connector.raw.indexingFrequencyMinutes));
 
   function handleSaveSettings() {
     const currentConnector = connector;
@@ -5257,7 +5350,9 @@ function ConnectorSettingsDialog({
                     </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {latestSuccessfulSync
-                        ? new Date(latestSuccessfulSync.createdAt).toLocaleString()
+                        ? new Date(
+                            latestSuccessfulSync.createdAt,
+                          ).toLocaleString()
                         : "Never"}
                     </p>
                   </div>
@@ -5277,7 +5372,9 @@ function ConnectorSettingsDialog({
                     </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {connector.raw.nextScheduledAt
-                        ? new Date(connector.raw.nextScheduledAt).toLocaleString()
+                        ? new Date(
+                            connector.raw.nextScheduledAt,
+                          ).toLocaleString()
                         : "Not scheduled"}
                     </p>
                   </div>
@@ -5289,7 +5386,9 @@ function ConnectorSettingsDialog({
                 ) : null}
                 {connector.raw.lastError ? (
                   <Alert variant="destructive">
-                    <AlertDescription>{connector.raw.lastError}</AlertDescription>
+                    <AlertDescription>
+                      {connector.raw.lastError}
+                    </AlertDescription>
                   </Alert>
                 ) : null}
                 <ActivityList
@@ -5404,7 +5503,8 @@ function ConnectorSettingsDialog({
                       <div className="flex justify-between gap-3">
                         <dt>Connection</dt>
                         <dd className="truncate text-foreground">
-                          {getConnectorAccountLabel(connector) ?? "Default connection"}
+                          {getConnectorAccountLabel(connector) ??
+                            "Default connection"}
                         </dd>
                       </div>
                       <div className="flex justify-between gap-3">
@@ -5473,8 +5573,8 @@ function ConnectorSettingsDialog({
                     </div>
                     {catalogItem?.webhookSupportNote ? (
                       <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-                        {catalogItem.webhookSupportNote} Events are recorded
-                        in Webhooks and Activity.
+                        {catalogItem.webhookSupportNote} Events are recorded in
+                        Webhooks and Activity.
                       </p>
                     ) : null}
                   </div>
@@ -5533,7 +5633,7 @@ function ConnectorSettingsDialog({
                         ? `Sync paused ${providerName} manually`
                         : connector.status === "disabled"
                           ? `${providerName} is disabled`
-                        : `Sync ${providerName}`
+                          : `Sync ${providerName}`
                     }
                     type="button"
                     variant="outline"
@@ -5550,12 +5650,12 @@ function ConnectorSettingsDialog({
                     disabled={isBusy}
                     onClick={() => onToggleStatus(connector)}
                     size="sm"
-                    title={`${pauseLabel} ${providerName}`}
+                    title={`${statusToggleLabel} ${providerName}`}
                     type="button"
                     variant="outline"
                   >
-                    <PauseIcon className="size-3.5" />
-                    {pauseLabel}
+                    <StatusToggleIcon className="size-3.5" />
+                    {statusToggleLabel}
                   </Button>
                   <Button
                     className={disabledConnectorIconButtonClass}
@@ -5629,13 +5729,16 @@ function ManageConnectorsDialog({
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
   );
+  const disabledConnectors = connectors.filter(
+    (connector) => connector.status === "disabled",
+  );
   const visibleCatalog = connectorCatalog.filter((item) =>
     connectorCatalogMatches(item, searchQuery),
   );
-  const visibleActiveConnectors = activeConnectors.filter((connector) =>
+  const visibleManagedConnectors = connectors.filter((connector) =>
     connectorMatchesSearch(connector, searchQuery),
   );
-  const filterLabel = tab === "active" ? "Active only" : "All connectors";
+  const filterLabel = tab === "active" ? "Managed" : "All connectors";
 
   useEffect(() => {
     if (open) {
@@ -5662,6 +5765,14 @@ function ManageConnectorsDialog({
                 >
                   {activeConnectors.length} active
                 </Badge>
+                {disabledConnectors.length > 0 ? (
+                  <Badge
+                    className="h-5 shrink-0 px-1.5 text-[10px]"
+                    variant="outline"
+                  >
+                    {disabledConnectors.length} disabled
+                  </Badge>
+                ) : null}
               </div>
               <DialogDescription className="mt-1 max-w-[680px] text-xs leading-5 sm:text-sm">
                 Connect SourceWeft to knowledge, project, and communication
@@ -5686,10 +5797,7 @@ function ManageConnectorsDialog({
                 <DropdownMenuContent align="start" className="w-48">
                   <DropdownMenuItem onSelect={() => setTab("all")}>
                     <CheckCircle2
-                      className={cn(
-                        "size-3.5",
-                        tab !== "all" && "opacity-0",
-                      )}
+                      className={cn("size-3.5", tab !== "all" && "opacity-0")}
                     />
                     All connectors
                   </DropdownMenuItem>
@@ -5700,7 +5808,7 @@ function ManageConnectorsDialog({
                         tab !== "active" && "opacity-0",
                       )}
                     />
-                    Active only
+                    Managed
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -5806,8 +5914,8 @@ function ManageConnectorsDialog({
                 </div>
               ) : (
                 <div className="mt-0 space-y-3">
-                  {visibleActiveConnectors.length > 0 ? (
-                    visibleActiveConnectors.map((connector) => (
+                  {visibleManagedConnectors.length > 0 ? (
+                    visibleManagedConnectors.map((connector) => (
                       <ActiveConnectorCard
                         connector={connector}
                         connectorBusyById={connectorBusyById}
@@ -5819,9 +5927,7 @@ function ManageConnectorsDialog({
                         onOpenSettings={onOpenSettings}
                         onSyncConnector={onSyncConnector}
                         onToggleStatus={onToggleConnectorStatus}
-                        webhookConfig={
-                          webhookConfigsById[connector.id] ?? null
-                        }
+                        webhookConfig={webhookConfigsById[connector.id] ?? null}
                         webhookEvents={
                           webhookEventsByConnectorId[connector.id] ?? []
                         }
@@ -5837,8 +5943,8 @@ function ManageConnectorsDialog({
                       icon={Link2}
                       title={
                         searchQuery
-                          ? `No active connectors match "${searchQuery}"`
-                          : "No active connectors yet."
+                          ? `No connectors match "${searchQuery}"`
+                          : "No connectors yet."
                       }
                     />
                   )}
@@ -5881,16 +5987,17 @@ function ConnectorsTab({
   const errorConnectors = activeConnectors.filter(
     (connector) => connector.status === "error" || connector.raw.lastError,
   );
-  const needsWebhookSetup =
-    activeConnectors.some((connector) => {
-      const catalogItem = connectorCatalog.find(
-        (item) => item.id === connector.raw.connectorType,
-      );
-      const webhookConfig = webhookConfigsById[connector.id] ?? null;
-      return Boolean(
-        catalogItem?.supportsWebhook && webhookConfig && !webhookConfig.isConfigured,
-      );
-    });
+  const needsWebhookSetup = activeConnectors.some((connector) => {
+    const catalogItem = connectorCatalog.find(
+      (item) => item.id === connector.raw.connectorType,
+    );
+    const webhookConfig = webhookConfigsById[connector.id] ?? null;
+    return Boolean(
+      catalogItem?.supportsWebhook &&
+        webhookConfig &&
+        !webhookConfig.isConfigured,
+    );
+  });
 
   return (
     <section className="space-y-2">
@@ -5993,10 +6100,7 @@ function ConnectorsTab({
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
                     <Button
-                      className={cn(
-                        "size-7",
-                        disabledConnectorIconButtonClass,
-                      )}
+                      className={cn("size-7", disabledConnectorIconButtonClass)}
                       disabled={connector.status === "disabled" || isBusy}
                       onClick={() => onSyncConnector(connector)}
                       size="icon-xs"
@@ -6005,7 +6109,7 @@ function ConnectorsTab({
                           ? `Sync paused ${providerName} manually`
                           : connector.status === "disabled"
                             ? `${providerName} is disabled`
-                          : `Sync ${providerName}`
+                            : `Sync ${providerName}`
                       }
                       type="button"
                       variant="ghost"
@@ -6026,15 +6130,10 @@ function ConnectorsTab({
                       variant="ghost"
                     >
                       <Settings2 className="size-3.5" />
-                      <span className="sr-only">
-                        Configure {providerName}
-                      </span>
+                      <span className="sr-only">Configure {providerName}</span>
                     </Button>
                     <Button
-                      className={cn(
-                        "size-7",
-                        disabledConnectorIconButtonClass,
-                      )}
+                      className={cn("size-7", disabledConnectorIconButtonClass)}
                       disabled={isBusy}
                       onClick={() => onToggleConnectorStatus(connector)}
                       size="icon-xs"
@@ -6125,10 +6224,12 @@ function CitationsTab({
 
       {mode === "thread" ? (
         <div className="mb-2 grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
-          {([
-            ["current", `Current (${currentCitationItems.length})`],
-            ["thread", `Thread (${threadCitationItems.length})`],
-          ] as const).map(([scope, label]) => (
+          {(
+            [
+              ["current", `Current (${currentCitationItems.length})`],
+              ["thread", `Thread (${threadCitationItems.length})`],
+            ] as const
+          ).map(([scope, label]) => (
             <button
               className={cn(
                 "rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
@@ -6175,7 +6276,8 @@ function CitationsTab({
                 className={cn(
                   "rounded-xl border bg-background p-3 shadow-xs transition-colors",
                   isActive && "border-primary/45 bg-primary/5 shadow-sm",
-                  canLocate && "cursor-pointer hover:border-primary/30 hover:bg-primary/5",
+                  canLocate &&
+                    "cursor-pointer hover:border-primary/30 hover:bg-primary/5",
                 )}
                 key={citation.id}
                 onClick={() => {
@@ -6230,11 +6332,12 @@ function filterCitations(items: DisplayCitationItem[], searchQuery: string) {
   if (!q) {
     return items;
   }
-  return items.filter((citation) =>
-    citation.sourceTitle.toLowerCase().includes(q) ||
-    citation.messageLabel.toLowerCase().includes(q) ||
-    citation.excerpt.toLowerCase().includes(q) ||
-    citation.citationRecord.citation.toLowerCase().includes(q),
+  return items.filter(
+    (citation) =>
+      citation.sourceTitle.toLowerCase().includes(q) ||
+      citation.messageLabel.toLowerCase().includes(q) ||
+      citation.excerpt.toLowerCase().includes(q) ||
+      citation.citationRecord.citation.toLowerCase().includes(q),
   );
 }
 
@@ -6258,7 +6361,11 @@ function countSelectedSourceCoverage(
     const selected = selectedSet.has(node.source.id);
     const covered = coveredByAncestor || selected;
 
-    if (covered && isSelectableSource(node.source) && !countedIds.has(node.source.id)) {
+    if (
+      covered &&
+      isSelectableSource(node.source) &&
+      !countedIds.has(node.source.id)
+    ) {
       countedIds.add(node.source.id);
       count += 1;
     }
@@ -6279,12 +6386,13 @@ function countFilteredSkills(items: HubSkillItem[], searchQuery: string) {
   if (!q) {
     return items.length;
   }
-  return items.filter((skill) =>
-    skill.displayName.toLowerCase().includes(q) ||
-    skill.description.toLowerCase().includes(q) ||
-    skill.name.toLowerCase().includes(q) ||
-    skill.slug.toLowerCase().includes(q) ||
-    skillSourceLabel(skill.sourceType).toLowerCase().includes(q),
+  return items.filter(
+    (skill) =>
+      skill.displayName.toLowerCase().includes(q) ||
+      skill.description.toLowerCase().includes(q) ||
+      skill.name.toLowerCase().includes(q) ||
+      skill.slug.toLowerCase().includes(q) ||
+      skillSourceLabel(skill.sourceType).toLowerCase().includes(q),
   ).length;
 }
 
@@ -6334,7 +6442,10 @@ export function SourcesHub({
   citations?: CitationRecord[];
   currentCitationMessageId?: string | null;
   mode: "thread" | "new";
-  onCitationOpen?: (citation: CitationRecord, context?: CitationOpenContext) => void;
+  onCitationOpen?: (
+    citation: CitationRecord,
+    context?: CitationOpenContext,
+  ) => void;
   onCitationLocate?: (messageId: string) => void;
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
@@ -6375,19 +6486,29 @@ export function SourcesHub({
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
   const [isLoadingWorkfiles, setIsLoadingWorkfiles] = useState(false);
-  const [workfilesLoadingError, setWorkfilesLoadingError] = useState<string | null>(null);
+  const [workfilesLoadingError, setWorkfilesLoadingError] = useState<
+    string | null
+  >(null);
   const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
   const [isLoadingMoreArtifacts, setIsLoadingMoreArtifacts] = useState(false);
-  const [artifactsLoadingError, setArtifactsLoadingError] = useState<string | null>(null);
-  const [artifactsNextCursor, setArtifactsNextCursor] = useState<string | null>(null);
+  const [artifactsLoadingError, setArtifactsLoadingError] = useState<
+    string | null
+  >(null);
+  const [artifactsNextCursor, setArtifactsNextCursor] = useState<string | null>(
+    null,
+  );
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
   >([]);
   const [isLoadingConnectors, setIsLoadingConnectors] = useState(false);
-  const [connectorsLoadingError, setConnectorsLoadingError] = useState<string | null>(null);
-  const [connectorBusyById, setConnectorBusyById] = useState<Record<string, boolean>>({});
+  const [connectorsLoadingError, setConnectorsLoadingError] = useState<
+    string | null
+  >(null);
+  const [connectorBusyById, setConnectorBusyById] = useState<
+    Record<string, boolean>
+  >({});
   const [connectorWaitingByType, setConnectorWaitingByType] = useState<
     Record<string, boolean>
   >({});
@@ -6399,7 +6520,7 @@ export function SourcesHub({
   >({});
   const [pendingDisconnectConnector, setPendingDisconnectConnector] =
     useState<ConnectorItem | null>(null);
-  const [removeConnectorPurgeIndexedContent, setRemoveConnectorPurgeIndexedContent] =
+  const [disconnectConnectorHardDelete, setDisconnectConnectorHardDelete] =
     useState(false);
   const [connectorWebhookEventsById, setConnectorWebhookEventsById] = useState<
     Record<string, ConnectorWebhookEventItem[]>
@@ -6411,13 +6532,21 @@ export function SourcesHub({
   const [connectorSettingsActivity, setConnectorSettingsActivity] = useState<
     ConnectorActivityItem[]
   >([]);
-  const [isLoadingConnectorSettingsActivity, setIsLoadingConnectorSettingsActivity] =
-    useState(false);
+  const [
+    isLoadingConnectorSettingsActivity,
+    setIsLoadingConnectorSettingsActivity,
+  ] = useState(false);
   const [connectorSettingsActivityError, setConnectorSettingsActivityError] =
     useState<string | null>(null);
-  const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(null);
-  const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(null);
-  const [workfileBusyByPath, setWorkfileBusyByPath] = useState<Record<string, boolean>>({});
+  const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(
+    null,
+  );
+  const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(
+    null,
+  );
+  const [workfileBusyByPath, setWorkfileBusyByPath] = useState<
+    Record<string, boolean>
+  >({});
   const currentCitationItems = useMemo(
     () => mapCitationsToUi(citations),
     [citations],
@@ -6468,11 +6597,15 @@ export function SourcesHub({
   const [isCreateDirectoryOpen, setIsCreateDirectoryOpen] = useState(false);
   const [directoryTitle, setDirectoryTitle] = useState("");
   const [directoryContext, setDirectoryContext] = useState("");
-  const [directoryParentSourceId, setDirectoryParentSourceId] = useState<string | null>(null);
+  const [directoryParentSourceId, setDirectoryParentSourceId] = useState<
+    string | null
+  >(null);
   const [readmeSource, setReadmeSource] = useState<SourceItem | null>(null);
   const [readmeContent, setReadmeContent] = useState("");
   const [moveSource, setMoveSource] = useState<SourceItem | null>(null);
-  const [moveParentSourceId, setMoveParentSourceId] = useState<string | null>(null);
+  const [moveParentSourceId, setMoveParentSourceId] = useState<string | null>(
+    null,
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
   const loadedSourcesWorkspaceIdRef = useRef<string | null>(null);
@@ -6483,7 +6616,9 @@ export function SourcesHub({
   const manualConnectorSyncSourcesRef = useRef<
     Map<string, { knownSourceIds: Set<string> }>
   >(new Map());
-  const activeSyncRunsRef = useRef<Map<string, ActiveConnectorSyncRun>>(new Map());
+  const activeSyncRunsRef = useRef<Map<string, ActiveConnectorSyncRun>>(
+    new Map(),
+  );
 
   const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([]);
   const [activeSyncRunTick, setActiveSyncRunTick] = useState(0);
@@ -6492,21 +6627,32 @@ export function SourcesHub({
   const [editingTitle, setEditingTitle] = useState("");
   const [rowBusyById, setRowBusyById] = useState<Record<string, boolean>>({});
   const [previewSource, setPreviewSource] = useState<SourceItem | null>(null);
-  const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<string | null>(null);
+  const [previewSkillCatalogId, setPreviewSkillCatalogId] = useState<
+    string | null
+  >(null);
   const [isSkillsGalleryOpen, setIsSkillsGalleryOpen] = useState(false);
   const [deleteSource, setDeleteSource] = useState<SourceItem | null>(null);
-  const [deleteSelectedSourcesOpen, setDeleteSelectedSourcesOpen] = useState(false);
-  const [isDeletingSelectedSources, setIsDeletingSelectedSources] = useState(false);
+  const [deleteSelectedSourcesOpen, setDeleteSelectedSourcesOpen] =
+    useState(false);
+  const [isDeletingSelectedSources, setIsDeletingSelectedSources] =
+    useState(false);
   const [expandedDirectoryIds, setExpandedDirectoryIds] = useState<Set<string>>(
     () => readStoredSourceTreeExpansion(workspaceId).expandedDirectoryIds,
   );
-  const [userCollapsedDirectoryIds, setUserCollapsedDirectoryIds] = useState<Set<string>>(
-    () => readStoredSourceTreeExpansion(workspaceId).userCollapsedDirectoryIds,
-  );
+  const [userCollapsedDirectoryIds, setUserCollapsedDirectoryIds] = useState<
+    Set<string>
+  >(() => readStoredSourceTreeExpansion(workspaceId).userCollapsedDirectoryIds);
   const expandedDirectoryIdsRef = useRef<Set<string>>(expandedDirectoryIds);
-  const userCollapsedDirectoryIdsRef = useRef<Set<string>>(userCollapsedDirectoryIds);
-  const expansionWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
-  const sourceTreeIndex = useMemo(() => buildSourceTreeIndex(sources), [sources]);
+  const userCollapsedDirectoryIdsRef = useRef<Set<string>>(
+    userCollapsedDirectoryIds,
+  );
+  const expansionWorkspaceIdRef = useRef<string | null | undefined>(
+    workspaceId,
+  );
+  const sourceTreeIndex = useMemo(
+    () => buildSourceTreeIndex(sources),
+    [sources],
+  );
   const fullSourceTree = useMemo(
     () => buildSourceTreeFromIndex(sourceTreeIndex, ""),
     [sourceTreeIndex],
@@ -6526,7 +6672,9 @@ export function SourcesHub({
     [fullSourceTree, selectedIds],
   );
   const selectedSourceIdsForBulkDelete = useMemo(() => {
-    const selectedSet = new Set(selectedLibrarySources.map((source) => source.id));
+    const selectedSet = new Set(
+      selectedLibrarySources.map((source) => source.id),
+    );
     const coveredByAncestor = new Set<string>();
     const visit = (node: SourceTreeNode, ancestorSelected: boolean) => {
       const isSelected = selectedSet.has(node.source.id);
@@ -6591,7 +6739,9 @@ export function SourcesHub({
         return;
       }
 
-      const availableSourceIds = new Set(nextSources.map((source) => source.id));
+      const availableSourceIds = new Set(
+        nextSources.map((source) => source.id),
+      );
       const sourceIdsToAdd = Array.from(
         pendingAutoSelectSourceIdsRef.current,
       ).filter((sourceId) => availableSourceIds.has(sourceId));
@@ -6650,7 +6800,10 @@ export function SourcesHub({
       let nextSelectedIds = currentSelectedIds;
       let changed = false;
 
-      for (const [connectorId, tracked] of manualConnectorSyncSourcesRef.current) {
+      for (const [
+        connectorId,
+        tracked,
+      ] of manualConnectorSyncSourcesRef.current) {
         const connectorSources = nextSources.filter(
           (source) => source.connectorId === connectorId,
         );
@@ -6675,7 +6828,10 @@ export function SourcesHub({
         }
       }
 
-      if (changed && !areStringArraysEqual(nextSelectedIds, currentSelectedIds)) {
+      if (
+        changed &&
+        !areStringArraysEqual(nextSelectedIds, currentSelectedIds)
+      ) {
         selectedIdsRef.current = nextSelectedIds;
         onSelectionChange(nextSelectedIds);
       }
@@ -6685,7 +6841,9 @@ export function SourcesHub({
           (source) => source.id,
         ),
       );
-      for (const sourceId of Array.from(pendingAutoSelectSourceIdsRef.current)) {
+      for (const sourceId of Array.from(
+        pendingAutoSelectSourceIdsRef.current,
+      )) {
         if (selectedSourceIds.has(sourceId)) {
           pendingAutoSelectSourceIdsRef.current.delete(sourceId);
         }
@@ -6695,13 +6853,18 @@ export function SourcesHub({
   );
 
   const trackConnectorSyncRun = useCallback(
-    (run: {
-      id: string;
-      connectorId: string;
-      discoveredCount: number;
-      indexedCount: number;
-      failedCount: number;
-    } | null | undefined) => {
+    (
+      run:
+        | {
+            id: string;
+            connectorId: string;
+            discoveredCount: number;
+            indexedCount: number;
+            failedCount: number;
+          }
+        | null
+        | undefined,
+    ) => {
       if (!run) {
         return;
       }
@@ -6933,7 +7096,10 @@ export function SourcesHub({
     setIsLoadingWorkfiles(true);
     setWorkfilesLoadingError(null);
     try {
-      const result = await contentClient.listWorkingFiles(workspaceId, threadId);
+      const result = await contentClient.listWorkingFiles(
+        workspaceId,
+        threadId,
+      );
       setWorkfiles(result.items);
       threadWorkfilesCache.set(
         getThreadWorkfilesCacheKey(workspaceId, threadId),
@@ -6941,7 +7107,9 @@ export function SourcesHub({
       );
     } catch (error) {
       setWorkfiles([]);
-      setWorkfilesLoadingError(getErrorMessage(error, "Failed to load workfiles."));
+      setWorkfilesLoadingError(
+        getErrorMessage(error, "Failed to load workfiles."),
+      );
     } finally {
       setIsLoadingWorkfiles(false);
     }
@@ -7007,12 +7175,17 @@ export function SourcesHub({
       }
 
       setArtifacts((current) => {
-        const mergedById = new Map(current.map((artifact) => [artifact.id, artifact]));
+        const mergedById = new Map(
+          current.map((artifact) => [artifact.id, artifact]),
+        );
         for (const artifact of result.items) {
           mergedById.set(artifact.id, artifact);
         }
         const merged = Array.from(mergedById.values());
-        workspaceArtifactsCache.set(activeWorkspaceId, cloneArtifactItems(merged));
+        workspaceArtifactsCache.set(
+          activeWorkspaceId,
+          cloneArtifactItems(merged),
+        );
         return merged;
       });
       setArtifactsNextCursor(result.nextCursor ?? null);
@@ -7045,7 +7218,7 @@ export function SourcesHub({
     setConnectorsLoadingError(null);
     try {
       const [result, accounts] = await Promise.all([
-        connectorsClient.list(workspaceId),
+        connectorsClient.list(workspaceId, { includeDisabled: true }),
         connectorsClient.listAccounts(workspaceId),
       ]);
       const uiConnectors = result.items.map(mapConnectorToUi);
@@ -7091,9 +7264,7 @@ export function SourcesHub({
           return {
             connectorId: connector.id,
             webhookConfig:
-              webhookConfig.status === "fulfilled"
-                ? webhookConfig.value
-                : null,
+              webhookConfig.status === "fulfilled" ? webhookConfig.value : null,
             webhookEvents:
               webhookEvents.status === "fulfilled"
                 ? webhookEvents.value.items
@@ -7110,7 +7281,8 @@ export function SourcesHub({
         }
         nextWebhookConfigs[result.value.connectorId] =
           result.value.webhookConfig;
-        nextWebhookEvents[result.value.connectorId] = result.value.webhookEvents;
+        nextWebhookEvents[result.value.connectorId] =
+          result.value.webhookEvents;
       }
       setConnectorWebhookConfigsById(nextWebhookConfigs);
       setConnectorWebhookEventsById(nextWebhookEvents);
@@ -7128,10 +7300,7 @@ export function SourcesHub({
   }, [workspaceId]);
 
   const refreshConnectorSettingsActivity = useCallback(
-    async (
-      connectorId?: string | null,
-      options: { silent?: boolean } = {},
-    ) => {
+    async (connectorId?: string | null, options: { silent?: boolean } = {}) => {
       if (!workspaceId || !connectorId) {
         setConnectorSettingsActivity([]);
         setConnectorSettingsActivityError(null);
@@ -7187,7 +7356,8 @@ export function SourcesHub({
     const storedExpansion = readStoredSourceTreeExpansion(workspaceId);
     expansionWorkspaceIdRef.current = workspaceId;
     expandedDirectoryIdsRef.current = storedExpansion.expandedDirectoryIds;
-    userCollapsedDirectoryIdsRef.current = storedExpansion.userCollapsedDirectoryIds;
+    userCollapsedDirectoryIdsRef.current =
+      storedExpansion.userCollapsedDirectoryIds;
     setExpandedDirectoryIds(storedExpansion.expandedDirectoryIds);
     setUserCollapsedDirectoryIds(storedExpansion.userCollapsedDirectoryIds);
 
@@ -7366,9 +7536,12 @@ export function SourcesHub({
     let cancelled = false;
     async function pollActiveSyncRuns() {
       try {
-        const result = await connectorsClient.listWorkspaceSyncRuns(activeWorkspaceId, {
-          status: "active",
-        });
+        const result = await connectorsClient.listWorkspaceSyncRuns(
+          activeWorkspaceId,
+          {
+            status: "active",
+          },
+        );
         if (cancelled) {
           return;
         }
@@ -7405,7 +7578,9 @@ export function SourcesHub({
             continue;
           }
 
-          const updatedAfter = getIncrementalUpdatedAfter(tracked.lastSourceUpdatedAt);
+          const updatedAfter = getIncrementalUpdatedAfter(
+            tracked.lastSourceUpdatedAt,
+          );
           incrementalRequests.push(
             contentClient
               .listSources(activeWorkspaceId, {
@@ -7434,8 +7609,12 @@ export function SourcesHub({
           );
         }
 
-        const completedRuns = Array.from(activeSyncRunsRef.current.entries())
-          .filter(([runId, tracked]) => !activeRunIds.has(runId) && !tracked.hasFinalRefreshed);
+        const completedRuns = Array.from(
+          activeSyncRunsRef.current.entries(),
+        ).filter(
+          ([runId, tracked]) =>
+            !activeRunIds.has(runId) && !tracked.hasFinalRefreshed,
+        );
 
         if (incrementalRequests.length > 0) {
           const batches = await Promise.all(incrementalRequests);
@@ -7448,12 +7627,16 @@ export function SourcesHub({
           const completedConnectorIds = new Set(
             completedRuns
               .map(([, tracked]) => tracked.connectorId)
-              .filter((connectorId): connectorId is string => Boolean(connectorId)),
+              .filter((connectorId): connectorId is string =>
+                Boolean(connectorId),
+              ),
           );
           const activeConnectorIds = new Set(
             result.items
               .map((run) => run.connectorId)
-              .filter((connectorId): connectorId is string => Boolean(connectorId)),
+              .filter((connectorId): connectorId is string =>
+                Boolean(connectorId),
+              ),
           );
           const finalRefreshes = Array.from(completedConnectorIds)
             .filter((connectorId) => !activeConnectorIds.has(connectorId))
@@ -7509,7 +7692,9 @@ export function SourcesHub({
   ]);
 
   useEffect(() => {
-    const syncingIds = sources.filter(isSyncingSource).map((source) => source.id);
+    const syncingIds = sources
+      .filter(isSyncingSource)
+      .map((source) => source.id);
     if (syncingIds.length === 0) {
       return;
     }
@@ -7705,17 +7890,22 @@ export function SourcesHub({
         return null;
       }
 
+      if (!accountId) {
+        if (!options.silentMissingAccount) {
+          toast.error(`Reconnect ${item.name} before creating a connector.`);
+        }
+        return null;
+      }
+
       setConnectorWaiting(item.id, true);
       try {
         const accounts = await connectorsClient.listAccounts(workspaceId, {
           connectorType: item.id,
         });
-        const account =
-          accounts.items.find((item) => item.id === accountId) ??
-          accounts.items.find((item) => item.status === "active");
+        const account = accounts.items.find((item) => item.id === accountId);
         if (!account) {
           if (!options.silentMissingAccount) {
-            toast.error(`Connect ${item.name} before creating a connector.`);
+            toast.error(`Reconnect ${item.name} before creating a connector.`);
           }
           return null;
         }
@@ -7726,19 +7916,16 @@ export function SourcesHub({
           return null;
         }
 
-        const created = await connectorsClient.create(
-          workspaceId,
-          {
-            connectorType: "notion",
-            name: account.displayName || "Notion",
-            oauthAccountId: account.id,
-            configJson: {
-              includePages: true,
-            },
-            periodicIndexingEnabled: true,
-            indexingFrequencyMinutes: 360,
+        const created = await connectorsClient.create(workspaceId, {
+          connectorType: "notion",
+          name: account.displayName || "Notion",
+          oauthAccountId: account.id,
+          configJson: {
+            includePages: true,
           },
-        );
+          periodicIndexingEnabled: true,
+          indexingFrequencyMinutes: 360,
+        });
         const syncResult = await connectorsClient.sync(
           workspaceId,
           created.connector.id,
@@ -7753,7 +7940,9 @@ export function SourcesHub({
           );
           toast.info(syncResult.message ?? `${item.name} connected.`);
         } else if (syncResult.alreadyRunning) {
-          toast.info(syncResult.message ?? `${item.name} sync is already running.`);
+          toast.info(
+            syncResult.message ?? `${item.name} sync is already running.`,
+          );
         } else {
           clearConnectorReadiness(created.connector.id);
           toast.success(`${item.name} connector enabled. Initial sync queued.`);
@@ -7761,9 +7950,18 @@ export function SourcesHub({
         await refreshConnectors();
         return mapConnectorToUi(created.connector);
       } catch (error) {
-        toast.error(
-          getErrorMessage(error, `Failed to enable ${item.name} connector.`),
-        );
+        if (
+          error instanceof HttpClientError &&
+          error.code === "CONNECTOR_DISABLED_CONFLICT"
+        ) {
+          toast.error(
+            "A disabled connector with this name already exists. Enable it or delete it before reconnecting.",
+          );
+        } else {
+          toast.error(
+            getErrorMessage(error, `Failed to enable ${item.name} connector.`),
+          );
+        }
         return null;
       } finally {
         setConnectorWaiting(item.id, false);
@@ -7780,18 +7978,26 @@ export function SourcesHub({
     ],
   );
 
-  const handleCreateConnector = useCallback(async (item: ConnectorCatalogItem) => {
-    if (!workspaceId) {
-      toast.error("No workspace selected yet.");
-      return;
-    }
-    const account = connectorAccounts.find(
-      (candidate) =>
-        candidate.connectorType === item.id && candidate.status === "active",
-    );
-    await ensureConnector(item, account?.id);
-    openManageConnectors("all");
-  }, [connectorAccounts, ensureConnector, openManageConnectors, workspaceId]);
+  const handleCreateConnector = useCallback(
+    async (item: ConnectorCatalogItem) => {
+      if (!workspaceId) {
+        toast.error("No workspace selected yet.");
+        return;
+      }
+      if (item.postOAuthMode === "auto_create") {
+        handleConnectConnector(item);
+        return;
+      }
+      await ensureConnector(item);
+      openManageConnectors("all");
+    },
+    [
+      ensureConnector,
+      handleConnectConnector,
+      openManageConnectors,
+      workspaceId,
+    ],
+  );
 
   const handleConnectorOAuthCompletion = useCallback(
     (message: ConnectorOAuthCompletionMessage) => {
@@ -7876,12 +8082,19 @@ export function SourcesHub({
           setConnectorWaiting(connectorType, false);
           continue;
         }
+        const waitingStartedAt =
+          connectorWaitingStartedAtRef.current[connectorType];
+        if (!waitingStartedAt) {
+          continue;
+        }
 
         void connectorsClient
           .listAccounts(activeWorkspaceId, { connectorType })
           .then(async (accounts) => {
             const account = accounts.items.find(
-              (candidate) => candidate.status === "active",
+              (candidate) =>
+                candidate.status === "active" &&
+                Date.parse(candidate.createdAt) >= waitingStartedAt,
             );
             if (!account) return;
             if (item.postOAuthMode === "auto_create") {
@@ -7903,12 +8116,7 @@ export function SourcesHub({
     const timer = window.setInterval(pollWaitingConnectors, 2500);
 
     return () => window.clearInterval(timer);
-  }, [
-    connectorWaitingByType,
-    ensureConnector,
-    refreshConnectors,
-    workspaceId,
-  ]);
+  }, [connectorWaitingByType, ensureConnector, refreshConnectors, workspaceId]);
 
   const handleRequestConnector = useCallback((item: ConnectorCatalogItem) => {
     toast.info(`${item.name} is on the roadmap.`);
@@ -7976,16 +8184,21 @@ export function SourcesHub({
   const handleToggleConnectorStatus = useCallback(
     async (connector: ConnectorItem) => {
       if (!workspaceId) return;
-      const nextStatus = connector.status === "paused" ? "active" : "paused";
+      const nextStatus =
+        connector.status === "paused" || connector.status === "disabled"
+          ? "active"
+          : "paused";
       setConnectorBusy(connector.id, true);
       try {
         await connectorsClient.update(workspaceId, connector.id, {
           status: nextStatus,
         });
         toast.success(
-          nextStatus === "active"
-            ? "Connector resumed."
-            : "Connector paused.",
+          connector.status === "disabled"
+            ? "Connector enabled."
+            : nextStatus === "active"
+              ? "Connector resumed."
+              : "Connector paused.",
         );
         await refreshConnectors();
         if (connectorSettingsConnectorId === connector.id) {
@@ -8025,7 +8238,9 @@ export function SourcesHub({
           await refreshConnectorSettingsActivity(connector.id);
         }
       } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to save connector settings."));
+        toast.error(
+          getErrorMessage(error, "Failed to save connector settings."),
+        );
       } finally {
         setConnectorBusy(connector.id, false);
       }
@@ -8044,32 +8259,42 @@ export function SourcesHub({
     setConnectorBusy(connector.id, true);
     try {
       const result = await connectorsClient.delete(workspaceId, connector.id, {
-        purgeIndexedContent: removeConnectorPurgeIndexedContent,
+        disable: !disconnectConnectorHardDelete,
       });
       toast.success(
-        result.indexedContentDeleted
-          ? "Connector removed. Indexed content deleted."
-          : "Connector removed. Indexed content was kept.",
+        result.hardDeleted
+          ? "Connector, authorization, and indexed content deleted."
+          : "Connector disabled. You can enable it again later.",
       );
-      if (result.providerRevokeWarning) {
-        toast.warning(result.providerRevokeWarning);
-      }
       setPendingDisconnectConnector(null);
-      setRemoveConnectorPurgeIndexedContent(false);
+      setDisconnectConnectorHardDelete(false);
       if (connectorSettingsConnectorId === connector.id) {
         setConnectorSettingsConnectorId(null);
       }
+      if (result.hardDeleted) {
+        await refreshSources();
+      }
       await refreshConnectors();
     } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to remove connector."));
+      if (
+        error instanceof HttpClientError &&
+        error.code === "CONNECTOR_OAUTH_ACCOUNT_IN_USE"
+      ) {
+        toast.error(
+          "This authorization is attached to another connector and cannot be deleted safely.",
+        );
+      } else {
+        toast.error(getErrorMessage(error, "Failed to remove connector."));
+      }
     } finally {
       setConnectorBusy(connector.id, false);
     }
   }, [
     connectorSettingsConnectorId,
+    disconnectConnectorHardDelete,
     pendingDisconnectConnector,
     refreshConnectors,
-    removeConnectorPurgeIndexedContent,
+    refreshSources,
     workspaceId,
   ]);
 
@@ -8130,7 +8355,13 @@ export function SourcesHub({
         setRowBusy(source.id, false);
       }
     },
-    [workspaceId, fullSourceTree, refreshSources, onSelectionChange, selectedIds],
+    [
+      workspaceId,
+      fullSourceTree,
+      refreshSources,
+      onSelectionChange,
+      selectedIds,
+    ],
   );
 
   const handleConfirmDeleteSelectedSources = useCallback(async () => {
@@ -8231,31 +8462,40 @@ export function SourcesHub({
     setPreviewSource(source);
   }, []);
 
-  const handlePreviewArtifact = useCallback((artifact: ArtifactListItem) => {
-    onArtifactOpen?.(artifact);
-  }, [onArtifactOpen]);
+  const handlePreviewArtifact = useCallback(
+    (artifact: ArtifactListItem) => {
+      onArtifactOpen?.(artifact);
+    },
+    [onArtifactOpen],
+  );
 
-  const handleOpenReadmeDialog = useCallback(async (source: SourceItem) => {
-    if (source.sourceType !== "directory") return;
-    setReadmeSource(source);
-    setReadmeContent(source.contentText);
+  const handleOpenReadmeDialog = useCallback(
+    async (source: SourceItem) => {
+      if (source.sourceType !== "directory") return;
+      setReadmeSource(source);
+      setReadmeContent(source.contentText);
 
-    if (!workspaceId) return;
+      if (!workspaceId) return;
 
-    try {
-      const detail = await contentClient.getSource(workspaceId, source.id);
-      setReadmeContent(detail.source.contentText);
-    } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to load README content."));
-    }
-  }, [workspaceId]);
+      try {
+        const detail = await contentClient.getSource(workspaceId, source.id);
+        setReadmeContent(detail.source.contentText);
+      } catch (error) {
+        toast.error(getErrorMessage(error, "Failed to load README content."));
+      }
+    },
+    [workspaceId],
+  );
 
-  const handleOpenCreateDirectory = useCallback((parentSourceId: string | null = null) => {
-    setDirectoryParentSourceId(parentSourceId);
-    setDirectoryTitle("");
-    setDirectoryContext("");
-    setIsCreateDirectoryOpen(true);
-  }, []);
+  const handleOpenCreateDirectory = useCallback(
+    (parentSourceId: string | null = null) => {
+      setDirectoryParentSourceId(parentSourceId);
+      setDirectoryTitle("");
+      setDirectoryContext("");
+      setIsCreateDirectoryOpen(true);
+    },
+    [],
+  );
 
   const handleCreateDirectory = useCallback(async () => {
     if (!workspaceId) return;
@@ -8276,7 +8516,9 @@ export function SourcesHub({
       if (directoryContext.trim()) {
         await contentClient.indexSource(workspaceId, created.source.id, {});
         setPendingSourceIds((prev) =>
-          prev.includes(created.source.id) ? prev : [...prev, created.source.id],
+          prev.includes(created.source.id)
+            ? prev
+            : [...prev, created.source.id],
         );
       }
       selectNewSourceIds([created.source.id]);
@@ -8404,7 +8646,13 @@ export function SourcesHub({
     } finally {
       setWorkfileBusy(deleteWorkfile.path, false);
     }
-  }, [deleteWorkfile, previewWorkfile?.path, refreshWorkfiles, threadId, workspaceId]);
+  }, [
+    deleteWorkfile,
+    previewWorkfile?.path,
+    refreshWorkfiles,
+    threadId,
+    workspaceId,
+  ]);
 
   const handleCreateTextSource = useCallback(async () => {
     if (!workspaceId) {
@@ -8500,7 +8748,9 @@ export function SourcesHub({
         });
         createdSourceIds.push(result.source.id);
         processed += 1;
-        addSourceDialog.setUploadProgress(Math.round((processed / total) * 100));
+        addSourceDialog.setUploadProgress(
+          Math.round((processed / total) * 100),
+        );
       }
 
       if (createdSourceIds.length > 0) {
@@ -8529,9 +8779,7 @@ export function SourcesHub({
       <aside
         className={cn(
           "flex h-full shrink-0 flex-col overflow-x-hidden bg-background",
-          variant === "drawer"
-            ? "w-full min-w-0"
-            : "w-[410px] border-l",
+          variant === "drawer" ? "w-full min-w-0" : "w-[410px] border-l",
         )}
       >
         <div className="min-w-0 shrink-0 border-b px-3 py-3">
@@ -8902,7 +9150,9 @@ export function SourcesHub({
               loadingError={connectorsLoadingError}
               onConfigureConnector={openConnectorSettings}
               onManageConnectors={() => openManageConnectors("all")}
-              onSyncConnector={(connector) => void handleSyncConnector(connector)}
+              onSyncConnector={(connector) =>
+                void handleSyncConnector(connector)
+              }
               onToggleConnectorStatus={(connector) =>
                 void handleToggleConnectorStatus(connector)
               }
@@ -8962,7 +9212,8 @@ export function SourcesHub({
         open={Boolean(connectorSettingsConnector)}
         webhookConfig={
           connectorSettingsConnector
-            ? (connectorWebhookConfigsById[connectorSettingsConnector.id] ?? null)
+            ? (connectorWebhookConfigsById[connectorSettingsConnector.id] ??
+              null)
             : null
         }
       />
@@ -9099,17 +9350,17 @@ export function SourcesHub({
         onOpenChange={(open) => {
           if (!open) {
             setPendingDisconnectConnector(null);
-            setRemoveConnectorPurgeIndexedContent(false);
+            setDisconnectConnectorHardDelete(false);
           }
         }}
         open={Boolean(pendingDisconnectConnector)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove connector?</AlertDialogTitle>
+            <AlertDialogTitle>Manage connector removal</AlertDialogTitle>
             <AlertDialogDescription>
-              Choose whether to keep or delete the content this connector has
-              already indexed into the knowledge base.
+              Choose whether to temporarily disable this connector or
+              permanently delete it from SourceWeft.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {pendingDisconnectConnector ? (
@@ -9123,65 +9374,67 @@ export function SourcesHub({
             <button
               className={cn(
                 "flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left transition-colors",
-                !removeConnectorPurgeIndexedContent
+                !disconnectConnectorHardDelete
                   ? "border-primary bg-primary/5"
                   : "hover:bg-accent/60",
               )}
-              onClick={() => setRemoveConnectorPurgeIndexedContent(false)}
+              onClick={() => setDisconnectConnectorHardDelete(false)}
               type="button"
             >
               <span
                 className={cn(
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
-                  !removeConnectorPurgeIndexedContent &&
-                    "border-primary bg-primary",
+                  !disconnectConnectorHardDelete && "border-primary bg-primary",
                 )}
               >
-                {!removeConnectorPurgeIndexedContent ? (
+                {!disconnectConnectorHardDelete ? (
                   <span className="size-1.5 rounded-full bg-primary-foreground" />
                 ) : null}
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-medium">
-                  Remove connector only
+                  Disable connector
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  Stops syncing and hides this connector. Indexed knowledge stays
-                  available.
+                  Stops syncing. Keeps authorization, configuration, history,
+                  and indexed content. You can enable it again later.
                 </span>
               </span>
             </button>
             <button
               className={cn(
                 "flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left transition-colors",
-                removeConnectorPurgeIndexedContent
+                disconnectConnectorHardDelete
                   ? "border-destructive bg-destructive/5"
                   : "hover:bg-accent/60",
               )}
-              onClick={() => setRemoveConnectorPurgeIndexedContent(true)}
+              onClick={() => setDisconnectConnectorHardDelete(true)}
               type="button"
             >
               <span
                 className={cn(
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
-                  removeConnectorPurgeIndexedContent &&
+                  disconnectConnectorHardDelete &&
                     "border-destructive bg-destructive",
                 )}
               >
-                {removeConnectorPurgeIndexedContent ? (
+                {disconnectConnectorHardDelete ? (
                   <span className="size-1.5 rounded-full bg-destructive-foreground" />
                 ) : null}
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-destructive">
-                  Remove connector and delete indexed content
+                  Delete connector and all indexed content
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  Deletes sources imported by this connector. This cannot be
-                  undone.
+                  Permanently deletes this connector, its local authorization,
+                  and all content imported by it. This cannot be undone.
                 </span>
               </span>
             </button>
+            <p className="text-xs text-muted-foreground">
+              SourceWeft will not revoke access in the third-party provider.
+            </p>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel
@@ -9194,7 +9447,8 @@ export function SourcesHub({
             </AlertDialogCancel>
             <AlertDialogAction
               className={cn(
-                buttonVariants({ variant: "destructive" }),
+                disconnectConnectorHardDelete &&
+                  buttonVariants({ variant: "destructive" }),
                 "whitespace-normal text-center",
               )}
               disabled={Boolean(
@@ -9210,12 +9464,14 @@ export function SourcesHub({
               connectorBusyById[pendingDisconnectConnector.id] ? (
                 <>
                   <Loader2 className="size-3.5 animate-spin" />
-                  Removing...
+                  {disconnectConnectorHardDelete
+                    ? "Deleting..."
+                    : "Disabling..."}
                 </>
-              ) : removeConnectorPurgeIndexedContent ? (
-                "Remove and delete indexed content"
+              ) : disconnectConnectorHardDelete ? (
+                "Delete connector and content"
               ) : (
-                "Remove"
+                "Disable connector"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -9241,7 +9497,8 @@ export function SourcesHub({
           <DialogHeader className="border-b px-5 py-4 text-left">
             <DialogTitle>Skills gallery</DialogTitle>
             <DialogDescription>
-              Install reusable skills for {workspaceName || "the current workspace"}.
+              Install reusable skills for{" "}
+              {workspaceName || "the current workspace"}.
             </DialogDescription>
           </DialogHeader>
           <SkillsGallery

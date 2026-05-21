@@ -1,6 +1,12 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../../shared/database";
+import {
+  logBm25Completed,
+  logBm25RecallTerms,
+  logBm25Skipped,
+} from "../bm25-debug";
 import { toPostgresTextArray } from "../sql";
+import { buildSearchQuery } from "../search-tokenizer";
 import { buildVirtualSourceTree } from "./paths";
 import type {
   VirtualFsDocument,
@@ -11,6 +17,7 @@ import type {
 
 const MAX_GREP_TERM_TOP_K = 120;
 const MIN_GREP_TERM_TOP_K = 50;
+const CHUNKS_BM25_INDEX_NAME = "chunks_bm25_universal_idx";
 
 function sourceIdsClause(input: {
   teamId: string;
@@ -431,6 +438,34 @@ export async function grepVirtualFsChunks(input: {
   queryText: string;
   topK: number;
 }): Promise<VirtualFsGrepCandidate[]> {
+  if (input.sourceIds.length === 0) {
+    logBm25Skipped({
+      operation: "virtual_fs_grep",
+      reason: "empty_source_ids",
+      queryText: input.queryText,
+      topK: input.topK,
+      sourceCount: 0,
+    });
+    return [];
+  }
+
+  const searchQuery = buildSearchQuery(input.queryText);
+  if (!searchQuery) {
+    logBm25Skipped({
+      operation: "virtual_fs_grep",
+      reason: "empty_search_query",
+      queryText: input.queryText,
+      searchQuery,
+      topK: input.topK,
+      sourceCount: input.sourceIds.length,
+    });
+    return [];
+  }
+
+  const bm25Query = sql`to_bm25query(${searchQuery}, ${CHUNKS_BM25_INDEX_NAME})`;
+  const bm25Score = sql`c.search_parts <@> ${bm25Query}`;
+
+  const startedAt = Date.now();
   const rows = await db.execute<{
     source_id: string;
     source_title: string;
@@ -457,14 +492,13 @@ export async function grepVirtualFsChunks(input: {
       c.end_offset,
       c.heading_path,
       c.language,
-      pdb.score(c.id) as score
+      -(${bm25Score}) as score
     from chunks c
     inner join sources s on s.id = c.source_id
     inner join documents d on d.id = c.document_id
     where c.team_id = ${input.teamId}
       and c.workspace_id = ${input.workspaceId}
       and s.status = 'indexed'
-      and c.content ||| ${input.queryText}
       ${sourceIdsClause({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
@@ -484,11 +518,11 @@ export async function grepVirtualFsChunks(input: {
             )
           )
       )
-    order by pdb.score(c.id) desc
+    order by ${bm25Score} asc
     limit ${input.topK}
   `);
 
-  return rows.rows.map((row) => ({
+  const candidates = rows.rows.map((row) => ({
     sourceId: row.source_id,
     sourceTitle: row.source_title,
     sourceFileName: row.source_file_name,
@@ -502,6 +536,18 @@ export async function grepVirtualFsChunks(input: {
     language: row.language,
     score: Number(row.score),
   }));
+
+  logBm25Completed({
+    operation: "virtual_fs_grep",
+    queryText: input.queryText,
+    searchQuery,
+    topK: input.topK,
+    sourceCount: input.sourceIds.length,
+    durationMs: Date.now() - startedAt,
+    results: candidates,
+  });
+
+  return candidates;
 }
 
 export function calculatePerTermGrepTopK(input: {
@@ -556,6 +602,14 @@ export async function grepVirtualFsChunksByRecallTerms(input: {
   });
 
   if (perTermTopK === 0) {
+    logBm25RecallTerms({
+      operation: "virtual_fs_recall_terms",
+      termCount: terms.length,
+      perTermTopK,
+      totalTopK: input.totalTopK,
+      sourceCount: input.sourceIds.length,
+      resultCount: 0,
+    });
     return [];
   }
 
@@ -571,7 +625,21 @@ export async function grepVirtualFsChunksByRecallTerms(input: {
     ),
   );
 
-  return mergeVirtualFsGrepCandidates(candidateLists.flat(), input.totalTopK);
+  const merged = mergeVirtualFsGrepCandidates(
+    candidateLists.flat(),
+    input.totalTopK,
+  );
+
+  logBm25RecallTerms({
+    operation: "virtual_fs_recall_terms",
+    termCount: terms.length,
+    perTermTopK,
+    totalTopK: input.totalTopK,
+    sourceCount: input.sourceIds.length,
+    resultCount: merged.length,
+  });
+
+  return merged;
 }
 
 export async function grepVirtualFsChunksByRegex(input: {

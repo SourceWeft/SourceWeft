@@ -1,57 +1,14 @@
 name: sourceweft
 
-x-sourceweft-app: &sourceweft-app
-  image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
-  pull_policy: missing
-  env_file:
-    - path: .env
-      required: false
-  init: true
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
-  stop_grace_period: 1m
-
 x-sourceweft-env: &sourceweft-env
   NODE_ENV: production
   DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
   NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-http://localhost:3000}
-  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in docker/.env}
-  MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET:?set MODEL_GATEWAY_ENCRYPTION_SECRET in docker/.env}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-replace_with_32_plus_char_auth_secret}
+  MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET:-replace_with_32_plus_char_model_secret}
   MODEL_GATEWAY_GLOBAL_CONFIG_PATH: /app/apps/backend/config/model-gateway.global.json
-  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-  DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:-}
-  SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
-  AUTH_GOOGLE_SIGNIN_WEB_CLIENT_ID: ${AUTH_GOOGLE_SIGNIN_WEB_CLIENT_ID:-}
-  AUTH_GOOGLE_SIGNIN_WEB_CLIENT_SECRET: ${AUTH_GOOGLE_SIGNIN_WEB_CLIENT_SECRET:-}
-  AUTH_GOOGLE_ONE_TAP_CLIENT_ID: ${AUTH_GOOGLE_ONE_TAP_CLIENT_ID:-}
-  AUTH_GOOGLE_MOBILE_CLIENT_ID: ${AUTH_GOOGLE_MOBILE_CLIENT_ID:-}
-  AUTH_GITHUB_CLIENT_ID: ${AUTH_GITHUB_CLIENT_ID:-}
-  AUTH_GITHUB_CLIENT_SECRET: ${AUTH_GITHUB_CLIENT_SECRET:-}
-  GOOGLE_CONNECTORS_OAUTH_CLIENT_ID: ${GOOGLE_CONNECTORS_OAUTH_CLIENT_ID:-}
-  GOOGLE_CONNECTORS_OAUTH_CLIENT_SECRET: ${GOOGLE_CONNECTORS_OAUTH_CLIENT_SECRET:-}
-  GOOGLE_DRIVE_REDIRECT_URI: ${GOOGLE_DRIVE_REDIRECT_URI:-}
-  GOOGLE_GMAIL_REDIRECT_URI: ${GOOGLE_GMAIL_REDIRECT_URI:-}
-  GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-}
-  MAIL_PROVIDER: ${MAIL_PROVIDER:-console}
-  PLUNK_API_KEY: ${PLUNK_API_KEY:-}
-  SOURCEWEFT_SAAS_ENABLED: ${SOURCEWEFT_SAAS_ENABLED:-false}
-  BACKEND_BILLING_MODE: ${BACKEND_BILLING_MODE:-enforced}
-  BACKEND_DEFAULT_MONTHLY_PAGES: ${BACKEND_DEFAULT_MONTHLY_PAGES:-300}
-  BACKEND_DEFAULT_MONTHLY_CREDITS: ${BACKEND_DEFAULT_MONTHLY_CREDITS:-3000}
-  BACKEND_BILLING_PROVIDER: ${BACKEND_BILLING_PROVIDER:-none}
-  BACKEND_TEAM_BILLING_ENABLED: ${BACKEND_TEAM_BILLING_ENABLED:-false}
-  BACKEND_BILLING_RECONCILE_ENABLED: ${BACKEND_BILLING_RECONCILE_ENABLED:-false}
-  CREEM_API_KEY: ${CREEM_API_KEY:-}
-  CREEM_WEBHOOK_SECRET: ${CREEM_WEBHOOK_SECRET:-}
-  CREEM_TEST_MODE: ${CREEM_TEST_MODE:-true}
-  CREEM_INDIVIDUAL_PRO_MONTHLY_PRODUCT_ID: ${CREEM_INDIVIDUAL_PRO_MONTHLY_PRODUCT_ID:-}
-  CREEM_INDIVIDUAL_PRO_YEARLY_PRODUCT_ID: ${CREEM_INDIVIDUAL_PRO_YEARLY_PRODUCT_ID:-}
-  CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID: ${CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID:-}
-  CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID: ${CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID:-}
-  CREEM_CREDIT_TOPUP_PRODUCT_ID: ${CREEM_CREDIT_TOPUP_PRODUCT_ID:-}
-  CREEM_PAGE_TOPUP_PRODUCT_ID: ${CREEM_PAGE_TOPUP_PRODUCT_ID:-}
 
 services:
   postgres:
@@ -89,20 +46,34 @@ services:
       start_period: 10s
 
   migrate:
-    <<: *sourceweft-app
+    image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
+    pull_policy: missing
     command: ["pnpm", "--filter", "@sourceweft/backend", "migrate"]
+    env_file:
+      - path: .env
+        required: false
     environment:
       <<: *sourceweft-env
     depends_on:
       postgres:
         condition: service_healthy
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 1m
     restart: "no"
 
   api:
-    <<: *sourceweft-app
+    image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
+    pull_policy: missing
     command: ["pnpm", "--filter", "@sourceweft/backend", "start:api"]
+    env_file:
+      - path: .env
+        required: false
     environment:
       <<: *sourceweft-env
+      BACKEND_API_HOST: 0.0.0.0
+      PORT: 3001
       BACKEND_API_PORT: 3001
     ports:
       - "${BACKEND_API_PORT:-3001}:3001"
@@ -113,6 +84,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 1m
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
@@ -122,8 +97,12 @@ services:
       start_period: 30s
 
   worker:
-    <<: *sourceweft-app
+    image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
+    pull_policy: missing
     command: ["pnpm", "--filter", "@sourceweft/backend", "start:worker"]
+    env_file:
+      - path: .env
+        required: false
     environment:
       <<: *sourceweft-env
     depends_on:
@@ -133,11 +112,19 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 1m
     restart: unless-stopped
 
   scheduler:
-    <<: *sourceweft-app
+    image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
+    pull_policy: missing
     command: ["pnpm", "--filter", "@sourceweft/backend", "start:scheduler"]
+    env_file:
+      - path: .env
+        required: false
     environment:
       <<: *sourceweft-env
     depends_on:
@@ -147,10 +134,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 1m
     restart: unless-stopped
 
   web:
-    <<: *sourceweft-app
+    image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
+    pull_policy: missing
+    env_file:
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: 1
@@ -169,6 +164,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 1m
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]

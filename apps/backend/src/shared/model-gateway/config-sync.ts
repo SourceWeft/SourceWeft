@@ -31,6 +31,11 @@ import {
   type CatalogModelCandidate,
 } from "./catalog-discovery";
 import { fetchLiteLLMPricing, type LiteLLMData } from "./litellm-capabilities";
+import {
+  stripFormerlyProtectedProfileConfigFields,
+  withProtectedProfileConfigFields,
+  type ProtectedProfileConfigField,
+} from "./profile-config-priority";
 
 let modelConfigSyncPromise: Promise<void> | null = null;
 
@@ -86,6 +91,92 @@ export function resolveGlobalModelGatewayConfigPath() {
   });
 }
 
+export function mergeGlobalProfileConfigJson(input: {
+  existingConfigJson: Record<string, unknown>;
+  entry: {
+    pricing?: GlobalProfilePricingEntry | null;
+    targetModel: string;
+    providerCatalogSource?: string;
+    providerCatalogGatewaySlug?: string;
+    litellmKey?: string;
+    architecture?: Record<string, unknown>;
+    supportsImageInput?: boolean;
+    contextLength?: number | null;
+    defaultParameters?: Record<string, unknown> | null;
+    displayName?: string;
+    maxCompletionTokens?: number | null;
+    subtitle?: string;
+    badges?: string[];
+    supportedParameters?: string[];
+    supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+    imageGeneration?: Record<string, unknown>;
+  };
+  existing: boolean;
+  now: Date;
+}) {
+  const protectedFields: ProtectedProfileConfigField[] = [];
+  const pricingConfigJson =
+    input.entry.pricing !== undefined || !input.existing
+      ? buildProfilePricingConfigJson(input.entry.pricing, input.now)
+      : {};
+  const globalConfigJson = {
+    ...pricingConfigJson,
+    targetModel: input.entry.targetModel,
+    ...(input.entry.displayName ? { displayName: input.entry.displayName } : {}),
+    ...(input.entry.subtitle ? { subtitle: input.entry.subtitle } : {}),
+    ...(input.entry.badges && input.entry.badges.length > 0
+      ? { badges: input.entry.badges }
+      : {}),
+    ...(input.entry.providerCatalogSource
+      ? { providerCatalogSource: input.entry.providerCatalogSource }
+      : {}),
+    ...(input.entry.providerCatalogGatewaySlug
+      ? { providerCatalogGatewaySlug: input.entry.providerCatalogGatewaySlug }
+      : {}),
+    ...(input.entry.litellmKey ? { litellm_key: input.entry.litellmKey } : {}),
+    ...(input.entry.architecture ? { architecture: input.entry.architecture } : {}),
+    ...(input.entry.supportsImageInput ? { supportsImageInput: true } : {}),
+    ...(input.entry.contextLength ? { contextLength: input.entry.contextLength } : {}),
+    ...(input.entry.defaultParameters
+      ? { defaultParameters: input.entry.defaultParameters }
+      : {}),
+    ...(input.entry.maxCompletionTokens
+      ? { maxCompletionTokens: input.entry.maxCompletionTokens }
+      : {}),
+    ...(input.entry.supportedParameters !== undefined
+      ? { supportedParameters: input.entry.supportedParameters }
+      : {}),
+    ...(input.entry.supportedEfforts !== undefined
+      ? { supportedEfforts: input.entry.supportedEfforts }
+      : {}),
+    ...(input.entry.imageGeneration !== undefined
+      ? { imageGeneration: input.entry.imageGeneration }
+      : {}),
+  };
+  if (input.entry.supportedParameters !== undefined) {
+    protectedFields.push("supportedParameters");
+  }
+  if (input.entry.supportedEfforts !== undefined) {
+    protectedFields.push("supportedEfforts");
+  }
+  if (input.entry.imageGeneration !== undefined) {
+    protectedFields.push("imageGeneration");
+  }
+  if (input.entry.supportsImageInput !== undefined) {
+    protectedFields.push("supportsImageInput");
+  }
+  return withProtectedProfileConfigFields(
+    {
+      ...stripFormerlyProtectedProfileConfigFields(
+        input.existingConfigJson,
+        protectedFields,
+      ),
+      ...globalConfigJson,
+    },
+    protectedFields,
+  );
+}
+
 async function upsertModelGatewayProfileFromGlobalConfig(
   kind: ModelGatewayProfileKind,
   entry: {
@@ -118,7 +209,10 @@ async function upsertModelGatewayProfileFromGlobalConfig(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
 ) {
   const [existing] = await tx
-    .select({ id: modelGatewayProfiles.id })
+    .select({
+      id: modelGatewayProfiles.id,
+      configJson: modelGatewayProfiles.configJson,
+    })
     .from(modelGatewayProfiles)
     .where(
       entry.profileId
@@ -126,6 +220,17 @@ async function upsertModelGatewayProfileFromGlobalConfig(
         : eq(modelGatewayProfiles.profileAlias, entry.profileAlias),
     )
     .limit(1);
+
+  const existingConfigJson =
+    existing?.configJson && typeof existing.configJson === "object"
+      ? (existing.configJson as Record<string, unknown>)
+      : {};
+  const mergedConfigJson = mergeGlobalProfileConfigJson({
+    existingConfigJson,
+    entry,
+    existing: Boolean(existing),
+    now,
+  });
 
   const setPayload = {
     kind,
@@ -136,34 +241,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     vectorStrategy: entry.vectorStrategy ?? "auto",
     isDefault: entry.isDefault,
     isActive: entry.isActive,
-    configJson: {
-      ...buildProfilePricingConfigJson(entry.pricing, now),
-      targetModel: entry.targetModel,
-      ...(entry.displayName ? { displayName: entry.displayName } : {}),
-      ...(entry.subtitle ? { subtitle: entry.subtitle } : {}),
-      ...(entry.badges && entry.badges.length > 0 ? { badges: entry.badges } : {}),
-      ...(entry.providerCatalogSource
-        ? { providerCatalogSource: entry.providerCatalogSource }
-        : {}),
-      ...(entry.providerCatalogGatewaySlug
-        ? { providerCatalogGatewaySlug: entry.providerCatalogGatewaySlug }
-        : {}),
-      ...(entry.litellmKey ? { litellm_key: entry.litellmKey } : {}),
-      ...(entry.architecture ? { architecture: entry.architecture } : {}),
-      ...(entry.supportsImageInput ? { supportsImageInput: true } : {}),
-      ...(entry.contextLength ? { contextLength: entry.contextLength } : {}),
-      ...(entry.defaultParameters ? { defaultParameters: entry.defaultParameters } : {}),
-      ...(entry.maxCompletionTokens
-        ? { maxCompletionTokens: entry.maxCompletionTokens }
-        : {}),
-      ...(entry.supportedParameters && entry.supportedParameters.length > 0
-        ? { supportedParameters: entry.supportedParameters }
-        : {}),
-      ...(entry.supportedEfforts && entry.supportedEfforts.length > 0
-        ? { supportedEfforts: entry.supportedEfforts }
-        : {}),
-      ...(entry.imageGeneration ? { imageGeneration: entry.imageGeneration } : {}),
-    },
+    configJson: mergedConfigJson,
     updatedAt: now,
   };
 

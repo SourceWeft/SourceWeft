@@ -139,10 +139,7 @@ type ShareAccessLevel = "viewer" | "editor";
 type JobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 type RetrievalStage = "bm25" | "vector" | "rrf" | "rerank";
 type RetrievalHitType = "chunk" | "document";
-type RetrievalVectorStrategy =
-  | "ann_hnsw"
-  | "exact_vector"
-  | "bm25_only";
+type RetrievalVectorStrategy = "ann_hnsw" | "exact_vector" | "bm25_only";
 type LedgerEventType =
   | "grant"
   | "reserve"
@@ -225,7 +222,11 @@ type SkillDefinitionSourceType = "builtin" | "workspace_custom" | "team_custom";
 type SkillDefinitionStatus = "active" | "archived";
 type SkillVersionStatus = "draft" | "published" | "deprecated" | "disabled";
 type SkillVersionStorageType = "repo_builtin" | "db_text";
-export type SkillManifestVisibility = "public" | "restricted" | "workspace" | "team";
+export type SkillManifestVisibility =
+  | "public"
+  | "restricted"
+  | "workspace"
+  | "team";
 export type SkillManifestJson = {
   slug: string;
   displayName: string;
@@ -294,9 +295,7 @@ export const workspaces = pgTable(
   "workspaces",
   {
     id: text("id").primaryKey(),
-    organizationId: text("organization_id")
-      .notNull()
-      ,
+    organizationId: text("organization_id").notNull(),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     isDefault: boolean("is_default").notNull().default(false),
@@ -326,9 +325,7 @@ export const workspaces = pgTable(
 export const teamProfiles = pgTable(
   "team_profiles",
   {
-    teamId: text("team_id")
-      .primaryKey()
-      ,
+    teamId: text("team_id").primaryKey(),
     displayName: text("display_name"),
     billingEmail: text("billing_email"),
     planFamily: text("plan_family").$type<PlanFamily>(),
@@ -387,9 +384,7 @@ export const workspaceMemberships = pgTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      ,
+    userId: text("user_id").notNull(),
     role: text("role")
       .$type<WorkspaceRole>()
       .notNull()
@@ -423,9 +418,7 @@ export const workspaceMemberships = pgTable(
 export const billingAccounts = pgTable(
   "billing_accounts",
   {
-    teamId: text("team_id")
-      .primaryKey()
-      ,
+    teamId: text("team_id").primaryKey(),
     planFamily: text("plan_family").$type<PlanFamily>().notNull(),
     cycleAnchorAt: timestamp("cycle_anchor_at", {
       withTimezone: true,
@@ -537,9 +530,7 @@ export const usageLedgers = pgTable(
   "usage_ledgers",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id").references(() => workspaces.id, {
       onDelete: "set null",
     }),
@@ -610,9 +601,7 @@ export const spendLimits = pgTable(
   "spend_limits",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     scope: text("scope").notNull().default("team"),
     actorUserId: text("actor_user_id"),
     softCapUsd: numeric("soft_cap_usd", { precision: 12, scale: 4 }),
@@ -807,9 +796,7 @@ export const subscriptions = pgTable(
   "subscriptions",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     provider: text("provider")
       .$type<BillingProvider>()
       .notNull()
@@ -1061,7 +1048,9 @@ export const modelGatewayConfigVersions = pgTable(
     uniqueIndex("model_gateway_config_versions_active_uq")
       .on(table.isActive)
       .where(sql`${table.isActive} = true`),
-    index("model_gateway_config_versions_created_idx").on(desc(table.createdAt)),
+    index("model_gateway_config_versions_created_idx").on(
+      desc(table.createdAt),
+    ),
   ],
 );
 
@@ -1190,11 +1179,11 @@ export const modelGatewayByokModels = pgTable(
     providerName: text("provider_name").notNull(),
     modelName: text("model_name").notNull(),
     displayName: text("display_name").notNull(),
-    modelType: text("model_type")
-      .$type<"llm" | "image" | "vision">()
-      .notNull(),
-    capabilitiesJson: jsonb("capabilities_json")
-      .$type<Record<string, unknown> | null>(),
+    modelType: text("model_type").$type<"llm" | "image" | "vision">().notNull(),
+    capabilitiesJson: jsonb("capabilities_json").$type<Record<
+      string,
+      unknown
+    > | null>(),
     configJson: jsonb("config_json")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -1278,14 +1267,8 @@ export const modelGatewayRoutes = pgTable(
       "model_gateway_routes_strategy_check",
       sql`${table.strategy} in ('priority', 'weighted-random', 'least-latency', 'cost-aware', 'sticky-by-tenant')`,
     ),
-    check(
-      "model_gateway_routes_priority_check",
-      sql`${table.priority} > 0`,
-    ),
-    check(
-      "model_gateway_routes_weight_check",
-      sql`${table.weight} >= 0`,
-    ),
+    check("model_gateway_routes_priority_check", sql`${table.priority} > 0`),
+    check("model_gateway_routes_weight_check", sql`${table.weight} >= 0`),
     index("model_gateway_routes_lookup_idx").on(
       table.configVersionId,
       table.alias,
@@ -1352,9 +1335,7 @@ export const connectorOAuthAccounts = pgTable(
   "connector_oauth_accounts",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -1423,17 +1404,17 @@ export const connectorOAuthStates = pgTable(
   {
     id: text("id").primaryKey(),
     stateHash: text("state_hash").notNull(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull(),
     connectorType: text("connector_type").notNull(),
     redirectAfter: text("redirect_after"),
-    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" })
-      .notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
@@ -1459,9 +1440,7 @@ export const sourceConnectors = pgTable(
   "source_connectors",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -1531,6 +1510,9 @@ export const sourceConnectors = pgTable(
       table.connectorType,
       table.name,
     ),
+    uniqueIndex("source_connectors_oauth_account_uq")
+      .on(table.oauthAccountId)
+      .where(sql`${table.oauthAccountId} is not null`),
     index("source_connectors_team_workspace_status_next_idx").on(
       table.teamId,
       table.workspaceId,
@@ -1548,9 +1530,7 @@ export const connectorActionRuns = pgTable(
   "connector_action_runs",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -1559,9 +1539,7 @@ export const connectorActionRuns = pgTable(
       .references(() => sourceConnectors.id, { onDelete: "cascade" }),
     connectorType: text("connector_type").notNull(),
     actionType: text("action_type").notNull(),
-    riskLevel: text("risk_level")
-      .$type<ConnectorActionRiskLevel>()
-      .notNull(),
+    riskLevel: text("risk_level").$type<ConnectorActionRiskLevel>().notNull(),
     status: text("status").$type<ConnectorActionRunStatus>().notNull(),
     requestJson: jsonb("request_json")
       .$type<Record<string, unknown>>()
@@ -1629,9 +1607,7 @@ export const connectorSyncRuns = pgTable(
   "connector_sync_runs",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -1794,9 +1770,7 @@ export const sources = pgTable(
   "sources",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -1804,7 +1778,10 @@ export const sources = pgTable(
       .$type<SourceIngestKind>()
       .notNull()
       .default("manual_upload"),
-    sourceType: text("source_type").$type<SourceType>().notNull().default("manual_upload"),
+    sourceType: text("source_type")
+      .$type<SourceType>()
+      .notNull()
+      .default("manual_upload"),
     connectorId: text("connector_id").references(() => sourceConnectors.id),
     syncRunId: text("sync_run_id").references(() => connectorSyncRuns.id),
     parentSourceId: text("parent_source_id"),
@@ -1923,9 +1900,7 @@ export const sourceRevisions = pgTable(
   "source_revisions",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -1977,9 +1952,7 @@ export const documents = pgTable(
   "documents",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2046,9 +2019,7 @@ export const chunks = pgTable(
   "chunks",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2064,6 +2035,10 @@ export const chunks = pgTable(
     startOffset: integer("start_offset"),
     endOffset: integer("end_offset"),
     language: text("language"),
+    searchParts: text("search_parts")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     chunkMetadata: jsonb("chunk_metadata")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -2105,9 +2080,7 @@ export const chunkEmbeddings = pgTable(
   "chunk_embeddings",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2134,7 +2107,10 @@ export const chunkEmbeddings = pgTable(
       table.chunkId,
       table.embeddingProfileId,
     ),
-    check("chunk_embeddings_dim_check", sql`${table.dim} > 0 and ${table.dim} <= 2000`),
+    check(
+      "chunk_embeddings_dim_check",
+      sql`${table.dim} > 0 and ${table.dim} <= 2000`,
+    ),
     index("chunk_embeddings_workspace_profile_created_idx").on(
       table.workspaceId,
       table.embeddingProfileId,
@@ -2151,9 +2127,7 @@ export const threads = pgTable(
   "threads",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2210,9 +2184,7 @@ export const messages = pgTable(
   "messages",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2313,9 +2285,7 @@ export const chatThreadRuns = pgTable(
   "chat_thread_runs",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2350,7 +2320,10 @@ export const chatThreadRuns = pgTable(
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
-    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true, mode: "date" }),
+    heartbeatAt: timestamp("heartbeat_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
@@ -2389,9 +2362,7 @@ export const chatThreadRuns = pgTable(
     ),
     uniqueIndex("chat_thread_runs_thread_active_uq")
       .on(table.teamId, table.workspaceId, table.threadId)
-      .where(
-        sql`${table.status} in ('queued', 'running', 'cancel_requested')`,
-      ),
+      .where(sql`${table.status} in ('queued', 'running', 'cancel_requested')`),
     index("chat_thread_runs_thread_status_created_idx").on(
       table.teamId,
       table.workspaceId,
@@ -2407,9 +2378,7 @@ export const workingFiles = pgTable(
   "working_files",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2454,10 +2423,7 @@ export const workingFiles = pgTable(
       "working_files_purpose_check",
       sql`${table.purpose} is null or ${table.purpose} in ('scratch', 'draft', 'note', 'output_candidate')`,
     ),
-    check(
-      "working_files_size_bytes_check",
-      sql`${table.sizeBytes} >= 0`,
-    ),
+    check("working_files_size_bytes_check", sql`${table.sizeBytes} >= 0`),
     index("working_files_thread_updated_idx").on(
       table.teamId,
       table.workspaceId,
@@ -2471,9 +2437,7 @@ export const citations = pgTable(
   "citations",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -2549,9 +2513,7 @@ export const skillDefinitions = pgTable(
     slug: text("slug").notNull(),
     displayName: text("display_name").notNull(),
     description: text("description").notNull(),
-    visibility: text("visibility")
-      .$type<SkillManifestVisibility>()
-      .notNull(),
+    visibility: text("visibility").$type<SkillManifestVisibility>().notNull(),
     status: text("status")
       .$type<SkillDefinitionStatus>()
       .notNull()
@@ -2613,11 +2575,12 @@ export const skillVersions = pgTable(
     storagePointer: text("storage_pointer").notNull(),
     isCurrent: boolean("is_current").notNull().default(false),
     contentHash: text("content_hash").notNull(),
-    manifestJson: jsonb("manifest_json")
-      .$type<SkillManifestJson>()
-      .notNull(),
+    manifestJson: jsonb("manifest_json").$type<SkillManifestJson>().notNull(),
     createdBy: text("created_by"),
-    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+    publishedAt: timestamp("published_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -2708,7 +2671,10 @@ export const workspaceSkills = pgTable(
       columns: [table.workspaceId, table.teamId],
       foreignColumns: [workspaces.id, workspaces.organizationId],
     }).onDelete("cascade"),
-    uniqueIndex("workspace_skills_skill_uq").on(table.workspaceId, table.skillId),
+    uniqueIndex("workspace_skills_skill_uq").on(
+      table.workspaceId,
+      table.skillId,
+    ),
     index("workspace_skills_workspace_enabled_idx").on(
       table.teamId,
       table.workspaceId,
@@ -2849,8 +2815,10 @@ export const llmTraces = pgTable(
       .default("running"),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
-    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" })
-      .notNull(),
+    startedAt: timestamp("started_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
     latencyMs: integer("latency_ms"),
     tagsJson: jsonb("tags_json")
@@ -2897,16 +2865,14 @@ export const llmTraces = pgTable(
       table.id,
     ),
     index("llm_traces_team_started_idx").on(table.teamId, table.startedAt),
-    index("llm_traces_team_started_id_idx").on(table.teamId, table.startedAt, table.id),
-    index("llm_traces_thread_started_idx").on(
-      table.threadId,
+    index("llm_traces_team_started_id_idx").on(
+      table.teamId,
       table.startedAt,
+      table.id,
     ),
+    index("llm_traces_thread_started_idx").on(table.threadId, table.startedAt),
     index("llm_traces_message_idx").on(table.messageId),
-    index("llm_traces_status_started_idx").on(
-      table.status,
-      table.startedAt,
-    ),
+    index("llm_traces_status_started_idx").on(table.status, table.startedAt),
   ],
 );
 
@@ -2935,8 +2901,10 @@ export const llmSpans = pgTable(
       .$type<LlmObservationStatus>()
       .notNull()
       .default("running"),
-    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" })
-      .notNull(),
+    startedAt: timestamp("started_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
     latencyMs: integer("latency_ms"),
     inputJson: jsonb("input_json").$type<Record<string, unknown> | null>(),
@@ -3035,7 +3003,10 @@ export const llmGenerations = pgTable(
     executionMode: text("execution_mode"),
     keySource: text("key_source"),
     routeStrategy: text("route_strategy"),
-    routeDecisionJson: jsonb("route_decision_json").$type<Record<string, unknown> | null>(),
+    routeDecisionJson: jsonb("route_decision_json").$type<Record<
+      string,
+      unknown
+    > | null>(),
     modelParametersJson: jsonb("model_parameters_json")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -3045,7 +3016,10 @@ export const llmGenerations = pgTable(
     outputText: text("output_text"),
     finishReason: text("finish_reason"),
     reasoningText: text("reasoning_text"),
-    providerFieldsJson: jsonb("provider_fields_json").$type<Record<string, unknown> | null>(),
+    providerFieldsJson: jsonb("provider_fields_json").$type<Record<
+      string,
+      unknown
+    > | null>(),
     usageJson: jsonb("usage_json").$type<Record<string, unknown> | null>(),
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
@@ -3058,10 +3032,20 @@ export const llmGenerations = pgTable(
       .$type<RawCaptureMode>()
       .notNull()
       .default("normalized"),
-    providerRequestJson: jsonb("provider_request_json").$type<Record<string, unknown> | null>(),
-    providerResponseJson: jsonb("provider_response_json").$type<Record<string, unknown> | null>(),
-    providerRequestHeadersJson: jsonb("provider_request_headers_json").$type<Record<string, unknown> | null>(),
-    providerResponseHeadersJson: jsonb("provider_response_headers_json").$type<Record<string, unknown> | null>(),
+    providerRequestJson: jsonb("provider_request_json").$type<Record<
+      string,
+      unknown
+    > | null>(),
+    providerResponseJson: jsonb("provider_response_json").$type<Record<
+      string,
+      unknown
+    > | null>(),
+    providerRequestHeadersJson: jsonb(
+      "provider_request_headers_json",
+    ).$type<Record<string, unknown> | null>(),
+    providerResponseHeadersJson: jsonb(
+      "provider_response_headers_json",
+    ).$type<Record<string, unknown> | null>(),
     providerStatusCode: integer("provider_status_code"),
     providerRequestId: text("provider_request_id"),
     rawCaptureError: text("raw_capture_error"),
@@ -3071,8 +3055,10 @@ export const llmGenerations = pgTable(
       .default("running"),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
-    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" })
-      .notNull(),
+    startedAt: timestamp("started_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
     latencyMs: integer("latency_ms"),
     metadataJson: jsonb("metadata_json")
@@ -3207,10 +3193,7 @@ export const llmFeedbackScores = pgTable(
       columns: [table.workspaceId, table.teamId],
       foreignColumns: [workspaces.id, workspaces.organizationId],
     }).onDelete("cascade"),
-    index("llm_feedback_scores_trace_idx").on(
-      table.traceId,
-      table.createdAt,
-    ),
+    index("llm_feedback_scores_trace_idx").on(table.traceId, table.createdAt),
     index("llm_feedback_scores_generation_idx").on(
       table.generationId,
       table.createdAt,
@@ -3271,9 +3254,7 @@ export const retrievalRuns = pgTable(
   "retrieval_runs",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -3418,9 +3399,7 @@ export const notes = pgTable(
   "notes",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -3484,9 +3463,7 @@ export const artifacts = pgTable(
   "artifacts",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -3547,9 +3524,7 @@ export const artifactVersions = pgTable(
   "artifact_versions",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -3625,9 +3600,7 @@ export const shareLinks = pgTable(
   "share_links",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id").references(() => workspaces.id, {
       onDelete: "set null",
     }),
@@ -3673,9 +3646,7 @@ export const jobsAudit = pgTable(
   "jobs_audit",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id")
-      .notNull()
-      ,
+    teamId: text("team_id").notNull(),
     workspaceId: text("workspace_id").references(() => workspaces.id, {
       onDelete: "set null",
     }),

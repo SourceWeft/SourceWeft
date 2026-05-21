@@ -5,56 +5,62 @@ import {
   deleteConnectorAccountResponseSchema,
   deleteConnectorRequestSchema,
   deleteConnectorResponseSchema,
+  listConnectorsRequestSchema,
 } from "../src/connectors";
 
-test("delete connector request defaults to keeping indexed content", () => {
+test("delete connector request defaults to hard delete", () => {
   assert.deepEqual(deleteConnectorRequestSchema.parse({}), {});
-  assert.deepEqual(deleteConnectorRequestSchema.parse({
-    purgeIndexedContent: true,
-  }), {
-    purgeIndexedContent: true,
-  });
-});
-
-test("delete connector response captures purge outcome and counts", () => {
   assert.deepEqual(
-    deleteConnectorResponseSchema.parse({
-      deleted: true,
-      connectorId: "connector_1",
-      indexedContentDeleted: true,
-      sourcesDeleted: 2,
-      documentsDeleted: 3,
-      providerRevokeWarning: "Provider revoke failed",
+    deleteConnectorRequestSchema.parse({
+      disable: true,
     }),
     {
-      deleted: true,
-      connectorId: "connector_1",
-      indexedContentDeleted: true,
-      sourcesDeleted: 2,
-      documentsDeleted: 3,
-      providerRevokeWarning: "Provider revoke failed",
+      disable: true,
     },
   );
 });
 
-test("delete connector account request and response support force detach", () => {
-  assert.deepEqual(deleteConnectorAccountRequestSchema.parse({ force: true }), {
-    force: true,
-  });
+test("delete connector response captures hard delete outcome and counts", () => {
+  assert.deepEqual(
+    deleteConnectorResponseSchema.parse({
+      disabled: false,
+      hardDeleted: true,
+      connectorId: "connector_1",
+      indexedContentDeleted: true,
+      sourcesDeleted: 2,
+      documentsDeleted: 3,
+      authorizationDeleted: true,
+    }),
+    {
+      disabled: false,
+      hardDeleted: true,
+      connectorId: "connector_1",
+      indexedContentDeleted: true,
+      sourcesDeleted: 2,
+      documentsDeleted: 3,
+      authorizationDeleted: true,
+    },
+  );
+});
+
+test("delete connector account request and response do not force detach", () => {
+  assert.deepEqual(deleteConnectorAccountRequestSchema.parse({}), {});
   assert.deepEqual(
     deleteConnectorAccountResponseSchema.parse({
       deleted: true,
       accountId: "account_1",
-      accountStatus: "revoked",
-      detachedConnectorIds: ["connector_1"],
-      providerRevokeWarning: null,
     }),
     {
       deleted: true,
       accountId: "account_1",
-      accountStatus: "revoked",
-      detachedConnectorIds: ["connector_1"],
-      providerRevokeWarning: null,
     },
+  );
+});
+
+test("list connectors request can opt into disabled records", () => {
+  assert.deepEqual(listConnectorsRequestSchema.parse({}), {});
+  assert.deepEqual(
+    listConnectorsRequestSchema.parse({ includeDisabled: true }),
+    { includeDisabled: true },
   );
 });

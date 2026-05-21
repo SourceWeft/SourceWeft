@@ -54,6 +54,22 @@ test("mergeVirtualFsGrepCandidates deduplicates chunks and keeps the best score"
   );
 });
 
+test("mergeVirtualFsGrepCandidates treats higher positive BM25 scores as better", () => {
+  const merged = mergeVirtualFsGrepCandidates(
+    [
+      candidate({ chunkId: "chunk-1", chunkNo: 1, score: 0.3 }),
+      candidate({ chunkId: "chunk-2", chunkNo: 2, score: 1.4 }),
+      candidate({ chunkId: "chunk-3", chunkNo: 3, score: 0.9 }),
+    ],
+    3,
+  );
+
+  assert.deepEqual(
+    merged.map((item) => item.chunkId),
+    ["chunk-2", "chunk-3", "chunk-1"],
+  );
+});
+
 test("mergeVirtualFsGrepCandidates caps candidates after score ordering", () => {
   const merged = mergeVirtualFsGrepCandidates(
     [

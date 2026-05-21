@@ -5,190 +5,22 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1776172025371,
-      "tag": "0000_nosy_madripoor",
+      "when": 1779284160000,
+      "tag": "0000_extensions",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1776827100000,
-      "tag": "0001_thread_model_settings_image_kind",
+      "when": 1779284161799,
+      "tag": "0001_baseline",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1776830100000,
-      "tag": "0002_retrieval_runtime_guardrails",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1777420800000,
-      "tag": "0003_thread_model_alias_settings",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1777766400000,
-      "tag": "0004_profile_alias_model_identity",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1777766675000,
-      "tag": "0005_llm_observability",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1777767000000,
-      "tag": "0006_llm_trace_io",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1777831796310,
-      "tag": "0007_llm_observability_scoped_identity",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1777996666268,
-      "tag": "0008_skills_catalog",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1778083200000,
-      "tag": "0009_pages_wallet",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1778086800000,
-      "tag": "0010_billing_cycle_anchor_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1778101200000,
-      "tag": "0011_source_library_tree",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1778191200000,
-      "tag": "0012_working_files",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1778371200000,
-      "tag": "0013_artifact_image_generation",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1778457600000,
-      "tag": "0014_siliconflow_cn_provider_kind",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1778544000000,
-      "tag": "0015_chat_thread_runs",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1778547600000,
-      "tag": "0016_chat_thread_runs_heartbeat",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1778691201785,
-      "tag": "0017_steady_jazinda",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "7",
-      "when": 1778716800000,
-      "tag": "0018_byok_credentials_models",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "7",
-      "when": 1778716900000,
-      "tag": "0019_drop_byok_key_refs",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "7",
-      "when": 1778832000000,
-      "tag": "0020_connector_platform",
-      "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "7",
-      "when": 1778835600000,
-      "tag": "0021_billing_orders",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "7",
-      "when": 1778872066251,
-      "tag": "0022_fluffy_shadowcat",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "7",
-      "when": 1778918400000,
-      "tag": "0023_pgvector_extension_guard",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1779028961317,
-      "tag": "0024_tearful_electro",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1779072690393,
-      "tag": "0025_connector_webhook_events",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1779134698354,
-      "tag": "0026_regular_mattie_franklin",
+      "when": 1779284163000,
+      "tag": "0002_retrieval_runtime_indexes",
       "breakpoints": true
     }
   ]

@@ -30,11 +30,7 @@ export const connectorSyncRunStatusSchema = z.enum([
   "skipped",
 ]);
 
-export const connectorActionRiskLevelSchema = z.enum([
-  "low",
-  "medium",
-  "high",
-]);
+export const connectorActionRiskLevelSchema = z.enum(["low", "medium", "high"]);
 
 export const connectorActionRunStatusSchema = z.enum([
   "proposed",
@@ -262,7 +258,7 @@ export const updateConnectorRequestSchema = z.object({
 });
 
 export const deleteConnectorRequestSchema = z.object({
-  purgeIndexedContent: z.boolean().optional(),
+  disable: z.boolean().optional(),
 });
 
 export const createConnectorResponseSchema = z.object({
@@ -274,24 +270,24 @@ export const updateConnectorResponseSchema = z.object({
 });
 
 export const deleteConnectorResponseSchema = z.object({
-  deleted: z.boolean(),
+  disabled: z.boolean(),
+  hardDeleted: z.boolean(),
   connectorId: z.string(),
-  indexedContentDeleted: z.boolean(),
+  indexedContentDeleted: z.boolean().optional(),
   sourcesDeleted: z.number().int().nonnegative().optional(),
   documentsDeleted: z.number().int().nonnegative().optional(),
-  providerRevokeWarning: z.string().nullable().optional(),
+  authorizationDeleted: z.boolean().optional(),
 });
 
-export const deleteConnectorAccountRequestSchema = z.object({
-  force: z.boolean().optional(),
-});
+export const deleteConnectorAccountRequestSchema = z.object({});
 
 export const deleteConnectorAccountResponseSchema = z.object({
   deleted: z.boolean(),
   accountId: z.string(),
-  accountStatus: connectorOAuthAccountStatusSchema,
-  detachedConnectorIds: z.array(z.string()),
-  providerRevokeWarning: z.string().nullable().optional(),
+});
+
+export const listConnectorsRequestSchema = z.object({
+  includeDisabled: z.boolean().optional(),
 });
 
 export const listConnectorsResponseSchema = z.object({
@@ -413,9 +409,7 @@ export type SourceConnector = z.infer<typeof sourceConnectorSchema>;
 export type ConnectorSyncRun = z.infer<typeof connectorSyncRunSchema>;
 export type ConnectorActionRun = z.infer<typeof connectorActionRunSchema>;
 export type ConnectorWebhookEvent = z.infer<typeof connectorWebhookEventSchema>;
-export type ConnectorActivityItem = z.infer<
-  typeof connectorActivityItemSchema
->;
+export type ConnectorActivityItem = z.infer<typeof connectorActivityItemSchema>;
 export type ConnectorNotionWriteRequest = z.infer<
   typeof connectorNotionWriteRequestSchema
 >;
@@ -458,6 +452,7 @@ export type DeleteConnectorAccountRequest = z.infer<
 export type DeleteConnectorAccountResponse = z.infer<
   typeof deleteConnectorAccountResponseSchema
 >;
+export type ListConnectorsRequest = z.infer<typeof listConnectorsRequestSchema>;
 export type ListConnectorsResponse = z.infer<
   typeof listConnectorsResponseSchema
 >;
