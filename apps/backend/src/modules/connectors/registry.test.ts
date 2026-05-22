@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { ConnectorError } from "./errors";
 import { ConnectorRegistry } from "./registry";
 import type { ConnectorAdapter, ConnectorManifest } from "./types";
@@ -18,7 +18,25 @@ const manifest: ConnectorManifest = {
     defaultFrequencyMinutes: 60,
     resources: [],
   },
-  actions: [],
+  actions: [
+    {
+      type: "fake.item.create",
+      displayName: "Create fake item",
+      agentToolName: "fake_item_create",
+      description: "Create a fake item.",
+      visibility: "agent",
+      capabilities: ["connector_write", "connector_create"],
+      riskLevel: "medium",
+      requiresApproval: true,
+      inputSchema: {
+        type: "object",
+        required: ["title"],
+        properties: {
+          title: { type: "string" },
+        },
+      },
+    },
+  ],
   configSchema: { type: "object" },
 };
 
@@ -36,6 +54,18 @@ test("ConnectorRegistry registers adapters and lists manifests", () => {
 
   assert.equal(registry.getAdapter("fake"), adapter);
   assert.deepEqual(registry.listManifests(), [manifest]);
+});
+
+test("ConnectorRegistry preserves agent-facing action metadata", () => {
+  const registry = new ConnectorRegistry([adapter]);
+  const [action] = registry.getManifest("fake").actions;
+
+  assert.equal(action?.agentToolName, "fake_item_create");
+  assert.equal(action?.visibility, "agent");
+  assert.deepEqual(action?.capabilities, [
+    "connector_write",
+    "connector_create",
+  ]);
 });
 
 test("ConnectorRegistry rejects missing adapters with connector error", () => {

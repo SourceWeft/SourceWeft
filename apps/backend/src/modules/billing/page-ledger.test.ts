@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import type { PoolClient } from "pg";
 import type { BillingStore } from "./store-port";
 import { BillingAccountService } from "./account-service";
@@ -1553,12 +1553,8 @@ test("team subscription seat upgrade preview includes prorated charge", async ()
   assert.equal(preview.billingAdjustment?.theoreticalRefundCents, 0);
   assert.equal(preview.billingAdjustment?.actualRefundCents, 0);
   assert.equal(preview.billingAdjustment?.unrefundedCents, 0);
-  assert.ok(
-    (preview.billingAdjustment?.estimatedChargeCents ?? 0) > 4_800,
-  );
-  assert.ok(
-    (preview.billingAdjustment?.estimatedChargeCents ?? 0) <= 4_900,
-  );
+  assert.ok((preview.billingAdjustment?.estimatedChargeCents ?? 0) > 4_800);
+  assert.ok((preview.billingAdjustment?.estimatedChargeCents ?? 0) <= 4_900);
 });
 
 test("team subscription seat downgrade partially refunds when monthly quota is spent", async () => {

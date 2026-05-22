@@ -1,4 +1,5 @@
 import type {
+  agentToolTrustRules,
   connectorActionRuns,
   connectorOAuthAccounts,
   connectorSyncRuns,
@@ -6,6 +7,7 @@ import type {
   sourceConnectors,
 } from "../../shared/db/schema";
 import type {
+  AgentToolTrustRuleRecord,
   ConnectorActionRunRecord,
   ConnectorOAuthAccountRecord,
   ConnectorOAuthAccountSecretRecord,
@@ -19,6 +21,7 @@ type SourceConnectorRow = typeof sourceConnectors.$inferSelect;
 type SyncRunRow = typeof connectorSyncRuns.$inferSelect;
 type ActionRunRow = typeof connectorActionRuns.$inferSelect;
 type WebhookEventRow = typeof connectorWebhookEvents.$inferSelect;
+type AgentToolTrustRuleRow = typeof agentToolTrustRules.$inferSelect;
 
 function iso(value: Date | null) {
   return value ? value.toISOString() : null;
@@ -107,6 +110,7 @@ export function mapActionRun(row: ActionRunRow): ConnectorActionRunRecord {
     connectorId: row.connectorId,
     connectorType: row.connectorType,
     actionType: row.actionType,
+    agentToolName: row.agentToolName,
     riskLevel: row.riskLevel,
     status: row.status,
     requestJson: row.requestJson ?? {},
@@ -118,6 +122,31 @@ export function mapActionRun(row: ActionRunRow): ConnectorActionRunRecord {
     executedBy: row.executedBy,
     errorCode: row.errorCode,
     errorMessage: row.errorMessage,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function mapAgentToolTrustRule(
+  row: AgentToolTrustRuleRow,
+): AgentToolTrustRuleRecord {
+  return {
+    id: row.id,
+    teamId: row.teamId,
+    workspaceId: row.workspaceId,
+    userId: row.userId,
+    domain: row.domain,
+    toolName: row.toolName,
+    connectorId: row.connectorId,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    allowedRiskLevels: Array.isArray(row.allowedRiskLevels)
+      ? row.allowedRiskLevels
+      : [],
+    status: row.status,
+    expiresAt: iso(row.expiresAt),
+    createdFromConfirmationId: row.createdFromConfirmationId,
+    lastUsedAt: iso(row.lastUsedAt),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

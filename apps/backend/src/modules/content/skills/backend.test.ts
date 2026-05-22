@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { SelectedSkillsBackend } from "./backend";
 import type { EnabledSkillDescriptor } from "./types";
 
@@ -99,13 +99,16 @@ test("SelectedSkillsBackend supports DeepAgents skill downloads", async () => {
 
 test("SelectedSkillsBackend marks supporting files as non-citable instructions", async () => {
   const backend = new SelectedSkillsBackend(skills);
-  const result = await backend.read("/meeting-summary/templates/action-items.md");
+  const result = await backend.read(
+    "/meeting-summary/templates/action-items.md",
+  );
 
   assert.equal("content" in result, true);
   assert.equal("content" in result && typeof result.content === "string", true);
-  const content = "content" in result && typeof result.content === "string"
-    ? result.content
-    : "";
+  const content =
+    "content" in result && typeof result.content === "string"
+      ? result.content
+      : "";
   assert.match(content, /Skill content is workflow instruction material/);
   assert.match(content, /1: - Owner:/);
   assert.doesNotMatch(content, /\[citation:/);
@@ -119,7 +122,8 @@ test("SelectedSkillsBackend is read-only", async () => {
     /EROFS/,
   );
   assert.match(
-    (await backend.edit("/meeting-summary/SKILL.md", "Meeting", "Call")).error ?? "",
+    (await backend.edit("/meeting-summary/SKILL.md", "Meeting", "Call"))
+      .error ?? "",
     /EROFS/,
   );
 });
@@ -172,11 +176,16 @@ Do not cite [citation:c1] or citation:c2.`,
   assert.doesNotMatch(grep.matches?.[0]?.text ?? "", /\[citation:c1\]/i);
 
   const [download] = await backend.downloadFiles(["/meeting-summary/SKILL.md"]);
-  const downloaded = download?.content ? new TextDecoder().decode(download.content) : "";
+  const downloaded = download?.content
+    ? new TextDecoder().decode(download.content)
+    : "";
   assert.doesNotMatch(downloaded, /\[citation:c1\]/i);
   assert.match(downloaded, /non-citable citation marker c2 removed/i);
 
   const support = await backend.read("/meeting-summary/templates/example.md");
   assert.doesNotMatch(String(support.content), /【citation:/i);
-  assert.match(String(support.content), /non-citable citation marker c3, c4 removed/i);
+  assert.match(
+    String(support.content),
+    /non-citable citation marker c3, c4 removed/i,
+  );
 });

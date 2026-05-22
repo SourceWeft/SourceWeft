@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   AGENT_TOOL_NAMES,
   isGeneratedImageArtifactToolName,
+  type ToolApprovalResume,
 } from "@sourceweft/sdk";
 import {
   buildByokModelExecution,
@@ -63,6 +64,7 @@ export type ThreadStreamActionInput = {
   durableRunKey?: string;
   attachOnly?: boolean;
   baseMessages?: ChatMessageItem[];
+  toolApprovalResume?: ToolApprovalResume | null;
 };
 
 type UseThreadStreamActionInput = {
@@ -75,6 +77,7 @@ type UseThreadStreamActionInput = {
   markRunStarted: (input: { idempotencyKey: string; status: "running"; mode?: "send" | "refresh" | "edit" }) => void;
   markRunTerminal: (input: { detachedWithoutFinish: boolean; durableRunKey: string }) => void;
   messages: ChatMessageItem[];
+  onToolConfirmationRequested?: () => void;
   searchEnabled: boolean;
   selectedByokModels: Partial<Record<ModelType, ByokModelSelection | null>>;
   selectedModels: SelectedModels;
@@ -102,6 +105,7 @@ export function useThreadStreamAction({
   markRunStarted,
   markRunTerminal,
   messages,
+  onToolConfirmationRequested,
   searchEnabled,
   selectedByokModels,
   selectedModels,
@@ -136,6 +140,7 @@ export function useThreadStreamAction({
       durableRunKey?: string;
       attachOnly?: boolean;
       baseMessages?: ChatMessageItem[];
+      toolApprovalResume?: ToolApprovalResume | null;
     }) => {
       if (!workspaceId) {
         return;
@@ -372,13 +377,19 @@ export function useThreadStreamAction({
         streamingAssistantMessageIds.add(committedMessage.id);
         setMessages((previous) => {
           let found = false;
-          const next = previous.map((message) => {
+          let inserted = false;
+          const next: ChatMessageItem[] = [];
+          for (const message of previous) {
             if (!streamingAssistantMessageIds.has(message.id)) {
-              return message;
+              next.push(message);
+              continue;
             }
             found = true;
-            return committedMessage;
-          });
+            if (!inserted) {
+              next.push(committedMessage);
+              inserted = true;
+            }
+          }
           return found ? next : [...next, committedMessage];
         });
         setStreamingAssistantSnapshot(null);
@@ -531,6 +542,7 @@ export function useThreadStreamAction({
               createdUserMessageId = messageId;
             }
           },
+          onToolConfirmationRequested,
           onPersistedAssistantMessageId: (messageId) => {
             persistedAssistantMessageId = messageId;
           },
@@ -578,6 +590,7 @@ export function useThreadStreamAction({
           streamingAssistantMessageIds,
           tempUserId,
           thinking: input.thinking,
+          toolApprovalResume: input.toolApprovalResume,
           thinkingSettings,
           threadId,
           throwStreamRequestError,
@@ -698,6 +711,7 @@ export function useThreadStreamAction({
       markRunStarted,
       markRunTerminal,
       messages,
+      onToolConfirmationRequested,
       searchEnabled,
       selectedByokModels,
       selectedModels,

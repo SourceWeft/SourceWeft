@@ -7,6 +7,7 @@ import type {
   ThinkingStepRecord,
   ToolCallRecord,
 } from "../_components/chat-canvas";
+import type { ToolApprovalResume } from "@sourceweft/sdk";
 import type {
   ModelType,
   SelectedModels,
@@ -44,6 +45,7 @@ const apiBaseUrl =
 
 const STREAM_DELTA_MAX_BATCH_CHARS = 800;
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
+const SILENT_STREAM_ERROR_CODES = new Set(["CHAT_RUN_STALE"]);
 const TITLE_POLL_INTERVAL_MS = 1000;
 const TITLE_POLL_TIMEOUT_MS = 60000;
 
@@ -58,6 +60,7 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
   effectiveMentionedSourceIds?: unknown;
   effectiveSourceIds?: unknown;
   error?: string;
+  finishReason?: string | null;
   hitCount?: number;
   id?: string;
   input?: unknown;
@@ -132,6 +135,7 @@ type RunChatStreamInput = {
   ) => void;
   mode: "send" | "refresh" | "edit";
   mentionedSourceIds?: string[];
+  toolApprovalResume?: ToolApprovalResume | null;
   normalizeCitationRecords: (value: unknown) => CitationRecord[];
   normalizeModelReasoningSegmentRecord: (
     value: unknown,
@@ -140,6 +144,7 @@ type RunChatStreamInput = {
   normalizeThinkingStepRecord: (value: unknown) => ThinkingStepRecord | null;
   normalizeThreadCommandRequest: (value: unknown) => unknown;
   onCreatedUserMessageId: (messageId: string) => void;
+  onToolConfirmationRequested?: () => void;
   onPersistedAssistantMessageId: (messageId: string) => void;
   onPersistedUserMessageId: (messageId: string) => void;
   onPreparedEffectiveSourceIds: (sourceIds: string[] | null) => void;
@@ -263,6 +268,7 @@ export async function runChatStream(
     images: input.images,
     userMessageId: input.userMessageId,
     assistantMessageId: input.assistantMessageId,
+    toolApprovalResume: input.toolApprovalResume,
   });
 
   const response = await fetch(
@@ -628,6 +634,9 @@ export async function runChatStream(
           },
         });
       } else if (data.type === "error") {
+        if (data.code && SILENT_STREAM_ERROR_CODES.has(data.code)) {
+          continue;
+        }
         sawStreamError = true;
         handleStreamingError({
           event: data,
@@ -656,9 +665,13 @@ export async function runChatStream(
       } else if (data.type === "finish") {
         const finishState = handleStreamingFinish({
           context: streamingEventHandlerContext,
+          finishReason: data.finishReason ?? null,
         });
         receivedFinishEvent = finishState.receivedFinishEvent;
         streamEnded = finishState.streamEnded;
+        if (data.finishReason === "tool_confirmation_requested") {
+          input.onToolConfirmationRequested?.();
+        }
         break readLoop;
       }
     }

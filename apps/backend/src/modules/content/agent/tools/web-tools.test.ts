@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { AgentCitationRegistry } from "../citation-registry";
 import { createWebTools } from "./web-tools";
 import type { WebProvider } from "../../web";

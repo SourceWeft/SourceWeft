@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { notionAdapter } from "./notion";
+import { test } from "vitest";
+import { notionAdapter } from "./adapter";
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -71,9 +71,7 @@ test("notion adapter declares install-integration OAuth manifest", () => {
     manifest.actions.some((action) => action.type === "notion.page.create"),
   );
   assert.ok(
-    manifest.sync.resources.some(
-      (resource) => resource.type === "notion_page",
-    ),
+    manifest.sync.resources.some((resource) => resource.type === "notion_page"),
   );
   assert.deepEqual(
     manifest.sync.resources.map((resource) => resource.type),
@@ -120,13 +118,29 @@ test("notion adapter declares expanded actions", () => {
   assert.ok(actionTypes.has("notion.file_upload.attach_to_page"));
 });
 
+test("notion agent-visible actions declare tool metadata", () => {
+  const agentActions = notionAdapter
+    .getManifest()
+    .actions.filter((action) => action.visibility === "agent");
+
+  assert.ok(agentActions.length > 0);
+  for (const action of agentActions) {
+    assert.equal(typeof action.agentToolName, "string");
+    assert.ok(action.agentToolName?.length);
+    assert.equal(typeof action.description, "string");
+    assert.ok(action.description?.length);
+    assert.ok(action.capabilities?.length);
+  }
+});
+
 test("notion readiness checks only page access with page_size 1", async () => {
   assert.ok(notionAdapter.checkSyncReadiness);
 
   await withMockedFetch(
     () => jsonResponse({ results: [], has_more: false }),
     async (calls) => {
-      const result = await notionAdapter.checkSyncReadiness?.(baseDiscoverInput);
+      const result =
+        await notionAdapter.checkSyncReadiness?.(baseDiscoverInput);
 
       assert.equal(result?.ready, false);
       assert.equal(result?.reason, "notion_no_pages");
@@ -207,6 +221,88 @@ test("notion page find sends query and page filter without nesting", async () =>
       assert.deepEqual(calls[0]?.body, {
         query: "Roadmap",
         filter: { property: "object", value: "page" },
+      });
+    },
+  );
+});
+
+test("notion create page omits parent for public OAuth private workspace pages", async () => {
+  await withMockedFetch(
+    (url) => {
+      if (url.endsWith("/pages")) {
+        return jsonResponse({
+          object: "page",
+          id: "page_1",
+          url: "https://www.notion.so/page_1",
+        });
+      }
+      return jsonResponse({});
+    },
+    async (calls) => {
+      await notionAdapter.executeAction({
+        ...baseDiscoverInput,
+        actionType: "notion.page.create",
+        request: { title: "Private Note", content: "Hello" },
+        idempotencyKey: "create_private_1",
+      });
+
+      assert.deepEqual(calls[0]?.body, {
+        properties: {
+          title: {
+            title: [{ text: { content: "Private Note" } }],
+          },
+        },
+        children: [
+          {
+            object: "block",
+            type: "paragraph",
+            paragraph: {
+              rich_text: [{ type: "text", text: { content: "Hello" } }],
+            },
+          },
+        ],
+      });
+    },
+  );
+});
+
+test("notion create page sends explicit page or data source parent when provided", async () => {
+  await withMockedFetch(
+    (url) => {
+      if (url.endsWith("/pages")) {
+        return jsonResponse({
+          object: "page",
+          id: "created_page",
+          url: "https://www.notion.so/created_page",
+        });
+      }
+      return jsonResponse({});
+    },
+    async (calls) => {
+      await notionAdapter.executeAction({
+        ...baseDiscoverInput,
+        actionType: "notion.page.create",
+        request: {
+          title: "Under Page",
+          content: "Hello",
+          parentPageId: "parent_page_1",
+        },
+        idempotencyKey: "create_parent_1",
+      });
+      await notionAdapter.executeAction({
+        ...baseDiscoverInput,
+        actionType: "notion.page.create",
+        request: {
+          title: "In Data Source",
+          content: "Hello",
+          dataSourceId: "data_source_1",
+        },
+        idempotencyKey: "create_ds_1",
+      });
+
+      assert.deepEqual(calls[0]?.body.parent, { page_id: "parent_page_1" });
+      assert.deepEqual(calls[1]?.body.parent, {
+        data_source_id: "data_source_1",
       });
     },
   );
@@ -577,7 +673,9 @@ test("notion extract does not use unresolved parent ids as directory names", asy
       assert.equal(parent.id, inaccessibleParentId);
       assert.equal(parent.title, "");
       assert.equal(
-        result.directoryPath?.some((node) => node.title === inaccessibleParentId),
+        result.directoryPath?.some(
+          (node) => node.title === inaccessibleParentId,
+        ),
         false,
       );
       assert.deepEqual(
@@ -635,7 +733,9 @@ test("notion webhook parser records verification token", async () => {
 
   assert.equal(event.eventType, "webhook.verification");
   assert.equal(event.metadata.verificationToken, "verify-me");
-  assert.deepEqual(targets, [{ action: "record_only", reason: "verification" }]);
+  assert.deepEqual(targets, [
+    { action: "record_only", reason: "verification" },
+  ]);
 });
 
 test("notion webhook verification rejects bad signature when secret is configured", async () => {

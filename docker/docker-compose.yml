@@ -9,6 +9,17 @@ x-sourceweft-env: &sourceweft-env
   BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-replace_with_32_plus_char_auth_secret}
   MODEL_GATEWAY_ENCRYPTION_SECRET: ${MODEL_GATEWAY_ENCRYPTION_SECRET:-replace_with_32_plus_char_model_secret}
   MODEL_GATEWAY_GLOBAL_CONFIG_PATH: /app/apps/backend/config/model-gateway.global.json
+  PUBLIC_S3_BUCKET: ${PUBLIC_S3_BUCKET:-}
+  PUBLIC_S3_REGION: ${PUBLIC_S3_REGION:-auto}
+  PUBLIC_S3_ENDPOINT: ${PUBLIC_S3_ENDPOINT:-}
+  PUBLIC_S3_ACCESS_KEY_ID: ${PUBLIC_S3_ACCESS_KEY_ID:-}
+  PUBLIC_S3_SECRET_ACCESS_KEY: ${PUBLIC_S3_SECRET_ACCESS_KEY:-}
+  PUBLIC_S3_FORCE_PATH_STYLE: ${PUBLIC_S3_FORCE_PATH_STYLE:-true}
+  PUBLIC_S3_BASE_URL: ${PUBLIC_S3_BASE_URL:-}
+  NOTION_BLOG_API_KEY: ${NOTION_BLOG_API_KEY:-}
+  NOTION_BLOG_DATABASE_ID: ${NOTION_BLOG_DATABASE_ID:-}
+  NOTION_BLOG_VERSION: ${NOTION_BLOG_VERSION:-2026-03-11}
+  BLOG_ASSET_MAX_BYTES: ${BLOG_ASSET_MAX_BYTES:-15728640}
 
 services:
   postgres:
@@ -148,6 +159,7 @@ services:
         required: false
     environment:
       NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-sourceweft}:${DB_PASSWORD:-sourceweft}@postgres:5432/${DB_NAME:-sourceweft}}
       NEXT_TELEMETRY_DISABLED: 1
       HOSTNAME: 0.0.0.0
       PORT: 3000

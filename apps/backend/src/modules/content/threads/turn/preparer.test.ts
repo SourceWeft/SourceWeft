@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import type { MeterConsumeRequest } from "@sourceweft/contracts";
 import type { ContentBillingPort } from "../../billing-port";
 import { testExports } from "./preparer";
@@ -47,23 +47,22 @@ function billingSummary() {
 }
 
 test("buildVisionFallbackGatewayMetadata marks system vision fallback operation", () => {
-  const metadata =
-    testExports.buildVisionFallbackGatewayMetadata({
-      workspace: {
-        id: "workspace-1",
-        organizationId: "team-1",
-        name: "Workspace",
-        slug: "workspace",
-        createdBy: "user-1",
-        createdAt: new Date(0).toISOString(),
-      },
-      threadId: "thread-1",
-      userId: "user-1",
-      traceId: "trace-1",
-      messageId: "message-1",
-      modelAlias: "vision-default",
-      profileAlias: "vision-profile",
-    });
+  const metadata = testExports.buildVisionFallbackGatewayMetadata({
+    workspace: {
+      id: "workspace-1",
+      organizationId: "team-1",
+      name: "Workspace",
+      slug: "workspace",
+      createdBy: "user-1",
+      createdAt: new Date(0).toISOString(),
+    },
+    threadId: "thread-1",
+    userId: "user-1",
+    traceId: "trace-1",
+    messageId: "message-1",
+    modelAlias: "vision-default",
+    profileAlias: "vision-profile",
+  });
 
   assert.deepEqual(metadata, {
     teamId: "team-1",
@@ -285,6 +284,130 @@ test("edit stream input distinguishes omitted images from explicit images", () =
   );
 });
 
+test("stream input metadata helper rejects arrays", () => {
+  assert.deepEqual(
+    inputTestExports.getMessageMetadataRecord({
+      metadata: {
+        finishReason: "tool_confirmation_requested",
+      },
+    }),
+    {
+      finishReason: "tool_confirmation_requested",
+    },
+  );
+  assert.deepEqual(
+    inputTestExports.getMessageMetadataRecord({
+      metadata: ["tool_confirmation_requested"],
+    }),
+    {},
+  );
+});
+
+test("tool confirmation refresh prefers the HITL resume checkpoint", () => {
+  const state = inputTestExports.resolveToolConfirmationRefreshAgentState({
+    finishReason: "tool_confirmation_requested",
+    toolApprovalResume: {
+      decisions: [{ type: "approve" }],
+    },
+    checkpoint: {
+      beforeInput: {
+        threadId: "thread-1",
+        checkpointId: "before-input",
+      },
+      beforeAssistant: {
+        threadId: "thread-1",
+        checkpointId: "before-assistant",
+      },
+      resume: {
+        threadId: "thread-1",
+        checkpointId: "resume",
+      },
+      final: {
+        threadId: "thread-1",
+        checkpointId: "final",
+      },
+    },
+  });
+
+  assert.equal(state.agentMode, "replay");
+  assert.deepEqual(state.agentBaseCheckpoint, {
+    threadId: "thread-1",
+    checkpointId: "resume",
+  });
+});
+
+test("tool confirmation refresh requires resume decisions", () => {
+  assert.throws(
+    () =>
+      inputTestExports.resolveToolConfirmationRefreshAgentState({
+        finishReason: "tool_confirmation_requested",
+        checkpoint: {
+          beforeInput: {
+            threadId: "thread-1",
+            checkpointId: "before-input",
+          },
+          beforeAssistant: {
+            threadId: "thread-1",
+            checkpointId: "before-assistant",
+          },
+          resume: null,
+          final: {
+            threadId: "thread-1",
+            checkpointId: "final",
+          },
+        },
+      }),
+    (error) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "THREAD_CONFIRMATION_RESUME_REQUIRED",
+  );
+});
+
+test("tool confirmation refresh requires an interrupt checkpoint", () => {
+  assert.throws(
+    () =>
+      inputTestExports.resolveToolConfirmationRefreshAgentState({
+        finishReason: "tool_confirmation_requested",
+        toolApprovalResume: {
+          decisions: [{ type: "approve" }],
+        },
+        checkpoint: null,
+      }),
+    (error) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "THREAD_CONFIRMATION_CHECKPOINT_MISSING",
+  );
+});
+
+test("normal refresh still forks from before-input checkpoint", () => {
+  const state = inputTestExports.resolveToolConfirmationRefreshAgentState({
+    finishReason: "stop",
+    checkpoint: {
+      beforeInput: {
+        threadId: "thread-1",
+        checkpointId: "before-input",
+      },
+      beforeAssistant: {
+        threadId: "thread-1",
+        checkpointId: "before-assistant",
+      },
+      resume: null,
+      final: {
+        threadId: "thread-1",
+        checkpointId: "final",
+      },
+    },
+  });
+
+  assert.equal(state.agentMode, "fork");
+  assert.deepEqual(state.agentBaseCheckpoint, {
+    threadId: "thread-1",
+    checkpointId: "before-input",
+  });
+});
+
 test("empty thread message validation allows submitted images", () => {
   assert.equal(
     testExports.shouldRejectEmptyThreadMessage({
@@ -478,23 +601,56 @@ test("resolveThreadCommand resolves slash skill command when skill was loaded by
   assert.equal(command?.instruction, "Explain $ARGUMENTS simply");
 });
 
-test("buildCommandAugmentedText leaves tool and skill activation text unchanged", () => {
+test("resolveThreadCommand resolves Notion tool slash command", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      command: {
+        arguments: "TEST",
+        kind: "tool",
+        name: "/search_notion_pages",
+      },
+    }),
+    enabledSkills: [],
+  });
+
+  assert.deepEqual(command, {
+    arguments: "TEST",
+    canonicalName: "/search_notion_pages",
+    description: "Search indexed Notion pages",
+    displayName: "Search Notion pages",
+    kind: "tool",
+    name: "/search_notion_pages",
+    skillSlug: "",
+    toolName: "search_notion_pages",
+  });
+});
+
+test("buildCommandAugmentedText instructs explicit tool command usage", () => {
   assert.equal(
     testExports.buildCommandAugmentedText({
       command: {
-        arguments: "draw a chart",
-        canonicalName: "/generate_image",
-        description: "Generate image",
-        displayName: "Generate image",
+        arguments: "TEST",
+        canonicalName: "/search_notion_pages",
+        description: "Search indexed Notion pages",
+        displayName: "Search Notion pages",
         kind: "tool",
-        name: "/generate_image",
+        name: "/search_notion_pages",
         skillSlug: "",
-        toolName: "generate_image",
+        toolName: "search_notion_pages",
       },
-      text: "draw a chart",
+      text: "TEST",
     }),
-    "draw a chart",
+    `<sourceweft_tool_command name="search_notion_pages">
+Use the search_notion_pages tool for this request. Treat the user request below as the tool input; do not answer without using the selected tool unless the input is invalid or the tool is unavailable.
+</sourceweft_tool_command>
+
+<user_request>
+TEST
+</user_request>`,
   );
+});
+
+test("buildCommandAugmentedText leaves skill activation text unchanged", () => {
   assert.equal(
     testExports.buildCommandAugmentedText({
       command: {

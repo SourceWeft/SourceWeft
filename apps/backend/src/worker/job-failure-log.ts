@@ -1,4 +1,5 @@
 import type { Job } from "bullmq";
+import { isConnectorError } from "../modules/connectors/errors";
 import { isContentError } from "../modules/content/errors";
 
 type LoggableJob = Pick<
@@ -86,6 +87,11 @@ export function buildWorkerJobFailureLog(
   }
 
   if (isContentError(error)) {
+    context.errorCode = error.code;
+    context.errorStatusCode = error.statusCode;
+  }
+
+  if (isConnectorError(error)) {
     context.errorCode = error.code;
     context.errorStatusCode = error.statusCode;
   }

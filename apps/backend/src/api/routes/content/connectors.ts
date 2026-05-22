@@ -557,6 +557,7 @@ export function registerConnectorRoutes(app: Hono) {
     const parsed = lookupNotionPagesRequestSchema.safeParse({
       connectorId: c.req.query("connectorId"),
       title: c.req.query("title"),
+      fuzzyTitle: c.req.query("fuzzyTitle"),
       externalId: c.req.query("externalId"),
       externalUri: c.req.query("externalUri"),
       limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
@@ -579,6 +580,7 @@ export function registerConnectorRoutes(app: Hono) {
       connectorType: "notion",
       connectorId: parsed.data.connectorId,
       title: parsed.data.title,
+      fuzzyTitle: parsed.data.fuzzyTitle,
       externalId: parsed.data.externalId,
       externalUri: parsed.data.externalUri,
       limit: parsed.data.limit ?? 20,

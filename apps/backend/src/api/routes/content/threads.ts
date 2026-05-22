@@ -465,6 +465,7 @@ export function registerThreadRoutes(app: Hono) {
               vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+              toolApprovalResume: parsed.data.toolApprovalResume ?? null,
             }
           : mode === "edit"
             ? {
@@ -487,6 +488,7 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                toolApprovalResume: parsed.data.toolApprovalResume ?? null,
               }
             : {
                 workspaceId,
@@ -505,6 +507,7 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                toolApprovalResume: parsed.data.toolApprovalResume ?? null,
               };
       await contentService.getOrCreateDurableThreadRun({
         workspaceId,
@@ -558,7 +561,8 @@ export function registerThreadRoutes(app: Hono) {
               vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-            })
+              toolApprovalResume: parsed.data.toolApprovalResume ?? null,
+            } satisfies RefreshThreadInput)
           : mode === "edit"
             ? await contentService.editThread({
                 workspaceId,
@@ -580,7 +584,8 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-              })
+                toolApprovalResume: parsed.data.toolApprovalResume ?? null,
+              } satisfies EditThreadInput)
             : await contentService.streamThread({
                 workspaceId,
                 threadId,
@@ -622,7 +627,8 @@ export function registerThreadRoutes(app: Hono) {
             vision: parsed.data.vision,
             visionProfileAlias:
               parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-          })
+            toolApprovalResume: parsed.data.toolApprovalResume ?? null,
+          } satisfies RefreshThreadInput)
         : mode === "edit"
           ? contentService.editThreadEvents({
               workspaceId,
@@ -644,7 +650,8 @@ export function registerThreadRoutes(app: Hono) {
               vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-            })
+              toolApprovalResume: parsed.data.toolApprovalResume ?? null,
+            } satisfies EditThreadInput)
           : contentService.streamThreadEvents({
               workspaceId,
               threadId,

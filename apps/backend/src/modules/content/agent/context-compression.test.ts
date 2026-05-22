@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { ContentError } from "../errors";
 import {
@@ -22,10 +22,7 @@ test("summary prompt requires the fixed SourceWeft sections", () => {
     assert.ok(index > previousIndex, `${section} should appear in order`);
     previousIndex = index;
   }
-  assert.match(
-    SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT,
-    /not source evidence/i,
-  );
+  assert.match(SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT, /not source evidence/i);
   assert.match(SOURCEWEFT_STRUCTURED_SUMMARY_PROMPT, /\{messages\}/);
 });
 

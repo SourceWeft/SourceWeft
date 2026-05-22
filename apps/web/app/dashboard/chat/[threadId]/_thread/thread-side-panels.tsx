@@ -17,6 +17,7 @@ import type {
   CitationRecord,
 } from "../../_components/chat-canvas";
 import type { SourceItem } from "../../_components/source-types";
+import type { SourceConnector } from "@sourceweft/sdk";
 
 const SourcesHub = dynamic(
   () => import("../../_components/sources-hub").then((mod) => mod.SourcesHub),
@@ -60,6 +61,7 @@ export function ThreadSidePanels({
   isDesktopPanel,
   isPersistentLayout,
   loadAvailableSkills,
+  onConnectorsChange,
   onArtifactOpen,
   onArtifactPreviewClose,
   onCitationLocate,
@@ -91,6 +93,7 @@ export function ThreadSidePanels({
   isDesktopPanel: boolean;
   isPersistentLayout: boolean;
   loadAvailableSkills: () => Promise<void>;
+  onConnectorsChange?: (connectors: SourceConnector[]) => void;
   onArtifactOpen: (artifact: ArtifactListItem) => void;
   onArtifactPreviewClose: () => void;
   onCitationLocate: (messageId: string) => void;
@@ -130,6 +133,7 @@ export function ThreadSidePanels({
           onSkillSelectionChange={onSkillSelectionChange}
           onSelectionChange={onSelectionChange}
           onSkillsCatalogChange={loadAvailableSkills}
+          onConnectorsChange={onConnectorsChange}
           onSourceLoad={onLibrarySourcesLoad}
           onSourceMerge={onLibrarySourcesMerge}
           selectedIds={activeSourceIds}
@@ -203,6 +207,7 @@ export function ThreadSidePanels({
             onSkillSelectionChange={onSkillSelectionChange}
             onSelectionChange={onSelectionChange}
             onSkillsCatalogChange={loadAvailableSkills}
+            onConnectorsChange={onConnectorsChange}
             onSourceLoad={onLibrarySourcesLoad}
             onSourceMerge={onLibrarySourcesMerge}
             selectedIds={activeSourceIds}

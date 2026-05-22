@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { isBillingError } from "../../modules/billing/errors";
 import { isConnectorError } from "../../modules/connectors/errors";
 import { isContentError } from "../../modules/content/errors";
+import { isMcpError } from "../../modules/mcp/errors";
 
 export type ApiErrorBody = {
   code: string;
@@ -99,6 +100,15 @@ export function toApiError(error: unknown): ApiError {
   }
 
   if (isBillingError(error)) {
+    return new ApiError(
+      error.statusCode,
+      error.code,
+      error.message,
+      error.details,
+    );
+  }
+
+  if (isMcpError(error)) {
     return new ApiError(
       error.statusCode,
       error.code,

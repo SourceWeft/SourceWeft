@@ -10,7 +10,8 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@sourceweft/contracts": "workspace:*"
+    "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/market-contracts": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.2"

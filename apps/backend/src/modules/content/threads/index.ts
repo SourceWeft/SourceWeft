@@ -18,3 +18,4 @@ export type {
   ToolCallStatus,
   ToolCallTrace,
 } from "./turn/types";
+export type { EditThreadInput, RefreshThreadInput } from "./stream/types";

@@ -57,6 +57,11 @@ import {
 import {
   DEFAULT_PROMPT_THINKING_SETTINGS,
 } from "./chat-canvas/tool-selection";
+import {
+  EMPTY_ACTIVE_CONNECTOR_TOOLS,
+  resolveActiveConnectorToolState,
+  type ActiveConnectorToolState,
+} from "./connector-agent-tools";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import type {
   ArtifactPreviewRecord,
@@ -94,7 +99,11 @@ import {
   desktopBridge,
   handleDesktopAuthDeepLink,
 } from "../../../../lib/desktop-bridge";
-import { contentClient } from "../../../../lib/sdk";
+import {
+  connectorsClient,
+  contentClient,
+} from "../../../../lib/sdk";
+import type { SourceConnector } from "@sourceweft/sdk";
 import {
   ChatCanvasPanelSkeleton,
   SourcesHubPanelSkeleton,
@@ -355,6 +364,8 @@ export function DashboardChatPageClient() {
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
+  const [activeConnectorTools, setActiveConnectorTools] =
+    useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
@@ -404,6 +415,16 @@ export function DashboardChatPageClient() {
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const shortcutPlatform = useDashboardShortcutPlatform();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const oauthStatus = params.get("connector_oauth");
+    if (oauthStatus === "success" || oauthStatus === "error") {
+      setHubDrawerOpen(true);
+    }
+  }, []);
+
   const handleArtifactPreview = useCallback(
     (artifact: ArtifactPreviewRecord) => {
       setPreviewArtifact(artifact);
@@ -413,6 +434,9 @@ export function DashboardChatPageClient() {
     },
     [sourcesVisible, toggleSourcesVisible],
   );
+  const handleConnectorsChange = useCallback((connectors: SourceConnector[]) => {
+    setActiveConnectorTools(resolveActiveConnectorToolState(connectors));
+  }, []);
   const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
     async ({ cursor, limit, query }) => {
       if (!workspaceId) {
@@ -476,6 +500,31 @@ export function DashboardChatPageClient() {
 
   useEffect(() => {
     setLibrarySources(getCachedWorkspaceSources(workspaceId) ?? []);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setActiveConnectorTools(EMPTY_ACTIVE_CONNECTOR_TOOLS);
+      return;
+    }
+
+    let cancelled = false;
+    void connectorsClient
+      .list(workspaceId)
+      .then((result) => {
+        if (!cancelled) {
+          setActiveConnectorTools(resolveActiveConnectorToolState(result.items));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActiveConnectorTools(EMPTY_ACTIVE_CONNECTOR_TOOLS);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId]);
 
   useEffect(() => {
@@ -1157,6 +1206,7 @@ export function DashboardChatPageClient() {
             imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
             imageModelAvailable={Boolean(selectedModels.image)}
             imageModelAlias={selectedModels.image?.modelAlias ?? null}
+            notionConnectorId={activeConnectorTools.notionConnectorId}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={setDisabledToolNames}
             thinkingSettings={thinkingSettings}
@@ -1184,6 +1234,7 @@ export function DashboardChatPageClient() {
             initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
             onSourceLoad={handleLibrarySourcesLoad}
             onSourceMerge={handleLibrarySourcesMerge}
+            onConnectorsChange={handleConnectorsChange}
             selectedIds={activeSourceIds}
             selectedSkillIds={activeSkillIds}
             workspaceId={workspaceId}
@@ -1298,6 +1349,7 @@ export function DashboardChatPageClient() {
             initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
             onSourceLoad={handleLibrarySourcesLoad}
             onSourceMerge={handleLibrarySourcesMerge}
+            onConnectorsChange={handleConnectorsChange}
             selectedIds={activeSourceIds}
             selectedSkillIds={activeSkillIds}
             variant="drawer"

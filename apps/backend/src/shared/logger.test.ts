@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, test } from "vitest";
 import { logger } from "./logger";
 
 const originalNodeEnv = process.env.NODE_ENV;
@@ -35,10 +35,7 @@ test("production logger writes metadata on a single line", () => {
   assert.equal(calls[0]?.length, 1);
 
   const line = String(calls[0]?.[0]);
-  assert.match(
-    line,
-    /^\[\d{4}-\d{2}-\d{2}T.*Z\] \[INFO\] Job completed /,
-  );
+  assert.match(line, /^\[\d{4}-\d{2}-\d{2}T.*Z\] \[INFO\] Job completed /);
   assert.equal(line.includes("\n"), false);
   assert.match(line, /"jobId":"source_parse_df4d6e10_1_3"/);
   assert.match(line, /"type":"source-parse-poll"/);

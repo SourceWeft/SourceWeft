@@ -1,10 +1,13 @@
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { ContentError } from "../errors";
 import { resolveBillingPages } from "./billing-pages";
 
 test("resolveBillingPages uses explicit parsed or estimated page counts", () => {
-  assert.equal(resolveBillingPages({ parsedPages: 2, contentText: "hello" }), 2);
+  assert.equal(
+    resolveBillingPages({ parsedPages: 2, contentText: "hello" }),
+    2,
+  );
   assert.equal(resolveBillingPages({ estimatedPages: 1.2 }), 2);
   assert.equal(resolveBillingPages({ sourceEstimatedPages: 3 }), 3);
 });

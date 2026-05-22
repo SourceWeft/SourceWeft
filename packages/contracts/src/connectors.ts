@@ -32,6 +32,22 @@ export const connectorSyncRunStatusSchema = z.enum([
 
 export const connectorActionRiskLevelSchema = z.enum(["low", "medium", "high"]);
 
+export const connectorActionVisibilitySchema = z.enum(["agent", "internal"]);
+
+export const connectorActionCapabilitySchema = z.enum([
+  "connector_read",
+  "connector_write",
+  "connector_create",
+  "connector_update",
+  "connector_delete",
+  "connector_append",
+  "connector_upload",
+  "connector_move",
+  "connector_archive",
+  "connector_comment",
+  "artifact",
+]);
+
 export const connectorActionRunStatusSchema = z.enum([
   "proposed",
   "approved",
@@ -74,6 +90,11 @@ export const connectorActionSpecSchema = z.object({
   riskLevel: connectorActionRiskLevelSchema,
   requiresApproval: z.boolean(),
   inputSchema: jsonObjectSchema,
+  agentToolName: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  visibility: connectorActionVisibilitySchema.optional(),
+  capabilities: z.array(connectorActionCapabilitySchema).optional(),
+  resultSchema: jsonObjectSchema.optional(),
 });
 
 export const connectorManifestSchema = z.object({
@@ -153,6 +174,7 @@ export const connectorActionRunSchema = z.object({
   connectorId: z.string(),
   connectorType: z.string(),
   actionType: z.string(),
+  agentToolName: z.string().nullable().optional(),
   riskLevel: connectorActionRiskLevelSchema,
   status: connectorActionRunStatusSchema,
   requestJson: jsonObjectSchema,
@@ -383,6 +405,7 @@ export const connectorNotionWriteRequestSchema = z.object({
 export const lookupNotionPagesRequestSchema = z.object({
   connectorId: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1).optional(),
+  fuzzyTitle: z.string().trim().min(1).optional(),
   externalId: z.string().trim().min(1).optional(),
   externalUri: z.string().trim().min(1).optional(),
   limit: z.number().int().positive().max(50).optional(),
@@ -408,6 +431,12 @@ export type ConnectorOAuthAccount = z.infer<typeof connectorOAuthAccountSchema>;
 export type SourceConnector = z.infer<typeof sourceConnectorSchema>;
 export type ConnectorSyncRun = z.infer<typeof connectorSyncRunSchema>;
 export type ConnectorActionRun = z.infer<typeof connectorActionRunSchema>;
+export type ConnectorActionVisibility = z.infer<
+  typeof connectorActionVisibilitySchema
+>;
+export type ConnectorActionCapability = z.infer<
+  typeof connectorActionCapabilitySchema
+>;
 export type ConnectorWebhookEvent = z.infer<typeof connectorWebhookEventSchema>;
 export type ConnectorActivityItem = z.infer<typeof connectorActivityItemSchema>;
 export type ConnectorNotionWriteRequest = z.infer<

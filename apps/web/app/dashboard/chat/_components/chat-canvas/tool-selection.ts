@@ -1,6 +1,7 @@
 import {
   AGENT_TOOL_NAMES,
   isGeneratedImageArtifactToolName,
+  isNotionToolName,
   isSkillActivatedAgentTool,
 } from "@sourceweft/sdk";
 import type {
@@ -15,6 +16,16 @@ import type {
   PromptThinkingSettings,
   ThinkingEffort,
 } from "./types";
+
+export const notionAgentToolNames = [
+  AGENT_TOOL_NAMES.searchNotionPages,
+  AGENT_TOOL_NAMES.createNotionPage,
+  AGENT_TOOL_NAMES.appendNotionPage,
+  AGENT_TOOL_NAMES.updateNotionPageByTitle,
+  AGENT_TOOL_NAMES.deleteNotionPageByTitle,
+  AGENT_TOOL_NAMES.saveArtifactToNotion,
+  AGENT_TOOL_NAMES.saveFinalAnswerToNotion,
+] as const;
 
 export function buildChatToolsRequest(input: {
   imageExecution?: Record<string, unknown> | null;
@@ -51,6 +62,12 @@ export function buildChatToolsRequest(input: {
     ...(generateImageWithExecution
       ? { [AGENT_TOOL_NAMES.generateImage]: generateImageWithExecution }
       : {}),
+    ...Object.fromEntries(
+      notionAgentToolNames.flatMap((toolName) => {
+        const selection = input.tools?.[toolName];
+        return selection ? [[toolName, selection] as const] : [];
+      }),
+    ),
   };
 }
 
@@ -281,6 +298,8 @@ function buildGenerateImageToolSelection(input: {
 export function buildComposerToolsSelection(input: {
   imageGenerationEnabled: boolean;
   imageSupported: boolean;
+  notionConnectorId?: string | null;
+  notionToolsEnabled?: boolean;
   selectedSkills: ChatSkillItem[];
   imageConfig: ChatImageArtifactConfig;
   imageModelAlias?: string | null;
@@ -298,5 +317,23 @@ export function buildComposerToolsSelection(input: {
     tools[AGENT_TOOL_NAMES.generateImage] = generateImage;
   }
 
+  if (input.notionConnectorId && input.notionToolsEnabled !== undefined) {
+    for (const toolName of notionAgentToolNames) {
+      tools[toolName] = {
+        connectorId: input.notionConnectorId,
+        enabled: input.notionToolsEnabled,
+      };
+    }
+  }
+
   return Object.keys(tools).length > 0 ? tools : undefined;
+}
+
+export function skillSupportsNotion(skill: ChatSkillItem) {
+  return (
+    skill.tools?.some(
+      (toolName) =>
+        isSkillActivatedAgentTool(toolName) && isNotionToolName(toolName),
+    ) === true
+  );
 }

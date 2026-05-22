@@ -1,4 +1,5 @@
 import type { DeepAgentTurnEvent } from "../../agent/turn/runner";
+import { toolConfirmationRequestSchema } from "@sourceweft/contracts";
 import type { ToolCallTrace } from "../turn/types";
 import { toSseData } from "./helpers";
 
@@ -57,34 +58,20 @@ function formatGrepMatch(value: unknown) {
   return line === null ? `${path}: ${text}` : `${path}:${line}: ${text}`;
 }
 
-function extractToolMessageContent(record: Record<string, unknown>) {
-  const kwargs = toObjectRecord(record.kwargs);
-  const content = kwargs?.content;
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return null;
-  }
-
-  const text = content
-    .map((item) => {
-      if (typeof item === "string") {
-        return item;
-      }
-      const itemRecord = toObjectRecord(item);
-      return typeof itemRecord?.text === "string" ? itemRecord.text : null;
-    })
-    .filter((item): item is string => item !== null)
-    .join("\n");
-
-  return text.length > 0 ? text : null;
+function extractToolConfirmationRequest(output: unknown): unknown | null {
+  const record = toObjectRecord(output);
+  const confirmation = toolConfirmationRequestSchema.safeParse(record);
+  return confirmation.success ? confirmation.data : null;
 }
 
 export function normalizeToolOutputForSse(output: unknown): unknown {
   if (output === null || output === undefined) {
     return null;
+  }
+
+  const confirmation = extractToolConfirmationRequest(output);
+  if (confirmation) {
+    return confirmation;
   }
 
   if (typeof output === "string") {
@@ -110,21 +97,6 @@ export function normalizeToolOutputForSse(output: unknown): unknown {
     return {
       ...record,
       content: truncateTextForSse(record.content),
-    };
-  }
-
-  const toolMessageContent = extractToolMessageContent(record);
-  if (toolMessageContent !== null) {
-    return {
-      content: truncateTextForSse(toolMessageContent),
-      status:
-        typeof toObjectRecord(record.kwargs)?.status === "string"
-          ? toObjectRecord(record.kwargs)?.status
-          : undefined,
-      name:
-        typeof toObjectRecord(record.kwargs)?.name === "string"
-          ? toObjectRecord(record.kwargs)?.name
-          : undefined,
     };
   }
 

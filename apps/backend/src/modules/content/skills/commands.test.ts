@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { parseSkillCommands, publicSkillCommands } from "./commands";
 
 test("parseSkillCommands derives canonical names from command files", () => {
@@ -58,7 +58,10 @@ test("parseSkillCommands maps nested command paths to dotted names", () => {
     ],
   });
 
-  assert.equal(commands[0]?.canonicalName, "/pm-data-analytics:sql.write-query");
+  assert.equal(
+    commands[0]?.canonicalName,
+    "/pm-data-analytics:sql.write-query",
+  );
   assert.equal(commands[0]?.displayName, "Sql Write Query");
 });
 

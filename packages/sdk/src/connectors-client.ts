@@ -30,6 +30,8 @@ import type {
   TriggerConnectorSyncResponse,
   UpdateConnectorResponse,
   UpdateConnectorRequest,
+  RespondAgentConfirmationRequest,
+  RespondAgentConfirmationResponse,
 } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
@@ -206,6 +208,17 @@ export class ConnectorsClient {
     );
   }
 
+  respondToConfirmation(
+    workspaceId: string,
+    confirmationId: string,
+    input: RespondAgentConfirmationRequest,
+  ) {
+    return this.http.post<RespondAgentConfirmationResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/agent-confirmations/${encode(confirmationId)}/respond`,
+      input,
+    );
+  }
+
   listActions(workspaceId: string, connectorId: string) {
     return this.http.get<ListConnectorActionsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/actions`,
@@ -235,6 +248,7 @@ export class ConnectorsClient {
       `/v1/workspaces/${encode(workspaceId)}/connectors/notion/pages${query({
         connectorId: input.connectorId,
         title: input.title,
+        fuzzyTitle: input.fuzzyTitle,
         externalId: input.externalId,
         externalUri: input.externalUri,
         limit: input.limit ? String(input.limit) : undefined,

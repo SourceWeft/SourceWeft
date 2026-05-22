@@ -4,6 +4,7 @@ import {
   meterConsumeResponseSchema,
   meterIngestionResponseSchema,
 } from "./billing";
+import { toolApprovalResumeSchema } from "./agent-confirmations";
 import { AGENT_TOOL_NAMES } from "./agent-tools";
 
 export const SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX = "sourceweft-web-run:";
@@ -608,6 +609,13 @@ const webSearchToolSelectionSchema = z
   })
   .strict();
 
+const connectorToolSelectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    connectorId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 const skillSlashConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -674,6 +682,20 @@ const threadToolsRequestSchema = z
     artifact: artifactToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.generateImage]: generateImageToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.webSearch]: webSearchToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.searchNotionPages]:
+      connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.createNotionPage]:
+      connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.appendNotionPage]:
+      connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.updateNotionPageByTitle]:
+      connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.deleteNotionPageByTitle]:
+      connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.saveArtifactToNotion]:
+      connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]:
+      connectorToolSelectionSchema.optional(),
   })
   .strict();
 
@@ -694,6 +716,7 @@ export const streamThreadRequestSchema = z.object({
   image: llmExecutionConfigSchema.optional(),
   vision: llmExecutionConfigSchema.optional(),
   modelSettings: threadModelSettingsInputSchema.optional(),
+  toolApprovalResume: toolApprovalResumeSchema.optional(),
 });
 
 export const refreshThreadRequestSchema = streamThreadRequestSchema;

@@ -57,6 +57,7 @@ function buildChatSystemPromptSuffix() {
 <output_rules>
 - Answer directly and concisely unless the user asks for a different format.
 - Do not reveal raw tool outputs or internal retrieval instructions.
+- Sensitive tool actions are reviewed by SourceWeft before execution. Do not narrate approval requests or tell the user to approve them in natural language; SourceWeft displays pending tool confirmations in the intervention UI. Only say an external provider, file, source, artifact, MCP, or other side-effect changed after the relevant tool execution completes.
 - For multi-source summaries, organize the answer by source unless the user requests another format.
 - Do not describe tool activity, inspection steps, or intentions. Provide only the final answer.
 - Citation markers should appear only where they support a source-grounded statement.

@@ -10,6 +10,22 @@ import {
 
 type OAuthCompleteState = "success" | "error";
 
+function safeReturnUrl(value: string | null) {
+  if (!value) {
+    return new URL("/dashboard/chat", window.location.origin);
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      return new URL("/dashboard/chat", window.location.origin);
+    }
+    return url;
+  } catch {
+    return new URL("/dashboard/chat", window.location.origin);
+  }
+}
+
 function createMessage(input: {
   accountId: string | null;
   connectorOAuth: string | null;
@@ -41,6 +57,7 @@ export function ConnectorOAuthCompleteClient({
   connectorOAuth,
   connectorType,
   error,
+  mode,
   returnTo,
   workspaceId,
 }: {
@@ -48,6 +65,7 @@ export function ConnectorOAuthCompleteClient({
   connectorOAuth: string | null;
   connectorType: string | null;
   error: string | null;
+  mode: string | null;
   returnTo: string | null;
   workspaceId: string | null;
 }) {
@@ -66,13 +84,32 @@ export function ConnectorOAuthCompleteClient({
   const isSuccess = message.status === "success";
 
   useEffect(() => {
+    if (mode === "redirect") {
+      const returnUrl = safeReturnUrl(returnTo);
+      returnUrl.searchParams.set("connector_oauth", message.status);
+      returnUrl.searchParams.set("connector_type", message.connectorType);
+      returnUrl.searchParams.set("workspace_id", message.workspaceId);
+      if (message.accountId) {
+        returnUrl.searchParams.set("account_id", message.accountId);
+      } else {
+        returnUrl.searchParams.delete("account_id");
+      }
+      if (message.error) {
+        returnUrl.searchParams.set("error", message.error);
+      } else {
+        returnUrl.searchParams.delete("error");
+      }
+      window.location.replace(returnUrl.toString());
+      return;
+    }
+
     publishConnectorOAuthCompletion(message);
     const timer = window.setTimeout(() => {
       setCloseAttempted(true);
       window.close();
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [message]);
+  }, [message, mode, returnTo]);
 
   const Icon = isSuccess ? CheckCircle2 : CircleAlert;
 
@@ -92,13 +129,17 @@ export function ConnectorOAuthCompleteClient({
               {isSuccess ? "Connector authorized" : "Authorization failed"}
             </h1>
             <p className="mt-1 text-sm leading-5 text-muted-foreground">
-              {isSuccess
-                ? "SourceWeft is updating the connector status in the original tab."
-                : message.error}
+              {mode === "redirect"
+                ? isSuccess
+                  ? "Returning to SourceWeft to finish setup."
+                  : "Returning to SourceWeft with the authorization error."
+                : isSuccess
+                  ? "SourceWeft is updating the connector status in the original tab."
+                  : message.error}
             </p>
           </div>
         </div>
-        {closeAttempted ? (
+        {mode !== "redirect" && closeAttempted ? (
           <div className="mt-4 flex gap-2">
             {returnTo ? (
               <Button asChild className="flex-1" type="button">

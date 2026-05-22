@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import type { ModelPricing } from "../../../../shared/db/schema-types";
 import { testExports } from "./cost";
 

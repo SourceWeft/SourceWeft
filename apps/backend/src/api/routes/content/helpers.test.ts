@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { createSseResponse } from "./helpers";
 
 test("createSseResponse returns the async generator when cancelled", async () => {

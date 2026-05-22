@@ -4,7 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "paths": {
-      "@sourceweft/contracts": ["../contracts/src/index.ts"]
+      "@sourceweft/contracts": ["../contracts/src/index.ts"],
+      "@sourceweft/market-contracts": ["../market-contracts/src/index.ts"]
     },
     "noEmit": true,
     "baseUrl": "."

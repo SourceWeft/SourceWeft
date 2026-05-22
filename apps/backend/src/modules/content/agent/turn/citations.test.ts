@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import type { AgentCitation } from "../citation-registry";
 import { normalizeAssistantCitations } from "./citations";
 
@@ -121,7 +121,8 @@ test("normalizeAssistantCitations removes unsupported citation markers", () => {
 
 test("normalizeAssistantCitations removes non-canonical citation-like markers", () => {
   const result = normalizeAssistantCitations({
-    assistantText: "Keep [citation:c1]. Remove 【citation: c1】 and [citation: c1] and [citation:c1,c2].",
+    assistantText:
+      "Keep [citation:c1]. Remove 【citation: c1】 and [citation: c1] and [citation:c1,c2].",
     citations: [citation("c1"), citation("c2")],
   });
 

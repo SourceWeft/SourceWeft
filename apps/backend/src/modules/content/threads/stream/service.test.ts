@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { after } from "node:test";
+import { afterAll, test, vi } from "vitest";
 import type {
   EndSpanInput,
   EndTraceInput,
@@ -21,7 +21,7 @@ import type {
 import type { MessageRecord } from "../../types";
 import type { PreparedThreadTurn } from "../turn/types";
 
-after(async () => {
+afterAll(async () => {
   await closeQueue();
 });
 
@@ -66,6 +66,7 @@ const outcome: DeepAgentTurnOutcome = {
   agentCheckpoint: {
     beforeInput: null,
     beforeAssistant: null,
+    resume: null,
     final: null,
   },
 };
@@ -369,6 +370,8 @@ const prepared: PreparedThreadTurn = {
   invokedSkillIds: [],
   selectedSkillIds: [],
   webSearchEnabled: false,
+  notionTools: {},
+  mcpTools: {},
   command: null,
   generateImageTool: undefined,
   artifactIntent: {
@@ -406,6 +409,7 @@ const prepared: PreparedThreadTurn = {
   },
   createdUserMessage: true,
   assistantMessageParentId: null,
+  assistantMessageId: null,
   profileAlias: "test-profile",
   modelAlias: "test-model",
   providerModel: "test-model",
@@ -417,6 +421,7 @@ const prepared: PreparedThreadTurn = {
   agentMode: "continue",
   agentBaseCheckpoint: null,
   agentRunThreadId: "thread-1",
+  toolApprovalResume: null,
   isFirstAssistantResponse: true,
   isFirstAssistantAttempt: true,
   initialTitle: "New chat",
@@ -652,6 +657,40 @@ test("streamThreadEvents emits pending when title is still generating", async ()
   assert.equal(Date.now() - startedAt < 3400, true);
 });
 
+test("streamThreadEvents includes finish reason in finish events", async () => {
+  const turnService = createTurnService();
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "done",
+        outcome: {
+          ...outcome,
+          finishReason: "tool_confirmation_requested",
+        },
+      };
+    },
+    async () => null,
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  const finish = events.find((event) => event.type === "finish");
+
+  assert.equal(finish?.finishReason, "tool_confirmation_requested");
+});
+
 test("streamThreadEvents skips title after a cancelled assistant attempt", async () => {
   const continuedAfterCancelPrepared = createPrepared({
     messageContent: "继续",
@@ -795,7 +834,10 @@ test("streamThreadEvents calls onFinalized with assistant message and billing", 
       availableCitations: [citation],
     },
   });
-  assert.equal(events.some((event) => event.type === "finish"), true);
+  assert.equal(
+    events.some((event) => event.type === "finish"),
+    true,
+  );
 });
 
 test("streamThreadEvents generates title when retrying after first failed assistant", async () => {
@@ -1204,7 +1246,9 @@ test("streamThreadEvents preserves preflight billing on persisted errors", async
       },
     ],
   });
-  const turnService = createTurnService({ prepared: preparedWithPreflightBilling });
+  const turnService = createTurnService({
+    prepared: preparedWithPreflightBilling,
+  });
 
   const service = new ContentThreadStreamService(
     turnService as unknown as ConstructorParameters<
@@ -1441,42 +1485,35 @@ test("streamThreadEvents persists edit errors as latest assistant versions", asy
   assert.equal(errorEvent.parentMessageId, "assistant-error-1");
 });
 
-test("streamThreadEvents closes trace as cancelled when stream is abandoned", async (t) => {
+test("streamThreadEvents closes trace as cancelled when stream is abandoned", async () => {
   const startedSpans: StartSpanInput[] = [];
   const endedSpans: EndSpanInput[] = [];
   const endedTraces: EndTraceInput[] = [];
-  let persistedCancelledError:
-    | {
-        errorCode?: string;
-        partialAssistantContent?: string;
-      }
-    | null = null;
-  t.mock.method(
-    threadStreamObservability,
-    "startTrace",
+  let persistedCancelledError: {
+    errorCode?: string;
+    partialAssistantContent?: string;
+  } | null = null;
+  vi.spyOn(threadStreamObservability, "startTrace").mockImplementation(
     async (input: StartTraceInput) => ({
-      id: "trace-row",
+      id: "00000000-0000-4000-8000-000000000001",
       traceId: input.traceId ?? "trace",
     }),
   );
-  t.mock.method(
-    threadStreamObservability,
-    "startSpan",
+  vi.spyOn(threadStreamObservability, "startSpan").mockImplementation(
     async (input: StartSpanInput) => {
       startedSpans.push(input);
-      return { id: "span-row", spanId: input.spanId ?? "span" };
+      return {
+        id: "00000000-0000-4000-8000-000000000002",
+        spanId: input.spanId ?? "span",
+      };
     },
   );
-  t.mock.method(
-    threadStreamObservability,
-    "endSpan",
+  vi.spyOn(threadStreamObservability, "endSpan").mockImplementation(
     async (input: EndSpanInput) => {
       endedSpans.push(input);
     },
   );
-  t.mock.method(
-    threadStreamObservability,
-    "endTrace",
+  vi.spyOn(threadStreamObservability, "endTrace").mockImplementation(
     async (input: EndTraceInput) => {
       endedTraces.push(input);
     },
@@ -1534,41 +1571,31 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
   });
 });
 
-test("streamThreadEvents observes requested cancellation as cancelled, not error", async (t) => {
+test("streamThreadEvents observes requested cancellation as cancelled, not error", async () => {
   const endedSpans: EndSpanInput[] = [];
   const endedTraces: EndTraceInput[] = [];
-  let persistedCancelledError:
-    | {
-        errorCode?: string;
-        partialAssistantContent?: string;
-      }
-    | null = null;
-  t.mock.method(
-    threadStreamObservability,
-    "startTrace",
+  let persistedCancelledError: {
+    errorCode?: string;
+    partialAssistantContent?: string;
+  } | null = null;
+  vi.spyOn(threadStreamObservability, "startTrace").mockImplementation(
     async (input: StartTraceInput) => ({
-      id: "trace-row",
+      id: "00000000-0000-4000-8000-000000000003",
       traceId: input.traceId ?? "trace",
     }),
   );
-  t.mock.method(
-    threadStreamObservability,
-    "startSpan",
+  vi.spyOn(threadStreamObservability, "startSpan").mockImplementation(
     async (input: StartSpanInput) => ({
-      id: "span-row",
+      id: "00000000-0000-4000-8000-000000000004",
       spanId: input.spanId ?? "span",
     }),
   );
-  t.mock.method(
-    threadStreamObservability,
-    "endSpan",
+  vi.spyOn(threadStreamObservability, "endSpan").mockImplementation(
     async (input: EndSpanInput) => {
       endedSpans.push(input);
     },
   );
-  t.mock.method(
-    threadStreamObservability,
-    "endTrace",
+  vi.spyOn(threadStreamObservability, "endTrace").mockImplementation(
     async (input: EndTraceInput) => {
       endedTraces.push(input);
     },
@@ -1631,7 +1658,9 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
     finishReason: "cancelled",
   });
   assert.equal(
-    endedSpans.some((span) => span.spanId === "agent_run" && span.status === "error"),
+    endedSpans.some(
+      (span) => span.spanId === "agent_run" && span.status === "error",
+    ),
     false,
   );
   const cancelledTrace = endedTraces.find(
@@ -1662,7 +1691,10 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
     errorCode: "CLIENT_CANCELLED",
     partialAssistantContent: "partial",
   });
-  assert.equal(events.find((event) => event.type === "error")?.code, "CLIENT_CANCELLED");
+  assert.equal(
+    events.find((event) => event.type === "error")?.code,
+    "CLIENT_CANCELLED",
+  );
 });
 
 test("streamThreadEvents honors cancellation after agent outcome before finalization", async () => {
@@ -1715,7 +1747,10 @@ test("streamThreadEvents honors cancellation after agent outcome before finaliza
   }
 
   assert.equal(finalizeCalled, false);
-  assert.equal(events.find((event) => event.type === "error")?.code, "CLIENT_CANCELLED");
+  assert.equal(
+    events.find((event) => event.type === "error")?.code,
+    "CLIENT_CANCELLED",
+  );
   assert.equal(
     events.some((event) => event.type === "assistant-message"),
     false,

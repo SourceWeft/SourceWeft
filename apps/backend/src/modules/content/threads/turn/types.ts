@@ -1,4 +1,5 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
+import type { ToolApprovalResume } from "@sourceweft/contracts";
 import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
 import type { AgentCitation } from "../../agent/citation-registry";
 import type { ContentBillingPort } from "../../billing-port";
@@ -61,6 +62,23 @@ export type ThreadToolsSelection = {
   [AGENT_TOOL_NAMES.webSearch]?: {
     enabled?: boolean;
   };
+  [AGENT_TOOL_NAMES.searchNotionPages]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.createNotionPage]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.appendNotionPage]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.updateNotionPageByTitle]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.deleteNotionPageByTitle]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.saveArtifactToNotion]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]?: ConnectorToolSelection;
+  mcp?: {
+    enabled?: boolean;
+    installIds?: string[];
+    toolIds?: string[];
+  };
+};
+
+export type ConnectorToolSelection = {
+  enabled?: boolean;
+  connectorId?: string;
 };
 
 export type ThreadCommandSelection = {
@@ -113,6 +131,8 @@ export type StreamThreadEventInput = {
   agentMode?: "continue" | "replay" | "fork";
   agentBaseCheckpoint?: AgentCheckpointRef | null;
   agentRunThreadId?: string;
+  toolApprovalResume?: ToolApprovalResume | null;
+  assistantMessageId?: string | null;
   existingUserMessage?: MessageRecord;
   failurePersistence?: "persist-error-turn" | "transient";
   onPreflightThinkingStep?: (step: ThinkingStepTrace) => void;
@@ -127,6 +147,7 @@ export type AgentCheckpointRef = {
 export type AgentCheckpointMetadata = {
   beforeInput: AgentCheckpointRef | null;
   beforeAssistant: AgentCheckpointRef | null;
+  resume: AgentCheckpointRef | null;
   final: AgentCheckpointRef | null;
 };
 
@@ -154,6 +175,12 @@ export type PreparedThreadTurn = {
   invokedSkillIds: string[];
   selectedSkillIds: string[];
   webSearchEnabled: boolean;
+  notionTools: Record<string, ConnectorToolSelection>;
+  mcpTools: {
+    enabled?: boolean;
+    installIds?: string[];
+    toolIds?: string[];
+  };
   command: ResolvedThreadCommand | null;
   generateImageTool: GenerateImageToolSelection | undefined;
   artifactIntent: ArtifactIntentDecision;
@@ -169,6 +196,7 @@ export type PreparedThreadTurn = {
   runTraceId: string;
   createdUserMessage: boolean;
   assistantMessageParentId: string | null;
+  assistantMessageId: string | null;
   profileAlias: string;
   modelAlias: string;
   providerModel: string;
@@ -178,6 +206,7 @@ export type PreparedThreadTurn = {
   agentMode: "continue" | "replay" | "fork";
   agentBaseCheckpoint: AgentCheckpointRef | null;
   agentRunThreadId: string;
+  toolApprovalResume: ToolApprovalResume | null;
   isFirstAssistantResponse: boolean;
   isFirstAssistantAttempt: boolean;
   initialTitle: string;

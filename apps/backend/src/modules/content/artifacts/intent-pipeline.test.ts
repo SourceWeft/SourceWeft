@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { runArtifactIntentPipeline } from "./intent-pipeline";
 import type { ResolvedArtifactImageProfile } from "./intent-pipeline";
 

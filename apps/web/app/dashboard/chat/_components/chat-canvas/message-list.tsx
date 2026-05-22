@@ -539,6 +539,7 @@ type MessageListProps = {
     groupId: string;
     assistantMessageId: string;
     branchIndex: number;
+    toolApprovalResume?: import("@sourceweft/sdk").ToolApprovalResume | null;
   }) => void;
   workspaceId?: string | null;
 };

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import {
   mapDeepAgentEventToSse,
   normalizeToolOutputForSse,
@@ -54,17 +54,50 @@ test("normalizeToolOutputForSse preserves readable content outputs", () => {
   );
 });
 
-test("normalizeToolOutputForSse extracts ToolMessage content", () => {
-  assert.deepEqual(
-    normalizeToolOutputForSse({
-      id: ["langchain_core", "messages", "tool", "ToolMessage"],
-      kwargs: {
-        content: [{ text: "tool output" }],
-        name: "ls",
-        status: "success",
+test("normalizeToolOutputForSse preserves structured confirmation payloads", () => {
+  const confirmation = {
+    type: "tool_confirmation_request",
+    schemaVersion: 1,
+    id: "action-1",
+    domain: "connector",
+    subject: {
+      label: "Notion",
+      provider: "notion",
+      connectorId: "connector-1",
+    },
+    action: {
+      type: "notion.page.create",
+      toolName: "create_notion_page",
+      label: "Create",
+      riskLevel: "low",
+      status: "proposed",
+      requiresApproval: true,
+    },
+    preview: {
+      title: "Create Notion page",
+      requestJson: {
+        title: "Draft",
       },
-    }),
-    { content: "tool output", name: "ls", status: "success" },
+    },
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+    execution: {
+      providerStatus: "not_executed",
+      executor: {
+        kind: "connector_action_run",
+        connectorId: "connector-1",
+        actionRunId: "action-1",
+      },
+    },
+    status: "proposed",
+    userMessage: "This action is waiting for confirmation in SourceWeft.",
+  };
+
+  assert.deepEqual(
+    normalizeToolOutputForSse(confirmation),
+    confirmation,
   );
 });
 

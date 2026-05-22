@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import {
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
@@ -157,6 +157,10 @@ test("resolveAgentCheckpointMetadata reads explicit checkpoint refs", () => {
             checkpointId: "checkpoint-before-assistant",
             checkpointNs: "",
           },
+          resume: {
+            threadId: "thread-1",
+            checkpointId: "checkpoint-resume",
+          },
           final: {
             threadId: "thread-1",
             checkpointId: "checkpoint-final",
@@ -173,6 +177,10 @@ test("resolveAgentCheckpointMetadata reads explicit checkpoint refs", () => {
         threadId: "thread-1",
         checkpointId: "checkpoint-before-assistant",
         checkpointNs: "",
+      },
+      resume: {
+        threadId: "thread-1",
+        checkpointId: "checkpoint-resume",
       },
       final: {
         threadId: "thread-1",
@@ -204,6 +212,7 @@ test("resolveAgentCheckpointMetadata maps legacy parent to beforeAssistant", () 
         threadId: "thread-1",
         checkpointId: "checkpoint-parent",
       },
+      resume: null,
       final: {
         threadId: "thread-1",
         checkpointId: "checkpoint-final",

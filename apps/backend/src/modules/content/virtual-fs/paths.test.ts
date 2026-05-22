@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import {
   buildChunkFilePath,
   buildVirtualSource,
@@ -10,7 +10,9 @@ import {
   safeVirtualName,
 } from "./paths";
 
-function source(overrides: Partial<Parameters<typeof buildVirtualSource>[0]> = {}) {
+function source(
+  overrides: Partial<Parameters<typeof buildVirtualSource>[0]> = {},
+) {
   return buildVirtualSource({
     sourceId: "source-1234567890",
     title: "Quarterly Report",
@@ -26,7 +28,10 @@ function source(overrides: Partial<Parameters<typeof buildVirtualSource>[0]> = {
 test("normalizeVirtualPath defaults to /kb and normalizes slashes", () => {
   assert.equal(normalizeVirtualPath(undefined), "/kb");
   assert.equal(normalizeVirtualPath(""), "/kb");
-  assert.equal(normalizeVirtualPath("kb//source///chunks/"), "/kb/source/chunks");
+  assert.equal(
+    normalizeVirtualPath("kb//source///chunks/"),
+    "/kb/source/chunks",
+  );
   assert.equal(normalizeVirtualPath("/"), "/");
 });
 
@@ -37,8 +42,14 @@ test("normalizeVirtualPath rejects traversal and non-kb paths", () => {
 });
 
 test("safeVirtualName strips extensions and sanitizes unsafe characters", () => {
-  assert.equal(safeVirtualName("Quarterly Report.pdf", "fallback-id"), "Quarterly-Report");
-  assert.equal(safeVirtualName("  ACME: Invoice #42!!.md  ", "fallback-id"), "ACME-Invoice-42");
+  assert.equal(
+    safeVirtualName("Quarterly Report.pdf", "fallback-id"),
+    "Quarterly-Report",
+  );
+  assert.equal(
+    safeVirtualName("  ACME: Invoice #42!!.md  ", "fallback-id"),
+    "ACME-Invoice-42",
+  );
   assert.equal(safeVirtualName("!!!", "fallback-id"), "fallback-id");
 });
 
@@ -156,8 +167,14 @@ test("buildVirtualSourceTree projects Notion connector directories into nested k
 test("buildChunkFilePath pads chunk numbers under the chunks directory", () => {
   const item = source();
 
-  assert.equal(buildChunkFilePath(item, 0), "/kb/Quarterly-Report__src_source-1/chunks/0000.md");
-  assert.equal(buildChunkFilePath(item, 42), "/kb/Quarterly-Report__src_source-1/chunks/0042.md");
+  assert.equal(
+    buildChunkFilePath(item, 0),
+    "/kb/Quarterly-Report__src_source-1/chunks/0000.md",
+  );
+  assert.equal(
+    buildChunkFilePath(item, 42),
+    "/kb/Quarterly-Report__src_source-1/chunks/0042.md",
+  );
 });
 
 test("parseVirtualPath resolves root, kb root, source, chunks dir, and chunk file", () => {
@@ -203,12 +220,18 @@ test("parseVirtualPath rejects unknown sources and malformed chunk files", () =>
   const item = source();
 
   assert.throws(() => parseVirtualPath("/kb/missing.md", [item]), /ENOENT/);
-  assert.throws(() => parseVirtualPath(`${item.dirPath}/chunks/current.txt`, [item]), /ENOENT/);
+  assert.throws(
+    () => parseVirtualPath(`${item.dirPath}/chunks/current.txt`, [item]),
+    /ENOENT/,
+  );
 });
 
 test("findVirtualSource returns visible source or reports scoped miss", () => {
   const item = source();
 
   assert.equal(findVirtualSource([item], item.sourceId), item);
-  assert.throws(() => findVirtualSource([item], "other-source"), /not visible in \/kb/);
+  assert.throws(
+    () => findVirtualSource([item], "other-source"),
+    /not visible in \/kb/,
+  );
 });

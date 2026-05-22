@@ -6,20 +6,20 @@ import {
   CalendarDays,
   Clock3,
   FlameKindling,
+  Hash,
 } from "lucide-react";
 
+import {
+  listPublishedBlogPosts,
+  listPublishedBlogTags,
+  type BlogPostSummary,
+} from "../../lib/blog-db";
 import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
-import { SITE_NAME, SITE_URL } from "../seo";
-import { BlogVisual } from "./blog-visual";
-import {
-  blogCategories,
-  blogPosts,
-  featuredPost,
-  type BlogCategory,
-  type BlogPost,
-} from "./data";
 import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
+import { SITE_NAME, SITE_URL } from "../seo";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   alternates: {
@@ -40,85 +40,161 @@ export const metadata: Metadata = {
 
 const blogContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
-type SelectedCategory = BlogCategory | "All Posts";
+type SelectedTag = string | "All Posts";
 
-function getSelectedCategory(category?: string | string[]): SelectedCategory {
-  const value = Array.isArray(category) ? category[0] : category;
-  const categories: readonly string[] = blogCategories;
+function getSelectedTag(input: {
+  tag?: string | string[];
+  tags: string[];
+}): SelectedTag {
+  const value = Array.isArray(input.tag) ? input.tag[0] : input.tag;
 
-  if (value && categories.includes(value)) {
-    return value as SelectedCategory;
+  if (value && input.tags.includes(value)) {
+    return value;
   }
 
   return "All Posts";
 }
 
-function CategoryRail({ selectedCategory }: { selectedCategory: SelectedCategory }) {
+function TagRail({
+  selectedTag,
+  tags,
+}: {
+  selectedTag: SelectedTag;
+  tags: string[];
+}) {
+  const items = ["All Posts", ...tags];
+
   return (
     <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {blogCategories.map((category, index) => (
+      {items.map((tag) => (
         <Link
-          key={category}
-          href={index === 0 ? "/blog#all-posts" : `/blog?category=${encodeURIComponent(category)}#all-posts`}
+          key={tag}
+          href={
+            tag === "All Posts"
+              ? "/blog#all-posts"
+              : `/blog?tag=${encodeURIComponent(tag)}#all-posts`
+          }
           className={`shrink-0 rounded-full border px-4 py-2 text-sm transition-colors ${
-            category === selectedCategory
+            tag === selectedTag
               ? "border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950"
               : "border-zinc-300 bg-white/50 text-zinc-600 hover:border-zinc-950 hover:text-zinc-950 dark:border-white/12 dark:bg-white/[0.03] dark:text-zinc-400 dark:hover:border-white/35 dark:hover:text-white"
           }`}
         >
-          {category}
+          {tag === "All Posts" ? tag : `#${tag}`}
         </Link>
       ))}
     </div>
   );
 }
 
-function PostMeta({ post }: { post: BlogPost }) {
+function PostTags({ post }: { post: BlogPostSummary }) {
+  if (post.tags.length === 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        <Hash className="size-3.5" />
+        Article
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {post.tags.slice(0, 3).map((tag) => (
+        <span
+          key={tag}
+          className="rounded-full border border-zinc-300 bg-white/50 px-2.5 py-1 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400"
+        >
+          #{tag}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function formatDate(date: Date | null) {
+  if (!date) {
+    return "Unscheduled";
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function PostMeta({ post }: { post: BlogPostSummary }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-zinc-500 dark:text-zinc-400">
       <span className="inline-flex items-center gap-1.5">
         <CalendarDays className="size-3.5" />
-        {post.date}
+        {formatDate(post.publishedAt)}
       </span>
       <span className="inline-flex items-center gap-1.5">
         <Clock3 className="size-3.5" />
-        {post.readTime}
+        {post.readingTimeMinutes} min read
       </span>
     </div>
   );
 }
 
-function FeaturedArticle() {
-  const Icon = featuredPost.icon;
+function CoverVisual({
+  compact,
+  post,
+}: {
+  compact?: boolean;
+  post: BlogPostSummary;
+}) {
+  if (!post.coverPublicUrl) {
+    return null;
+  }
+
+  return (
+    <div
+      className={`overflow-hidden rounded-lg border border-zinc-300 bg-zinc-100 dark:border-white/10 dark:bg-white/[0.04] ${
+        compact ? "aspect-[1.7]" : "min-h-[21rem]"
+      }`}
+    >
+      <img
+        alt={post.coverAltText || post.title}
+        className="h-full w-full object-cover"
+        src={post.coverPublicUrl}
+      />
+    </div>
+  );
+}
+
+function FeaturedArticle({ post }: { post: BlogPostSummary }) {
+  const hasCover = Boolean(post.coverPublicUrl);
+  const label = post.featured ? "Featured" : "Latest";
 
   return (
     <Link
-      href={`/blog/${featuredPost.slug}`}
-      className="group grid gap-6 rounded-lg border border-zinc-300 bg-white/58 p-3 shadow-[0_24px_90px_rgba(39,39,42,0.08)] transition-all hover:-translate-y-1 hover:border-zinc-950/40 hover:shadow-[0_28px_110px_rgba(39,39,42,0.12)] lg:grid-cols-[1fr_0.92fr] dark:border-white/10 dark:bg-white/[0.035] dark:shadow-[0_24px_90px_rgba(0,0,0,0.34)] dark:hover:border-white/35"
+      href={post.urlPath}
+      className={`group grid gap-6 rounded-lg border border-zinc-300 bg-white/58 p-3 shadow-[0_24px_90px_rgba(39,39,42,0.08)] transition-all hover:-translate-y-1 hover:border-zinc-950/40 hover:shadow-[0_28px_110px_rgba(39,39,42,0.12)] dark:border-white/10 dark:bg-white/[0.035] dark:shadow-[0_24px_90px_rgba(0,0,0,0.34)] dark:hover:border-white/35 ${
+        hasCover ? "lg:grid-cols-[1fr_0.92fr]" : ""
+      }`}
     >
       <div className="order-2 flex flex-col p-3 sm:p-5 lg:order-1">
         <div className="mb-10 flex items-center justify-between gap-3">
           <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/60 bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-300/30 dark:bg-emerald-300/10 dark:text-emerald-200">
             <FlameKindling className="size-3.5" />
-            Featured
+            {label}
           </span>
-          <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/70 px-3 py-1 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
-            <Icon className="size-3.5" />
-            {featuredPost.category}
-          </span>
+          <PostTags post={post} />
         </div>
         <div className="mt-auto">
           <p className="mb-4 text-xs font-semibold uppercase text-zinc-400">
-            {featuredPost.heroLabel}
+            SourceWeft Blog
           </p>
           <h2 className="max-w-3xl text-3xl font-semibold leading-[1.05] tracking-tight text-zinc-950 sm:text-4xl lg:text-5xl dark:text-white">
-            {featuredPost.title}
+            {post.title}
           </h2>
           <p className="mt-5 max-w-2xl text-base leading-7 text-zinc-600 dark:text-zinc-300">
-            {featuredPost.description}
+            {post.excerpt}
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
-            <PostMeta post={featuredPost} />
+            <PostMeta post={post} />
             <span className="inline-flex items-center gap-2 text-sm font-medium text-zinc-950 dark:text-white">
               Read essay
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
@@ -126,38 +202,39 @@ function FeaturedArticle() {
           </div>
         </div>
       </div>
-      <div className="order-1 lg:order-2">
-        <BlogVisual accent={featuredPost.accent} visual={featuredPost.visual} />
-      </div>
+      {hasCover ? (
+        <div className="order-1 lg:order-2">
+          <CoverVisual post={post} />
+        </div>
+      ) : null}
     </Link>
   );
 }
 
-function PostCard({ post }: { post: BlogPost }) {
-  const Icon = post.icon;
-
+function PostCard({ post }: { post: BlogPostSummary }) {
   return (
     <Link
-      href={`/blog/${post.slug}`}
+      href={post.urlPath}
       className="group flex h-full flex-col rounded-lg border border-zinc-300 bg-white/54 p-3 transition-all hover:-translate-y-1 hover:border-zinc-950/40 hover:bg-white/82 hover:shadow-[0_20px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/35 dark:hover:bg-white/[0.055] dark:hover:shadow-[0_20px_70px_rgba(0,0,0,0.32)]"
     >
-      <BlogVisual accent={post.accent} compact visual={post.visual} />
+      {post.coverPublicUrl ? <CoverVisual compact post={post} /> : null}
       <div className="flex flex-1 flex-col px-2 pb-2 pt-5">
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <span className="inline-flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-            <Icon className="size-3.5" />
-            {post.category}
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <PostTags post={post} />
+          <span className="text-xs text-zinc-400">
+            {post.readingTimeMinutes} min read
           </span>
-          <span className="text-xs text-zinc-400">{post.readTime}</span>
         </div>
         <h3 className="text-xl font-semibold leading-tight tracking-tight text-zinc-950 dark:text-white">
           {post.title}
         </h3>
         <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-          {post.description}
+          {post.excerpt}
         </p>
         <div className="mt-auto flex items-center justify-between gap-4 pt-7">
-          <span className="text-xs text-zinc-400">{post.date}</span>
+          <span className="text-xs text-zinc-400">
+            {formatDate(post.publishedAt)}
+          </span>
           <span className="inline-flex size-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 transition-colors group-hover:border-zinc-950 group-hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400 dark:group-hover:border-white/35 dark:group-hover:text-white">
             <ArrowRight className="size-4" />
           </span>
@@ -167,39 +244,18 @@ function PostCard({ post }: { post: BlogPost }) {
   );
 }
 
-function NewsletterBand() {
+function EmptyBlogState() {
   return (
-    <section className="mt-20 border-y border-zinc-300 bg-[#ebe5d8] text-zinc-950 dark:border-white/10 dark:bg-zinc-900 dark:text-white">
-      <div className="relative mx-auto grid max-w-7xl gap-8 overflow-hidden px-5 py-10 sm:px-6 md:grid-cols-[1fr_0.85fr] lg:px-8">
-        <div
-          aria-hidden
-          className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.045)_1px,transparent_1px)] bg-[size:36px_36px] opacity-70 dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
-        />
-        <div>
-          <p className="relative mb-3 text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-            Research letters
-          </p>
-          <h2 className="relative max-w-2xl text-3xl font-semibold tracking-tight">
-            Get the best SourceWeft essays when they ship.
-          </h2>
-        </div>
-        <form className="relative flex items-center gap-2 self-end rounded-lg border border-zinc-300 bg-white/58 p-2 shadow-[0_16px_50px_rgba(39,39,42,0.08)] dark:border-white/12 dark:bg-white/[0.055] dark:shadow-none">
-          <label htmlFor="blog-email" className="sr-only">
-            Email address
-          </label>
-          <input
-            id="blog-email"
-            type="email"
-            placeholder="team@example.com"
-            className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm text-zinc-950 outline-none placeholder:text-zinc-500 dark:text-white dark:placeholder:text-zinc-500"
-          />
-          <button
-            type="button"
-            className="inline-flex shrink-0 items-center gap-2 rounded-md bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
-          >
-            Subscribe
-          </button>
-        </form>
+    <section className="mx-auto max-w-7xl px-5 py-16 sm:px-6 lg:px-8">
+      <div className="rounded-lg border border-zinc-300 bg-white/54 p-10 text-center dark:border-white/10 dark:bg-white/[0.03]">
+        <BookMarked className="mx-auto mb-4 size-8 text-zinc-400" />
+        <h2 className="text-2xl font-semibold tracking-tight">
+          Blog posts are syncing soon.
+        </h2>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+          Published Notion rows with `Sync` enabled will appear here after the
+          manual blog sync command writes them to Postgres.
+        </p>
       </div>
     </section>
   );
@@ -208,18 +264,25 @@ function NewsletterBand() {
 export default async function BlogIndexPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string | string[] }>;
+  searchParams: Promise<{ tag?: string | string[] }>;
 }) {
-  const { category } = await searchParams;
-  const initialAuthState = await resolveInitialLandingAuthState();
-  const selectedCategory = getSelectedCategory(category);
+  const { tag } = await searchParams;
+  const [initialAuthState, posts, tags] = await Promise.all([
+    resolveInitialLandingAuthState(),
+    listPublishedBlogPosts(),
+    listPublishedBlogTags(),
+  ]);
+  const selectedTag = getSelectedTag({ tag, tags });
+  const scopedPosts =
+    selectedTag === "All Posts"
+      ? posts
+      : posts.filter((post) => post.tags.includes(selectedTag));
+  const featuredPost =
+    scopedPosts.find((post) => post.featured) ?? scopedPosts[0] ?? null;
   const visiblePosts =
-    selectedCategory === "All Posts"
-      ? blogPosts.slice(1)
-      : blogPosts.filter(
-          (post) =>
-            post.category === selectedCategory && post.slug !== featuredPost.slug,
-        );
+    selectedTag === "All Posts"
+      ? posts.filter((post) => post.id !== featuredPost?.id)
+      : scopedPosts.filter((post) => post.id !== featuredPost?.id);
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -249,20 +312,24 @@ export default async function BlogIndexPage({
                 patterns for teams building with connected knowledge sources.
               </p>
               <p className="mt-7 max-w-lg border-l border-zinc-300 pl-4 text-sm leading-6 text-zinc-500 dark:border-white/12 dark:text-zinc-400">
-                Browse essays by discipline, from model evaluation to research
+                Browse essays by topic, from model evaluation to research
                 operations and product updates.
               </p>
             </div>
           </div>
           <div className="mt-12 border-t border-zinc-300 pt-6 dark:border-white/10">
-            <CategoryRail selectedCategory={selectedCategory} />
+            <TagRail selectedTag={selectedTag} tags={tags} />
           </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-5 py-10 sm:px-6 lg:px-8 lg:py-14">
-        <FeaturedArticle />
-      </section>
+      {featuredPost ? (
+        <section className="mx-auto max-w-7xl px-5 py-10 sm:px-6 lg:px-8 lg:py-14">
+          <FeaturedArticle post={featuredPost} />
+        </section>
+      ) : (
+        <EmptyBlogState />
+      )}
 
       <section
         id="all-posts"
@@ -274,32 +341,31 @@ export default async function BlogIndexPage({
               Latest writing
             </p>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-              {selectedCategory === "All Posts"
+              {selectedTag === "All Posts"
                 ? "Guides, updates, and systems notes"
-                : `${selectedCategory} essays`}
+                : `#${selectedTag} essays`}
             </h2>
           </div>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {selectedCategory === "All Posts"
-              ? `${blogPosts.length} essays from the product and engineering team`
-              : `${visiblePosts.length} essays in ${selectedCategory}`}
+            {selectedTag === "All Posts"
+              ? `${posts.length} essays from the product and engineering team`
+              : `${scopedPosts.length} essays tagged #${selectedTag}`}
           </p>
         </div>
         <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {visiblePosts.map((post) => (
-            <PostCard key={post.slug} post={post} />
+            <PostCard key={post.id} post={post} />
           ))}
         </div>
-        {visiblePosts.length === 0 ? (
+        {visiblePosts.length === 0 && posts.length > 0 ? (
           <div className="rounded-lg border border-zinc-300 bg-white/54 p-10 text-center dark:border-white/10 dark:bg-white/[0.03]">
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              No posts in this topic yet.
+              No posts with this tag yet.
             </p>
           </div>
         ) : null}
       </section>
 
-      <NewsletterBand />
       <SourceWeftFooter containerClassName={blogContainerClassName} />
     </main>
   );

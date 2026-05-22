@@ -3,6 +3,7 @@ import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
 import {
   isAgentToolEnabledByDefault,
   isGeneratedImageArtifactToolName,
+  isNotionToolName,
   isSkillActivatedAgentTool,
   isWebSearchToolName,
 } from "../../agent/tool-registry";
@@ -12,7 +13,13 @@ import {
   normalizeGenerateImageToolSelection,
   type GenerateImageToolSelection,
 } from "../../artifacts/types";
-import type { ThreadToolsSelection } from "./types";
+import type { ConnectorToolSelection, ThreadToolsSelection } from "./types";
+
+export type McpToolSelection = {
+  enabled?: boolean;
+  installIds?: string[];
+  toolIds?: string[];
+};
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -76,6 +83,8 @@ export function buildThreadToolsMetadata(input: {
   skillIds: string[];
   webSearchEnabled: boolean;
   generateImageTool?: GenerateImageToolSelection;
+  notionTools?: Record<string, ConnectorToolSelection>;
+  mcpTools?: McpToolSelection;
 }) {
   return {
     skillIds: input.skillIds,
@@ -88,6 +97,8 @@ export function buildThreadToolsMetadata(input: {
     ...(input.generateImageTool
       ? { [AGENT_TOOL_NAMES.generateImage]: input.generateImageTool }
       : {}),
+    ...(input.notionTools ?? {}),
+    ...(input.mcpTools ? { mcp: input.mcpTools } : {}),
   };
 }
 
@@ -143,6 +154,139 @@ export function resolveGenerateImageToolFromToolsMetadata(value: unknown) {
       : {}),
   };
 }
+
+function normalizeConnectorToolSelection(
+  value: unknown,
+): ConnectorToolSelection | undefined {
+  const record = toRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const enabled =
+    typeof record.enabled === "boolean" ? record.enabled : undefined;
+  const connectorId =
+    typeof record.connectorId === "string" && record.connectorId.trim()
+      ? record.connectorId.trim()
+      : undefined;
+  if (enabled === undefined && connectorId === undefined) {
+    return undefined;
+  }
+  return {
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(connectorId ? { connectorId } : {}),
+  };
+}
+
+export function resolveNotionToolSelections(
+  tools?: ThreadToolsSelection,
+): Record<string, ConnectorToolSelection> {
+  const selections: Record<string, ConnectorToolSelection> = {};
+  if (!tools) {
+    return selections;
+  }
+  const rawTools = tools as Record<string, unknown>;
+  for (const toolName of Object.values(AGENT_TOOL_NAMES)) {
+    if (!isNotionToolName(toolName)) {
+      continue;
+    }
+    const selection = normalizeConnectorToolSelection(rawTools[toolName]);
+    if (selection) {
+      selections[toolName] = selection;
+    }
+  }
+  return selections;
+}
+
+export function resolveNotionToolSelectionsFromToolsMetadata(
+  value: unknown,
+): Record<string, ConnectorToolSelection> {
+  const tools = toRecord(value);
+  const selections: Record<string, ConnectorToolSelection> = {};
+  if (!tools) {
+    return selections;
+  }
+  for (const toolName of Object.values(AGENT_TOOL_NAMES)) {
+    if (!isNotionToolName(toolName)) {
+      continue;
+    }
+    const selection = normalizeConnectorToolSelection(tools[toolName]);
+    if (selection) {
+      selections[toolName] = selection;
+    }
+  }
+  return selections;
+}
+
+function normalizeStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
+    : [];
+}
+
+export function resolveMcpToolSelection(
+  tools?: ThreadToolsSelection,
+): McpToolSelection | undefined {
+  const record = toRecord(tools?.mcp);
+  if (!record) {
+    return undefined;
+  }
+  const enabled =
+    typeof record.enabled === "boolean" ? record.enabled : undefined;
+  const installIds = normalizeStringArray(record.installIds);
+  const toolIds = normalizeStringArray(record.toolIds);
+  if (enabled === undefined && installIds.length === 0 && toolIds.length === 0) {
+    return undefined;
+  }
+  return {
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(installIds.length > 0 ? { installIds } : {}),
+    ...(toolIds.length > 0 ? { toolIds } : {}),
+  };
+}
+
+export function resolveMcpToolSelectionFromToolsMetadata(
+  value: unknown,
+): McpToolSelection | undefined {
+  const tools = toRecord(value);
+  const record = toRecord(tools?.mcp);
+  if (!record) {
+    return undefined;
+  }
+  const enabled =
+    typeof record.enabled === "boolean" ? record.enabled : undefined;
+  const installIds = normalizeStringArray(record.installIds);
+  const toolIds = normalizeStringArray(record.toolIds);
+  if (enabled === undefined && installIds.length === 0 && toolIds.length === 0) {
+    return undefined;
+  }
+  return {
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(installIds.length > 0 ? { installIds } : {}),
+    ...(toolIds.length > 0 ? { toolIds } : {}),
+  };
+}
+
+export function enableNotionToolSelection(
+  tools: StreamThreadToolsSelectionLike,
+  toolName: string,
+) {
+  if (!isNotionToolName(toolName)) {
+    return tools;
+  }
+  const rawTools = (tools ?? {}) as Record<string, unknown>;
+  return {
+    ...(tools ?? {}),
+    [toolName]: {
+      ...normalizeConnectorToolSelection(rawTools[toolName]),
+      enabled: true,
+    },
+  };
+}
+
+type StreamThreadToolsSelectionLike = ThreadToolsSelection | undefined;
 
 export const testExports = {
   assertSelectedSkillsAllowedByTools,

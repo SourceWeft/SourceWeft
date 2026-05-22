@@ -10,6 +10,7 @@
 
 import { createDeepAgent } from "deepagents";
 import type { AnyBackendProtocol } from "deepagents";
+import type { InterruptOnConfig } from "langchain";
 import {
   HumanMessage,
   RemoveMessage,
@@ -159,6 +160,7 @@ export interface CreateThreadAgentParams {
   chatProfileConfig?: unknown;
   contextCompressionReportKey?: string;
   traceContext?: TraceContext;
+  interruptOn?: Record<string, boolean | InterruptOnConfig>;
 }
 
 /**
@@ -215,6 +217,7 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
     checkpointer,
     backend: params.backend,
     skills: params.skills,
+    interruptOn: params.interruptOn,
   });
 
   return agent;

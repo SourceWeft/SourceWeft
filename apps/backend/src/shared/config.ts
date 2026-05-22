@@ -91,6 +91,12 @@ const documentParseStrategies = new Set([
 ]);
 
 const pdf2MarkdownOutputs = new Set(["markdown", "json", "all"]);
+const marketModes = new Set([
+  "official_api",
+  "private_api",
+  "local_only",
+  "disabled",
+]);
 
 const planFamilies: ReadonlySet<PlanFamily> = new Set([
   "individual_free",
@@ -194,6 +200,15 @@ function parsePdf2MarkdownOutput(value: string | undefined, fallback: string) {
   return pdf2MarkdownOutputs.has(normalized) ? normalized : fallback;
 }
 
+function parseMarketMode(value: string | undefined, fallback: string) {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return marketModes.has(normalized) ? normalized : fallback;
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -205,6 +220,11 @@ function requireEnv(name: string): string {
 
 function stripTrailingSlash(value: string) {
   return value.replace(/\/$/, "");
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = parsePositiveNumber(value, fallback);
+  return Number.isInteger(parsed) ? parsed : fallback;
 }
 
 function isValidExtensionId(value: string) {
@@ -348,6 +368,25 @@ export const config = {
       process.env.AWS_SECRET_ACCESS_KEY || process.env.S3_SECRET_ACCESS_KEY || "",
     forcePathStyle: parseBoolean(process.env.S3_FORCE_PATH_STYLE, false),
   },
+  publicS3: {
+    region: process.env.PUBLIC_S3_REGION || "auto",
+    bucket: process.env.PUBLIC_S3_BUCKET || "",
+    endpoint: process.env.PUBLIC_S3_ENDPOINT || "",
+    accessKeyId: process.env.PUBLIC_S3_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.PUBLIC_S3_SECRET_ACCESS_KEY || "",
+    forcePathStyle: parseBoolean(process.env.PUBLIC_S3_FORCE_PATH_STYLE, true),
+    baseUrl: stripTrailingSlash(process.env.PUBLIC_S3_BASE_URL || ""),
+  },
+  blog: {
+    notionApiKey: process.env.NOTION_BLOG_API_KEY || "",
+    notionDatabaseId: process.env.NOTION_BLOG_DATABASE_ID || "",
+    notionDataSourceId: process.env.NOTION_BLOG_DATA_SOURCE_ID || "",
+    notionVersion: process.env.NOTION_BLOG_VERSION || "2026-03-11",
+    assetMaxBytes: parsePositiveInteger(
+      process.env.BLOG_ASSET_MAX_BYTES,
+      15 * 1024 * 1024,
+    ),
+  },
   documentParsing: {
     strategy: parseDocumentParseStrategy(
       process.env.DOCUMENT_PARSE_STRATEGY,
@@ -393,6 +432,14 @@ export const config = {
     anycrawl: {
       apiKey: process.env.ANYCRAWL_API_KEY?.trim() || "",
     },
+  },
+  market: {
+    mode: parseMarketMode(process.env.MARKET_MODE, "official_api"),
+    baseUrl: stripTrailingSlash(
+      process.env.MARKET_API_BASE_URL || "http://localhost:3011",
+    ),
+    serviceToken: process.env.MARKET_SERVICE_TOKEN?.trim() || "",
+    trustedPublicKeys: parseCsv(process.env.MARKET_TRUSTED_PUBLIC_KEYS),
   },
   schedulerExampleJobEnabled: parseBoolean(
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,

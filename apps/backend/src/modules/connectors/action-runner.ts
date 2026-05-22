@@ -52,6 +52,7 @@ export class ConnectorActionRunner {
     userId: string;
     connectorId: string;
     actionType: string;
+    agentToolName?: string | null;
     requestJson: Record<string, unknown>;
     requestPreview?: string;
     idempotencyKey?: string;
@@ -89,12 +90,30 @@ export class ConnectorActionRunner {
     const redactedRequest = redactConnectorSecrets(
       input.requestJson,
     ) as Record<string, unknown>;
+    const idempotencyKey =
+      input.idempotencyKey ??
+      buildActionIdempotencyKey({
+        connectorId: connector.id,
+        actionType: input.actionType,
+        request: redactedRequest,
+      });
+    const existingAction = await findActionRunRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: connector.id,
+      idempotencyKey,
+    });
+    if (existingAction) {
+      return { action: existingAction };
+    }
+
     const action = await createActionRunRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       connectorId: connector.id,
       connectorType: connector.connectorType,
       actionType: input.actionType,
+      agentToolName: input.agentToolName ?? actionSpec.agentToolName ?? null,
       riskLevel: actionSpec.riskLevel,
       status: "proposed",
       requestJson: redactedRequest,
@@ -104,13 +123,7 @@ export class ConnectorActionRunner {
           actionType: input.actionType,
           request: redactedRequest,
         }),
-      idempotencyKey:
-        input.idempotencyKey ??
-        buildActionIdempotencyKey({
-          connectorId: connector.id,
-          actionType: input.actionType,
-          request: redactedRequest,
-        }),
+      idempotencyKey,
     });
 
     return { action };
@@ -139,6 +152,9 @@ export class ConnectorActionRunner {
         "CONNECTOR_ACTION_NOT_FOUND",
         "Connector action not found",
       );
+    }
+    if (action.status === "succeeded" || action.status === "running") {
+      return { action };
     }
     if (action.status !== "proposed") {
       throw new ConnectorError(
@@ -187,6 +203,33 @@ export class ConnectorActionRunner {
     return { action: updated };
   }
 
+  async get(input: {
+    workspaceId: string;
+    userId: string;
+    connectorId: string;
+    actionRunId: string;
+  }) {
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "connector.read",
+    });
+    const action = await findActionRunRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: input.connectorId,
+      actionRunId: input.actionRunId,
+    });
+    if (!action) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_ACTION_NOT_FOUND",
+        "Connector action not found",
+      );
+    }
+    return { action };
+  }
+
   async execute(input: {
     workspaceId: string;
     connectorId: string;
@@ -211,6 +254,9 @@ export class ConnectorActionRunner {
         "CONNECTOR_ACTION_NOT_FOUND",
         "Connector action not found",
       );
+    }
+    if (action.status === "succeeded" || action.status === "running") {
+      return { action };
     }
     if (action.status !== "approved") {
       throw new ConnectorError(

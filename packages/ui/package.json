@@ -59,7 +59,6 @@
     "motion": "^12.38.0",
     "nanoid": "^5.1.7",
     "radix-ui": "^1.4.3",
-    "react-jsx-parser": "^2.4.1",
     "shadcn": "^3.6.2",
     "shiki": "^4.0.2",
     "streamdown": "^2.5.0",

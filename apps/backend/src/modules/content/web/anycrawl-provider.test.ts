@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { AnyCrawlWebProvider } from "./anycrawl-provider";
 
 test("AnyCrawlWebProvider fetch starts up to 5 scrapes concurrently", async () => {
@@ -9,11 +9,17 @@ test("AnyCrawlWebProvider fetch starts up to 5 scrapes concurrently", async () =
   const startedUrls: string[] = [];
   const releases: Array<() => void> = [];
 
-  (provider as unknown as {
-    client: {
-      scrape(input: { url: string; engine?: string; timeout?: number }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          timeout?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape(input) {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -72,30 +78,34 @@ test("AnyCrawlWebProvider search requests cheerio main content enrichment", asyn
     };
   }> = [];
 
-  (provider as unknown as {
-    client: {
-      search(input: {
-        query: string;
-        limit?: number;
-        pages?: number;
-        scrape_options?: {
-          engine?: string;
-          formats?: string[];
-          only_main_content?: boolean;
-          max_age?: number;
-        };
-      }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        search(input: {
+          query: string;
+          limit?: number;
+          pages?: number;
+          scrape_options?: {
+            engine?: string;
+            formats?: string[];
+            only_main_content?: boolean;
+            max_age?: number;
+          };
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async search(input) {
       observedInputs.push(input);
-      return [{
-        title: "Example",
-        url: "https://example.com/result",
-        description: "Snippet",
-        source: "example",
-        markdown: "Main content ".repeat(100),
-      }];
+      return [
+        {
+          title: "Example",
+          url: "https://example.com/result",
+          description: "Snippet",
+          source: "example",
+          markdown: "Main content ".repeat(100),
+        },
+      ];
     },
   };
 
@@ -120,34 +130,40 @@ test("AnyCrawlWebProvider search requests cheerio main content enrichment", asyn
 
 test("AnyCrawlWebProvider fresh search forces main content refresh", async () => {
   const provider = new AnyCrawlWebProvider("test-key");
-  let observedScrapeOptions: {
-    engine?: string;
-    formats?: string[];
-    only_main_content?: boolean;
-    max_age?: number;
-  } | undefined;
+  let observedScrapeOptions:
+    | {
+        engine?: string;
+        formats?: string[];
+        only_main_content?: boolean;
+        max_age?: number;
+      }
+    | undefined;
 
-  (provider as unknown as {
-    client: {
-      search(input: {
-        scrape_options?: {
-          engine?: string;
-          formats?: string[];
-          only_main_content?: boolean;
-          max_age?: number;
-        };
-      }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        search(input: {
+          scrape_options?: {
+            engine?: string;
+            formats?: string[];
+            only_main_content?: boolean;
+            max_age?: number;
+          };
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async search(input) {
       observedScrapeOptions = input.scrape_options;
-      return [{
-        title: "Example",
-        url: "https://example.com/fresh",
-        description: "Snippet",
-        source: "example",
-        markdown: "Fresh main content",
-      }];
+      return [
+        {
+          title: "Example",
+          url: "https://example.com/fresh",
+          description: "Snippet",
+          source: "example",
+          markdown: "Fresh main content",
+        },
+      ];
     },
   };
 
@@ -172,15 +188,17 @@ test("AnyCrawlWebProvider plain search allows 20 results without scrape options"
   let observedPages = 0;
   let observedScrapeOptions: unknown = null;
 
-  (provider as unknown as {
-    client: {
-      search(input: {
-        limit?: number;
-        pages?: number;
-        scrape_options?: unknown;
-      }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        search(input: {
+          limit?: number;
+          pages?: number;
+          scrape_options?: unknown;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async search(input) {
       observedLimit = input.limit ?? 0;
       observedPages = input.pages ?? 0;
@@ -212,11 +230,17 @@ test("AnyCrawlWebProvider fetch only accepts the first 5 URLs", async () => {
   const provider = new AnyCrawlWebProvider("test-key");
   const startedUrls: string[] = [];
 
-  (provider as unknown as {
-    client: {
-      scrape(input: { url: string; engine?: string; timeout?: number }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          timeout?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape(input) {
       startedUrls.push(input.url);
       return {
@@ -255,16 +279,18 @@ test("AnyCrawlWebProvider fetch uses auto with a 30s scrape timeout by default",
     max_age?: number;
   }> = [];
 
-  (provider as unknown as {
-    client: {
-      scrape(input: {
-        url: string;
-        engine?: string;
-        timeout?: number;
-        max_age?: number;
-      }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          timeout?: number;
+          max_age?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape(input) {
       observedInputs.push(input);
       return {
@@ -300,15 +326,17 @@ test("createDefaultWebProvider forwards fetch timeout options", async () => {
     timeout?: number;
   }> = [];
 
-  (provider as unknown as {
-    client: {
-      scrape(input: {
-        url: string;
-        engine?: string;
-        timeout?: number;
-      }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          timeout?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape(input) {
       observedInputs.push(input);
       return {
@@ -337,15 +365,17 @@ test("AnyCrawlWebProvider fresh fetch forces page refresh", async () => {
     max_age?: number;
   }> = [];
 
-  (provider as unknown as {
-    client: {
-      scrape(input: {
-        url: string;
-        engine?: string;
-        max_age?: number;
-      }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          max_age?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape(input) {
       observedInputs.push(input);
       return {
@@ -373,11 +403,17 @@ test("AnyCrawlWebProvider fetch falls back to playwright when auto content is to
   const provider = new AnyCrawlWebProvider("test-key");
   const observedEngines: string[] = [];
 
-  (provider as unknown as {
-    client: {
-      scrape(input: { url: string; engine?: string; timeout?: number }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          timeout?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape(input) {
       observedEngines.push(input.engine ?? "");
       return {
@@ -403,11 +439,17 @@ test("AnyCrawlWebProvider fetch falls back to playwright when auto fails", async
   const provider = new AnyCrawlWebProvider("test-key");
   const observedEngines: string[] = [];
 
-  (provider as unknown as {
-    client: {
-      scrape(input: { url: string; engine?: string; timeout?: number }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          timeout?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape(input) {
       observedEngines.push(input.engine ?? "");
       if (input.engine === "auto") {
@@ -434,11 +476,17 @@ test("AnyCrawlWebProvider fetch falls back to playwright when auto fails", async
 test("AnyCrawlWebProvider fetch returns an item error when scrapes exceed timeout", async () => {
   const provider = new AnyCrawlWebProvider("test-key", { fetchTimeoutMs: 10 });
 
-  (provider as unknown as {
-    client: {
-      scrape(input: { url: string; engine?: string; timeout?: number }): Promise<unknown>;
-    };
-  }).client = {
+  (
+    provider as unknown as {
+      client: {
+        scrape(input: {
+          url: string;
+          engine?: string;
+          timeout?: number;
+        }): Promise<unknown>;
+      };
+    }
+  ).client = {
     async scrape() {
       await new Promise(() => {});
     },

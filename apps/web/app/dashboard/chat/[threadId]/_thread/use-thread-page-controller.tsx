@@ -19,11 +19,22 @@ import {
   useDashboardShortcutPlatform,
   type DashboardShortcutDefinition,
 } from "../../../_components/dashboard-shortcuts";
-import type { ChatSendInput } from "../../_components/chat-canvas";
+import type {
+  ChatSendInput,
+  ToolConfirmationInterventionSignal,
+} from "../../_components/chat-canvas";
+import {
+  EMPTY_ACTIVE_CONNECTOR_TOOLS,
+  resolveActiveConnectorToolState,
+  type ActiveConnectorToolState,
+} from "../../_components/connector-agent-tools";
 import {
   desktopBridge,
   handleDesktopAuthDeepLink,
 } from "../../../../../lib/desktop-bridge";
+import { connectorsClient } from "../../../../../lib/sdk";
+import type { SourceConnector } from "@sourceweft/sdk";
+import type { ToolApprovalResume } from "@sourceweft/sdk";
 import { useChatStreamRunnerControl } from "../chat-stream-runner-control";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
 import { useThreadMessages } from "./use-thread-messages";
@@ -101,6 +112,19 @@ export function useThreadPageController({
   const [composerResetKey, setComposerResetKey] = useState(0);
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [activeConnectorTools, setActiveConnectorTools] =
+    useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
+  const [toolConfirmationInterventionSignal, setToolConfirmationInterventionSignal] =
+    useState<ToolConfirmationInterventionSignal | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const oauthStatus = params.get("connector_oauth");
+    if (oauthStatus === "success" || oauthStatus === "error") {
+      setHubDrawerOpen(true);
+    }
+  }, []);
 
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
 
@@ -131,6 +155,9 @@ export function useThreadPageController({
     setActiveSkillIds,
     setDisabledToolNames,
   } = useThreadSources({ threadId, workspaceId });
+  const handleConnectorsChange = useCallback((connectors: SourceConnector[]) => {
+    setActiveConnectorTools(resolveActiveConnectorToolState(connectors));
+  }, []);
 
   const {
     availableModels,
@@ -292,6 +319,31 @@ export function useThreadPageController({
     };
   }, [router]);
 
+  useEffect(() => {
+    if (!workspaceId) {
+      setActiveConnectorTools(EMPTY_ACTIVE_CONNECTOR_TOOLS);
+      return;
+    }
+
+    let cancelled = false;
+    void connectorsClient
+      .list(workspaceId)
+      .then((result) => {
+        if (!cancelled) {
+          setActiveConnectorTools(resolveActiveConnectorToolState(result.items));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActiveConnectorTools(EMPTY_ACTIVE_CONNECTOR_TOOLS);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
   const { streamThreadAction } = useThreadStreamAction({
     catalogKindEnabled,
     clearAttachedRunKeyIfCurrent,
@@ -302,6 +354,11 @@ export function useThreadPageController({
     markRunStarted,
     markRunTerminal,
     messages,
+    onToolConfirmationRequested: () => {
+      setToolConfirmationInterventionSignal({
+        id: `${Date.now()}:${Math.random().toString(36).slice(2)}`,
+      });
+    },
     searchEnabled,
     selectedByokModels,
     selectedModels,
@@ -495,6 +552,7 @@ export function useThreadPageController({
       groupId: string;
       assistantMessageId: string;
       branchIndex: number;
+      toolApprovalResume?: ToolApprovalResume | null;
     }) => {
       if (isStreaming) {
         return;
@@ -503,17 +561,19 @@ export function useThreadPageController({
       const assistantGroup = messageGroups.find(
         (group) => group.groupId === input.groupId,
       );
-      const nextBranchIndex = assistantGroup
-        ? assistantGroup.versions.length
-        : input.branchIndex + 1;
+      if (!input.toolApprovalResume) {
+        const nextBranchIndex = assistantGroup
+          ? assistantGroup.versions.length
+          : input.branchIndex + 1;
 
-      setActiveVersionByGroup((previous) => ({
-        ...previous,
-        [input.groupId]: Math.max(
-          previous[input.groupId] ?? 0,
-          nextBranchIndex,
-        ),
-      }));
+        setActiveVersionByGroup((previous) => ({
+          ...previous,
+          [input.groupId]: Math.max(
+            previous[input.groupId] ?? 0,
+            nextBranchIndex,
+          ),
+        }));
+      }
       pendingLatestVersionSelectionRef.current = {
         assistantGroupId: input.groupId,
         turnId: assistantGroup?.turnId,
@@ -531,6 +591,8 @@ export function useThreadPageController({
         skillIds: effectiveActiveSkillIds,
         searchEnabled,
         assistantMessageId: input.assistantMessageId,
+        attachOnly: Boolean(input.toolApprovalResume),
+        toolApprovalResume: input.toolApprovalResume ?? null,
       });
     },
     [
@@ -603,6 +665,7 @@ export function useThreadPageController({
     activeAssistantVersion,
     activeCitationIndex,
     activeSkillIds,
+    activeConnectorTools,
     activeSourceIds,
     activeVersionByGroup,
     artifactsRefreshKey,
@@ -623,6 +686,7 @@ export function useThreadPageController({
     handleActiveVersionChange,
     handleArtifactPreview,
     handleCitationClick,
+    handleConnectorsChange,
     handleLibrarySourcesLoad,
     handleLibrarySourcesMerge,
     handleModelSelect,
@@ -683,6 +747,7 @@ export function useThreadPageController({
     threadId,
     threadTitle,
     thinkingSettings,
+    toolConfirmationInterventionSignal,
     toggleSourcesVisible,
     workfilesRefreshKey,
     workspaceId,

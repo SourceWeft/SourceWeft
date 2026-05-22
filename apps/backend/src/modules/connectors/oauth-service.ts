@@ -8,6 +8,7 @@ import {
   createOAuthAccountRecord,
   createOAuthStateRecord,
   findOAuthAccountRecord,
+  findOAuthStateRecord,
   updateOAuthAccountStatusRecord,
   updateOAuthAccountTokenRecord,
 } from "./repository";
@@ -212,6 +213,26 @@ export class ConnectorOAuthService {
     return {
       account,
       redirectAfter: stateRow.redirectAfter,
+    };
+  }
+
+  async getGlobalCallbackState(input: {
+    connectorType: string;
+    state: string;
+  }) {
+    const stateRow = await findOAuthStateRecord({
+      stateHash: hashState(input.state),
+      connectorType: input.connectorType,
+      now: new Date(),
+    });
+    if (!stateRow) {
+      return null;
+    }
+
+    return {
+      connectorType: stateRow.connectorType,
+      redirectAfter: stateRow.redirectAfter,
+      workspaceId: stateRow.workspaceId,
     };
   }
 

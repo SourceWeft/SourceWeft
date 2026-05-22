@@ -188,6 +188,10 @@ export function isGeneratedImageArtifactToolName(
   return hasAgentToolCapability(value, "generated_image_artifact");
 }
 
+export function isNotionToolName(value: string): value is AgentToolName {
+  return hasAgentToolCapability(value, "notion");
+}
+
 export function isReadToolOutputToolName(value: string): value is AgentToolName {
   return hasAgentToolCapability(value, "read_tool_output");
 }

@@ -24,6 +24,7 @@ function ModelCatalogErrorState() {
 
 export function DashboardChatThreadPageView({
   activeAssistantVersion,
+  activeConnectorTools,
   activeCitationIndex,
   activeSkillIds,
   activeSourceIds,
@@ -46,6 +47,7 @@ export function DashboardChatThreadPageView({
   handleActiveVersionChange,
   handleArtifactPreview,
   handleCitationClick,
+  handleConnectorsChange,
   handleLibrarySourcesLoad,
   handleLibrarySourcesMerge,
   handleModelSelect,
@@ -105,6 +107,7 @@ export function DashboardChatThreadPageView({
   threadId,
   threadTitle,
   thinkingSettings,
+  toolConfirmationInterventionSignal,
   toggleSourcesVisible,
   workfilesRefreshKey,
   workspaceId,
@@ -169,11 +172,15 @@ export function DashboardChatThreadPageView({
             selectedSkillIds={activeSkillIds}
             sourcesVisible={sourcesVisible}
             thinkingCapabilities={selectedModels.llm?.capabilities}
+            toolConfirmationInterventionSignal={
+              toolConfirmationInterventionSignal
+            }
             imageCapabilities={
               selectedModels.image?.capabilities?.imageGeneration
             }
             imageModelAvailable={Boolean(selectedModels.image)}
             imageModelAlias={selectedModels.image?.modelAlias ?? null}
+            notionConnectorId={activeConnectorTools.notionConnectorId}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={setDisabledToolNames}
             onLoadOlderMessages={() => void loadOlderThreadMessages()}
@@ -204,6 +211,7 @@ export function DashboardChatThreadPageView({
         isDesktopPanel={isDesktopPanel}
         isPersistentLayout={isPersistentLayout}
         loadAvailableSkills={loadAvailableSkills}
+        onConnectorsChange={handleConnectorsChange}
         onArtifactOpen={setPreviewArtifact}
         onArtifactPreviewClose={() => setPreviewArtifact(null)}
         onCitationLocate={scrollToMessage}

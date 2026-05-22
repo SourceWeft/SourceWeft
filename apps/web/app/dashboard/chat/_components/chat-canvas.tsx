@@ -12,6 +12,7 @@ export type {
   ChatSkillItem,
   ChatToolName,
   ChatToolsSelection,
+  ToolConfirmationInterventionSignal,
   CitationRecord,
   ArtifactPreviewRecord,
   ImageAspectRatio,

@@ -21,9 +21,98 @@ export function isConnectorError(error: unknown): error is ConnectorError {
   return error instanceof ConnectorError;
 }
 
+function errorRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function errorMessages(value: unknown) {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = value;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error && current.message) {
+      messages.push(current.message);
+    } else if (typeof current === "string" && current) {
+      messages.push(current);
+    }
+    current = errorRecord(current)?.cause;
+  }
+  return messages;
+}
+
+function errorCodes(value: unknown) {
+  const codes: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = value;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const code = errorRecord(current)?.code;
+    if (typeof code === "string" && code.length > 0) {
+      codes.push(code);
+    }
+    current = errorRecord(current)?.cause;
+  }
+  return codes;
+}
+
+function connectorMigrationError(error: unknown) {
+  const messages = errorMessages(error).join("\n");
+  const lowerMessages = messages.toLowerCase();
+  const codes = new Set(errorCodes(error));
+  const missingColumn = codes.has("42703");
+  const missingRelation = codes.has("42P01");
+
+  if (
+    missingColumn &&
+    lowerMessages.includes("agent_tool_name") &&
+    lowerMessages.includes("connector_action_runs")
+  ) {
+    return new ConnectorError(
+      503,
+      "CONNECTOR_MIGRATION_REQUIRED",
+      "Connector action approval storage is not up to date. Run backend migrations, then restart the worker.",
+      { migration: "0003_agent_tool_trust_rules" },
+    );
+  }
+
+  if (
+    (missingRelation || lowerMessages.includes("does not exist")) &&
+    lowerMessages.includes("agent_tool_trust_rules")
+  ) {
+    return new ConnectorError(
+      503,
+      "CONNECTOR_MIGRATION_REQUIRED",
+      "Agent tool trust-rule storage is not ready. Run backend migrations, then restart the worker.",
+      { migration: "0003_agent_tool_trust_rules" },
+    );
+  }
+
+  if (
+    (missingRelation || lowerMessages.includes("does not exist")) &&
+    lowerMessages.includes("connector_action_runs")
+  ) {
+    return new ConnectorError(
+      503,
+      "CONNECTOR_MIGRATION_REQUIRED",
+      "Connector action-run storage is not ready. Run backend migrations, then restart the worker.",
+      { migration: "0001_baseline" },
+    );
+  }
+
+  return null;
+}
+
 export function toConnectorError(error: unknown): ConnectorError {
   if (isConnectorError(error)) {
     return error;
+  }
+
+  const migrationError = connectorMigrationError(error);
+  if (migrationError) {
+    return migrationError;
   }
 
   const message = error instanceof Error ? error.message : String(error);

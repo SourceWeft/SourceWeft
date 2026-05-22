@@ -1,6 +1,6 @@
 "use client";
 
-import type { SettingsCenterTab } from "./dashboard-settings-center-modal";
+import type { SettingsCenterTab } from "./dashboard-settings-center/types";
 
 type SkeletonProps = {
   className?: string;

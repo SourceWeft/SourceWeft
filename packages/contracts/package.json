@@ -12,6 +12,7 @@
     "./content": "./src/content.ts",
     "./connectors": "./src/connectors.ts",
     "./dashboard": "./src/dashboard.ts",
+    "./mcp": "./src/mcp.ts",
     "./agent-tools": "./src/agent-tools.ts",
     "./workspace": "./src/workspace.ts",
     "./api-response": "./src/api-response.ts"
@@ -20,6 +21,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@sourceweft/market-contracts": "workspace:*",
     "zod": "^4.2.1"
   },
   "devDependencies": {

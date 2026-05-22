@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import {
   calculatePerTermGrepTopK,
   mergeVirtualFsGrepCandidates,
@@ -40,7 +40,12 @@ test("mergeVirtualFsGrepCandidates deduplicates chunks and keeps the best score"
     [
       candidate({ chunkId: "chunk-1", chunkNo: 1, score: 0.2 }),
       candidate({ chunkId: "chunk-2", chunkNo: 2, score: 0.8 }),
-      candidate({ chunkId: "chunk-1", chunkNo: 1, score: 0.9, content: "best" }),
+      candidate({
+        chunkId: "chunk-1",
+        chunkNo: 1,
+        score: 0.9,
+        content: "best",
+      }),
     ],
     10,
   );

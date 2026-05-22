@@ -48,6 +48,7 @@ const ORPHANED_QUEUED_RUN_GRACE_MS = 10_000;
 const STALE_ACTIVE_RUN_TIMEOUT_MS = 10 * 60_000;
 const CLIENT_CANCELLED_CODE = "CLIENT_CANCELLED";
 const CLIENT_CANCELLED_MESSAGE = "Chat run was cancelled";
+const STALE_CHAT_RUN_CODE = "CHAT_RUN_STALE";
 const ACTIVE_RUN_CONSTRAINT = "chat_thread_runs_thread_active_uq";
 
 function wait(delayMs: number) {
@@ -184,20 +185,6 @@ async function cancelRunBeforeMessages(run: ChatThreadRunRecord) {
 }
 
 async function failStaleActiveRun(run: ChatThreadRunRecord) {
-  const error = {
-    code: "CHAT_RUN_STALE",
-    message: "Previous chat run stopped unexpectedly.",
-  };
-  await chatRunStreamManager.appendEvent(
-    run.streamKey,
-    `data: ${JSON.stringify({
-      type: "error",
-      code: error.code,
-      error: error.message,
-      ...(run.userMessageId ? { userMessageId: run.userMessageId } : {}),
-      ...(run.assistantMessageId ? { messageId: run.assistantMessageId } : {}),
-    })}\n\n`,
-  );
   await chatRunStreamManager.appendEvent(
     run.streamKey,
     `data: ${JSON.stringify({ type: "finish" })}\n\n`,
@@ -210,11 +197,10 @@ async function failStaleActiveRun(run: ChatThreadRunRecord) {
     assistantMessageId: run.assistantMessageId,
     snapshotJson: {
       ...(run.snapshotJson as ChatRunSnapshot),
-      errorCode: error.code,
-      errorMessage: error.message,
+      errorCode: STALE_CHAT_RUN_CODE,
     },
-    errorCode: error.code,
-    errorMessage: error.message,
+    errorCode: STALE_CHAT_RUN_CODE,
+    errorMessage: null,
   });
 }
 
@@ -310,7 +296,10 @@ export function synthesizeTerminalRunEvents(input: {
   sawErrorEvent: boolean;
 }) {
   const events: string[] = [];
-  const terminalError = toTerminalRunError(input.run);
+  const terminalError =
+    input.run.errorCode === STALE_CHAT_RUN_CODE
+      ? null
+      : toTerminalRunError(input.run);
   if (terminalError && !input.sawErrorEvent) {
     events.push(
       `data: ${JSON.stringify({

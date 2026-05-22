@@ -1,4 +1,5 @@
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
+import type { ToolApprovalResume } from "@sourceweft/contracts";
 import type {
   ChatInputImage,
   ThreadCommandSelection,
@@ -21,6 +22,7 @@ export type RefreshThreadInput = {
   image?: LlmExecutionConfig;
   vision?: LlmExecutionConfig;
   visionProfileAlias?: string | null;
+  toolApprovalResume?: ToolApprovalResume | null;
 };
 
 export type EditThreadInput = RefreshThreadInput & {

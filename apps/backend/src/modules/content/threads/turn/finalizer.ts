@@ -121,6 +121,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     agentCheckpoint: input.agentCheckpoint ?? {
       beforeInput: null,
       beforeAssistant: null,
+      resume: null,
       final: null,
     },
     finishReason: input.finishReason,

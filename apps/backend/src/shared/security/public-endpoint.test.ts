@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import {
   isPublicIpAddress,
   sanitizeCustomHeaders,
@@ -23,10 +23,13 @@ test("identifies public and non-public IP addresses", () => {
 
 test("validates public HTTPS endpoints with DNS resolution", async () => {
   assert.equal(
-    await validatePublicHttpsEndpoint("https://api.example.com/v1/", async () => [
-      { address: "8.8.8.8", family: 4 },
-      { address: "2606:4700:4700::1111", family: 6 },
-    ]),
+    await validatePublicHttpsEndpoint(
+      "https://api.example.com/v1/",
+      async () => [
+        { address: "8.8.8.8", family: 4 },
+        { address: "2606:4700:4700::1111", family: 6 },
+      ],
+    ),
     "https://api.example.com/v1",
   );
 });
@@ -83,7 +86,10 @@ test("sanitizes custom headers and rejects dangerous names", () => {
     () => sanitizeCustomHeaders({ Authorization: "Bearer token" }),
     /not allowed/,
   );
-  assert.throws(() => sanitizeCustomHeaders({ HOST: "example.com" }), /not allowed/);
+  assert.throws(
+    () => sanitizeCustomHeaders({ HOST: "example.com" }),
+    /not allowed/,
+  );
   assert.throws(
     () => sanitizeCustomHeaders({ "x-forwarded-for": "127.0.0.1" }),
     /not allowed/,

@@ -592,89 +592,21 @@ export class ContentService {
     return workingFilesService.deleteWorkingFile(input);
   }
 
-  async refreshThread(input: {
-    workspaceId: string;
-    threadId: string;
-    userId: string;
-    mentionedSourceIds?: string[];
-    sourceIds?: string[];
-    tools?: ThreadToolsSelection;
-    command?: StreamThreadEventInput["command"];
-    timezone?: string;
-    userMessageId?: string;
-    assistantMessageId?: string;
-    idempotencyKey?: string;
-    llm?: LlmExecutionConfig;
-    image?: LlmExecutionConfig;
-    vision?: LlmExecutionConfig;
-    visionProfileAlias?: string | null;
-  }) {
+  async refreshThread(input: RefreshThreadInput) {
     return this.threadStreamService.refreshThread(input);
   }
 
-  async *refreshThreadEvents(input: {
-    workspaceId: string;
-    threadId: string;
-    userId: string;
-    mentionedSourceIds?: string[];
-    sourceIds?: string[];
-    tools?: ThreadToolsSelection;
-    command?: StreamThreadEventInput["command"];
-    timezone?: string;
-    userMessageId?: string;
-    assistantMessageId?: string;
-    idempotencyKey?: string;
-    llm?: LlmExecutionConfig;
-    image?: LlmExecutionConfig;
-    vision?: LlmExecutionConfig;
-    visionProfileAlias?: string | null;
-  }): AsyncGenerator<string> {
+  async *refreshThreadEvents(
+    input: RefreshThreadInput,
+  ): AsyncGenerator<string> {
     yield* this.threadStreamService.refreshThreadEvents(input);
   }
 
-  async editThread(input: {
-    workspaceId: string;
-    threadId: string;
-    userId: string;
-    content: string;
-    imagesProvided?: boolean;
-    images?: StreamThreadEventInput["images"];
-    mentionedSourceIds?: string[];
-    sourceIds?: string[];
-    tools?: ThreadToolsSelection;
-    command?: StreamThreadEventInput["command"];
-    timezone?: string;
-    userMessageId?: string;
-    assistantMessageId?: string;
-    idempotencyKey?: string;
-    llm?: LlmExecutionConfig;
-    image?: LlmExecutionConfig;
-    vision?: LlmExecutionConfig;
-    visionProfileAlias?: string | null;
-  }) {
+  async editThread(input: EditThreadInput) {
     return this.threadStreamService.editThread(input);
   }
 
-  async *editThreadEvents(input: {
-    workspaceId: string;
-    threadId: string;
-    userId: string;
-    content: string;
-    imagesProvided?: boolean;
-    images?: StreamThreadEventInput["images"];
-    mentionedSourceIds?: string[];
-    sourceIds?: string[];
-    tools?: ThreadToolsSelection;
-    command?: StreamThreadEventInput["command"];
-    timezone?: string;
-    userMessageId?: string;
-    assistantMessageId?: string;
-    idempotencyKey?: string;
-    llm?: LlmExecutionConfig;
-    image?: LlmExecutionConfig;
-    vision?: LlmExecutionConfig;
-    visionProfileAlias?: string | null;
-  }): AsyncGenerator<string> {
+  async *editThreadEvents(input: EditThreadInput): AsyncGenerator<string> {
     yield* this.threadStreamService.editThreadEvents(input);
   }
 

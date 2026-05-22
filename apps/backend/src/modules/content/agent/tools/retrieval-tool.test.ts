@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { formatRetrievalContext } from "./retrieval-tool";
 
 test("formatRetrievalContext tells the model not to infer unsupported values", () => {

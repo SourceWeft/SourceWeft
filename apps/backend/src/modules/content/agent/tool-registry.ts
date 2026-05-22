@@ -13,6 +13,7 @@ export {
   hasAgentToolTrait,
   isAgentToolSlashCommandSupported,
   isGeneratedImageArtifactToolName,
+  isNotionToolName,
   isAgentToolEnabledByDefault,
   isAgentToolFamily,
   isAgentToolDomain,

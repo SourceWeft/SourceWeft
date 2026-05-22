@@ -15,6 +15,14 @@ export const searchNotionPagesTool = defineAgentTool({
   domain: "connector",
   capabilities: ["connector", "notion", "connector_read"],
   activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  slash: {
+    description: "Search indexed Notion pages",
+    displayName: "Search Notion pages",
+  },
 });
 
 export const createNotionPageTool = defineAgentTool({
@@ -23,6 +31,14 @@ export const createNotionPageTool = defineAgentTool({
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write"],
   activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  slash: {
+    description: "Propose creating a Notion page",
+    displayName: "Create Notion page",
+  },
 });
 
 export const appendNotionPageTool = defineAgentTool({
@@ -31,6 +47,14 @@ export const appendNotionPageTool = defineAgentTool({
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write"],
   activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  slash: {
+    description: "Propose appending content to a Notion page",
+    displayName: "Append Notion page",
+  },
 });
 
 export const updateNotionPageByTitleTool = defineAgentTool({
@@ -39,6 +63,14 @@ export const updateNotionPageByTitleTool = defineAgentTool({
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write"],
   activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  slash: {
+    description: "Propose updating a Notion page by exact title",
+    displayName: "Update Notion page",
+  },
 });
 
 export const deleteNotionPageByTitleTool = defineAgentTool({
@@ -47,6 +79,14 @@ export const deleteNotionPageByTitleTool = defineAgentTool({
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write"],
   activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  slash: {
+    description: "Propose moving a Notion page to trash by exact title",
+    displayName: "Delete Notion page",
+  },
 });
 
 export const saveArtifactToNotionTool = defineAgentTool({
@@ -55,6 +95,14 @@ export const saveArtifactToNotionTool = defineAgentTool({
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write", "artifact"],
   activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  slash: {
+    description: "Propose saving an artifact reference to Notion",
+    displayName: "Save artifact to Notion",
+  },
 });
 
 export const saveFinalAnswerToNotionTool = defineAgentTool({
@@ -63,6 +111,14 @@ export const saveFinalAnswerToNotionTool = defineAgentTool({
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write"],
   activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  slash: {
+    description: "Propose saving the final answer to Notion",
+    displayName: "Save answer to Notion",
+  },
 });
 
 export const notionTools = [

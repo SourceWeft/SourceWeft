@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { FileUIPart } from "ai";
+import type { ToolApprovalResume } from "@sourceweft/sdk";
 import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import {
   trackChatMessageSent,
@@ -12,6 +13,11 @@ import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
+import {
+  getActiveToolConfirmationItems,
+  ToolInterventionBar,
+  type ToolConfirmationIntervention,
+} from "./tool-confirmation";
 import type {
   ArtifactPreviewRecord,
   ChatSendInput,
@@ -22,12 +28,45 @@ import type {
   ImageModelCapabilities,
   PromptThinkingCapabilities,
   PromptThinkingSettings,
+  ToolConfirmationInterventionSignal,
   VersionedMessageGroup,
 } from "./types";
 
 type PromptImageMimeType = NonNullable<
   NonNullable<ChatSendInput["images"]>[number]["mimeType"]
 >;
+
+function findToolConfirmationResumeTarget(input: {
+  activeVersionByGroup: Record<string, number>;
+  messageGroups: VersionedMessageGroup[];
+  messageId: string;
+}) {
+  for (const group of input.messageGroups) {
+    if (group.role !== "assistant") {
+      continue;
+    }
+
+    const branchIndex = group.versions.findIndex(
+      (version) => version.id === input.messageId,
+    );
+    const version = group.versions[branchIndex];
+    if (!version) {
+      continue;
+    }
+
+    return {
+      groupId: group.groupId,
+      assistantMessageId: version.id,
+      branchIndex:
+        branchIndex >= 0
+          ? branchIndex
+          : (input.activeVersionByGroup[group.groupId] ??
+            Math.max(group.versions.length - 1, 0)),
+    };
+  }
+
+  return null;
+}
 
 function normalizePromptImageMediaType(
   value: string | undefined,
@@ -128,10 +167,12 @@ export function ChatCanvas({
   workspaceId,
   thinkingCapabilities,
   thinkingSettings,
+  toolConfirmationInterventionSignal = null,
   onThinkingSettingsChange,
   imageCapabilities,
   imageModelAvailable,
   imageModelAlias,
+  notionConnectorId = null,
   disabledToolNames = [],
   onDisabledToolNamesChange,
 }: {
@@ -171,6 +212,7 @@ export function ChatCanvas({
     groupId: string;
     assistantMessageId: string;
     branchIndex: number;
+    toolApprovalResume?: ToolApprovalResume | null;
   }) => void;
   onSendMessage?: (input: ChatSendInput) => void;
   onStopStreaming?: () => void;
@@ -186,10 +228,12 @@ export function ChatCanvas({
   workspaceId?: string | null;
   thinkingCapabilities?: PromptThinkingCapabilities;
   thinkingSettings?: PromptThinkingSettings;
+  toolConfirmationInterventionSignal?: ToolConfirmationInterventionSignal | null;
   onThinkingSettingsChange?: (settings: PromptThinkingSettings) => void;
   imageCapabilities?: ImageModelCapabilities;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
+  notionConnectorId?: string | null;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
@@ -221,6 +265,35 @@ export function ChatCanvas({
 
     return [];
   }, [editingMessageId, isEditing, messageGroups]);
+  const [activeIntervention, setActiveIntervention] =
+    useState<ToolConfirmationIntervention | null>(null);
+  const handledInterventionSignalIdRef = useRef<string | null>(null);
+  const activeConfirmationItems = useMemo(
+    () => getActiveToolConfirmationItems(messageGroups, activeVersionByGroup),
+    [activeVersionByGroup, messageGroups],
+  );
+
+  useEffect(() => {
+    if (
+      !toolConfirmationInterventionSignal ||
+      handledInterventionSignalIdRef.current ===
+        toolConfirmationInterventionSignal.id ||
+      activeConfirmationItems.length === 0
+    ) {
+      return;
+    }
+    const next = activeConfirmationItems[0];
+    if (!next) {
+      return;
+    }
+    handledInterventionSignalIdRef.current =
+      toolConfirmationInterventionSignal.id;
+    setActiveIntervention({
+      id: next.confirmation.id,
+      messageId: next.messageId,
+      toolCallId: next.toolCall.id,
+    });
+  }, [activeConfirmationItems, toolConfirmationInterventionSignal]);
 
   useEffect(() => {
     if (
@@ -289,6 +362,7 @@ export function ChatCanvas({
         imageCapabilities={imageCapabilities}
         imageModelAvailable={imageModelAvailable}
         imageModelAlias={imageModelAlias}
+        notionConnectorId={notionConnectorId}
         disabledToolNames={disabledToolNames}
         onDisabledToolNamesChange={onDisabledToolNamesChange}
       />
@@ -313,6 +387,29 @@ export function ChatCanvas({
         onRestartFromMessage={onRestartFromMessage}
         onSourcePreview={onSourcePreview}
         onWorkfileClick={onWorkfileClick}
+        workspaceId={workspaceId}
+      />
+
+      <ToolInterventionBar
+        activeIntervention={activeIntervention}
+        activeVersionByGroup={activeVersionByGroup}
+        messageGroups={messageGroups}
+        onInterventionSettled={({ result, item }) => {
+          setActiveIntervention(null);
+          const resumeTarget = findToolConfirmationResumeTarget({
+            activeVersionByGroup,
+            messageGroups,
+            messageId: item.messageId,
+          });
+          if (resumeTarget) {
+            onRefreshLatest?.({
+              groupId: resumeTarget.groupId,
+              assistantMessageId: resumeTarget.assistantMessageId,
+              branchIndex: resumeTarget.branchIndex,
+              toolApprovalResume: result.resume ?? null,
+            });
+          }
+        }}
         workspaceId={workspaceId}
       />
 
@@ -360,6 +457,7 @@ export function ChatCanvas({
             imageCapabilities={imageCapabilities}
             imageModelAvailable={imageModelAvailable}
             imageModelAlias={imageModelAlias}
+            notionConnectorId={notionConnectorId}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={onDisabledToolNamesChange}
           />

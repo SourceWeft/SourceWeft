@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import {
-  providerSupportsKind,
-} from "./catalog-discovery";
+import { test } from "vitest";
+import { providerSupportsKind } from "./catalog-discovery";
 import {
   hasLiteLLMPricing,
   resolveLiteLLMModelMatch,

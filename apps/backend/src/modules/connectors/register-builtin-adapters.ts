@@ -1,4 +1,4 @@
-import { notionAdapter } from "./adapters/notion";
+import { notionAdapter } from "./providers/notion";
 import { connectorRegistry } from "./registry";
 
 let registered = false;
@@ -10,4 +10,3 @@ export function registerBuiltinConnectorAdapters() {
   connectorRegistry.register(notionAdapter);
   registered = true;
 }
-

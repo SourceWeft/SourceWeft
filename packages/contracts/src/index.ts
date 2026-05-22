@@ -5,6 +5,8 @@ export * from "./pricing";
 export * from "./content";
 export * from "./connectors";
 export * from "./dashboard";
+export * from "./mcp";
 export * from "./workspace";
 export * from "./api-response";
 export * from "./agent-tools";
+export * from "./agent-confirmations";

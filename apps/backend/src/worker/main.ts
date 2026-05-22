@@ -35,12 +35,25 @@ const processors: Record<string, (job: Job<JobPayload>) => Promise<unknown>> = {
 const defaultProcessor: (job: Job<JobPayload>) => Promise<unknown> =
   processExampleJob;
 
+async function runIsolatedJob(job: Job<JobPayload>) {
+  const processor = processors[job.name] ?? defaultProcessor;
+  try {
+    return await processor(job);
+  } catch (error) {
+    logger.error(
+      "Job processor failed",
+      buildWorkerJobFailureLog(
+        job,
+        error instanceof Error ? error : new Error(String(error)),
+      ),
+    );
+    throw error;
+  }
+}
+
 const worker = new Worker<JobPayload>(
   config.queueName,
-  async (job: Job<JobPayload>) => {
-    const processor = processors[job.name] ?? defaultProcessor;
-    return processor(job);
-  },
+  async (job: Job<JobPayload>) => runIsolatedJob(job),
   {
     connection: connectionOptions,
     concurrency: config.workerConcurrency,
@@ -56,6 +69,18 @@ worker.on("completed", (job: Job<JobPayload>) => {
 
 worker.on("failed", (job: Job<JobPayload> | undefined, error: Error) => {
   logger.error("Job failed", buildWorkerJobFailureLog(job, error));
+});
+
+worker.on("error", (error: Error) => {
+  logger.error("Worker runtime error", {
+    error: error.message,
+    errorName: error.name,
+    stack: error.stack,
+  });
+});
+
+worker.on("stalled", (jobId: string) => {
+  logger.warn("Job stalled", { jobId });
 });
 
 logger.info("Worker started", {

@@ -9,6 +9,7 @@ import type { FileUIPart } from "ai";
 import {
   ArrowUp,
   Brain,
+  FileText,
   Globe,
   Image as ImageIcon,
   Loader2,
@@ -63,6 +64,7 @@ import {
   AGENT_TOOL_NAMES,
   getAgentToolSlashCommand,
   isGeneratedImageArtifactToolName,
+  isNotionToolName,
 } from "@sourceweft/sdk";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { SourceItem } from "../source-types";
@@ -78,11 +80,14 @@ import {
   imageModelAliasFromSkills,
   imageQualityOptions,
   imageStyleOptions,
+  notionAgentToolNames,
   skillSupportsImageGeneration,
+  skillSupportsNotion,
   thinkingEffortOptions,
 } from "./tool-selection";
 import type {
   ChatSendInput,
+  ChatConnectorToolSelection,
   ChatImageArtifactConfig,
   ChatSkillItem,
   ChatToolName,
@@ -104,7 +109,7 @@ type ComposerSlashCommandMeta =
     }
   | {
       kind: "tool-command";
-      tool: "generate_image";
+      tool: ChatToolName;
     }
   | {
       kind: "skill";
@@ -203,6 +208,21 @@ function promptSegmentsToMarkerContent(segments: PromptInputSegment[]) {
     .trim();
 }
 
+function promptSegmentsToUserText(segments: PromptInputSegment[]) {
+  return segments
+    .map((segment) => {
+      if (segment.type === "source") {
+        return `@${segment.title}`;
+      }
+      if (segment.type === "command") {
+        return "";
+      }
+      return segment.text;
+    })
+    .join("")
+    .trim();
+}
+
 function uniqueCommandSegments(segments: PromptInputSegment[]) {
   const seen = new Set<string>();
   return segments.filter(
@@ -235,8 +255,16 @@ type ResolvedComposerCommand =
   | {
       arguments: string;
       kind: "tool-command";
-      name: "/generate_image";
+      toolName: ChatToolName;
+      name: `/${string}`;
     };
+
+function notionOptionSummary(enabled: boolean, connectorId: string | null) {
+  if (!connectorId) {
+    return "Unavailable";
+  }
+  return enabled ? "On" : "Off";
+}
 
 export function Composer({
   isEditing = false,
@@ -264,6 +292,7 @@ export function Composer({
   imageCapabilities,
   imageModelAvailable = false,
   imageModelAlias,
+  notionConnectorId = null,
   disabledToolNames = [],
   onDisabledToolNamesChange,
   onStopStreaming,
@@ -300,6 +329,7 @@ export function Composer({
   imageCapabilities?: ImageModelCapabilities;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
+  notionConnectorId?: string | null;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
   onStopStreaming?: () => void;
@@ -321,15 +351,31 @@ export function Composer({
   const imageGenerationEnabled = !disabledToolNameSet.has(
     AGENT_TOOL_NAMES.generateImage,
   );
+  const notionToolsAvailable = Boolean(notionConnectorId);
+  const notionToolsEnabled =
+    notionToolsAvailable &&
+    !notionAgentToolNames.some((toolName) => disabledToolNameSet.has(toolName));
   const effectiveSelectedSkillIds = useMemo(
     () =>
-      imageGenerationEnabled
-        ? selectedSkillIds
-        : selectedSkillIds.filter((skillId) => {
-            const skill = availableSkills.find((item) => item.id === skillId);
-            return !skill || !skillSupportsImageGeneration(skill);
-          }),
-    [availableSkills, imageGenerationEnabled, selectedSkillIds],
+      selectedSkillIds.filter((skillId) => {
+        const skill = availableSkills.find((item) => item.id === skillId);
+        if (!skill) {
+          return true;
+        }
+        if (!imageGenerationEnabled && skillSupportsImageGeneration(skill)) {
+          return false;
+        }
+        if (!notionToolsEnabled && skillSupportsNotion(skill)) {
+          return false;
+        }
+        return true;
+      }),
+    [
+      availableSkills,
+      imageGenerationEnabled,
+      notionToolsEnabled,
+      selectedSkillIds,
+    ],
   );
   const effectiveSelectedSkillIdSet = useMemo(
     () => new Set(effectiveSelectedSkillIds),
@@ -368,6 +414,11 @@ export function Composer({
     effectiveImageConfig.style !== "auto";
   const imageToolChanged = imageOptionsChanged || !imageGenerationEnabled;
   const imageOptionSummary = imageConfigSummary(effectiveImageConfig);
+  const notionToolChanged = notionToolsAvailable && !notionToolsEnabled;
+  const notionSummary = notionOptionSummary(
+    notionToolsEnabled,
+    notionConnectorId,
+  );
   const filteredAspectRatioOptions = imageAspectRatioOptions.filter((option) =>
     (
       effectiveImageCapabilities?.controls?.aspectRatio?.values ??
@@ -392,6 +443,7 @@ export function Composer({
     : DEFAULT_PROMPT_THINKING_SETTINGS;
   const optionCount =
     (imageToolChanged ? 1 : 0) +
+    (notionToolChanged ? 1 : 0) +
     (supportsThinking && activeThinkingSettings.mode !== "auto" ? 1 : 0);
   const thinkingEnabled = activeThinkingSettings.mode !== "off";
   const supportedThinkingEfforts = thinkingEffortOptions.filter((option) =>
@@ -424,6 +476,27 @@ export function Composer({
       const generateImageSlash = getAgentToolSlashCommand(
         AGENT_TOOL_NAMES.generateImage,
       );
+      const notionToolCommands: PromptInputSlashCommand[] = notionToolsAvailable
+        ? notionAgentToolNames.flatMap((toolName) => {
+            const slash = getAgentToolSlashCommand(toolName);
+            return slash
+              ? [
+                  {
+                    description: slash.description,
+                    group: "Notion",
+                    id: `tool-command:${toolName}`,
+                    kind: "tool" as const,
+                    label: slash.displayName,
+                    meta: {
+                      kind: "tool-command",
+                      tool: toolName,
+                    } satisfies ComposerSlashCommandMeta,
+                    value: `/${toolName}`,
+                  },
+                ]
+              : [];
+          })
+        : [];
       const toolCommands: PromptInputSlashCommand[] =
         imageSupported && generateImageSlash
           ? [
@@ -435,7 +508,7 @@ export function Composer({
                 label: generateImageSlash.displayName,
                 meta: {
                   kind: "tool-command",
-                  tool: "generate_image",
+                  tool: AGENT_TOOL_NAMES.generateImage,
                 } satisfies ComposerSlashCommandMeta,
                 value: "/generate_image",
               },
@@ -482,9 +555,14 @@ export function Composer({
           } satisfies ComposerSlashCommandMeta,
           value: `/${skill.slug}`,
         }));
-      return [...toolCommands, ...skillCommands, ...skillActivationCommands];
+      return [
+        ...toolCommands,
+        ...notionToolCommands,
+        ...skillCommands,
+        ...skillActivationCommands,
+      ];
     },
-    [availableSkills, imageSupported],
+    [availableSkills, imageSupported, notionToolsAvailable],
   );
   const commandByCanonicalName = useMemo(() => {
     const map = new Map<
@@ -590,12 +668,31 @@ export function Composer({
     }
   }
 
+  function updateNotionToolsEnabled(next: boolean) {
+    const nextDisabledTools = next
+      ? disabledToolNames.filter((toolName) => !isNotionToolName(toolName))
+      : Array.from(new Set([...disabledToolNames, ...notionAgentToolNames]));
+    onDisabledToolNamesChange?.(nextDisabledTools);
+    if (!next) {
+      const remainingSkillIds = selectedSkillIds.filter((skillId) => {
+        const skill = availableSkills.find((item) => item.id === skillId);
+        return !skill || !skillSupportsNotion(skill);
+      });
+      if (remainingSkillIds.length !== selectedSkillIds.length) {
+        onSkillSelectionChange?.(remainingSkillIds);
+      }
+    }
+  }
+
   function applyCommandTools(command: NonNullable<ChatSkillItem["commands"]>[number]) {
     if (command.tools?.includes(AGENT_TOOL_NAMES.webSearch)) {
       onSearchEnabledChange?.(true);
     }
     if (command.tools?.includes(AGENT_TOOL_NAMES.generateImage)) {
       updateImageGenerationEnabled(true);
+    }
+    if (command.tools?.some((toolName) => isNotionToolName(toolName))) {
+      updateNotionToolsEnabled(true);
     }
   }
 
@@ -608,11 +705,24 @@ export function Composer({
     argumentsText = "",
   ): ResolvedComposerCommand | null {
     const args = argumentsText.trim();
-    if (commandName.toLowerCase() === "/generate_image") {
+    const normalizedToolName = commandName.replace(/^\//, "").toLowerCase();
+    if (normalizedToolName === AGENT_TOOL_NAMES.generateImage) {
       return {
         arguments: args,
         kind: "tool-command",
         name: "/generate_image",
+        toolName: AGENT_TOOL_NAMES.generateImage,
+      };
+    }
+    const notionToolName = notionAgentToolNames.find(
+      (toolName) => toolName.toLowerCase() === normalizedToolName,
+    );
+    if (notionToolsAvailable && notionToolName) {
+      return {
+        arguments: args,
+        kind: "tool-command",
+        name: `/${notionToolName}`,
+        toolName: notionToolName,
       };
     }
 
@@ -765,6 +875,7 @@ export function Composer({
             const submittedCommandSegments =
               uniqueCommandSegments(submittedSegments);
             const markerContent = promptSegmentsToMarkerContent(submittedSegments);
+            const userTextContent = promptSegmentsToUserText(submittedSegments);
             const tokenResolvedCommands = resolveTokenCommands(
               submittedCommandSegments.map((segment) => segment.command),
             );
@@ -772,6 +883,12 @@ export function Composer({
               [...tokenResolvedCommands]
                 .reverse()
                 .find((command) => command.kind === "skill-command") ?? null;
+            const activeToolCommand =
+              activeCommand === null
+                ? ([...tokenResolvedCommands]
+                    .reverse()
+                    .find((command) => command.kind === "tool-command") ?? null)
+                : null;
             const invokedSkillIds = [
               ...new Set(
                 tokenResolvedCommands
@@ -795,30 +912,76 @@ export function Composer({
                     kind: "skill-command" as const,
                     name: activeCommand.command.canonicalName,
                   }
-                : undefined;
+                : activeToolCommand?.kind === "tool-command"
+                  ? {
+                      arguments: userTextContent,
+                      kind: "tool" as const,
+                      name: activeToolCommand.name,
+                      toolName: activeToolCommand.toolName,
+                    }
+                  : undefined;
             const tools = buildComposerToolsSelection({
               imageGenerationEnabled:
                 imageGenerationEnabled ||
                 tokenResolvedCommands.some(
-                  (command) => command.kind === "tool-command",
+                  (command) =>
+                    command.kind === "tool-command" &&
+                    command.toolName === AGENT_TOOL_NAMES.generateImage,
                 ),
               imageSupported,
+              notionConnectorId,
+              notionToolsEnabled:
+                notionToolsEnabled ||
+                tokenResolvedCommands.some(
+                  (command) =>
+                    command.kind === "tool-command" &&
+                    isNotionToolName(command.toolName),
+                ),
               selectedSkills: availableSkills.filter((skill) =>
                 turnSkillIds.includes(skill.id),
               ),
               imageConfig: effectiveImageConfig,
               imageModelAlias: effectiveImageModelAlias,
             });
-            const toolsWithTokenCommands = tokenResolvedCommands.some(
-              (command) => command.kind === "tool-command",
-            )
+            const toolCommandNames = new Set(
+              tokenResolvedCommands
+                .filter((command) => command.kind === "tool-command")
+                .map((command) => command.toolName),
+            );
+            const toolsWithTokenCommands = toolCommandNames.size
               ? {
                   ...(tools ?? {}),
-                  [AGENT_TOOL_NAMES.generateImage]: {
-                    ...(tools?.[AGENT_TOOL_NAMES.generateImage] ?? {}),
-                    enabled: true,
-                    mode: "generate" as const,
-                  },
+                  ...(toolCommandNames.has(AGENT_TOOL_NAMES.generateImage)
+                    ? {
+                        [AGENT_TOOL_NAMES.generateImage]: {
+                          ...(tools?.[AGENT_TOOL_NAMES.generateImage] ?? {}),
+                          enabled: true,
+                          mode: "generate" as const,
+                        },
+                      }
+                    : {}),
+                  ...Object.fromEntries(
+                    Array.from(toolCommandNames).flatMap((toolName) => {
+                      if (!isNotionToolName(toolName)) {
+                        return [];
+                      }
+                      const connectorTools = tools as
+                        | Record<string, ChatConnectorToolSelection | undefined>
+                        | undefined;
+                      return [
+                        [
+                          toolName,
+                          {
+                            ...(connectorTools?.[toolName] ?? {}),
+                            ...(notionConnectorId
+                              ? { connectorId: notionConnectorId }
+                              : {}),
+                            enabled: true,
+                          },
+                        ] as const,
+                      ];
+                    }),
+                  ),
                 }
               : tools;
             const toolsWithInvokedSkills =
@@ -879,7 +1042,11 @@ export function Composer({
                   return;
                 }
                 if (meta.kind === "tool-command") {
-                  updateImageGenerationEnabled(true);
+                  if (meta.tool === AGENT_TOOL_NAMES.generateImage) {
+                    updateImageGenerationEnabled(true);
+                  } else if (isNotionToolName(meta.tool)) {
+                    updateNotionToolsEnabled(true);
+                  }
                   return;
                 }
                 if (meta.kind === "skill") {
@@ -1025,6 +1192,58 @@ export function Composer({
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                     <DropdownMenuSeparator />
+                    {notionToolsAvailable ? (
+                      <>
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                            <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                              <span className="shrink-0">Notion</span>
+                              <span
+                                className={cn(
+                                  "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
+                                  notionToolChanged && "text-primary",
+                                )}
+                              >
+                                {notionSummary}
+                              </span>
+                            </span>
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className="w-64 p-3">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-medium text-foreground">
+                                    Notion tools
+                                  </div>
+                                </div>
+                                <Switch
+                                  checked={notionToolsEnabled}
+                                  onCheckedChange={(checked) =>
+                                    updateNotionToolsEnabled(Boolean(checked))
+                                  }
+                                  size="sm"
+                                />
+                              </div>
+                              <div className="flex items-center justify-between border-border/60 border-t pt-2">
+                                <span className="truncate text-[11px] text-muted-foreground">
+                                  {notionSummary}
+                                </span>
+                                <button
+                                  className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                  onClick={() => updateNotionToolsEnabled(true)}
+                                  type="button"
+                                >
+                                  <RotateCcw className="size-3" />
+                                  Reset
+                                </button>
+                              </div>
+                            </div>
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                        <DropdownMenuSeparator />
+                      </>
+                    ) : null}
                     {supportsThinking && supportedThinkingEfforts.length > 0 ? (
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">

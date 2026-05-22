@@ -6,6 +6,8 @@ import { findThreadRecord } from "../thread/repository";
 import { listMessageRecordsByThread } from "../message-repository";
 import {
   resolveGenerateImageToolFromToolsMetadata,
+  resolveMcpToolSelectionFromToolsMetadata,
+  resolveNotionToolSelectionsFromToolsMetadata,
   resolveWebSearchEnabledFromToolsMetadata,
 } from "./tool-selection";
 
@@ -126,6 +128,30 @@ export function resolveGenerateImageToolFromMessage(
   return resolveGenerateImageToolFromToolsMetadata(metadata?.tools);
 }
 
+export function resolveNotionToolSelectionsFromMessage(
+  message: MessageRecord | null | undefined,
+) {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          tools?: unknown;
+        })
+      : undefined;
+  return resolveNotionToolSelectionsFromToolsMetadata(metadata?.tools);
+}
+
+export function resolveMcpToolSelectionFromMessage(
+  message: MessageRecord | null | undefined,
+) {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          tools?: unknown;
+        })
+      : undefined;
+  return resolveMcpToolSelectionFromToolsMetadata(metadata?.tools);
+}
+
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -170,6 +196,7 @@ export function resolveAgentCheckpointMetadata(
     beforeAssistant: normalizeAgentCheckpointRef(
       checkpoint.beforeAssistant ?? checkpoint.parent,
     ),
+    resume: normalizeAgentCheckpointRef(checkpoint.resume),
     final: normalizeAgentCheckpointRef(checkpoint.final),
   };
 }

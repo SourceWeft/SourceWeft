@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { AgentCitationRegistry } from "./citation-registry";
 import {
   DatabaseKnowledgeBackend,
@@ -35,13 +35,7 @@ test("DatabaseKnowledgeBackend readRaw is disabled to avoid hidden citation regi
 });
 
 test("paginateSourceContent uses source lines instead of chunk windows", () => {
-  const content = [
-    "line 1",
-    "line 2",
-    "line 3",
-    "line 4",
-    "line 5",
-  ].join("\n");
+  const content = ["line 1", "line 2", "line 3", "line 4", "line 5"].join("\n");
 
   const page = paginateSourceContent(content, 1, 2);
 
@@ -50,11 +44,17 @@ test("paginateSourceContent uses source lines instead of chunk windows", () => {
   assert.equal(page.endLine, 3);
   assert.equal(page.totalLines, 5);
   assert.equal(page.nextOffset, 3);
-  assert.equal(content.slice(page.pageStartOffset, page.pageEndOffset), "line 2\nline 3\n");
+  assert.equal(
+    content.slice(page.pageStartOffset, page.pageEndOffset),
+    "line 2\nline 3\n",
+  );
 });
 
 test("paginateSourceContent defaults to 100 source lines and caps explicit limits", () => {
-  const content = Array.from({ length: 1200 }, (_, index) => `line ${index + 1}`).join("\n");
+  const content = Array.from(
+    { length: 1200 },
+    (_, index) => `line ${index + 1}`,
+  ).join("\n");
 
   const defaultPage = paginateSourceContent(content);
   assert.equal(defaultPage.startLine, 1);
@@ -74,7 +74,10 @@ test("paginateSourceContent keeps offsets aligned with CRLF source content", () 
   assert.equal(page.text, "bravo");
   assert.equal(page.pageStartOffset, 7);
   assert.equal(page.pageEndOffset, 14);
-  assert.equal(content.slice(page.pageStartOffset, page.pageEndOffset), "bravo\r\n");
+  assert.equal(
+    content.slice(page.pageStartOffset, page.pageEndOffset),
+    "bravo\r\n",
+  );
 });
 
 test("addInlineSourceMarkers annotates overlapping chunks without duplicating source text", () => {

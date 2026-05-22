@@ -21,6 +21,7 @@ export type {
   MessageContentJson,
   SourceConnector,
   SkillCommand,
+  ToolApprovalResume,
   ThreadCommandRequest,
 } from "@sourceweft/contracts";
 export {

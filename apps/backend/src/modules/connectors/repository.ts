@@ -1,8 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  sql,
+} from "drizzle-orm";
 import { logger } from "../../shared/logger";
 import { db } from "../../shared/database";
 import {
+  agentToolTrustRules,
   citations,
   chunks,
   documents,
@@ -15,6 +27,7 @@ import {
   sources,
 } from "../../shared/db/schema";
 import {
+  mapAgentToolTrustRule,
   mapActionRun,
   mapOAuthAccount,
   mapOAuthAccountWithSecret,
@@ -27,6 +40,7 @@ import { redactConnectorSecrets } from "./security";
 import type {
   ConnectorActionRiskLevel,
   ConnectorActionRunStatus,
+  AgentToolTrustRuleStatus,
   ConnectorActivityItemRecord,
   ConnectorOAuthAccountStatus,
   ConnectorStatus,
@@ -100,6 +114,30 @@ export async function consumeOAuthStateRecord(input: {
 
     return consumed ?? null;
   });
+}
+
+export async function findOAuthStateRecord(input: {
+  stateHash: string;
+  connectorType: string;
+  now: Date;
+}) {
+  const [row] = await db
+    .select()
+    .from(connectorOAuthStates)
+    .where(
+      and(
+        eq(connectorOAuthStates.stateHash, input.stateHash),
+        eq(connectorOAuthStates.connectorType, input.connectorType),
+        isNull(connectorOAuthStates.consumedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row || row.expiresAt.getTime() <= input.now.getTime()) {
+    return null;
+  }
+
+  return row;
 }
 
 export async function createOAuthAccountRecord(input: {
@@ -928,6 +966,7 @@ export async function lookupConnectorSourceRecords(input: {
   workspaceId: string;
   connectorType: string;
   connectorId?: string;
+  fuzzyTitle?: string;
   title?: string;
   externalId?: string;
   externalUri?: string;
@@ -979,12 +1018,27 @@ export async function lookupConnectorSourceRecords(input: {
       sql`lower(${sources.title}) = lower(${input.title})` as never,
     );
   }
+  if (input.fuzzyTitle) {
+    conditions.push(ilike(sources.title, `%${input.fuzzyTitle}%`));
+  }
 
   const rows = await db
     .select()
     .from(sources)
     .where(and(...conditions))
-    .orderBy(asc(sources.title), desc(sources.updatedAt))
+    .orderBy(
+      input.fuzzyTitle
+        ? sql`
+          case
+            when lower(${sources.title}) = lower(${input.fuzzyTitle}) then 0
+            when lower(${sources.title}) like lower(${input.fuzzyTitle} || '%') then 1
+            else 2
+          end
+        `
+        : asc(sources.title),
+      desc(sources.updatedAt),
+      asc(sources.title),
+    )
     .limit(input.limit);
 
   return rows.map(mapSource);
@@ -1466,6 +1520,7 @@ export async function createActionRunRecord(input: {
   connectorId: string;
   connectorType: string;
   actionType: string;
+  agentToolName?: string | null;
   riskLevel: ConnectorActionRiskLevel;
   status: ConnectorActionRunStatus;
   requestJson: Record<string, unknown>;
@@ -1496,6 +1551,7 @@ export async function createActionRunRecord(input: {
       connectorId: input.connectorId,
       connectorType: input.connectorType,
       actionType: input.actionType,
+      agentToolName: input.agentToolName ?? null,
       riskLevel: input.riskLevel,
       status: input.status,
       requestJson: input.requestJson,
@@ -1511,10 +1567,9 @@ export async function createActionRunRecord(input: {
   return mapActionRun(row);
 }
 
-export async function findActionRunRecord(input: {
+export async function findActionRunRecordById(input: {
   teamId: string;
   workspaceId: string;
-  connectorId: string;
   actionRunId: string;
 }) {
   const [row] = await db
@@ -1523,6 +1578,37 @@ export async function findActionRunRecord(input: {
     .where(
       and(
         eq(connectorActionRuns.id, input.actionRunId),
+        eq(connectorActionRuns.teamId, input.teamId),
+        eq(connectorActionRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+
+  return row ? mapActionRun(row) : null;
+}
+
+export async function findActionRunRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+  actionRunId?: string;
+  idempotencyKey?: string;
+}) {
+  const identityCondition = input.actionRunId
+    ? eq(connectorActionRuns.id, input.actionRunId)
+    : input.idempotencyKey
+      ? eq(connectorActionRuns.idempotencyKey, input.idempotencyKey)
+      : null;
+  if (!identityCondition) {
+    return null;
+  }
+
+  const [row] = await db
+    .select()
+    .from(connectorActionRuns)
+    .where(
+      and(
+        identityCondition,
         eq(connectorActionRuns.teamId, input.teamId),
         eq(connectorActionRuns.workspaceId, input.workspaceId),
         eq(connectorActionRuns.connectorId, input.connectorId),
@@ -1566,6 +1652,9 @@ export async function updateActionRunRecord(input: {
   executedBy?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;
+  requestJson?: Record<string, unknown>;
+  requestPreview?: string;
+  agentToolName?: string | null;
 }) {
   const updates: Partial<typeof connectorActionRuns.$inferInsert> = {
     updatedAt: new Date(),
@@ -1578,6 +1667,11 @@ export async function updateActionRunRecord(input: {
   if (input.errorCode !== undefined) updates.errorCode = input.errorCode;
   if (input.errorMessage !== undefined)
     updates.errorMessage = input.errorMessage;
+  if (input.requestJson !== undefined) updates.requestJson = input.requestJson;
+  if (input.requestPreview !== undefined)
+    updates.requestPreview = input.requestPreview;
+  if (input.agentToolName !== undefined)
+    updates.agentToolName = input.agentToolName;
 
   const [row] = await db
     .update(connectorActionRuns)
@@ -1593,6 +1687,117 @@ export async function updateActionRunRecord(input: {
     .returning();
 
   return row ? mapActionRun(row) : null;
+}
+
+export async function findAgentToolTrustRuleRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  domain: string;
+  toolName: string;
+  connectorId?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  riskLevel: ConnectorActionRiskLevel;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const rows = await db
+    .select()
+    .from(agentToolTrustRules)
+    .where(
+      and(
+        eq(agentToolTrustRules.teamId, input.teamId),
+        eq(agentToolTrustRules.workspaceId, input.workspaceId),
+        eq(agentToolTrustRules.userId, input.userId),
+        eq(agentToolTrustRules.domain, input.domain),
+        eq(agentToolTrustRules.toolName, input.toolName),
+        eq(agentToolTrustRules.status, "active"),
+      ),
+    )
+    .orderBy(desc(agentToolTrustRules.createdAt))
+    .limit(50);
+
+  const connectorId = input.connectorId ?? null;
+  const targetType = input.targetType ?? null;
+  const targetId = input.targetId ?? null;
+  const match = rows.find((row) => {
+    if (row.connectorId !== connectorId) return false;
+    if ((row.targetType ?? null) !== targetType) return false;
+    if ((row.targetId ?? null) !== targetId) return false;
+    if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
+      return false;
+    }
+    return Array.isArray(row.allowedRiskLevels)
+      ? row.allowedRiskLevels.includes(input.riskLevel)
+      : false;
+  });
+
+  return match ? mapAgentToolTrustRule(match) : null;
+}
+
+export async function createAgentToolTrustRuleRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  domain: string;
+  toolName: string;
+  connectorId?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  allowedRiskLevels: ConnectorActionRiskLevel[];
+  status?: AgentToolTrustRuleStatus;
+  expiresAt?: Date | null;
+  createdFromConfirmationId?: string | null;
+}) {
+  const [row] = await db
+    .insert(agentToolTrustRules)
+    .values({
+      id: randomUUID(),
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      domain: input.domain,
+      toolName: input.toolName,
+      connectorId: input.connectorId ?? null,
+      targetType: input.targetType ?? null,
+      targetId: input.targetId ?? null,
+      allowedRiskLevels: input.allowedRiskLevels,
+      status: input.status ?? "active",
+      expiresAt: input.expiresAt ?? null,
+      createdFromConfirmationId: input.createdFromConfirmationId ?? null,
+    })
+    .returning();
+
+  if (!row) {
+    throw new Error("Failed to create agent tool trust rule");
+  }
+
+  return mapAgentToolTrustRule(row);
+}
+
+export async function touchAgentToolTrustRuleRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  trustRuleId: string;
+  lastUsedAt?: Date;
+}) {
+  const [row] = await db
+    .update(agentToolTrustRules)
+    .set({
+      lastUsedAt: input.lastUsedAt ?? new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentToolTrustRules.id, input.trustRuleId),
+        eq(agentToolTrustRules.teamId, input.teamId),
+        eq(agentToolTrustRules.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+
+  return row ? mapAgentToolTrustRule(row) : null;
 }
 
 export async function touchConnectorScheduleAfterSync(input: {

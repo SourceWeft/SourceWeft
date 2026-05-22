@@ -1,6 +1,19 @@
 export type ConnectorType = string;
 
 export type ConnectorActionRiskLevel = "low" | "medium" | "high";
+export type ConnectorActionVisibility = "agent" | "internal";
+export type ConnectorActionCapability =
+  | "connector_read"
+  | "connector_write"
+  | "connector_create"
+  | "connector_update"
+  | "connector_delete"
+  | "connector_append"
+  | "connector_upload"
+  | "connector_move"
+  | "connector_archive"
+  | "connector_comment"
+  | "artifact";
 export type ConnectorActionRunStatus =
   | "proposed"
   | "approved"
@@ -67,6 +80,11 @@ export type ConnectorActionSpec = {
   riskLevel: ConnectorActionRiskLevel;
   requiresApproval: boolean;
   inputSchema: Record<string, unknown>;
+  agentToolName?: string;
+  description?: string;
+  visibility?: ConnectorActionVisibility;
+  capabilities?: ConnectorActionCapability[];
+  resultSchema?: Record<string, unknown>;
 };
 
 export type OAuthCodeExchangeInput = {
@@ -318,6 +336,7 @@ export type ConnectorActionRunRecord = {
   connectorId: string;
   connectorType: string;
   actionType: string;
+  agentToolName: string | null;
   riskLevel: ConnectorActionRiskLevel;
   status: ConnectorActionRunStatus;
   requestJson: Record<string, unknown>;
@@ -329,6 +348,27 @@ export type ConnectorActionRunRecord = {
   executedBy: string | null;
   errorCode: string | null;
   errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentToolTrustRuleStatus = "active" | "revoked";
+
+export type AgentToolTrustRuleRecord = {
+  id: string;
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  domain: string;
+  toolName: string;
+  connectorId: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  allowedRiskLevels: ConnectorActionRiskLevel[];
+  status: AgentToolTrustRuleStatus;
+  expiresAt: string | null;
+  createdFromConfirmationId: string | null;
+  lastUsedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };

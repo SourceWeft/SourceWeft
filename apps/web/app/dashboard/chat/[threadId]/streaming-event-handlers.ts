@@ -130,7 +130,9 @@ type HandleStreamingThreadTitlePendingInput = {
 };
 
 type HandleStreamingFinishInput<TToolEvent extends ToolCallEventPayload> =
-  ContextInput<TToolEvent>;
+  ContextInput<TToolEvent> & {
+    finishReason?: string | null;
+  };
 
 type HandleStreamingAssistantMessageInput<
   TToolEvent extends ToolCallEventPayload,
@@ -439,7 +441,10 @@ export function handleStreamingThreadTitlePending({
 
 export function handleStreamingFinish<
   TToolEvent extends ToolCallEventPayload,
->({ context }: HandleStreamingFinishInput<TToolEvent>) {
+>({
+  context,
+  finishReason,
+}: HandleStreamingFinishInput<TToolEvent>) {
   if (context.streamToolCallsById.size > 0) {
     for (const [toolId, toolCall] of context.streamToolCallsById.entries()) {
       if (toolCall.status === "running") {
@@ -473,6 +478,7 @@ export function handleStreamingFinish<
       ...message,
       metadata: {
         ...message.metadata,
+        ...(finishReason ? { finishReason } : {}),
         [STREAM_TEXT_PAUSED_KEY]: false,
         renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
         threadRun: {
@@ -490,6 +496,11 @@ export function handleStreamingFinish<
     streamEnded: true,
   };
 }
+
+export const testExports = {
+  handleStreamingAssistantMessage,
+  handleStreamingFinish,
+};
 
 export function handleStreamingAssistantMessage<
   TToolEvent extends ToolCallEventPayload,
@@ -509,6 +520,12 @@ export function handleStreamingAssistantMessage<
   setPersistedAssistantMessageId(messageId);
   const nextUserMessageId = userMessageId ?? persistedUserMessageId;
   const previousAssistantMessageId = streamingAssistantMessageId;
+  const nextParentMessageId =
+    parentMessageId === undefined
+      ? context.mode === "refresh"
+        ? (streamingAssistantMessage?.parentMessageId ?? null)
+        : undefined
+      : parentMessageId;
   streamingAssistantMessageIds.add(previousAssistantMessageId);
   streamingAssistantMessageIds.add(messageId);
   setStreamingAssistantMessageId(messageId);
@@ -526,13 +543,16 @@ export function handleStreamingAssistantMessage<
     id: messageId,
     content: message.content,
     parentMessageId:
-      parentMessageId === undefined ? message.parentMessageId : parentMessageId,
+      nextParentMessageId === undefined
+        ? message.parentMessageId
+        : nextParentMessageId,
     metadata: {
       ...message.metadata,
       isError: false,
       excludeFromContext: false,
       userMessageId: nextUserMessageId,
       sourceUserMessageId: nextUserMessageId,
+      sourceAssistantMessageId: previousAssistantMessageId,
       [STREAM_TEXT_PAUSED_KEY]: false,
       renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
       threadRun: {

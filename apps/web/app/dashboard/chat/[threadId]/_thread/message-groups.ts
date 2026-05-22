@@ -253,7 +253,12 @@ function resolveAssistantSourceUserMessageId(
 function buildVersionedMessageGroups(
   messages: ChatMessageItem[],
 ): VersionedMessageGroup[] {
-  const sorted = [...messages].sort(
+  const messagesById = new Map<string, ChatMessageItem>();
+  for (const message of messages) {
+    messagesById.set(message.id, message);
+  }
+
+  const sorted = [...messagesById.values()].sort(
     (left, right) =>
       new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
   );
@@ -507,6 +512,11 @@ function buildVersionedMessageGroups(
                 "cancelled",
             error: toNullableString(version.metadata.error),
             errorCode: toNullableString(version.metadata.errorCode),
+            finishReason:
+              group.role === "assistant"
+                ? (toNullableString(version.metadata.finishReason) ??
+                  undefined)
+                : undefined,
             isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
             isTextInterrupted:
               version.metadata[STREAM_TEXT_INTERRUPTED_KEY] === true,

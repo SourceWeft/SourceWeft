@@ -73,6 +73,35 @@ type ConnectorWebhookEventStatus =
   | "processed"
   | "ignored"
   | "failed";
+type BlogPostStatus = "draft" | "published" | "archived";
+type BlogAssetKind = "cover" | "og_image" | "content_image" | "file";
+type AgentToolTrustRuleStatus = "active" | "revoked";
+type McpTransport =
+  | "streamable_http"
+  | "http_sse_compat"
+  | "sse"
+  | "stdio";
+type McpAuthType =
+  | "none"
+  | "bearer"
+  | "api_key_header"
+  | "custom_headers";
+type McpRiskLevel = "read" | "write" | "destructive" | "unknown";
+type WorkspaceMcpInstallStatus = "active" | "disabled" | "error";
+type WorkspaceMcpCredentialStatus =
+  | "not_required"
+  | "required"
+  | "configured"
+  | "invalid";
+type McpInstallSource = "market" | "custom" | "local_import";
+type McpActionRunStatus =
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled";
 type DocumentStatus = "pending" | "processing" | "ready" | "failed";
 type ModelGatewayProfileKind =
   | "chat"
@@ -1539,6 +1568,7 @@ export const connectorActionRuns = pgTable(
       .references(() => sourceConnectors.id, { onDelete: "cascade" }),
     connectorType: text("connector_type").notNull(),
     actionType: text("action_type").notNull(),
+    agentToolName: text("agent_tool_name"),
     riskLevel: text("risk_level").$type<ConnectorActionRiskLevel>().notNull(),
     status: text("status").$type<ConnectorActionRunStatus>().notNull(),
     requestJson: jsonb("request_json")
@@ -1683,6 +1713,408 @@ export const connectorSyncRuns = pgTable(
   ],
 );
 
+export const agentToolTrustRules = pgTable(
+  "agent_tool_trust_rules",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    domain: text("domain").notNull(),
+    toolName: text("tool_name").notNull(),
+    connectorId: text("connector_id").references(() => sourceConnectors.id, {
+      onDelete: "cascade",
+    }),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    allowedRiskLevels: jsonb("allowed_risk_levels")
+      .$type<ConnectorActionRiskLevel[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    status: text("status").$type<AgentToolTrustRuleStatus>().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    createdFromConfirmationId: text("created_from_confirmation_id"),
+    lastUsedAt: timestamp("last_used_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "agent_tool_trust_rules_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "agent_tool_trust_rules_connector_workspace_team_fk",
+      columns: [table.connectorId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        sourceConnectors.id,
+        sourceConnectors.workspaceId,
+        sourceConnectors.teamId,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "agent_tool_trust_rules_status_check",
+      sql`${table.status} in ('active', 'revoked')`,
+    ),
+    index("agent_tool_trust_rules_scope_idx").on(
+      table.workspaceId,
+      table.userId,
+      table.domain,
+      table.toolName,
+      table.status,
+    ),
+    index("agent_tool_trust_rules_connector_idx").on(table.connectorId),
+  ],
+);
+
+export const workspaceMcpInstalls = pgTable(
+  "workspace_mcp_installs",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    source: text("source").$type<McpInstallSource>().notNull().default("market"),
+    marketIdentifier: text("market_identifier"),
+    marketVersion: text("market_version"),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    transport: text("transport").$type<McpTransport>().notNull(),
+    endpointUrl: text("endpoint_url"),
+    status: text("status")
+      .$type<WorkspaceMcpInstallStatus>()
+      .notNull()
+      .default("active"),
+    official: boolean("official").notNull().default(false),
+    verified: boolean("verified").notNull().default(false),
+    desktopOnly: boolean("desktop_only").notNull().default(false),
+    webExecutable: boolean("web_executable").notNull().default(true),
+    authType: text("auth_type").$type<McpAuthType>().notNull().default("none"),
+    credentialStatus: text("credential_status")
+      .$type<WorkspaceMcpCredentialStatus>()
+      .notNull()
+      .default("not_required"),
+    enabled: boolean("enabled").notNull().default(true),
+    manifestJson: jsonb("manifest_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    signature: text("signature"),
+    signingKeyId: text("signing_key_id"),
+    lastTestedAt: timestamp("last_tested_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    lastError: text("last_error"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workspace_mcp_installs_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    check(
+      "workspace_mcp_installs_source_check",
+      sql`${table.source} in ('market', 'custom', 'local_import')`,
+    ),
+    check(
+      "workspace_mcp_installs_transport_check",
+      sql`${table.transport} in ('streamable_http', 'http_sse_compat', 'sse', 'stdio')`,
+    ),
+    check(
+      "workspace_mcp_installs_status_check",
+      sql`${table.status} in ('active', 'disabled', 'error')`,
+    ),
+    check(
+      "workspace_mcp_installs_auth_type_check",
+      sql`${table.authType} in ('none', 'bearer', 'api_key_header', 'custom_headers')`,
+    ),
+    check(
+      "workspace_mcp_installs_credential_status_check",
+      sql`${table.credentialStatus} in ('not_required', 'required', 'configured', 'invalid')`,
+    ),
+    uniqueIndex("workspace_mcp_installs_market_uq")
+      .on(table.workspaceId, table.marketIdentifier)
+      .where(sql`${table.marketIdentifier} is not null`),
+    unique("workspace_mcp_installs_id_workspace_team_uq").on(
+      table.id,
+      table.workspaceId,
+      table.teamId,
+    ),
+    index("workspace_mcp_installs_workspace_status_idx").on(
+      table.teamId,
+      table.workspaceId,
+      table.status,
+    ),
+  ],
+);
+
+export const workspaceMcpTools = pgTable(
+  "workspace_mcp_tools",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    installId: text("install_id")
+      .notNull()
+      .references(() => workspaceMcpInstalls.id, { onDelete: "cascade" }),
+    serverToolName: text("server_tool_name").notNull(),
+    normalizedToolName: text("normalized_tool_name").notNull(),
+    title: text("title"),
+    description: text("description"),
+    inputSchema: jsonb("input_schema")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    outputSchema: jsonb("output_schema").$type<Record<string, unknown> | null>(),
+    annotations: jsonb("annotations")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    risk: text("risk").$type<McpRiskLevel>().notNull().default("unknown"),
+    enabled: boolean("enabled").notNull().default(true),
+    lastDiscoveredHash: text("last_discovered_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workspace_mcp_tools_install_workspace_team_fk",
+      columns: [table.installId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        workspaceMcpInstalls.id,
+        workspaceMcpInstalls.workspaceId,
+        workspaceMcpInstalls.teamId,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "workspace_mcp_tools_risk_check",
+      sql`${table.risk} in ('read', 'write', 'destructive', 'unknown')`,
+    ),
+    uniqueIndex("workspace_mcp_tools_install_tool_uq").on(
+      table.installId,
+      table.serverToolName,
+    ),
+    uniqueIndex("workspace_mcp_tools_workspace_normalized_uq").on(
+      table.workspaceId,
+      table.normalizedToolName,
+    ),
+    index("workspace_mcp_tools_install_enabled_idx").on(
+      table.installId,
+      table.enabled,
+    ),
+  ],
+);
+
+export const workspaceMcpCredentials = pgTable(
+  "workspace_mcp_credentials",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    installId: text("install_id")
+      .notNull()
+      .references(() => workspaceMcpInstalls.id, { onDelete: "cascade" }),
+    authType: text("auth_type").$type<McpAuthType>().notNull(),
+    encryptedSecret: text("encrypted_secret"),
+    encryptedHeaders: text("encrypted_headers"),
+    headerName: text("header_name"),
+    status: text("status")
+      .$type<WorkspaceMcpCredentialStatus>()
+      .notNull()
+      .default("configured"),
+    configuredBy: text("configured_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "workspace_mcp_credentials_install_workspace_team_fk",
+      columns: [table.installId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        workspaceMcpInstalls.id,
+        workspaceMcpInstalls.workspaceId,
+        workspaceMcpInstalls.teamId,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "workspace_mcp_credentials_auth_type_check",
+      sql`${table.authType} in ('none', 'bearer', 'api_key_header', 'custom_headers')`,
+    ),
+    check(
+      "workspace_mcp_credentials_status_check",
+      sql`${table.status} in ('not_required', 'required', 'configured', 'invalid')`,
+    ),
+    uniqueIndex("workspace_mcp_credentials_install_uq").on(table.installId),
+  ],
+);
+
+export const mcpToolRuns = pgTable(
+  "mcp_tool_runs",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    threadId: text("thread_id"),
+    runId: text("run_id"),
+    toolCallId: text("tool_call_id"),
+    installId: text("install_id").references(() => workspaceMcpInstalls.id, {
+      onDelete: "set null",
+    }),
+    toolId: text("tool_id").references(() => workspaceMcpTools.id, {
+      onDelete: "set null",
+    }),
+    actionRunId: text("action_run_id"),
+    serverToolName: text("server_tool_name").notNull(),
+    normalizedToolName: text("normalized_tool_name").notNull(),
+    risk: text("risk").$type<McpRiskLevel>().notNull().default("unknown"),
+    status: text("status").notNull(),
+    redactedInput: jsonb("redacted_input")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    redactedOutput: jsonb("redacted_output")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    latencyMs: integer("latency_ms"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "mcp_tool_runs_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    check(
+      "mcp_tool_runs_risk_check",
+      sql`${table.risk} in ('read', 'write', 'destructive', 'unknown')`,
+    ),
+    check(
+      "mcp_tool_runs_status_check",
+      sql`${table.status} in ('running', 'succeeded', 'failed', 'proposed', 'rejected', 'canceled')`,
+    ),
+    index("mcp_tool_runs_workspace_created_idx").on(
+      table.workspaceId,
+      desc(table.createdAt),
+    ),
+    index("mcp_tool_runs_install_created_idx").on(
+      table.installId,
+      desc(table.createdAt),
+    ),
+  ],
+);
+
+export const mcpActionRuns = pgTable(
+  "mcp_action_runs",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    installId: text("install_id")
+      .notNull()
+      .references(() => workspaceMcpInstalls.id, { onDelete: "cascade" }),
+    toolId: text("tool_id").references(() => workspaceMcpTools.id, {
+      onDelete: "set null",
+    }),
+    serverToolName: text("server_tool_name").notNull(),
+    normalizedToolName: text("normalized_tool_name").notNull(),
+    risk: text("risk").$type<McpRiskLevel>().notNull().default("unknown"),
+    status: text("status").$type<McpActionRunStatus>().notNull(),
+    requestJson: jsonb("request_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    requestPreview: text("request_preview").notNull().default(""),
+    resultJson: jsonb("result_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    approvedBy: text("approved_by"),
+    executedBy: text("executed_by"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "mcp_action_runs_install_workspace_team_fk",
+      columns: [table.installId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        workspaceMcpInstalls.id,
+        workspaceMcpInstalls.workspaceId,
+        workspaceMcpInstalls.teamId,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "mcp_action_runs_risk_check",
+      sql`${table.risk} in ('read', 'write', 'destructive', 'unknown')`,
+    ),
+    check(
+      "mcp_action_runs_status_check",
+      sql`${table.status} in ('proposed', 'approved', 'rejected', 'running', 'succeeded', 'failed', 'canceled')`,
+    ),
+    uniqueIndex("mcp_action_runs_idempotency_uq").on(
+      table.workspaceId,
+      table.installId,
+      table.idempotencyKey,
+    ),
+    index("mcp_action_runs_workspace_status_created_idx").on(
+      table.workspaceId,
+      table.status,
+      desc(table.createdAt),
+    ),
+  ],
+);
+
 export const connectorWebhookEvents = pgTable(
   "connector_webhook_events",
   {
@@ -1762,6 +2194,120 @@ export const connectorWebhookEvents = pgTable(
     index("connector_webhook_events_status_received_idx").on(
       table.status,
       desc(table.receivedAt),
+    ),
+  ],
+);
+
+export const blogPosts = pgTable(
+  "blog_posts",
+  {
+    id: text("id").primaryKey(),
+    articleId: text("article_id").notNull(),
+    locale: text("locale").notNull(),
+    slug: text("slug").notNull(),
+    syncEnabled: boolean("sync_enabled").notNull().default(false),
+    status: text("status").$type<BlogPostStatus>().notNull().default("draft"),
+    title: text("title").notNull(),
+    excerpt: text("excerpt").notNull().default(""),
+    contentHtml: text("content_html").notNull().default(""),
+    contentText: text("content_text").notNull().default(""),
+    readingTimeMinutes: integer("reading_time_minutes").notNull().default(1),
+    seoTitle: text("seo_title"),
+    seoDescription: text("seo_description"),
+    canonicalUrl: text("canonical_url"),
+    ogImageAssetId: text("og_image_asset_id"),
+    coverAssetId: text("cover_asset_id"),
+    authorName: text("author_name"),
+    category: text("category"),
+    tags: text("tags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    featured: boolean("featured").notNull().default(false),
+    featuredStartsAt: timestamp("featured_starts_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    publishedAt: timestamp("published_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }),
+    sourceLastEditedAt: timestamp("source_last_edited_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    contentHash: text("content_hash"),
+    metadataJson: jsonb("metadata_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    syncedAt: timestamp("synced_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("blog_posts_article_locale_uq").on(
+      table.articleId,
+      table.locale,
+    ),
+    uniqueIndex("blog_posts_locale_slug_uq").on(table.locale, table.slug),
+    index("blog_posts_public_locale_published_idx")
+      .on(table.locale, desc(table.publishedAt))
+      .where(sql`${table.syncEnabled} = true and ${table.status} = 'published'`),
+    index("blog_posts_article_idx").on(table.articleId),
+    check(
+      "blog_posts_locale_check",
+      sql`${table.locale} in ('en', 'zh-CN', 'zh-TW', 'ja', 'ko', 'ar', 'he', 'hi', 'th')`,
+    ),
+    check(
+      "blog_posts_status_check",
+      sql`${table.status} in ('draft', 'published', 'archived')`,
+    ),
+    check(
+      "blog_posts_reading_time_check",
+      sql`${table.readingTimeMinutes} >= 1`,
+    ),
+  ],
+);
+
+export const blogAssets = pgTable(
+  "blog_assets",
+  {
+    id: text("id").primaryKey(),
+    postId: text("post_id")
+      .notNull()
+      .references(() => blogPosts.id, { onDelete: "cascade" }),
+    assetKind: text("asset_kind").$type<BlogAssetKind>().notNull(),
+    storageBucket: text("storage_bucket").notNull(),
+    storageKey: text("storage_key").notNull(),
+    publicUrl: text("public_url").notNull(),
+    contentType: text("content_type"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    sha256: text("sha256").notNull(),
+    sourceUrlHash: text("source_url_hash").notNull(),
+    altText: text("alt_text"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("blog_assets_post_kind_hash_uq").on(
+      table.postId,
+      table.assetKind,
+      table.sha256,
+    ),
+    index("blog_assets_post_idx").on(table.postId),
+    check(
+      "blog_assets_kind_check",
+      sql`${table.assetKind} in ('cover', 'og_image', 'content_image', 'file')`,
+    ),
+    check(
+      "blog_assets_size_check",
+      sql`${table.sizeBytes} is null or ${table.sizeBytes} >= 0`,
     ),
   ],
 );

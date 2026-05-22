@@ -14,14 +14,34 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function safeReturnUrl(value: string | null) {
+  if (!value) {
+    return "/dashboard/chat";
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      return "/dashboard/chat";
+    }
+    return url.toString();
+  } catch {
+    return "/dashboard/chat";
+  }
+}
+
 function buildCompletionUrl(input: {
   workspaceId: string;
   connectorType: string;
+  mode: string | null;
   returnTo: string | null;
 }) {
   const url = new URL("/dashboard/connectors/oauth/complete", window.location.origin);
   url.searchParams.set("workspace_id", input.workspaceId);
   url.searchParams.set("connector_type", input.connectorType);
+  if (input.mode) {
+    url.searchParams.set("mode", input.mode);
+  }
   if (input.returnTo) {
     url.searchParams.set("return_to", input.returnTo);
   }
@@ -30,10 +50,12 @@ function buildCompletionUrl(input: {
 
 export function ConnectorOAuthStartClient({
   connectorType,
+  mode,
   returnTo,
   workspaceId,
 }: {
   connectorType: string | null;
+  mode: string | null;
   returnTo: string | null;
   workspaceId: string | null;
 }) {
@@ -62,6 +84,7 @@ export function ConnectorOAuthStartClient({
             redirectAfter: buildCompletionUrl({
               workspaceId,
               connectorType,
+              mode,
               returnTo,
             }),
           },
@@ -87,7 +110,11 @@ export function ConnectorOAuthStartClient({
     return () => {
       cancelled = true;
     };
-  }, [connectorType, returnTo, workspaceId]);
+  }, [connectorType, mode, returnTo, workspaceId]);
+
+  const isRedirectMode = mode === "redirect";
+  const fallbackReturnTo =
+    returnTo && isRedirectMode ? safeReturnUrl(returnTo) : "/dashboard/chat";
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
@@ -110,11 +137,17 @@ export function ConnectorOAuthStartClient({
         {state.kind === "error" ? (
           <Button
             className="mt-4 w-full"
-            onClick={() => window.close()}
+            onClick={() => {
+              if (isRedirectMode) {
+                window.location.assign(fallbackReturnTo);
+                return;
+              }
+              window.close();
+            }}
             type="button"
             variant="outline"
           >
-            Close tab
+            {isRedirectMode ? "Return to SourceWeft" : "Close tab"}
           </Button>
         ) : null}
       </section>

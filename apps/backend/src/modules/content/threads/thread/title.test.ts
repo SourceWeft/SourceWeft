@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import {
-  isPlaceholderThreadTitle,
-  normalizeGeneratedChatTitle,
-} from "./title";
+import { test } from "vitest";
+import { isPlaceholderThreadTitle, normalizeGeneratedChatTitle } from "./title";
 
 test("only recognizes the UI default thread title as placeholder", () => {
   assert.equal(isPlaceholderThreadTitle("New chat"), true);
@@ -15,6 +12,9 @@ test("only recognizes the UI default thread title as placeholder", () => {
 });
 
 test("normalizes generated chat titles", () => {
-  assert.equal(normalizeGeneratedChatTitle('"Billing status?"'), "Billing status");
+  assert.equal(
+    normalizeGeneratedChatTitle('"Billing status?"'),
+    "Billing status",
+  );
   assert.equal(normalizeGeneratedChatTitle("   "), null);
 });

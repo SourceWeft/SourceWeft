@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { config } from "../../../shared/config";
-import { ConnectorError } from "../errors";
+import { config } from "../../../../shared/config";
+import { ConnectorError } from "../../errors";
 import type {
   ConnectorActionInput,
   ConnectorActionResult,
@@ -16,7 +16,7 @@ import type {
   OAuthCodeExchangeInput,
   OAuthRefreshInput,
   OAuthTokenSet,
-} from "../types";
+} from "../../types";
 
 const NOTION_API_BASE_URL = "https://api.notion.com/v1";
 const NOTION_AUTHORIZATION_URL = "https://www.notion.so/install-integration";
@@ -174,6 +174,8 @@ const actionInputSchemas: Record<string, Record<string, unknown>> = {
       content: { type: "string" },
       parentPageId: { type: "string" },
       dataSourceId: { type: "string" },
+      sourceId: { type: "string" },
+      targetHint: { type: "string" },
     },
   },
   "notion.page.append": {
@@ -300,6 +302,11 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.create",
       displayName: "Create Notion page",
+      agentToolName: "create_notion_page",
+      description:
+        "Propose creating a Notion page. Requires user approval before execution.",
+      visibility: "agent",
+      capabilities: ["connector_write", "connector_create"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema: actionInputSchemas["notion.page.create"] ?? jsonObjectSchema,
@@ -307,6 +314,11 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.append",
       displayName: "Append to Notion page",
+      agentToolName: "append_notion_page",
+      description:
+        "Propose appending markdown content to an existing Notion page by page id.",
+      visibility: "agent",
+      capabilities: ["connector_write", "connector_append"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema: actionInputSchemas["notion.page.append"] ?? jsonObjectSchema,
@@ -314,6 +326,10 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.update_properties",
       displayName: "Update Notion page properties",
+      description:
+        "Update properties on an existing Notion page. Intended for internal workflows.",
+      visibility: "internal",
+      capabilities: ["connector_write", "connector_update"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema:
@@ -322,6 +338,10 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.trash",
       displayName: "Move Notion page to trash",
+      description:
+        "Move an existing Notion page to trash by page id. Intended for internal workflows.",
+      visibility: "internal",
+      capabilities: ["connector_write", "connector_delete"],
       riskLevel: "high",
       requiresApproval: true,
       inputSchema: actionInputSchemas["notion.page.trash"] ?? jsonObjectSchema,
@@ -329,6 +349,10 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.comment.create",
       displayName: "Create Notion comment",
+      description:
+        "Create a Notion comment on a page or discussion. Intended for internal workflows.",
+      visibility: "internal",
+      capabilities: ["connector_write", "connector_comment"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema: actionInputSchemas["notion.comment.create"] ?? jsonObjectSchema,
@@ -336,6 +360,10 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.data_source.query",
       displayName: "Query Notion data source",
+      description:
+        "Query a Notion data source. Intended for internal or future read workflows.",
+      visibility: "internal",
+      capabilities: ["connector_read"],
       riskLevel: "low",
       requiresApproval: false,
       inputSchema:
@@ -344,6 +372,11 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.find",
       displayName: "Find Notion page",
+      agentToolName: "search_notion_pages",
+      description:
+        "Search indexed Notion pages by title. Use before updating or deleting a Notion page by title.",
+      visibility: "agent",
+      capabilities: ["connector_read"],
       riskLevel: "low",
       requiresApproval: false,
       inputSchema: actionInputSchemas["notion.page.find"] ?? jsonObjectSchema,
@@ -351,6 +384,11 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.update_by_title",
       displayName: "Update Notion page by title",
+      agentToolName: "update_notion_page_by_title",
+      description:
+        "Propose updating a synced Notion page by exact title. Requires user approval before execution.",
+      visibility: "agent",
+      capabilities: ["connector_write", "connector_update"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema:
@@ -359,6 +397,11 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.trash_by_title",
       displayName: "Move Notion page to trash by title",
+      agentToolName: "delete_notion_page_by_title",
+      description:
+        "Propose moving a synced Notion page to trash by exact title. Requires user approval before execution.",
+      visibility: "agent",
+      capabilities: ["connector_write", "connector_delete"],
       riskLevel: "high",
       requiresApproval: true,
       inputSchema:
@@ -367,6 +410,10 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.file_upload.create",
       displayName: "Create Notion file upload",
+      description:
+        "Create a Notion file upload. Intended for internal file workflows.",
+      visibility: "internal",
+      capabilities: ["connector_write", "connector_upload"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema:
@@ -375,6 +422,10 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.file_upload.attach_to_page",
       displayName: "Attach Notion file upload to page",
+      description:
+        "Attach a Notion file upload to a page. Intended for internal file workflows.",
+      visibility: "internal",
+      capabilities: ["connector_write", "connector_upload"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema:
@@ -388,7 +439,6 @@ const notionManifest: ConnectorManifest = {
     properties: {
       includePages: { type: "boolean" },
       rootPageIds: { type: "array" },
-      defaultParentPageId: { type: "string" },
     },
   },
 };
@@ -2003,22 +2053,16 @@ async function createPageAction(
   const content = getRequestString(request, "content");
   const parentPageId = getRequestString(request, "parentPageId", false);
   const dataSourceId = getRequestString(request, "dataSourceId", false);
-  if (!parentPageId && !dataSourceId) {
-    throw new ConnectorError(
-      400,
-      "NOTION_PARENT_REQUIRED",
-      "parentPageId or dataSourceId is required",
-    );
-  }
-
   const parent = dataSourceId
     ? { data_source_id: dataSourceId }
-    : { page_id: parentPageId };
+    : parentPageId
+      ? { page_id: parentPageId }
+      : undefined;
   const children = markdownToBlocks(content);
   const page = await client.request<NotionPage>("/pages", {
     method: "POST",
     body: JSON.stringify({
-      parent,
+      ...(parent ? { parent } : {}),
       properties: {
         title: {
           title: notionRichText(title),

@@ -19,6 +19,7 @@ import {
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { hasWebPageToolResults } from "../web-tool-results";
+import { getToolConfirmationOutput } from "./tool-confirmation";
 import {
   compactText,
   getToolOutputContent,
@@ -152,6 +153,10 @@ function pluralize(count: number, singular: string, plural = `${singular}s`) {
 }
 
 function summarizeToolOutput(output: unknown) {
+  const confirmation = getToolConfirmationOutput(output);
+  if (confirmation) {
+    return null;
+  }
   const content = getToolOutputContent(output);
   return content ? compactText(content) : null;
 }
@@ -297,6 +302,15 @@ function getGeneratedImagePrompt(toolCall: ToolCallRecord) {
 }
 
 function getToolDisplayLabel(toolCall: ToolCallRecord) {
+  const confirmation = getToolConfirmationOutput(toolCall.output);
+  if (confirmation) {
+    const toolName = formatToolName(toolCall.tool);
+    if (toolCall.status === "error") {
+      return `${toolName} approval failed`;
+    }
+    return `${toolName} waiting for approval`;
+  }
+
   if (isGeneratedImageArtifactToolName(toolCall.tool)) {
     const title = getGeneratedImageTitle(toolCall);
     const imageStatus = getGeneratedImageStatus(toolCall);
@@ -620,6 +634,7 @@ function ToolCallDetails({
   const shouldShowQuery = Boolean(query && !isRetrievalToolName(toolCall.tool));
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
+  const toolConfirmation = getToolConfirmationOutput(toolCall.output);
   const imageArtifact = resolveGeneratedImageArtifact(toolCall, toolStep);
   const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
     ? getGeneratedImageStatus(toolCall)
@@ -656,6 +671,7 @@ function ToolCallDetails({
   const shouldShowOutputSummary = Boolean(
     outputSummary &&
       !imageArtifact &&
+      !toolConfirmation &&
       !isRetrievalToolName(toolCall.tool) &&
       !isWebToolName(toolCall.tool) &&
       outputSummary !== "{}",
@@ -708,6 +724,11 @@ function ToolCallDetails({
           >
             {imageArtifact.title ?? "Open generated image"}
           </button>
+        </p>
+      ) : null}
+      {toolConfirmation ? (
+        <p>
+          Waiting for your decision before this action runs.
         </p>
       ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}

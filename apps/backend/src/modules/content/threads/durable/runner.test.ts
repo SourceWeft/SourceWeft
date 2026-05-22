@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { ContentError } from "../../errors";
 import type { ChatThreadRunRecord } from "./types";
 import { persistTerminalFailure } from "./runner";

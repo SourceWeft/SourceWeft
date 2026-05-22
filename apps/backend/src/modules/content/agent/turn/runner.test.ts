@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { testExports as agentTestExports } from "..";
 import {
@@ -102,6 +102,123 @@ test("normalizes web_search failure outputs to display-safe metadata", () => {
     urlCount: 0,
     urls: [],
     truncated: false,
+  });
+});
+
+test("connector tool error outputs are preserved for tool error handling", () => {
+  const output = normalizeToolOutputForObservability("create_notion_page", {
+    type: "connector_tool_error",
+    code: "NOTION_TARGET_NOT_FOUND",
+    message: "The provided sourceId does not resolve to an indexed Notion page.",
+    statusCode: 400,
+  });
+
+  assert.deepEqual(output, {
+    type: "connector_tool_error",
+    code: "NOTION_TARGET_NOT_FOUND",
+    message: "The provided sourceId does not resolve to an indexed Notion page.",
+    statusCode: 400,
+  });
+});
+
+test("connector approval mismatches are surfaced as content errors", () => {
+  const error = testExports.getConnectorToolOutputContentError({
+    type: "connector_tool_error",
+    code: "CONNECTOR_ACTION_NOT_APPROVED",
+    message:
+      "Approved action was not found for this resumed tool call. Please retry the confirmation.",
+    statusCode: 409,
+  });
+
+  assert.equal(error?.code, "CONNECTOR_ACTION_APPROVAL_MISMATCH");
+  assert.equal(error?.statusCode, 409);
+});
+
+test("connector approval mismatches are detected inside ToolMessage content", () => {
+  const error = testExports.getConnectorToolOutputContentError({
+    type: "tool",
+    lc_kwargs: {
+      content: JSON.stringify({
+        type: "connector_tool_error",
+        code: "CONNECTOR_ACTION_NOT_APPROVED",
+        message:
+          "Approved action was not found for this resumed tool call. Please retry the confirmation.",
+        statusCode: 409,
+      }),
+    },
+  });
+
+  assert.equal(error?.code, "CONNECTOR_ACTION_APPROVAL_MISMATCH");
+});
+
+test("connector approval mismatches are detected inside tool error text", () => {
+  const error = testExports.getConnectorToolErrorTextContentError(
+    "Error: Connector action must be approved before execution\n Please fix your mistakes.",
+  );
+
+  assert.equal(error?.code, "CONNECTOR_ACTION_APPROVAL_MISMATCH");
+});
+
+test("DeepAgents resume input excludes SourceWeft execution metadata", () => {
+  assert.deepEqual(
+    testExports.commandResumeFromToolApprovalResume({
+      decisions: [{ type: "approve" }],
+      sourceweft: {
+        connectorActions: [
+          {
+            actionRunId: "action_1",
+            connectorId: "connector_1",
+            toolName: "create_notion_page",
+          },
+        ],
+      },
+    }),
+    {
+      decisions: [{ type: "approve" }],
+    },
+  );
+});
+
+test("HITL replay resumes the interrupted thread without pinning checkpoint_id", () => {
+  const config = testExports.resolveAgentBaseConfig({
+    agentMode: "replay",
+    agentRunThreadId: "unused-refresh-thread",
+    agentBaseCheckpoint: {
+      threadId: "agent-thread-1",
+      checkpointId: "interrupted-checkpoint",
+      checkpointNs: "",
+    },
+  });
+
+  assert.deepEqual(config, {
+    configurable: {
+      thread_id: "agent-thread-1",
+      checkpoint_ns: "",
+    },
+  });
+  assert.equal(
+    "checkpoint_id" in config.configurable,
+    false,
+    "LangGraph Command({ resume }) must read the latest pending interrupt for the thread",
+  );
+});
+
+test("fork mode pins the requested checkpoint", () => {
+  const config = testExports.resolveAgentBaseConfig({
+    agentMode: "fork",
+    agentRunThreadId: "unused-refresh-thread",
+    agentBaseCheckpoint: {
+      threadId: "agent-thread-1",
+      checkpointId: "before-input",
+    },
+  });
+
+  assert.deepEqual(config, {
+    configurable: {
+      thread_id: "agent-thread-1",
+      checkpoint_id: "before-input",
+      checkpoint_ns: "",
+    },
   });
 });
 
@@ -291,7 +408,8 @@ test("runtime prompt preloads slash-invoked skill instructions", () => {
         files: [
           {
             path: "SKILL.md",
-            contentText: "Explain with simple analogies and check understanding.",
+            contentText:
+              "Explain with simple analogies and check understanding.",
             mimeType: "text/markdown",
             sizeBytes: 40,
             contentHash: "hash",
@@ -424,7 +542,8 @@ test("runtime prompt treats image auto mode as available but optional", () => {
       shouldInjectTool: true,
       source: "explicit_tool",
       confidence: 0.55,
-      reason: "User-facing image generation controls configured generate_image.",
+      reason:
+        "User-facing image generation controls configured generate_image.",
       config: {
         aspectRatio: "auto",
         quality: "auto",

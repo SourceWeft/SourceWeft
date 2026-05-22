@@ -18,6 +18,10 @@ export type ChatSendInput = {
   command?: ThreadCommandRequest;
 };
 
+export type ToolConfirmationInterventionSignal = {
+  id: string;
+};
+
 export type MessageVersion = {
   id: string;
   renderKey?: string;
@@ -30,6 +34,7 @@ export type MessageVersion = {
   isCancelled?: boolean;
   error?: string | null;
   errorCode?: string | null;
+  finishReason?: string;
   isTextPaused?: boolean;
   isTextInterrupted?: boolean;
   mentionedSourceIds?: string[];
@@ -113,10 +118,22 @@ export type ChatGenerateImageToolSelection = {
   config?: ChatImageArtifactConfig;
 };
 
+export type ChatConnectorToolSelection = {
+  enabled?: boolean;
+  connectorId?: string;
+};
+
 export type ChatToolName = AgentToolName;
 
 export type ChatToolsSelection = {
   [AGENT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
+  [AGENT_TOOL_NAMES.searchNotionPages]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.createNotionPage]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.appendNotionPage]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.updateNotionPageByTitle]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.deleteNotionPageByTitle]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.saveArtifactToNotion]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]?: ChatConnectorToolSelection;
   invokedSkillIds?: string[];
 };
 

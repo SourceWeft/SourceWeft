@@ -4,7 +4,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, ReactNode, JSX } from "react";
 import { createContext, useContext, useMemo } from "react";
 
 type ToolUIPartApproval =
@@ -16,21 +16,6 @@ type ToolUIPartApproval =
   | {
       id: string;
       approved: boolean;
-      reason?: string;
-    }
-  | {
-      id: string;
-      approved: true;
-      reason?: string;
-    }
-  | {
-      id: string;
-      approved: true;
-      reason?: string;
-    }
-  | {
-      id: string;
-      approved: false;
       reason?: string;
     }
   | undefined;
@@ -91,7 +76,9 @@ export interface ConfirmationRequestProps {
   children?: ReactNode;
 }
 
-export const ConfirmationRequest = ({ children }: ConfirmationRequestProps) => {
+export const ConfirmationRequest = ({
+  children,
+}: ConfirmationRequestProps): JSX.Element | null => {
   const { state } = useConfirmation();
 
   // Only show when approval is requested
@@ -99,7 +86,7 @@ export const ConfirmationRequest = ({ children }: ConfirmationRequestProps) => {
     return null;
   }
 
-  return children;
+  return <>{children}</>;
 };
 
 export interface ConfirmationAcceptedProps {
@@ -108,20 +95,20 @@ export interface ConfirmationAcceptedProps {
 
 export const ConfirmationAccepted = ({
   children,
-}: ConfirmationAcceptedProps) => {
+}: ConfirmationAcceptedProps): JSX.Element | null => {
   const { approval, state } = useConfirmation();
 
   // Only show when approved and in response states
   if (
     !approval?.approved ||
     (state !== "approval-responded" &&
-      state !== "output-denied" &&
-      state !== "output-available")
+      state !== "output-available" &&
+      state !== "output-error")
   ) {
     return null;
   }
 
-  return children;
+  return <>{children}</>;
 };
 
 export interface ConfirmationRejectedProps {
@@ -130,20 +117,18 @@ export interface ConfirmationRejectedProps {
 
 export const ConfirmationRejected = ({
   children,
-}: ConfirmationRejectedProps) => {
+}: ConfirmationRejectedProps): JSX.Element | null => {
   const { approval, state } = useConfirmation();
 
   // Only show when rejected and in response states
   if (
     approval?.approved !== false ||
-    (state !== "approval-responded" &&
-      state !== "output-denied" &&
-      state !== "output-available")
+    (state !== "approval-responded" && state !== "output-denied")
   ) {
     return null;
   }
 
-  return children;
+  return <>{children}</>;
 };
 
 export type ConfirmationActionsProps = ComponentProps<"div">;

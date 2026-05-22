@@ -69,7 +69,10 @@ import {
 import {
   assertSelectedSkillsAllowedByTools,
   buildThreadToolsMetadata,
+  enableNotionToolSelection,
   resolveGenerateImageToolSelection,
+  resolveMcpToolSelection,
+  resolveNotionToolSelections,
   resolveWebSearchEnabled,
 } from "./tool-selection";
 import {
@@ -133,6 +136,9 @@ function buildCommandAugmentedText(input: {
   const args = input.command ? input.command.arguments : input.text;
   if (input.command?.kind === "skill") {
     return args;
+  }
+  if (input.command?.kind === "tool") {
+    return `<sourceweft_tool_command name="${input.command.toolName ?? input.command.canonicalName.replace(/^\//, "")}">\nUse the ${input.command.toolName ?? input.command.displayName} tool for this request. Treat the user request below as the tool input; do not answer without using the selected tool unless the input is invalid or the tool is unavailable.\n</sourceweft_tool_command>\n\n<user_request>\n${args}\n</user_request>`;
   }
   if (!input.command?.instruction) {
     return input.command ? args : input.text;
@@ -259,6 +265,15 @@ function lastSkillCommandMarker(markers: ParsedPromptMarker[]) {
     );
 }
 
+function lastToolCommandMarker(markers: ParsedPromptMarker[]) {
+  return [...markers]
+    .reverse()
+    .find(
+      (marker): marker is Extract<ParsedPromptMarker, { type: "command" }> =>
+        marker.type === "command" && marker.kind === "tool",
+    );
+}
+
 function resolveMarkerToolSelection(
   markers: ParsedPromptMarker[],
   tools: StreamThreadEventInput["tools"],
@@ -267,19 +282,23 @@ function resolveMarkerToolSelection(
   for (const marker of markers) {
     if (
       marker.type !== "command" ||
-      marker.kind !== "tool" ||
-      resolveToolCommandName(marker.value) !== AGENT_TOOL_NAMES.generateImage
+      marker.kind !== "tool"
     ) {
       continue;
     }
-    next = {
-      ...(next ?? {}),
-      [AGENT_TOOL_NAMES.generateImage]: {
-        ...((next ?? {})[AGENT_TOOL_NAMES.generateImage] ?? {}),
-        enabled: true,
-        mode: "generate",
-      },
-    };
+    const toolName = resolveToolCommandName(marker.value);
+    if (toolName === AGENT_TOOL_NAMES.generateImage) {
+      next = {
+        ...(next ?? {}),
+        [AGENT_TOOL_NAMES.generateImage]: {
+          ...((next ?? {})[AGENT_TOOL_NAMES.generateImage] ?? {}),
+          enabled: true,
+          mode: "generate",
+        },
+      };
+      continue;
+    }
+    next = enableNotionToolSelection(next, toolName ?? "");
   }
   return next;
 }
@@ -1277,6 +1296,9 @@ export async function prepareThreadTurn(
   });
   const sourceIds = sourceScope.effectiveSourceIds;
   const markerSkillCommand = lastSkillCommandMarker(parsedPrompt.markers);
+  const markerToolCommand = markerSkillCommand
+    ? undefined
+    : lastToolCommandMarker(parsedPrompt.markers);
   const markerCommandNamesInput = markerCommandNames(parsedPrompt.markers);
   const requestedCommand = parseRequestedCommand({
     command: markerSkillCommand
@@ -1285,7 +1307,14 @@ export async function prepareThreadTurn(
           kind: "skill-command",
           name: markerSkillCommand.value,
         }
-      : input.command,
+      : markerToolCommand
+        ? {
+            arguments: messageContent,
+            kind: "tool",
+            name: markerToolCommand.value,
+            toolName: resolveToolCommandName(markerToolCommand.value) ?? undefined,
+          }
+        : input.command,
   });
   const toolsWithMarkers = resolveMarkerToolSelection(
     parsedPrompt.markers,
@@ -1369,6 +1398,8 @@ export async function prepareThreadTurn(
     tools: toolsWithCommand,
     enabledSkills,
   });
+  const notionTools = resolveNotionToolSelections(toolsWithCommand);
+  const mcpTools = resolveMcpToolSelection(toolsWithCommand);
 
   await assertSourcesExist({
     teamId: workspace.organizationId,
@@ -1539,6 +1570,8 @@ export async function prepareThreadTurn(
             : {}),
           webSearchEnabled,
           generateImageTool: effectiveGenerateImageTool,
+          notionTools,
+          mcpTools,
         }),
         artifactIntent: artifactPipeline.decision,
         versionOf: input.userMessageParentId ?? null,
@@ -1595,6 +1628,7 @@ export async function prepareThreadTurn(
       : `thread-stream:${userMessage.id}:assistant`);
 
   const agentRunThreadId = input.agentRunThreadId ?? thread.id;
+  const toolApprovalResume = input.toolApprovalResume ?? null;
   const runTraceId = existingUserMessage
     ? `thread-run:${randomUUID()}`
     : userMessage.id;
@@ -1646,6 +1680,8 @@ export async function prepareThreadTurn(
     invokedSkillIds: effectiveInvokedSkillIds,
     selectedSkillIds,
     webSearchEnabled,
+    notionTools,
+    mcpTools: mcpTools ?? {},
     command: resolvedCommand,
     generateImageTool: effectiveGenerateImageTool,
     artifactIntent: artifactPipeline.decision,
@@ -1656,6 +1692,7 @@ export async function prepareThreadTurn(
     runTraceId,
     createdUserMessage,
     assistantMessageParentId,
+    assistantMessageId: input.assistantMessageId ?? null,
     profileAlias,
     modelAlias,
     providerModel,
@@ -1665,6 +1702,7 @@ export async function prepareThreadTurn(
     agentMode,
     agentBaseCheckpoint,
     agentRunThreadId,
+    toolApprovalResume,
     isFirstAssistantResponse,
     isFirstAssistantAttempt,
     initialTitle,
@@ -1901,6 +1939,9 @@ function mergeCommandTools(
       },
     };
   }
+  if (command?.kind === "tool" && command.toolName) {
+    return enableNotionToolSelection(tools, command.toolName);
+  }
   if (!command?.tools?.length) {
     return tools;
   }
@@ -1914,6 +1955,9 @@ function mergeCommandTools(
       ...(next[AGENT_TOOL_NAMES.generateImage] ?? {}),
       enabled: true,
     };
+  }
+  for (const toolName of command.tools) {
+    Object.assign(next, enableNotionToolSelection(next, toolName));
   }
   return next;
 }

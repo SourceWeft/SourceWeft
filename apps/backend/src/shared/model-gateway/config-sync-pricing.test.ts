@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { mergeGlobalProfileConfigJson } from "./config-sync";
 
 const now = new Date("2026-05-21T00:00:00.000Z");
 
-function configValue(
-  config: Record<string, unknown>,
-  key: string,
-) {
+function configValue(config: Record<string, unknown>, key: string) {
   return config[key];
 }
 

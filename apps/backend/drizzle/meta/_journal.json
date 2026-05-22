@@ -22,6 +22,34 @@
       "when": 1779284163000,
       "tag": "0002_retrieval_runtime_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779284164000,
+      "tag": "0003_agent_tool_trust_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779284165000,
+      "tag": "0004_multilingual_blog",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779284166000,
+      "tag": "0005_blog_featured_starts_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779284167000,
+      "tag": "0006_mcp_runtime",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import {
   type ChatSendInput,
   type PromptThinkingSettings,
 } from "../_components/chat-canvas";
+import type { ToolApprovalResume } from "@sourceweft/sdk";
 import {
   type ModelItem,
   type ModelType,
@@ -43,6 +44,7 @@ type BuildStreamingRequestBodyInput = {
   assistantMessageId?: string | null;
   attachOnly?: boolean;
   content?: string;
+  toolApprovalResume?: ToolApprovalResume | null;
 };
 
 export function buildRequestThinking(input: {
@@ -190,6 +192,10 @@ export function buildStreamingThreadRequestBody(
     if (input.assistantMessageId) {
       requestBody.assistantMessageId = input.assistantMessageId;
     }
+  }
+
+  if (input.toolApprovalResume) {
+    requestBody.toolApprovalResume = input.toolApprovalResume;
   }
 
   return requestBody;

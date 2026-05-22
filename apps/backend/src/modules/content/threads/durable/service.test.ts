@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import type { ChatThreadRunRecord } from "./types";
 import {
   isStaleActiveRun,
@@ -116,6 +116,19 @@ test("terminal attach fallback does not duplicate prior error event", () => {
   assert.deepEqual(events, [{ type: "finish" }]);
 });
 
+test("terminal attach fallback keeps stale run recovery silent", () => {
+  const events = synthesizeTerminalRunEvents({
+    run: createRun({
+      status: "failed",
+      errorCode: "CHAT_RUN_STALE",
+      errorMessage: null,
+    }),
+    sawErrorEvent: false,
+  }).map(parseSseData);
+
+  assert.deepEqual(events, [{ type: "finish" }]);
+});
+
 test("retrieval snapshot preserves string annIndexUsed", () => {
   assert.deepEqual(
     normalizeRetrievalSnapshot({
@@ -186,7 +199,7 @@ test("attach state fails stale running run and synthesizes terminal events", asy
   const failedRun = createRun({
     status: "failed",
     errorCode: "CHAT_RUN_STALE",
-    errorMessage: "Previous chat run stopped unexpectedly.",
+    errorMessage: null,
     finishedAt: "2024-01-01T00:11:00.000Z",
   });
   const failCalls: ChatThreadRunRecord[] = [];
@@ -205,16 +218,7 @@ test("attach state fails stale running run and synthesizes terminal events", asy
 
   assert.deepEqual(failCalls, [staleRun]);
   assert.equal(result.run.status, "failed");
-  assert.deepEqual(result.terminalEvents?.map(parseSseData), [
-    {
-      type: "error",
-      code: "CHAT_RUN_STALE",
-      error: "Previous chat run stopped unexpectedly.",
-      userMessageId: "user-message-1",
-      messageId: "assistant-message-1",
-    },
-    { type: "finish" },
-  ]);
+  assert.deepEqual(result.terminalEvents?.map(parseSseData), [{ type: "finish" }]);
 });
 
 test("result wait turns stale active run terminal before timeout", async () => {
@@ -225,7 +229,7 @@ test("result wait turns stale active run terminal before timeout", async () => {
   const failedRun = createRun({
     status: "failed",
     errorCode: "CHAT_RUN_STALE",
-    errorMessage: "Previous chat run stopped unexpectedly.",
+    errorMessage: null,
     finishedAt: "2024-01-01T00:11:00.000Z",
   });
   let failCalls = 0;

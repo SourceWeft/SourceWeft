@@ -1006,7 +1006,8 @@ class ContentThreadStreamService {
     }
     const prepared = prepareResult.prepared;
     const preparedOptions = await options.onPrepared?.(prepared);
-    const assistantMessageId = preparedOptions?.assistantMessageId ?? undefined;
+    const assistantMessageId =
+      prepared.assistantMessageId ?? preparedOptions?.assistantMessageId ?? undefined;
     const assistantMetadata = preparedOptions?.assistantMetadata;
     const prepareEndedAt = new Date();
     prepared.traceContext = buildThreadTraceContext(prepared);
@@ -1433,7 +1434,10 @@ class ContentThreadStreamService {
             outcome,
           })) || traceEnded;
       }
-      yield toSseData({ type: "finish" });
+      yield toSseData({
+        type: "finish",
+        finishReason: outcome?.finishReason ?? null,
+      });
       responseFinished = true;
     } finally {
       if (!traceEnded) {

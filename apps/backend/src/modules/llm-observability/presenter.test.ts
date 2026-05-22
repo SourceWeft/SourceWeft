@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import {
   presentGeneration,
   presentGenerationSummary,
@@ -107,7 +107,10 @@ test("presentGeneration exposes explicit model routing fields", () => {
   assert.equal(presented.modelAlias, "chat-default");
   assert.equal(presented.providerModel, null);
   assert.equal(presented.keySource, "rawApiKey");
-  assert.deepEqual(presented.routeDecision, { provider: "openrouter", alias: "chat-default" });
+  assert.deepEqual(presented.routeDecision, {
+    provider: "openrouter",
+    alias: "chat-default",
+  });
   assert.deepEqual(presented.metadata, {
     modelAlias: "chat-default",
     providerModel: "minimax/minimax-m2.7",
@@ -166,7 +169,10 @@ test("presentGeneration hides payloads blocked by payload policy", () => {
     redacted: true,
     reason: "payload_policy",
   });
-  assert.deepEqual(presented.output, { mode: "preview", preview: "visible preview" });
+  assert.deepEqual(presented.output, {
+    mode: "preview",
+    preview: "visible preview",
+  });
 });
 
 test("presentGeneration hides payloads after full payload retention", () => {
@@ -185,7 +191,10 @@ test("presentGeneration hides payloads after full payload retention", () => {
     redacted: true,
     reason: "retention_expired",
   });
-  assert.deepEqual(presented.output, { mode: "preview", preview: "still visible" });
+  assert.deepEqual(presented.output, {
+    mode: "preview",
+    preview: "still visible",
+  });
 });
 
 test("presentSpan redacts tool payload fields without payload access", () => {

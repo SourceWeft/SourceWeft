@@ -7,6 +7,8 @@ import {
   resolveAgentCheckpointMetadata,
   resolveGenerateImageToolFromMessage,
   resolveMentionedSourceIdsFromMessage,
+  resolveMcpToolSelectionFromMessage,
+  resolveNotionToolSelectionsFromMessage,
   resolveSkillIdsFromMessage,
   resolveSourceIdsFromMessage,
   resolveWebSearchEnabledFromMessage,
@@ -14,7 +16,11 @@ import {
 } from "../turn/context";
 import { normalizeSkillIds } from "../../skills/selection";
 import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
-import { buildThreadToolsMetadata } from "../turn/tool-selection";
+import {
+  buildThreadToolsMetadata,
+  resolveMcpToolSelection,
+  resolveNotionToolSelections,
+} from "../turn/tool-selection";
 import { listMessageRecordsByThread } from "../message-repository";
 import type { StreamThreadEventInput } from "../turn/service";
 import type { AgentCheckpointRef, ChatMessageImagePart } from "../turn/types";
@@ -90,6 +96,56 @@ function shouldUseSubmittedEditImages(input: {
   return input.imagesProvided === true;
 }
 
+function getMessageMetadataRecord(message: {
+  metadata?: unknown;
+}): Record<string, unknown> {
+  return message.metadata &&
+    typeof message.metadata === "object" &&
+    !Array.isArray(message.metadata)
+    ? (message.metadata as Record<string, unknown>)
+    : {};
+}
+
+function resolveToolConfirmationRefreshAgentState(input: {
+  checkpoint: ReturnType<typeof resolveAgentCheckpointMetadata>;
+  finishReason?: unknown;
+  toolApprovalResume?: RefreshThreadInput["toolApprovalResume"];
+}) {
+  if (input.finishReason !== "tool_confirmation_requested") {
+    return {
+      agentBaseCheckpoint: input.checkpoint?.beforeInput ?? null,
+      agentMode: input.checkpoint?.beforeInput ? "fork" : "continue",
+    } as const;
+  }
+
+  const resumeCheckpoint =
+    input.checkpoint?.resume ??
+    input.checkpoint?.beforeAssistant ??
+    input.checkpoint?.final ??
+    null;
+
+  if (!input.toolApprovalResume) {
+    throw new ContentError(
+      400,
+      "THREAD_CONFIRMATION_RESUME_REQUIRED",
+      "Tool confirmation refresh requires a DeepAgents resume decision payload.",
+    );
+  }
+
+  if (!resumeCheckpoint) {
+    throw new ContentError(
+      409,
+      "THREAD_CONFIRMATION_CHECKPOINT_MISSING",
+      "Tool confirmation checkpoint is missing.",
+    );
+  }
+
+  return {
+    agentBaseCheckpoint: resumeCheckpoint,
+    agentMode: "replay",
+  } as const;
+}
+
 async function resolveFallbackEditBaseCheckpoint(input: {
   workspace: Awaited<ReturnType<typeof resolveThreadTurnContext>>["workspace"];
   thread: Awaited<ReturnType<typeof resolveThreadTurnContext>>["thread"];
@@ -161,8 +217,26 @@ export async function resolveRefreshThreadStreamInput(
   const generateImageTool =
     input.tools?.[AGENT_TOOL_NAMES.generateImage] ??
     resolveGenerateImageToolFromMessage(latestUserMessage);
+  const notionTools =
+    input.tools !== undefined
+      ? resolveNotionToolSelections(input.tools)
+      : resolveNotionToolSelectionsFromMessage(latestUserMessage);
+  const mcpTools =
+    input.tools !== undefined
+      ? resolveMcpToolSelection(input.tools)
+      : resolveMcpToolSelectionFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const refreshRunThreadId = `thread:${input.threadId}:refresh:${latestUserMessage.id}:${latestAssistantMessage.id}:${input.idempotencyKey ?? randomUUID()}`;
+  const latestAssistantMetadata =
+    getMessageMetadataRecord(latestAssistantMessage);
+  const isToolApprovalContinuation = Boolean(
+    input.toolApprovalResume && input.assistantMessageId,
+  );
+  const refreshAgentState = resolveToolConfirmationRefreshAgentState({
+    checkpoint,
+    finishReason: latestAssistantMetadata.finishReason,
+    toolApprovalResume: input.toolApprovalResume,
+  });
 
   return {
     workspaceId: input.workspaceId,
@@ -178,6 +252,8 @@ export async function resolveRefreshThreadStreamInput(
       skillIds,
       webSearchEnabled,
       generateImageTool,
+      notionTools,
+      mcpTools,
     }),
     command: input.command,
     timezone: input.timezone,
@@ -187,10 +263,15 @@ export async function resolveRefreshThreadStreamInput(
     vision: input.vision,
     visionProfileAlias: input.visionProfileAlias,
     existingUserMessage: latestUserMessage,
-    assistantMessageParentId: latestAssistantMessage.id,
-    agentMode: checkpoint?.beforeInput ? "fork" : "continue",
-    agentBaseCheckpoint: checkpoint?.beforeInput ?? null,
+    assistantMessageParentId: isToolApprovalContinuation
+      ? latestAssistantMessage.parentMessageId
+      : latestAssistantMessage.id,
+    assistantMessageId:
+      isToolApprovalContinuation ? input.assistantMessageId! : null,
+    agentMode: refreshAgentState.agentMode,
+    agentBaseCheckpoint: refreshAgentState.agentBaseCheckpoint,
     agentRunThreadId: refreshRunThreadId,
+    toolApprovalResume: input.toolApprovalResume ?? null,
     failurePersistence: "persist-error-turn",
   };
 }
@@ -230,6 +311,14 @@ export async function resolveEditThreadStreamInput(
   const generateImageTool =
     input.tools?.[AGENT_TOOL_NAMES.generateImage] ??
     resolveGenerateImageToolFromMessage(latestUserMessage);
+  const notionTools =
+    input.tools !== undefined
+      ? resolveNotionToolSelections(input.tools)
+      : resolveNotionToolSelectionsFromMessage(latestUserMessage);
+  const mcpTools =
+    input.tools !== undefined
+      ? resolveMcpToolSelection(input.tools)
+      : resolveMcpToolSelectionFromMessage(latestUserMessage);
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const agentBaseCheckpoint =
     checkpoint?.beforeInput ??
@@ -257,6 +346,8 @@ export async function resolveEditThreadStreamInput(
       skillIds,
       webSearchEnabled,
       generateImageTool,
+      notionTools,
+      mcpTools,
     }),
     command: input.command,
     timezone: input.timezone,
@@ -275,5 +366,7 @@ export async function resolveEditThreadStreamInput(
 }
 
 export const testExports = {
+  getMessageMetadataRecord,
+  resolveToolConfirmationRefreshAgentState,
   shouldUseSubmittedEditImages,
 };

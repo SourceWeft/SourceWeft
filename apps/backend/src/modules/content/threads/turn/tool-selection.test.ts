@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { ContentError } from "../../errors";
 import {
   buildThreadToolsMetadata,
+  resolveNotionToolSelections,
   resolveGenerateImageToolSelection,
   resolveWebSearchEnabled,
   testExports,
@@ -66,11 +67,29 @@ test("buildThreadToolsMetadata stores canonical tool-name keyed fields", () => {
       generateImageTool: {
         config: { style: "cartoon" },
       },
+      notionTools: {
+        search_notion_pages: { enabled: true, connectorId: "connector_1" },
+      },
     }),
     {
       skillIds: ["skill-1"],
       web_search: { enabled: true },
       generate_image: { config: { style: "cartoon" } },
+      search_notion_pages: { enabled: true, connectorId: "connector_1" },
+    },
+  );
+});
+
+test("resolveNotionToolSelections keeps notion connector tool selections only", () => {
+  assert.deepEqual(
+    resolveNotionToolSelections({
+      search_notion_pages: { enabled: true, connectorId: "connector_1" },
+      create_notion_page: { enabled: false },
+      web_search: { enabled: true },
+    }),
+    {
+      search_notion_pages: { enabled: true, connectorId: "connector_1" },
+      create_notion_page: { enabled: false },
     },
   );
 });

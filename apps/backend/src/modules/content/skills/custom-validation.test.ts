@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { CUSTOM_SKILL_LIMITS, validateCustomSkillBundle } from "./custom-validation";
+import { test } from "vitest";
+import {
+  CUSTOM_SKILL_LIMITS,
+  validateCustomSkillBundle,
+} from "./custom-validation";
 
 const skillMd = `---
 name: custom-review
@@ -19,7 +22,10 @@ test("validateCustomSkillBundle accepts small text-only bundles", () => {
 
   assert.equal(bundle.name, "custom-review");
   assert.equal(bundle.version, "0.1.0");
-  assert.equal(bundle.description, "Use this skill when reviewing custom material.");
+  assert.equal(
+    bundle.description,
+    "Use this skill when reviewing custom material.",
+  );
   assert.equal(bundle.files.length, 2);
   assert.equal(bundle.files[0]?.path, "SKILL.md");
   assert.equal(bundle.files[1]?.mimeType, "application/json");
@@ -217,10 +223,13 @@ test("validateCustomSkillBundle enforces file count limit", () => {
   assert.throws(
     () =>
       validateCustomSkillBundle({
-        files: Array.from({ length: CUSTOM_SKILL_LIMITS.fileCount + 1 }, (_, index) => ({
-          path: index === 0 ? "SKILL.md" : `file-${index}.md`,
-          contentText: index === 0 ? skillMd : "content",
-        })),
+        files: Array.from(
+          { length: CUSTOM_SKILL_LIMITS.fileCount + 1 },
+          (_, index) => ({
+            path: index === 0 ? "SKILL.md" : `file-${index}.md`,
+            contentText: index === 0 ? skillMd : "content",
+          }),
+        ),
       }),
     /exceeds 50 files/,
   );

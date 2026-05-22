@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { redactHeaders, redactValue, REDACTED_VALUE } from "./redaction";
 
 test("redacts sensitive keys recursively without mutating input", () => {

@@ -67,6 +67,7 @@ export function EmptyState({
   imageCapabilities,
   imageModelAvailable,
   imageModelAlias,
+  notionConnectorId = null,
   disabledToolNames = [],
   onDisabledToolNamesChange,
 }: {
@@ -88,6 +89,7 @@ export function EmptyState({
   imageCapabilities?: ImageModelCapabilities;
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
+  notionConnectorId?: string | null;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
@@ -165,6 +167,7 @@ export function EmptyState({
             imageCapabilities={imageCapabilities}
             imageModelAvailable={imageModelAvailable}
             imageModelAlias={imageModelAlias}
+            notionConnectorId={notionConnectorId}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={onDisabledToolNamesChange}
           />

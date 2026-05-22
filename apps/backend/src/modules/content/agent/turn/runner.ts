@@ -1,4 +1,9 @@
 import { buildAgentConfig, createThreadAgent } from "..";
+import type {
+  ToolApprovalResume,
+  ToolConfirmationRequest,
+} from "@sourceweft/contracts";
+import { Command } from "@langchain/langgraph";
 import { AgentCitationRegistry } from "../citation-registry";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import { createDefaultFilesystemMounts } from "../filesystem-capabilities";
@@ -9,11 +14,27 @@ import {
   GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
 } from "../tools/generate-image-tool";
 import { WorkingFilesBackend } from "../working-files-backend";
-import { createNotionTools } from "../tools/notion-tools";
+import type {
+  ConnectorActionApprovalCursor,
+  ConnectorActionExecutionCursor,
+} from "../../../connectors/agent-tool-idempotency";
+import {
+  createNotionInterruptConfig,
+  createNotionToolApprovalRequest,
+  createNotionTools,
+  hasActiveNotionConnector,
+} from "../../../connectors/providers/notion";
+import {
+  createConnectorActionApprovalRequest,
+  createConnectorActionInterruptConfigs,
+  createConnectorActionTools,
+} from "../../../connectors/agent-tools";
+import { mcpService } from "../../../mcp";
 import { createWebTools } from "../tools/web-tools";
 import {
   AGENT_TOOL_NAMES,
   isGeneratedImageArtifactToolName,
+  isNotionToolName,
   isPatternScopeToolName,
   isReadToolOutputToolName,
   isRetrievalToolName,
@@ -21,6 +42,7 @@ import {
   isWebSearchToolName,
   isWebToolName,
 } from "../tool-registry";
+import { ContentError } from "../../errors";
 import { sanitizeNonCitableCitationMarkers } from "../fs-utils";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { createDefaultWebProvider } from "../../web";
@@ -76,6 +98,36 @@ function checkpointRefToConfig(checkpoint: AgentCheckpointRef) {
   };
 }
 
+function checkpointRefToResumeConfig(checkpoint: AgentCheckpointRef) {
+  return buildAgentConfig(
+    checkpoint.threadId,
+    checkpoint.checkpointNs !== undefined
+      ? { checkpoint_ns: checkpoint.checkpointNs }
+      : {},
+  );
+}
+
+function resolveAgentBaseConfig(input: {
+  agentBaseCheckpoint: AgentCheckpointRef | null;
+  agentMode: PreparedThreadTurn["agentMode"];
+  agentRunThreadId: string;
+}) {
+  if (input.agentMode === "replay") {
+    if (!input.agentBaseCheckpoint) {
+      throw new ContentError(
+        400,
+        "AGENT_HITL_CHECKPOINT_REQUIRED",
+        "DeepAgents HITL replay requires a checkpoint from the interrupted thread.",
+      );
+    }
+    return checkpointRefToResumeConfig(input.agentBaseCheckpoint);
+  }
+
+  return input.agentBaseCheckpoint
+    ? checkpointRefToConfig(input.agentBaseCheckpoint)
+    : buildAgentConfig(input.agentRunThreadId);
+}
+
 function checkpointRefFromConfig(value: unknown): AgentCheckpointRef | null {
   const config = toObjectRecord(value);
   const configurable = toObjectRecord(config?.configurable);
@@ -106,6 +158,20 @@ function checkpointRefFromConfig(value: unknown): AgentCheckpointRef | null {
 function checkpointHasPendingTasks(value: unknown) {
   const record = toObjectRecord(value);
   return Array.isArray(record?.next) && record.next.length > 0;
+}
+
+async function resolvePendingInterruptCheckpoint(input: {
+  agent: Awaited<ReturnType<typeof createThreadAgent>>;
+  config: AgentRunnableConfig;
+}) {
+  const state = await getAgentStateOrNull(input.agent, input.config);
+  const checkpoint = checkpointRefFromConfig(
+    (state as { config?: unknown } | null)?.config,
+  );
+  return {
+    checkpoint,
+    pending: checkpointHasPendingTasks(state),
+  };
 }
 
 type AgentRunnableConfig =
@@ -575,6 +641,30 @@ type GeneratedImageArtifactReference = {
   toolCallId?: string;
 };
 
+type ObservedAgentToolCall = {
+  args: Record<string, unknown>;
+  id: string;
+  index?: number;
+  name: string;
+};
+
+type HitlActionRequest = {
+  args: Record<string, unknown>;
+  description?: string;
+  name: string;
+};
+
+type HitlReviewConfig = {
+  actionName: string;
+  allowedDecisions: Array<"approve" | "edit" | "reject">;
+  argsSchema?: Record<string, unknown>;
+};
+
+type HitlInterruptRequest = {
+  actionRequests: HitlActionRequest[];
+  reviewConfigs: HitlReviewConfig[];
+};
+
 function extractToolOutputField(output: unknown, key: string) {
   const outputText = extractToolOutputText(output);
   if (!outputText) {
@@ -626,6 +716,333 @@ function extractGeneratedImageArtifacts(
     });
 }
 
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJsonStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(
+      ([left], [right]) => left.localeCompare(right),
+    );
+    return `{${entries
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJsonStringify(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sameToolArgs(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+) {
+  return stableJsonStringify(left) === stableJsonStringify(right);
+}
+
+function parseToolArgs(value: unknown): Record<string, unknown> {
+  if (typeof value === "string" && value.trim().length > 0) {
+    try {
+      return parseToolArgs(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+  return toObjectRecord(value) ?? {};
+}
+
+function extractToolCallsFromRawProvider(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as ObservedAgentToolCall[];
+  }
+  return value
+    .map((candidate, index): ObservedAgentToolCall | null => {
+      const record = toObjectRecord(candidate);
+      if (!record) {
+        return null;
+      }
+      const functionRecord = toObjectRecord(record.function);
+      const name =
+        typeof record.name === "string"
+          ? record.name
+          : typeof functionRecord?.name === "string"
+            ? functionRecord.name
+            : null;
+      const id = typeof record.id === "string" ? record.id : null;
+      if (!name || !id) {
+        return null;
+      }
+      return {
+        id,
+        name,
+        args: parseToolArgs(functionRecord?.arguments ?? record.args),
+        index:
+          typeof record.index === "number" && Number.isFinite(record.index)
+            ? record.index
+            : index,
+      };
+    })
+    .filter((call): call is ObservedAgentToolCall => call !== null);
+}
+
+function extractToolCallsFromContentBlocks(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as ObservedAgentToolCall[];
+  }
+  return value
+    .map((candidate, index): ObservedAgentToolCall | null => {
+      const record = toObjectRecord(candidate);
+      if (!record) {
+        return null;
+      }
+      const type = typeof record.type === "string" ? record.type : "";
+      if (type !== "tool_call" && type !== "tool_use") {
+        return null;
+      }
+      const name =
+        typeof record.name === "string"
+          ? record.name
+          : typeof record.tool_name === "string"
+            ? record.tool_name
+            : null;
+      const id = typeof record.id === "string" ? record.id : null;
+      if (!name || !id) {
+        return null;
+      }
+      return {
+        id,
+        name,
+        args: parseToolArgs(record.args ?? record.input),
+        index:
+          typeof record.index === "number" && Number.isFinite(record.index)
+            ? record.index
+            : index,
+      };
+    })
+    .filter((call): call is ObservedAgentToolCall => call !== null);
+}
+
+function extractToolCallsFromMessage(value: unknown) {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return [] as ObservedAgentToolCall[];
+  }
+  const directCalls = Array.isArray(record.tool_calls)
+    ? record.tool_calls
+    : Array.isArray(record.toolCalls)
+      ? record.toolCalls
+      : [];
+  const normalizedDirect = directCalls
+    .map((candidate, index): ObservedAgentToolCall | null => {
+      const call = toObjectRecord(candidate);
+      if (!call) {
+        return null;
+      }
+      const id = typeof call?.id === "string" ? call.id : null;
+      const name = typeof call?.name === "string" ? call.name : null;
+      if (!id || !name) {
+        return null;
+      }
+      return {
+        id,
+        name,
+        args: parseToolArgs(call.args ?? toObjectRecord(call.function)?.arguments),
+        index,
+      };
+    })
+    .filter((call): call is ObservedAgentToolCall => call !== null);
+  const contentBlockCalls = [
+    ...extractToolCallsFromContentBlocks(record.contentBlocks),
+    ...extractToolCallsFromContentBlocks(record.content_blocks),
+    ...extractToolCallsFromContentBlocks(record.content),
+  ];
+  const rawCalls = extractToolCallsFromRawProvider(
+    toObjectRecord(record.additional_kwargs)?.tool_calls ??
+      toObjectRecord(toObjectRecord(record.lc_kwargs)?.additional_kwargs)
+        ?.tool_calls,
+  );
+  return [...normalizedDirect, ...contentBlockCalls, ...rawCalls];
+}
+
+function extractToolCallsFromUpdates(payload: unknown) {
+  const updates = toObjectRecord(payload);
+  if (!updates) {
+    return [] as ObservedAgentToolCall[];
+  }
+  const calls: ObservedAgentToolCall[] = [];
+  for (const value of Object.values(updates)) {
+    const update = toObjectRecord(value);
+    if (!update) {
+      continue;
+    }
+    const messages = Array.isArray(update.messages) ? update.messages : [];
+    for (const message of messages) {
+      calls.push(...extractToolCallsFromMessage(message));
+    }
+  }
+  return calls;
+}
+
+function rememberObservedToolCalls(
+  target: Map<string, ObservedAgentToolCall>,
+  calls: ObservedAgentToolCall[],
+) {
+  for (const call of calls) {
+    if (!target.has(call.id)) {
+      target.set(call.id, call);
+    }
+  }
+}
+
+function extractHitlInterrupts(payload: unknown) {
+  const record = toObjectRecord(payload);
+  const interrupts = record?.__interrupt__;
+  if (!Array.isArray(interrupts)) {
+    return [] as HitlInterruptRequest[];
+  }
+  return interrupts
+    .map((interruptValue): HitlInterruptRequest | null => {
+      const interruptRecord = toObjectRecord(interruptValue);
+      const value = toObjectRecord(interruptRecord?.value);
+      const actionRequestsValue = value?.actionRequests;
+      const reviewConfigsValue = value?.reviewConfigs;
+      if (
+        !Array.isArray(actionRequestsValue) ||
+        !Array.isArray(reviewConfigsValue)
+      ) {
+        return null;
+      }
+      const actionRequests = actionRequestsValue.map((candidate) => {
+        const action = toObjectRecord(candidate);
+        return {
+          name: typeof action?.name === "string" ? action.name : "",
+          args: parseToolArgs(action?.args),
+          ...(typeof action?.description === "string"
+            ? { description: action.description }
+            : {}),
+        };
+      });
+      const reviewConfigs = reviewConfigsValue.map((candidate) => {
+        const config = toObjectRecord(candidate);
+        const allowed = Array.isArray(config?.allowedDecisions)
+          ? config.allowedDecisions.filter(
+              (decision): decision is "approve" | "edit" | "reject" =>
+                decision === "approve" ||
+                decision === "edit" ||
+                decision === "reject",
+            )
+          : [];
+        return {
+          actionName:
+            typeof config?.actionName === "string" ? config.actionName : "",
+          allowedDecisions: allowed,
+          ...(toObjectRecord(config?.argsSchema)
+            ? { argsSchema: toObjectRecord(config?.argsSchema)! }
+            : {}),
+        };
+      });
+      if (
+        actionRequests.some((request) => request.name.length === 0) ||
+        reviewConfigs.some((config) => config.actionName.length === 0)
+      ) {
+        return null;
+      }
+      return { actionRequests, reviewConfigs };
+    })
+    .filter((interrupt): interrupt is HitlInterruptRequest => interrupt !== null);
+}
+
+function matchInterruptedToolCall(input: {
+  action: HitlActionRequest;
+  index: number;
+  observedToolCalls: ObservedAgentToolCall[];
+  usedToolCallIds: Set<string>;
+}) {
+  const matches = input.observedToolCalls.filter(
+    (call) =>
+      call.name === input.action.name && !input.usedToolCallIds.has(call.id),
+  );
+  const exact = matches.find((call) => sameToolArgs(call.args, input.action.args));
+  const match = exact ?? matches[input.index] ?? matches[0] ?? null;
+  if (!match) {
+    throw new ContentError(
+      500,
+      "AGENT_HITL_TOOL_CALL_NOT_FOUND",
+      `DeepAgents HITL interrupted ${input.action.name}, but the matching tool call id was not present in the streamed AI message.`,
+    );
+  }
+  input.usedToolCallIds.add(match.id);
+  return match;
+}
+
+function withHitlEditableArgs(
+  confirmation: ToolConfirmationRequest,
+  reviewConfig: HitlReviewConfig | undefined,
+) {
+  if (!reviewConfig || !reviewConfig.allowedDecisions.includes("edit")) {
+    return confirmation;
+  }
+  return {
+    ...confirmation,
+    editableArgs: {
+      value: confirmation.editableArgs?.value ?? confirmation.preview.requestJson ?? {},
+      ...(reviewConfig.argsSchema
+        ? { schema: reviewConfig.argsSchema }
+        : confirmation.editableArgs?.schema
+          ? { schema: confirmation.editableArgs.schema }
+          : {}),
+    },
+  };
+}
+
+async function createHitlConfirmation(input: {
+  action: HitlActionRequest;
+  connectorContext: {
+    actionApprovalCursor?: ConnectorActionApprovalCursor;
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+    actionApprovalScope?: string;
+    enabledToolNames?: ReadonlySet<string>;
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+  };
+  reviewConfig?: HitlReviewConfig;
+  toolCallId: string;
+}) {
+  const confirmation = isNotionToolName(input.action.name)
+    ? await createNotionToolApprovalRequest(input.connectorContext, {
+        args: input.action.args,
+        toolCallId: input.toolCallId,
+        toolName: input.action.name,
+      })
+    : input.action.name.startsWith("mcp__")
+      ? await mcpService.createApprovalForInterruptedTool({
+          workspaceId: input.connectorContext.workspaceId,
+          userId: input.connectorContext.userId,
+          toolName: input.action.name,
+          args: input.action.args,
+          toolCallId: input.toolCallId,
+        })
+    : await createConnectorActionApprovalRequest(input.connectorContext, {
+        args: input.action.args,
+        excludeConnectorTypes: ["notion"],
+        toolCallId: input.toolCallId,
+        toolName: input.action.name,
+      });
+  if (!confirmation) {
+    throw new ContentError(
+      500,
+      "AGENT_HITL_CONFIRMATION_UNSUPPORTED",
+      `DeepAgents HITL interrupted unsupported tool ${input.action.name}.`,
+    );
+  }
+  return withHitlEditableArgs(confirmation, input.reviewConfig);
+}
+
+function commandResumeFromToolApprovalResume(
+  resume: ToolApprovalResume,
+): ToolApprovalResume {
+  return { decisions: resume.decisions };
+}
+
 export const testExports = {
   buildAgentRuntimePrompt,
   createMessageRenderBlockBuilder,
@@ -634,6 +1051,10 @@ export const testExports = {
   getFilesystemToolDescription,
   getFilesystemToolEndTitle,
   getFilesystemToolStartTitle,
+  getConnectorToolOutputContentError,
+  getConnectorToolErrorTextContentError,
+  commandResumeFromToolApprovalResume,
+  resolveAgentBaseConfig,
   resolveToolCommand,
 };
 
@@ -688,6 +1109,18 @@ function getWebToolEndTitle(toolName: string) {
     return "Fetched web pages";
   }
   return null;
+}
+
+function isMcpToolName(toolName: string) {
+  return toolName.startsWith("mcp__");
+}
+
+function getMcpToolDisplayName(toolName: string) {
+  return toolName
+    .replace(/^mcp__/, "")
+    .split("__")
+    .filter(Boolean)
+    .join(".");
 }
 
 function getWebToolInputMetadata(
@@ -828,6 +1261,71 @@ function getWebToolOutputError(output: unknown) {
   }
 
   return extractWebToolError(outputText)?.error ?? null;
+}
+
+function getConnectorToolOutputError(output: unknown) {
+  const record = getConnectorToolErrorRecord(output);
+  if (
+    record &&
+    typeof record.message === "string" &&
+    record.message.trim().length > 0
+  ) {
+    return record.message.trim();
+  }
+  return null;
+}
+
+function getConnectorToolErrorRecord(output: unknown) {
+  const record = toObjectRecord(output);
+  if (record?.type === "connector_tool_error") {
+    return record;
+  }
+
+  const outputText = extractToolOutputText(output);
+  if (!outputText) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(outputText);
+    const parsedRecord = toObjectRecord(parsed);
+    return parsedRecord?.type === "connector_tool_error" ? parsedRecord : null;
+  } catch {
+    return null;
+  }
+}
+
+function getConnectorToolOutputContentError(output: unknown) {
+  const record = getConnectorToolErrorRecord(output);
+  const outputText = extractToolOutputText(output) ?? "";
+  if (record?.code !== "CONNECTOR_ACTION_NOT_APPROVED") {
+    if (
+      !outputText.includes("CONNECTOR_ACTION_NOT_APPROVED") &&
+      !outputText.includes("Connector action must be approved before execution") &&
+      !outputText.includes("Approved action was not found for this resumed tool call")
+    ) {
+      return null;
+    }
+  }
+  return new ContentError(
+    409,
+    "CONNECTOR_ACTION_APPROVAL_MISMATCH",
+    "The approved connector action could not be matched during HITL replay. Please retry the latest confirmation.",
+  );
+}
+
+function getConnectorToolErrorTextContentError(errorText: string) {
+  if (
+    !errorText.includes("CONNECTOR_ACTION_NOT_APPROVED") &&
+    !errorText.includes("Connector action must be approved before execution") &&
+    !errorText.includes("Approved action was not found for this resumed tool call")
+  ) {
+    return null;
+  }
+  return new ContentError(
+    409,
+    "CONNECTOR_ACTION_APPROVAL_MISMATCH",
+    "The approved connector action could not be matched during HITL replay. Please retry the latest confirmation.",
+  );
 }
 
 function decodeXmlAttribute(value: string) {
@@ -1011,6 +1509,7 @@ function buildInvokedSkillsRuntimePrompt(input: {
 function buildAgentRuntimePrompt(input: {
   availableWebTools?: string[];
   availableArtifactTools?: string[];
+  availableMcpTools?: string[];
   artifactIntent?: PreparedThreadTurn["artifactIntent"];
   enabledSkills?: PreparedThreadTurn["enabledSkills"];
   invokedSkillIds?: string[];
@@ -1062,6 +1561,14 @@ function buildAgentRuntimePrompt(input: {
       "If the prompt is missing essential visual details for a requested image, make a reasonable concise prompt instead of asking a separate confirmation.",
       `Never claim an image was created unless ${AGENT_TOOL_NAMES.generateImage} completed successfully.`,
       `After ${AGENT_TOOL_NAMES.generateImage} succeeds, keep the final answer concise. The application displays the generated image automatically; do not include image markdown or raw artifact URLs.`,
+    );
+  }
+
+  const availableMcpTools = input.availableMcpTools ?? [];
+  if (availableMcpTools.length > 0) {
+    lines.push(
+      `Available MCP tools this turn: ${availableMcpTools.join(", ")}.`,
+      "MCP tools may call external services configured by the workspace. Use them only when they are relevant to the user's request.",
     );
   }
 
@@ -1121,6 +1628,7 @@ export async function* invokeDeepAgentTurn(input: {
   const toolCallsById = new Map<string, ToolCallTrace>();
   const toolCallOrder: string[] = [];
   const toolStartedAtById = new Map<string, number>();
+  const observedToolCallsById = new Map<string, ObservedAgentToolCall>();
   const thinkingStepsById = new Map<string, ThinkingStepTrace>();
   const thinkingStepOrder: string[] = [];
   const reasoningSegments: DeepAgentTurnOutcome["reasoningSegments"] = [];
@@ -1130,7 +1638,7 @@ export async function* invokeDeepAgentTurn(input: {
   let latestToolRetrieval: Awaited<ReturnType<typeof runToolRetrieval>> | null =
     null;
   let assistantContent = "";
-  let fallbackAssistantContent: string | null = null;
+  let assistantContentFromUpdates: string | null = null;
   let usage: DeepAgentTurnOutcome["usage"];
   let finishReason: string | undefined;
   let modelReasoning: string | undefined;
@@ -1152,6 +1660,30 @@ export async function* invokeDeepAgentTurn(input: {
     eventSequence += 1;
     return eventSequence;
   };
+
+  const collectRetrievalCalls = () =>
+    retrievalCallOrder
+      .map((callId) => retrievalCallsById.get(callId))
+      .filter((call): call is RetrievalCallTrace => Boolean(call));
+
+  const collectToolCalls = () =>
+    toolCallOrder
+      .map((callId) => toolCallsById.get(callId))
+      .filter((call): call is ToolCallTrace => Boolean(call))
+      .map((call) => {
+        if (call.status !== "running") {
+          return call;
+        }
+
+        const startedAt = toolStartedAtById.get(call.id);
+        return {
+          ...call,
+          status: "completed" as const,
+          latencyMs:
+            call.latencyMs ??
+            (typeof startedAt === "number" ? Date.now() - startedAt : null),
+        };
+      });
 
   const setThinkingStep = (step: Omit<ThinkingStepTrace, "sequence">) => {
     const existing = thinkingStepsById.get(step.id);
@@ -1307,11 +1839,44 @@ export async function* invokeDeepAgentTurn(input: {
           }),
         ]
       : [];
-  const notionTools = createNotionTools({
+  const enabledNotionToolNames = new Set(
+    Object.entries(input.prepared.notionTools)
+      .filter(([, selection]) => selection.enabled !== false)
+      .map(([toolName]) => toolName),
+  );
+  const actionApprovalCursor: ConnectorActionApprovalCursor = { value: 0 };
+  const actionApprovalScope =
+    input.prepared.agentMode === "replay" && input.prepared.agentBaseCheckpoint
+      ? input.prepared.agentBaseCheckpoint.threadId
+      : input.prepared.agentRunThreadId;
+  const actionExecutionCursor: ConnectorActionExecutionCursor | undefined =
+    input.prepared.toolApprovalResume?.sourceweft?.connectorActions?.length
+      ? {
+          refs: input.prepared.toolApprovalResume.sourceweft.connectorActions,
+          value: 0,
+        }
+      : undefined;
+  const connectorToolContext = {
+    actionApprovalCursor,
+    actionExecutionCursor,
+    actionApprovalScope,
+    enabledToolNames:
+      Object.keys(input.prepared.notionTools).length > 0
+        ? enabledNotionToolNames
+        : undefined,
     teamId: input.prepared.workspace.organizationId,
     workspaceId: input.prepared.workspace.id,
     userId: input.prepared.userId,
-  });
+  };
+  const notionTools = (await hasActiveNotionConnector(connectorToolContext))
+    ? createNotionTools(connectorToolContext)
+    : [];
+  const connectorActionTools = await createConnectorActionTools(
+    connectorToolContext,
+    {
+      excludeConnectorTypes: ["notion"],
+    },
+  );
   const toolCommand = resolveToolCommand(input.prepared);
   if (toolCommand?.name === AGENT_TOOL_NAMES.generateImage) {
     const generateImageTool = artifactTools.find(
@@ -1340,6 +1905,7 @@ export async function* invokeDeepAgentTurn(input: {
           agentCheckpoint: {
             beforeInput: null,
             beforeAssistant: null,
+            resume: null,
             final: null,
           },
         },
@@ -1593,6 +2159,7 @@ export async function* invokeDeepAgentTurn(input: {
         agentCheckpoint: {
           beforeInput: null,
           beforeAssistant: null,
+          resume: null,
           final: null,
         },
       },
@@ -1642,9 +2209,23 @@ export async function* invokeDeepAgentTurn(input: {
   }
   const runtimeSources = Array.from(runtimeSourcesById.values());
   const visibleSources = runtimeSources.slice(0, MAX_RUNTIME_SOURCE_REFERENCES);
+  const mcpToolSelection = input.prepared.mcpTools;
+  const mcpToolRuntime =
+    mcpToolSelection.enabled !== false && mcpToolSelection.installIds?.length
+      ? await mcpService.buildLangChainToolsForTurn({
+          workspaceId: input.prepared.workspace.id,
+          userId: input.prepared.userId,
+          threadId: input.prepared.thread.id,
+          runId: input.prepared.runTraceId,
+          installIds: mcpToolSelection.installIds,
+          toolIds: mcpToolSelection.toolIds,
+        })
+      : null;
+  const mcpTools = mcpToolRuntime?.tools ?? [];
   const runtimePrompt = buildAgentRuntimePrompt({
     availableWebTools: webTools.map((tool) => tool.name),
     availableArtifactTools: artifactTools.map((tool) => tool.name),
+    availableMcpTools: mcpTools.map((tool) => tool.name),
     artifactIntent: input.prepared.artifactIntent,
     enabledSkills: input.prepared.enabledSkills,
     invokedSkillIds: input.prepared.invokedSkillIds,
@@ -1692,7 +2273,14 @@ export async function* invokeDeepAgentTurn(input: {
     modelAlias: input.prepared.modelAlias,
     providerModel: input.prepared.providerModel,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
-    tools: [retrievalTool, ...webTools, ...artifactTools, ...notionTools],
+    tools: [
+      retrievalTool,
+      ...webTools,
+      ...artifactTools,
+      ...notionTools,
+      ...connectorActionTools,
+      ...mcpTools,
+    ],
     backend,
     filesystemMounts,
     skills: skillsBackend ? ["/skills/"] : undefined,
@@ -1745,6 +2333,30 @@ export async function* invokeDeepAgentTurn(input: {
         selected_skill_count: input.prepared.enabledSkills.length,
       },
     },
+    interruptOn: {
+      ...(mcpToolRuntime?.interruptOn ?? {}),
+      ...createConnectorActionInterruptConfigs({
+        excludeConnectorTypes: ["notion"],
+      }),
+      [AGENT_TOOL_NAMES.createNotionPage]: createNotionInterruptConfig(
+        AGENT_TOOL_NAMES.createNotionPage,
+      ),
+      [AGENT_TOOL_NAMES.appendNotionPage]: createNotionInterruptConfig(
+        AGENT_TOOL_NAMES.appendNotionPage,
+      ),
+      [AGENT_TOOL_NAMES.updateNotionPageByTitle]: createNotionInterruptConfig(
+        AGENT_TOOL_NAMES.updateNotionPageByTitle,
+      ),
+      [AGENT_TOOL_NAMES.deleteNotionPageByTitle]: createNotionInterruptConfig(
+        AGENT_TOOL_NAMES.deleteNotionPageByTitle,
+      ),
+      [AGENT_TOOL_NAMES.saveArtifactToNotion]: createNotionInterruptConfig(
+        AGENT_TOOL_NAMES.saveArtifactToNotion,
+      ),
+      [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]: createNotionInterruptConfig(
+        AGENT_TOOL_NAMES.saveFinalAnswerToNotion,
+      ),
+    },
   });
 
   const agentMessages = [
@@ -1754,9 +2366,11 @@ export async function* invokeDeepAgentTurn(input: {
     },
   ];
 
-  const baseConfig = input.prepared.agentBaseCheckpoint
-    ? checkpointRefToConfig(input.prepared.agentBaseCheckpoint)
-    : buildAgentConfig(input.prepared.agentRunThreadId);
+  const baseConfig = resolveAgentBaseConfig({
+    agentBaseCheckpoint: input.prepared.agentBaseCheckpoint,
+    agentMode: input.prepared.agentMode,
+    agentRunThreadId: input.prepared.agentRunThreadId,
+  });
   const beforeInputState =
     input.prepared.agentMode === "continue"
       ? await getAgentStateOrNull(agent, baseConfig as AgentRunnableConfig)
@@ -1811,14 +2425,29 @@ export async function* invokeDeepAgentTurn(input: {
   }
 
   const streamInput =
-    input.prepared.agentMode === "replay" ? null : { messages: agentMessages };
-  const stream = await agent.stream(
-    streamInput,
-    runConfig as AgentRunnableConfig,
-  );
+    input.prepared.agentMode === "replay"
+      ? input.prepared.toolApprovalResume
+        ? new Command({
+            resume: commandResumeFromToolApprovalResume(
+              input.prepared.toolApprovalResume,
+            ),
+          })
+        : (() => {
+            throw new ContentError(
+              400,
+              "AGENT_HITL_RESUME_REQUIRED",
+              "DeepAgents HITL replay requires a resume decision payload.",
+            );
+          })()
+      : { messages: agentMessages };
   const suppressModelReasoning = input.llm?.thinking?.mode === "off";
 
-  for await (const streamChunk of stream as AsyncGenerator<unknown>) {
+  try {
+    const stream = await agent.stream(
+      streamInput,
+      runConfig as AgentRunnableConfig,
+    );
+    for await (const streamChunk of stream as AsyncGenerator<unknown>) {
     if (!Array.isArray(streamChunk) || streamChunk.length < 2) {
       continue;
     }
@@ -1846,6 +2475,10 @@ export async function* invokeDeepAgentTurn(input: {
 
       const messageChunk = payload[0];
       const messageMetadata = payload[1];
+      rememberObservedToolCalls(
+        observedToolCallsById,
+        extractToolCallsFromMessage(messageChunk),
+      );
       usage = addUsage(usage, extractUsageFromMessageChunk(messageChunk));
       finishReason =
         extractFinishReasonFromMessageChunk(messageChunk) ?? finishReason;
@@ -1882,10 +2515,152 @@ export async function* invokeDeepAgentTurn(input: {
     }
 
     if (mode === "updates") {
+      rememberObservedToolCalls(
+        observedToolCallsById,
+        extractToolCallsFromUpdates(payload),
+      );
       const assistantFromUpdates =
         resolveAssistantContentFromUpdatesChunk(payload);
       if (assistantFromUpdates && assistantFromUpdates.trim().length > 0) {
-        fallbackAssistantContent = assistantFromUpdates.trim();
+        assistantContentFromUpdates = assistantFromUpdates.trim();
+      }
+      const hitlInterrupts = extractHitlInterrupts(payload);
+      if (hitlInterrupts.length > 0) {
+        currentReasoningSegment = null;
+        if (hasTextSinceLastToolBoundary) {
+          yield {
+            type: "text-interrupted",
+            reason: "tool-call",
+            toolCallId: "tool_confirmation",
+            tool: "tool_confirmation",
+          };
+          assistantContent += "\n";
+          renderBlocks.appendText("\n");
+          yield {
+            type: "text-delta",
+            delta: "\n",
+          };
+          hasTextSinceLastToolBoundary = false;
+        }
+
+        const observedToolCalls = [...observedToolCallsById.values()];
+        const usedToolCallIds = new Set<string>();
+        for (const interruptRequest of hitlInterrupts) {
+          for (const [
+            index,
+            action,
+          ] of interruptRequest.actionRequests.entries()) {
+            const observedToolCall = matchInterruptedToolCall({
+              action,
+              index,
+              observedToolCalls,
+              usedToolCallIds,
+            });
+            const reviewConfig =
+              interruptRequest.reviewConfigs.find(
+                (config) => config.actionName === action.name,
+              ) ?? interruptRequest.reviewConfigs[index];
+            const confirmation = await createHitlConfirmation({
+              action,
+              connectorContext: connectorToolContext,
+              reviewConfig,
+              toolCallId: observedToolCall.id,
+            });
+            const latencyMs = 0;
+            const nextToolCall: ToolCallTrace = {
+              id: observedToolCall.id,
+              tool: action.name,
+              input: action.args,
+              output: confirmation,
+              status: "completed",
+              latencyMs,
+              error: null,
+              sequence:
+                toolCallsById.get(observedToolCall.id)?.sequence ??
+                nextSequence(),
+            };
+            if (!toolCallsById.has(observedToolCall.id)) {
+              toolCallOrder.push(observedToolCall.id);
+            }
+            toolCallsById.set(observedToolCall.id, nextToolCall);
+            const runningToolCall: ToolCallTrace = {
+              ...nextToolCall,
+              output: null,
+              status: "running",
+            };
+            yield {
+              type: "tool-call-start",
+              id: observedToolCall.id,
+              tool: action.name,
+              input: action.args,
+              toolCall: runningToolCall,
+            };
+            yield {
+              type: "tool-call-result",
+              id: observedToolCall.id,
+              tool: action.name,
+              input: action.args,
+              output: confirmation,
+              latencyMs,
+              toolCall: nextToolCall,
+            };
+            yield {
+              type: "tool-call-end",
+              id: observedToolCall.id,
+              tool: action.name,
+              latencyMs,
+              status: "completed",
+              toolCall: nextToolCall,
+            };
+            logger.info("Agent turn paused for DeepAgents HITL interrupt", {
+              workspaceId: input.prepared.workspace.id,
+              threadId: input.prepared.thread.id,
+              userId: input.prepared.userId,
+              toolName: action.name,
+              toolCallId: observedToolCall.id,
+              confirmationId: confirmation.id,
+            });
+          }
+        }
+
+        const interruptCheckpoint =
+          await resolvePendingInterruptCheckpoint({
+            agent,
+            config: runConfig,
+          });
+        if (interruptCheckpoint.pending && interruptCheckpoint.checkpoint) {
+          finalCheckpoint = interruptCheckpoint.checkpoint;
+          beforeAssistantCheckpoint = interruptCheckpoint.checkpoint;
+        }
+        finalCheckpoint ??= interruptCheckpoint.checkpoint;
+        beforeAssistantCheckpoint ??= finalCheckpoint;
+        const finalText = assistantContent.trim();
+        yield {
+          type: "done",
+          outcome: {
+            assistantContent: finalText,
+            usage,
+            finishReason: "tool_confirmation_requested",
+            reasoning: modelReasoning,
+            retrieval: latestToolRetrieval,
+            citations: [],
+            availableCitations: citationRegistry.list(),
+            retrievalCalls: collectRetrievalCalls(),
+            toolCalls: collectToolCalls(),
+            thinkingSteps: listThinkingSteps({
+              stepsById: thinkingStepsById,
+              stepOrder: thinkingStepOrder,
+            }),
+            reasoningSegments,
+            agentCheckpoint: {
+              beforeInput: beforeInputCheckpoint,
+              beforeAssistant: beforeAssistantCheckpoint,
+              resume: interruptCheckpoint.checkpoint,
+              final: finalCheckpoint,
+            },
+          },
+        };
+        return;
       }
       continue;
     }
@@ -2092,6 +2867,21 @@ export async function* invokeDeepAgentTurn(input: {
             }),
           };
         }
+      } else if (isMcpToolName(toolName)) {
+        yield {
+          type: "thinking-step",
+          step: setThinkingStep({
+            id: `tool:${toolCallId}`,
+            kind: "state",
+            title: `Calling MCP ${getMcpToolDisplayName(toolName)}`,
+            status: "in_progress",
+            items: formatToolInputItems(normalizedInput),
+            metadata: {
+              toolCallId,
+              tool: toolName,
+            },
+          }),
+        };
       } else {
         const title = getFilesystemToolStartTitle(toolName, normalizedInput);
         if (title) {
@@ -2154,10 +2944,12 @@ export async function* invokeDeepAgentTurn(input: {
             hitCount: retrievalCall.hitCount,
           }
         : normalizeToolOutputForObservability(toolName, toolPayload.output);
+      const connectorContentError =
+        getConnectorToolOutputContentError(output);
       const outputError =
-        isWebToolName(toolName)
-          ? getWebToolOutputError(output)
-          : null;
+        connectorContentError?.message ??
+        getConnectorToolOutputError(output) ??
+        (isWebToolName(toolName) ? getWebToolOutputError(output) : null);
       const toolStatus: ToolCallStatus = outputError ? "error" : "completed";
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
@@ -2189,6 +2981,9 @@ export async function* invokeDeepAgentTurn(input: {
               : {}),
           },
         });
+      }
+      if (connectorContentError) {
+        throw connectorContentError;
       }
       if (toolStatus === "completed") {
         yield {
@@ -2272,6 +3067,26 @@ export async function* invokeDeepAgentTurn(input: {
             }),
           };
         }
+      } else if (isMcpToolName(toolName)) {
+        yield {
+          type: "thinking-step",
+          step: setThinkingStep({
+            id: `tool:${toolCallId}`,
+            kind: "state",
+            title:
+              toolStatus === "error"
+                ? `MCP ${getMcpToolDisplayName(toolName)} failed`
+                : `Called MCP ${getMcpToolDisplayName(toolName)}`,
+            status: "completed",
+            items: formatToolInputItems(nextToolCall.input),
+            description: outputError ?? undefined,
+            metadata: {
+              latencyMs,
+              toolCallId,
+              tool: toolName,
+            },
+          }),
+        };
       } else {
         const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
         if (title) {
@@ -2322,6 +3137,8 @@ export async function* invokeDeepAgentTurn(input: {
           ? Date.now() - startedAt
           : currentToolCall.latencyMs;
       const errorText = normalizeErrorText(toolPayload.error);
+      const connectorContentError =
+        getConnectorToolErrorTextContentError(errorText);
       const nextToolCall: ToolCallTrace = {
         ...currentToolCall,
         tool: toolName,
@@ -2343,6 +3160,9 @@ export async function* invokeDeepAgentTurn(input: {
             toolName,
           },
         });
+      }
+      if (connectorContentError) {
+        throw connectorContentError;
       }
       yield {
         type: "tool-call-error",
@@ -2399,14 +3219,17 @@ export async function* invokeDeepAgentTurn(input: {
         };
       }
     }
+    }
+  } finally {
+    await mcpToolRuntime?.close();
   }
 
   const streamedAssistantText = assistantContent.trim();
   let assistantText =
     assistantContent.trim().length > 0
       ? assistantContent.trim()
-      : fallbackAssistantContent && fallbackAssistantContent.trim().length > 0
-        ? fallbackAssistantContent.trim()
+      : assistantContentFromUpdates && assistantContentFromUpdates.trim().length > 0
+        ? assistantContentFromUpdates.trim()
         : "Model returned an empty response.";
 
   const finalRetrieval = latestToolRetrieval;
@@ -2498,27 +3321,8 @@ export async function* invokeDeepAgentTurn(input: {
     };
   }
 
-  const retrievalCalls = retrievalCallOrder
-    .map((callId) => retrievalCallsById.get(callId))
-    .filter((call): call is RetrievalCallTrace => Boolean(call));
-
-  const toolCalls = toolCallOrder
-    .map((callId) => toolCallsById.get(callId))
-    .filter((call): call is ToolCallTrace => Boolean(call))
-    .map((call) => {
-      if (call.status !== "running") {
-        return call;
-      }
-
-      const startedAt = toolStartedAtById.get(call.id);
-      return {
-        ...call,
-        status: "completed" as const,
-        latencyMs:
-          call.latencyMs ??
-          (typeof startedAt === "number" ? Date.now() - startedAt : null),
-      };
-    });
+  const retrievalCalls = collectRetrievalCalls();
+  const toolCalls = collectToolCalls();
   const finalState = finalCheckpoint
     ? null
     : await getAgentStateOrNull(agent, runConfig);
@@ -2553,6 +3357,7 @@ export async function* invokeDeepAgentTurn(input: {
       agentCheckpoint: {
         beforeInput: beforeInputCheckpoint,
         beforeAssistant: beforeAssistantCheckpoint,
+        resume: null,
         final: finalCheckpoint,
       },
     },
