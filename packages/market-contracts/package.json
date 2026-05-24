@@ -1,18 +1,31 @@
 {
   "name": "@sourceweft/market-contracts",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
-    "check-types": "tsc --noEmit"
+    "build": "tsup --config tsup.config.ts",
+    "check-types": "tsc --noEmit",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "tsup": "^8.5.0",
     "typescript": "5.9.2"
   }
 }

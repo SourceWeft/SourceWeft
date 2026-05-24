@@ -1,0 +1,61 @@
+name: Publish Market Contracts
+
+on:
+  push:
+    tags:
+      - "market-contracts-v*"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-market-contracts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish @sourceweft/market-contracts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+          scope: "@sourceweft"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check version tag
+        shell: bash
+        run: |
+          version="$(node -p "require('./packages/market-contracts/package.json').version")"
+          expected="refs/tags/market-contracts-v${version}"
+          if [[ "${GITHUB_REF}" != "${expected}" ]]; then
+            echo "Tag ${GITHUB_REF} does not match package version ${version}."
+            echo "Expected ${expected}."
+            exit 1
+          fi
+
+      - name: Check types
+        run: pnpm --filter @sourceweft/market-contracts check-types
+
+      - name: Build
+        run: pnpm --filter @sourceweft/market-contracts build
+
+      - name: Publish
+        run: pnpm --dir packages/market-contracts publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
