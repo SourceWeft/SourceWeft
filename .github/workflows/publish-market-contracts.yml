@@ -9,6 +9,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: publish-market-contracts-${{ github.ref }}
   cancel-in-progress: false
@@ -36,7 +39,7 @@ jobs:
           scope: "@sourceweft"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter @sourceweft/market-contracts
 
       - name: Check version tag
         shell: bash
