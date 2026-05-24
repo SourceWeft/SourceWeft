@@ -59,6 +59,7 @@ jobs:
         run: pnpm --filter @sourceweft/market-contracts build
 
       - name: Publish
-        run: pnpm --dir packages/market-contracts publish --no-git-checks
+        working-directory: packages/market-contracts
+        run: pnpm publish --no-git-checks --access restricted
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
