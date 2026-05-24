@@ -39,7 +39,7 @@ jobs:
           scope: "@sourceweft"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter @sourceweft/market-contracts
+        run: pnpm install --no-frozen-lockfile --filter @sourceweft/market-contracts
 
       - name: Check version tag
         shell: bash
