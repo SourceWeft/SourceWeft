@@ -17,6 +17,12 @@ import type { MessageRecord } from "../../types";
 import type { requireContentWorkspace } from "../../content-support";
 import type { findThreadRecord } from "../thread/repository";
 import type { resolveActiveChatProfileByAlias } from "./model-resolution";
+import type {
+  CommandSuccessCriteria,
+  ResolvedCommandWorkflow,
+  ToolPermission,
+} from "./command-registry";
+import type { TracePart } from "./trace-parts";
 
 export type ChatInputImage = {
   dataUrl: string;
@@ -63,10 +69,11 @@ export type ThreadToolsSelection = {
     enabled?: boolean;
   };
   [AGENT_TOOL_NAMES.searchNotionPages]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.readNotionPage]?: ConnectorToolSelection;
   [AGENT_TOOL_NAMES.createNotionPage]?: ConnectorToolSelection;
   [AGENT_TOOL_NAMES.appendNotionPage]?: ConnectorToolSelection;
-  [AGENT_TOOL_NAMES.updateNotionPageByTitle]?: ConnectorToolSelection;
-  [AGENT_TOOL_NAMES.deleteNotionPageByTitle]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.updateNotionPage]?: ConnectorToolSelection;
+  [AGENT_TOOL_NAMES.deleteNotionPage]?: ConnectorToolSelection;
   [AGENT_TOOL_NAMES.saveArtifactToNotion]?: ConnectorToolSelection;
   [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]?: ConnectorToolSelection;
   mcp?: {
@@ -107,6 +114,7 @@ export type ResolvedThreadCommand = {
   instruction?: string;
   tools?: string[];
   skillSlugs?: string[];
+  workflow?: ResolvedCommandWorkflow;
 };
 
 export type StreamThreadEventInput = {
@@ -134,6 +142,7 @@ export type StreamThreadEventInput = {
   toolApprovalResume?: ToolApprovalResume | null;
   assistantMessageId?: string | null;
   existingUserMessage?: MessageRecord;
+  contextAnchorUserMessageId?: string | null;
   failurePersistence?: "persist-error-turn" | "transient";
   onPreflightThinkingStep?: (step: ThinkingStepTrace) => void;
 };
@@ -149,6 +158,12 @@ export type AgentCheckpointMetadata = {
   beforeAssistant: AgentCheckpointRef | null;
   resume: AgentCheckpointRef | null;
   final: AgentCheckpointRef | null;
+};
+
+export type TraceContinuationMetadata = {
+  maxSequence: number;
+  toolSequenceById: Record<string, number>;
+  traceParts?: TracePart[];
 };
 
 export type PreparedThreadTurn = {
@@ -182,6 +197,8 @@ export type PreparedThreadTurn = {
     toolIds?: string[];
   };
   command: ResolvedThreadCommand | null;
+  commandSuccessCriteria: CommandSuccessCriteria;
+  toolPermissions: Record<string, ToolPermission>;
   generateImageTool: GenerateImageToolSelection | undefined;
   artifactIntent: ArtifactIntentDecision;
   imageProfile:
@@ -207,6 +224,7 @@ export type PreparedThreadTurn = {
   agentBaseCheckpoint: AgentCheckpointRef | null;
   agentRunThreadId: string;
   toolApprovalResume: ToolApprovalResume | null;
+  traceContinuation: TraceContinuationMetadata | null;
   isFirstAssistantResponse: boolean;
   isFirstAssistantAttempt: boolean;
   initialTitle: string;
@@ -247,7 +265,11 @@ export type RetrievalCallTrace = {
   latencyMs: number;
 };
 
-export type ToolCallStatus = "running" | "completed" | "error";
+export type ToolCallStatus =
+  | "running"
+  | "approval_requested"
+  | "completed"
+  | "error";
 
 export type ToolCallTrace = {
   id: string;
@@ -258,6 +280,8 @@ export type ToolCallTrace = {
   latencyMs: number | null;
   error: string | null;
   sequence: number;
+  approvalState?: "approved" | "rejected";
+  approvalConfirmationId?: string;
 };
 
 export type MessageRenderBlock =
@@ -306,6 +330,7 @@ export type FinalizeThreadTurnCommand = {
   thinkingSteps: ThinkingStepTrace[];
   renderBlocks?: MessageRenderBlock[];
   reasoningSegments?: ModelReasoningSegmentTrace[];
+  traceParts?: TracePart[];
   llm?: LlmExecutionConfig;
   operation: "chat.stream" | "chat.complete";
   assistantContent: string;

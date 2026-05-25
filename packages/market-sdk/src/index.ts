@@ -65,6 +65,18 @@ export class MarketClient {
     if (input.category) {
       params.set("category", input.category);
     }
+    if (input.transport) {
+      params.set("transport", input.transport);
+    }
+    if (typeof input.official === "boolean") {
+      params.set("official", String(input.official));
+    }
+    if (typeof input.verified === "boolean") {
+      params.set("verified", String(input.verified));
+    }
+    if (input.runtime) {
+      params.set("runtime", input.runtime);
+    }
     if (typeof input.includeDesktopOnly === "boolean") {
       params.set("includeDesktopOnly", String(input.includeDesktopOnly));
     }

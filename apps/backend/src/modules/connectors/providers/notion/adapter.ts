@@ -51,6 +51,8 @@ type NotionBlock = {
   id: string;
   type: string;
   has_children?: boolean;
+  archived?: boolean;
+  in_trash?: boolean;
   [key: string]: unknown;
 };
 
@@ -162,6 +164,13 @@ type NotionWebhookPayload = {
   [key: string]: unknown;
 };
 
+type NotionRawResponseLogEntry = {
+  body: unknown;
+  method: string;
+  path: string;
+  status: number;
+};
+
 const jsonObjectSchema = { type: "object", additionalProperties: true };
 
 const actionInputSchemas: Record<string, Record<string, unknown>> = {
@@ -172,10 +181,42 @@ const actionInputSchemas: Record<string, Record<string, unknown>> = {
     properties: {
       title: { type: "string" },
       content: { type: "string" },
-      parentPageId: { type: "string" },
-      dataSourceId: { type: "string" },
+      parentPageId: {
+        type: "string",
+        description:
+          "Optional explicit parent page ID. Omit by default so Notion creates the page in the authorized workspace selected by this connector.",
+      },
+      pageId: {
+        type: "string",
+        description:
+          "Optional alias for parentPageId. Omit by default unless the user explicitly requested and confirmed a parent page.",
+      },
+      dataSourceId: {
+        type: "string",
+        description:
+          "Optional explicit data source ID. Omit by default unless the user explicitly requested and confirmed a target data source.",
+      },
       sourceId: { type: "string" },
       targetHint: { type: "string" },
+    },
+  },
+  "notion.page.save_artifact": {
+    type: "object",
+    required: ["title", "artifactId"],
+    additionalProperties: false,
+    properties: {
+      title: { type: "string" },
+      artifactId: { type: "string" },
+      artifactUrl: { type: "string" },
+    },
+  },
+  "notion.page.save_final_answer": {
+    type: "object",
+    required: ["title", "content"],
+    additionalProperties: false,
+    properties: {
+      title: { type: "string" },
+      content: { type: "string" },
     },
   },
   "notion.page.append": {
@@ -198,10 +239,21 @@ const actionInputSchemas: Record<string, Record<string, unknown>> = {
   },
   "notion.page.trash": {
     type: "object",
-    required: ["pageId"],
+    anyOf: [{ required: ["pageId"] }, { required: ["pageIds"] }],
     additionalProperties: false,
     properties: {
-      pageId: { type: "string" },
+      pageId: {
+        type: "string",
+        description:
+          "Single Notion page ID to move to trash. Prefer pageIds for batch deletion.",
+      },
+      pageIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "One or more Notion page IDs to move to trash. Use this for duplicate-title or batch deletion.",
+      },
+      deleteFromKnowledgeBase: { type: "boolean" },
     },
   },
   "notion.comment.create": {
@@ -232,22 +284,31 @@ const actionInputSchemas: Record<string, Record<string, unknown>> = {
       query: { type: "string" },
     },
   },
-  "notion.page.update_by_title": {
+  "notion.page.read": {
     type: "object",
-    required: ["title", "content"],
-    additionalProperties: true,
-    properties: {
-      title: { type: "string" },
-      content: { type: "string" },
-    },
-  },
-  "notion.page.trash_by_title": {
-    type: "object",
-    required: ["title"],
+    required: ["pageId"],
     additionalProperties: false,
     properties: {
-      title: { type: "string" },
-      deleteFromKnowledgeBase: { type: "boolean" },
+      pageId: { type: "string" },
+      includeProperties: { type: "boolean" },
+      includeContent: { type: "boolean" },
+      maxChars: { type: "number" },
+    },
+  },
+  "notion.page.update": {
+    type: "object",
+    required: ["pageId"],
+    additionalProperties: true,
+    properties: {
+      pageId: { type: "string" },
+      content: { type: "string" },
+      mode: {
+        type: "string",
+        enum: ["append", "replace"],
+        description:
+          "append adds markdown blocks after existing content. replace archives existing top-level blocks before writing content.",
+      },
+      properties: { type: "object" },
     },
   },
   "notion.file_upload.create": {
@@ -304,12 +365,38 @@ const notionManifest: ConnectorManifest = {
       displayName: "Create Notion page",
       agentToolName: "create_notion_page",
       description:
-        "Propose creating a Notion page. Requires user approval before execution.",
+        "Propose creating a Notion page in the authorized workspace selected by this connector. Only include parentPageId/pageId or dataSourceId when the user explicitly requested and confirmed a parent page or data source. Requires user approval before execution.",
       visibility: "agent",
       capabilities: ["connector_write", "connector_create"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema: actionInputSchemas["notion.page.create"] ?? jsonObjectSchema,
+    },
+    {
+      type: "notion.page.save_artifact",
+      displayName: "Save artifact to Notion",
+      agentToolName: "save_artifact_to_notion",
+      description:
+        "Save an artifact reference to a new Notion page in the authorized workspace selected by this connector. Requires user approval before execution.",
+      visibility: "agent",
+      capabilities: ["connector_write", "connector_create", "artifact"],
+      riskLevel: "medium",
+      requiresApproval: true,
+      inputSchema:
+        actionInputSchemas["notion.page.save_artifact"] ?? jsonObjectSchema,
+    },
+    {
+      type: "notion.page.save_final_answer",
+      displayName: "Save final answer to Notion",
+      agentToolName: "save_final_answer_to_notion",
+      description:
+        "Save the final answer markdown to a new Notion page in the authorized workspace selected by this connector. Requires user approval before execution.",
+      visibility: "agent",
+      capabilities: ["connector_write", "connector_create"],
+      riskLevel: "medium",
+      requiresApproval: true,
+      inputSchema:
+        actionInputSchemas["notion.page.save_final_answer"] ?? jsonObjectSchema,
     },
     {
       type: "notion.page.append",
@@ -338,9 +425,10 @@ const notionManifest: ConnectorManifest = {
     {
       type: "notion.page.trash",
       displayName: "Move Notion page to trash",
+      agentToolName: "delete_notion_page",
       description:
-        "Move an existing Notion page to trash by page id. Intended for internal workflows.",
-      visibility: "internal",
+        "Move one or more existing Notion pages to trash by page ID. Use pageIds for batch deletion and whenever page titles are duplicated.",
+      visibility: "agent",
       capabilities: ["connector_write", "connector_delete"],
       riskLevel: "high",
       requiresApproval: true,
@@ -374,7 +462,7 @@ const notionManifest: ConnectorManifest = {
       displayName: "Find Notion page",
       agentToolName: "search_notion_pages",
       description:
-        "Search indexed Notion pages by title. Use before updating or deleting a Notion page by title.",
+        "Search Notion pages and return page IDs. Use this for discovery before reading, updating, or deleting when the user did not provide a page ID.",
       visibility: "agent",
       capabilities: ["connector_read"],
       riskLevel: "low",
@@ -382,30 +470,30 @@ const notionManifest: ConnectorManifest = {
       inputSchema: actionInputSchemas["notion.page.find"] ?? jsonObjectSchema,
     },
     {
-      type: "notion.page.update_by_title",
-      displayName: "Update Notion page by title",
-      agentToolName: "update_notion_page_by_title",
+      type: "notion.page.read",
+      displayName: "Read Notion page",
+      agentToolName: "read_notion_page",
       description:
-        "Propose updating a synced Notion page by exact title. Requires user approval before execution.",
+        "Read a Notion page by page ID and return markdown content plus page metadata.",
+      visibility: "agent",
+      capabilities: ["connector_read"],
+      riskLevel: "low",
+      requiresApproval: false,
+      inputSchema:
+        actionInputSchemas["notion.page.read"] ?? jsonObjectSchema,
+    },
+    {
+      type: "notion.page.update",
+      displayName: "Update Notion page",
+      agentToolName: "update_notion_page",
+      description:
+        "Propose updating a Notion page by page ID. Supports appending markdown content, replacing top-level page content, and updating page properties.",
       visibility: "agent",
       capabilities: ["connector_write", "connector_update"],
       riskLevel: "medium",
       requiresApproval: true,
       inputSchema:
-        actionInputSchemas["notion.page.update_by_title"] ?? jsonObjectSchema,
-    },
-    {
-      type: "notion.page.trash_by_title",
-      displayName: "Move Notion page to trash by title",
-      agentToolName: "delete_notion_page_by_title",
-      description:
-        "Propose moving a synced Notion page to trash by exact title. Requires user approval before execution.",
-      visibility: "agent",
-      capabilities: ["connector_write", "connector_delete"],
-      riskLevel: "high",
-      requiresApproval: true,
-      inputSchema:
-        actionInputSchemas["notion.page.trash_by_title"] ?? jsonObjectSchema,
+        actionInputSchemas["notion.page.update"] ?? jsonObjectSchema,
     },
     {
       type: "notion.file_upload.create",
@@ -483,6 +571,14 @@ function asString(value: unknown): string {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .map((item) => asString(item).trim())
+        .filter((item) => item.length > 0)
+    : [];
 }
 
 function getRequestString(
@@ -1455,7 +1551,7 @@ async function parseNotionResponse<T>(response: Response): Promise<T> {
       response.status,
       `NOTION_${(error.code || "REQUEST_FAILED").toUpperCase()}`,
       error.message || response.statusText || "Notion request failed",
-      { status: response.status },
+      { rawResponseJson: payload, status: response.status },
     );
   }
   return payload as T;
@@ -1479,7 +1575,17 @@ function sleep(ms: number) {
 }
 
 class NotionApiClient {
+  private rawResponseLog: NotionRawResponseLogEntry[] = [];
+
   constructor(private readonly accessToken: string) {}
+
+  clearRawResponseLog() {
+    this.rawResponseLog = [];
+  }
+
+  getRawResponseLog() {
+    return [...this.rawResponseLog];
+  }
 
   async request<T>(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
@@ -1499,14 +1605,28 @@ class NotionApiClient {
         response.ok ||
         (response.status !== 429 && (response.status < 500 || response.status >= 600))
       ) {
-        return parseNotionResponse<T>(response);
+        const payload = await parseNotionResponse<T>(response);
+        this.rawResponseLog.push({
+          body: payload,
+          method: init.method ?? "GET",
+          path,
+          status: response.status,
+        });
+        return payload;
       }
       lastResponse = response;
       const delayMs = retryAfterMs(response) ?? 500 * 2 ** attempt;
       await sleep(delayMs);
     }
     if (lastResponse) {
-      return parseNotionResponse<T>(lastResponse);
+      const payload = await parseNotionResponse<T>(lastResponse);
+      this.rawResponseLog.push({
+        body: payload,
+        method: init.method ?? "GET",
+        path,
+        status: lastResponse.status,
+      });
+      return payload;
     }
     throw new ConnectorError(
       502,
@@ -1583,6 +1703,13 @@ class NotionApiClient {
     return this.request(`/blocks/${encodeURIComponent(blockId)}/children`, {
       method: "PATCH",
       body: JSON.stringify({ children }),
+    });
+  }
+
+  updateBlock(blockId: string, payload: Record<string, unknown>) {
+    return this.request(`/blocks/${encodeURIComponent(blockId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     });
   }
 }
@@ -1807,6 +1934,28 @@ function parseJsonObject(value: string) {
       "Notion webhook payload must be JSON",
     );
   }
+}
+
+function getRequestBoolean(
+  request: Record<string, unknown>,
+  key: string,
+  defaultValue: boolean,
+) {
+  return typeof request[key] === "boolean"
+    ? (request[key] as boolean)
+    : defaultValue;
+}
+
+function getRequestPositiveInteger(
+  request: Record<string, unknown>,
+  key: string,
+  defaultValue: number,
+) {
+  const value = request[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return defaultValue;
+  }
+  return Math.max(1, Math.floor(value));
 }
 
 function signatureMatches(input: {
@@ -2051,7 +2200,9 @@ async function createPageAction(
 ): Promise<ConnectorActionResult> {
   const title = getRequestString(request, "title");
   const content = getRequestString(request, "content");
-  const parentPageId = getRequestString(request, "parentPageId", false);
+  const parentPageId =
+    getRequestString(request, "parentPageId", false) ||
+    getRequestString(request, "pageId", false);
   const dataSourceId = getRequestString(request, "dataSourceId", false);
   const parent = dataSourceId
     ? { data_source_id: dataSourceId }
@@ -2084,6 +2235,20 @@ async function createPageAction(
       title,
     },
   };
+}
+
+async function saveArtifactAction(
+  client: NotionApiClient,
+  request: Record<string, unknown>,
+): Promise<ConnectorActionResult> {
+  const artifactId = getRequestString(request, "artifactId");
+  const artifactUrl = getRequestString(request, "artifactUrl", false);
+  return createPageAction(client, {
+    title: getRequestString(request, "title"),
+    content: artifactUrl
+      ? `[Artifact ${artifactId}](${artifactUrl})`
+      : `Artifact: ${artifactId}`,
+  });
 }
 
 async function appendPageAction(
@@ -2131,17 +2296,35 @@ async function trashPageAction(
   client: NotionApiClient,
   request: Record<string, unknown>,
 ): Promise<ConnectorActionResult> {
-  const pageId = getRequestString(request, "pageId");
-  await client.request(`/pages/${encodeURIComponent(pageId)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ in_trash: true }),
-  });
+  const pageIds = Array.from(
+    new Set([
+      ...asStringArray(request.pageIds),
+      ...(getRequestString(request, "pageId", false)
+        ? [getRequestString(request, "pageId", false)]
+        : []),
+    ]),
+  );
+  if (pageIds.length === 0) {
+    throw new ConnectorError(
+      400,
+      "NOTION_ACTION_INPUT_INVALID",
+      "requestJson.pageId or requestJson.pageIds is required",
+    );
+  }
+  for (const pageId of pageIds) {
+    await client.request(`/pages/${encodeURIComponent(pageId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ in_trash: true }),
+    });
+  }
   return {
-    externalId: `page:${pageId}`,
-    resyncExternalIds: [`page:${pageId}`],
+    externalId: pageIds.length === 1 ? `page:${pageIds[0]}` : null,
+    resyncExternalIds: pageIds.map((pageId) => `page:${pageId}`),
     shouldResync: true,
     result: {
-      pageId,
+      pageId: pageIds[0],
+      pageIds,
+      count: pageIds.length,
       trashed: true,
     },
   };
@@ -2213,23 +2396,6 @@ async function queryDataSourceAction(
   };
 }
 
-async function findPagesByTitle(client: NotionApiClient, title: string) {
-  const matches: NotionPage[] = [];
-  for await (const value of client.search({
-    query: title,
-    filter: { property: "object", value: "page" },
-  })) {
-    if (asString(value.object) !== "page") {
-      continue;
-    }
-    const page = value as NotionPage;
-    if (findPageTitle(page).toLowerCase() === title.toLowerCase()) {
-      matches.push(page);
-    }
-  }
-  return matches;
-}
-
 async function findPageAction(
   client: NotionApiClient,
   request: Record<string, unknown>,
@@ -2262,72 +2428,141 @@ async function findPageAction(
   };
 }
 
-async function resolveSinglePageByTitle(client: NotionApiClient, title: string) {
-  const pages = await findPagesByTitle(client, title);
-  if (pages.length === 0) {
-    throw new ConnectorError(
-      404,
-      "NOTION_PAGE_NOT_FOUND",
-      `No Notion page matched title '${title}'`,
-    );
-  }
-  if (pages.length > 1) {
-    throw new ConnectorError(
-      409,
-      "NOTION_PAGE_TITLE_AMBIGUOUS",
-      `Multiple Notion pages matched title '${title}'`,
-      {
-        candidates: pages.map((page) => ({
-          pageId: page.id,
-          title: findPageTitle(page),
-          url: buildNotionUri(page.id, page.url),
-        })),
-      },
-    );
-  }
-  return pages[0]!;
+async function readPageMarkdown(
+  client: NotionApiClient,
+  pageId: string,
+) {
+  const page = await client.retrievePage(pageId);
+  const resolver = createNotionTitleResolver(client);
+  const properties = await normalizeNotionPageProperties(
+    page.properties,
+    resolver,
+  );
+  const location = await resolveNotionPageLocation(page, resolver);
+  const blocks = await collectBlocksMarkdown(client, page.id);
+  const markdown = pageToMarkdown({
+    page,
+    properties,
+    location,
+    blocksMarkdown: blocks.markdown,
+  });
+
+  return {
+    page,
+    properties,
+    location,
+    blocks,
+    markdown,
+  };
 }
 
-async function updatePageByTitleAction(
+function truncateMarkdown(markdown: string, maxChars: number) {
+  if (markdown.length <= maxChars) {
+    return { markdown, truncated: false };
+  }
+  return {
+    markdown: markdown.slice(0, maxChars),
+    truncated: true,
+  };
+}
+
+async function readPageAction(
   client: NotionApiClient,
   request: Record<string, unknown>,
 ): Promise<ConnectorActionResult> {
-  const title = getRequestString(request, "title");
-  const content = getRequestString(request, "content");
-  const page = await resolveSinglePageByTitle(client, title);
-  await appendMarkdownInBatches(client, page.id, content);
+  const pageId = getRequestString(request, "pageId");
+  const includeContent = getRequestBoolean(request, "includeContent", true);
+  const includeProperties = getRequestBoolean(request, "includeProperties", true);
+  const maxChars = getRequestPositiveInteger(request, "maxChars", 20000);
+  const read = await readPageMarkdown(client, pageId);
+  const markdownResult = includeContent
+    ? truncateMarkdown(read.markdown, maxChars)
+    : { markdown: "", truncated: false };
+
   return {
-    externalId: `page:${page.id}`,
-    resyncExternalIds: [`page:${page.id}`],
-    shouldResync: true,
+    externalId: `page:${read.page.id}`,
     result: {
-      pageId: page.id,
-      title: findPageTitle(page),
-      updated: true,
-      contentHash: computeHash(content),
+      pageId: read.page.id,
+      title: findPageTitle(read.page),
+      url: buildNotionUri(read.page.id, read.page.url),
+      lastEditedTime: read.page.last_edited_time ?? null,
+      archived: Boolean(read.page.archived),
+      inTrash: Boolean(read.page.in_trash),
+      path: read.location.path,
+      parent: read.location.parent,
+      ...(includeProperties ? { properties: read.properties.values } : {}),
+      ...(includeContent ? { markdown: markdownResult.markdown } : {}),
+      truncated: markdownResult.truncated,
+      contentHash: computeHash(read.markdown),
+      skippedBlockTypes: read.blocks.skippedBlockTypes,
+      skippedBlockCount: read.blocks.skippedBlockCount,
     },
   };
 }
 
-async function trashPageByTitleAction(
+async function archiveTopLevelBlocks(client: NotionApiClient, pageId: string) {
+  const blockIds: string[] = [];
+  for await (const block of client.listBlockChildren(pageId)) {
+    if (!block.archived && !block.in_trash) {
+      blockIds.push(block.id);
+    }
+  }
+  for (const blockId of blockIds) {
+    await client.updateBlock(blockId, { archived: true });
+  }
+  return blockIds.length;
+}
+
+async function updatePageAction(
   client: NotionApiClient,
   request: Record<string, unknown>,
 ): Promise<ConnectorActionResult> {
-  const title = getRequestString(request, "title");
-  const page = await resolveSinglePageByTitle(client, title);
-  await client.request(`/pages/${encodeURIComponent(page.id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ in_trash: true }),
-  });
+  const pageId = getRequestString(request, "pageId");
+  const content = getRequestString(request, "content", false);
+  const mode = getRequestString(request, "mode", false) || "append";
+  const properties = asRecord(request.properties);
+  if (!content && Object.keys(properties).length === 0) {
+    throw new ConnectorError(
+      400,
+      "NOTION_ACTION_INPUT_INVALID",
+      "requestJson.content or requestJson.properties is required",
+    );
+  }
+  if (mode !== "append" && mode !== "replace") {
+    throw new ConnectorError(
+      400,
+      "NOTION_ACTION_INPUT_INVALID",
+      "requestJson.mode must be append or replace",
+    );
+  }
+  if (Object.keys(properties).length > 0) {
+    await client.request(`/pages/${encodeURIComponent(pageId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ properties }),
+    });
+  }
+  const replacedBlockCount = content && mode === "replace"
+    ? await archiveTopLevelBlocks(client, pageId)
+    : 0;
+  if (content) {
+    await appendMarkdownInBatches(client, pageId, content);
+  }
   return {
-    externalId: `page:${page.id}`,
-    resyncExternalIds: [`page:${page.id}`],
+    externalId: `page:${pageId}`,
+    resyncExternalIds: [`page:${pageId}`],
     shouldResync: true,
     result: {
-      pageId: page.id,
-      title: findPageTitle(page),
-      trashed: true,
-      deleteFromKnowledgeBase: Boolean(request.deleteFromKnowledgeBase),
+      pageId,
+      updated: true,
+      mode,
+      propertyNames: Object.keys(properties),
+      ...(content
+        ? {
+            contentHash: computeHash(content),
+            contentUpdated: true,
+            replacedBlockCount,
+          }
+        : {}),
     },
   };
 }
@@ -2554,29 +2789,48 @@ export const notionAdapter: ConnectorAdapter = {
     input: ConnectorActionInput,
   ): Promise<ConnectorActionResult> {
     const client = createNotionClient(input);
+    client.clearRawResponseLog();
+    let result: ConnectorActionResult;
     switch (input.actionType) {
       case "notion.page.create":
-        return createPageAction(client, input.request);
+        result = await createPageAction(client, input.request);
+        break;
+      case "notion.page.save_artifact":
+        result = await saveArtifactAction(client, input.request);
+        break;
+      case "notion.page.save_final_answer":
+        result = await createPageAction(client, input.request);
+        break;
       case "notion.page.append":
-        return appendPageAction(client, input.request);
+        result = await appendPageAction(client, input.request);
+        break;
       case "notion.page.update_properties":
-        return updatePagePropertiesAction(client, input.request);
+        result = await updatePagePropertiesAction(client, input.request);
+        break;
       case "notion.page.trash":
-        return trashPageAction(client, input.request);
+        result = await trashPageAction(client, input.request);
+        break;
       case "notion.comment.create":
-        return createCommentAction(client, input.request);
+        result = await createCommentAction(client, input.request);
+        break;
       case "notion.data_source.query":
-        return queryDataSourceAction(client, input.request);
+        result = await queryDataSourceAction(client, input.request);
+        break;
       case "notion.page.find":
-        return findPageAction(client, input.request);
-      case "notion.page.update_by_title":
-        return updatePageByTitleAction(client, input.request);
-      case "notion.page.trash_by_title":
-        return trashPageByTitleAction(client, input.request);
+        result = await findPageAction(client, input.request);
+        break;
+      case "notion.page.read":
+        result = await readPageAction(client, input.request);
+        break;
+      case "notion.page.update":
+        result = await updatePageAction(client, input.request);
+        break;
       case "notion.file_upload.create":
-        return createFileUploadAction(client, input.request);
+        result = await createFileUploadAction(client, input.request);
+        break;
       case "notion.file_upload.attach_to_page":
-        return attachFileUploadToPageAction(client, input.request);
+        result = await attachFileUploadToPageAction(client, input.request);
+        break;
       default:
         throw new ConnectorError(
           400,
@@ -2584,5 +2838,9 @@ export const notionAdapter: ConnectorAdapter = {
           `Notion action '${input.actionType}' is not supported`,
         );
     }
+    return {
+      ...result,
+      rawResponseJson: client.getRawResponseLog(),
+    };
   },
 };

@@ -65,6 +65,37 @@ test("validateObjectWithJsonSchema rejects additional properties when disabled",
   );
 });
 
+test("validateObjectWithJsonSchema accepts anyOf object variants", () => {
+  const schema = {
+    type: "object",
+    anyOf: [{ required: ["pageId"] }, { required: ["pageIds"] }],
+    additionalProperties: false,
+    properties: {
+      pageId: { type: "string" },
+      pageIds: { type: "array" },
+    },
+  };
+
+  assert.doesNotThrow(() =>
+    validateObjectWithJsonSchema({
+      label: "requestJson",
+      schema,
+      value: { pageIds: ["page_1", "page_2"] },
+    }),
+  );
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "requestJson",
+        schema,
+        value: {},
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+});
+
 test("normalizeConnectorConfigJson strips deprecated Notion config fields", () => {
   const input = {
     includePages: true,

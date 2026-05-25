@@ -44,7 +44,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { llmObservabilityClient } from "../../../lib/sdk";
+import { contentClient, llmObservabilityClient } from "../../../lib/sdk";
 import { useDashboardChatState } from "../_components/dashboard-chat-state";
 import type {
   LlmGenerationDetail,
@@ -52,6 +52,8 @@ import type {
   LlmSpanDetail,
   LlmTraceDetailResponse,
   LlmTraceSummary,
+  WorkspaceMcpActionRun,
+  WorkspaceMcpToolRun,
 } from "@sourceweft/sdk";
 
 const LIST_LIMIT = 50;
@@ -59,6 +61,7 @@ const TRACE_DETAIL_OBSERVATION_LIMIT = 200;
 const TRACE_TREE_ROW_HEIGHT_PX = 48;
 const TRACE_LOG_ROW_HEIGHT_PX = 49;
 const TRACE_VIRTUALIZE_THRESHOLD = 120;
+const MCP_RUN_LIMIT = 50;
 const ALL_WORKSPACES = "__all__";
 const EMPTY_TREE_ROWS: TreeRow[] = [];
 const NOISY_MESSAGE_FIELDS = new Set([
@@ -1529,6 +1532,205 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
+function compactJson(value: unknown) {
+  try {
+    const text = JSON.stringify(value);
+    return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+  } catch {
+    return "--";
+  }
+}
+
+function McpRunTable({
+  actionRuns,
+  loading,
+  onLoadMore,
+  nextCursor,
+  toolRuns,
+}: {
+  actionRuns: WorkspaceMcpActionRun[];
+  loading: boolean;
+  nextCursor: string | null;
+  onLoadMore: () => void;
+  toolRuns: WorkspaceMcpToolRun[];
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-hidden">
+      <ScrollArea className="h-full">
+        <div className="border-b border-border bg-background px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">
+                MCP Activity
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Redacted MCP tool calls and approval proposals for the selected
+                workspace.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Badge className="h-6 px-2 text-[11px]" variant="outline">
+                {toolRuns.length} tool calls
+              </Badge>
+              <Badge className="h-6 px-2 text-[11px]" variant="outline">
+                {actionRuns.length} approvals
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        <div className="hidden min-w-0 overflow-x-auto md:block">
+          <table className="w-full min-w-[1320px] table-fixed text-xs">
+            <thead className="sticky top-0 z-10 border-b border-border bg-card text-left text-[11px] text-muted-foreground">
+              <tr>
+                <th className="w-[150px] px-3 py-1.5 font-medium">Time</th>
+                <th className="w-[190px] px-3 py-1.5 font-medium">Server</th>
+                <th className="w-[180px] px-3 py-1.5 font-medium">Tool</th>
+                <th className="w-[90px] px-3 py-1.5 font-medium">Status</th>
+                <th className="w-[90px] px-3 py-1.5 font-medium">Risk</th>
+                <th className="w-[90px] px-3 py-1.5 font-medium">Latency</th>
+                <th className="w-[240px] px-3 py-1.5 font-medium">Input</th>
+                <th className="w-[240px] px-3 py-1.5 font-medium">Output / Error</th>
+                <th className="w-[120px] px-3 py-1.5 font-medium">Thread</th>
+              </tr>
+            </thead>
+            <tbody>
+              {toolRuns.map((run) => (
+                <tr className="border-b border-border" key={run.id}>
+                  <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
+                    {formatTime(run.createdAt)}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <div className="truncate font-medium text-foreground">
+                      {run.install?.name ?? "Unknown MCP"}
+                    </div>
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {run.install?.marketIdentifier ?? run.installId ?? "--"}
+                    </div>
+                  </td>
+                  <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                    {run.serverToolName}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <Badge
+                      className={cn(
+                        "h-5 border px-1.5 text-[10px]",
+                        statusClassName(
+                          run.status === "failed"
+                            ? "error"
+                            : run.status === "running"
+                              ? "running"
+                              : "ok",
+                        ),
+                      )}
+                      variant="outline"
+                    >
+                      {run.status}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
+                      {run.risk}
+                    </Badge>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
+                    {formatLatency(run.latencyMs)}
+                  </td>
+                  <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                    {compactJson(run.redactedInput)}
+                  </td>
+                  <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                    {run.errorMessage ?? compactJson(run.redactedOutput)}
+                  </td>
+                  <td className="truncate px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                    {run.threadId ?? "--"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="md:hidden">
+          {toolRuns.map((run) => (
+            <article className="border-b border-border px-3 py-3" key={run.id}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-foreground">
+                    {run.install?.name ?? "Unknown MCP"}
+                  </div>
+                  <div className="truncate font-mono text-[11px] text-muted-foreground">
+                    {run.serverToolName}
+                  </div>
+                </div>
+                <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
+                  {run.status}
+                </Badge>
+              </div>
+              <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
+                {compactJson(run.redactedInput)}
+              </p>
+            </article>
+          ))}
+        </div>
+
+        {toolRuns.length === 0 && !loading ? (
+          <div className="p-6 text-sm text-muted-foreground">
+            No MCP tool calls found for this workspace.
+          </div>
+        ) : null}
+
+        {nextCursor ? (
+          <div className="border-t border-border p-3">
+            <Button
+              className="w-full"
+              disabled={loading}
+              onClick={onLoadMore}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Load older MCP calls
+            </Button>
+          </div>
+        ) : null}
+
+        {actionRuns.length > 0 ? (
+          <div className="border-t border-border bg-muted/20 px-4 py-3">
+            <h3 className="text-xs font-semibold text-foreground">
+              Approval Proposals
+            </h3>
+            <div className="mt-2 grid gap-2 lg:grid-cols-2">
+              {actionRuns.slice(0, 8).map((run) => (
+                <article
+                  className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                  key={run.id}
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
+                      {run.status}
+                    </Badge>
+                    <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                      {run.install?.name ?? "MCP"} / {run.serverToolName}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {formatTime(run.createdAt)}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-muted-foreground">
+                    {run.requestPreview}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </ScrollArea>
+    </div>
+  );
+}
+
 function selectedNodeData(
   detail: LlmTraceDetailResponse | null,
   selected: SelectedNode | null,
@@ -2376,13 +2578,18 @@ function NodeDetail({
 
 export default function ObservabilityPage() {
   const { organizationId, switchWorkspace, workspaceId, workspaceName, workspaces } = useDashboardChatState();
+  const [activeView, setActiveView] = React.useState<"traces" | "mcp">("traces");
   const [traces, setTraces] = React.useState<LlmTraceSummary[]>([]);
+  const [mcpRuns, setMcpRuns] = React.useState<WorkspaceMcpToolRun[]>([]);
+  const [mcpActionRuns, setMcpActionRuns] = React.useState<WorkspaceMcpActionRun[]>([]);
   const [detail, setDetail] = React.useState<LlmTraceDetailResponse | null>(null);
   const [selectedTraceKey, setSelectedTraceKey] = React.useState<string | null>(null);
   const [selectedNode, setSelectedNode] = React.useState<SelectedNode | null>(null);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [mcpNextCursor, setMcpNextCursor] = React.useState<string | null>(null);
   const [loadingList, setLoadingList] = React.useState(false);
+  const [loadingMcpRuns, setLoadingMcpRuns] = React.useState(false);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
   const [loadingMoreObservations, setLoadingMoreObservations] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -2398,6 +2605,7 @@ export default function ObservabilityPage() {
     workspaceId ?? (organizationId ? ALL_WORKSPACES : null),
   );
   const listRequestIdRef = React.useRef(0);
+  const mcpRequestIdRef = React.useRef(0);
   const detailRequestIdRef = React.useRef(0);
   const allWorkspacesSelected = selectedWorkspaceScope === ALL_WORKSPACES;
   const selectedWorkspaceId = allWorkspacesSelected ? null : selectedWorkspaceScope;
@@ -2457,6 +2665,57 @@ export default function ObservabilityPage() {
     loadTracesRef.current = loadTraces;
   }, [loadTraces]);
 
+  const loadMcpRuns = React.useCallback(async (cursor?: string | null) => {
+    if (!selectedWorkspaceId) {
+      setMcpRuns([]);
+      setMcpActionRuns([]);
+      setMcpNextCursor(null);
+      return;
+    }
+    const requestId = mcpRequestIdRef.current + 1;
+    mcpRequestIdRef.current = requestId;
+    setLoadingMcpRuns(true);
+    setError(null);
+    try {
+      const [toolRunsPage, actionRunsPage] = await Promise.all([
+        contentClient.listWorkspaceMcpRuns(selectedWorkspaceId, {
+          cursor: cursor ?? undefined,
+          limit: MCP_RUN_LIMIT,
+        }),
+        cursor
+          ? Promise.resolve({ items: [], nextCursor: null })
+          : contentClient.listWorkspaceMcpActionRuns(selectedWorkspaceId, {
+              limit: MCP_RUN_LIMIT,
+            }),
+      ]);
+      if (requestId !== mcpRequestIdRef.current) {
+        return;
+      }
+      setMcpRuns((current) =>
+        cursor ? [...current, ...toolRunsPage.items] : toolRunsPage.items,
+      );
+      if (!cursor) {
+        setMcpActionRuns(actionRunsPage.items);
+      }
+      setMcpNextCursor(toolRunsPage.nextCursor);
+    } catch (err) {
+      if (requestId !== mcpRequestIdRef.current) {
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Failed to load MCP activity");
+    } finally {
+      if (requestId === mcpRequestIdRef.current) {
+        setLoadingMcpRuns(false);
+      }
+    }
+  }, [selectedWorkspaceId]);
+
+  const loadMcpRunsRef = React.useRef(loadMcpRuns);
+
+  React.useEffect(() => {
+    loadMcpRunsRef.current = loadMcpRuns;
+  }, [loadMcpRuns]);
+
   const traceNameOptions = React.useMemo(
     () => Array.from(new Set(traces.map((trace) => trace.name))).sort((a, b) => a.localeCompare(b)),
     [traces],
@@ -2483,6 +2742,7 @@ export default function ObservabilityPage() {
     setNextCursor(null);
     setLoadingMoreObservations(false);
     void loadTracesRef.current(null);
+    void loadMcpRunsRef.current(null);
   }, [allWorkspacesSelected, organizationId, selectedWorkspaceId, selectedWorkspaceScope]);
 
   const openTrace = React.useCallback(async (traceId: string, traceWorkspaceId?: string | null) => {
@@ -2669,13 +2929,60 @@ export default function ObservabilityPage() {
                 <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="secondary">Page size {LIST_LIMIT}</Badge>
                 {allWorkspacesSelected ? <Badge className="h-6 shrink-0 px-2 text-[11px]" variant="outline">All workspaces</Badge> : null}
               </div>
-              <Button className="h-8 shrink-0 px-2 text-xs" onClick={() => void loadTraces(null)} size="sm" type="button" variant="outline">
-                {loadingList ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                Refresh
-              </Button>
+              <div className="flex items-center gap-2">
+                <Tabs
+                  onValueChange={(value) =>
+                    setActiveView(value === "mcp" ? "mcp" : "traces")
+                  }
+                  value={activeView}
+                >
+                  <TabsList className="h-8" variant="line">
+                    <TabsTrigger className="px-2.5 text-xs" value="traces">
+                      LLM Traces
+                    </TabsTrigger>
+                    <TabsTrigger className="px-2.5 text-xs" value="mcp">
+                      MCP Activity
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <Button
+                  className="h-8 shrink-0 px-2 text-xs"
+                  onClick={() =>
+                    activeView === "mcp"
+                      ? void loadMcpRuns(null)
+                      : void loadTraces(null)
+                  }
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {loadingList || loadingMcpRuns ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+              </div>
             </div>
             {error ? <p className="mt-2 text-xs text-red-600 dark:text-red-300">{error}</p> : null}
           </div>
+          {activeView === "mcp" ? (
+            allWorkspacesSelected ? (
+              <div className="p-6 text-sm text-muted-foreground">
+                MCP activity is scoped to a single workspace. Select a workspace
+                from the filters to inspect MCP tool calls.
+              </div>
+            ) : (
+              <McpRunTable
+                actionRuns={mcpActionRuns}
+                loading={loadingMcpRuns}
+                nextCursor={mcpNextCursor}
+                onLoadMore={() => void loadMcpRuns(mcpNextCursor)}
+                toolRuns={mcpRuns}
+              />
+            )
+          ) : (
           <ScrollArea className="min-h-0 flex-1">
             {loadingList && visibleTraces.length === 0 ? (
               <TraceListSkeletonRows
@@ -2776,6 +3083,7 @@ export default function ObservabilityPage() {
               </div>
             ) : null}
           </ScrollArea>
+          )}
         </section>
       </div>
       <Sheet open={filtersDrawerOpen} onOpenChange={setFiltersDrawerOpen}>

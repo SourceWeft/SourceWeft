@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -346,6 +346,8 @@ function normalizeThinkingSettingsForModel(input: {
 
 export function DashboardChatPageClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const mcpInstallIdFromQuery = searchParams.get("mcp_install_id");
   const {
     adoptChat,
     bootstrapModelCatalog,
@@ -363,6 +365,8 @@ export function DashboardChatPageClient() {
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
+  const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
   const [activeConnectorTools, setActiveConnectorTools] =
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
@@ -372,6 +376,8 @@ export function DashboardChatPageClient() {
   const isPersistentLayout = useMediaQuery("(min-width: 768px)");
   const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
   const isStartingChatRef = useRef(false);
+  const appliedMcpRunRef = useRef<string | null>(null);
+  const handledConnectorOAuthHubRef = useRef(false);
   const skillsLoadGenerationRef = useRef(0);
   const initialSourcesForWorkspace = useMemo(
     () => getCachedWorkspaceSources(workspaceId) ?? librarySources,
@@ -418,12 +424,20 @@ export function DashboardChatPageClient() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (handledConnectorOAuthHubRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const oauthStatus = params.get("connector_oauth");
     if (oauthStatus === "success" || oauthStatus === "error") {
+      handledConnectorOAuthHubRef.current = true;
+      if (window.matchMedia("(min-width: 768px)").matches) {
+        if (!sourcesVisible) {
+          toggleSourcesVisible();
+        }
+        return;
+      }
       setHubDrawerOpen(true);
     }
-  }, []);
+  }, [sourcesVisible, toggleSourcesVisible]);
 
   const handleArtifactPreview = useCallback(
     (artifact: ArtifactPreviewRecord) => {
@@ -958,6 +972,32 @@ export function DashboardChatPageClient() {
     librarySources,
     activeSourceIds,
   );
+  const handleMcpSelectionChange = useCallback(
+    (selection: { installIds?: string[]; toolIds?: string[] }) => {
+      setActiveMcpInstallIds(selection.installIds ?? []);
+      setActiveMcpToolIds(selection.toolIds ?? []);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!workspaceId || !mcpInstallIdFromQuery) {
+      return;
+    }
+    const runKey = `${workspaceId}:${mcpInstallIdFromQuery}`;
+    if (appliedMcpRunRef.current === runKey) {
+      return;
+    }
+    appliedMcpRunRef.current = runKey;
+    setActiveMcpInstallIds([mcpInstallIdFromQuery]);
+    setActiveMcpToolIds([]);
+    toast.success("MCP selected for this chat");
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete("mcp_install_id");
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/dashboard/chat?${nextQuery}` : "/dashboard/chat");
+  }, [mcpInstallIdFromQuery, router, searchParams, workspaceId]);
 
   const handleSendMessage = useCallback(
     async (input: ChatSendInput) => {
@@ -987,6 +1027,18 @@ export function DashboardChatPageClient() {
       const sourceIds = mergeSourceIds(activeSourceIds);
       const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
       const selectedSkillIds = input.skillIds ?? effectiveActiveSkillIds;
+      const selectedMcp =
+        input.tools?.mcp ??
+        (activeMcpInstallIds.length > 0 || activeMcpToolIds.length > 0
+          ? {
+              enabled: true,
+              installIds: activeMcpInstallIds,
+              toolIds: activeMcpToolIds,
+            }
+          : undefined);
+      const tools = selectedMcp
+        ? { ...(input.tools ?? {}), mcp: selectedMcp }
+        : input.tools;
 
       const resolvedThreadModelSettings = buildThreadCreateModelSettings({
         byokSelection: selectedByokModels.llm,
@@ -1034,7 +1086,7 @@ export function DashboardChatPageClient() {
           mentionedSourceIds,
           sourceIds,
           skillIds: selectedSkillIds,
-          tools: input.tools,
+          tools,
           command: input.command,
           thinking,
           thinkingSettings,
@@ -1068,6 +1120,8 @@ export function DashboardChatPageClient() {
       activeSourceIds,
       availableModels,
       effectiveActiveSkillIds,
+      activeMcpInstallIds,
+      activeMcpToolIds,
       router,
       catalogKindEnabled,
       modelCatalogStatus,
@@ -1201,6 +1255,8 @@ export function DashboardChatPageClient() {
             sourceMentionLoader={loadSourceMentions}
             selectedSources={selectedSources}
             selectedSkillIds={activeSkillIds}
+            selectedMcpInstallIds={activeMcpInstallIds}
+            selectedMcpToolIds={activeMcpToolIds}
             sourcesVisible={sourcesVisible}
             thinkingCapabilities={selectedModels.llm?.capabilities}
             imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
@@ -1226,6 +1282,9 @@ export function DashboardChatPageClient() {
             mode="new"
             disabledToolNames={disabledToolNames}
             installedSkills={availableSkills}
+            selectedMcpInstallIds={activeMcpInstallIds}
+            selectedMcpToolIds={activeMcpToolIds}
+            onMcpSelectionChange={handleMcpSelectionChange}
             onArtifactOpen={setPreviewArtifact}
             onSkillSelectionChange={setActiveSkillIds}
             onSelectionChange={persistActiveSourceIds}
@@ -1338,6 +1397,9 @@ export function DashboardChatPageClient() {
             onClose={() => setHubDrawerOpen(false)}
             disabledToolNames={disabledToolNames}
             installedSkills={availableSkills}
+            selectedMcpInstallIds={activeMcpInstallIds}
+            selectedMcpToolIds={activeMcpToolIds}
+            onMcpSelectionChange={handleMcpSelectionChange}
             onArtifactOpen={(artifact) => {
               setPreviewArtifact(artifact);
               setHubDrawerOpen(false);

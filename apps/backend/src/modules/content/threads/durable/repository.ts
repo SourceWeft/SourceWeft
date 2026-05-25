@@ -14,6 +14,7 @@ const ACTIVE_RUN_STATUSES: ChatThreadRunStatus[] = [
   "queued",
   "running",
   "cancel_requested",
+  "waiting_for_approval",
 ];
 
 type ChatThreadRunRow = typeof chatThreadRuns.$inferSelect;
@@ -111,6 +112,26 @@ export async function findActiveChatThreadRun(input: {
     .limit(1);
 
   return row ? mapRun(row) : null;
+}
+
+export async function listExpiredApprovalWaitingRuns(input: {
+  limit: number;
+  now?: Date;
+}) {
+  const rows = await db
+    .select()
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.status, "waiting_for_approval"),
+        sql`(${chatThreadRuns.snapshotJson}->>'approvalExpiresAt') is not null`,
+        sql`(${chatThreadRuns.snapshotJson}->>'approvalExpiresAt')::timestamptz <= ${input.now ?? new Date()}`,
+      ),
+    )
+    .orderBy(desc(chatThreadRuns.createdAt))
+    .limit(input.limit);
+
+  return rows.map(mapRun);
 }
 
 export async function createChatThreadRun(input: {
@@ -262,7 +283,11 @@ export async function requestChatThreadRunCancel(input: {
         eq(chatThreadRuns.id, input.runId),
         eq(chatThreadRuns.teamId, input.teamId),
         eq(chatThreadRuns.workspaceId, input.workspaceId),
-        inArray(chatThreadRuns.status, ["queued", "running"]),
+        inArray(chatThreadRuns.status, [
+          "queued",
+          "running",
+          "waiting_for_approval",
+        ]),
       ),
     )
     .returning();
@@ -275,11 +300,26 @@ export async function updateChatThreadRunStatus(input: {
   teamId: string;
   workspaceId: string;
   status: ChatThreadRunStatus;
+  snapshotJson?: ChatRunSnapshot;
+  errorCode?: string | null;
+  errorMessage?: string | null;
 }) {
   const [row] = await db
     .update(chatThreadRuns)
     .set({
       status: input.status,
+      ...(input.snapshotJson !== undefined
+        ? {
+            snapshotJson: input.snapshotJson as unknown as Record<
+              string,
+              unknown
+            >,
+          }
+        : {}),
+      ...(input.errorCode !== undefined ? { errorCode: input.errorCode } : {}),
+      ...(input.errorMessage !== undefined
+        ? { errorMessage: input.errorMessage }
+        : {}),
       updatedAt: new Date(),
     })
     .where(
@@ -287,6 +327,36 @@ export async function updateChatThreadRunStatus(input: {
         eq(chatThreadRuns.id, input.runId),
         eq(chatThreadRuns.teamId, input.teamId),
         eq(chatThreadRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+
+  return row ? mapRun(row) : null;
+}
+
+export async function markChatThreadRunWaitingForApproval(input: {
+  assistantMessageId?: string | null;
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+  snapshotJson: ChatRunSnapshot;
+}) {
+  const [row] = await db
+    .update(chatThreadRuns)
+    .set({
+      status: "waiting_for_approval",
+      ...(input.assistantMessageId !== undefined
+        ? { assistantMessageId: input.assistantMessageId }
+        : {}),
+      snapshotJson: input.snapshotJson as unknown as Record<string, unknown>,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(chatThreadRuns.id, input.runId),
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+        eq(chatThreadRuns.status, "running"),
       ),
     )
     .returning();
@@ -306,7 +376,7 @@ export async function finishChatThreadRun(input: {
 }) {
   const allowedSourceStatuses: ChatThreadRunStatus[] =
     input.status === "completed"
-      ? ["running"]
+      ? ["running", "waiting_for_approval"]
       : ACTIVE_RUN_STATUSES;
   const [row] = await db
     .update(chatThreadRuns)

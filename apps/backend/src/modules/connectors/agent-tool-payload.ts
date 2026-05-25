@@ -18,6 +18,8 @@ type ConnectorActionPayloadInput = {
     status: ConnectorActionRunStatus;
   };
   agentToolName?: string;
+  description?: string;
+  displayName?: string;
   connector: SourceConnectorRecord;
   target?: {
     externalUri?: string | null;
@@ -140,7 +142,8 @@ export function connectorActionApprovalPayload(
         input.agentToolName ??
         input.action.agentToolName ??
         input.action.actionType,
-      label: formatActionLabel(input.action.actionType),
+      label: input.displayName ?? formatActionLabel(input.action.actionType),
+      ...(input.description ? { description: input.description } : {}),
       riskLevel: input.action.riskLevel,
       status: input.action.status,
       requiresApproval: true as const,

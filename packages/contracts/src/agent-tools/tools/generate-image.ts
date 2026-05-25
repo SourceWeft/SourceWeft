@@ -20,9 +20,12 @@ export const generateImageTool = defineAgentTool({
     configurable: true,
     configKeys: ["aspectRatio", "quality", "style"],
   },
+  defaultPermission: "allow",
+  riskLevel: "low",
   slash: {
     description: "Generate an image directly from your prompt",
     displayName: "Generate image",
+    supportsCommand: true,
   },
 });
 

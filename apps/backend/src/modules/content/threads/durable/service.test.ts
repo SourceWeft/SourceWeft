@@ -81,6 +81,7 @@ test("terminal job status preserves failed and cancelled terminal states", () =>
   assert.equal(toTerminalJobStatus("completed"), "completed");
   assert.equal(toTerminalJobStatus("failed"), "failed");
   assert.equal(toTerminalJobStatus("cancelled"), "cancelled");
+  assert.equal(toTerminalJobStatus("waiting_for_approval"), "cancelled");
   assert.equal(toTerminalJobStatus("queued"), "cancelled");
   assert.equal(toTerminalJobStatus("cancel_requested"), "cancelled");
 });
@@ -127,6 +128,343 @@ test("terminal attach fallback keeps stale run recovery silent", () => {
   }).map(parseSseData);
 
   assert.deepEqual(events, [{ type: "finish" }]);
+});
+
+test("forced stop terminalizes cancel_requested run and emits terminal events", async () => {
+  const runningRun = createRun({
+    status: "cancel_requested",
+    userMessageId: "user-message-1",
+    assistantMessageId: "assistant-message-1",
+  });
+  const appended: Array<{ streamKey: string; payload: string }> = [];
+  let assistantMetadataUpdated = false;
+  const finishInputs: Array<{
+    runId: string;
+    status: string;
+    assistantMessageId?: string | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }> = [];
+  const cancelledRun = createRun({
+    status: "cancelled",
+    errorCode: "CLIENT_CANCELLED",
+    errorMessage: "Chat run was cancelled",
+  });
+
+  const result = await testExports.forceCancelStoppedRun(runningRun, {
+    appendEvent: async (streamKey, payload) => {
+      appended.push({ streamKey, payload });
+      return appended.length;
+    },
+    finishRun: async (input) => {
+      finishInputs.push(input);
+      return cancelledRun;
+    },
+    findRunById: async () =>
+      finishInputs.length === 0 ? runningRun : cancelledRun,
+    updateAssistantMetadata: async () => {
+      assistantMetadataUpdated = true;
+      return null;
+    },
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.deepEqual(appended.map((event) => parseSseData(event.payload)), [
+    {
+      type: "error",
+      code: "CLIENT_CANCELLED",
+      error: "Chat run was cancelled",
+      userMessageId: "user-message-1",
+      messageId: "assistant-message-1",
+    },
+    { type: "finish" },
+  ]);
+  const finishInput = finishInputs[0];
+  assert.ok(finishInput);
+  assert.equal(finishInput?.runId, "run-1");
+  assert.equal(finishInput?.status, "cancelled");
+  assert.equal(finishInput?.assistantMessageId, "assistant-message-1");
+  assert.equal(finishInput?.errorCode, "CLIENT_CANCELLED");
+  assert.equal(finishInput?.errorMessage, "Chat run was cancelled");
+  assert.equal(assistantMetadataUpdated, true);
+});
+
+test("approval waiting runs with no pending confirmations can be completed", () => {
+  assert.equal(
+    testExports.shouldCompleteApprovalRunWithoutPendingConfirmations(
+      createRun({
+        status: "waiting_for_approval",
+        snapshotJson: {
+          toolCalls: [
+            {
+              id: "tool-1",
+              output: {
+                id: "confirmation-1",
+                status: "approved",
+                type: "tool_confirmation_request",
+              },
+            },
+          ],
+        },
+      }),
+    ),
+    true,
+  );
+});
+
+test("approval waiting runs with proposed confirmations remain active", () => {
+  assert.equal(
+    testExports.shouldCompleteApprovalRunWithoutPendingConfirmations(
+      createRun({
+        status: "waiting_for_approval",
+        snapshotJson: {
+          toolCalls: [
+            {
+              id: "tool-1",
+              output: {
+                id: "confirmation-1",
+                status: "proposed",
+                type: "tool_confirmation_request",
+              },
+            },
+          ],
+        },
+      }),
+    ),
+    false,
+  );
+});
+
+test("handled confirmation metadata replaces stale approval_requested tool calls", () => {
+  const metadata = testExports.buildAssistantMessageConfirmationMetadata({
+    currentMetadata: {
+      finishReason: "tool_confirmation_requested",
+      reasoning: "before approval",
+      reasoningSegments: [
+        {
+          id: "reasoning-before",
+          text: "Need approval before deleting.",
+          sequence: 1,
+        },
+      ],
+      thinkingSteps: [
+        {
+          id: "thinking-before",
+          title: "Found matching page",
+          status: "completed",
+          items: ["Found 1 page."],
+          sequence: 2,
+        },
+      ],
+      toolCalls: [
+        {
+          id: "tool-1",
+          output: {
+            id: "confirmation-1",
+            status: "proposed",
+            type: "tool_confirmation_request",
+          },
+          status: "approval_requested",
+        },
+      ],
+    },
+    run: createRun({
+      status: "completed",
+    }),
+    snapshot: {
+      finishReason: "tool_confirmation_requested",
+      reasoning: "before approval",
+      reasoningSegments: [
+        {
+          id: "reasoning-before",
+          text: "Need approval before deleting.",
+          sequence: 1,
+        },
+      ],
+      thinkingSteps: [
+        {
+          id: "thinking-before",
+          title: "Found matching page",
+          status: "completed",
+          items: ["Found 1 page."],
+          sequence: 2,
+        },
+      ],
+      toolCalls: [
+        {
+          id: "tool-1",
+          tool: "delete_notion_page",
+          input: {},
+          output: {
+            id: "confirmation-1",
+            status: "approved",
+            type: "tool_confirmation_request",
+          },
+          status: "completed",
+          latencyMs: 0,
+          error: null,
+          sequence: 3,
+          approvalState: "approved",
+          approvalConfirmationId: "confirmation-1",
+        },
+      ],
+      traceParts: [
+        {
+          id: "reasoning-before",
+          kind: "reasoning",
+          order: 0,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          text: "Need approval before deleting.",
+        },
+        {
+          id: "tool-1",
+          kind: "tool",
+          order: 1,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          toolCallId: "tool-1",
+          tool: "delete_notion_page",
+          status: "completed",
+          input: {},
+          output: {
+            id: "confirmation-1",
+            status: "approved",
+            type: "tool_confirmation_request",
+          },
+          latencyMs: 0,
+          error: null,
+          approvalState: "approved",
+          approvalConfirmationId: "confirmation-1",
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(metadata.toolCalls, [
+    {
+      id: "tool-1",
+      tool: "delete_notion_page",
+      input: {},
+      output: {
+        id: "confirmation-1",
+        status: "approved",
+        type: "tool_confirmation_request",
+      },
+      status: "completed",
+      latencyMs: 0,
+      error: null,
+      sequence: 3,
+      approvalState: "approved",
+      approvalConfirmationId: "confirmation-1",
+    },
+  ]);
+  assert.deepEqual(
+    (metadata.traceParts as Array<Record<string, unknown>> | undefined)?.map(
+      (part) =>
+        part.kind === "tool"
+          ? {
+              id: part.id,
+              kind: part.kind,
+              order: part.order,
+              status: part.status,
+              approvalState: part.approvalState,
+              approvalConfirmationId: part.approvalConfirmationId,
+            }
+          : {
+              id: part.id,
+              kind: part.kind,
+              order: part.order,
+            },
+    ),
+    [
+      {
+        id: "reasoning-before",
+        kind: "reasoning",
+        order: 0,
+      },
+      {
+        id: "tool-1",
+        kind: "tool",
+        order: 1,
+        status: "completed",
+        approvalState: "approved",
+        approvalConfirmationId: "confirmation-1",
+      },
+    ],
+  );
+  assert.equal(metadata.reasoning, "before approval");
+  assert.deepEqual(metadata.reasoningSegments, [
+    {
+      id: "reasoning-before",
+      text: "Need approval before deleting.",
+      sequence: 1,
+    },
+  ]);
+  assert.deepEqual(metadata.thinkingSteps, [
+    {
+      id: "thinking-before",
+      title: "Found matching page",
+      status: "completed",
+      items: ["Found 1 page."],
+      sequence: 2,
+    },
+  ]);
+  assert.deepEqual(metadata.threadRun, {
+    id: "run-1",
+    idempotencyKey: "sourceweft-web-run:run-1",
+    mode: "send",
+    status: "completed",
+    streamKey: "chat-run-events:run-1",
+  });
+});
+
+test("pending confirmation metadata keeps approval expiry on the assistant message", () => {
+  const metadata = testExports.buildAssistantMessageConfirmationMetadata({
+    currentMetadata: {
+      reasoningSegments: [
+        {
+          id: "reasoning-before",
+          text: "Need user approval.",
+          sequence: 1,
+        },
+      ],
+      threadRun: {
+        approvalExpiresAt: "2026-05-24T01:00:00.000Z",
+        approvalRequestedAt: "2026-05-24T00:00:00.000Z",
+      },
+    },
+    run: createRun({
+      status: "waiting_for_approval",
+    }),
+    snapshot: {
+      reasoningSegments: [
+        {
+          id: "reasoning-before",
+          text: "Need user approval.",
+          sequence: 1,
+        },
+      ],
+      toolCalls: [],
+    },
+  });
+
+  assert.deepEqual(metadata.threadRun, {
+    approvalExpiresAt: "2026-05-24T01:00:00.000Z",
+    approvalRequestedAt: "2026-05-24T00:00:00.000Z",
+    id: "run-1",
+    idempotencyKey: "sourceweft-web-run:run-1",
+    mode: "send",
+    status: "waiting_for_approval",
+    streamKey: "chat-run-events:run-1",
+  });
+  assert.deepEqual(metadata.reasoningSegments, [
+    {
+      id: "reasoning-before",
+      text: "Need user approval.",
+      sequence: 1,
+    },
+  ]);
 });
 
 test("retrieval snapshot preserves string annIndexUsed", () => {
@@ -188,6 +526,21 @@ test("queued run without job is stale after grace period", () => {
       now,
     ),
     true,
+  );
+});
+
+test("waiting approval runs are not heartbeat-stale", () => {
+  const now = Date.parse("2024-01-01T01:00:00.000Z");
+
+  assert.equal(
+    isStaleActiveRun(
+      createRun({
+        status: "waiting_for_approval",
+        heartbeatAt: "2024-01-01T00:00:00.000Z",
+      }),
+      now,
+    ),
+    false,
   );
 });
 

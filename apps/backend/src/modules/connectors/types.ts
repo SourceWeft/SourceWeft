@@ -201,6 +201,7 @@ export type ConnectorActionInput = {
 
 export type ConnectorActionResult = {
   externalId?: string | null;
+  rawResponseJson?: unknown;
   result: Record<string, unknown>;
   shouldResync?: boolean;
   resyncExternalIds?: string[];

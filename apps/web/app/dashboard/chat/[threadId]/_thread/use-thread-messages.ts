@@ -33,6 +33,14 @@ type UseThreadMessagesInput = {
   workspaceId: string | null;
 };
 
+function normalizeActiveThreadRun(run: ActiveThreadRun): ActiveThreadRun {
+  return {
+    ...run,
+    approvalRequestedAt: run.approvalRequestedAt ?? null,
+    approvalExpiresAt: run.approvalExpiresAt ?? null,
+  };
+}
+
 export function useThreadMessages({
   attachedRunKeyRef,
   setActiveThreadRun,
@@ -90,8 +98,14 @@ export function useThreadMessages({
 
         loadedThreadMessagesKeyRef.current = threadMessagesKey;
         setOlderMessagesCursor(messagesResult.nextCursor ?? null);
-        let runningAssistant = findLatestActiveThreadRunMessage(serverMessages);
-        const runningRun = runningAssistant?.run ?? activeRun;
+        let runningAssistant:
+          | { message: ChatMessageItem; run: ActiveThreadRun }
+          | null = findLatestActiveThreadRunMessage(serverMessages);
+        const runningRun = runningAssistant?.run
+          ? normalizeActiveThreadRun(runningAssistant.run)
+          : activeRun
+            ? normalizeActiveThreadRun(activeRun)
+            : null;
         if (runningRun && !runningAssistant) {
           const latestUserMessage = [...serverMessages]
             .reverse()
@@ -108,6 +122,7 @@ export function useThreadMessages({
         setStreamingAssistantSnapshot(null);
         if (
           runningRun &&
+          runningRun.status !== "waiting_for_approval" &&
           runningAssistant &&
           runningRun.idempotencyKey !== attachedRunKeyRef.current
         ) {

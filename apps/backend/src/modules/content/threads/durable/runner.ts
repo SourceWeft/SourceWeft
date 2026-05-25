@@ -10,6 +10,16 @@ import { toSseData } from "../stream/helpers";
 import { ContentThreadStreamService } from "../stream/service";
 import { ContentThreadTurnService } from "../turn/service";
 import {
+  appendAssistantContinuationContent,
+  preserveAssistantMetadataForContinuation,
+} from "../turn/finalizer";
+import {
+  tracePartFromReasoningSegment,
+  tracePartFromThinkingStep,
+  tracePartFromToolCall,
+  upsertTracePart,
+} from "../turn/trace-parts";
+import {
   createMessageRecord,
   findMessageRecord,
   updateMessageRecord,
@@ -32,12 +42,34 @@ type TerminalRunStatus = Extract<
   ChatThreadRunStatus,
   "completed" | "failed" | "cancelled"
 >;
+type DurableRunJobStatus = TerminalRunStatus | "waiting_for_approval";
 type DurableChatRunServiceAppendRunEvent =
   typeof durableChatRunService.appendRunEvent;
 type DurableChatRunServiceFinishRun = typeof durableChatRunService.finishRun;
 
 const STREAM_APPEND_TEXT_DELTA_FLUSH_MS = 80;
 const ASSISTANT_SNAPSHOT_FLUSH_MS = 500;
+const TOOL_CONFIRMATION_FINISH_REASON = "tool_confirmation_requested";
+
+function extractPendingConfirmationIds(toolCalls: unknown[] | undefined) {
+  return (toolCalls ?? [])
+    .map((toolCall) => {
+      const record =
+        toolCall && typeof toolCall === "object" && !Array.isArray(toolCall)
+          ? (toolCall as Record<string, unknown>)
+          : null;
+      const output =
+        record?.output && typeof record.output === "object" && !Array.isArray(record.output)
+          ? (record.output as Record<string, unknown>)
+          : null;
+      return output?.type === "tool_confirmation_request" &&
+        output.status === "proposed" &&
+        typeof output.id === "string"
+        ? output.id
+        : null;
+    })
+    .filter((id): id is string => Boolean(id));
+}
 
 function asRequestSnapshot(value: Record<string, unknown>) {
   return value as unknown as DurableRunRequestSnapshot;
@@ -48,6 +80,9 @@ function createThreadRunStream(input: {
   request: DurableRunRequestSnapshot;
   options: Parameters<ContentThreadStreamService["streamThreadEvents"]>[1];
 }) {
+  if (input.request.mode === "resume") {
+    return input.streamService.resumeThreadEvents(input.request, input.options);
+  }
   if (input.request.mode === "refresh") {
     return input.streamService.refreshThreadEvents(input.request, input.options);
   }
@@ -131,6 +166,64 @@ function mergeThinkingStep(existing: unknown[], next: unknown) {
   ];
 }
 
+function isSameReasoningSegment(existing: unknown, next: unknown) {
+  const existingRecord =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : null;
+  const nextRecord =
+    next && typeof next === "object" && !Array.isArray(next)
+      ? (next as Record<string, unknown>)
+      : null;
+  if (!existingRecord || !nextRecord) {
+    return false;
+  }
+
+  return (
+    existingRecord.id === nextRecord.id &&
+    typeof existingRecord.text === "string" &&
+    typeof nextRecord.text === "string"
+  );
+}
+
+function mergeReasoningSegment(existing: unknown[], next: unknown) {
+  const record =
+    next && typeof next === "object" && !Array.isArray(next)
+      ? (next as Record<string, unknown>)
+      : null;
+  const id = typeof record?.id === "string" ? record.id : null;
+  if (!id) {
+    return existing;
+  }
+
+  const existingIndex = existing.findIndex((item) => {
+    const itemRecord =
+      item && typeof item === "object" && !Array.isArray(item)
+        ? (item as Record<string, unknown>)
+        : null;
+    return itemRecord?.id === id;
+  });
+
+  if (
+    existingIndex >= 0 &&
+    isSameReasoningSegment(existing[existingIndex], record)
+  ) {
+    return existing.map((item, index) =>
+      index === existingIndex
+        ? {
+            ...(item && typeof item === "object" && !Array.isArray(item)
+              ? (item as Record<string, unknown>)
+              : {}),
+            ...record,
+            id,
+          }
+        : item,
+    );
+  }
+
+  return [...existing, record];
+}
+
 function updateSnapshotFromPayload(
   snapshot: ChatRunSnapshot,
   payload: Record<string, unknown> | null,
@@ -152,21 +245,24 @@ function updateSnapshotFromPayload(
   if (payload.type === "reasoning" && typeof payload.reasoning === "string") {
     next.reasoning = `${next.reasoning ?? ""}${payload.reasoning}`;
     if (payload.segment) {
-      const segment = payload.segment;
-      const id =
-        segment && typeof segment === "object" && !Array.isArray(segment)
-          ? (segment as Record<string, unknown>).id
+      next.reasoningSegments = mergeReasoningSegment(
+        next.reasoningSegments ?? [],
+        payload.segment,
+      );
+      const segment =
+        payload.segment &&
+        typeof payload.segment === "object" &&
+        !Array.isArray(payload.segment)
+          ? (payload.segment as Parameters<
+              typeof tracePartFromReasoningSegment
+            >[0])
           : null;
-      next.reasoningSegments = [
-        ...(next.reasoningSegments ?? []).filter((item) => {
-          const itemRecord =
-            item && typeof item === "object" && !Array.isArray(item)
-              ? (item as Record<string, unknown>)
-              : null;
-          return !id || itemRecord?.id !== id;
-        }),
-        segment,
-      ];
+      if (segment) {
+        next.traceParts = upsertTracePart(
+          next.traceParts,
+          tracePartFromReasoningSegment(segment),
+        );
+      }
     }
   }
   if (payload.type === "thinking-step" && payload.step) {
@@ -174,9 +270,45 @@ function updateSnapshotFromPayload(
       next.thinkingSteps ?? [],
       payload.step,
     );
+    const step =
+      payload.step &&
+      typeof payload.step === "object" &&
+      !Array.isArray(payload.step)
+        ? (payload.step as Parameters<typeof tracePartFromThinkingStep>[0])
+        : null;
+    if (step) {
+      next.traceParts = upsertTracePart(
+        next.traceParts,
+        tracePartFromThinkingStep(step),
+      );
+    }
   }
   if (String(payload.type).startsWith("tool-call-") && payload.toolCall) {
     next.toolCalls = mergeToolCall(next.toolCalls ?? [], payload.toolCall);
+    const toolCall =
+      payload.toolCall &&
+      typeof payload.toolCall === "object" &&
+      !Array.isArray(payload.toolCall)
+        ? (payload.toolCall as Parameters<typeof tracePartFromToolCall>[0])
+        : null;
+    if (toolCall) {
+      next.traceParts = upsertTracePart(
+        next.traceParts,
+        tracePartFromToolCall(toolCall),
+      );
+    }
+  }
+  if (payload.type === "finish") {
+    next.finishReason =
+      typeof payload.finishReason === "string" ? payload.finishReason : null;
+    if (
+      payload.agentCheckpoint &&
+      typeof payload.agentCheckpoint === "object" &&
+      !Array.isArray(payload.agentCheckpoint)
+    ) {
+      next.agentCheckpoint =
+        payload.agentCheckpoint as ChatRunSnapshot["agentCheckpoint"];
+    }
   }
   if (payload.type === "citations") {
     if (Array.isArray(payload.citations)) {
@@ -188,6 +320,10 @@ function updateSnapshotFromPayload(
       next.availableCitations = payload.citations;
     }
   }
+  next.traceEvents = appendTraceEvent(
+    next.traceEvents,
+    traceEventFromPayload(payload),
+  );
   return next;
 }
 
@@ -203,10 +339,236 @@ function buildThreadRunMetadata(run: ChatThreadRunRecord) {
   };
 }
 
+function getObjectRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getTraceSequence(value: unknown) {
+  const sequence = getObjectRecord(value)?.sequence;
+  return typeof sequence === "number" && Number.isFinite(sequence)
+    ? sequence
+    : null;
+}
+
+function getTraceEventKey(value: unknown) {
+  const record = getObjectRecord(value);
+  const type = typeof record?.type === "string" ? record.type : null;
+  const id = typeof record?.id === "string" ? record.id : null;
+  if (!type || !id) {
+    return null;
+  }
+  return `${type}:${id}`;
+}
+
+function buildTraceEventId(input: {
+  baseId: string;
+  sequence: number | null;
+}) {
+  return input.sequence === null
+    ? input.baseId
+    : `${input.baseId}:${input.sequence}`;
+}
+
+function appendTraceEvent(
+  events: unknown[] | undefined,
+  event: Record<string, unknown> | null,
+) {
+  if (!event) {
+    return events ?? [];
+  }
+
+  const current = events ?? [];
+  const key = getTraceEventKey(event);
+  const nextEvent = {
+    ...event,
+    displayOrder: current.length,
+  };
+  if (!key) {
+    return [...current, nextEvent];
+  }
+
+  const existingIndex = current.findIndex(
+    (item) => getTraceEventKey(item) === key,
+  );
+  if (existingIndex < 0) {
+    return [...current, nextEvent];
+  }
+
+  const existing = getObjectRecord(current[existingIndex]);
+  const displayOrder =
+    typeof existing?.displayOrder === "number" &&
+    Number.isFinite(existing.displayOrder)
+      ? existing.displayOrder
+      : existingIndex;
+  return current.map((item, index) =>
+    index === existingIndex
+      ? {
+          ...event,
+          displayOrder,
+        }
+      : item,
+  );
+}
+
+function traceEventFromPayload(payload: Record<string, unknown> | null) {
+  if (!payload || typeof payload.type !== "string") {
+    return null;
+  }
+
+  if (payload.type === "reasoning") {
+    const segment = getObjectRecord(payload.segment);
+    const segmentId = typeof segment?.id === "string" ? segment.id : null;
+    if (!segment || !segmentId) {
+      return null;
+    }
+    const sequence = getTraceSequence(segment);
+    return {
+      type: "reasoning",
+      id: buildTraceEventId({
+        baseId: segmentId,
+        sequence,
+      }),
+      itemId: segmentId,
+      sequence,
+      segment,
+      reasoning:
+        typeof payload.reasoning === "string" ? payload.reasoning : undefined,
+    };
+  }
+
+  if (payload.type === "thinking-step") {
+    const step = getObjectRecord(payload.step);
+    const stepId = typeof step?.id === "string" ? step.id : null;
+    if (!step || !stepId) {
+      return null;
+    }
+    const sequence = getTraceSequence(step);
+    return {
+      type: "thinking-step",
+      id: buildTraceEventId({
+        baseId: stepId,
+        sequence,
+      }),
+      itemId: stepId,
+      sequence,
+      step,
+    };
+  }
+
+  if (payload.type.startsWith("tool-call-")) {
+    const toolCall = getObjectRecord(payload.toolCall);
+    const eventId =
+      typeof payload.id === "string" && payload.id.length > 0
+        ? payload.id
+        : typeof toolCall?.id === "string" && toolCall.id.length > 0
+          ? toolCall.id
+          : null;
+    if (!eventId) {
+      return null;
+    }
+    const sequence = getTraceSequence(toolCall);
+    return {
+      type: "tool-call",
+      id: buildTraceEventId({
+        baseId: eventId,
+        sequence,
+      }),
+      itemId: eventId,
+      sequence,
+      eventType: payload.type,
+      tool: typeof payload.tool === "string" ? payload.tool : toolCall?.tool,
+      toolCall: toolCall ?? undefined,
+      payload,
+    };
+  }
+
+  return null;
+}
+
+function buildSnapshotMetadata(input: {
+  currentMetadata?: Record<string, unknown> | null;
+  run: ChatThreadRunRecord;
+  snapshot: ChatRunSnapshot;
+}) {
+  const nextMetadata = {
+    ...(input.currentMetadata ?? {}),
+    userMessageId: input.run.userMessageId,
+    sourceUserMessageId: input.run.userMessageId,
+    toolCalls: input.snapshot.toolCalls ?? [],
+    thinkingSteps: input.snapshot.thinkingSteps ?? [],
+    reasoning: input.snapshot.reasoning,
+    reasoningSegments: input.snapshot.reasoningSegments ?? [],
+    traceEvents: input.snapshot.traceEvents ?? [],
+    traceParts: input.snapshot.traceParts ?? [],
+    renderBlocks: input.snapshot.renderBlocks ?? [],
+    ...(input.snapshot.finishReason !== undefined
+      ? { finishReason: input.snapshot.finishReason }
+      : {}),
+    ...(input.snapshot.agentCheckpoint !== undefined
+      ? { agentCheckpoint: input.snapshot.agentCheckpoint }
+      : {}),
+    retrieval: {
+      citations: input.snapshot.citations ?? [],
+      availableCitations:
+        input.snapshot.availableCitations ?? input.snapshot.citations ?? [],
+    },
+    ...buildThreadRunMetadata(input.run),
+  };
+  return preserveAssistantMetadataForContinuation({
+    existingMetadata: input.currentMetadata,
+    nextMetadata,
+  });
+}
+
+function resolveFinalRunAfterFinish(input: {
+  finished: ChatThreadRunRecord | null;
+  latest: ChatThreadRunRecord | null;
+  run: ChatThreadRunRecord;
+}) {
+  return input.finished ?? input.latest ?? input.run;
+}
+
+function resolvePreparedAssistantMessageId(input: {
+  prepared: Pick<PreparedThreadTurn, "assistantMessageId">;
+  placeholderId: string;
+}) {
+  return input.prepared.assistantMessageId ?? input.placeholderId;
+}
+
 async function createAssistantPlaceholder(input: {
   run: ChatThreadRunRecord;
   prepared: PreparedThreadTurn;
 }) {
+  if (input.prepared.assistantMessageId) {
+    const existingAssistantMessage = await findMessageRecord({
+      teamId: input.run.teamId,
+      workspaceId: input.run.workspaceId,
+      messageId: input.prepared.assistantMessageId,
+    });
+    if (!existingAssistantMessage) {
+      throw new ContentError(
+        404,
+        "ASSISTANT_MESSAGE_NOT_FOUND",
+        "Assistant message not found for continuation",
+      );
+    }
+
+    const assistantMessage = await updateMessageRecord({
+      teamId: input.run.teamId,
+      workspaceId: input.run.workspaceId,
+      threadId: input.run.threadId,
+      messageId: input.prepared.assistantMessageId,
+      metadata: {
+        ...existingAssistantMessage.metadata,
+        ...buildThreadRunMetadata(input.run),
+      },
+    });
+
+    return assistantMessage ?? existingAssistantMessage;
+  }
+
   const assistantMessage = await createMessageRecord({
     teamId: input.run.teamId,
     workspaceId: input.run.workspaceId,
@@ -226,6 +588,7 @@ async function createAssistantPlaceholder(input: {
       versionOf: input.prepared.assistantMessageParentId,
       toolCalls: [],
       thinkingSteps: input.prepared.preflightThinkingSteps,
+      traceParts: [],
       renderBlocks: [],
       ...buildThreadRunMetadata(input.run),
     },
@@ -249,23 +612,16 @@ async function updateAssistantSnapshot(input: {
     workspaceId: input.run.workspaceId,
     threadId: input.run.threadId,
     messageId: input.assistantMessageId,
-    content: input.snapshot.assistantContent ?? "",
-    metadata: {
-      ...(currentMessage?.metadata ?? {}),
-      userMessageId: input.run.userMessageId,
-      sourceUserMessageId: input.run.userMessageId,
-      toolCalls: input.snapshot.toolCalls ?? [],
-      thinkingSteps: input.snapshot.thinkingSteps ?? [],
-      reasoning: input.snapshot.reasoning,
-      reasoningSegments: input.snapshot.reasoningSegments ?? [],
-      renderBlocks: input.snapshot.renderBlocks ?? [],
-      retrieval: {
-        citations: input.snapshot.citations ?? [],
-        availableCitations:
-          input.snapshot.availableCitations ?? input.snapshot.citations ?? [],
-      },
-      ...buildThreadRunMetadata(input.run),
-    },
+    content: appendAssistantContinuationContent({
+      existingContent:
+        input.snapshot.assistantMessage?.content ?? currentMessage?.content,
+      nextContent: input.snapshot.assistantContent ?? "",
+    }),
+    metadata: buildSnapshotMetadata({
+      currentMetadata: currentMessage?.metadata,
+      run: input.run,
+      snapshot: input.snapshot,
+    }),
   });
 }
 
@@ -281,14 +637,18 @@ async function createDurableErrorMessage(input: {
 
   const isClientCancelled =
     input.createErrorInput.contentError.code === "CLIENT_CANCELLED";
+  const assistantContent = appendAssistantContinuationContent({
+    existingContent: input.snapshot.assistantMessage?.content,
+    nextContent:
+      input.createErrorInput.partialAssistantContent?.trimEnd() ??
+      input.createErrorInput.contentError.message,
+  });
   const message = await updateMessageRecord({
     teamId: input.run.teamId,
     workspaceId: input.run.workspaceId,
     threadId: input.run.threadId,
     messageId: input.assistantMessageId,
-    content:
-      input.createErrorInput.partialAssistantContent?.trimEnd() ??
-      input.createErrorInput.contentError.message,
+    content: assistantContent,
     model: input.createErrorInput.prepared.modelAlias,
     creditsConsumed: input.createErrorInput.prepared.preflightBilling.reduce(
       (sum, item) => sum + item.consumedCredits,
@@ -319,6 +679,7 @@ async function createDurableErrorMessage(input: {
         ),
       reasoning: input.snapshot.reasoning,
       reasoningSegments: input.snapshot.reasoningSegments ?? [],
+      traceParts: input.snapshot.traceParts ?? [],
       toolCalls: input.snapshot.toolCalls ?? [],
       renderBlocks: input.snapshot.renderBlocks ?? [],
       thinkingSteps: input.snapshot.thinkingSteps ?? [],
@@ -349,6 +710,23 @@ export async function persistTerminalFailure(input: {
   appendRunEvent: DurableChatRunServiceAppendRunEvent;
   finishRun: DurableChatRunServiceFinishRun;
 }) {
+  const terminalRun = {
+    ...input.run,
+    status: input.status,
+    assistantMessageId: input.assistantMessageId,
+  };
+  const snapshot = input.snapshot.assistantMessage
+    ? {
+        ...input.snapshot,
+        assistantMessage: {
+          ...input.snapshot.assistantMessage,
+          metadata: {
+            ...input.snapshot.assistantMessage.metadata,
+            ...buildThreadRunMetadata(terminalRun),
+          },
+        },
+      }
+    : input.snapshot;
   const errorPayload = toSseData({
     type: "error",
     code: input.contentError.code,
@@ -359,19 +737,19 @@ export async function persistTerminalFailure(input: {
   await input.appendRunEvent({
     run: input.run,
     payload: errorPayload,
-    snapshot: input.snapshot,
+    snapshot,
   });
   await input.appendRunEvent({
     run: input.run,
     payload: toSseData({ type: "finish" }),
-    snapshot: input.snapshot,
+    snapshot,
   });
   return (
     (await input.finishRun({
       run: input.run,
       status: input.status,
       assistantMessageId: input.assistantMessageId,
-      snapshot: input.snapshot,
+      snapshot,
       errorCode: input.contentError.code,
       errorMessage: input.contentError.message,
     })) ?? input.run
@@ -404,7 +782,7 @@ export async function processThreadChatRunJob(
   let assistantMessageId: string | null = run.assistantMessageId;
   let finalRun = run;
   let runBilling: MeterConsumeResponse | null = null;
-  let terminalStatus: TerminalRunStatus = "completed";
+  let terminalStatus: DurableRunJobStatus = "completed";
   let terminalErrorCode: string | null = null;
   let terminalErrorMessage: string | null = null;
   let assistantMessagePersisted = false;
@@ -523,7 +901,10 @@ export async function processThreadChatRunJob(
               teamId: run.teamId,
               workspaceId: run.workspaceId,
               userMessageId: prepared.userMessage.id,
-              assistantMessageId: placeholder.id,
+              assistantMessageId: resolvePreparedAssistantMessageId({
+                prepared,
+                placeholderId: placeholder.id,
+              }),
               snapshotJson: snapshot,
             })) ?? run;
           return {
@@ -604,27 +985,53 @@ export async function processThreadChatRunJob(
       ...(assistantMessage ? { assistantMessage } : {}),
       ...(runBilling ? { billing: runBilling } : {}),
     };
-    const finished = await durableChatRunService.finishRun({
-      run,
-      status: terminalStatus,
-      assistantMessageId,
-      snapshot: {
-        ...snapshot,
-        ...(terminalErrorCode ? { errorCode: terminalErrorCode } : {}),
-        ...(terminalErrorMessage
-          ? { errorMessage: terminalErrorMessage }
-          : {}),
-      },
-      errorCode: terminalErrorCode,
-      errorMessage: terminalErrorMessage,
-    });
-    if (!finished && terminalStatus === "completed") {
+    const finalSnapshot = {
+      ...snapshot,
+      ...(terminalErrorCode ? { errorCode: terminalErrorCode } : {}),
+      ...(terminalErrorMessage ? { errorMessage: terminalErrorMessage } : {}),
+    };
+    const persistedFinishReason =
+      typeof finalSnapshot.assistantMessage?.metadata === "object" &&
+      finalSnapshot.assistantMessage?.metadata !== null &&
+      !Array.isArray(finalSnapshot.assistantMessage.metadata)
+        ? (finalSnapshot.assistantMessage.metadata as Record<string, unknown>)
+            .finishReason
+        : undefined;
+    const finishReason =
+      typeof finalSnapshot.finishReason === "string"
+        ? finalSnapshot.finishReason
+        : persistedFinishReason;
+    const isWaitingForApproval =
+      terminalStatus === "completed" &&
+      finishReason === TOOL_CONFIRMATION_FINISH_REASON;
+    const finished = isWaitingForApproval
+      ? await durableChatRunService.markWaitingForApproval({
+          run,
+          assistantMessageId,
+          snapshot: finalSnapshot,
+          confirmationIds: extractPendingConfirmationIds(finalSnapshot.toolCalls),
+        })
+      : await durableChatRunService.finishRun({
+          run,
+          status: terminalStatus,
+          assistantMessageId,
+          snapshot: finalSnapshot,
+          errorCode: terminalErrorCode,
+          errorMessage: terminalErrorMessage,
+        });
+    if (isWaitingForApproval && finished) {
+      terminalStatus = "waiting_for_approval";
+    }
+    if (!finished) {
       const latest = await findChatThreadRunById({
         runId: run.id,
         teamId: run.teamId,
         workspaceId: run.workspaceId,
       });
-      if (isClientCancelledRun(latest)) {
+      if (
+        (terminalStatus === "completed" || isWaitingForApproval) &&
+        isClientCancelledRun(latest)
+      ) {
         const contentError = new ContentError(
           499,
           "CLIENT_CANCELLED",
@@ -635,7 +1042,7 @@ export async function processThreadChatRunJob(
           status: "cancelled",
           assistantMessageId,
           snapshot: {
-            ...snapshot,
+            ...finalSnapshot,
             errorCode: contentError.code,
             errorMessage: contentError.message,
           },
@@ -649,10 +1056,18 @@ export async function processThreadChatRunJob(
         terminalErrorCode = contentError.code;
         terminalErrorMessage = contentError.message;
       } else {
-        finalRun = latest ?? run;
+        finalRun = resolveFinalRunAfterFinish({
+          finished,
+          latest,
+          run,
+        });
       }
     } else {
-      finalRun = finished ?? run;
+      finalRun = resolveFinalRunAfterFinish({
+        finished,
+        latest: null,
+        run,
+      });
     }
 
     if (assistantMessageId) {
@@ -666,17 +1081,26 @@ export async function processThreadChatRunJob(
         workspaceId: run.workspaceId,
         threadId: run.threadId,
         messageId: assistantMessageId,
-        metadata: {
-          ...(finalMessage?.metadata ?? snapshot.assistantMessage?.metadata ?? {}),
-          ...buildThreadRunMetadata(finalRun),
-        },
+        metadata: terminalStatus === "waiting_for_approval"
+          ? buildSnapshotMetadata({
+              currentMetadata:
+                finalMessage?.metadata ?? finalSnapshot.assistantMessage?.metadata,
+              run: finalRun,
+              snapshot: finalSnapshot,
+            })
+          : {
+              ...(finalMessage?.metadata ??
+                snapshot.assistantMessage?.metadata ??
+                {}),
+              ...buildThreadRunMetadata(finalRun),
+            },
       });
     }
 
     return {
       status: terminalStatus,
       runId: run.id,
-      assistantMessageId: assistantMessageId ?? "",
+      assistantMessageId,
       ...(terminalErrorCode ? { errorCode: terminalErrorCode } : {}),
       ...(terminalErrorMessage ? { errorMessage: terminalErrorMessage } : {}),
     };
@@ -719,3 +1143,10 @@ export async function processThreadChatRunJob(
     };
   }
 }
+
+export const testExports = {
+  buildSnapshotMetadata,
+  resolveFinalRunAfterFinish,
+  resolvePreparedAssistantMessageId,
+  updateSnapshotFromPayload,
+};

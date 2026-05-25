@@ -3,8 +3,10 @@ import {
   type AgentToolName,
   type ChatInputImage,
   type ChatMessageImagePart,
+  type ToolApprovalResume,
   type SkillCommand,
   type ThreadCommandRequest,
+  type McpToolSelection,
 } from "@sourceweft/sdk";
 
 export type { ChatMessageImagePart };
@@ -20,6 +22,15 @@ export type ChatSendInput = {
 
 export type ToolConfirmationInterventionSignal = {
   id: string;
+};
+
+export type ToolConfirmationResolution = {
+  confirmationId: string;
+  decision: "approve" | "reject";
+  resume?: ToolApprovalResume | null;
+  expired?: boolean;
+  stale?: boolean;
+  stopped?: boolean;
 };
 
 export type MessageVersion = {
@@ -48,6 +59,22 @@ export type MessageVersion = {
   renderBlocks?: MessageRenderBlock[];
   modelReasoning?: string;
   modelReasoningSegments?: ModelReasoningSegmentRecord[];
+  traceEvents?: ReasoningTraceEventRecord[];
+  traceParts?: TracePartRecord[];
+  threadRun?: {
+    id?: string;
+    idempotencyKey?: string;
+    status?: string;
+    mode?: "send" | "refresh" | "edit" | "resume";
+    approvalRequestedAt?: string | null;
+    approvalExpiresAt?: string | null;
+  };
+};
+
+export type AssistantVersionIndexEntry = {
+  branchIndex: number;
+  groupId: string;
+  version: MessageVersion;
 };
 
 export type ThinkingEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -128,12 +155,14 @@ export type ChatToolName = AgentToolName;
 export type ChatToolsSelection = {
   [AGENT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
   [AGENT_TOOL_NAMES.searchNotionPages]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.readNotionPage]?: ChatConnectorToolSelection;
   [AGENT_TOOL_NAMES.createNotionPage]?: ChatConnectorToolSelection;
   [AGENT_TOOL_NAMES.appendNotionPage]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.updateNotionPageByTitle]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.deleteNotionPageByTitle]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.updateNotionPage]?: ChatConnectorToolSelection;
+  [AGENT_TOOL_NAMES.deleteNotionPage]?: ChatConnectorToolSelection;
   [AGENT_TOOL_NAMES.saveArtifactToNotion]?: ChatConnectorToolSelection;
   [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]?: ChatConnectorToolSelection;
+  mcp?: McpToolSelection;
   invokedSkillIds?: string[];
 };
 
@@ -216,9 +245,11 @@ export type ToolCallRecord = {
   input: Record<string, unknown>;
   output: unknown;
   latencyMs: number | null;
-  status: "running" | "completed" | "error";
+  status: "running" | "approval_requested" | "completed" | "error";
   error: string | null;
   sequence?: number;
+  approvalState?: "approved" | "rejected";
+  approvalConfirmationId?: string;
 };
 
 export type MessageRenderBlock =
@@ -250,7 +281,82 @@ export type ModelReasoningSegmentRecord = {
   text: string;
   sequence?: number;
   durationMs?: number;
+  phase?: "initial" | "after_tool";
+  toolCallId?: string;
+  tool?: string;
 };
+
+export type ReasoningTraceEventRecord =
+  | {
+      type: "reasoning";
+      id: string;
+      displayOrder?: number;
+      itemId?: string;
+      sequence?: number;
+      reasoning?: string;
+      segment: ModelReasoningSegmentRecord;
+    }
+  | {
+      type: "tool-call";
+      id: string;
+      displayOrder?: number;
+      itemId?: string;
+      sequence?: number;
+      eventType?: string;
+      tool?: string;
+      toolCall?: ToolCallRecord;
+      payload?: Record<string, unknown>;
+    }
+  | {
+      type: "thinking-step";
+      id: string;
+      displayOrder?: number;
+      itemId?: string;
+      sequence?: number;
+      step: ThinkingStepRecord;
+    };
+
+export type TracePartRecord =
+  | {
+      id: string;
+      kind: "reasoning";
+      order: number;
+      createdAt: string;
+      updatedAt: string;
+      text: string;
+      phase?: "initial" | "after_tool";
+      toolCallId?: string;
+      tool?: string;
+      durationMs?: number;
+    }
+  | {
+      id: string;
+      kind: "tool";
+      order: number;
+      createdAt: string;
+      updatedAt: string;
+      toolCallId: string;
+      tool: string;
+      status: ToolCallRecord["status"];
+      input: Record<string, unknown>;
+      output?: unknown;
+      error?: string | null;
+      latencyMs?: number | null;
+      title?: string;
+      approvalState?: ToolCallRecord["approvalState"];
+      approvalConfirmationId?: string;
+    }
+  | {
+      id: string;
+      kind: "step";
+      order: number;
+      createdAt: string;
+      updatedAt: string;
+      title: string;
+      status: ThinkingStepRecord["status"];
+      items: string[];
+      metadata?: Record<string, unknown>;
+    };
 
 export type VersionedMessageGroup = {
   groupId: string;

@@ -540,7 +540,12 @@ const llmExecutionConfigSchema = z
   )
   .strict();
 
-export const streamThreadModeSchema = z.enum(["send", "refresh", "edit"]);
+export const streamThreadModeSchema = z.enum([
+  "send",
+  "refresh",
+  "edit",
+  "resume",
+]);
 
 export const imageStyleSchema = z.enum([
   "auto",
@@ -684,13 +689,15 @@ const threadToolsRequestSchema = z
     [AGENT_TOOL_NAMES.webSearch]: webSearchToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.searchNotionPages]:
       connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.readNotionPage]:
+      connectorToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.createNotionPage]:
       connectorToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.appendNotionPage]:
       connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.updateNotionPageByTitle]:
+    [AGENT_TOOL_NAMES.updateNotionPage]:
       connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.deleteNotionPageByTitle]:
+    [AGENT_TOOL_NAMES.deleteNotionPage]:
       connectorToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.saveArtifactToNotion]:
       connectorToolSelectionSchema.optional(),
@@ -719,23 +726,45 @@ export const streamThreadRequestSchema = z.object({
   toolApprovalResume: toolApprovalResumeSchema.optional(),
 });
 
-export const refreshThreadRequestSchema = streamThreadRequestSchema;
+export const refreshThreadRequestSchema = streamThreadRequestSchema
+  .omit({ toolApprovalResume: true })
+  .extend({
+    mode: z.literal("refresh").optional(),
+  });
 
-export const editThreadRequestSchema = streamThreadRequestSchema;
+export const resumeThreadRequestSchema = streamThreadRequestSchema.extend({
+  mode: z.literal("resume").optional(),
+  assistantMessageId: z.string().trim().min(1).max(128),
+  toolApprovalResume: toolApprovalResumeSchema,
+});
+
+export const editThreadRequestSchema = streamThreadRequestSchema
+  .omit({ toolApprovalResume: true })
+  .extend({
+    mode: z.literal("edit").optional(),
+  });
 
 export const threadRunSummarySchema = z.object({
   id: z.string(),
   idempotencyKey: z.string(),
-  status: z.enum(["queued", "running", "cancel_requested"]),
+  status: z.enum([
+    "queued",
+    "running",
+    "cancel_requested",
+    "waiting_for_approval",
+  ]),
   mode: streamThreadModeSchema,
   userMessageId: z.string().nullable(),
   assistantMessageId: z.string().nullable(),
+  approvalRequestedAt: z.string().nullable().optional(),
+  approvalExpiresAt: z.string().nullable().optional(),
 });
 
 export const startThreadTurnRequestSchema = createThreadRequestSchema.merge(
   streamThreadRequestSchema.omit({
     mode: true,
     stream: true,
+    toolApprovalResume: true,
     userMessageId: true,
     assistantMessageId: true,
   }),
@@ -755,6 +784,7 @@ export const streamThreadResponseSchema = z.object({
 });
 
 export const refreshThreadResponseSchema = streamThreadResponseSchema;
+export const resumeThreadResponseSchema = streamThreadResponseSchema;
 export const editThreadResponseSchema = streamThreadResponseSchema;
 
 export const listThreadMessagesResponseSchema = z.object({
@@ -1331,6 +1361,8 @@ export type StreamThreadRequest = z.infer<typeof streamThreadRequestSchema>;
 export type StreamThreadResponse = z.infer<typeof streamThreadResponseSchema>;
 export type RefreshThreadRequest = z.infer<typeof refreshThreadRequestSchema>;
 export type RefreshThreadResponse = z.infer<typeof refreshThreadResponseSchema>;
+export type ResumeThreadRequest = z.infer<typeof resumeThreadRequestSchema>;
+export type ResumeThreadResponse = z.infer<typeof resumeThreadResponseSchema>;
 export type EditThreadRequest = z.infer<typeof editThreadRequestSchema>;
 export type EditThreadResponse = z.infer<typeof editThreadResponseSchema>;
 export type ListThreadMessagesResponse = z.infer<

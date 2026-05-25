@@ -17,11 +17,13 @@ import type {
   ThinkingStepTrace,
   ToolCallTrace,
 } from "../turn/types";
+import type { TracePart } from "../turn/trace-parts";
 
 export type ThreadStreamPartialErrorState = {
   reasoning?: string;
   reasoningSegments?: ModelReasoningSegmentTrace[];
   toolCalls?: ToolCallTrace[];
+  traceParts?: TracePart[];
   thinkingSteps?: ThinkingStepTrace[];
   renderBlocks?: MessageRenderBlock[];
   citations?: AgentCitation[];
@@ -130,6 +132,7 @@ export async function createThreadStreamErrorMessage(input: {
       reasoning: input.partialState?.reasoning,
       reasoningSegments: input.partialState?.reasoningSegments,
       toolCalls: input.partialState?.toolCalls,
+      traceParts: input.partialState?.traceParts,
       renderBlocks: input.partialState?.renderBlocks,
       thinkingSteps: input.partialState?.thinkingSteps,
       retrieval: {

@@ -10,6 +10,7 @@ type JsonSchemaObject = {
   required?: unknown;
   additionalProperties?: unknown;
   enum?: unknown;
+  anyOf?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -98,6 +99,31 @@ export function validateObjectWithJsonSchema(input: {
         "CONNECTOR_SCHEMA_VALIDATION_FAILED",
         `${input.label}.${key} is required`,
       );
+    }
+  }
+
+  if (Array.isArray(schema.anyOf)) {
+    const variants = schema.anyOf.filter(isRecord);
+    if (variants.length > 0) {
+      const matched = variants.some((variant) => {
+        try {
+          validateObjectWithJsonSchema({
+            schema: variant,
+            value: input.value,
+            label: input.label,
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      if (!matched) {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+          `${input.label} must match at least one allowed shape`,
+        );
+      }
     }
   }
 

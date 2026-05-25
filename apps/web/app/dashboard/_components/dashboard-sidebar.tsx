@@ -6,7 +6,6 @@ import {
   Activity,
   LayoutDashboard,
   MessageSquareText,
-  Sparkles,
 } from "lucide-react";
 import { Logo } from "@sourceweft/ui-web/logo";
 import {
@@ -18,6 +17,7 @@ import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { useDashboardChatState } from "./dashboard-chat-state";
+import { McpIcon, SkillIcon } from "./dashboard-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 import { copyStoredByokState } from "../chat/_components/byok-state";
 import { copyStoredModelSelection } from "../chat/_components/model-selection-storage";
@@ -45,8 +45,14 @@ const navMain: NavItem[] = [
   {
     title: "Skills",
     href: "/dashboard/skills",
-    icon: Sparkles,
+    icon: SkillIcon,
     match: (p) => p.startsWith("/dashboard/skills"),
+  },
+  {
+    title: "MCP",
+    href: "/dashboard/mcp",
+    icon: McpIcon,
+    match: (p) => p.startsWith("/dashboard/mcp"),
   },
   {
     title: "Observability",

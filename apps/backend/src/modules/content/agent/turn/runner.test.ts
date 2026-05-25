@@ -7,6 +7,7 @@ import {
   normalizeToolOutputForObservability,
   testExports,
 } from "./runner";
+import type { ConnectorActionExecutionCursor } from "../../../connectors/agent-tool-idempotency";
 
 test("normalizes read_file ToolMessage output content for observability", () => {
   const output = normalizeToolOutputForObservability("read_file", {
@@ -121,6 +122,144 @@ test("connector tool error outputs are preserved for tool error handling", () =>
   });
 });
 
+test("model reasoning segment ids include the run trace id", () => {
+  assert.equal(
+    testExports.createModelReasoningSegmentId({
+      runTraceId: "trace-1",
+      index: 2,
+    }),
+    "model-reasoning:trace-1:2",
+  );
+});
+
+test("connector success outputs hide raw provider payloads", () => {
+  const output = normalizeToolOutputForObservability("create_notion_page", {
+    url: "https://www.notion.so/page",
+    title: "服务器配置查询总结",
+    pageId: "page-1",
+    postActionSyncRunId: "sync-1",
+    content: "private conversation summary",
+  });
+
+  assert.deepEqual(output, {
+    type: "connector_tool_result",
+    connector: "notion",
+    toolName: "create_notion_page",
+    title: "服务器配置查询总结",
+    url: "https://www.notion.so/page",
+    pageId: "page-1",
+  });
+});
+
+test("connector search outputs preserve public result details", () => {
+  const output = normalizeToolOutputForObservability("search_notion_pages", {
+    actionType: "notion.page.find",
+    query: "服务器",
+    resultCount: 2,
+    pages: [
+      {
+        pageId: "page-1",
+        title: "服务器配置",
+        url: "https://www.notion.so/page-1",
+        lastEditedTime: "2026-05-23T01:00:00.000Z",
+        content: "private page body",
+      },
+      {
+        pageId: "page-2",
+        title: "服务器部署",
+        url: "https://www.notion.so/page-2",
+      },
+    ],
+  });
+
+  assert.deepEqual(output, {
+    type: "connector_tool_result",
+    connector: "notion",
+    toolName: "search_notion_pages",
+    actionType: "notion.page.find",
+    query: "服务器",
+    resultCount: 2,
+    pages: [
+      {
+        pageId: "page-1",
+        title: "服务器配置",
+        url: "https://www.notion.so/page-1",
+        lastEditedTime: "2026-05-23T01:00:00.000Z",
+      },
+      {
+        pageId: "page-2",
+        title: "服务器部署",
+        url: "https://www.notion.so/page-2",
+      },
+    ],
+  });
+});
+
+test("connector confirmation outputs hide editable request payloads", () => {
+  const output = normalizeToolOutputForObservability("create_notion_page", {
+    type: "tool",
+    lc_kwargs: {
+      content: JSON.stringify({
+        type: "tool_confirmation_request",
+        schemaVersion: 1,
+        id: "action-1",
+        domain: "connector",
+        subject: {
+          label: "Lei Qin",
+          provider: "notion",
+          connectorId: "connector-1",
+        },
+        action: {
+          type: "notion.page.create",
+          toolName: "create_notion_page",
+          label: "Create",
+          riskLevel: "medium",
+          status: "proposed",
+          requiresApproval: true,
+        },
+        preview: {
+          title: "Create Notion page: 服务器配置查询总结",
+          requestJson: {
+            title: "服务器配置查询总结",
+            content: "private conversation summary",
+          },
+        },
+        editableArgs: {
+          value: {
+            title: "服务器配置查询总结",
+            content: "private conversation summary",
+          },
+        },
+        decisionOptions: [
+          { decision: "reject", label: "Reject" },
+          { decision: "approve", label: "Approve" },
+        ],
+        execution: {
+          providerStatus: "not_executed",
+          executor: {
+            kind: "connector_action_run",
+            connectorId: "connector-1",
+            actionRunId: "action-1",
+          },
+        },
+        status: "proposed",
+        userMessage: "Waiting for confirmation.",
+      }),
+    },
+  });
+
+  assert.equal(
+    (output as Record<string, unknown>).type,
+    "tool_confirmation_request",
+  );
+  assert.equal(
+    "requestJson" in
+      ((output as Record<string, unknown>).preview as Record<string, unknown>),
+    false,
+  );
+  assert.equal("editableArgs" in (output as Record<string, unknown>), false);
+});
+
 test("connector approval mismatches are surfaced as content errors", () => {
   const error = testExports.getConnectorToolOutputContentError({
     type: "connector_tool_error",
@@ -159,7 +298,7 @@ test("connector approval mismatches are detected inside tool error text", () => 
   assert.equal(error?.code, "CONNECTOR_ACTION_APPROVAL_MISMATCH");
 });
 
-test("DeepAgents resume input excludes SourceWeft execution metadata", () => {
+test("DeepAgents resume input excludes SourceWeft connector execution metadata", () => {
   assert.deepEqual(
     testExports.commandResumeFromToolApprovalResume({
       decisions: [{ type: "approve" }],
@@ -179,10 +318,298 @@ test("DeepAgents resume input excludes SourceWeft execution metadata", () => {
   );
 });
 
-test("HITL replay resumes the interrupted thread without pinning checkpoint_id", () => {
+test("DeepAgents HITL duplicate connector interrupts auto-resume from approved execution refs", () => {
+  const actionExecutionCursor: ConnectorActionExecutionCursor = {
+    refs: [
+      {
+        actionRunId: "delete-action",
+        connectorId: "connector-1",
+        requestJson: { pageId: "placeholder-page" },
+        toolName: "delete_notion_page",
+      },
+    ],
+    value: 0,
+  };
+  const context = {
+    actionExecutionCursor,
+  };
+
+  assert.deepEqual(
+    testExports.buildAutoApprovedHitlResumeDecisions({
+      connectorContext: context,
+      hitlInterrupts: [
+        {
+          actionRequests: [
+            {
+              args: { pageId: "placeholder-page" },
+              name: "delete_notion_page",
+            },
+          ],
+          reviewConfigs: [
+            {
+              actionName: "delete_notion_page",
+              allowedDecisions: ["approve", "reject"],
+            },
+          ],
+        },
+      ],
+    }),
+    [{ type: "approve" }],
+  );
+  assert.equal(context.actionExecutionCursor.value, 0);
+  assert.equal(context.actionExecutionCursor.consumedActionRunIds, undefined);
+});
+
+test("DeepAgents HITL auto-resume matches approved refs when replay adds undefined optional args", () => {
+  assert.deepEqual(
+    testExports.buildAutoApprovedHitlResumeDecisions({
+      connectorContext: {
+        actionExecutionCursor: {
+          refs: [
+            {
+              actionRunId: "create-action",
+              connectorId: "connector-1",
+              requestJson: {
+                title: "测试",
+                content: "这是一个占位页面。",
+                parentPageId: "367dadfc-4a0b-8026-996a-f6fd70dc6043",
+              },
+              toolName: "create_notion_page",
+            },
+          ],
+          value: 0,
+        },
+      },
+      hitlInterrupts: [
+        {
+          actionRequests: [
+            {
+              args: {
+                title: "测试",
+                content: "这是一个占位页面。",
+                parentPageId: "367dadfc-4a0b-8026-996a-f6fd70dc6043",
+                dataSourceId: undefined,
+                pageId: undefined,
+              },
+              name: "create_notion_page",
+            },
+          ],
+          reviewConfigs: [
+            {
+              actionName: "create_notion_page",
+              allowedDecisions: ["approve", "reject"],
+            },
+          ],
+        },
+      ],
+    }),
+    [{ type: "approve" }],
+  );
+});
+
+test("trace continuation keeps approval tool sequence and advances new events", () => {
+  const allocator = testExports.createTraceSequenceAllocator({
+    traceContinuation: {
+      maxSequence: 4,
+      toolSequenceById: {
+        "approval-tool": 4,
+      },
+    },
+  });
+
+  assert.equal(allocator.resolveToolCallSequence("approval-tool"), 4);
+  assert.equal(allocator.nextSequence(), 5);
+  assert.equal(allocator.resolveToolCallSequence("new-tool"), 6);
+  assert.equal(allocator.nextSequence(), 7);
+});
+
+test("DeepAgents HITL resume targets the persisted interrupt id when present", () => {
+  assert.deepEqual(
+    testExports.commandResumeFromToolApprovalResume({
+      decisions: [{ type: "approve" }],
+      sourceweft: {
+        hitlInterruptId: "0123456789abcdef0123456789abcdef",
+      },
+    }),
+    {
+      "0123456789abcdef0123456789abcdef": {
+        decisions: [{ type: "approve" }],
+      },
+    },
+  );
+});
+
+test("DeepAgents auto-approved HITL resume targets the interrupt id when present", () => {
+  assert.deepEqual(
+    testExports.commandResumeFromHitlDecisions({
+      decisions: [{ type: "approve" }],
+      hitlInterruptId: "0123456789abcdef0123456789abcdef",
+    }),
+    {
+      "0123456789abcdef0123456789abcdef": {
+        decisions: [{ type: "approve" }],
+      },
+    },
+  );
+});
+
+test("DeepAgents HITL auto-resume does not approve unmatched connector args", () => {
+  assert.equal(
+    testExports.buildAutoApprovedHitlResumeDecisions({
+      connectorContext: {
+        actionExecutionCursor: {
+          refs: [
+            {
+              actionRunId: "delete-action",
+              connectorId: "connector-1",
+              requestJson: { pageId: "approved-page" },
+              toolName: "delete_notion_page",
+            },
+          ],
+          value: 0,
+        },
+      },
+      hitlInterrupts: [
+        {
+          actionRequests: [
+            {
+              args: { pageId: "different-page" },
+              name: "delete_notion_page",
+            },
+          ],
+          reviewConfigs: [
+            {
+              actionName: "delete_notion_page",
+              allowedDecisions: ["approve", "reject"],
+            },
+          ],
+        },
+      ],
+    }),
+    null,
+  );
+});
+
+test("final assistant text stays empty for tool-only successful turns", () => {
+  assert.equal(
+    testExports.resolveFinalAssistantText({
+      assistantContent: "",
+      assistantContentFromUpdates: null,
+      hasCompletedToolOutput: true,
+    }),
+    "",
+  );
+  assert.equal(
+    testExports.resolveFinalAssistantText({
+      assistantContent: "",
+      assistantContentFromUpdates: null,
+      hasCompletedToolOutput: false,
+    }),
+    "Model returned an empty response.",
+  );
+});
+
+test("final assistant text can stay silent for rejected approval resumes", () => {
+  assert.equal(
+    testExports.resolveFinalAssistantText({
+      assistantContent: "",
+      assistantContentFromUpdates: null,
+      hasCompletedToolOutput: false,
+      allowSilentEmptyResponse: true,
+    }),
+    "",
+  );
+});
+
+test("final assistant text prefers real assistant content over silent approval resume", () => {
+  assert.equal(
+    testExports.resolveFinalAssistantText({
+      assistantContent: "The action was cancelled.",
+      assistantContentFromUpdates: null,
+      hasCompletedToolOutput: false,
+      allowSilentEmptyResponse: true,
+    }),
+    "The action was cancelled.",
+  );
+  assert.equal(
+    testExports.resolveFinalAssistantText({
+      assistantContent: "",
+      assistantContentFromUpdates: "The action was cancelled.",
+      hasCompletedToolOutput: false,
+      allowSilentEmptyResponse: true,
+    }),
+    "The action was cancelled.",
+  );
+});
+
+test("rejected approval resume can silence empty continuations", () => {
+  assert.equal(
+    testExports.shouldSilenceEmptyApprovalResume({
+      assistantMessageId: "assistant-message-1",
+      hasCompletedToolOutput: false,
+      toolApprovalResume: {
+        decisions: [{ type: "reject", message: "User rejected the action." }],
+      },
+    }),
+    true,
+  );
+});
+
+test("approval resume silence requires reject decision and existing assistant message", () => {
+  assert.equal(
+    testExports.shouldSilenceEmptyApprovalResume({
+      assistantMessageId: "assistant-message-1",
+      hasCompletedToolOutput: false,
+      toolApprovalResume: {
+        decisions: [{ type: "approve" }],
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    testExports.shouldSilenceEmptyApprovalResume({
+      assistantMessageId: "assistant-message-1",
+      hasCompletedToolOutput: false,
+      toolApprovalResume: {
+        decisions: [
+          {
+            type: "edit",
+            editedAction: {
+              name: "delete_notion_page",
+              args: { pageId: "page-1" },
+            },
+          },
+        ],
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    testExports.shouldSilenceEmptyApprovalResume({
+      assistantMessageId: null,
+      hasCompletedToolOutput: false,
+      toolApprovalResume: {
+        decisions: [{ type: "reject" }],
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    testExports.shouldSilenceEmptyApprovalResume({
+      assistantMessageId: "assistant-message-1",
+      hasCompletedToolOutput: true,
+      toolApprovalResume: {
+        decisions: [{ type: "reject" }],
+      },
+    }),
+    false,
+  );
+});
+
+test("HITL replay maps to the interrupted checkpoint without top-level checkpoint_id", () => {
   const config = testExports.resolveAgentBaseConfig({
     agentMode: "replay",
-    agentRunThreadId: "unused-refresh-thread",
+    agentRunThreadId: "unused-resume-thread",
     agentBaseCheckpoint: {
       threadId: "agent-thread-1",
       checkpointId: "interrupted-checkpoint",
@@ -193,14 +620,59 @@ test("HITL replay resumes the interrupted thread without pinning checkpoint_id",
   assert.deepEqual(config, {
     configurable: {
       thread_id: "agent-thread-1",
+      checkpoint_map: {
+        "": "interrupted-checkpoint",
+      },
       checkpoint_ns: "",
     },
   });
   assert.equal(
     "checkpoint_id" in config.configurable,
     false,
-    "LangGraph Command({ resume }) must read the latest pending interrupt for the thread",
+    "LangGraph keeps skipDoneTasks enabled only when checkpoint_id is not a top-level configurable key",
   );
+});
+
+test("HITL interrupt checkpoint prefers the current stream checkpoint when getState is stale", () => {
+  const checkpoint = testExports.resolveHitlInterruptCheckpoint({
+    pendingCheckpoint: {
+      pending: false,
+      checkpoint: {
+        threadId: "agent-thread-1",
+        checkpointId: "old-fork-base",
+      },
+    },
+    observedCheckpoint: {
+      threadId: "agent-thread-1",
+      checkpointId: "current-interrupt",
+    },
+  });
+
+  assert.deepEqual(checkpoint, {
+    threadId: "agent-thread-1",
+    checkpointId: "current-interrupt",
+  });
+});
+
+test("HITL interrupt checkpoint uses pending getState checkpoint when available", () => {
+  const checkpoint = testExports.resolveHitlInterruptCheckpoint({
+    pendingCheckpoint: {
+      pending: true,
+      checkpoint: {
+        threadId: "agent-thread-1",
+        checkpointId: "pending-interrupt",
+      },
+    },
+    observedCheckpoint: {
+      threadId: "agent-thread-1",
+      checkpointId: "current-interrupt",
+    },
+  });
+
+  assert.deepEqual(checkpoint, {
+    threadId: "agent-thread-1",
+    checkpointId: "pending-interrupt",
+  });
 });
 
 test("fork mode pins the requested checkpoint", () => {
@@ -269,6 +741,22 @@ test("resolveToolCommand uses clean message content when display content has mar
       name: "/generate_image",
       skillSlug: "",
       toolName: "generate_image",
+      workflow: {
+        arguments: "",
+        defaultTools: ["generate_image"],
+        execution: "direct",
+        kind: "tool_workflow",
+        name: "/generate_image",
+        permissionOverrides: {
+          generate_image: "allow",
+        },
+        renderedPrompt: "",
+        successCriteria: {
+          artifactType: "image",
+          kind: "artifact",
+          toolName: "generate_image",
+        },
+      },
     },
     generateImageTool: {
       enabled: true,
@@ -304,6 +792,71 @@ test("resolveToolCommand uses clean message content when display content has mar
     name: "generate_image",
     prompt: "draw a dashboard",
   });
+});
+
+test("command success requires generated image artifact metadata", () => {
+  assert.equal(
+    testExports.isCommandSuccessSatisfied({
+      criteria: {
+        artifactType: "image",
+        kind: "artifact",
+        toolName: "generate_image",
+      },
+      toolCalls: [
+        {
+          id: "tool-1",
+          input: {},
+          output: "Image artifact created.\nartifact_id: artifact-1",
+          status: "completed",
+          tool: "generate_image",
+          latencyMs: 10,
+          error: null,
+          sequence: 1,
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    testExports.isCommandSuccessSatisfied({
+      criteria: {
+        artifactType: "image",
+        kind: "artifact",
+        toolName: "generate_image",
+      },
+      toolCalls: [
+        {
+          id: "tool-1",
+          input: {},
+          output:
+            "Image artifact created.\nartifact_id: artifact-1\nartifact_url: /v1/workspaces/workspace-1/artifacts/artifact-1/file",
+          status: "completed",
+          tool: "generate_image",
+          latencyMs: 10,
+          error: null,
+          sequence: 1,
+        },
+      ],
+    }),
+    true,
+  );
+});
+
+test("command retry instruction restates required tool completion", () => {
+  assert.match(
+    testExports.buildCommandRetryInstruction({
+      kind: "tool_call",
+      toolName: "search_notion_pages",
+    }),
+    /Retry now/,
+  );
+  assert.match(
+    testExports.buildCommandRetryInstruction({
+      kind: "tool_call",
+      toolName: "search_notion_pages",
+    }),
+    /search_notion_pages/,
+  );
 });
 
 test("filesystem tool titles classify glob scope from mounted pattern", () => {

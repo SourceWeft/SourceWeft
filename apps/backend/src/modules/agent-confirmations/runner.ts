@@ -1,6 +1,7 @@
 import {
   ConnectorError,
   connectorActionRunner,
+  connectorRegistry,
 } from "../connectors";
 import { mcpService } from "../mcp";
 import {
@@ -67,6 +68,25 @@ function resumeDecisionFromInput(input: {
   return { type: "approve" };
 }
 
+function hitlInterruptIdFromConfirmation(
+  confirmation?: ToolConfirmationRequest,
+) {
+  return confirmation?.execution.sourceweft?.hitlInterruptId;
+}
+
+function connectorActionMetadata(action: ConnectorActionRunRecord) {
+  const manifest = connectorRegistry
+    .listManifests()
+    .find((candidate) => candidate.type === action.connectorType);
+  const actionSpec = manifest?.actions.find(
+    (candidate) => candidate.type === action.actionType,
+  );
+  return {
+    ...(actionSpec?.description ? { description: actionSpec.description } : {}),
+    ...(actionSpec?.displayName ? { displayName: actionSpec.displayName } : {}),
+  };
+}
+
 export class ToolConfirmationRunner {
   async respond(input: {
     workspaceId: string;
@@ -87,6 +107,7 @@ export class ToolConfirmationRunner {
         confirmationId: input.confirmationId,
         confirmation: input.confirmation,
         decision: input.decision,
+        editedArgs: input.editedArgs,
         note: input.note,
       });
     }
@@ -146,12 +167,22 @@ export class ToolConfirmationRunner {
             note: input.note,
           }),
         ],
+        ...(hitlInterruptIdFromConfirmation(input.confirmation)
+          ? {
+              sourceweft: {
+                hitlInterruptId: hitlInterruptIdFromConfirmation(
+                  input.confirmation,
+                ),
+              },
+            }
+          : {}),
       };
       return {
         confirmation: connectorActionApprovalPayload({
           action: rejected.action,
           agentToolName: input.confirmation?.action.toolName,
           connector,
+          ...connectorActionMetadata(rejected.action),
           target: connectorTargetFromConfirmation(input.confirmation),
         }),
         resume,
@@ -173,10 +204,18 @@ export class ToolConfirmationRunner {
         }),
       ],
       sourceweft: {
+        ...(hitlInterruptIdFromConfirmation(input.confirmation)
+          ? {
+              hitlInterruptId: hitlInterruptIdFromConfirmation(
+                input.confirmation,
+              ),
+            }
+          : {}),
         connectorActions: [
           {
             actionRunId: approved.action.id,
             connectorId: connector.id,
+            requestJson: approved.action.requestJson,
             toolName:
               approved.action.agentToolName ??
               input.confirmation?.action.toolName ??
@@ -191,6 +230,7 @@ export class ToolConfirmationRunner {
         action: approved.action,
         agentToolName: input.confirmation?.action.toolName,
         connector,
+        ...connectorActionMetadata(approved.action),
         target: connectorTargetFromConfirmation(input.confirmation),
       }),
       resume,

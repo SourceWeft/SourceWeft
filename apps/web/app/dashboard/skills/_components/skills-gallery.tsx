@@ -6,13 +6,11 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Database,
   FileText,
   ListFilter,
   Loader2,
   PanelsTopLeft,
   Search,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,6 +32,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
+import { SkillIcon } from "../../_components/dashboard-icons";
 
 type SkillsCatalogResponse = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -106,10 +105,6 @@ function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
   if (sourceType === "builtin") return "Official";
   if (sourceType === "team_custom") return "Team";
   return "Workspace";
-}
-
-function iconForSkill(item: SkillCatalogItem) {
-  return item.sourceType === "builtin" ? Sparkles : Database;
 }
 
 function categoryForSkill(item: SkillCatalogItem): CategoryKey {
@@ -317,7 +312,6 @@ function SkillsCatalogSkeletonGrid({
 }
 
 function SkillAvatar({ item }: { item: SkillCatalogItem }) {
-  const Icon = iconForSkill(item);
   const palette =
     item.sourceType === "builtin"
       ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
@@ -331,7 +325,7 @@ function SkillAvatar({ item }: { item: SkillCatalogItem }) {
       )}
     >
       <span className="absolute inset-0 bg-black/10" />
-      <Icon className="relative h-4.5 w-4.5 drop-shadow" />
+      <SkillIcon className="relative h-4.5 w-4.5 drop-shadow" />
     </span>
   );
 }
@@ -591,7 +585,7 @@ function SkillCard({
           ) : item.enabled ? (
             <Trash2 className="h-3.5 w-3.5" />
           ) : (
-            <Sparkles className="h-3.5 w-3.5" />
+            <SkillIcon className="h-3.5 w-3.5" />
           )}
           <span className="min-w-0 truncate">
             {item.enabled ? "Uninstall" : "Install"}

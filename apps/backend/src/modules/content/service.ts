@@ -16,6 +16,7 @@ import {
   contentThreadService,
   type EditThreadInput,
   type RefreshThreadInput,
+  type ResumeThreadInput,
   type StreamThreadEventInput,
   type ThreadToolsSelection,
 } from "./threads";
@@ -602,6 +603,14 @@ export class ContentService {
     yield* this.threadStreamService.refreshThreadEvents(input);
   }
 
+  async resumeThread(input: ResumeThreadInput) {
+    return this.threadStreamService.resumeThread(input);
+  }
+
+  async *resumeThreadEvents(input: ResumeThreadInput): AsyncGenerator<string> {
+    yield* this.threadStreamService.resumeThreadEvents(input);
+  }
+
   async editThread(input: EditThreadInput) {
     return this.threadStreamService.editThread(input);
   }
@@ -625,7 +634,11 @@ export class ContentService {
     userId: string;
     idempotencyKey: string;
     mode: ChatThreadRunMode;
-    request: StreamThreadEventInput | RefreshThreadInput | EditThreadInput;
+    request:
+      | StreamThreadEventInput
+      | RefreshThreadInput
+      | ResumeThreadInput
+      | EditThreadInput;
   }) {
     return durableChatRunService.getOrCreateRun(input);
   }

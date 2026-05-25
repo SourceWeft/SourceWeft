@@ -53,7 +53,11 @@ export function buildRequestPreview(input: {
       ? input.request.target
       : typeof input.request.externalId === "string"
         ? input.request.externalId
-        : null;
+        : typeof input.request.pageId === "string"
+          ? input.request.pageId
+          : Array.isArray(input.request.pageIds)
+            ? `${input.request.pageIds.length} pages`
+            : null;
   return target
     ? `${input.actionType} on ${target}`
     : `${input.actionType} connector action`;

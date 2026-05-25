@@ -1,6 +1,7 @@
 import { buildAgentConfig, createThreadAgent } from "..";
 import type {
   ToolApprovalResume,
+  ToolApprovalResumeDecision,
   ToolConfirmationRequest,
 } from "@sourceweft/contracts";
 import { Command } from "@langchain/langgraph";
@@ -19,11 +20,9 @@ import type {
   ConnectorActionExecutionCursor,
 } from "../../../connectors/agent-tool-idempotency";
 import {
-  createNotionInterruptConfig,
-  createNotionToolApprovalRequest,
-  createNotionTools,
-  hasActiveNotionConnector,
-} from "../../../connectors/providers/notion";
+  buildConnectorActionApprovalScope,
+  peekConnectorActionExecutionRef,
+} from "../../../connectors/agent-tool-idempotency";
 import {
   createConnectorActionApprovalRequest,
   createConnectorActionInterruptConfigs,
@@ -34,13 +33,13 @@ import { createWebTools } from "../tools/web-tools";
 import {
   AGENT_TOOL_NAMES,
   isGeneratedImageArtifactToolName,
-  isNotionToolName,
   isPatternScopeToolName,
   isReadToolOutputToolName,
   isRetrievalToolName,
   isWebFetchToolName,
   isWebSearchToolName,
   isWebToolName,
+  isAgentToolDomain,
 } from "../tool-registry";
 import { ContentError } from "../../errors";
 import { sanitizeNonCitableCitationMarkers } from "../fs-utils";
@@ -55,6 +54,7 @@ import { endSpan, startSpan } from "../../../../shared/llm-observability";
 import { contentRetrievalService } from "../../retrieval/service";
 import type {
   AgentCheckpointRef,
+  CommandSuccessCriteria,
   MessageRenderBlock,
   PreparedThreadTurn,
   RetrievalCallTrace,
@@ -101,9 +101,12 @@ function checkpointRefToConfig(checkpoint: AgentCheckpointRef) {
 function checkpointRefToResumeConfig(checkpoint: AgentCheckpointRef) {
   return buildAgentConfig(
     checkpoint.threadId,
-    checkpoint.checkpointNs !== undefined
-      ? { checkpoint_ns: checkpoint.checkpointNs }
-      : {},
+    {
+      checkpoint_map: {
+        [checkpoint.checkpointNs ?? ""]: checkpoint.checkpointId,
+      },
+      checkpoint_ns: checkpoint.checkpointNs ?? "",
+    },
   );
 }
 
@@ -174,6 +177,20 @@ async function resolvePendingInterruptCheckpoint(input: {
   };
 }
 
+function resolveHitlInterruptCheckpoint(input: {
+  pendingCheckpoint: {
+    checkpoint: AgentCheckpointRef | null;
+    pending: boolean;
+  };
+  observedCheckpoint: AgentCheckpointRef | null;
+}) {
+  if (input.pendingCheckpoint.pending && input.pendingCheckpoint.checkpoint) {
+    return input.pendingCheckpoint.checkpoint;
+  }
+
+  return input.observedCheckpoint;
+}
+
 type AgentRunnableConfig =
   Awaited<ReturnType<typeof createThreadAgent>> extends {
     stream: (input: unknown, config?: infer Config) => unknown;
@@ -223,10 +240,8 @@ function addUsage(
     inputAudioTokens: sum(current?.inputAudioTokens, next.inputAudioTokens),
     outputAudioTokens: sum(current?.outputAudioTokens, next.outputAudioTokens),
     providerCostUsd: sum(current?.providerCostUsd, next.providerCostUsd),
-    providerCostSource:
-      next.providerCostSource ?? current?.providerCostSource,
-    costDetails:
-      Object.keys(costDetails).length > 0 ? costDetails : undefined,
+    providerCostSource: next.providerCostSource ?? current?.providerCostSource,
+    costDetails: Object.keys(costDetails).length > 0 ? costDetails : undefined,
   };
 }
 
@@ -243,23 +258,122 @@ function appendReasoningChunk(current: string | undefined, next: string) {
   return `${current}${next}`;
 }
 
+function createModelReasoningSegmentId(input: {
+  runTraceId: string;
+  index: number;
+}) {
+  return `model-reasoning:${input.runTraceId}:${input.index}`;
+}
+
 function resolveToolCommand(input: PreparedThreadTurn) {
   if (
     input.command?.kind === "tool" &&
     input.command.toolName === AGENT_TOOL_NAMES.generateImage &&
+    input.command.workflow?.execution === "direct" &&
     input.generateImageTool?.mode === "generate" &&
     input.artifactIntent.shouldInjectTool &&
     input.imageProfile
   ) {
     return {
       name: AGENT_TOOL_NAMES.generateImage,
-      prompt:
-        input.command.arguments?.trim() ||
-        input.messageContent.trim(),
+      prompt: input.command.arguments?.trim() || input.messageContent.trim(),
     };
   }
 
   return null;
+}
+
+function isCommandSuccessSatisfied(input: {
+  criteria: CommandSuccessCriteria;
+  toolCalls: ToolCallTrace[];
+}) {
+  const { criteria } = input;
+  switch (criteria.kind) {
+    case "none":
+      return true;
+    case "artifact":
+      return input.toolCalls.some((call) => {
+        if (
+          call.tool !== criteria.toolName ||
+          call.status !== "completed" ||
+          call.error
+        ) {
+          return false;
+        }
+        if (criteria.artifactType !== "image") {
+          return true;
+        }
+        return Boolean(extractToolOutputField(call.output, "artifact_url"));
+      });
+    case "tool_call":
+      return input.toolCalls.some(
+        (call) =>
+          call.tool === criteria.toolName &&
+          call.status === "completed" &&
+          !call.error,
+      );
+  }
+}
+
+function commandSuccessFailureText(
+  criteria: CommandSuccessCriteria,
+  toolCalls: ToolCallTrace[] = [],
+) {
+  switch (criteria.kind) {
+    case "none":
+      return "Command failed because its success criteria were not satisfied.";
+    case "artifact":
+      if (toolCalls.some((call) => call.tool === criteria.toolName)) {
+        return `Command failed because ${criteria.toolName} did not create a ${criteria.artifactType} artifact.`;
+      }
+      return `Command failed because ${criteria.toolName} did not create a ${criteria.artifactType} artifact.`;
+    case "tool_call":
+      if (toolCalls.some((call) => call.tool === criteria.toolName)) {
+        return `Command failed because ${criteria.toolName} did not complete successfully.`;
+      }
+      return `Command failed because ${criteria.toolName} was not called.`;
+  }
+}
+
+function buildCommandSuccessInstruction(criteria: CommandSuccessCriteria) {
+  switch (criteria.kind) {
+    case "none":
+      return "";
+    case "artifact":
+      return `Command success requires creating a ${criteria.artifactType} artifact by completing ${criteria.toolName}. Do not finish this turn as successful until that happens.`;
+    case "tool_call":
+      return `Command success requires calling ${criteria.toolName}. You may use supporting tools first if needed, but do not finish this turn as successful until ${criteria.toolName} has been called or you have a concrete tool/runtime error.`;
+  }
+}
+
+function buildCommandRetryInstruction(criteria: CommandSuccessCriteria) {
+  const completion = buildCommandSuccessInstruction(criteria);
+  if (!completion) {
+    return "";
+  }
+  return [
+    "The previous attempt did not satisfy the slash command success criteria.",
+    completion,
+    "Retry now. Do not provide a normal final answer until the command succeeds or the required tool/runtime error is explicit.",
+  ].join("\n");
+}
+
+function getToolPermission(
+  prepared: PreparedThreadTurn,
+  toolName: string,
+): "allow" | "ask" | "deny" {
+  return prepared.toolPermissions[toolName] ?? "allow";
+}
+
+function isToolDenied(prepared: PreparedThreadTurn, toolName: string) {
+  return getToolPermission(prepared, toolName) === "deny";
+}
+
+function filterAllowedTools<T extends { name: string }>(
+  prepared: PreparedThreadTurn,
+  tools: T[],
+) {
+  return tools.filter((tool) => !isToolDenied(prepared, tool.name));
 }
 
 async function runToolRetrieval(input: {
@@ -303,14 +417,12 @@ const TOOL_INPUT_PREVIEW_FIELDS = [
 const GENERATED_IMAGE_ALT = "Generated image";
 
 function formatToolInputItems(input: Record<string, unknown>) {
-  const entries = TOOL_INPUT_PREVIEW_FIELDS
-    .map((key) => {
-      const value = input[key];
-      return typeof value === "string" && value.trim().length > 0
-        ? `${key}: ${compactTraceText(value)}`
-        : null;
-    })
-    .filter((item): item is string => item !== null);
+  const entries = TOOL_INPUT_PREVIEW_FIELDS.map((key) => {
+    const value = input[key];
+    return typeof value === "string" && value.trim().length > 0
+      ? `${key}: ${compactTraceText(value)}`
+      : null;
+  }).filter((item): item is string => item !== null);
 
   const items = input.items;
   if (Array.isArray(items)) {
@@ -539,6 +651,10 @@ export function normalizeToolOutputForObservability(
     return normalizeWebToolOutput(toolName, output);
   }
 
+  if (isAgentToolDomain(toolName, "connector")) {
+    return normalizeConnectorToolOutput(toolName, output);
+  }
+
   if (!isReadToolOutputToolName(toolName)) {
     return output;
   }
@@ -554,6 +670,121 @@ export function normalizeToolOutputForObservability(
   }
 
   return output;
+}
+
+function getPublicStringField(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function normalizeConnectorToolOutput(toolName: string, output: unknown) {
+  const record = toObjectRecord(output);
+  const outputText = extractToolOutputText(output);
+  const parsedTextRecord = outputText ? parseJsonObject(outputText) : null;
+  const publicRecord = parsedTextRecord ?? record;
+  if (publicRecord?.type === "connector_tool_error") {
+    return publicRecord;
+  }
+  if (publicRecord?.type === "tool_confirmation_request") {
+    return sanitizeToolConfirmationForObservability(publicRecord);
+  }
+
+  const actionType = getPublicStringField(publicRecord, "actionType");
+  const outputToolName = getPublicStringField(publicRecord, "toolName") ?? toolName;
+  const title = getPublicStringField(publicRecord, "title");
+  const url = getPublicStringField(publicRecord, "url");
+  const pageId = getPublicStringField(publicRecord, "pageId");
+  const query = getPublicStringField(publicRecord, "query");
+  const resultCount =
+    typeof publicRecord?.resultCount === "number" &&
+    Number.isFinite(publicRecord.resultCount)
+      ? publicRecord.resultCount
+      : null;
+  const pages = normalizeConnectorPageSummaries(publicRecord?.pages);
+  return {
+    type: "connector_tool_result",
+    connector: "notion",
+    toolName: outputToolName,
+    ...(actionType ? { actionType } : {}),
+    ...(title ? { title } : {}),
+    ...(url ? { url } : {}),
+    ...(pageId ? { pageId } : {}),
+    ...(query ? { query } : {}),
+    ...(resultCount !== null ? { resultCount } : {}),
+    ...(pages.length > 0 ? { pages } : {}),
+  };
+}
+
+function normalizeConnectorPageSummaries(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const record = toObjectRecord(item);
+      if (!record) {
+        return null;
+      }
+      const pageId =
+        typeof record.pageId === "string" && record.pageId.trim().length > 0
+          ? record.pageId.trim()
+          : null;
+      const title =
+        typeof record.title === "string" && record.title.trim().length > 0
+          ? record.title.trim()
+          : null;
+      const url =
+        typeof record.url === "string" && record.url.trim().length > 0
+          ? record.url.trim()
+          : null;
+      const lastEditedTime =
+        typeof record.lastEditedTime === "string" &&
+        record.lastEditedTime.trim().length > 0
+          ? record.lastEditedTime.trim()
+          : null;
+      if (!pageId && !title && !url) {
+        return null;
+      }
+      return {
+        ...(pageId ? { pageId } : {}),
+        ...(title ? { title } : {}),
+        ...(url ? { url } : {}),
+        ...(lastEditedTime ? { lastEditedTime } : {}),
+      };
+    })
+    .filter((item): item is Record<string, string> => item !== null);
+}
+
+function parseJsonObject(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    return toObjectRecord(JSON.parse(trimmed) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeToolConfirmationForObservability(
+  confirmation: Record<string, unknown>,
+) {
+  const preview = toObjectRecord(confirmation.preview);
+  const sanitized = {
+    ...confirmation,
+    preview: preview
+      ? Object.fromEntries(
+          Object.entries(preview).filter(([key]) => key !== "requestJson"),
+        )
+      : confirmation.preview,
+  } as Record<string, unknown>;
+  delete sanitized.editableArgs;
+  return sanitized;
 }
 
 function extractToolPayloadInput(toolPayload: Record<string, unknown>) {
@@ -661,6 +892,7 @@ type HitlReviewConfig = {
 };
 
 type HitlInterruptRequest = {
+  id?: string;
   actionRequests: HitlActionRequest[];
   reviewConfigs: HitlReviewConfig[];
 };
@@ -691,8 +923,7 @@ function extractGeneratedImageArtifacts(
         extractToolOutputField(call.output, "artifact_id") ?? "";
       const artifactUrl = extractToolOutputField(call.output, "artifact_url");
       const title =
-        extractToolOutputField(call.output, "title") ||
-        GENERATED_IMAGE_ALT;
+        extractToolOutputField(call.output, "title") || GENERATED_IMAGE_ALT;
 
       return artifactUrl
         ? {
@@ -725,7 +956,9 @@ function stableJsonStringify(value: unknown): string {
       ([left], [right]) => left.localeCompare(right),
     );
     return `{${entries
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableJsonStringify(item)}`)
+      .map(
+        ([key, item]) => `${JSON.stringify(key)}:${stableJsonStringify(item)}`,
+      )
       .join(",")}}`;
   }
   return JSON.stringify(value);
@@ -844,7 +1077,9 @@ function extractToolCallsFromMessage(value: unknown) {
       return {
         id,
         name,
-        args: parseToolArgs(call.args ?? toObjectRecord(call.function)?.arguments),
+        args: parseToolArgs(
+          call.args ?? toObjectRecord(call.function)?.arguments,
+        ),
         index,
       };
     })
@@ -902,6 +1137,11 @@ function extractHitlInterrupts(payload: unknown) {
     .map((interruptValue): HitlInterruptRequest | null => {
       const interruptRecord = toObjectRecord(interruptValue);
       const value = toObjectRecord(interruptRecord?.value);
+      const id =
+        typeof interruptRecord?.id === "string" &&
+        interruptRecord.id.trim().length > 0
+          ? interruptRecord.id.trim()
+          : undefined;
       const actionRequestsValue = value?.actionRequests;
       const reviewConfigsValue = value?.reviewConfigs;
       if (
@@ -945,9 +1185,11 @@ function extractHitlInterrupts(payload: unknown) {
       ) {
         return null;
       }
-      return { actionRequests, reviewConfigs };
+      return { ...(id ? { id } : {}), actionRequests, reviewConfigs };
     })
-    .filter((interrupt): interrupt is HitlInterruptRequest => interrupt !== null);
+    .filter(
+      (interrupt): interrupt is HitlInterruptRequest => interrupt !== null,
+    );
 }
 
 function matchInterruptedToolCall(input: {
@@ -960,7 +1202,9 @@ function matchInterruptedToolCall(input: {
     (call) =>
       call.name === input.action.name && !input.usedToolCallIds.has(call.id),
   );
-  const exact = matches.find((call) => sameToolArgs(call.args, input.action.args));
+  const exact = matches.find((call) =>
+    sameToolArgs(call.args, input.action.args),
+  );
   const match = exact ?? matches[input.index] ?? matches[0] ?? null;
   if (!match) {
     throw new ContentError(
@@ -983,7 +1227,10 @@ function withHitlEditableArgs(
   return {
     ...confirmation,
     editableArgs: {
-      value: confirmation.editableArgs?.value ?? confirmation.preview.requestJson ?? {},
+      value:
+        confirmation.editableArgs?.value ??
+        confirmation.preview.requestJson ??
+        {},
       ...(reviewConfig.argsSchema
         ? { schema: reviewConfig.argsSchema }
         : confirmation.editableArgs?.schema
@@ -991,6 +1238,57 @@ function withHitlEditableArgs(
           : {}),
     },
   };
+}
+
+function connectorHitlActionResumeInput(action: HitlActionRequest) {
+  const { connectorId: rawConnectorId, ...requestJson } = action.args;
+  return {
+    connectorId:
+      typeof rawConnectorId === "string" && rawConnectorId.trim().length > 0
+        ? rawConnectorId.trim()
+        : undefined,
+    requestJson,
+    toolName: action.name,
+  };
+}
+
+function isConnectorHitlActionAlreadyApproved(input: {
+  action: HitlActionRequest;
+  connectorContext: {
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+  };
+}) {
+  return Boolean(
+    peekConnectorActionExecutionRef(
+      input.connectorContext,
+      connectorHitlActionResumeInput(input.action),
+    ),
+  );
+}
+
+function buildAutoApprovedHitlResumeDecisions(input: {
+  connectorContext: {
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+  };
+  hitlInterrupts: HitlInterruptRequest[];
+}): ToolApprovalResumeDecision[] | null {
+  const decisions: ToolApprovalResumeDecision[] = [];
+
+  for (const interruptRequest of input.hitlInterrupts) {
+    for (const action of interruptRequest.actionRequests) {
+      if (
+        !isConnectorHitlActionAlreadyApproved({
+          action,
+          connectorContext: input.connectorContext,
+        })
+      ) {
+        return null;
+      }
+      decisions.push({ type: "approve" });
+    }
+  }
+
+  return decisions.length > 0 ? decisions : null;
 }
 
 async function createHitlConfirmation(input: {
@@ -1005,25 +1303,19 @@ async function createHitlConfirmation(input: {
     userId: string;
   };
   reviewConfig?: HitlReviewConfig;
+  hitlInterruptId?: string;
   toolCallId: string;
 }) {
-  const confirmation = isNotionToolName(input.action.name)
-    ? await createNotionToolApprovalRequest(input.connectorContext, {
+  const confirmation = input.action.name.startsWith("mcp__")
+    ? await mcpService.createApprovalForInterruptedTool({
+        workspaceId: input.connectorContext.workspaceId,
+        userId: input.connectorContext.userId,
+        toolName: input.action.name,
         args: input.action.args,
         toolCallId: input.toolCallId,
-        toolName: input.action.name,
       })
-    : input.action.name.startsWith("mcp__")
-      ? await mcpService.createApprovalForInterruptedTool({
-          workspaceId: input.connectorContext.workspaceId,
-          userId: input.connectorContext.userId,
-          toolName: input.action.name,
-          args: input.action.args,
-          toolCallId: input.toolCallId,
-        })
     : await createConnectorActionApprovalRequest(input.connectorContext, {
         args: input.action.args,
-        excludeConnectorTypes: ["notion"],
         toolCallId: input.toolCallId,
         toolName: input.action.name,
       });
@@ -1034,18 +1326,104 @@ async function createHitlConfirmation(input: {
       `DeepAgents HITL interrupted unsupported tool ${input.action.name}.`,
     );
   }
-  return withHitlEditableArgs(confirmation, input.reviewConfig);
+  const nextConfirmation = withHitlEditableArgs(
+    confirmation,
+    input.reviewConfig,
+  );
+  return input.hitlInterruptId
+    ? {
+        ...nextConfirmation,
+        execution: {
+          ...nextConfirmation.execution,
+          sourceweft: {
+            ...(nextConfirmation.execution.sourceweft ?? {}),
+            hitlInterruptId: input.hitlInterruptId,
+          },
+        },
+      }
+    : nextConfirmation;
 }
 
 function commandResumeFromToolApprovalResume(
   resume: ToolApprovalResume,
-): ToolApprovalResume {
-  return { decisions: resume.decisions };
+): ToolApprovalResume | Record<string, ToolApprovalResume> {
+  const interruptId = resume.sourceweft?.hitlInterruptId;
+  const commandResume = { decisions: resume.decisions };
+  return interruptId ? { [interruptId]: commandResume } : commandResume;
+}
+
+function commandResumeFromHitlDecisions(input: {
+  decisions: ToolApprovalResumeDecision[];
+  hitlInterruptId?: string;
+}): ToolApprovalResume | Record<string, ToolApprovalResume> {
+  const commandResume = { decisions: input.decisions };
+  return input.hitlInterruptId
+    ? { [input.hitlInterruptId]: commandResume }
+    : commandResume;
+}
+
+function resolveFinalAssistantText(input: {
+  assistantContent: string;
+  assistantContentFromUpdates: string | null;
+  hasCompletedToolOutput: boolean;
+  allowSilentEmptyResponse?: boolean;
+}) {
+  const assistantContent = input.assistantContent.trim();
+  if (assistantContent.length > 0) {
+    return assistantContent;
+  }
+
+  const assistantContentFromUpdates = input.assistantContentFromUpdates?.trim();
+  if (assistantContentFromUpdates && assistantContentFromUpdates.length > 0) {
+    return assistantContentFromUpdates;
+  }
+
+  if (input.allowSilentEmptyResponse) {
+    return "";
+  }
+
+  return input.hasCompletedToolOutput
+    ? ""
+    : "Model returned an empty response.";
+}
+
+function shouldSilenceEmptyApprovalResume(input: {
+  assistantMessageId: string | null;
+  hasCompletedToolOutput: boolean;
+  toolApprovalResume: ToolApprovalResume | null;
+}) {
+  if (!input.assistantMessageId || input.hasCompletedToolOutput) {
+    return false;
+  }
+
+  return (
+    input.toolApprovalResume?.decisions.some(
+      (decision) => decision.type === "reject",
+    ) ?? false
+  );
+}
+
+function createTraceSequenceAllocator(input: {
+  traceContinuation: PreparedThreadTurn["traceContinuation"];
+}) {
+  let eventSequence = input.traceContinuation?.maxSequence ?? 0;
+  const nextSequence = () => {
+    eventSequence += 1;
+    return eventSequence;
+  };
+  const resolveToolCallSequence = (toolCallId: string) =>
+    input.traceContinuation?.toolSequenceById[toolCallId] ?? nextSequence();
+
+  return {
+    nextSequence,
+    resolveToolCallSequence,
+  };
 }
 
 export const testExports = {
   buildAgentRuntimePrompt,
   createMessageRenderBlockBuilder,
+  buildCommandRetryInstruction,
   extractGeneratedImageArtifacts,
   finalizeMessageRenderBlocks,
   getFilesystemToolDescription,
@@ -1053,14 +1431,20 @@ export const testExports = {
   getFilesystemToolStartTitle,
   getConnectorToolOutputContentError,
   getConnectorToolErrorTextContentError,
+  createModelReasoningSegmentId,
   commandResumeFromToolApprovalResume,
+  commandResumeFromHitlDecisions,
+  resolveHitlInterruptCheckpoint,
   resolveAgentBaseConfig,
+  resolveFinalAssistantText,
+  shouldSilenceEmptyApprovalResume,
+  createTraceSequenceAllocator,
   resolveToolCommand,
+  buildAutoApprovedHitlResumeDecisions,
+  isCommandSuccessSatisfied,
 };
 
-export function normalizeGeneratedImageProgressEvent(
-  payload: unknown,
-): {
+export function normalizeGeneratedImageProgressEvent(payload: unknown): {
   toolCallId: string;
   tool: string;
   data: Record<string, unknown>;
@@ -1300,8 +1684,12 @@ function getConnectorToolOutputContentError(output: unknown) {
   if (record?.code !== "CONNECTOR_ACTION_NOT_APPROVED") {
     if (
       !outputText.includes("CONNECTOR_ACTION_NOT_APPROVED") &&
-      !outputText.includes("Connector action must be approved before execution") &&
-      !outputText.includes("Approved action was not found for this resumed tool call")
+      !outputText.includes(
+        "Connector action must be approved before execution",
+      ) &&
+      !outputText.includes(
+        "Approved action was not found for this resumed tool call",
+      )
     ) {
       return null;
     }
@@ -1317,7 +1705,9 @@ function getConnectorToolErrorTextContentError(errorText: string) {
   if (
     !errorText.includes("CONNECTOR_ACTION_NOT_APPROVED") &&
     !errorText.includes("Connector action must be approved before execution") &&
-    !errorText.includes("Approved action was not found for this resumed tool call")
+    !errorText.includes(
+      "Approved action was not found for this resumed tool call",
+    )
   ) {
     return null;
   }
@@ -1479,8 +1869,9 @@ function buildInvokedSkillsRuntimePrompt(input: {
     "The user explicitly invoked these skills for this turn. This is a strong instruction, not a suggestion: apply the loaded SKILL.md workflow when answering unless it conflicts with higher-priority system rules. Use /skills only for supporting files or additional details.",
     ...invokedSkills.flatMap((skill) => {
       const skillPath = `/skills/${skill.name}/SKILL.md`;
-      const skillContent = skill.files.find((file) => file.path === "SKILL.md")
-        ?.contentText;
+      const skillContent = skill.files.find(
+        (file) => file.path === "SKILL.md",
+      )?.contentText;
       const header = [
         `- name="${escapeRuntimeValue(skill.name)}"`,
         `description="${escapeRuntimeValue(skill.description)}"`,
@@ -1511,6 +1902,7 @@ function buildAgentRuntimePrompt(input: {
   availableArtifactTools?: string[];
   availableMcpTools?: string[];
   artifactIntent?: PreparedThreadTurn["artifactIntent"];
+  commandSuccessCriteria?: PreparedThreadTurn["commandSuccessCriteria"];
   enabledSkills?: PreparedThreadTurn["enabledSkills"];
   invokedSkillIds?: string[];
   timezone: string;
@@ -1536,6 +1928,16 @@ function buildAgentRuntimePrompt(input: {
   });
   if (invokedSkillsPrompt) {
     lines.push(invokedSkillsPrompt);
+  }
+  const commandSuccessInstruction = buildCommandSuccessInstruction(
+    input.commandSuccessCriteria ?? { kind: "none" },
+  );
+  if (commandSuccessInstruction) {
+    lines.push(
+      "<sourceweft_command_success>",
+      commandSuccessInstruction,
+      "</sourceweft_command_success>",
+    );
   }
 
   const availableWebTools = input.availableWebTools ?? [];
@@ -1646,7 +2048,9 @@ export async function* invokeDeepAgentTurn(input: {
   let hasStreamedText = false;
   let hasTextSinceLastToolBoundary = false;
   let lastEmittedCitationCount = 0;
-  let eventSequence = 0;
+  const traceSequenceAllocator = createTraceSequenceAllocator({
+    traceContinuation: input.prepared.traceContinuation,
+  });
   let currentReasoningSegment:
     | DeepAgentTurnOutcome["reasoningSegments"][number]
     | null = null;
@@ -1656,10 +2060,7 @@ export async function* invokeDeepAgentTurn(input: {
     phase: "initial",
   };
 
-  const nextSequence = () => {
-    eventSequence += 1;
-    return eventSequence;
-  };
+  const { nextSequence, resolveToolCallSequence } = traceSequenceAllocator;
 
   const collectRetrievalCalls = () =>
     retrievalCallOrder
@@ -1700,7 +2101,10 @@ export async function* invokeDeepAgentTurn(input: {
   const appendReasoningSegment = (text: string) => {
     if (!currentReasoningSegment) {
       currentReasoningSegment = {
-        id: `model-reasoning-${reasoningSegments.length + 1}`,
+        id: createModelReasoningSegmentId({
+          runTraceId: input.prepared.runTraceId,
+          index: reasoningSegments.length + 1,
+        }),
         text: "",
         sequence: nextSequence(),
         durationMs: 0,
@@ -1813,16 +2217,20 @@ export async function* invokeDeepAgentTurn(input: {
     },
   });
   const webProvider = createDefaultWebProvider();
+  const webSearchAvailable =
+    input.prepared.webSearchEnabled &&
+    !isToolDenied(input.prepared, AGENT_TOOL_NAMES.webSearch);
   const webTools = webProvider
     ? createWebTools({
         provider: webProvider,
         citationRegistry,
-        searchEnabled: input.prepared.webSearchEnabled,
-      })
+        searchEnabled: webSearchAvailable,
+      }).filter((tool) => !isToolDenied(input.prepared, tool.name))
     : [];
   const artifactTools =
     input.prepared.artifactIntent.shouldInjectTool &&
-    input.prepared.imageProfile
+    input.prepared.imageProfile &&
+    !isToolDenied(input.prepared, AGENT_TOOL_NAMES.generateImage)
       ? [
           createGenerateImageTool({
             teamId: input.prepared.workspace.organizationId,
@@ -1839,16 +2247,16 @@ export async function* invokeDeepAgentTurn(input: {
           }),
         ]
       : [];
-  const enabledNotionToolNames = new Set(
-    Object.entries(input.prepared.notionTools)
-      .filter(([, selection]) => selection.enabled !== false)
-      .map(([toolName]) => toolName),
-  );
   const actionApprovalCursor: ConnectorActionApprovalCursor = { value: 0 };
   const actionApprovalScope =
     input.prepared.agentMode === "replay" && input.prepared.agentBaseCheckpoint
-      ? input.prepared.agentBaseCheckpoint.threadId
-      : input.prepared.agentRunThreadId;
+      ? buildConnectorActionApprovalScope({
+          threadId: input.prepared.agentBaseCheckpoint.threadId,
+          checkpointId: input.prepared.agentBaseCheckpoint.checkpointId,
+        })
+      : buildConnectorActionApprovalScope({
+          threadId: input.prepared.agentRunThreadId,
+        });
   const actionExecutionCursor: ConnectorActionExecutionCursor | undefined =
     input.prepared.toolApprovalResume?.sourceweft?.connectorActions?.length
       ? {
@@ -1860,22 +2268,13 @@ export async function* invokeDeepAgentTurn(input: {
     actionApprovalCursor,
     actionExecutionCursor,
     actionApprovalScope,
-    enabledToolNames:
-      Object.keys(input.prepared.notionTools).length > 0
-        ? enabledNotionToolNames
-        : undefined,
     teamId: input.prepared.workspace.organizationId,
     workspaceId: input.prepared.workspace.id,
     userId: input.prepared.userId,
   };
-  const notionTools = (await hasActiveNotionConnector(connectorToolContext))
-    ? createNotionTools(connectorToolContext)
-    : [];
-  const connectorActionTools = await createConnectorActionTools(
-    connectorToolContext,
-    {
-      excludeConnectorTypes: ["notion"],
-    },
+  const connectorActionTools = filterAllowedTools(
+    input.prepared,
+    await createConnectorActionTools(connectorToolContext),
   );
   const toolCommand = resolveToolCommand(input.prepared);
   if (toolCommand?.name === AGENT_TOOL_NAMES.generateImage) {
@@ -1934,7 +2333,7 @@ export async function* invokeDeepAgentTurn(input: {
       status: "running",
       latencyMs: null,
       error: null,
-      sequence: nextSequence(),
+      sequence: resolveToolCallSequence(toolCallId),
     };
     toolCallOrder.push(toolCallId);
     toolCallsById.set(toolCallId, initialToolCall);
@@ -2126,11 +2525,18 @@ export async function* invokeDeepAgentTurn(input: {
       };
     }
 
-    const assistantText =
-      finalToolCall.status === "completed"
-        ? "Image artifact created."
-        : (finalToolCall.error ?? "Image generation failed.");
-    if (finalToolCall.status !== "completed") {
+    const commandSatisfied = isCommandSuccessSatisfied({
+      criteria: input.prepared.commandSuccessCriteria,
+      toolCalls: [finalToolCall],
+    });
+    const assistantText = commandSatisfied
+      ? "Image artifact created."
+      : finalToolCall.error
+        ? `Command failed because ${finalToolCall.error}`
+        : commandSuccessFailureText(input.prepared.commandSuccessCriteria, [
+            finalToolCall,
+          ]);
+    if (!commandSatisfied) {
       renderBlocks.appendText(assistantText);
       yield {
         type: "text-delta",
@@ -2138,7 +2544,7 @@ export async function* invokeDeepAgentTurn(input: {
       };
     }
     const finalRenderBlocks = finalizeMessageRenderBlocks({
-      blocks: renderBlocks.list(),
+      blocks: commandSatisfied ? renderBlocks.list() : [],
       finalText: assistantText,
     });
     yield {
@@ -2151,6 +2557,9 @@ export async function* invokeDeepAgentTurn(input: {
         availableCitations: [],
         retrievalCalls: [],
         toolCalls: [finalToolCall],
+        ...(commandSatisfied
+          ? {}
+          : { finishReason: "command_success_criteria_failed" }),
         ...(finalRenderBlocks.length > 0
           ? { renderBlocks: finalRenderBlocks }
           : {}),
@@ -2227,6 +2636,7 @@ export async function* invokeDeepAgentTurn(input: {
     availableArtifactTools: artifactTools.map((tool) => tool.name),
     availableMcpTools: mcpTools.map((tool) => tool.name),
     artifactIntent: input.prepared.artifactIntent,
+    commandSuccessCriteria: input.prepared.commandSuccessCriteria,
     enabledSkills: input.prepared.enabledSkills,
     invokedSkillIds: input.prepared.invokedSkillIds,
     timezone: input.prepared.timezone,
@@ -2274,10 +2684,9 @@ export async function* invokeDeepAgentTurn(input: {
     providerModel: input.prepared.providerModel,
     gatewayConfigId: input.prepared.chatProfile.gatewayConfigId,
     tools: [
-      retrievalTool,
+      ...filterAllowedTools(input.prepared, [retrievalTool]),
       ...webTools,
       ...artifactTools,
-      ...notionTools,
       ...connectorActionTools,
       ...mcpTools,
     ],
@@ -2335,27 +2744,7 @@ export async function* invokeDeepAgentTurn(input: {
     },
     interruptOn: {
       ...(mcpToolRuntime?.interruptOn ?? {}),
-      ...createConnectorActionInterruptConfigs({
-        excludeConnectorTypes: ["notion"],
-      }),
-      [AGENT_TOOL_NAMES.createNotionPage]: createNotionInterruptConfig(
-        AGENT_TOOL_NAMES.createNotionPage,
-      ),
-      [AGENT_TOOL_NAMES.appendNotionPage]: createNotionInterruptConfig(
-        AGENT_TOOL_NAMES.appendNotionPage,
-      ),
-      [AGENT_TOOL_NAMES.updateNotionPageByTitle]: createNotionInterruptConfig(
-        AGENT_TOOL_NAMES.updateNotionPageByTitle,
-      ),
-      [AGENT_TOOL_NAMES.deleteNotionPageByTitle]: createNotionInterruptConfig(
-        AGENT_TOOL_NAMES.deleteNotionPageByTitle,
-      ),
-      [AGENT_TOOL_NAMES.saveArtifactToNotion]: createNotionInterruptConfig(
-        AGENT_TOOL_NAMES.saveArtifactToNotion,
-      ),
-      [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]: createNotionInterruptConfig(
-        AGENT_TOOL_NAMES.saveFinalAnswerToNotion,
-      ),
+      ...createConnectorActionInterruptConfigs(),
     },
   });
 
@@ -2403,6 +2792,10 @@ export async function* invokeDeepAgentTurn(input: {
     },
     streamMode: ["messages", "tools", "updates", "checkpoints", "custom"],
   } satisfies AgentRunnableConfig;
+  const runAgentStream = (messages: typeof agentMessages) =>
+    agent.stream({ messages }, runConfig as AgentRunnableConfig) as Promise<
+      AsyncGenerator<unknown>
+    >;
 
   if (input.prepared.enabledSkills.length > 0) {
     yield {
@@ -2424,386 +2817,911 @@ export async function* invokeDeepAgentTurn(input: {
     };
   }
 
-  const streamInput =
-    input.prepared.agentMode === "replay"
-      ? input.prepared.toolApprovalResume
-        ? new Command({
-            resume: commandResumeFromToolApprovalResume(
-              input.prepared.toolApprovalResume,
-            ),
-          })
-        : (() => {
-            throw new ContentError(
-              400,
-              "AGENT_HITL_RESUME_REQUIRED",
-              "DeepAgents HITL replay requires a resume decision payload.",
-            );
-          })()
-      : { messages: agentMessages };
   const suppressModelReasoning = input.llm?.thinking?.mode === "off";
 
   try {
-    const stream = await agent.stream(
-      streamInput,
-      runConfig as AgentRunnableConfig,
+    let stream =
+      input.prepared.agentMode === "replay"
+        ? input.prepared.toolApprovalResume
+          ? await agent.stream(
+              new Command({
+                resume: commandResumeFromToolApprovalResume(
+                  input.prepared.toolApprovalResume,
+                ),
+              }),
+              runConfig as AgentRunnableConfig,
+            )
+          : (() => {
+              throw new ContentError(
+                400,
+                "AGENT_HITL_RESUME_REQUIRED",
+                "DeepAgents HITL replay requires a resume decision payload.",
+              );
+            })()
+        : await runAgentStream(agentMessages);
+    let retryAttempted = false;
+    let autoApprovedHitlResumeCount = 0;
+    const maxAutoApprovedHitlResumes = Math.max(
+      1,
+      input.prepared.toolApprovalResume?.sourceweft?.connectorActions
+        ?.length ?? 0,
     );
-    for await (const streamChunk of stream as AsyncGenerator<unknown>) {
-    if (!Array.isArray(streamChunk) || streamChunk.length < 2) {
-      continue;
-    }
-
-    const mode = streamChunk[0];
-    const payload = streamChunk[1];
-
-    if (mode === "checkpoints") {
-      const checkpoint = checkpointRefFromConfig(
-        (toObjectRecord(payload) ?? {}).config,
-      );
-      if (checkpoint) {
-        if (!beforeAssistantCheckpoint && checkpointHasPendingTasks(payload)) {
-          beforeAssistantCheckpoint = checkpoint;
-        }
-        finalCheckpoint = checkpoint;
-      }
-      continue;
-    }
-
-    if (mode === "messages") {
-      if (!Array.isArray(payload) || payload.length < 1) {
-        continue;
-      }
-
-      const messageChunk = payload[0];
-      const messageMetadata = payload[1];
-      rememberObservedToolCalls(
-        observedToolCallsById,
-        extractToolCallsFromMessage(messageChunk),
-      );
-      usage = addUsage(usage, extractUsageFromMessageChunk(messageChunk));
-      finishReason =
-        extractFinishReasonFromMessageChunk(messageChunk) ?? finishReason;
-      providerFields =
-        extractProviderFieldsFromMessageChunk(messageChunk) ?? providerFields;
-      const nextReasoning =
-        extractReasoningFromMessageChunk(messageChunk) ??
-        extractReasoningFromMessageChunk(messageMetadata) ??
-        extractReasoningFromMessageChunk(payload);
-      if (nextReasoning && !suppressModelReasoning) {
-        modelReasoning = appendReasoningChunk(modelReasoning, nextReasoning);
-        const segment = appendReasoningSegment(nextReasoning);
-        yield {
-          type: "reasoning",
-          reasoning: nextReasoning,
-          segment,
-        };
-      }
-      const deltas = extractTextDeltasFromMessageChunk(messageChunk);
-      for (const delta of deltas) {
-        if (!delta) {
+    streamLoop: while (true) {
+      for await (const streamChunk of stream as AsyncGenerator<unknown>) {
+        if (!Array.isArray(streamChunk) || streamChunk.length < 2) {
           continue;
         }
-        assistantContent += delta;
-        renderBlocks.appendText(delta);
-        hasStreamedText = true;
-        hasTextSinceLastToolBoundary = true;
-        yield {
-          type: "text-delta",
-          delta,
-        };
-      }
-      continue;
-    }
 
-    if (mode === "updates") {
-      rememberObservedToolCalls(
-        observedToolCallsById,
-        extractToolCallsFromUpdates(payload),
-      );
-      const assistantFromUpdates =
-        resolveAssistantContentFromUpdatesChunk(payload);
-      if (assistantFromUpdates && assistantFromUpdates.trim().length > 0) {
-        assistantContentFromUpdates = assistantFromUpdates.trim();
-      }
-      const hitlInterrupts = extractHitlInterrupts(payload);
-      if (hitlInterrupts.length > 0) {
-        currentReasoningSegment = null;
-        if (hasTextSinceLastToolBoundary) {
-          yield {
-            type: "text-interrupted",
-            reason: "tool-call",
-            toolCallId: "tool_confirmation",
-            tool: "tool_confirmation",
-          };
-          assistantContent += "\n";
-          renderBlocks.appendText("\n");
-          yield {
-            type: "text-delta",
-            delta: "\n",
-          };
-          hasTextSinceLastToolBoundary = false;
+        const mode = streamChunk[0];
+        const payload = streamChunk[1];
+
+        if (mode === "checkpoints") {
+          const checkpoint = checkpointRefFromConfig(
+            (toObjectRecord(payload) ?? {}).config,
+          );
+          if (checkpoint) {
+            if (
+              !beforeAssistantCheckpoint &&
+              checkpointHasPendingTasks(payload)
+            ) {
+              beforeAssistantCheckpoint = checkpoint;
+            }
+            finalCheckpoint = checkpoint;
+          }
+          continue;
         }
 
-        const observedToolCalls = [...observedToolCallsById.values()];
-        const usedToolCallIds = new Set<string>();
-        for (const interruptRequest of hitlInterrupts) {
-          for (const [
-            index,
-            action,
-          ] of interruptRequest.actionRequests.entries()) {
-            const observedToolCall = matchInterruptedToolCall({
-              action,
-              index,
-              observedToolCalls,
-              usedToolCallIds,
-            });
-            const reviewConfig =
-              interruptRequest.reviewConfigs.find(
-                (config) => config.actionName === action.name,
-              ) ?? interruptRequest.reviewConfigs[index];
-            const confirmation = await createHitlConfirmation({
-              action,
-              connectorContext: connectorToolContext,
-              reviewConfig,
-              toolCallId: observedToolCall.id,
-            });
-            const latencyMs = 0;
-            const nextToolCall: ToolCallTrace = {
-              id: observedToolCall.id,
-              tool: action.name,
-              input: action.args,
-              output: confirmation,
-              status: "completed",
-              latencyMs,
-              error: null,
-              sequence:
-                toolCallsById.get(observedToolCall.id)?.sequence ??
-                nextSequence(),
+        if (mode === "messages") {
+          if (!Array.isArray(payload) || payload.length < 1) {
+            continue;
+          }
+
+          const messageChunk = payload[0];
+          const messageMetadata = payload[1];
+          rememberObservedToolCalls(
+            observedToolCallsById,
+            extractToolCallsFromMessage(messageChunk),
+          );
+          usage = addUsage(usage, extractUsageFromMessageChunk(messageChunk));
+          finishReason =
+            extractFinishReasonFromMessageChunk(messageChunk) ?? finishReason;
+          providerFields =
+            extractProviderFieldsFromMessageChunk(messageChunk) ??
+            providerFields;
+          const nextReasoning =
+            extractReasoningFromMessageChunk(messageChunk) ??
+            extractReasoningFromMessageChunk(messageMetadata) ??
+            extractReasoningFromMessageChunk(payload);
+          if (nextReasoning && !suppressModelReasoning) {
+            modelReasoning = appendReasoningChunk(
+              modelReasoning,
+              nextReasoning,
+            );
+            const segment = appendReasoningSegment(nextReasoning);
+            yield {
+              type: "reasoning",
+              reasoning: nextReasoning,
+              segment,
             };
-            if (!toolCallsById.has(observedToolCall.id)) {
-              toolCallOrder.push(observedToolCall.id);
+          }
+          const deltas = extractTextDeltasFromMessageChunk(messageChunk);
+          for (const delta of deltas) {
+            if (!delta) {
+              continue;
             }
-            toolCallsById.set(observedToolCall.id, nextToolCall);
-            const runningToolCall: ToolCallTrace = {
-              ...nextToolCall,
-              output: null,
-              status: "running",
-            };
+            assistantContent += delta;
+            renderBlocks.appendText(delta);
+            hasStreamedText = true;
+            hasTextSinceLastToolBoundary = true;
             yield {
-              type: "tool-call-start",
-              id: observedToolCall.id,
-              tool: action.name,
-              input: action.args,
-              toolCall: runningToolCall,
+              type: "text-delta",
+              delta,
             };
+          }
+          continue;
+        }
+
+        if (mode === "updates") {
+          rememberObservedToolCalls(
+            observedToolCallsById,
+            extractToolCallsFromUpdates(payload),
+          );
+          const assistantFromUpdates =
+            resolveAssistantContentFromUpdatesChunk(payload);
+          if (assistantFromUpdates && assistantFromUpdates.trim().length > 0) {
+            assistantContentFromUpdates = assistantFromUpdates.trim();
+          }
+          const hitlInterrupts = extractHitlInterrupts(payload);
+          if (hitlInterrupts.length > 0) {
+            currentReasoningSegment = null;
+            if (hasTextSinceLastToolBoundary) {
+              yield {
+                type: "text-interrupted",
+                reason: "tool-call",
+                toolCallId: "tool_confirmation",
+                tool: "tool_confirmation",
+              };
+              assistantContent += "\n";
+              renderBlocks.appendText("\n");
+              yield {
+                type: "text-delta",
+                delta: "\n",
+              };
+              hasTextSinceLastToolBoundary = false;
+            }
+
+            const observedToolCalls = [...observedToolCallsById.values()];
+            const usedToolCallIds = new Set<string>();
+            const interruptCheckpoint = await resolvePendingInterruptCheckpoint(
+              {
+                agent,
+                config: runConfig,
+              },
+            );
+            const hitlCheckpoint = resolveHitlInterruptCheckpoint({
+              pendingCheckpoint: interruptCheckpoint,
+              observedCheckpoint: finalCheckpoint,
+            });
+            if (!hitlCheckpoint) {
+              throw new ContentError(
+                409,
+                "AGENT_HITL_CHECKPOINT_MISSING",
+                "DeepAgents HITL interrupt did not provide a resumable checkpoint.",
+              );
+            }
+            connectorToolContext.actionApprovalScope =
+              buildConnectorActionApprovalScope({
+                threadId: hitlCheckpoint.threadId,
+                checkpointId: hitlCheckpoint.checkpointId,
+              });
+            const autoApprovedHitlDecisions =
+              buildAutoApprovedHitlResumeDecisions({
+                connectorContext: connectorToolContext,
+                hitlInterrupts,
+              });
+            if (
+              autoApprovedHitlDecisions &&
+              autoApprovedHitlResumeCount < maxAutoApprovedHitlResumes
+            ) {
+              autoApprovedHitlResumeCount += 1;
+              finalCheckpoint = hitlCheckpoint;
+              beforeAssistantCheckpoint = hitlCheckpoint;
+              logger.info(
+                "Agent HITL interrupt already has approved connector execution refs; resuming without a duplicate confirmation",
+                {
+                  workspaceId: input.prepared.workspace.id,
+                  threadId: input.prepared.thread.id,
+                  userId: input.prepared.userId,
+                  decisionCount: autoApprovedHitlDecisions.length,
+                  autoApprovedHitlResumeCount,
+                },
+              );
+              stream = await agent.stream(
+                new Command({
+                  resume: commandResumeFromHitlDecisions({
+                    decisions: autoApprovedHitlDecisions,
+                    hitlInterruptId:
+                      hitlInterrupts.length === 1
+                        ? hitlInterrupts[0]?.id
+                        : undefined,
+                  }),
+                }),
+                runConfig as AgentRunnableConfig,
+              );
+              continue streamLoop;
+            }
+            for (const interruptRequest of hitlInterrupts) {
+              for (const [
+                index,
+                action,
+              ] of interruptRequest.actionRequests.entries()) {
+                const observedToolCall = matchInterruptedToolCall({
+                  action,
+                  index,
+                  observedToolCalls,
+                  usedToolCallIds,
+                });
+                const reviewConfig =
+                  interruptRequest.reviewConfigs.find(
+                    (config) => config.actionName === action.name,
+                  ) ?? interruptRequest.reviewConfigs[index];
+                const confirmation = await createHitlConfirmation({
+                  action,
+                  connectorContext: connectorToolContext,
+                  hitlInterruptId: interruptRequest.id,
+                  reviewConfig,
+                  toolCallId: observedToolCall.id,
+                });
+                const latencyMs = 0;
+                const nextToolCall: ToolCallTrace = {
+                  id: observedToolCall.id,
+                  tool: action.name,
+                  input: action.args,
+                  output: confirmation,
+                  status: "approval_requested",
+                  latencyMs,
+                  error: null,
+                  sequence:
+                    toolCallsById.get(observedToolCall.id)?.sequence ??
+                    resolveToolCallSequence(observedToolCall.id),
+                };
+                if (!toolCallsById.has(observedToolCall.id)) {
+                  toolCallOrder.push(observedToolCall.id);
+                }
+                toolCallsById.set(observedToolCall.id, nextToolCall);
+                const runningToolCall: ToolCallTrace = {
+                  ...nextToolCall,
+                  output: null,
+                  status: "running",
+                };
+                yield {
+                  type: "tool-call-start",
+                  id: observedToolCall.id,
+                  tool: action.name,
+                  input: action.args,
+                  toolCall: runningToolCall,
+                };
+                yield {
+                  type: "tool-call-result",
+                  id: observedToolCall.id,
+                  tool: action.name,
+                  input: action.args,
+                  output: confirmation,
+                  latencyMs,
+                  toolCall: nextToolCall,
+                };
+                yield {
+                  type: "tool-call-end",
+                  id: observedToolCall.id,
+                  tool: action.name,
+                  latencyMs,
+                  status: "approval_requested",
+                  toolCall: nextToolCall,
+                };
+                logger.info("Agent turn paused for DeepAgents HITL interrupt", {
+                  workspaceId: input.prepared.workspace.id,
+                  threadId: input.prepared.thread.id,
+                  userId: input.prepared.userId,
+                  toolName: action.name,
+                  toolCallId: observedToolCall.id,
+                  confirmationId: confirmation.id,
+                });
+              }
+            }
+
+            finalCheckpoint = hitlCheckpoint;
+            beforeAssistantCheckpoint = hitlCheckpoint;
+            const finalText = assistantContent.trim();
             yield {
-              type: "tool-call-result",
-              id: observedToolCall.id,
-              tool: action.name,
-              input: action.args,
-              output: confirmation,
-              latencyMs,
-              toolCall: nextToolCall,
+              type: "done",
+              outcome: {
+                assistantContent: finalText,
+                usage,
+                finishReason: "tool_confirmation_requested",
+                reasoning: modelReasoning,
+                retrieval: latestToolRetrieval,
+                citations: [],
+                availableCitations: citationRegistry.list(),
+                retrievalCalls: collectRetrievalCalls(),
+                toolCalls: collectToolCalls(),
+                thinkingSteps: listThinkingSteps({
+                  stepsById: thinkingStepsById,
+                  stepOrder: thinkingStepOrder,
+                }),
+                reasoningSegments,
+                agentCheckpoint: {
+                  beforeInput: beforeInputCheckpoint,
+                  beforeAssistant: beforeAssistantCheckpoint,
+                  resume: hitlCheckpoint,
+                  final: finalCheckpoint,
+                },
+              },
             };
-            yield {
-              type: "tool-call-end",
-              id: observedToolCall.id,
-              tool: action.name,
-              latencyMs,
-              status: "completed",
-              toolCall: nextToolCall,
-            };
-            logger.info("Agent turn paused for DeepAgents HITL interrupt", {
-              workspaceId: input.prepared.workspace.id,
-              threadId: input.prepared.thread.id,
-              userId: input.prepared.userId,
-              toolName: action.name,
-              toolCallId: observedToolCall.id,
-              confirmationId: confirmation.id,
+            return;
+          }
+          continue;
+        }
+
+        if (mode === "custom") {
+          const progressEvent = normalizeGeneratedImageProgressEvent(payload);
+          if (!progressEvent) {
+            continue;
+          }
+
+          const currentToolCall = toolCallsById.get(progressEvent.toolCallId);
+          if (!currentToolCall) {
+            continue;
+          }
+
+          const nextToolCall: ToolCallTrace = {
+            ...currentToolCall,
+            tool: progressEvent.tool,
+            output: progressEvent.data,
+            status: "running",
+            error: null,
+          };
+          toolCallsById.set(progressEvent.toolCallId, nextToolCall);
+          yield {
+            type: "tool-call-event",
+            id: progressEvent.toolCallId,
+            tool: progressEvent.tool,
+            data: progressEvent.data,
+            toolCall: nextToolCall,
+          };
+          continue;
+        }
+
+        if (mode !== "tools") {
+          continue;
+        }
+
+        const toolPayload = toObjectRecord(payload);
+        if (!toolPayload) {
+          continue;
+        }
+
+        const event =
+          typeof toolPayload.event === "string" ? toolPayload.event : "";
+        const toolName =
+          typeof toolPayload.name === "string" && toolPayload.name.length > 0
+            ? toolPayload.name
+            : "tool";
+        const toolCallId = resolveToolCallId({
+          toolCallId:
+            typeof toolPayload.toolCallId === "string"
+              ? toolPayload.toolCallId
+              : undefined,
+          toolName,
+          fallbackIndex: toolCallOrder.length + 1,
+        });
+
+        if (!toolCallsById.has(toolCallId)) {
+          toolCallOrder.push(toolCallId);
+          toolCallsById.set(toolCallId, {
+            id: toolCallId,
+            tool: toolName,
+            input: {},
+            output: null,
+            status: "running" as ToolCallStatus,
+            latencyMs: null,
+            error: null,
+            sequence: resolveToolCallSequence(toolCallId),
+          });
+        }
+
+        const currentToolCall = toolCallsById.get(toolCallId);
+        if (!currentToolCall) {
+          continue;
+        }
+
+        if (event === "on_tool_start") {
+          currentReasoningSegment = null;
+          const normalizedInput = extractToolPayloadInput(toolPayload);
+          toolStartedAtById.set(toolCallId, Date.now());
+          if (input.traceContext) {
+            await startSpan({
+              ...input.traceContext,
+              spanId: toolCallId,
+              parentSpanId: input.traceContext.parentSpanId,
+              name: `tool:${toolName}`,
+              kind: "tool",
+              operation: "tool.call",
+              input: normalizedInput,
+              metadata: {
+                toolName,
+                sequence: currentToolCall.sequence,
+              },
             });
           }
-        }
-
-        const interruptCheckpoint =
-          await resolvePendingInterruptCheckpoint({
-            agent,
-            config: runConfig,
-          });
-        if (interruptCheckpoint.pending && interruptCheckpoint.checkpoint) {
-          finalCheckpoint = interruptCheckpoint.checkpoint;
-          beforeAssistantCheckpoint = interruptCheckpoint.checkpoint;
-        }
-        finalCheckpoint ??= interruptCheckpoint.checkpoint;
-        beforeAssistantCheckpoint ??= finalCheckpoint;
-        const finalText = assistantContent.trim();
-        yield {
-          type: "done",
-          outcome: {
-            assistantContent: finalText,
-            usage,
-            finishReason: "tool_confirmation_requested",
-            reasoning: modelReasoning,
-            retrieval: latestToolRetrieval,
-            citations: [],
-            availableCitations: citationRegistry.list(),
-            retrievalCalls: collectRetrievalCalls(),
-            toolCalls: collectToolCalls(),
-            thinkingSteps: listThinkingSteps({
-              stepsById: thinkingStepsById,
-              stepOrder: thinkingStepOrder,
-            }),
-            reasoningSegments,
-            agentCheckpoint: {
-              beforeInput: beforeInputCheckpoint,
-              beforeAssistant: beforeAssistantCheckpoint,
-              resume: interruptCheckpoint.checkpoint,
-              final: finalCheckpoint,
-            },
-          },
-        };
-        return;
-      }
-      continue;
-    }
-
-    if (mode === "custom") {
-      const progressEvent = normalizeGeneratedImageProgressEvent(payload);
-      if (!progressEvent) {
-        continue;
-      }
-
-      const currentToolCall = toolCallsById.get(progressEvent.toolCallId);
-      if (!currentToolCall) {
-        continue;
-      }
-
-      const nextToolCall: ToolCallTrace = {
-        ...currentToolCall,
-        tool: progressEvent.tool,
-        output: progressEvent.data,
-        status: "running",
-        error: null,
-      };
-      toolCallsById.set(progressEvent.toolCallId, nextToolCall);
-      yield {
-        type: "tool-call-event",
-        id: progressEvent.toolCallId,
-        tool: progressEvent.tool,
-        data: progressEvent.data,
-        toolCall: nextToolCall,
-      };
-      continue;
-    }
-
-    if (mode !== "tools") {
-      continue;
-    }
-
-    const toolPayload = toObjectRecord(payload);
-    if (!toolPayload) {
-      continue;
-    }
-
-    const event =
-      typeof toolPayload.event === "string" ? toolPayload.event : "";
-    const toolName =
-      typeof toolPayload.name === "string" && toolPayload.name.length > 0
-        ? toolPayload.name
-        : "tool";
-    const toolCallId = resolveToolCallId({
-      toolCallId:
-        typeof toolPayload.toolCallId === "string"
-          ? toolPayload.toolCallId
-          : undefined,
-      toolName,
-      fallbackIndex: toolCallOrder.length + 1,
-    });
-
-    if (!toolCallsById.has(toolCallId)) {
-      toolCallOrder.push(toolCallId);
-      toolCallsById.set(toolCallId, {
-        id: toolCallId,
-        tool: toolName,
-        input: {},
-        output: null,
-        status: "running" as ToolCallStatus,
-        latencyMs: null,
-        error: null,
-        sequence: nextSequence(),
-      });
-    }
-
-    const currentToolCall = toolCallsById.get(toolCallId);
-    if (!currentToolCall) {
-      continue;
-    }
-
-    if (event === "on_tool_start") {
-      currentReasoningSegment = null;
-      const normalizedInput = extractToolPayloadInput(toolPayload);
-      toolStartedAtById.set(toolCallId, Date.now());
-      if (input.traceContext) {
-        await startSpan({
-          ...input.traceContext,
-          spanId: toolCallId,
-          parentSpanId: input.traceContext.parentSpanId,
-          name: `tool:${toolName}`,
-          kind: "tool",
-          operation: "tool.call",
-          input: normalizedInput,
-          metadata: {
-            toolName,
-            sequence: currentToolCall.sequence,
-          },
-        });
-      }
-      const nextToolCall: ToolCallTrace = {
-        ...currentToolCall,
-        tool: toolName,
-        input: normalizedInput,
-        status: "running",
-        error: null,
-      };
-      toolCallsById.set(toolCallId, nextToolCall);
-      if (isGeneratedImageArtifactToolName(toolName)) {
-        const progressEvent = normalizeGeneratedImageProgressEvent({
-          type: GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
-          toolCallId,
-          tool: toolName,
-          stage: "preparing",
-          ...(typeof normalizedInput.title === "string" &&
-          normalizedInput.title.trim().length > 0
-            ? { title: normalizedInput.title.trim() }
-            : {}),
-          ...(input.prepared.artifactIntent?.kind === "image"
-            ? {
-                aspectRatio: input.prepared.artifactIntent.config.aspectRatio,
-                quality: input.prepared.artifactIntent.config.quality,
-                style: input.prepared.artifactIntent.config.style,
-              }
-            : {}),
-        });
-        if (progressEvent) {
-          const progressToolCall: ToolCallTrace = {
-            ...nextToolCall,
-            output: progressEvent.data,
+          const nextToolCall: ToolCallTrace = {
+            ...currentToolCall,
+            tool: toolName,
+            input: normalizedInput,
+            status: "running",
+            error: null,
           };
-          toolCallsById.set(toolCallId, progressToolCall);
+          toolCallsById.set(toolCallId, nextToolCall);
+          if (isGeneratedImageArtifactToolName(toolName)) {
+            const progressEvent = normalizeGeneratedImageProgressEvent({
+              type: GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
+              toolCallId,
+              tool: toolName,
+              stage: "preparing",
+              ...(typeof normalizedInput.title === "string" &&
+              normalizedInput.title.trim().length > 0
+                ? { title: normalizedInput.title.trim() }
+                : {}),
+              ...(input.prepared.artifactIntent?.kind === "image"
+                ? {
+                    aspectRatio:
+                      input.prepared.artifactIntent.config.aspectRatio,
+                    quality: input.prepared.artifactIntent.config.quality,
+                    style: input.prepared.artifactIntent.config.style,
+                  }
+                : {}),
+            });
+            if (progressEvent) {
+              const progressToolCall: ToolCallTrace = {
+                ...nextToolCall,
+                output: progressEvent.data,
+              };
+              toolCallsById.set(toolCallId, progressToolCall);
+              yield {
+                type: "tool-call-event",
+                id: toolCallId,
+                tool: toolName,
+                data: progressEvent.data,
+                toolCall: progressToolCall,
+              };
+            }
+          }
+          if (hasTextSinceLastToolBoundary) {
+            yield {
+              type: "text-interrupted",
+              reason: "tool-call",
+              toolCallId,
+              tool: toolName,
+            };
+            assistantContent += "\n";
+            renderBlocks.appendText("\n");
+            yield {
+              type: "text-delta",
+              delta: "\n",
+            };
+            hasTextSinceLastToolBoundary = false;
+          }
+          if (isGeneratedImageArtifactToolName(toolName)) {
+            renderBlocks.appendGeneratedImage(toolCallId);
+          }
+          yield {
+            type: "tool-call-start",
+            id: toolCallId,
+            tool: toolName,
+            input: normalizedInput,
+            toolCall: nextToolCall,
+          };
+          if (isRetrievalToolName(toolName)) {
+            const query =
+              typeof normalizedInput.query === "string"
+                ? normalizedInput.query.trim()
+                : "";
+            yield {
+              type: "thinking-step",
+              step: setThinkingStep({
+                id: `${toolName}:${toolCallId}`,
+                kind: "state",
+                title: "Searching sources",
+                status: "in_progress",
+                items: [],
+                description:
+                  query.length > 0
+                    ? `Query: ${compactTraceText(query)}`
+                    : undefined,
+                metadata: {
+                  toolCallId,
+                  tool: toolName,
+                },
+              }),
+            };
+          } else if (isWebToolName(toolName)) {
+            const title = getWebToolStartTitle(toolName);
+            if (title) {
+              const metadata = {
+                ...getWebToolInputMetadata(toolName, normalizedInput),
+                toolCallId,
+                tool: toolName,
+              };
+              yield {
+                type: "thinking-step",
+                step: setThinkingStep({
+                  id: `tool:${toolCallId}`,
+                  kind: "state",
+                  title,
+                  status: "in_progress",
+                  items: formatToolInputItems(normalizedInput),
+                  metadata: {
+                    ...metadata,
+                  },
+                }),
+              };
+            }
+          } else if (isMcpToolName(toolName)) {
+            yield {
+              type: "thinking-step",
+              step: setThinkingStep({
+                id: `tool:${toolCallId}`,
+                kind: "state",
+                title: `Calling MCP ${getMcpToolDisplayName(toolName)}`,
+                status: "in_progress",
+                items: formatToolInputItems(normalizedInput),
+                metadata: {
+                  toolCallId,
+                  tool: toolName,
+                },
+              }),
+            };
+          } else {
+            const title = getFilesystemToolStartTitle(
+              toolName,
+              normalizedInput,
+            );
+            if (title) {
+              yield {
+                type: "thinking-step",
+                step: setThinkingStep({
+                  id: `tool:${toolCallId}`,
+                  kind: "state",
+                  title,
+                  status: "in_progress",
+                  items: formatToolInputItems(normalizedInput),
+                  metadata: {
+                    toolCallId,
+                    tool: toolName,
+                  },
+                }),
+              };
+            }
+          }
+          continue;
+        }
+
+        if (event === "on_tool_event") {
+          const toolData = toolPayload.data;
+          const nextToolCall: ToolCallTrace = {
+            ...currentToolCall,
+            tool: toolName,
+            output: toolData,
+            status: "running",
+            error: null,
+          };
+          toolCallsById.set(toolCallId, nextToolCall);
           yield {
             type: "tool-call-event",
             id: toolCallId,
             tool: toolName,
-            data: progressEvent.data,
-            toolCall: progressToolCall,
+            data: toolData,
+            toolCall: nextToolCall,
           };
+          continue;
+        }
+
+        if (event === "on_tool_end") {
+          currentReasoningSegment = null;
+          nextReasoningContext = {
+            phase: "after_tool",
+            toolCallId,
+            tool: toolName,
+          };
+          const retrievalCall = retrievalCallsById.get(toolCallId);
+          const toolRetrieval = retrievalsByToolCallId.get(toolCallId) ?? null;
+          const startedAt = toolStartedAtById.get(toolCallId);
+          const normalizedInput = extractToolPayloadInput(toolPayload);
+          const measuredLatency =
+            typeof startedAt === "number" ? Date.now() - startedAt : null;
+          const latencyMs = retrievalCall?.latencyMs ?? measuredLatency;
+          const output = retrievalCall
+            ? {
+                query: retrievalCall.query,
+                hitCount: retrievalCall.hitCount,
+              }
+            : normalizeToolOutputForObservability(toolName, toolPayload.output);
+          const connectorContentError =
+            getConnectorToolOutputContentError(output);
+          const outputError =
+            connectorContentError?.message ??
+            getConnectorToolOutputError(output) ??
+            (isWebToolName(toolName) ? getWebToolOutputError(output) : null);
+          const toolStatus: ToolCallStatus = outputError
+            ? "error"
+            : "completed";
+          const nextToolCall: ToolCallTrace = {
+            ...currentToolCall,
+            tool: toolName,
+            input:
+              Object.keys(currentToolCall.input).length > 0
+                ? currentToolCall.input
+                : normalizedInput,
+            output,
+            status: toolStatus,
+            latencyMs,
+            error: outputError,
+          };
+          toolCallsById.set(toolCallId, nextToolCall);
+          if (input.traceContext) {
+            await endSpan({
+              traceId: input.traceContext.traceId,
+              teamId: input.traceContext.teamId,
+              workspaceId: input.traceContext.workspaceId,
+              spanId: toolCallId,
+              status: toolStatus === "error" ? "error" : "ok",
+              latencyMs,
+              output,
+              ...(outputError ? { errorMessage: outputError } : {}),
+              metadata: {
+                toolName,
+                ...(retrievalCall
+                  ? {
+                      query: retrievalCall.query,
+                      hitCount: retrievalCall.hitCount,
+                    }
+                  : {}),
+              },
+            });
+          }
+          if (connectorContentError) {
+            throw connectorContentError;
+          }
+          if (toolStatus === "completed") {
+            yield {
+              type: "tool-call-result",
+              id: toolCallId,
+              tool: toolName,
+              input: nextToolCall.input,
+              output,
+              latencyMs,
+              toolCall: nextToolCall,
+              ...(retrievalCall
+                ? {
+                    query: retrievalCall.query,
+                    hitCount: retrievalCall.hitCount,
+                  }
+                : {}),
+            };
+          }
+          if (toolStatus === "error" && outputError) {
+            yield {
+              type: "tool-call-error",
+              id: toolCallId,
+              tool: toolName,
+              input: nextToolCall.input,
+              error: outputError,
+              latencyMs,
+              toolCall: nextToolCall,
+            };
+          }
+          yield {
+            type: "tool-call-end",
+            id: toolCallId,
+            tool: toolName,
+            latencyMs,
+            status: toolStatus,
+            toolCall: nextToolCall,
+          };
+          if (isRetrievalToolName(toolName)) {
+            const query = retrievalCall?.query ?? "";
+            yield {
+              type: "thinking-step",
+              step: setThinkingStep({
+                id: `${toolName}:${toolCallId}`,
+                kind: "state",
+                title: "Searching sources",
+                status: "completed",
+                items: [],
+                description:
+                  typeof retrievalCall?.hitCount === "number"
+                    ? `Found ${retrievalCall.hitCount} relevant chunks.`
+                    : undefined,
+                metadata: {
+                  query,
+                  hitCount: retrievalCall?.hitCount,
+                  latencyMs,
+                  toolCallId,
+                  tool: toolName,
+                },
+              }),
+            };
+          } else if (isWebToolName(toolName)) {
+            const title = getWebToolEndTitle(toolName);
+            if (title) {
+              const metadata: Record<string, unknown> = {
+                ...getWebToolInputMetadata(toolName, nextToolCall.input),
+                ...getWebToolMetadata(toolPayload.output),
+                latencyMs,
+                toolCallId,
+                tool: toolName,
+              };
+              yield {
+                type: "thinking-step",
+                step: setThinkingStep({
+                  id: `tool:${toolCallId}`,
+                  kind: "state",
+                  title: toolStatus === "error" ? `${title} failed` : title,
+                  status: "completed",
+                  items: formatToolInputItems(nextToolCall.input),
+                  description: outputError ?? undefined,
+                  metadata,
+                }),
+              };
+            }
+          } else if (isMcpToolName(toolName)) {
+            yield {
+              type: "thinking-step",
+              step: setThinkingStep({
+                id: `tool:${toolCallId}`,
+                kind: "state",
+                title:
+                  toolStatus === "error"
+                    ? `MCP ${getMcpToolDisplayName(toolName)} failed`
+                    : `Called MCP ${getMcpToolDisplayName(toolName)}`,
+                status: "completed",
+                items: formatToolInputItems(nextToolCall.input),
+                description: outputError ?? undefined,
+                metadata: {
+                  latencyMs,
+                  toolCallId,
+                  tool: toolName,
+                },
+              }),
+            };
+          } else {
+            const title = getFilesystemToolEndTitle(
+              toolName,
+              nextToolCall.input,
+            );
+            if (title) {
+              const metadata = {
+                ...getFilesystemToolMetadata(toolName, output),
+                latencyMs,
+                toolCallId,
+                tool: toolName,
+              };
+              yield {
+                type: "thinking-step",
+                step: setThinkingStep({
+                  id: `tool:${toolCallId}`,
+                  kind: "state",
+                  title,
+                  status: "completed",
+                  items: formatToolInputItems(nextToolCall.input),
+                  description: getFilesystemToolDescription(
+                    toolName,
+                    metadata,
+                    nextToolCall.input,
+                  ),
+                  metadata,
+                }),
+              };
+            }
+          }
+          const citationSnapshot = getNewCitationSnapshot();
+          if (citationSnapshot) {
+            yield {
+              type: "citations",
+              citations: citationSnapshot,
+            };
+          }
+          continue;
+        }
+
+        if (event === "on_tool_error") {
+          currentReasoningSegment = null;
+          nextReasoningContext = {
+            phase: "after_tool",
+            toolCallId,
+            tool: toolName,
+          };
+          const startedAt = toolStartedAtById.get(toolCallId);
+          const latencyMs =
+            typeof startedAt === "number"
+              ? Date.now() - startedAt
+              : currentToolCall.latencyMs;
+          const errorText = normalizeErrorText(toolPayload.error);
+          const connectorContentError =
+            getConnectorToolErrorTextContentError(errorText);
+          const nextToolCall: ToolCallTrace = {
+            ...currentToolCall,
+            tool: toolName,
+            status: "error",
+            latencyMs,
+            error: errorText,
+          };
+          toolCallsById.set(toolCallId, nextToolCall);
+          if (input.traceContext) {
+            await endSpan({
+              traceId: input.traceContext.traceId,
+              teamId: input.traceContext.teamId,
+              workspaceId: input.traceContext.workspaceId,
+              spanId: toolCallId,
+              status: "error",
+              latencyMs,
+              errorMessage: errorText,
+              metadata: {
+                toolName,
+              },
+            });
+          }
+          if (connectorContentError) {
+            throw connectorContentError;
+          }
+          yield {
+            type: "tool-call-error",
+            id: toolCallId,
+            tool: toolName,
+            input: nextToolCall.input,
+            error: errorText,
+            latencyMs,
+            toolCall: nextToolCall,
+          };
+          yield {
+            type: "tool-call-end",
+            id: toolCallId,
+            tool: toolName,
+            latencyMs,
+            status: "error",
+            toolCall: nextToolCall,
+          };
+          const webTitle = getWebToolEndTitle(toolName);
+          const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
+          if (webTitle) {
+            yield {
+              type: "thinking-step",
+              step: setThinkingStep({
+                id: `tool:${toolCallId}`,
+                kind: "state",
+                title: `${webTitle} failed`,
+                status: "completed",
+                items: formatToolInputItems(nextToolCall.input),
+                description: errorText,
+                metadata: {
+                  latencyMs,
+                  toolCallId,
+                  tool: toolName,
+                },
+              }),
+            };
+          } else if (title) {
+            yield {
+              type: "thinking-step",
+              step: setThinkingStep({
+                id: `tool:${toolCallId}`,
+                kind: "state",
+                title: `${title} failed`,
+                status: "completed",
+                items: formatToolInputItems(nextToolCall.input),
+                description: errorText,
+                metadata: {
+                  latencyMs,
+                  toolCallId,
+                  tool: toolName,
+                },
+              }),
+            };
+          }
         }
       }
+      if (
+        retryAttempted ||
+        input.prepared.agentMode === "replay" ||
+        isCommandSuccessSatisfied({
+          criteria: input.prepared.commandSuccessCriteria,
+          toolCalls: collectToolCalls(),
+        })
+      ) {
+        break;
+      }
+
+      const retryInstruction = buildCommandRetryInstruction(
+        input.prepared.commandSuccessCriteria,
+      );
+      if (!retryInstruction) {
+        break;
+      }
+      retryAttempted = true;
+      yield {
+        type: "thinking-step",
+        step: setThinkingStep({
+          id: "command-retry",
+          kind: "verification",
+          title: "Retrying command",
+          status: "in_progress",
+          items: [],
+          description: retryInstruction,
+          metadata: {
+            criteria: input.prepared.commandSuccessCriteria,
+          },
+        }),
+      };
       if (hasTextSinceLastToolBoundary) {
-        yield {
-          type: "text-interrupted",
-          reason: "tool-call",
-          toolCallId,
-          tool: toolName,
-        };
         assistantContent += "\n";
         renderBlocks.appendText("\n");
         yield {
@@ -2812,425 +3730,31 @@ export async function* invokeDeepAgentTurn(input: {
         };
         hasTextSinceLastToolBoundary = false;
       }
-      if (isGeneratedImageArtifactToolName(toolName)) {
-        renderBlocks.appendGeneratedImage(toolCallId);
-      }
-      yield {
-        type: "tool-call-start",
-        id: toolCallId,
-        tool: toolName,
-        input: normalizedInput,
-        toolCall: nextToolCall,
-      };
-      if (isRetrievalToolName(toolName)) {
-        const query =
-          typeof normalizedInput.query === "string"
-            ? normalizedInput.query.trim()
-            : "";
-        yield {
-          type: "thinking-step",
-          step: setThinkingStep({
-            id: `${toolName}:${toolCallId}`,
-            kind: "state",
-            title: "Searching sources",
-            status: "in_progress",
-            items: [],
-            description:
-              query.length > 0
-                ? `Query: ${compactTraceText(query)}`
-                : undefined,
-            metadata: {
-              toolCallId,
-              tool: toolName,
-            },
-          }),
-        };
-      } else if (isWebToolName(toolName)) {
-        const title = getWebToolStartTitle(toolName);
-        if (title) {
-          const metadata = {
-            ...getWebToolInputMetadata(toolName, normalizedInput),
-            toolCallId,
-            tool: toolName,
-          };
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: `tool:${toolCallId}`,
-              kind: "state",
-              title,
-              status: "in_progress",
-              items: formatToolInputItems(normalizedInput),
-              metadata: {
-                ...metadata,
-              },
-            }),
-          };
-        }
-      } else if (isMcpToolName(toolName)) {
-        yield {
-          type: "thinking-step",
-          step: setThinkingStep({
-            id: `tool:${toolCallId}`,
-            kind: "state",
-            title: `Calling MCP ${getMcpToolDisplayName(toolName)}`,
-            status: "in_progress",
-            items: formatToolInputItems(normalizedInput),
-            metadata: {
-              toolCallId,
-              tool: toolName,
-            },
-          }),
-        };
-      } else {
-        const title = getFilesystemToolStartTitle(toolName, normalizedInput);
-        if (title) {
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: `tool:${toolCallId}`,
-              kind: "state",
-              title,
-              status: "in_progress",
-              items: formatToolInputItems(normalizedInput),
-              metadata: {
-                toolCallId,
-                tool: toolName,
-              },
-            }),
-          };
-        }
-      }
-      continue;
-    }
-
-    if (event === "on_tool_event") {
-      const toolData = toolPayload.data;
-      const nextToolCall: ToolCallTrace = {
-        ...currentToolCall,
-        tool: toolName,
-        output: toolData,
-        status: "running",
-        error: null,
-      };
-      toolCallsById.set(toolCallId, nextToolCall);
-      yield {
-        type: "tool-call-event",
-        id: toolCallId,
-        tool: toolName,
-        data: toolData,
-        toolCall: nextToolCall,
-      };
-      continue;
-    }
-
-    if (event === "on_tool_end") {
-      currentReasoningSegment = null;
-      nextReasoningContext = {
-        phase: "after_tool",
-        toolCallId,
-        tool: toolName,
-      };
-      const retrievalCall = retrievalCallsById.get(toolCallId);
-      const toolRetrieval = retrievalsByToolCallId.get(toolCallId) ?? null;
-      const startedAt = toolStartedAtById.get(toolCallId);
-      const normalizedInput = extractToolPayloadInput(toolPayload);
-      const measuredLatency =
-        typeof startedAt === "number" ? Date.now() - startedAt : null;
-      const latencyMs = retrievalCall?.latencyMs ?? measuredLatency;
-      const output = retrievalCall
-        ? {
-            query: retrievalCall.query,
-            hitCount: retrievalCall.hitCount,
-          }
-        : normalizeToolOutputForObservability(toolName, toolPayload.output);
-      const connectorContentError =
-        getConnectorToolOutputContentError(output);
-      const outputError =
-        connectorContentError?.message ??
-        getConnectorToolOutputError(output) ??
-        (isWebToolName(toolName) ? getWebToolOutputError(output) : null);
-      const toolStatus: ToolCallStatus = outputError ? "error" : "completed";
-      const nextToolCall: ToolCallTrace = {
-        ...currentToolCall,
-        tool: toolName,
-        input:
-          Object.keys(currentToolCall.input).length > 0
-            ? currentToolCall.input
-            : normalizedInput,
-        output,
-        status: toolStatus,
-        latencyMs,
-        error: outputError,
-      };
-      toolCallsById.set(toolCallId, nextToolCall);
-      if (input.traceContext) {
-        await endSpan({
-          traceId: input.traceContext.traceId,
-          teamId: input.traceContext.teamId,
-          workspaceId: input.traceContext.workspaceId,
-          spanId: toolCallId,
-          status: toolStatus === "error" ? "error" : "ok",
-          latencyMs,
-          output,
-          ...(outputError ? { errorMessage: outputError } : {}),
-          metadata: {
-            toolName,
-            ...(retrievalCall
-              ? { query: retrievalCall.query, hitCount: retrievalCall.hitCount }
-              : {}),
-          },
-        });
-      }
-      if (connectorContentError) {
-        throw connectorContentError;
-      }
-      if (toolStatus === "completed") {
-        yield {
-          type: "tool-call-result",
-          id: toolCallId,
-          tool: toolName,
-          input: nextToolCall.input,
-          output,
-          latencyMs,
-          toolCall: nextToolCall,
-          ...(retrievalCall
-            ? {
-                query: retrievalCall.query,
-                hitCount: retrievalCall.hitCount,
-              }
-            : {}),
-        };
-      }
-      if (toolStatus === "error" && outputError) {
-        yield {
-          type: "tool-call-error",
-          id: toolCallId,
-          tool: toolName,
-          input: nextToolCall.input,
-          error: outputError,
-          latencyMs,
-          toolCall: nextToolCall,
-        };
-      }
-      yield {
-        type: "tool-call-end",
-        id: toolCallId,
-        tool: toolName,
-        latencyMs,
-        status: toolStatus,
-        toolCall: nextToolCall,
-      };
-      if (isRetrievalToolName(toolName)) {
-        const query = retrievalCall?.query ?? "";
-        yield {
-          type: "thinking-step",
-          step: setThinkingStep({
-            id: `${toolName}:${toolCallId}`,
-            kind: "state",
-            title: "Searching sources",
-            status: "completed",
-            items: [],
-            description:
-              typeof retrievalCall?.hitCount === "number"
-                ? `Found ${retrievalCall.hitCount} relevant chunks.`
-                : undefined,
-            metadata: {
-              query,
-              hitCount: retrievalCall?.hitCount,
-              latencyMs,
-              toolCallId,
-              tool: toolName,
-            },
-          }),
-        };
-      } else if (isWebToolName(toolName)) {
-        const title = getWebToolEndTitle(toolName);
-        if (title) {
-          const metadata: Record<string, unknown> = {
-            ...getWebToolInputMetadata(toolName, nextToolCall.input),
-            ...getWebToolMetadata(toolPayload.output),
-            latencyMs,
-            toolCallId,
-            tool: toolName,
-          };
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: `tool:${toolCallId}`,
-              kind: "state",
-              title: toolStatus === "error" ? `${title} failed` : title,
-              status: "completed",
-              items: formatToolInputItems(nextToolCall.input),
-              description: outputError ?? undefined,
-              metadata,
-            }),
-          };
-        }
-      } else if (isMcpToolName(toolName)) {
-        yield {
-          type: "thinking-step",
-          step: setThinkingStep({
-            id: `tool:${toolCallId}`,
-            kind: "state",
-            title:
-              toolStatus === "error"
-                ? `MCP ${getMcpToolDisplayName(toolName)} failed`
-                : `Called MCP ${getMcpToolDisplayName(toolName)}`,
-            status: "completed",
-            items: formatToolInputItems(nextToolCall.input),
-            description: outputError ?? undefined,
-            metadata: {
-              latencyMs,
-              toolCallId,
-              tool: toolName,
-            },
-          }),
-        };
-      } else {
-        const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
-        if (title) {
-          const metadata = {
-            ...getFilesystemToolMetadata(toolName, output),
-            latencyMs,
-            toolCallId,
-            tool: toolName,
-          };
-          yield {
-            type: "thinking-step",
-            step: setThinkingStep({
-              id: `tool:${toolCallId}`,
-              kind: "state",
-              title,
-              status: "completed",
-              items: formatToolInputItems(nextToolCall.input),
-              description: getFilesystemToolDescription(
-                toolName,
-                metadata,
-                nextToolCall.input,
-              ),
-              metadata,
-            }),
-          };
-        }
-      }
-      const citationSnapshot = getNewCitationSnapshot();
-      if (citationSnapshot) {
-        yield {
-          type: "citations",
-          citations: citationSnapshot,
-        };
-      }
-      continue;
-    }
-
-    if (event === "on_tool_error") {
-      currentReasoningSegment = null;
-      nextReasoningContext = {
-        phase: "after_tool",
-        toolCallId,
-        tool: toolName,
-      };
-      const startedAt = toolStartedAtById.get(toolCallId);
-      const latencyMs =
-        typeof startedAt === "number"
-          ? Date.now() - startedAt
-          : currentToolCall.latencyMs;
-      const errorText = normalizeErrorText(toolPayload.error);
-      const connectorContentError =
-        getConnectorToolErrorTextContentError(errorText);
-      const nextToolCall: ToolCallTrace = {
-        ...currentToolCall,
-        tool: toolName,
-        status: "error",
-        latencyMs,
-        error: errorText,
-      };
-      toolCallsById.set(toolCallId, nextToolCall);
-      if (input.traceContext) {
-        await endSpan({
-          traceId: input.traceContext.traceId,
-          teamId: input.traceContext.teamId,
-          workspaceId: input.traceContext.workspaceId,
-          spanId: toolCallId,
-          status: "error",
-          latencyMs,
-          errorMessage: errorText,
-          metadata: {
-            toolName,
-          },
-        });
-      }
-      if (connectorContentError) {
-        throw connectorContentError;
-      }
-      yield {
-        type: "tool-call-error",
-        id: toolCallId,
-        tool: toolName,
-        input: nextToolCall.input,
-        error: errorText,
-        latencyMs,
-        toolCall: nextToolCall,
-      };
-      yield {
-        type: "tool-call-end",
-        id: toolCallId,
-        tool: toolName,
-        latencyMs,
-        status: "error",
-        toolCall: nextToolCall,
-      };
-      const webTitle = getWebToolEndTitle(toolName);
-      const title = getFilesystemToolEndTitle(toolName, nextToolCall.input);
-      if (webTitle) {
-        yield {
-          type: "thinking-step",
-          step: setThinkingStep({
-            id: `tool:${toolCallId}`,
-            kind: "state",
-            title: `${webTitle} failed`,
-            status: "completed",
-            items: formatToolInputItems(nextToolCall.input),
-            description: errorText,
-            metadata: {
-              latencyMs,
-              toolCallId,
-              tool: toolName,
-            },
-          }),
-        };
-      } else if (title) {
-        yield {
-          type: "thinking-step",
-          step: setThinkingStep({
-            id: `tool:${toolCallId}`,
-            kind: "state",
-            title: `${title} failed`,
-            status: "completed",
-            items: formatToolInputItems(nextToolCall.input),
-            description: errorText,
-            metadata: {
-              latencyMs,
-              toolCallId,
-              tool: toolName,
-            },
-          }),
-        };
-      }
-    }
+      stream = await runAgentStream([
+        {
+          role: "user" as const,
+          content: retryInstruction,
+        },
+      ]);
     }
   } finally {
     await mcpToolRuntime?.close();
   }
 
   const streamedAssistantText = assistantContent.trim();
-  let assistantText =
-    assistantContent.trim().length > 0
-      ? assistantContent.trim()
-      : assistantContentFromUpdates && assistantContentFromUpdates.trim().length > 0
-        ? assistantContentFromUpdates.trim()
-        : "Model returned an empty response.";
+  const hasCompletedToolOutput = collectToolCalls().some(
+    (call) => call.status === "completed" && !call.error,
+  );
+  let assistantText = resolveFinalAssistantText({
+    assistantContent,
+    assistantContentFromUpdates,
+    hasCompletedToolOutput,
+    allowSilentEmptyResponse: shouldSilenceEmptyApprovalResume({
+      assistantMessageId: input.prepared.assistantMessageId,
+      hasCompletedToolOutput,
+      toolApprovalResume: input.prepared.toolApprovalResume,
+    }),
+  });
 
   const finalRetrieval = latestToolRetrieval;
   const finalCitations = citationRegistry.list();
@@ -3313,7 +3837,7 @@ export async function* invokeDeepAgentTurn(input: {
     availableCitations: finalCitations,
   };
 
-  if (!hasStreamedText) {
+  if (!hasStreamedText && assistantText.length > 0) {
     renderBlocks.appendText(assistantText);
     yield {
       type: "text-delta",
@@ -3323,6 +3847,40 @@ export async function* invokeDeepAgentTurn(input: {
 
   const retrievalCalls = collectRetrievalCalls();
   const toolCalls = collectToolCalls();
+  let commandFailed = false;
+  if (
+    !isCommandSuccessSatisfied({
+      criteria: input.prepared.commandSuccessCriteria,
+      toolCalls,
+    })
+  ) {
+    const criteria = input.prepared.commandSuccessCriteria;
+    const errorText = commandSuccessFailureText(criteria, toolCalls);
+    assistantText = errorText;
+    commandFailed = true;
+    finishReason = "command_success_criteria_failed";
+    if (!hasStreamedText) {
+      renderBlocks.appendText(errorText);
+      yield {
+        type: "text-delta",
+        delta: sanitizeSseValue(errorText),
+      };
+    }
+    yield {
+      type: "thinking-step",
+      step: setThinkingStep({
+        id: "command-success",
+        kind: "verification",
+        title: "Checking command outcome",
+        status: "completed",
+        items: [],
+        description: errorText,
+        metadata: {
+          criteria,
+        },
+      }),
+    };
+  }
   const finalState = finalCheckpoint
     ? null
     : await getAgentStateOrNull(agent, runConfig);
@@ -3330,7 +3888,7 @@ export async function* invokeDeepAgentTurn(input: {
     (finalState as { config?: unknown } | null)?.config,
   );
   const finalRenderBlocks: MessageRenderBlock[] = finalizeMessageRenderBlocks({
-    blocks: renderBlocks.list(),
+    blocks: commandFailed ? [] : renderBlocks.list(),
     finalText: assistantText,
   });
 

@@ -1,4 +1,3 @@
-import { createPublicKey, verify } from "node:crypto";
 import {
   marketMcpManifestSchema,
   type McpAuthType,
@@ -12,16 +11,20 @@ import { config } from "../../shared/config";
 import { decryptSecret, encryptSecret } from "../../shared/secrets";
 import { McpError } from "./errors";
 import { createLangChainMcpClient } from "./langchain-client";
+import { verifyMarketManifestSignature } from "./market-signature";
 import { marketService } from "./market-service";
 import { requireMcpWorkspace } from "./permissions";
 import {
   createMcpActionRun,
   createMcpToolRun,
   createOrUpdateMarketMcpInstall,
+  deleteWorkspaceMcpInstall,
   findMcpActionRun,
   findWorkspaceMcpCredential,
   findWorkspaceMcpInstall,
   findWorkspaceMcpInstallByMarketIdentifier,
+  listMcpActionRuns,
+  listMcpToolRuns,
   listWorkspaceMcpInstalls,
   setWorkspaceMcpToolsEnabled,
   updateMcpActionRun,
@@ -32,7 +35,6 @@ import {
 } from "./repository";
 import {
   assertSafeMcpEndpoint,
-  canonicalJson,
   hashJson,
   normalizedMcpToolName,
   redactMcpSecrets,
@@ -67,93 +69,6 @@ function assertWebTransport(manifest: MarketMcpManifest) {
   assertSafeMcpEndpoint(manifest.endpointUrl, {
     allowLocalhost: isDevelopment(),
   });
-}
-
-function decodeBase64(value: string) {
-  try {
-    return Buffer.from(value, "base64");
-  } catch {
-    throw new McpError(
-      422,
-      "MCP_MARKET_SIGNATURE_INVALID",
-      "MCP market signature or public key is not valid base64",
-    );
-  }
-}
-
-function parseTrustedPublicKey(value: string) {
-  const separatorIndex = value.indexOf(":");
-  if (separatorIndex <= 0) {
-    return null;
-  }
-  return {
-    keyId: value.slice(0, separatorIndex),
-    publicKey: value.slice(separatorIndex + 1),
-  };
-}
-
-function createEd25519PublicKey(value: string) {
-  const bytes = decodeBase64(value);
-  const der =
-    bytes.length === 32
-      ? Buffer.concat([
-          Buffer.from("302a300506032b6570032100", "hex"),
-          bytes,
-        ])
-      : bytes;
-  try {
-    return createPublicKey({ key: der, format: "der", type: "spki" });
-  } catch {
-    throw new McpError(
-      422,
-      "MCP_MARKET_PUBLIC_KEY_INVALID",
-      "MCP market signing public key is invalid",
-    );
-  }
-}
-
-function verifyMarketManifestSignature(input: {
-  manifest: MarketMcpManifest;
-  signature?: string | null;
-  signingKeyId?: string | null;
-}) {
-  if (config.market.trustedPublicKeys.length > 0) {
-    if (!input.signature || !input.signingKeyId) {
-      throw new McpError(
-        422,
-        "MCP_MARKET_SIGNATURE_REQUIRED",
-        "MCP manifests must include a signature and signing key id when trusted market keys are configured",
-      );
-    }
-    const key = config.market.trustedPublicKeys
-      .map(parseTrustedPublicKey)
-      .find((candidate) => candidate?.keyId === input.signingKeyId);
-    if (!key) {
-      throw new McpError(
-        422,
-        "MCP_MARKET_SIGNING_KEY_UNTRUSTED",
-        "MCP manifest signing key is not trusted by this SourceWeft deployment",
-      );
-    }
-    const valid = verify(
-      null,
-      Buffer.from(canonicalJson(input.manifest)),
-      createEd25519PublicKey(key.publicKey),
-      decodeBase64(input.signature),
-    );
-    if (!valid) {
-      throw new McpError(
-        422,
-        "MCP_MARKET_SIGNATURE_INVALID",
-        "MCP manifest signature is invalid",
-      );
-    }
-  }
-  return {
-    verified: input.manifest.verified,
-    signingKeyId: input.signingKeyId ?? null,
-    manifestHash: hashJson(input.manifest),
-  };
 }
 
 function credentialStatusFor(authType: McpAuthType) {
@@ -246,6 +161,9 @@ function mcpConfirmationPayload(input: {
       type: input.tool.serverToolName,
       toolName: input.tool.normalizedToolName,
       label: input.tool.title ?? input.tool.serverToolName,
+      ...(input.tool.description
+        ? { description: input.tool.description }
+        : {}),
       riskLevel: connectorRiskFromMcpRisk(input.action.risk),
       status: input.action.status,
       requiresApproval: true,
@@ -363,6 +281,18 @@ export class McpService {
     };
   }
 
+  async listMarketMcpCategories(input: {
+    workspaceId: string;
+    userId: string;
+  }) {
+    await requireMcpWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "mcp.read",
+    });
+    return marketService.listMcpCategories();
+  }
+
   async getMarketMcp(input: {
     workspaceId: string;
     userId: string;
@@ -396,6 +326,44 @@ export class McpService {
         workspaceId: workspace.id,
       }),
     };
+  }
+
+  async listToolRuns(input: {
+    workspaceId: string;
+    userId: string;
+    limit?: number;
+    cursor?: string | null;
+  }) {
+    const { workspace } = await requireMcpWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "mcp.read",
+    });
+    return listMcpToolRuns({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      limit: input.limit,
+      cursor: input.cursor,
+    });
+  }
+
+  async listActionRuns(input: {
+    workspaceId: string;
+    userId: string;
+    limit?: number;
+    cursor?: string | null;
+  }) {
+    const { workspace } = await requireMcpWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "mcp.read",
+    });
+    return listMcpActionRuns({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      limit: input.limit,
+      cursor: input.cursor,
+    });
   }
 
   async installMarketMcp(input: {
@@ -433,6 +401,7 @@ export class McpService {
       manifest: parsed.data,
       signature: response.signature,
       signingKeyId: response.signingKeyId,
+      trustedPublicKeys: config.market.trustedPublicKeys,
     });
 
     const install = await createOrUpdateMarketMcpInstall({
@@ -480,6 +449,27 @@ export class McpService {
       throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
     }
     return { install };
+  }
+
+  async deleteInstall(input: {
+    workspaceId: string;
+    userId: string;
+    installId: string;
+  }) {
+    const { workspace } = await requireMcpWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "mcp.manage",
+    });
+    const deleted = await deleteWorkspaceMcpInstall({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      installId: input.installId,
+    });
+    if (!deleted) {
+      throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
+    }
+    return { deleted: true as const, installId: input.installId };
   }
 
   async upsertCredentials(input: {
@@ -910,6 +900,13 @@ export class McpService {
     if (!action) {
       throw new McpError(404, "MCP_CONFIRMATION_NOT_FOUND", "MCP confirmation request not found");
     }
+    if (action.status !== "proposed") {
+      throw new McpError(
+        409,
+        "MCP_CONFIRMATION_INVALID_STATE",
+        "Only proposed MCP confirmations can be approved or rejected",
+      );
+    }
     const install = await findWorkspaceMcpInstall({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -949,11 +946,11 @@ export class McpService {
         workspaceId: workspace.id,
         actionRunId: action.id,
         status: "approved",
-        requestJson: action.requestJson,
+        requestJson: input.editedArgs ?? action.requestJson,
         requestPreview: buildMcpRequestPreview({
           install,
           tool,
-          args: action.requestJson,
+          args: input.editedArgs ?? action.requestJson,
         }),
         approvedBy: input.userId,
       })) ?? action;

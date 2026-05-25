@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { MeterConsumeRequest } from "@sourceweft/contracts";
 import type { ContentBillingPort } from "../../billing-port";
+import type { MessageRecord } from "../../types";
+import { filterMessagesBeforeEditAnchor } from "./context";
 import { testExports } from "./preparer";
 import { testExports as inputTestExports } from "../stream/input";
 
@@ -44,6 +46,25 @@ function billingSummary() {
       hardCapUsd: null,
     },
   } satisfies Awaited<ReturnType<ContentBillingPort["getSummary"]>>;
+}
+
+function message(
+  overrides: Partial<MessageRecord> & Pick<MessageRecord, "id" | "role">,
+): MessageRecord {
+  return {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    parentMessageId: null,
+    content: "",
+    createdBy: overrides.role === "user" ? "user-1" : null,
+    model: null,
+    creditsConsumed: null,
+    contentJson: {},
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+    ...overrides,
+  };
 }
 
 test("buildVisionFallbackGatewayMetadata marks system vision fallback operation", () => {
@@ -303,13 +324,8 @@ test("stream input metadata helper rejects arrays", () => {
   );
 });
 
-test("tool confirmation refresh prefers the HITL resume checkpoint", () => {
-  const state = inputTestExports.resolveToolConfirmationRefreshAgentState({
-    finishReason: "tool_confirmation_requested",
-    toolApprovalResume: {
-      decisions: [{ type: "approve" }],
-    },
-    checkpoint: {
+test("tool confirmation resume prefers the HITL resume checkpoint", () => {
+  const checkpoint = inputTestExports.resolveToolConfirmationResumeCheckpoint({
       beforeInput: {
         threadId: "thread-1",
         checkpointId: "before-input",
@@ -326,54 +342,18 @@ test("tool confirmation refresh prefers the HITL resume checkpoint", () => {
         threadId: "thread-1",
         checkpointId: "final",
       },
-    },
   });
 
-  assert.equal(state.agentMode, "replay");
-  assert.deepEqual(state.agentBaseCheckpoint, {
+  assert.deepEqual(checkpoint, {
     threadId: "thread-1",
     checkpointId: "resume",
   });
 });
 
-test("tool confirmation refresh requires resume decisions", () => {
+test("tool confirmation resume requires an interrupt checkpoint", () => {
   assert.throws(
     () =>
-      inputTestExports.resolveToolConfirmationRefreshAgentState({
-        finishReason: "tool_confirmation_requested",
-        checkpoint: {
-          beforeInput: {
-            threadId: "thread-1",
-            checkpointId: "before-input",
-          },
-          beforeAssistant: {
-            threadId: "thread-1",
-            checkpointId: "before-assistant",
-          },
-          resume: null,
-          final: {
-            threadId: "thread-1",
-            checkpointId: "final",
-          },
-        },
-      }),
-    (error) =>
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "THREAD_CONFIRMATION_RESUME_REQUIRED",
-  );
-});
-
-test("tool confirmation refresh requires an interrupt checkpoint", () => {
-  assert.throws(
-    () =>
-      inputTestExports.resolveToolConfirmationRefreshAgentState({
-        finishReason: "tool_confirmation_requested",
-        toolApprovalResume: {
-          decisions: [{ type: "approve" }],
-        },
-        checkpoint: null,
-      }),
+      inputTestExports.resolveToolConfirmationResumeCheckpoint(null),
     (error) =>
       error instanceof Error &&
       "code" in error &&
@@ -381,31 +361,291 @@ test("tool confirmation refresh requires an interrupt checkpoint", () => {
   );
 });
 
-test("normal refresh still forks from before-input checkpoint", () => {
-  const state = inputTestExports.resolveToolConfirmationRefreshAgentState({
-    finishReason: "stop",
-    checkpoint: {
-      beforeInput: {
-        threadId: "thread-1",
-        checkpointId: "before-input",
+test("tool confirmation resume carries prior approved connector actions", () => {
+  const priorActions =
+    inputTestExports.extractApprovedConnectorActionsFromMessage({
+      metadata: {
+        toolCalls: [
+          {
+            id: "tool-call-1",
+            tool: "append_notion_page",
+            output: {
+              type: "tool_confirmation_request",
+              id: "old-confirmation",
+              status: "approved",
+              action: {
+                toolName: "append_notion_page",
+              },
+              preview: {
+                requestJson: {
+                  content: "Old summary",
+                  pageId: "test-page",
+                },
+              },
+              execution: {
+                executor: {
+                  kind: "connector_action_run",
+                  connectorId: "connector-1",
+                  actionRunId: "old-action",
+                },
+              },
+            },
+          },
+          {
+            id: "tool-call-2",
+            tool: "append_notion_page",
+            output: {
+              type: "tool_confirmation_request",
+              id: "pending-confirmation",
+              status: "proposed",
+              action: {
+                toolName: "append_notion_page",
+              },
+              preview: {
+                requestJson: {
+                  content: "New summary",
+                  pageId: "test-page",
+                },
+              },
+              execution: {
+                executor: {
+                  kind: "connector_action_run",
+                  connectorId: "connector-1",
+                  actionRunId: "pending-action",
+                },
+              },
+            },
+          },
+        ],
       },
-      beforeAssistant: {
-        threadId: "thread-1",
-        checkpointId: "before-assistant",
+    });
+
+  assert.deepEqual(priorActions, [
+    {
+      actionRunId: "old-action",
+      connectorId: "connector-1",
+      requestJson: {
+        content: "Old summary",
+        pageId: "test-page",
       },
-      resume: null,
-      final: {
-        threadId: "thread-1",
-        checkpointId: "final",
+      toolName: "append_notion_page",
+    },
+  ]);
+
+  const resume = inputTestExports.mergeToolApprovalResumeConnectorActions({
+    priorConnectorActions: priorActions,
+    resume: {
+      decisions: [{ type: "approve" }],
+      sourceweft: {
+        connectorActions: [
+          {
+            actionRunId: "new-action",
+            connectorId: "connector-1",
+            requestJson: {
+              content: "New summary",
+              pageId: "test-page",
+            },
+            toolName: "append_notion_page",
+          },
+        ],
       },
     },
   });
 
-  assert.equal(state.agentMode, "fork");
-  assert.deepEqual(state.agentBaseCheckpoint, {
-    threadId: "thread-1",
-    checkpointId: "before-input",
+  assert.deepEqual(resume.decisions, [{ type: "approve" }]);
+  assert.deepEqual(resume.sourceweft?.connectorActions, [
+    {
+      actionRunId: "old-action",
+      connectorId: "connector-1",
+      requestJson: {
+        content: "Old summary",
+        pageId: "test-page",
+      },
+      toolName: "append_notion_page",
+    },
+    {
+      actionRunId: "new-action",
+      connectorId: "connector-1",
+      requestJson: {
+        content: "New summary",
+        pageId: "test-page",
+      },
+      toolName: "append_notion_page",
+    },
+  ]);
+});
+
+test("trace continuation derives max sequence and tool sequence map", () => {
+  assert.deepEqual(
+    testExports.resolveTraceContinuationMetadata({
+      metadata: {
+        reasoningSegments: [
+          {
+            id: "initial-reasoning",
+            text: "Need to search first.",
+            sequence: 1,
+          },
+          {
+            id: "after-search",
+            text: "Found the page.",
+            sequence: 3,
+          },
+        ],
+        toolCalls: [
+          {
+            id: "search-page",
+            tool: "search_notion_pages",
+            sequence: 2,
+          },
+          {
+            id: "create-page",
+            tool: "create_notion_page",
+            sequence: 4,
+          },
+        ],
+        thinkingSteps: [
+          {
+            id: "verify",
+            title: "Checking citations",
+            status: "completed",
+            items: [],
+            sequence: 5,
+          },
+        ],
+      },
+    } as never),
+    {
+      maxSequence: 5,
+      toolSequenceById: {
+        "create-page": 4,
+        "search-page": 2,
+      },
+      traceParts: [],
+    },
+  );
+
+  assert.equal(testExports.resolveTraceContinuationMetadata(null), null);
+});
+
+test("edit base checkpoint ignores the edited turn assistant result", () => {
+  const messages = [
+    message({
+      id: "setup-user",
+      role: "user",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }),
+    message({
+      id: "setup-assistant",
+      role: "assistant",
+      createdAt: "2026-01-01T00:01:00.000Z",
+      metadata: {
+        agentCheckpoint: {
+          final: {
+            threadId: "agent-thread",
+            checkpointId: "setup-final",
+          },
+        },
+      },
+    }),
+    message({
+      id: "delete-user",
+      role: "user",
+      createdAt: "2026-01-01T00:02:00.000Z",
+    }),
+    message({
+      id: "delete-failed-assistant",
+      role: "assistant",
+      createdAt: "2026-01-01T00:03:00.000Z",
+      metadata: {
+        userMessageId: "delete-user",
+        agentCheckpoint: {
+          beforeInput: {
+            threadId: "agent-thread",
+            checkpointId: "delete-before-input",
+          },
+          final: {
+            threadId: "agent-thread",
+            checkpointId: "delete-failed-final",
+          },
+        },
+      },
+    }),
+  ];
+
+  assert.deepEqual(
+    inputTestExports.resolveEditBaseCheckpointFromMessages({
+      latestUserMessageId: "delete-user",
+      messages,
+    }),
+    {
+      threadId: "agent-thread",
+      checkpointId: "setup-final",
+    },
+  );
+});
+
+test("edit context fallback ignores later source and checkpoint state", () => {
+  const messages = [
+    message({
+      id: "setup-user",
+      role: "user",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      metadata: { sourceIds: ["setup-source"] },
+    }),
+    message({
+      id: "setup-assistant",
+      role: "assistant",
+      createdAt: "2026-01-01T00:01:00.000Z",
+      metadata: {
+        agentCheckpoint: {
+          final: {
+            threadId: "agent-thread",
+            checkpointId: "setup-final",
+          },
+        },
+      },
+    }),
+    message({
+      id: "edited-user",
+      role: "user",
+      createdAt: "2026-01-01T00:02:00.000Z",
+      metadata: { sourceIds: ["edited-source"] },
+    }),
+    message({
+      id: "old-assistant",
+      role: "assistant",
+      createdAt: "2026-01-01T00:03:00.000Z",
+      metadata: {
+        agentCheckpoint: {
+          final: {
+            threadId: "agent-thread",
+            checkpointId: "old-final",
+          },
+        },
+      },
+    }),
+    message({
+      id: "later-user",
+      role: "user",
+      createdAt: "2026-01-01T00:04:00.000Z",
+      metadata: { sourceIds: ["later-source"] },
+    }),
+  ];
+  const editContextMessages = filterMessagesBeforeEditAnchor({
+    anchorUserMessageId: "edited-user",
+    messages,
   });
+
+  assert.deepEqual(testExports.resolveLatestSourceIds(editContextMessages), [
+    "setup-source",
+  ]);
+  assert.deepEqual(
+    testExports.resolveLatestAssistantFinalCheckpoint(editContextMessages),
+    {
+      threadId: "agent-thread",
+      checkpointId: "setup-final",
+    },
+  );
 });
 
 test("empty thread message validation allows submitted images", () => {
@@ -544,6 +784,7 @@ test("resolveThreadCommand resolves slash skill activation when skill was loaded
         version: "1.0.0",
         description: "Use the Feynman technique",
         slash: true,
+        tools: ["search_notion_pages"],
         files: [],
       },
     ],
@@ -557,6 +798,17 @@ test("resolveThreadCommand resolves slash skill activation when skill was loaded
     kind: "skill",
     name: "/feynman",
     skillSlug: "feynman",
+    workflow: {
+      arguments: "解释二八定律",
+      defaultTools: ["search_notion_pages"],
+      execution: "agent",
+      kind: "workflow",
+      name: "/feynman",
+      permissionOverrides: {},
+      renderedPrompt:
+        '<sourceweft_command name="/feynman" kind="workflow" skill="feynman">\nRun the selected skill workflow for the user\'s request.\nThis slash command is a task request, not a passive tool toggle. Apply the loaded skill instructions and use relevant enabled tools when helpful.\n</sourceweft_command>\n\n<user_request>\n解释二八定律\n</user_request>',
+      successCriteria: { kind: "none" },
+    },
   });
 });
 
@@ -599,6 +851,13 @@ test("resolveThreadCommand resolves slash skill command when skill was loaded by
   assert.equal(command?.canonicalName, "/feynman:explain");
   assert.equal(command?.arguments, "解释二八定律");
   assert.equal(command?.instruction, "Explain $ARGUMENTS simply");
+  assert.equal(command?.workflow?.kind, "workflow");
+  assert.equal(command?.workflow?.execution, "agent");
+  assert.deepEqual(command?.workflow?.successCriteria, { kind: "none" });
+  assert.match(
+    command?.workflow?.renderedPrompt ?? "",
+    /<sourceweft_command name="\/feynman:explain" kind="workflow" skill="feynman" path="\/skills\/feynman\/commands\/explain.md">/,
+  );
 });
 
 test("resolveThreadCommand resolves Notion tool slash command", () => {
@@ -616,42 +875,151 @@ test("resolveThreadCommand resolves Notion tool slash command", () => {
   assert.deepEqual(command, {
     arguments: "TEST",
     canonicalName: "/search_notion_pages",
-    description: "Search indexed Notion pages",
-    displayName: "Search Notion pages",
+    description: "Find Notion pages and return page IDs",
+    displayName: "Find Notion pages",
     kind: "tool",
     name: "/search_notion_pages",
     skillSlug: "",
     toolName: "search_notion_pages",
+    workflow: {
+      arguments: "TEST",
+      defaultTools: ["search_notion_pages"],
+      execution: "agent",
+      kind: "tool_workflow",
+      name: "/search_notion_pages",
+      permissionOverrides: {
+        search_notion_pages: "allow",
+      },
+      renderedPrompt:
+        '<sourceweft_command name="/search_notion_pages" kind="tool_workflow" tool="search_notion_pages">\nFind Notion pages for the user\'s request and return the relevant page IDs, titles, and URLs. Search is for discovery only; use page IDs for reading, updating, or deleting.\nThis slash command is a task request, not a passive tool toggle. Use any relevant enabled support tools first if needed, but the command\'s success criteria must be satisfied.\nSuccess criteria: call search_notion_pages.\n</sourceweft_command>\n\n<user_request>\nTEST\n</user_request>',
+      successCriteria: {
+        kind: "tool_call",
+        toolName: "search_notion_pages",
+      },
+    },
   });
 });
 
-test("buildCommandAugmentedText instructs explicit tool command usage", () => {
+test("buildCommandAugmentedText uses normalized tool workflow prompt", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      command: {
+        arguments: "roadmap",
+        kind: "tool",
+        name: "/search_notion_pages",
+      },
+    }),
+    enabledSkills: [],
+  });
+
+  const text = testExports.buildCommandAugmentedText({
+    command,
+    text: "ignored",
+  });
+
+  assert.match(text, /kind="tool_workflow"/);
+  assert.match(text, /Success criteria: call search_notion_pages/);
+});
+
+test("create Notion tool workflow defaults to authorized workspace", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      command: {
+        arguments: "保存会议纪要",
+        kind: "tool",
+        name: "/create_notion_page",
+      },
+    }),
+    enabledSkills: [],
+  });
+
+  assert.equal(command?.description, "Create a Notion page in the authorized workspace unless an explicit parent page or data source ID is provided");
+  assert.match(command?.workflow?.renderedPrompt ?? "", /authorized Notion workspace selected by the active connector/);
+  assert.match(command?.workflow?.renderedPrompt ?? "", /do not pass parentPageId, pageId, or dataSourceId/);
+  assert.match(command?.workflow?.renderedPrompt ?? "", /Only pass parentPageId\/pageId or dataSourceId when the user explicitly requested/);
+});
+
+test("resolveToolPermissions keeps explicit deny above command overrides", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      command: {
+        arguments: "roadmap",
+        kind: "tool",
+        name: "/search_notion_pages",
+      },
+    }),
+    enabledSkills: [],
+  });
+
+  const permissions = testExports.resolveToolPermissions({
+    command,
+    tools: {
+      search_notion_pages: { enabled: false },
+    },
+  });
+  assert.equal(permissions.search_notion_pages, "deny");
+  assert.equal(permissions.search_sources, "allow");
+  assert.equal(permissions.web_search, undefined);
+});
+
+test("resolveToolPermissions includes skill-activated tools as capabilities", () => {
   assert.equal(
+    testExports.resolveToolPermissions({
+      command: null,
+      enabledSkills: [
+        {
+          workspaceSkillId: "skill-1",
+          sourceType: "workspace_custom",
+          name: "notion-skill",
+          version: "1.0.0",
+          description: "Use Notion",
+          tools: ["search_notion_pages"],
+          files: [],
+        },
+      ],
+      tools: undefined,
+    }).search_notion_pages,
+    "allow",
+  );
+});
+
+test("buildCommandAugmentedText instructs explicit tool command usage", () => {
+  assert.match(
     testExports.buildCommandAugmentedText({
       command: {
         arguments: "TEST",
         canonicalName: "/search_notion_pages",
-        description: "Search indexed Notion pages",
-        displayName: "Search Notion pages",
+        description: "Find Notion pages and return page IDs",
+        displayName: "Find Notion pages",
         kind: "tool",
         name: "/search_notion_pages",
         skillSlug: "",
         toolName: "search_notion_pages",
+        workflow: {
+          arguments: "TEST",
+          defaultTools: ["search_notion_pages"],
+          execution: "agent",
+          kind: "tool_workflow",
+          name: "/search_notion_pages",
+          permissionOverrides: {
+            search_notion_pages: "allow",
+          },
+          renderedPrompt:
+            '<sourceweft_command name="/search_notion_pages" kind="tool_workflow" tool="search_notion_pages">\nFind Notion pages for the user\'s request and return the relevant page IDs, titles, and URLs. Search is for discovery only; use page IDs for reading, updating, or deleting.\nThis slash command is a task request, not a passive tool toggle. Use any relevant enabled support tools first if needed, but the command\'s success criteria must be satisfied.\nSuccess criteria: call search_notion_pages.\n</sourceweft_command>\n\n<user_request>\nTEST\n</user_request>',
+          successCriteria: {
+            kind: "tool_call",
+            toolName: "search_notion_pages",
+          },
+        },
       },
       text: "TEST",
     }),
-    `<sourceweft_tool_command name="search_notion_pages">
-Use the search_notion_pages tool for this request. Treat the user request below as the tool input; do not answer without using the selected tool unless the input is invalid or the tool is unavailable.
-</sourceweft_tool_command>
-
-<user_request>
-TEST
-</user_request>`,
+    /kind="tool_workflow" tool="search_notion_pages"/,
   );
 });
 
-test("buildCommandAugmentedText leaves skill activation text unchanged", () => {
-  assert.equal(
+test("buildCommandAugmentedText uses normalized skill activation workflow prompt", () => {
+  assert.match(
     testExports.buildCommandAugmentedText({
       command: {
         arguments: "Show active users",
@@ -661,10 +1029,21 @@ test("buildCommandAugmentedText leaves skill activation text unchanged", () => {
         kind: "skill",
         name: "/pm-data-analytics",
         skillSlug: "pm-data-analytics",
+        workflow: {
+          arguments: "Show active users",
+          defaultTools: [],
+          execution: "agent",
+          kind: "workflow",
+          name: "/pm-data-analytics",
+          permissionOverrides: {},
+          renderedPrompt:
+            '<sourceweft_command name="/pm-data-analytics" kind="workflow" skill="pm-data-analytics">\nRun the selected skill workflow for the user\'s request.\nThis slash command is a task request, not a passive tool toggle. Apply the loaded skill instructions and use relevant enabled tools when helpful.\n</sourceweft_command>\n\n<user_request>\nShow active users\n</user_request>',
+          successCriteria: { kind: "none" },
+        },
       },
       text: "Show active users",
     }),
-    "Show active users",
+    /kind="workflow" skill="pm-data-analytics"/,
   );
 });
 
@@ -682,10 +1061,21 @@ test("buildCommandAugmentedText injects skill command instructions", () => {
         name: "/pm-data-analytics:write-query",
         path: "commands/write-query.md",
         skillSlug: "pm-data-analytics",
+        workflow: {
+          arguments: "Show active users",
+          defaultTools: [],
+          execution: "agent",
+          kind: "workflow",
+          name: "/pm-data-analytics:write-query",
+          permissionOverrides: {},
+          renderedPrompt:
+            '<sourceweft_command name="/pm-data-analytics:write-query" kind="workflow" skill="pm-data-analytics" path="/skills/pm-data-analytics/commands/write-query.md">\nUse Show active users to write SQL\n</sourceweft_command>\n\n<user_request>\nShow active users\n</user_request>',
+          successCriteria: { kind: "none" },
+        },
       },
       text: "Show active users",
     }),
-    /<sourceweft_command name="\/pm-data-analytics:write-query" path="\/skills\/pm-data-analytics\/commands\/write-query.md">/,
+    /<sourceweft_command name="\/pm-data-analytics:write-query" kind="workflow" skill="pm-data-analytics" path="\/skills\/pm-data-analytics\/commands\/write-query.md">/,
   );
 });
 

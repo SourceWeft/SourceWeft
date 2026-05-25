@@ -373,6 +373,8 @@ const prepared: PreparedThreadTurn = {
   notionTools: {},
   mcpTools: {},
   command: null,
+  commandSuccessCriteria: { kind: "none" },
+  toolPermissions: {},
   generateImageTool: undefined,
   artifactIntent: {
     kind: null,
@@ -422,6 +424,7 @@ const prepared: PreparedThreadTurn = {
   agentBaseCheckpoint: null,
   agentRunThreadId: "thread-1",
   toolApprovalResume: null,
+  traceContinuation: null,
   isFirstAssistantResponse: true,
   isFirstAssistantAttempt: true,
   initialTitle: "New chat",
@@ -689,6 +692,7 @@ test("streamThreadEvents includes finish reason in finish events", async () => {
   const finish = events.find((event) => event.type === "finish");
 
   assert.equal(finish?.finishReason, "tool_confirmation_requested");
+  assert.deepEqual(finish?.agentCheckpoint, outcome.agentCheckpoint);
 });
 
 test("streamThreadEvents skips title after a cancelled assistant attempt", async () => {
@@ -838,6 +842,52 @@ test("streamThreadEvents calls onFinalized with assistant message and billing", 
     events.some((event) => event.type === "finish"),
     true,
   );
+});
+
+test("streamThreadEvents emits prepared thread run metadata on start", async () => {
+  const turnService = createTurnService();
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "text-delta", delta: "Answer" };
+      yield { type: "done", outcome };
+    },
+    async () => null,
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents(
+    {
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      content: "What is in this invoice?",
+    },
+    {
+      onPrepared: async () => ({
+        assistantMessageId: "assistant-message-1",
+        assistantMetadata: {
+          threadRun: {
+            id: "run-1",
+            idempotencyKey: "sourceweft-web-run:resume-1",
+            mode: "resume",
+            status: "running",
+          },
+        },
+      }),
+    },
+  )) {
+    events.push(parseSseData(event));
+  }
+
+  assert.deepEqual(events[0]?.threadRun, {
+    id: "run-1",
+    idempotencyKey: "sourceweft-web-run:resume-1",
+    mode: "resume",
+    status: "running",
+  });
 });
 
 test("streamThreadEvents generates title when retrying after first failed assistant", async () => {
@@ -1308,11 +1358,22 @@ test("streamThreadEvents preserves partial assistant content for persisted error
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
       yield {
         type: "reasoning",
-        reasoning: "I found the invoice total.",
+        reasoning: "I found",
+        segment: {
+          id: "model-reasoning-1",
+          text: "I found",
+          sequence: 0,
+          phase: "initial",
+        },
+      };
+      yield {
+        type: "reasoning",
+        reasoning: " the invoice total.",
         segment: {
           id: "model-reasoning-1",
           text: "I found the invoice total.",
           sequence: 0,
+          phase: "initial",
         },
       };
       yield {
@@ -1344,6 +1405,18 @@ test("streamThreadEvents preserves partial assistant content for persisted error
       yield {
         type: "citations",
         citations: [citation],
+      };
+      yield {
+        type: "reasoning",
+        reasoning: " It came from the source.",
+        segment: {
+          id: "model-reasoning-1",
+          text: "It came from the source.",
+          sequence: 3,
+          phase: "after_tool",
+          toolCallId: "tool-1",
+          tool: "search_sources",
+        },
       };
       yield {
         type: "text-delta",
@@ -1388,14 +1461,32 @@ test("streamThreadEvents preserves partial assistant content for persisted error
 
   assert.equal(textDeltaEvent?.delta, "Partial answer before failure.");
   assert.equal(partialAssistantContent, "Partial answer before failure.");
-  assert.equal(partialState?.reasoning, "I found the invoice total.");
+  assert.equal(
+    partialState?.reasoning,
+    "I found the invoice total. It came from the source.",
+  );
   assert.deepEqual(partialState?.reasoningSegments, [
     {
       id: "model-reasoning-1",
-      text: "I found the invoice total.",
+      text: "It came from the source.",
       sequence: 0,
+      phase: "after_tool",
+      toolCallId: "tool-1",
+      tool: "search_sources",
     },
   ]);
+  assert.deepEqual(
+    (
+      partialState?.traceParts as Array<{
+        kind: string;
+        order: number;
+        text?: string;
+      }>
+    )
+      .filter((part) => part.kind === "reasoning")
+      .map((part) => `${part.order}:${part.kind}:${part.text ?? ""}`),
+    ["0:reasoning:It came from the source."],
+  );
   assert.deepEqual(partialState?.thinkingSteps, [
     {
       id: "step-1",

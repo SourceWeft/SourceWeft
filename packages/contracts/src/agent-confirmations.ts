@@ -38,9 +38,11 @@ export const toolApprovalResumeSchema = z.object({
             toolName: z.string().min(1),
             connectorId: z.string().min(1),
             actionRunId: z.string().min(1),
+            requestJson: jsonObjectSchema.optional(),
           }),
         )
         .optional(),
+      hitlInterruptId: z.string().min(1).optional(),
     })
     .optional(),
 });
@@ -101,6 +103,7 @@ export const toolConfirmationRequestSchema = z.object({
     type: z.string().min(1),
     toolName: z.string().min(1),
     label: z.string().min(1),
+    description: z.string().min(1).optional(),
     riskLevel: connectorActionRiskLevelSchema,
     status: toolConfirmationStatusSchema.or(connectorActionRunStatusSchema),
     requiresApproval: z.literal(true),
@@ -133,6 +136,11 @@ export const toolConfirmationRequestSchema = z.object({
       "not_applicable",
     ]),
     executor: toolConfirmationExecutorSchema,
+    sourceweft: z
+      .object({
+        hitlInterruptId: z.string().min(1).optional(),
+      })
+      .optional(),
   }),
   status: toolConfirmationStatusSchema,
   userMessage: z.string().min(1),
@@ -143,6 +151,8 @@ export const respondAgentConfirmationRequestSchema = z.object({
   editedArgs: jsonObjectSchema.optional(),
   note: z.string().trim().max(2000).optional(),
   confirmation: toolConfirmationRequestSchema.optional(),
+  threadRunId: z.string().trim().min(1).max(128).optional(),
+  assistantMessageId: z.string().trim().min(1).max(128).optional(),
 });
 
 export const agentToolTrustRuleSchema = z.object({
@@ -168,6 +178,19 @@ export const respondAgentConfirmationResponseSchema = z.object({
   confirmation: toolConfirmationRequestSchema,
   resume: toolApprovalResumeSchema.optional(),
 });
+
+export function isPendingToolConfirmation(
+  confirmation: unknown,
+) {
+  if (
+    !confirmation ||
+    typeof confirmation !== "object" ||
+    Array.isArray(confirmation)
+  ) {
+    return false;
+  }
+  return (confirmation as { status?: unknown }).status === "proposed";
+}
 
 export type ToolConfirmationDecision = z.infer<
   typeof toolConfirmationDecisionSchema

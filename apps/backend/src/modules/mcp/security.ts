@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { BlockList, isIP } from "node:net";
 import { McpError } from "./errors";
 
 const BLOCKED_HEADER_NAMES = new Set([
@@ -17,6 +18,22 @@ const BLOCKED_HEADER_NAMES = new Set([
 
 const SENSITIVE_KEY_PATTERN =
   /(?:access[_-]?token|refresh[_-]?token|client[_-]?secret|authorization|cookie|password|api[_-]?key|secret|credential|token)/i;
+
+const BLOCKED_ENDPOINT_IPS = new BlockList();
+BLOCKED_ENDPOINT_IPS.addSubnet("0.0.0.0", 8, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("10.0.0.0", 8, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("100.64.0.0", 10, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("127.0.0.0", 8, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("169.254.0.0", 16, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("172.16.0.0", 12, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("192.168.0.0", 16, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("224.0.0.0", 4, "ipv4");
+BLOCKED_ENDPOINT_IPS.addSubnet("240.0.0.0", 4, "ipv4");
+BLOCKED_ENDPOINT_IPS.addAddress("::", "ipv6");
+BLOCKED_ENDPOINT_IPS.addAddress("::1", "ipv6");
+BLOCKED_ENDPOINT_IPS.addSubnet("fc00::", 7, "ipv6");
+BLOCKED_ENDPOINT_IPS.addSubnet("fe80::", 10, "ipv6");
+BLOCKED_ENDPOINT_IPS.addSubnet("ff00::", 8, "ipv6");
 
 export function normalizeMcpSlug(value: string) {
   return value
@@ -73,6 +90,34 @@ export function redactMcpSecrets(value: unknown): unknown {
   return output;
 }
 
+function hostnameWithoutIpv6Brackets(value: string) {
+  return value.startsWith("[") && value.endsWith("]")
+    ? value.slice(1, -1)
+    : value;
+}
+
+function isLocalhostName(hostname: string) {
+  const normalized = hostnameWithoutIpv6Brackets(hostname.toLowerCase());
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized.endsWith(".localhost")
+  );
+}
+
+function isBlockedIpHost(hostname: string) {
+  const normalized = hostnameWithoutIpv6Brackets(hostname.toLowerCase());
+  const ipVersion = isIP(normalized);
+  if (!ipVersion) {
+    return false;
+  }
+  return BLOCKED_ENDPOINT_IPS.check(
+    normalized,
+    ipVersion === 6 ? "ipv6" : "ipv4",
+  );
+}
+
 export function assertSafeMcpEndpoint(value: string, input: { allowLocalhost: boolean }) {
   let url: URL;
   try {
@@ -81,7 +126,20 @@ export function assertSafeMcpEndpoint(value: string, input: { allowLocalhost: bo
     throw new McpError(400, "MCP_ENDPOINT_INVALID", "MCP endpoint URL is invalid");
   }
 
-  if (url.protocol !== "https:" && !(input.allowLocalhost && url.protocol === "http:")) {
+  if (url.username || url.password) {
+    throw new McpError(
+      400,
+      "MCP_ENDPOINT_UNSAFE",
+      "MCP endpoint must not include credentials",
+    );
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  const localhostAllowed = input.allowLocalhost && isLocalhostName(hostname);
+  if (url.protocol === "http:") {
+    if (localhostAllowed) {
+      return url.toString();
+    }
     throw new McpError(
       400,
       "MCP_ENDPOINT_UNSAFE",
@@ -89,25 +147,21 @@ export function assertSafeMcpEndpoint(value: string, input: { allowLocalhost: bo
     );
   }
 
-  const hostname = url.hostname.toLowerCase();
-  const localhostAllowed =
-    input.allowLocalhost &&
-    (hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname.endsWith(".localhost"));
+  if (url.protocol !== "https:") {
+    throw new McpError(
+      400,
+      "MCP_ENDPOINT_UNSAFE",
+      "MCP endpoint must use https. Local http is only allowed in development.",
+    );
+  }
+
   if (localhostAllowed) {
     return url.toString();
   }
 
   if (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1" ||
-    hostname.startsWith("10.") ||
-    hostname.startsWith("192.168.") ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname) ||
-    hostname.startsWith("169.254.") ||
+    isLocalhostName(hostname) ||
+    isBlockedIpHost(hostname) ||
     hostname === "metadata.google.internal"
   ) {
     throw new McpError(

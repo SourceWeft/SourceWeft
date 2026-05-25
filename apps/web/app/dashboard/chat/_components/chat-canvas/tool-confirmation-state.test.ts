@@ -1,0 +1,650 @@
+import assert from "node:assert/strict";
+import { test } from "vitest";
+import {
+  getToolConfirmationRunKey,
+  initialToolConfirmationControllerState,
+  settleToolConfirmationDecision,
+  stopToolConfirmationRun,
+  syncToolConfirmationRun,
+} from "./tool-confirmation-controller";
+import {
+  combineToolApprovalResumes,
+  getPendingToolConfirmationItems,
+  getToolConfirmationItemsForRun,
+  getVisibleToolConfirmationItems,
+  isExpiredToolConfirmationResponse,
+  isStaleToolConfirmationResponse,
+  isToolCallActivelyRunning,
+  orderToolConfirmationResolutions,
+  shouldLockComposerForApproval,
+  shouldLockComposerForRun,
+  type ToolConfirmationItem,
+  updateToolConfirmationOrder,
+} from "./tool-confirmation-state";
+import type {
+  AssistantVersionIndexEntry,
+  MessageVersion,
+  ToolCallRecord,
+  ToolConfirmationResolution,
+} from "./types";
+
+function createConfirmationItem(
+  id: string,
+  input: Partial<Pick<ToolConfirmationItem, "threadRunId">> = {},
+): ToolConfirmationItem {
+  const toolCall: ToolCallRecord = {
+    id: `tool-${id}`,
+    tool: "delete_notion_page",
+    input: {},
+    output: null,
+    latencyMs: 0,
+    status: "approval_requested",
+    error: null,
+  };
+
+  return {
+    assistantMessageId: "assistant-1",
+    messageId: "assistant-1",
+    threadRunId: input.threadRunId ?? "run-1",
+    toolCall,
+    confirmation: {
+      type: "tool_confirmation_request",
+      schemaVersion: 1,
+      id,
+      domain: "connector",
+      subject: {
+        label: "Lei Qin",
+        provider: "notion",
+        connectorId: "connector-1",
+      },
+      action: {
+        type: "notion.page.trash",
+        toolName: "delete_notion_page",
+        label: "Delete",
+        riskLevel: "high",
+        status: "proposed",
+        requiresApproval: true,
+      },
+      preview: {
+        title: `Delete Notion page: ${id}`,
+      },
+      decisionOptions: [
+        { decision: "reject", label: "Reject" },
+        { decision: "approve", label: "Approve" },
+      ],
+      execution: {
+        providerStatus: "not_executed",
+        executor: {
+          kind: "connector_action_run",
+          connectorId: "connector-1",
+          actionRunId: id,
+        },
+      },
+      status: "proposed",
+      userMessage: "Waiting for confirmation.",
+    },
+  };
+}
+
+function createVersion(
+  id: string,
+  input: {
+    confirmationId?: string;
+    threadRunId?: string;
+    threadRunStatus?: string;
+  } = {},
+): MessageVersion {
+  const item = createConfirmationItem(input.confirmationId ?? id, {
+    threadRunId: input.threadRunId ?? "run-1",
+  });
+  return {
+    id,
+    content: "",
+    threadRun: {
+      id: input.threadRunId ?? "run-1",
+      status: input.threadRunStatus ?? "waiting_for_approval",
+    },
+    toolCalls: [
+      {
+        ...item.toolCall,
+        output: item.confirmation,
+      },
+    ],
+  };
+}
+
+function createAssistantVersionIndex(
+  entries: Array<{
+    branchIndex?: number;
+    groupId: string;
+    version: MessageVersion;
+  }>,
+) {
+  return new Map<string, AssistantVersionIndexEntry>(
+    entries.map((entry) => [
+      entry.version.id,
+      {
+        branchIndex: entry.branchIndex ?? 0,
+        groupId: entry.groupId,
+        version: entry.version,
+      },
+    ]),
+  );
+}
+
+test("pending confirmation items are hidden only after their confirmation id resolves", () => {
+  const items = [
+    createConfirmationItem("action-1"),
+    createConfirmationItem("action-2"),
+  ];
+
+  const pending = getPendingToolConfirmationItems(items, [
+    { confirmationId: "action-1", decision: "approve" },
+  ]);
+
+  assert.deepEqual(
+    pending.map((item) => item.confirmation.id),
+    ["action-2"],
+  );
+});
+
+test("confirmation controller clears stale resolutions when the active run changes", () => {
+  const item = createConfirmationItem("action-1");
+  const synced = syncToolConfirmationRun({
+    items: [item],
+    runKey: getToolConfirmationRunKey({
+      id: "run-1",
+      idempotencyKey: "key-1",
+      status: "waiting_for_approval",
+    }),
+    state: initialToolConfirmationControllerState,
+  });
+  const stopped = stopToolConfirmationRun({
+    items: [item],
+    state: synced,
+  });
+  const afterRunCleared = syncToolConfirmationRun({
+    items: [],
+    runKey: null,
+    state: stopped,
+  });
+  const newRunItem = createConfirmationItem("action-2", {
+    threadRunId: "run-2",
+  });
+  const nextRun = syncToolConfirmationRun({
+    items: [newRunItem],
+    runKey: "run-2",
+    state: afterRunCleared,
+  });
+
+  assert.deepEqual(afterRunCleared.resolutions, []);
+  assert.deepEqual(nextRun.resolutions, []);
+  assert.deepEqual(
+    getPendingToolConfirmationItems([newRunItem], nextRun.resolutions).map(
+      (pending) => pending.confirmation.id,
+    ),
+    ["action-2"],
+  );
+});
+
+test("confirmation controller resumes only after all active confirmations settle", () => {
+  const firstItem = createConfirmationItem("action-1");
+  const secondItem = createConfirmationItem("action-2");
+  const items = [firstItem, secondItem];
+  const synced = syncToolConfirmationRun({
+    items,
+    runKey: "run-1",
+    state: initialToolConfirmationControllerState,
+  });
+
+  const first = settleToolConfirmationDecision({
+    decision: "approve",
+    item: firstItem,
+    items,
+    resume: {
+      decisions: [{ type: "approve" }],
+      sourceweft: {
+        hitlInterruptId: "0123456789abcdef0123456789abcdef",
+        connectorActions: [
+          {
+            actionRunId: "action-1",
+            connectorId: "connector-1",
+            toolName: "delete_notion_page",
+          },
+        ],
+      },
+    },
+    state: synced,
+  });
+
+  assert.equal(first.missingResume, false);
+  assert.equal(first.resumeEffect, null);
+  assert.equal(first.state.activeIntervention?.id, "action-2");
+
+  const second = settleToolConfirmationDecision({
+    decision: "reject",
+    item: secondItem,
+    items,
+    resume: {
+      decisions: [{ type: "reject", message: "Skip this one." }],
+    },
+    state: first.state,
+  });
+
+  assert.equal(second.missingResume, false);
+  assert.deepEqual(second.resumeEffect, {
+    assistantMessageId: "assistant-1",
+    resolvedConfirmationIds: ["action-1", "action-2"],
+    toolApprovalResume: {
+      decisions: [
+        { type: "approve" },
+        { type: "reject", message: "Skip this one." },
+      ],
+      sourceweft: {
+        hitlInterruptId: "0123456789abcdef0123456789abcdef",
+        connectorActions: [
+          {
+            actionRunId: "action-1",
+            connectorId: "connector-1",
+            toolName: "delete_notion_page",
+          },
+        ],
+      },
+    },
+  });
+});
+
+test("run-scoped confirmations use the active run assistant message", () => {
+  const oldTurnVersion = createVersion("assistant-old-edit", {
+    confirmationId: "old-action",
+    threadRunId: "run-old",
+  });
+  const latestTurnVersion = createVersion("assistant-latest", {
+    confirmationId: "latest-action",
+    threadRunId: "run-latest",
+  });
+  const lookup = getToolConfirmationItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-old-edit",
+      id: "run-old",
+      status: "waiting_for_approval",
+    },
+    assistantVersionById: createAssistantVersionIndex([
+      {
+        branchIndex: 1,
+        groupId: "assistant:old",
+        version: oldTurnVersion,
+      },
+      {
+        groupId: "assistant:latest",
+        version: latestTurnVersion,
+      },
+    ]),
+  });
+
+  assert.deepEqual(
+    lookup.items.map((item) => item.confirmation.id),
+    ["old-action"],
+  );
+  assert.equal(lookup.reason, "found");
+  assert.equal(lookup.items[0]?.assistantMessageId, "assistant-old-edit");
+});
+
+test("run-scoped confirmations return empty when waiting run lacks assistant message", () => {
+  const lookup = getToolConfirmationItemsForRun({
+    activeThreadRun: {
+      id: "run-1",
+      status: "waiting_for_approval",
+    },
+    assistantVersionById: createAssistantVersionIndex([
+      {
+        groupId: "assistant:latest",
+        version: createVersion("assistant-latest"),
+      },
+    ]),
+  });
+
+  assert.deepEqual(lookup.items, []);
+  assert.equal(lookup.reason, "missing_assistant_message");
+});
+
+test("run-scoped confirmations return empty when assistant message is missing locally", () => {
+  const lookup = getToolConfirmationItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-missing",
+      id: "run-1",
+      status: "waiting_for_approval",
+    },
+    assistantVersionById: createAssistantVersionIndex([
+      {
+        groupId: "assistant:latest",
+        version: createVersion("assistant-latest"),
+      },
+    ]),
+  });
+
+  assert.deepEqual(lookup.items, []);
+  assert.equal(lookup.reason, "assistant_message_not_found");
+  assert.equal(lookup.assistantMessageId, "assistant-missing");
+});
+
+test("cancelled assistant versions do not expose pending confirmations", () => {
+  const lookup = getToolConfirmationItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-1",
+      id: "run-1",
+      status: "waiting_for_approval",
+    },
+    assistantVersionById: createAssistantVersionIndex([
+      {
+        groupId: "assistant:assistant-1",
+        version: {
+          ...createVersion("assistant-1"),
+          isCancelled: true,
+          threadRun: {
+            id: "run-1",
+            status: "cancelled",
+          },
+        },
+      },
+    ]),
+  });
+
+  assert.deepEqual(lookup.items, []);
+  assert.equal(lookup.reason, "found");
+});
+
+test("visible confirmations are hidden after their confirmation id resolves", () => {
+  const visible = getVisibleToolConfirmationItems(
+    [createConfirmationItem("action-1"), createConfirmationItem("action-2")],
+    [{ confirmationId: "action-1", decision: "approve" }],
+  );
+
+  assert.deepEqual(
+    visible.map((item) => item.confirmation.id),
+    ["action-2"],
+  );
+});
+
+test("composer stays available for approval runs with no visible pending confirmation", () => {
+  assert.equal(
+    shouldLockComposerForApproval({
+      isWaitingForApproval: true,
+      pendingConfirmationCount: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldLockComposerForApproval({
+      isWaitingForApproval: true,
+      pendingConfirmationCount: 1,
+    }),
+    true,
+  );
+});
+
+test("composer stays available for stale waiting runs without pending confirmation", () => {
+  assert.equal(
+    shouldLockComposerForRun({
+      isStreaming: true,
+      isWaitingForApproval: true,
+      pendingConfirmationCount: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldLockComposerForRun({
+      isStreaming: true,
+      isWaitingForApproval: true,
+      pendingConfirmationCount: 1,
+    }),
+    true,
+  );
+});
+
+test("resolved approval requests are not treated as actively running tool calls", () => {
+  const item = createConfirmationItem("action-1");
+  assert.equal(
+    isToolCallActivelyRunning({
+      resolvedConfirmationIds: new Set(["action-1"]),
+      toolCall: {
+        ...item.toolCall,
+        output: item.confirmation,
+      },
+    }),
+    false,
+  );
+});
+
+test("pending approval requests are treated as active tool calls", () => {
+  const item = createConfirmationItem("action-1");
+  assert.equal(
+    isToolCallActivelyRunning({
+      toolCall: {
+        ...item.toolCall,
+        output: item.confirmation,
+      },
+    }),
+    true,
+  );
+});
+
+test("tool approval resumes combine every decision in confirmation order", () => {
+  const resolutions: ToolConfirmationResolution[] = [
+    {
+      confirmationId: "action-1",
+      decision: "approve",
+      resume: {
+        decisions: [{ type: "approve" }],
+        sourceweft: {
+          hitlInterruptId: "0123456789abcdef0123456789abcdef",
+          connectorActions: [
+            {
+              actionRunId: "action-1",
+              connectorId: "connector-1",
+              toolName: "delete_notion_page",
+            },
+          ],
+        },
+      },
+    },
+    {
+      confirmationId: "action-2",
+      decision: "reject",
+      resume: {
+        decisions: [{ type: "reject", message: "Skip this one." }],
+      },
+    },
+  ];
+
+  assert.deepEqual(combineToolApprovalResumes(resolutions), {
+    decisions: [
+      { type: "approve" },
+      { type: "reject", message: "Skip this one." },
+    ],
+    sourceweft: {
+      hitlInterruptId: "0123456789abcdef0123456789abcdef",
+      connectorActions: [
+        {
+          actionRunId: "action-1",
+          connectorId: "connector-1",
+          toolName: "delete_notion_page",
+        },
+      ],
+    },
+  });
+});
+
+test("tool approval resume keeps earlier decisions after resolved cards leave the pending list", () => {
+  const firstResolution: ToolConfirmationResolution = {
+    confirmationId: "action-1",
+    decision: "approve",
+    resume: {
+      decisions: [{ type: "approve" }],
+      sourceweft: {
+        connectorActions: [
+          {
+            actionRunId: "action-1",
+            connectorId: "connector-1",
+            toolName: "delete_notion_page",
+          },
+        ],
+      },
+    },
+  };
+  const secondResolution: ToolConfirmationResolution = {
+    confirmationId: "action-2",
+    decision: "approve",
+    resume: {
+      decisions: [{ type: "approve" }],
+      sourceweft: {
+        connectorActions: [
+          {
+            actionRunId: "action-2",
+            connectorId: "connector-1",
+            toolName: "delete_notion_page",
+          },
+        ],
+      },
+    },
+  };
+
+  const ordered = orderToolConfirmationResolutions({
+    confirmationIds: updateToolConfirmationOrder(
+      ["action-1", "action-2"],
+      [createConfirmationItem("action-2")],
+    ),
+    resolutions: [firstResolution, secondResolution],
+  });
+
+  assert.deepEqual(
+    ordered.map((resolution) => resolution.confirmationId),
+    ["action-1", "action-2"],
+  );
+  assert.deepEqual(combineToolApprovalResumes(ordered), {
+    decisions: [{ type: "approve" }, { type: "approve" }],
+    sourceweft: {
+      connectorActions: [
+        {
+          actionRunId: "action-1",
+          connectorId: "connector-1",
+          toolName: "delete_notion_page",
+        },
+        {
+          actionRunId: "action-2",
+          connectorId: "connector-1",
+          toolName: "delete_notion_page",
+        },
+      ],
+    },
+  });
+});
+
+test("tool approval resume stays blocked when any decided confirmation lacks resume data", () => {
+  assert.equal(
+    combineToolApprovalResumes([
+      {
+        confirmationId: "action-1",
+        decision: "approve",
+        resume: {
+          decisions: [{ type: "approve" }],
+        },
+      },
+      {
+        confirmationId: "action-2",
+        decision: "approve",
+      },
+    ]),
+    null,
+  );
+});
+
+test("tool approval resume ignores stale confirmation markers", () => {
+  assert.deepEqual(
+    combineToolApprovalResumes([
+      {
+        confirmationId: "action-1",
+        decision: "reject",
+        stale: true,
+      },
+      {
+        confirmationId: "action-2",
+        decision: "approve",
+        resume: {
+          decisions: [{ type: "approve" }],
+        },
+      },
+    ]),
+    {
+      decisions: [{ type: "approve" }],
+    },
+  );
+});
+
+test("tool approval resume preserves HITL interrupt id without connector actions", () => {
+  assert.deepEqual(
+    combineToolApprovalResumes([
+      {
+        confirmationId: "action-1",
+        decision: "reject",
+        resume: {
+          decisions: [{ type: "reject", message: "Skip" }],
+          sourceweft: {
+            hitlInterruptId: "0123456789abcdef0123456789abcdef",
+          },
+        },
+      },
+    ]),
+    {
+      decisions: [{ type: "reject", message: "Skip" }],
+      sourceweft: {
+        hitlInterruptId: "0123456789abcdef0123456789abcdef",
+      },
+    },
+  );
+});
+
+test("stopped confirmation markers hide pending confirmations and do not resume", () => {
+  const stoppedResolution: ToolConfirmationResolution = {
+    confirmationId: "action-1",
+    decision: "reject",
+    resume: null,
+    stopped: true,
+  };
+
+  assert.deepEqual(
+    getVisibleToolConfirmationItems(
+      [createConfirmationItem("action-1")],
+      [stoppedResolution],
+    ),
+    [],
+  );
+  assert.equal(combineToolApprovalResumes([stoppedResolution]), null);
+});
+
+test("stale confirmation response errors are identified by backend error code", () => {
+  assert.equal(
+    isStaleToolConfirmationResponse({
+      code: "CHAT_RUN_NOT_WAITING_FOR_APPROVAL",
+    }),
+    true,
+  );
+  assert.equal(
+    isStaleToolConfirmationResponse({ code: "CONFIRMATION_NOT_ACTIVE" }),
+    true,
+  );
+  assert.equal(
+    isStaleToolConfirmationResponse({ code: "TOOL_APPROVAL_EXPIRED" }),
+    false,
+  );
+  assert.equal(
+    isExpiredToolConfirmationResponse({ code: "TOOL_APPROVAL_EXPIRED" }),
+    true,
+  );
+  assert.equal(
+    isStaleToolConfirmationResponse({
+      code: "CONFIRMATION_ASSISTANT_MESSAGE_MISMATCH",
+    }),
+    false,
+  );
+});

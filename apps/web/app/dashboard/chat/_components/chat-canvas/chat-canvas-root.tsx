@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { FileUIPart } from "ai";
 import type { ToolApprovalResume } from "@sourceweft/sdk";
@@ -13,12 +13,25 @@ import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
+import { ToolInterventionBar } from "./tool-confirmation";
+import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-control";
 import {
-  getActiveToolConfirmationItems,
-  ToolInterventionBar,
-  type ToolConfirmationIntervention,
-} from "./tool-confirmation";
+  getPendingToolConfirmationItems,
+  getToolConfirmationItemsForRun,
+  shouldLockComposerForRun,
+} from "./tool-confirmation-state";
+import {
+  activateFirstPendingToolConfirmation,
+  getToolConfirmationRunKey,
+  initialToolConfirmationControllerState,
+  markToolConfirmationTerminal,
+  settleToolConfirmationDecision,
+  stopToolConfirmationRun,
+  syncToolConfirmationRun,
+  type ToolConfirmationControllerState,
+} from "./tool-confirmation-controller";
 import type {
+  AssistantVersionIndexEntry,
   ArtifactPreviewRecord,
   ChatSendInput,
   ChatMessageImagePart,
@@ -35,38 +48,6 @@ import type {
 type PromptImageMimeType = NonNullable<
   NonNullable<ChatSendInput["images"]>[number]["mimeType"]
 >;
-
-function findToolConfirmationResumeTarget(input: {
-  activeVersionByGroup: Record<string, number>;
-  messageGroups: VersionedMessageGroup[];
-  messageId: string;
-}) {
-  for (const group of input.messageGroups) {
-    if (group.role !== "assistant") {
-      continue;
-    }
-
-    const branchIndex = group.versions.findIndex(
-      (version) => version.id === input.messageId,
-    );
-    const version = group.versions[branchIndex];
-    if (!version) {
-      continue;
-    }
-
-    return {
-      groupId: group.groupId,
-      assistantMessageId: version.id,
-      branchIndex:
-        branchIndex >= 0
-          ? branchIndex
-          : (input.activeVersionByGroup[group.groupId] ??
-            Math.max(group.versions.length - 1, 0)),
-    };
-  }
-
-  return null;
-}
 
 function normalizePromptImageMediaType(
   value: string | undefined,
@@ -136,11 +117,13 @@ export function ChatCanvas({
   editingMessageId = null,
   highlightedMessageId = null,
   hasOlderMessages = false,
+  activeThreadRun = null,
   isEditing = false,
   isLoadingOlderMessages = false,
   isStreaming = false,
   isStopping = false,
   messageGroups = [],
+  assistantVersionById,
   mode,
   sourcesVisible,
   threadTitle,
@@ -149,10 +132,12 @@ export function ChatCanvas({
   onCancelEditing,
   onCitationClick,
   onLoadOlderMessages,
+  onReloadMessages,
   onSourcePreview,
   onWorkfileClick,
   onRestartFromMessage,
   onRefreshLatest,
+  onResumeToolConfirmation,
   onSendMessage,
   onStopStreaming,
   allSources = [],
@@ -160,6 +145,8 @@ export function ChatCanvas({
   selectedSources = [],
   availableSkills = [],
   selectedSkillIds = [],
+  selectedMcpInstallIds = [],
+  selectedMcpToolIds = [],
   onRemoveSource,
   onSkillSelectionChange,
   searchEnabled,
@@ -177,6 +164,7 @@ export function ChatCanvas({
   onDisabledToolNamesChange,
 }: {
   activeVersionByGroup?: Record<string, number>;
+  activeThreadRun?: ActiveThreadRun | null;
   composerInitialCommand?: ChatSendInput["command"] | null;
   composerInitialInput?: string;
   composerResetKey?: number;
@@ -188,6 +176,7 @@ export function ChatCanvas({
   isStreaming?: boolean;
   isStopping?: boolean;
   messageGroups?: VersionedMessageGroup[];
+  assistantVersionById?: ReadonlyMap<string, AssistantVersionIndexEntry>;
   mode: "thread" | "new";
   sourcesVisible: boolean;
   threadTitle: string;
@@ -199,6 +188,7 @@ export function ChatCanvas({
   onCancelEditing?: () => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onLoadOlderMessages?: () => void;
+  onReloadMessages?: () => Promise<void> | void;
   onSourcePreview?: (source: SourceItem) => void;
   onWorkfileClick?: (path: string) => void;
   onRestartFromMessage?: (input: {
@@ -212,15 +202,24 @@ export function ChatCanvas({
     groupId: string;
     assistantMessageId: string;
     branchIndex: number;
-    toolApprovalResume?: ToolApprovalResume | null;
   }) => void;
-  onSendMessage?: (input: ChatSendInput) => void;
+  onResumeToolConfirmation?: (input: {
+    assistantMessageId: string;
+    resolvedConfirmationIds: string[];
+    toolApprovalResume: ToolApprovalResume;
+  }) => void;
+  onSendMessage?: (
+    input: ChatSendInput,
+    options?: { allowWhileStreaming?: boolean },
+  ) => void;
   onStopStreaming?: () => void;
   allSources?: SourceItem[];
   sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources?: SourceItem[];
   availableSkills?: ChatSkillItem[];
   selectedSkillIds?: string[];
+  selectedMcpInstallIds?: string[];
+  selectedMcpToolIds?: string[];
   onRemoveSource?: (id: string) => void;
   onSkillSelectionChange?: (skillIds: string[]) => void;
   searchEnabled?: boolean;
@@ -265,35 +264,166 @@ export function ChatCanvas({
 
     return [];
   }, [editingMessageId, isEditing, messageGroups]);
-  const [activeIntervention, setActiveIntervention] =
-    useState<ToolConfirmationIntervention | null>(null);
-  const handledInterventionSignalIdRef = useRef<string | null>(null);
-  const activeConfirmationItems = useMemo(
-    () => getActiveToolConfirmationItems(messageGroups, activeVersionByGroup),
-    [activeVersionByGroup, messageGroups],
+  const [toolConfirmationState, setToolConfirmationState] =
+    useState<ToolConfirmationControllerState>(
+      initialToolConfirmationControllerState,
+    );
+  const toolConfirmationStateRef = useRef<ToolConfirmationControllerState>(
+    initialToolConfirmationControllerState,
   );
+  const missingAssistantMessageRefreshKeyRef = useRef<string | null>(null);
+  const reportedMissingAssistantRunKeyRef = useRef<string | null>(null);
+  const handledInterventionSignalIdRef = useRef<string | null>(null);
+  const toolConfirmationLookup = useMemo(
+    () =>
+      getToolConfirmationItemsForRun({
+        activeThreadRun,
+        assistantVersionById: assistantVersionById ?? new Map(),
+      }),
+    [activeThreadRun, assistantVersionById],
+  );
+  const activeConfirmationItems = toolConfirmationLookup.items;
+  const toolConfirmationRunKey = getToolConfirmationRunKey(activeThreadRun);
+  const confirmationResolutions = toolConfirmationState.resolutions;
+  const activeIntervention = toolConfirmationState.activeIntervention;
+  const pendingConfirmationItems = useMemo(
+    () =>
+      getPendingToolConfirmationItems(
+        activeConfirmationItems,
+        confirmationResolutions,
+      ),
+    [activeConfirmationItems, confirmationResolutions],
+  );
+  const isWaitingForApproval =
+    activeThreadRun?.status === "waiting_for_approval";
+  const hasPendingConfirmationItems = pendingConfirmationItems.length > 0;
+  const isSubmitDisabledForRun = shouldLockComposerForRun({
+    isStreaming,
+    isWaitingForApproval,
+    pendingConfirmationCount: pendingConfirmationItems.length,
+  });
+
+  const applyToolConfirmationState = useCallback(function applyToolConfirmationState(
+    nextState: ToolConfirmationControllerState,
+  ) {
+    toolConfirmationStateRef.current = nextState;
+    setToolConfirmationState(nextState);
+    return nextState;
+  }, []);
+
+  const updateToolConfirmationState = useCallback(function updateToolConfirmationState(
+    updater: (
+      state: ToolConfirmationControllerState,
+    ) => ToolConfirmationControllerState,
+  ) {
+    return applyToolConfirmationState(
+      updater(toolConfirmationStateRef.current),
+    );
+  }, [applyToolConfirmationState]);
+
+  useEffect(() => {
+    updateToolConfirmationState((current) =>
+      syncToolConfirmationRun({
+        items: activeConfirmationItems,
+        runKey: toolConfirmationRunKey,
+        state: current,
+      }),
+    );
+  }, [activeConfirmationItems, toolConfirmationRunKey, updateToolConfirmationState]);
+
+  useEffect(() => {
+    if (toolConfirmationLookup.reason === "missing_assistant_message") {
+      const runKey =
+        activeThreadRun?.id ?? activeThreadRun?.idempotencyKey ?? "unknown";
+      if (reportedMissingAssistantRunKeyRef.current !== runKey) {
+        reportedMissingAssistantRunKeyRef.current = runKey;
+        console.error(
+          "Confirmation run is missing assistant message.",
+          activeThreadRun,
+        );
+      }
+      if (onReloadMessages) {
+        void Promise.resolve(onReloadMessages()).catch((error) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Failed to reload thread messages.";
+          toast.error(message);
+        });
+      }
+      return;
+    }
+
+    if (toolConfirmationLookup.reason !== "assistant_message_not_found") {
+      return;
+    }
+
+    const refreshKey = `${activeThreadRun?.id ?? activeThreadRun?.idempotencyKey ?? "unknown"}:${toolConfirmationLookup.assistantMessageId}`;
+    if (missingAssistantMessageRefreshKeyRef.current === refreshKey) {
+      console.error(
+        "Confirmation assistant message was not found after refresh.",
+        {
+          activeThreadRun,
+          assistantMessageId: toolConfirmationLookup.assistantMessageId,
+        },
+      );
+      toast.error(
+        "Confirmation message is missing. Refresh the thread and try again.",
+      );
+      return;
+    }
+
+    missingAssistantMessageRefreshKeyRef.current = refreshKey;
+    if (!onReloadMessages) {
+      console.error(
+        "Confirmation assistant message was not found and no reload handler is available.",
+        {
+          activeThreadRun,
+          assistantMessageId: toolConfirmationLookup.assistantMessageId,
+        },
+      );
+      toast.error(
+        "Confirmation message is missing. Refresh the thread and try again.",
+      );
+      return;
+    }
+
+    void Promise.resolve(onReloadMessages()).catch((error) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to reload thread messages.";
+      toast.error(message);
+    });
+  }, [activeThreadRun, onReloadMessages, toolConfirmationLookup]);
 
   useEffect(() => {
     if (
       !toolConfirmationInterventionSignal ||
       handledInterventionSignalIdRef.current ===
         toolConfirmationInterventionSignal.id ||
-      activeConfirmationItems.length === 0
+      pendingConfirmationItems.length === 0
     ) {
       return;
     }
-    const next = activeConfirmationItems[0];
+    const next = pendingConfirmationItems[0];
     if (!next) {
       return;
     }
     handledInterventionSignalIdRef.current =
       toolConfirmationInterventionSignal.id;
-    setActiveIntervention({
-      id: next.confirmation.id,
-      messageId: next.messageId,
-      toolCallId: next.toolCall.id,
-    });
-  }, [activeConfirmationItems, toolConfirmationInterventionSignal]);
+    updateToolConfirmationState((current) =>
+      activateFirstPendingToolConfirmation({
+        items: activeConfirmationItems,
+        state: current,
+      }),
+    );
+  }, [
+    activeConfirmationItems,
+    pendingConfirmationItems,
+    toolConfirmationInterventionSignal,
+    updateToolConfirmationState,
+  ]);
 
   useEffect(() => {
     if (
@@ -322,7 +452,12 @@ export function ChatCanvas({
       surface: mode === "new" ? "empty_state" : "thread",
       toolCount: countSelectedTools(input.tools),
     });
-    onSendMessage?.(input);
+    if (isWaitingForApproval && !hasPendingConfirmationItems) {
+      onStopStreaming?.();
+    }
+    onSendMessage?.(input, {
+      allowWhileStreaming: isWaitingForApproval && !hasPendingConfirmationItems,
+    });
   }
 
   function handleRemoveSource(id: string) {
@@ -356,6 +491,8 @@ export function ChatCanvas({
         searchEnabled={searchEnabled}
         availableSkills={availableSkills}
         selectedSkillIds={selectedSkillIds}
+        selectedMcpInstallIds={selectedMcpInstallIds}
+        selectedMcpToolIds={selectedMcpToolIds}
         selectedSources={selectedSources}
         thinkingCapabilities={thinkingCapabilities}
         thinkingSettings={thinkingSettings}
@@ -387,29 +524,100 @@ export function ChatCanvas({
         onRestartFromMessage={onRestartFromMessage}
         onSourcePreview={onSourcePreview}
         onWorkfileClick={onWorkfileClick}
+        resolvedConfirmations={confirmationResolutions}
         workspaceId={workspaceId}
       />
 
       <ToolInterventionBar
         activeIntervention={activeIntervention}
-        activeVersionByGroup={activeVersionByGroup}
-        messageGroups={messageGroups}
-        onInterventionSettled={({ result, item }) => {
-          setActiveIntervention(null);
-          const resumeTarget = findToolConfirmationResumeTarget({
-            activeVersionByGroup,
-            messageGroups,
-            messageId: item.messageId,
+        activeThreadRun={activeThreadRun}
+        items={activeConfirmationItems}
+        onInterventionSettled={({ decision, result, item }) => {
+          const settled = settleToolConfirmationDecision({
+            decision,
+            item,
+            items: activeConfirmationItems,
+            resume: result.resume,
+            state: toolConfirmationStateRef.current,
           });
-          if (resumeTarget) {
-            onRefreshLatest?.({
-              groupId: resumeTarget.groupId,
-              assistantMessageId: resumeTarget.assistantMessageId,
-              branchIndex: resumeTarget.branchIndex,
-              toolApprovalResume: result.resume ?? null,
-            });
+          applyToolConfirmationState(settled.state);
+
+          if (settled.missingResume) {
+            toast.error("Confirmation response did not include resume data.");
+            return;
           }
+
+          if (!settled.resumeEffect) {
+            return;
+          }
+
+          if (!onResumeToolConfirmation) {
+            toast.error("Tool confirmation resume handler is not available.");
+            return;
+          }
+
+          onResumeToolConfirmation(settled.resumeEffect);
         }}
+        onInterventionExpired={({ item }) => {
+          updateToolConfirmationState((current) =>
+            markToolConfirmationTerminal({
+              item,
+              items: activeConfirmationItems,
+              reason: "expired",
+              state: current,
+            }),
+          );
+          if (!onReloadMessages) {
+            return;
+          }
+          void Promise.resolve(onReloadMessages()).catch((error) => {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Failed to reload thread messages.";
+            toast.error(message);
+          });
+        }}
+        onInterventionStale={({ item }) => {
+          updateToolConfirmationState((current) =>
+            markToolConfirmationTerminal({
+              item,
+              items: activeConfirmationItems,
+              reason: "stale",
+              state: current,
+            }),
+          );
+          if (!onReloadMessages) {
+            return;
+          }
+          void Promise.resolve(onReloadMessages()).catch((error) => {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Failed to reload thread messages.";
+            toast.error(message);
+          });
+        }}
+        onStopWaiting={() => {
+          updateToolConfirmationState((current) =>
+            stopToolConfirmationRun({
+              items: activeConfirmationItems,
+              state: current,
+            }),
+          );
+          onStopStreaming?.();
+          if (!onReloadMessages) {
+            return;
+          }
+          void Promise.resolve(onReloadMessages()).catch((error) => {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Failed to reload thread messages.";
+            toast.error(message);
+          });
+        }}
+        resolvedConfirmations={confirmationResolutions}
         workspaceId={workspaceId}
       />
 
@@ -419,7 +627,7 @@ export function ChatCanvas({
             className="w-full"
             allSources={allSources}
             sourceMentionLoader={sourceMentionLoader}
-            disabled={isStreaming}
+            submitDisabled={isSubmitDisabledForRun}
             isStopping={isStopping}
             initialAttachments={editingInitialAttachments}
             initialCommand={composerInitialCommand}
@@ -451,6 +659,8 @@ export function ChatCanvas({
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}
             selectedSkillIds={selectedSkillIds}
+            selectedMcpInstallIds={selectedMcpInstallIds}
+            selectedMcpToolIds={selectedMcpToolIds}
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}

@@ -24,8 +24,12 @@ function ModelCatalogErrorState() {
 
 export function DashboardChatThreadPageView({
   activeAssistantVersion,
+  assistantVersionById,
+  activeThreadRun,
   activeConnectorTools,
   activeCitationIndex,
+  activeMcpInstallIds,
+  activeMcpToolIds,
   activeSkillIds,
   activeSourceIds,
   activeVersionByGroup,
@@ -50,8 +54,10 @@ export function DashboardChatThreadPageView({
   handleConnectorsChange,
   handleLibrarySourcesLoad,
   handleLibrarySourcesMerge,
+  handleMcpSelectionChange,
   handleModelSelect,
   handleRefreshLatest,
+  handleResumeToolConfirmation,
   handleRestartFromMessage,
   handleSendMessage,
   handleSourceHubCitationOpen,
@@ -72,6 +78,7 @@ export function DashboardChatThreadPageView({
   librarySources,
   loadAvailableSkills,
   loadOlderThreadMessages,
+  loadThreadMessages,
   loadSourceMentions,
   messageGroups,
   modelCatalogStatus,
@@ -137,6 +144,8 @@ export function DashboardChatThreadPageView({
         {modelCatalogStatus === "ready" ? (
           <ChatCanvas
             activeVersionByGroup={activeVersionByGroup}
+            assistantVersionById={assistantVersionById}
+            activeThreadRun={activeThreadRun}
             allSources={librarySources}
             availableSkills={availableSkills}
             composerInitialCommand={composerInitialCommand}
@@ -161,6 +170,7 @@ export function DashboardChatThreadPageView({
               persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
             }
             onRefreshLatest={handleRefreshLatest}
+            onResumeToolConfirmation={handleResumeToolConfirmation}
             onRestartFromMessage={handleRestartFromMessage}
             onSendMessage={handleSendMessage}
             onSkillSelectionChange={setActiveSkillIds}
@@ -170,6 +180,8 @@ export function DashboardChatThreadPageView({
             sourceMentionLoader={loadSourceMentions}
             selectedSources={selectedSources}
             selectedSkillIds={activeSkillIds}
+            selectedMcpInstallIds={activeMcpInstallIds}
+            selectedMcpToolIds={activeMcpToolIds}
             sourcesVisible={sourcesVisible}
             thinkingCapabilities={selectedModels.llm?.capabilities}
             toolConfirmationInterventionSignal={
@@ -184,6 +196,7 @@ export function DashboardChatThreadPageView({
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={setDisabledToolNames}
             onLoadOlderMessages={() => void loadOlderThreadMessages()}
+            onReloadMessages={loadThreadMessages}
             thinkingSettings={thinkingSettings}
             onThinkingSettingsChange={handleThinkingSettingsChange}
             threadTitle={threadTitle}
@@ -199,6 +212,8 @@ export function DashboardChatThreadPageView({
       <ThreadSidePanels
         activeCitationIndex={activeCitationIndex}
         activeCitationMessageId={activeAssistantVersion?.id ?? null}
+        activeMcpInstallIds={activeMcpInstallIds}
+        activeMcpToolIds={activeMcpToolIds}
         activeSkillIds={activeSkillIds}
         activeSourceIds={activeSourceIds}
         artifactsRefreshKey={artifactsRefreshKey}
@@ -219,6 +234,7 @@ export function DashboardChatThreadPageView({
         onHubDrawerOpenChange={setHubDrawerOpen}
         onLibrarySourcesLoad={handleLibrarySourcesLoad}
         onLibrarySourcesMerge={handleLibrarySourcesMerge}
+        onMcpSelectionChange={handleMcpSelectionChange}
         onSelectionChange={persistActiveSourceIds}
         onSkillSelectionChange={setActiveSkillIds}
         previewArtifact={previewArtifact}

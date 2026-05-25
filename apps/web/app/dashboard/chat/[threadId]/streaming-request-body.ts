@@ -13,7 +13,6 @@ import {
   buildByokModelExecution,
   type ByokModelSelection,
 } from "../_components/byok-state";
-import { AGENT_TOOL_NAMES } from "@sourceweft/sdk";
 
 export type RequestThinkingConfig = {
   mode: "auto" | "off" | "effort";
@@ -29,7 +28,7 @@ type BuildStreamingRequestBodyInput = {
   durableRunKey: string;
   images?: ChatSendInput["images"];
   mentionedSourceIds?: string[];
-  mode: "send" | "refresh" | "edit";
+  mode: "send" | "refresh" | "edit" | "resume";
   selectedByokModels: Partial<Record<ModelType, ByokModelSelection | null>>;
   selectedModels: SelectedModels;
   searchEnabled: boolean;
@@ -119,9 +118,6 @@ export function buildStreamingThreadRequestBody(
     skillIds: selectedSkillIds,
     searchEnabled: input.searchEnabled,
     tools: input.tools,
-    forceImageGenerate:
-      input.command?.kind === "tool" &&
-      input.command.name === `/${AGENT_TOOL_NAMES.generateImage}`,
   });
 
   const selectedLlmProfileAlias =
@@ -185,13 +181,21 @@ export function buildStreamingThreadRequestBody(
     requestBody.modelSettings = modelSettings;
   }
 
-  if (input.mode === "refresh" || input.mode === "edit") {
+  if (
+    input.mode === "refresh" ||
+    input.mode === "edit" ||
+    input.mode === "resume"
+  ) {
     if (input.userMessageId) {
       requestBody.userMessageId = input.userMessageId;
     }
     if (input.assistantMessageId) {
       requestBody.assistantMessageId = input.assistantMessageId;
     }
+  }
+
+  if (input.toolApprovalResume && input.mode !== "resume") {
+    throw new Error("toolApprovalResume requires resume mode.");
   }
 
   if (input.toolApprovalResume) {

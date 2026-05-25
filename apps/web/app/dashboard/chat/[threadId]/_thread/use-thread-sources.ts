@@ -36,6 +36,8 @@ export function useThreadSources({
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
+  const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
   const skillsLoadGenerationRef = useRef(0);
@@ -208,6 +210,8 @@ export function useThreadSources({
   );
 
   return {
+    activeMcpInstallIds,
+    activeMcpToolIds,
     activeSkillIds,
     activeSourceIds,
     availableSkills,
@@ -222,6 +226,8 @@ export function useThreadSources({
     loadSourceMentions,
     persistActiveSourceIds,
     selectedSources,
+    setActiveMcpInstallIds,
+    setActiveMcpToolIds,
     setActiveSkillIds,
     setDisabledToolNames,
   };

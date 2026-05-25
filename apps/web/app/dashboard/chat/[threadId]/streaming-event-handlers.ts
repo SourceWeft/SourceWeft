@@ -1,8 +1,10 @@
 import type {
   CitationRecord,
   ModelReasoningSegmentRecord,
+  ReasoningTraceEventRecord,
   ThinkingStepRecord,
   ToolCallRecord,
+  TracePartRecord,
 } from "../_components/chat-canvas";
 import type { ChatMessageItem } from "./streaming-assistant-state";
 import type { StreamingRenderBuffer } from "./streaming-render-buffer";
@@ -34,7 +36,7 @@ export type StreamingEventHandlerContext<
     stepsById: Map<string, ThinkingStepRecord>,
     nextStep: ThinkingStepRecord,
   ) => void;
-  mode: "send" | "refresh" | "edit";
+  mode: "send" | "refresh" | "edit" | "resume";
   normalizeCitationRecords: (value: unknown) => CitationRecord[];
   normalizeModelReasoningSegmentRecord: (
     value: unknown,
@@ -46,6 +48,10 @@ export type StreamingEventHandlerContext<
     event: TToolEvent;
     streamToolCallsById: Map<string, ToolCallRecord>;
   }) => ToolCallRecord;
+  resolveTraceEventFromStreamEvent: (input: {
+    event: TToolEvent;
+    toolCall: ToolCallRecord;
+  }) => ReasoningTraceEventRecord | null;
   streamRenderBuffer: StreamingRenderBuffer;
   streamThinkingStepsById: Map<string, ThinkingStepRecord>;
   streamToolCallsById: Map<string, ToolCallRecord>;
@@ -60,6 +66,19 @@ export type StreamingEventHandlerContext<
   updateChatTitle: (threadId: string, title: string) => void;
   updateStreamingAssistantMessage: UpdateStreamingAssistantMessage;
 };
+
+function resolveFinishedThreadRunStatus(input: {
+  existingStatus: string | null;
+  finishReason?: string | null;
+}) {
+  if (input.existingStatus === "failed" || input.existingStatus === "cancelled") {
+    return input.existingStatus;
+  }
+  if (input.finishReason === "tool_confirmation_requested") {
+    return "waiting_for_approval";
+  }
+  return "completed";
+}
 
 type ContextInput<TToolEvent extends ToolCallEventPayload> = {
   context: StreamingEventHandlerContext<TToolEvent>;
@@ -181,6 +200,7 @@ type StartEventPayload = {
   mentionedSourceIds?: unknown;
   messageId: string;
   sourceIds?: unknown;
+  threadRun?: unknown;
 };
 
 type HandleStreamingStartInput<TToolEvent extends ToolCallEventPayload> =
@@ -316,6 +336,26 @@ export function handleStreamingToolCallEvent<
     drainQueuedDeltasNow();
     context.streamRenderBuffer.appendGeneratedImageBlock(nextToolCall.id);
   }
+  const traceEvent = context.resolveTraceEventFromStreamEvent({
+    event,
+    toolCall: nextToolCall,
+  });
+  context.updateStreamingAssistantMessage((message) => ({
+    ...message,
+    metadata: {
+      ...message.metadata,
+      traceEvents: traceEvent
+        ? upsertReasoningTraceEvent(
+            getReasoningTraceEvents(message.metadata),
+            traceEvent,
+          )
+        : getReasoningTraceEvents(message.metadata),
+      traceParts: upsertTracePart(
+        getTraceParts(message.metadata),
+        buildToolTracePart(nextToolCall),
+      ),
+    },
+  }));
   context.syncStreamingToolCalls();
   if (
     context.isCompletedWorkfileWriteToolCall(nextToolCall, event) &&
@@ -342,7 +382,259 @@ export function handleStreamingThinkingStep<
   }
 
   context.mergeThinkingStepRecords(context.streamThinkingStepsById, nextStep);
+  context.updateStreamingAssistantMessage((message) => ({
+    ...message,
+    metadata: {
+      ...message.metadata,
+      traceEvents: upsertReasoningTraceEvent(
+        getReasoningTraceEvents(message.metadata),
+        buildThinkingStepTraceEvent(nextStep),
+      ),
+      traceParts: upsertTracePart(
+        getTraceParts(message.metadata),
+        buildStepTracePart(nextStep),
+      ),
+    },
+  }));
   context.syncStreamingThinkingSteps();
+}
+
+function isSameModelReasoningSegment(
+  existing: ModelReasoningSegmentRecord,
+  next: ModelReasoningSegmentRecord,
+) {
+  return existing.id === next.id;
+}
+
+function appendUniqueModelReasoningSegment(
+  segments: ModelReasoningSegmentRecord[],
+  next: ModelReasoningSegmentRecord,
+) {
+  const usedIds = new Set(segments.map((segment) => segment.id));
+  let suffix = 2;
+  let nextId = `${next.id}:${suffix}`;
+  while (usedIds.has(nextId)) {
+    suffix += 1;
+    nextId = `${next.id}:${suffix}`;
+  }
+
+  return [
+    ...segments,
+    {
+      ...next,
+      id: nextId,
+    },
+  ];
+}
+
+function upsertModelReasoningSegment(
+  segments: ModelReasoningSegmentRecord[],
+  next: ModelReasoningSegmentRecord,
+) {
+  const existingIndex = segments.findIndex((segment) => segment.id === next.id);
+  if (existingIndex < 0) {
+    return [...segments, next];
+  }
+
+  const existing = segments[existingIndex];
+  if (existing && isSameModelReasoningSegment(existing, next)) {
+    return segments.map((segment, index) =>
+      index === existingIndex
+        ? {
+            ...existing,
+            ...next,
+            id: existing.id,
+            text: next.text,
+            sequence: existing.sequence ?? next.sequence,
+          }
+        : segment,
+    );
+  }
+
+  return appendUniqueModelReasoningSegment(segments, next);
+}
+
+function nextTraceDisplayOrder(events: ReasoningTraceEventRecord[]) {
+  return (
+    events.reduce((max, event, index) => {
+      const displayOrder =
+        typeof event.displayOrder === "number" &&
+        Number.isFinite(event.displayOrder)
+          ? event.displayOrder
+          : index;
+      return Math.max(max, displayOrder);
+    }, -1) + 1
+  );
+}
+
+function upsertReasoningTraceEvent(
+  events: ReasoningTraceEventRecord[],
+  next: ReasoningTraceEventRecord,
+) {
+  const existingIndex = events.findIndex((event) => event.id === next.id);
+  if (existingIndex < 0) {
+    return [
+      ...events,
+      {
+        ...next,
+        displayOrder: next.displayOrder ?? nextTraceDisplayOrder(events),
+      },
+    ];
+  }
+
+  const existing = events[existingIndex];
+  const displayOrder = existing?.displayOrder ?? next.displayOrder ?? existingIndex;
+  return events.map((event, index) =>
+    index === existingIndex
+      ? {
+          ...next,
+          displayOrder,
+        }
+      : event,
+  );
+}
+
+function getReasoningTraceEvents(metadata: Record<string, unknown>) {
+  return Array.isArray(metadata.traceEvents)
+    ? (metadata.traceEvents.filter(
+        (item): item is ReasoningTraceEventRecord =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      ) as ReasoningTraceEventRecord[])
+    : [];
+}
+
+function getTraceParts(metadata: Record<string, unknown>) {
+  return Array.isArray(metadata.traceParts)
+    ? (metadata.traceParts.filter(
+        (item): item is TracePartRecord =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      ) as TracePartRecord[])
+    : [];
+}
+
+function tracePartKey(part: Pick<TracePartRecord, "id" | "kind">) {
+  if (part.kind === "tool" && "toolCallId" in part) {
+    return `${part.kind}:${part.toolCallId}`;
+  }
+  return `${part.kind}:${part.id}`;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function upsertTracePart(
+  parts: TracePartRecord[],
+  next: TracePartDraft,
+) {
+  const existingIndex = parts.findIndex(
+    (part) => tracePartKey(part) === tracePartKey(next),
+  );
+  const updatedAt = nowIso();
+  if (existingIndex < 0) {
+    return [
+      ...parts,
+      {
+        ...next,
+        order: parts.length,
+        createdAt: updatedAt,
+        updatedAt,
+      } as TracePartRecord,
+    ];
+  }
+  const existing = parts[existingIndex]!;
+  return parts.map((part, index) =>
+    index === existingIndex
+      ? ({
+          ...existing,
+          ...next,
+          id: existing.id,
+          order: existing.order,
+          createdAt: existing.createdAt,
+          updatedAt,
+        } as TracePartRecord)
+      : part,
+  );
+}
+
+type TracePartDraft = TracePartRecord extends infer T
+  ? T extends TracePartRecord
+    ? Omit<T, "order" | "createdAt" | "updatedAt">
+    : never
+  : never;
+
+function buildReasoningTracePart(
+  segment: ModelReasoningSegmentRecord,
+): TracePartDraft {
+  return {
+    id: segment.id,
+    kind: "reasoning",
+    text: segment.text,
+    phase: segment.phase,
+    toolCallId: segment.toolCallId,
+    tool: segment.tool,
+    durationMs: segment.durationMs,
+  };
+}
+
+function buildToolTracePart(
+  toolCall: ToolCallRecord,
+): TracePartDraft {
+  return {
+    id: toolCall.id,
+    kind: "tool",
+    toolCallId: toolCall.id,
+    tool: toolCall.tool,
+    status: toolCall.status,
+    input: toolCall.input,
+    output: toolCall.output,
+    error: toolCall.error,
+    latencyMs: toolCall.latencyMs,
+    approvalState: toolCall.approvalState,
+    approvalConfirmationId: toolCall.approvalConfirmationId,
+  };
+}
+
+function buildStepTracePart(
+  step: ThinkingStepRecord,
+): TracePartDraft {
+  return {
+    id: step.id,
+    kind: "step",
+    title: step.title,
+    status: step.status,
+    items: step.items,
+    metadata: step.metadata,
+  };
+}
+
+function buildReasoningTraceEvent(input: {
+  reasoning: string;
+  segment: ModelReasoningSegmentRecord;
+}): ReasoningTraceEventRecord {
+  return {
+    type: "reasoning",
+    id:
+      typeof input.segment.sequence === "number"
+        ? `${input.segment.id}:${input.segment.sequence}`
+        : input.segment.id,
+    itemId: input.segment.id,
+    sequence: input.segment.sequence,
+    reasoning: input.reasoning,
+    segment: input.segment,
+  };
+}
+
+function buildThinkingStepTraceEvent(
+  step: ThinkingStepRecord,
+): ReasoningTraceEventRecord {
+  return {
+    type: "thinking-step",
+    id: typeof step.sequence === "number" ? `${step.id}:${step.sequence}` : step.id,
+    itemId: step.id,
+    sequence: step.sequence,
+    step,
+  };
 }
 
 export function handleStreamingReasoning<
@@ -372,15 +664,18 @@ export function handleStreamingReasoning<
           )
       : [];
     const reasoningSegments = nextSegment
-      ? [
-          ...currentSegments.filter((segment) => segment.id !== nextSegment.id),
-          nextSegment,
-        ].sort(
+      ? upsertModelReasoningSegment(currentSegments, nextSegment).sort(
           (left, right) =>
             (left.sequence ?? Number.MAX_SAFE_INTEGER) -
             (right.sequence ?? Number.MAX_SAFE_INTEGER),
         )
       : currentSegments;
+    const traceParts = nextSegment
+      ? upsertTracePart(
+          getTraceParts(message.metadata),
+          buildReasoningTracePart(nextSegment),
+        )
+      : getTraceParts(message.metadata);
 
     return {
       ...message,
@@ -388,6 +683,8 @@ export function handleStreamingReasoning<
         ...message.metadata,
         reasoning: currentReasoning,
         reasoningSegments,
+        traceEvents: getReasoningTraceEvents(message.metadata),
+        traceParts,
         threadRun: {
           ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
           idempotencyKey: context.durableRunKey,
@@ -470,10 +767,10 @@ export function handleStreamingFinish<
   context.updateStreamingAssistantMessage((message) => {
     const existingRun = context.toObjectRecord(message.metadata.threadRun);
     const existingStatus = context.toNullableString(existingRun?.status);
-    const nextStatus =
-      existingStatus === "failed" || existingStatus === "cancelled"
-        ? existingStatus
-        : "completed";
+    const nextStatus = resolveFinishedThreadRunStatus({
+      existingStatus,
+      finishReason,
+    });
     return {
       ...message,
       metadata: {
@@ -498,8 +795,15 @@ export function handleStreamingFinish<
 }
 
 export const testExports = {
+  buildReasoningTraceEvent,
+  buildThinkingStepTraceEvent,
   handleStreamingAssistantMessage,
   handleStreamingFinish,
+  handleStreamingReasoning,
+  handleStreamingThinkingStep,
+  handleStreamingToolCallEvent,
+  resolveFinishedThreadRunStatus,
+  upsertReasoningTraceEvent,
 };
 
 export function handleStreamingAssistantMessage<
@@ -608,6 +912,7 @@ export function handleStreamingStart<
   const serverEffectiveSourceIds = normalizeStringArray(event.effectiveSourceIds);
   const serverContentJson = context.toObjectRecord(event.contentJson);
   const serverCommand = context.normalizeThreadCommandRequest(event.command);
+  const serverThreadRun = context.toObjectRecord(event.threadRun);
 
   setPreparedEffectiveSourceIds(serverEffectiveSourceIds);
   setPersistedUserMessageId(serverUserMessageId);
@@ -652,6 +957,7 @@ export function handleStreamingStart<
       sourceUserMessageId: serverUserMessageId,
       threadRun: {
         ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
+        ...(serverThreadRun ?? {}),
         idempotencyKey: context.durableRunKey,
         status: "running",
         mode: context.mode,

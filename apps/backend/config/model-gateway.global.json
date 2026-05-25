@@ -75,7 +75,7 @@
       "modelAlias": "chat-default",
       "gatewaySlug": "openrouter-default",
       "providerName": "openrouter",
-      "targetModel": "minimax/minimax-m2.7",
+      "targetModel": "deepseek/deepseek-v4-pro",
       "routingStrategy": "priority",
       "priority": 1,
       "weight": 100,
@@ -86,9 +86,6 @@
         "include_reasoning"
       ],
       "supportedEfforts": [
-        "minimal",
-        "low",
-        "medium",
         "high",
         "xhigh"
       ]

@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { respondAgentConfirmationRequestSchema } from "@sourceweft/contracts";
 import { toolConfirmationRunner } from "../../../modules/agent-confirmations/runner";
+import { durableChatRunService } from "../../../modules/content/threads/durable/service";
 import {
   getSessionUserId,
   requireSession,
@@ -23,6 +24,14 @@ export function registerAgentConfirmationRoutes(app: Hono) {
       );
     }
 
+    const run = await durableChatRunService.validateConfirmationResponse({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      confirmationId: requireRouteParam(c, "confirmationId"),
+      threadRunId: parsed.data.threadRunId,
+      assistantMessageId: parsed.data.assistantMessageId,
+    });
+
     const result = await toolConfirmationRunner.respond({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
@@ -31,6 +40,11 @@ export function registerAgentConfirmationRoutes(app: Hono) {
       decision: parsed.data.decision,
       editedArgs: parsed.data.editedArgs,
       note: parsed.data.note,
+    });
+    await durableChatRunService.recordConfirmationResponse({
+      run,
+      confirmationId: requireRouteParam(c, "confirmationId"),
+      confirmation: result.confirmation,
     });
     return ApiResponse.success(c, result);
   });

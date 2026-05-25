@@ -1,4 +1,5 @@
 import type { ChatSkillItem, ChatToolName } from "../../_components/chat-canvas";
+import type { ChatMessageItem } from "../streaming-assistant-state";
 
 function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
   return [
@@ -33,4 +34,31 @@ function resolveClientTimezone() {
   }
 }
 
-export { mergeSourceIds, removeDisabledToolSkills, resolveClientTimezone };
+function resolveAttachOnlyAssistantMessage(input: {
+  assistantMessageId?: string | null;
+  messages: ChatMessageItem[];
+}) {
+  const latestAssistantMessage =
+    [...input.messages]
+      .reverse()
+      .find((message) => message.role === "assistant") ??
+    null;
+  if (!input.assistantMessageId) {
+    return latestAssistantMessage;
+  }
+
+  return (
+    input.messages.find(
+      (message) =>
+        message.role === "assistant" && message.id === input.assistantMessageId,
+    ) ??
+    latestAssistantMessage
+  );
+}
+
+export {
+  mergeSourceIds,
+  removeDisabledToolSkills,
+  resolveAttachOnlyAssistantMessage,
+  resolveClientTimezone,
+};

@@ -19,10 +19,11 @@ import type {
 
 export const notionAgentToolNames = [
   AGENT_TOOL_NAMES.searchNotionPages,
+  AGENT_TOOL_NAMES.readNotionPage,
   AGENT_TOOL_NAMES.createNotionPage,
   AGENT_TOOL_NAMES.appendNotionPage,
-  AGENT_TOOL_NAMES.updateNotionPageByTitle,
-  AGENT_TOOL_NAMES.deleteNotionPageByTitle,
+  AGENT_TOOL_NAMES.updateNotionPage,
+  AGENT_TOOL_NAMES.deleteNotionPage,
   AGENT_TOOL_NAMES.saveArtifactToNotion,
   AGENT_TOOL_NAMES.saveFinalAnswerToNotion,
 ] as const;
@@ -33,23 +34,15 @@ export function buildChatToolsRequest(input: {
   skillIds?: string[];
   searchEnabled?: boolean;
   tools?: ChatToolsSelection;
-  forceImageGenerate?: boolean;
 }) {
   const generateImage = input.tools?.[AGENT_TOOL_NAMES.generateImage];
-  const generateImageWithMode = input.forceImageGenerate
+  const generateImageWithExecution = input.imageExecution
     ? {
         ...(generateImage ?? {}),
         enabled: generateImage?.enabled ?? true,
-        mode: "generate" as const,
-      }
-    : generateImage;
-  const generateImageWithExecution = input.imageExecution
-    ? {
-        ...(generateImageWithMode ?? {}),
-        enabled: generateImageWithMode?.enabled ?? true,
         execution: input.imageExecution,
       }
-    : generateImageWithMode;
+    : generateImage;
 
   return {
     skillIds: input.skillIds ?? [],
@@ -68,6 +61,7 @@ export function buildChatToolsRequest(input: {
         return selection ? [[toolName, selection] as const] : [];
       }),
     ),
+    ...(input.tools?.mcp ? { mcp: input.tools.mcp } : {}),
   };
 }
 

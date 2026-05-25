@@ -37,6 +37,8 @@
     "@fontsource-variable/sora": "^5.2.8",
     "@next/third-parties": "^16.2.6",
     "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/market-contracts": "workspace:*",
+    "@sourceweft/market-sdk": "workspace:*",
     "@sourceweft/sdk": "workspace:*",
     "@sourceweft/ui-web": "workspace:*",
     "@streamdown/cjk": "^1.0.3",

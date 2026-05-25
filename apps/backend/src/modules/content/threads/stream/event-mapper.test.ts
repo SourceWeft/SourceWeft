@@ -191,7 +191,78 @@ test("mapDeepAgentEventToSse sends slim tool end events", () => {
     tool: "generate_image",
     status: "completed",
     latencyMs: 1234,
+    toolCall: {
+      id: "image-1",
+      tool: "generate_image",
+      input: { prompt: "long prompt", title: "Concept map" },
+      output: { artifactUrl: "/artifact.png" },
+      status: "completed",
+      latencyMs: 1234,
+      error: null,
+      sequence: 1,
+    },
   });
+});
+
+test("mapDeepAgentEventToSse preserves approval requested tool end events", () => {
+  const confirmation = {
+    type: "tool_confirmation_request",
+    schemaVersion: 1,
+    id: "action-1",
+    domain: "connector",
+    subject: {
+      label: "Notion",
+      provider: "notion",
+      connectorId: "connector-1",
+    },
+    action: {
+      type: "notion.page.trash",
+      toolName: "delete_notion_page",
+      label: "Delete",
+      riskLevel: "high",
+      status: "proposed",
+      requiresApproval: true,
+    },
+    preview: {
+      title: "Delete Notion page",
+    },
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+    execution: {
+      providerStatus: "not_executed",
+      executor: {
+        kind: "connector_action_run",
+        connectorId: "connector-1",
+        actionRunId: "action-1",
+      },
+    },
+    status: "proposed",
+    userMessage: "Waiting for confirmation.",
+  };
+  const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
+    type: "tool-call-end",
+    id: "tool-1",
+    tool: "delete_notion_page",
+    status: "approval_requested",
+    latencyMs: 0,
+    toolCall: {
+      id: "tool-1",
+      tool: "delete_notion_page",
+      input: {},
+      output: confirmation,
+      status: "approval_requested",
+      latencyMs: 0,
+      error: null,
+      sequence: 1,
+    },
+  };
+
+  const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
+
+  assert.equal(data.status, "approval_requested");
+  assert.deepEqual(data.toolCall, event.toolCall);
 });
 
 test("mapDeepAgentEventToSse preserves tool input parameters", () => {

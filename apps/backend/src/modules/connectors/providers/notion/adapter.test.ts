@@ -97,7 +97,8 @@ test("notion action schemas require approval for writes", () => {
   const writeActions = manifest.actions.filter(
     (action) =>
       action.type !== "notion.data_source.query" &&
-      action.type !== "notion.page.find",
+      action.type !== "notion.page.find" &&
+      action.type !== "notion.page.read",
   );
 
   assert.ok(writeActions.length > 0);
@@ -112,8 +113,11 @@ test("notion adapter declares expanded actions", () => {
   );
 
   assert.ok(actionTypes.has("notion.page.find"));
-  assert.ok(actionTypes.has("notion.page.update_by_title"));
-  assert.ok(actionTypes.has("notion.page.trash_by_title"));
+  assert.ok(actionTypes.has("notion.page.read"));
+  assert.ok(actionTypes.has("notion.page.save_artifact"));
+  assert.ok(actionTypes.has("notion.page.save_final_answer"));
+  assert.ok(actionTypes.has("notion.page.update"));
+  assert.ok(actionTypes.has("notion.page.trash"));
   assert.ok(actionTypes.has("notion.file_upload.create"));
   assert.ok(actionTypes.has("notion.file_upload.attach_to_page"));
 });
@@ -131,6 +135,24 @@ test("notion agent-visible actions declare tool metadata", () => {
     assert.ok(action.description?.length);
     assert.ok(action.capabilities?.length);
   }
+});
+
+test("notion create action describes workspace-default target overrides", () => {
+  const createAction = notionAdapter
+    .getManifest()
+    .actions.find((action) => action.type === "notion.page.create");
+  assert.ok(createAction);
+
+  assert.match(createAction.description ?? "", /authorized workspace/);
+  assert.match(createAction.description ?? "", /Only include parentPageId\/pageId or dataSourceId/);
+  const schema = createAction.inputSchema as {
+    properties?: Record<string, { description?: string }>;
+    required?: string[];
+  };
+  assert.deepEqual(schema.required, ["title", "content"]);
+  assert.match(schema.properties?.parentPageId?.description ?? "", /Omit by default/);
+  assert.match(schema.properties?.pageId?.description ?? "", /Omit by default/);
+  assert.match(schema.properties?.dataSourceId?.description ?? "", /Omit by default/);
 });
 
 test("notion readiness checks only page access with page_size 1", async () => {
@@ -249,7 +271,7 @@ test("notion create page omits parent for public OAuth private workspace pages",
       assert.deepEqual(calls[0]?.body, {
         properties: {
           title: {
-            title: [{ text: { content: "Private Note" } }],
+            title: [{ type: "text", text: { content: "Private Note" } }],
           },
         },
         children: [
@@ -262,6 +284,210 @@ test("notion create page omits parent for public OAuth private workspace pages",
           },
         ],
       });
+    },
+  );
+});
+
+test("notion page trash action accepts batch page ids", async () => {
+  await withMockedFetch(
+    () => jsonResponse({ object: "page" }),
+    async (calls) => {
+      const result = await notionAdapter.executeAction({
+        ...baseDiscoverInput,
+        actionType: "notion.page.trash",
+        request: { pageIds: ["page_1", "page_2"] },
+        idempotencyKey: "trash_batch_1",
+      });
+
+      assert.deepEqual(
+        calls.map((call) => call.input),
+        [
+          "https://api.notion.com/v1/pages/page_1",
+          "https://api.notion.com/v1/pages/page_2",
+        ],
+      );
+      assert.deepEqual(
+        calls.map((call) => call.body),
+        [{ in_trash: true }, { in_trash: true }],
+      );
+      assert.deepEqual(result.resyncExternalIds, ["page:page_1", "page:page_2"]);
+      assert.deepEqual(result.result.pageIds, ["page_1", "page_2"]);
+      assert.equal(result.result.count, 2);
+    },
+  );
+});
+
+test("notion page read action returns markdown by page id", async () => {
+  await withMockedFetch(
+    (url) => {
+      if (url.includes("/pages/page_1")) {
+        return jsonResponse({
+          object: "page",
+          id: "page_1",
+          url: "https://www.notion.so/page_1",
+          last_edited_time: "2026-05-02T00:00:00.000Z",
+          parent: { type: "workspace", workspace: true },
+          properties: {
+            Name: {
+              type: "title",
+              title: [{ plain_text: "Roadmap" }],
+            },
+            Status: {
+              type: "status",
+              status: { name: "Draft" },
+            },
+          },
+        });
+      }
+      if (url.includes("/blocks/page_1/children")) {
+        return jsonResponse({
+          results: [
+            {
+              object: "block",
+              id: "block_1",
+              type: "paragraph",
+              has_children: false,
+              paragraph: {
+                rich_text: [{ plain_text: "Hello from Notion" }],
+              },
+            },
+          ],
+          has_more: false,
+        });
+      }
+      return jsonResponse({ results: [], has_more: false });
+    },
+    async () => {
+      const result = await notionAdapter.executeAction({
+        ...baseDiscoverInput,
+        actionType: "notion.page.read",
+        request: { pageId: "page_1" },
+        idempotencyKey: "read_1",
+      });
+
+      assert.equal(result.result.pageId, "page_1");
+      assert.equal(result.result.title, "Roadmap");
+      assert.match(String(result.result.markdown), /Hello from Notion/);
+      assert.deepEqual(result.rawResponseJson, [
+        {
+          body: {
+            object: "page",
+            id: "page_1",
+            url: "https://www.notion.so/page_1",
+            last_edited_time: "2026-05-02T00:00:00.000Z",
+            parent: { type: "workspace", workspace: true },
+            properties: {
+              Name: {
+                type: "title",
+                title: [{ plain_text: "Roadmap" }],
+              },
+              Status: {
+                type: "status",
+                status: { name: "Draft" },
+              },
+            },
+          },
+          method: "GET",
+          path: "/pages/page_1",
+          status: 200,
+        },
+        {
+          body: {
+            results: [
+              {
+                object: "block",
+                id: "block_1",
+                type: "paragraph",
+                has_children: false,
+                paragraph: {
+                  rich_text: [{ plain_text: "Hello from Notion" }],
+                },
+              },
+            ],
+            has_more: false,
+          },
+          method: "GET",
+          path: "/blocks/page_1/children",
+          status: 200,
+        },
+      ]);
+      assert.deepEqual(
+        (result.result.properties as Record<string, unknown>).Status,
+        { type: "status", value: "Draft" },
+      );
+      assert.equal(result.result.truncated, false);
+    },
+  );
+});
+
+test("notion page update action replaces content by page id", async () => {
+  await withMockedFetch(
+    (url) => {
+      if (url.includes("/blocks/page_1/children")) {
+        return jsonResponse({
+          results: [
+            {
+              object: "block",
+              id: "block_1",
+              type: "paragraph",
+              archived: false,
+              paragraph: {
+                rich_text: [{ plain_text: "Old content" }],
+              },
+            },
+          ],
+          has_more: false,
+        });
+      }
+      return jsonResponse({ object: "page", id: "page_1" });
+    },
+    async (calls) => {
+      const result = await notionAdapter.executeAction({
+        ...baseDiscoverInput,
+        actionType: "notion.page.update",
+        request: {
+          pageId: "page_1",
+          mode: "replace",
+          properties: {
+            Status: {
+              status: { name: "Done" },
+            },
+          },
+          content: "## New plan\nShip it",
+        },
+        idempotencyKey: "update_1",
+      });
+
+      assert.deepEqual(calls[0]?.body, {
+        properties: {
+          Status: {
+            status: { name: "Done" },
+          },
+        },
+      });
+      assert.deepEqual(calls[2]?.body, { archived: true });
+      assert.deepEqual(calls[3]?.body, {
+        children: [
+          {
+            object: "block",
+            type: "heading_2",
+            heading_2: {
+              rich_text: [{ type: "text", text: { content: "New plan" } }],
+            },
+          },
+          {
+            object: "block",
+            type: "paragraph",
+            paragraph: {
+              rich_text: [{ type: "text", text: { content: "Ship it" } }],
+            },
+          },
+        ],
+      });
+      assert.equal(result.result.pageId, "page_1");
+      assert.equal(result.result.mode, "replace");
+      assert.equal(result.result.replacedBlockCount, 1);
+      assert.deepEqual(result.result.propertyNames, ["Status"]);
     },
   );
 });

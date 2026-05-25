@@ -47,6 +47,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CornerDownLeftIcon,
   FileTextIcon,
   FolderIcon,
@@ -591,6 +593,7 @@ export type PromptInputMentionSourceLoader = (input: {
 }) => Promise<PromptInputMentionSourcePage>;
 
 export type PromptInputSlashCommand = {
+  children?: PromptInputSlashCommand[];
   description?: string;
   disabled?: boolean;
   group?: string;
@@ -599,6 +602,40 @@ export type PromptInputSlashCommand = {
   label?: string;
   meta?: unknown;
   value: string;
+};
+
+const slashCommandHasChildren = (command: PromptInputSlashCommand): boolean =>
+  command.children?.some(
+    (child) => child.value.trim().length > 0 || slashCommandHasChildren(child),
+  ) ?? false;
+
+const slashCommandSearchText = (command: PromptInputSlashCommand): string =>
+  [
+    command.value,
+    command.label ?? "",
+    command.description ?? "",
+    command.group ?? "",
+    ...(command.children?.map(slashCommandSearchText) ?? []),
+  ].join(" ");
+
+const filterSlashCommands = (
+  commands: PromptInputSlashCommand[],
+  query: string,
+) => {
+  const candidates = commands.filter(
+    (command) =>
+      command.value.trim().length > 0 || slashCommandHasChildren(command),
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return candidates.slice(0, SOURCE_MENTION_PAGE_SIZE);
+  }
+
+  return candidates
+    .filter((command) =>
+      slashCommandSearchText(command).toLowerCase().includes(normalizedQuery),
+    )
+    .slice(0, SOURCE_MENTION_PAGE_SIZE);
 };
 
 const normalizeCommandValue = (value: string) =>
@@ -881,6 +918,37 @@ function SlashCommandIcon({ command }: { command: PromptInputSlashCommand }) {
     return <WrenchIcon className={className} />;
   }
   return <BookOpenIcon className={className} />;
+}
+
+function SlashCommandText({ command }: { command: PromptInputSlashCommand }) {
+  const label = command.label ?? command.value;
+  const description = command.description ?? command.group;
+  const content = (
+    <div className="min-w-0 flex-1">
+      <div className="truncate text-sm font-medium leading-5">{label}</div>
+      {description ? (
+        <div className="truncate text-xs leading-4 text-muted-foreground">
+          {description}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  if (!description) {
+    return content;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{content}</TooltipTrigger>
+      <TooltipContent align="start" side="right">
+        <div className="space-y-1 text-left">
+          <div className="font-medium">{label}</div>
+          <div>{description}</div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 // ============================================================================
@@ -1234,6 +1302,7 @@ export type PromptInputProps = Omit<
   globalDrop?: boolean;
   // Render a hidden input with given name and keep it in sync for native form posts. Default false.
   syncHiddenInput?: boolean;
+  submitDisabled?: boolean;
   // Minimal constraints
   maxFiles?: number;
   // bytes
@@ -1254,6 +1323,7 @@ export const PromptInput = ({
   multiple,
   globalDrop,
   syncHiddenInput,
+  submitDisabled,
   maxFiles,
   maxFileSize,
   onError,
@@ -1593,6 +1663,10 @@ export const PromptInput = ({
     async (event) => {
       event.preventDefault();
 
+      if (submitDisabled) {
+        return;
+      }
+
       const form = event.currentTarget;
       const formData = new FormData(form);
       const text = usingProvider
@@ -1667,7 +1741,7 @@ export const PromptInput = ({
         // Don't clear on error - user may want to retry
       }
     },
-    [usingProvider, controller, files, onSubmit, clear],
+    [usingProvider, controller, files, onSubmit, clear, submitDisabled],
   );
 
   // Render with or without local provider
@@ -1911,6 +1985,9 @@ export const PromptInputMentionEditor = ({
   const [slashStartOffset, setSlashStartOffset] = useState<number | null>(null);
   const [isSlashOpen, setIsSlashOpen] = useState(false);
   const [slashHighlightedIndex, setSlashHighlightedIndex] = useState(0);
+  const [slashCommandPath, setSlashCommandPath] = useState<
+    PromptInputSlashCommand[]
+  >([]);
   const mentionListRef = useRef<HTMLDivElement | null>(null);
   const mentionItemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const slashListRef = useRef<HTMLDivElement | null>(null);
@@ -1947,23 +2024,11 @@ export const PromptInputMentionEditor = ({
     (Boolean(sourceLoader) ||
       filteredSources.length > 0 ||
       mentionQuery.trim().length > 0);
+  const activeSlashParent = slashCommandPath.at(-1);
+  const activeSlashCommands = activeSlashParent?.children ?? slashCommands;
   const filteredSlashCommands = useMemo(() => {
-    const query = slashQuery.trim().toLowerCase();
-    const candidates = slashCommands.filter(
-      (command) => command.value.trim().length > 0,
-    );
-    if (!query) {
-      return candidates.slice(0, SOURCE_MENTION_PAGE_SIZE);
-    }
-
-    return candidates
-      .filter((command) => {
-        const haystack =
-          `${command.value} ${command.label ?? ""} ${command.description ?? ""} ${command.group ?? ""}`.toLowerCase();
-        return haystack.includes(query);
-      })
-      .slice(0, SOURCE_MENTION_PAGE_SIZE);
-  }, [slashCommands, slashQuery]);
+    return filterSlashCommands(activeSlashCommands, slashQuery);
+  }, [activeSlashCommands, slashQuery]);
   const isSlashPopoverOpen = isSlashOpen;
 
   const publishSegments = useCallback(
@@ -2028,6 +2093,7 @@ export const PromptInputMentionEditor = ({
       setIsSlashOpen(false);
       setSlashQuery("");
       setSlashStartOffset(null);
+      setSlashCommandPath([]);
       return;
     }
 
@@ -2085,6 +2151,23 @@ export const PromptInputMentionEditor = ({
     setSlashQuery("");
     setSlashStartOffset(null);
     setSlashHighlightedIndex(0);
+    setSlashCommandPath([]);
+  }, []);
+
+  const openSlashSubmenu = useCallback((command: PromptInputSlashCommand) => {
+    if (!slashCommandHasChildren(command)) {
+      return false;
+    }
+    setSlashCommandPath((current) => [...current, command]);
+    setSlashHighlightedIndex(0);
+    slashItemRefs.current.clear();
+    return true;
+  }, []);
+
+  const goBackSlashSubmenu = useCallback(() => {
+    setSlashCommandPath((current) => current.slice(0, -1));
+    setSlashHighlightedIndex(0);
+    slashItemRefs.current.clear();
   }, []);
 
   useEffect(() => {
@@ -2319,6 +2402,10 @@ export const PromptInputMentionEditor = ({
       if (command.disabled) {
         return;
       }
+      if (openSlashSubmenu(command)) {
+        editorRef.current?.focus();
+        return;
+      }
       const editor = editorRef.current;
       if (!editor) {
         return;
@@ -2356,6 +2443,7 @@ export const PromptInputMentionEditor = ({
     [
       closeSlash,
       onSlashCommandSelect,
+      openSlashSubmenu,
       slashQuery.length,
       slashStartOffset,
       syncFromDom,
@@ -2419,8 +2507,27 @@ export const PromptInputMentionEditor = ({
       if (isSlashOpen) {
         if (e.key === "Escape") {
           e.preventDefault();
+          if (slashCommandPath.length > 0) {
+            goBackSlashSubmenu();
+            return;
+          }
           closeSlash();
           return;
+        }
+        if (e.key === "ArrowLeft" && slashCommandPath.length > 0) {
+          e.preventDefault();
+          goBackSlashSubmenu();
+          return;
+        }
+        if (e.key === "ArrowRight") {
+          const command =
+            filteredSlashCommands[slashHighlightedIndex] ??
+            filteredSlashCommands[0];
+          if (command && slashCommandHasChildren(command)) {
+            e.preventDefault();
+            openSlashSubmenu(command);
+            return;
+          }
         }
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -2563,13 +2670,16 @@ export const PromptInputMentionEditor = ({
       closeSlash,
       filteredSlashCommands,
       filteredSources,
+      goBackSlashSubmenu,
       mentionHighlightedIndex,
       isComposing,
       isMentionOpen,
       isSlashOpen,
       onKeyDown,
+      openSlashSubmenu,
       selectSource,
       selectSlashCommand,
+      slashCommandPath.length,
       slashHighlightedIndex,
       syncAndUpdateMention,
     ],
@@ -2747,7 +2857,26 @@ export const PromptInputMentionEditor = ({
             shouldFilter={false}
           >
             <CommandList className="max-h-[280px]" ref={slashListRef}>
-              <CommandGroup className="px-2 py-1.5" heading="Commands">
+              {activeSlashParent ? (
+                <div className="border-border/70 border-b p-1.5">
+                  <button
+                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={goBackSlashSubmenu}
+                    onMouseDown={(event) => event.preventDefault()}
+                    type="button"
+                  >
+                    <ChevronLeftIcon className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {activeSlashParent.label ?? activeSlashParent.value}
+                    </span>
+                    <span className="shrink-0">Back</span>
+                  </button>
+                </div>
+              ) : null}
+              <CommandGroup
+                className="px-2 py-1.5"
+                heading={activeSlashParent?.label ?? "Commands"}
+              >
                 {filteredSlashCommands.length === 0 ? (
                   <CommandEmpty className="px-3 py-3 text-xs text-muted-foreground">
                     No matching commands
@@ -2778,19 +2907,10 @@ export const PromptInputMentionEditor = ({
                     value={command.value}
                   >
                     <SlashCommandIcon command={command} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium leading-5">
-                        {command.label ?? command.value}
-                      </div>
-                      {command.description || command.group ? (
-                        <div className="truncate text-xs leading-4 text-muted-foreground">
-                          {command.description ?? command.group}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="ml-2 max-w-[120px] shrink-0 truncate font-mono text-[11px] text-muted-foreground/70">
-                      {command.value}
-                    </div>
+                    <SlashCommandText command={command} />
+                    {slashCommandHasChildren(command) ? (
+                      <ChevronRightIcon className="ml-2 size-3.5 shrink-0 text-muted-foreground/70" />
+                    ) : null}
                   </CommandItem>
                 ))}
               </CommandGroup>

@@ -25,6 +25,11 @@ export type RefreshThreadInput = {
   toolApprovalResume?: ToolApprovalResume | null;
 };
 
+export type ResumeThreadInput = RefreshThreadInput & {
+  assistantMessageId: string;
+  toolApprovalResume: ToolApprovalResume;
+};
+
 export type EditThreadInput = RefreshThreadInput & {
   content: string;
   imagesProvided?: boolean;

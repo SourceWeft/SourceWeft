@@ -5,6 +5,7 @@ import {
   listThreadsRequestSchema,
   startThreadTurnRequestSchema,
   streamThreadRequestSchema,
+  type StreamThreadRequest,
   type ThreadRunSummary,
   updateThreadModelSettingsRequestSchema,
 } from "@sourceweft/contracts";
@@ -23,35 +24,96 @@ import {
   requireRouteParam,
 } from "./helpers";
 import { parseDurableChatRunKey } from "../../../modules/content/threads/durable/constants";
+import { getRunApprovalPauseState } from "../../../modules/content/threads/durable/service";
 import type {
   EditThreadInput,
   RefreshThreadInput,
+  ResumeThreadInput,
   StreamThreadEventInput,
 } from "../../../modules/content/threads";
 
 type DurableThreadRequestInput =
   | StreamThreadEventInput
   | RefreshThreadInput
+  | ResumeThreadInput
   | EditThreadInput;
+type StreamThreadRequestData = StreamThreadRequest;
+type ResumeRequestData = StreamThreadRequestData & {
+  assistantMessageId: string;
+  toolApprovalResume: ResumeThreadInput["toolApprovalResume"];
+};
+
+function assertResumeRequestData(
+  data: StreamThreadRequestData,
+): asserts data is ResumeRequestData {
+  if (!data.assistantMessageId || !data.toolApprovalResume) {
+    throw new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      "resume mode requires assistantMessageId and toolApprovalResume",
+    );
+  }
+}
+
+function buildResumeThreadInput(input: {
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  data: StreamThreadRequestData;
+  idempotencyKey?: string;
+}): ResumeThreadInput {
+  assertResumeRequestData(input.data);
+  return {
+    workspaceId: input.workspaceId,
+    threadId: input.threadId,
+    userId: input.userId,
+    mentionedSourceIds: input.data.mentionedSourceIds,
+    sourceIds: input.data.sourceIds,
+    tools: input.data.tools,
+    command: input.data.command,
+    timezone: input.data.timezone,
+    userMessageId: input.data.userMessageId,
+    assistantMessageId: input.data.assistantMessageId,
+    idempotencyKey: input.idempotencyKey ?? input.data.idempotencyKey,
+    llm: input.data.llm,
+    image: input.data.image,
+    vision: input.data.vision,
+    visionProfileAlias: input.data.modelSettings?.visionProfileAlias ?? undefined,
+    toolApprovalResume: input.data.toolApprovalResume,
+  };
+}
 
 function presentThreadRunSummary(run: {
   id: string;
   idempotencyKey: string;
-  status: "queued" | "running" | "cancel_requested" | string;
-  mode: "send" | "refresh" | "edit";
+  status: string;
+  mode: "send" | "refresh" | "edit" | "resume";
   userMessageId: string | null;
   assistantMessageId: string | null;
+  snapshotJson?: Record<string, unknown>;
 }): ThreadRunSummary {
+  const approval = getRunApprovalPauseState({
+    snapshotJson: run.snapshotJson ?? {},
+  });
+  const status =
+    run.status === "running" ||
+    run.status === "cancel_requested" ||
+    run.status === "waiting_for_approval"
+      ? run.status
+      : "queued";
   return {
     id: run.id,
     idempotencyKey: run.idempotencyKey,
-    status:
-      run.status === "running" || run.status === "cancel_requested"
-        ? run.status
-        : "queued",
+    status,
     mode: run.mode,
     userMessageId: run.userMessageId,
     assistantMessageId: run.assistantMessageId,
+    ...(status === "waiting_for_approval"
+      ? {
+          approvalRequestedAt: approval.requestedAt,
+          approvalExpiresAt: approval.expiresAt,
+        }
+      : {}),
   };
 }
 
@@ -407,6 +469,14 @@ export function registerThreadRoutes(app: Hono) {
     const imagesProvided = Object.hasOwn(body, "images");
     const images = parsed.data.images ?? [];
 
+    if (parsed.data.toolApprovalResume && mode !== "resume") {
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "toolApprovalResume requires resume mode",
+      );
+    }
+
     if (
       !existingDurableRun &&
       (mode === "send" || mode === "edit") &&
@@ -446,7 +516,15 @@ export function registerThreadRoutes(app: Hono) {
       }
 
       const request: DurableThreadRequestInput =
-        mode === "refresh"
+        mode === "resume"
+          ? buildResumeThreadInput({
+              workspaceId,
+              threadId,
+              userId,
+              idempotencyKey: durableKey.idempotencyKey,
+              data: parsed.data,
+            })
+          : mode === "refresh"
           ? {
               workspaceId,
               threadId,
@@ -465,7 +543,6 @@ export function registerThreadRoutes(app: Hono) {
               vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-              toolApprovalResume: parsed.data.toolApprovalResume ?? null,
             }
           : mode === "edit"
             ? {
@@ -488,7 +565,6 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-                toolApprovalResume: parsed.data.toolApprovalResume ?? null,
               }
             : {
                 workspaceId,
@@ -507,7 +583,6 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-                toolApprovalResume: parsed.data.toolApprovalResume ?? null,
               };
       await contentService.getOrCreateDurableThreadRun({
         workspaceId,
@@ -543,7 +618,16 @@ export function registerThreadRoutes(app: Hono) {
 
     if (parsed.data.stream === false) {
       const result =
-        mode === "refresh"
+        mode === "resume"
+          ? await contentService.resumeThread(
+              buildResumeThreadInput({
+                workspaceId,
+                threadId,
+                userId,
+                data: parsed.data,
+              }),
+            )
+          : mode === "refresh"
           ? await contentService.refreshThread({
               workspaceId,
               threadId,
@@ -561,7 +645,6 @@ export function registerThreadRoutes(app: Hono) {
               vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-              toolApprovalResume: parsed.data.toolApprovalResume ?? null,
             } satisfies RefreshThreadInput)
           : mode === "edit"
             ? await contentService.editThread({
@@ -584,7 +667,6 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-                toolApprovalResume: parsed.data.toolApprovalResume ?? null,
               } satisfies EditThreadInput)
             : await contentService.streamThread({
                 workspaceId,
@@ -609,7 +691,16 @@ export function registerThreadRoutes(app: Hono) {
     }
 
     const stream =
-      mode === "refresh"
+      mode === "resume"
+        ? contentService.resumeThreadEvents(
+            buildResumeThreadInput({
+              workspaceId,
+              threadId,
+              userId,
+              data: parsed.data,
+            }),
+          )
+        : mode === "refresh"
         ? contentService.refreshThreadEvents({
             workspaceId,
             threadId,
@@ -627,7 +718,6 @@ export function registerThreadRoutes(app: Hono) {
             vision: parsed.data.vision,
             visionProfileAlias:
               parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-            toolApprovalResume: parsed.data.toolApprovalResume ?? null,
           } satisfies RefreshThreadInput)
         : mode === "edit"
           ? contentService.editThreadEvents({
@@ -650,7 +740,6 @@ export function registerThreadRoutes(app: Hono) {
               vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-              toolApprovalResume: parsed.data.toolApprovalResume ?? null,
             } satisfies EditThreadInput)
           : contentService.streamThreadEvents({
               workspaceId,

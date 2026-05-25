@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckIcon,
+  CircleStopIcon,
+  ShieldAlertIcon,
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,15 +24,29 @@ import {
   TabsTrigger,
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import {
-  toolConfirmationRequestSchema,
-  type ToolConfirmationRequest,
-} from "@sourceweft/contracts";
 import { connectorsClient } from "../../../../../lib/sdk";
+import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-control";
 import { compactText } from "./message-assets";
-import type { ToolCallRecord, VersionedMessageGroup } from "./types";
+import {
+  confirmationTitle,
+  requestDetailLines,
+} from "./tool-confirmation-display";
+import {
+  getVisibleToolConfirmationItems,
+  isExpiredToolConfirmationResponse,
+  isStaleToolConfirmationResponse,
+  type ToolConfirmationItem,
+  type ToolConfirmationRequestOutput,
+} from "./tool-confirmation-state";
+import type { ToolConfirmationResolution } from "./types";
+import type {
+  ToolConfirmationDecision,
+  ToolConfirmationIntervention,
+} from "./tool-confirmation-controller";
 
 type ConfirmationState =
+  | "input-streaming"
+  | "input-available"
   | "approval-requested"
   | "approval-responded"
   | "output-available"
@@ -49,129 +65,9 @@ type ConfirmationApproval =
       reason?: string;
     };
 
-type ToolConfirmationDecision = "approve" | "reject";
-
-export type ToolConfirmationRequestOutput = ToolConfirmationRequest;
-
-type ToolConfirmationItem = {
-  confirmation: ToolConfirmationRequestOutput;
-  messageId: string;
-  toolCall: ToolCallRecord;
-};
-
-export type ToolConfirmationIntervention = {
-  id: string;
-  messageId: string;
-  toolCallId: string;
-};
-
-function getActiveAssistantVersion(
-  group: VersionedMessageGroup,
-  activeVersionByGroup: Record<string, number>,
-) {
-  const activeIndex =
-    activeVersionByGroup[group.groupId] ?? group.versions.length - 1;
-  return group.versions[Math.max(0, activeIndex)];
-}
-
-function getObjectRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function getStringRecordValue(
-  record: Record<string, unknown> | null,
-  key: string,
-) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
-}
-
-function parseJsonOutput(output: unknown): unknown {
-  if (typeof output !== "string") {
-    const record = getObjectRecord(output);
-    const content = getStringRecordValue(record, "content");
-    return content ? parseJsonOutput(content) : output;
-  }
-  const trimmed = output.trim();
-  if (!trimmed.startsWith("{")) {
-    return output;
-  }
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return output;
-  }
-}
-
-export function getToolConfirmationOutput(
-  output: unknown,
-): ToolConfirmationRequestOutput | null {
-  const parsed = parseJsonOutput(output);
-  const record = getObjectRecord(parsed);
-  if (!record) {
-    return null;
-  }
-  if (record.type !== "tool_confirmation_request") {
-    return null;
-  }
-  const parsedConfirmation = toolConfirmationRequestSchema.safeParse(record);
-  return parsedConfirmation.success ? parsedConfirmation.data : null;
-}
-
-export function getToolConfirmationItems(
-  messageGroups: VersionedMessageGroup[] | undefined,
-  activeVersionByGroup: Record<string, number> = {},
-) {
-  return (messageGroups ?? []).flatMap((group) => {
-    if (group.role !== "assistant") {
-      return [];
-    }
-    const version = getActiveAssistantVersion(group, activeVersionByGroup);
-    if (!version) {
-      return [];
-    }
-    return (version.toolCalls ?? [])
-      .map((toolCall) => {
-        const confirmation = getToolConfirmationOutput(toolCall.output);
-        return confirmation
-          ? { confirmation, messageId: version.id, toolCall }
-          : null;
-      })
-      .filter((item): item is ToolConfirmationItem => item !== null);
-  });
-}
-
-export function getActiveToolConfirmationItems(
-  messageGroups: VersionedMessageGroup[] | undefined,
-  activeVersionByGroup: Record<string, number> = {},
-) {
-  const groups = messageGroups ?? [];
-  for (let index = groups.length - 1; index >= 0; index -= 1) {
-    const group = groups[index];
-    if (group?.role !== "assistant") {
-      continue;
-    }
-    const version = getActiveAssistantVersion(group, activeVersionByGroup);
-    if (version?.finishReason !== "tool_confirmation_requested") {
-      return [];
-    }
-    return (version.toolCalls ?? [])
-      .map((toolCall) => {
-        const confirmation = getToolConfirmationOutput(toolCall.output);
-        return confirmation
-          ? { confirmation, messageId: version.id, toolCall }
-          : null;
-      })
-      .filter((item): item is ToolConfirmationItem => item !== null);
-  }
-  return [];
-}
-
-function confirmationStatusToState(status: string | undefined): ConfirmationState {
+function confirmationStatusToState(
+  status: string | undefined,
+): ConfirmationState {
   if (status === "failed") {
     return "output-error";
   }
@@ -206,30 +102,33 @@ function canDecide(
   state: ConfirmationState,
   isBusy: boolean,
   workspaceId?: string | null,
+  threadRunId?: string | null,
 ) {
-  return Boolean(workspaceId) && state === "approval-requested" && !isBusy;
-}
-
-function confirmationTitle(confirmation: ToolConfirmationRequestOutput) {
   return (
-    confirmation.preview.title ??
-    confirmation.preview.summary ??
-    confirmation.action.label ??
-    "Tool action"
+    Boolean(workspaceId) &&
+    Boolean(threadRunId) &&
+    state === "approval-requested" &&
+    !isBusy
   );
 }
 
 function ToolConfirmationPanel({
+  activeThreadRun,
   item,
   onSettled,
+  onExpired,
+  onStale,
   workspaceId,
 }: {
+  activeThreadRun?: ActiveThreadRun | null;
   item: ToolConfirmationItem;
   onSettled?: (input: {
     decision: ToolConfirmationDecision;
     item: ToolConfirmationItem;
     result: Awaited<ReturnType<typeof connectorsClient.respondToConfirmation>>;
   }) => void;
+  onExpired?: (input: { item: ToolConfirmationItem }) => void;
+  onStale?: (input: { item: ToolConfirmationItem }) => void;
   workspaceId?: string | null;
 }) {
   const { confirmation } = item;
@@ -241,35 +140,54 @@ function ToolConfirmationPanel({
     confirmationStatusToApproval(confirmation.id, initialStatus),
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const submittedConfirmationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    submittedConfirmationIdRef.current = null;
+    setHasSubmitted(false);
+  }, [confirmation.id]);
 
   const title = confirmationTitle(confirmation);
-  const requestSummary = compactText(
-    confirmation.preview.summary ?? confirmation.preview.title ?? title,
-    120,
+  const requestLines = requestDetailLines(confirmation);
+  const threadRunId = item.threadRunId ?? activeThreadRun?.id ?? null;
+  const respondable = canDecide(
+    confirmation,
+    state,
+    isBusy || hasSubmitted,
+    workspaceId,
+    threadRunId,
   );
-  const targetLabel = confirmation.preview.target?.label;
-  const respondable = canDecide(confirmation, state, isBusy, workspaceId);
 
   async function respond(decision: ToolConfirmationDecision) {
+    if (submittedConfirmationIdRef.current === confirmation.id) {
+      return;
+    }
     if (!workspaceId) {
       toast.error("SourceWeft confirmation is missing workspace context.");
       return;
     }
+    if (!threadRunId) {
+      toast.error("This confirmation is no longer attached to an active run.");
+      return;
+    }
+    submittedConfirmationIdRef.current = confirmation.id;
+    setHasSubmitted(true);
+    const isRejectDecision = decision === "reject";
     setIsBusy(true);
     setState("approval-responded");
     setApproval({
       id: confirmation.id,
-      approved: decision !== "reject",
-      reason:
-        decision === "reject"
-          ? "Rejected in SourceWeft."
-          : "Approved in SourceWeft.",
+      approved: !isRejectDecision,
+      reason: isRejectDecision
+        ? "Rejected in SourceWeft."
+        : "Approved in SourceWeft.",
     });
     setMessage(
-      decision === "reject"
+      isRejectDecision
         ? "Rejected in SourceWeft. The action was not run."
-        : "Approved in SourceWeft. Resuming now...",
+        : "Approved in SourceWeft.",
     );
     try {
       const result = await connectorsClient.respondToConfirmation(
@@ -278,13 +196,14 @@ function ToolConfirmationPanel({
         {
           decision,
           confirmation,
+          threadRunId,
+          assistantMessageId: item.assistantMessageId,
         },
       );
       const status = result.confirmation.status;
-      if (status === "rejected") {
+      if (isRejectDecision || status === "rejected") {
         setState("output-denied");
         setMessage("Rejected in SourceWeft. The action was not run.");
-        toast.info("Action rejected.");
         onSettled?.({ decision, item, result });
       } else if (status === "failed") {
         setState("output-error");
@@ -294,25 +213,31 @@ function ToolConfirmationPanel({
         setState(confirmationStatusToState(status));
         setApproval({
           id: confirmation.id,
-          approved: decision !== "reject",
+          approved: !isRejectDecision,
           reason: "Approved in SourceWeft.",
         });
         setMessage(
-          decision === "reject"
+          isRejectDecision
             ? "Rejected in SourceWeft. The action was not run."
-            : "Approved in SourceWeft. Resuming now...",
+            : "Approved in SourceWeft.",
         );
         onSettled?.({ decision, item, result });
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Confirmation failed.";
-      setState("output-error");
-      setApproval({
-        id: confirmation.id,
-        approved: decision !== "reject",
-        reason: errorMessage,
-      });
+      if (isExpiredToolConfirmationResponse(error)) {
+        onExpired?.({ item });
+        return;
+      }
+      if (isStaleToolConfirmationResponse(error)) {
+        onStale?.({ item });
+        return;
+      }
+      submittedConfirmationIdRef.current = null;
+      setHasSubmitted(false);
+      setState("approval-requested");
+      setApproval({ id: confirmation.id });
       setMessage(errorMessage);
       toast.error(errorMessage);
     } finally {
@@ -321,25 +246,29 @@ function ToolConfirmationPanel({
   }
 
   return (
-    <Confirmation
-      approval={approval}
-      state={state}
-    >
+    <Confirmation approval={approval} state={state}>
       <ConfirmationRequest>
-        <ConfirmationTitle>
-          {title}
-          {targetLabel ? (
-            <>
-              <br />
-              <span className="text-xs">Target: {targetLabel}</span>
-            </>
-          ) : null}
-          {requestSummary && requestSummary !== title ? (
-            <>
-              <br />
-              <span className="text-xs">{requestSummary}</span>
-            </>
-          ) : null}
+        <ConfirmationTitle className="block">
+          <span className="flex items-start gap-2">
+            <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-foreground">
+                {title}
+              </span>
+              {requestLines.length > 0 ? (
+                <span className="mt-1 block space-y-0.5">
+                  {requestLines.map((line) => (
+                    <span
+                      className="block text-xs leading-5 text-muted-foreground"
+                      key={line}
+                    >
+                      {line}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+            </span>
+          </span>
         </ConfirmationTitle>
       </ConfirmationRequest>
       <ConfirmationAccepted>
@@ -381,14 +310,13 @@ function ToolConfirmationPanel({
         <ConfirmationAction
           disabled={!respondable}
           onClick={() => void respond("reject")}
-          variant="outline"
+          variant="destructive"
         >
           Reject
         </ConfirmationAction>
         <ConfirmationAction
           disabled={!respondable}
           onClick={() => void respond("approve")}
-          variant="default"
         >
           {isBusy ? "Approving..." : "Approve"}
         </ConfirmationAction>
@@ -398,46 +326,48 @@ function ToolConfirmationPanel({
 }
 
 export function ToolInterventionBar({
-  activeVersionByGroup = {},
+  activeThreadRun = null,
   activeIntervention = null,
   className,
-  messageGroups,
+  items,
   onInterventionSettled,
+  onInterventionExpired,
+  onInterventionStale,
+  onStopWaiting,
+  resolvedConfirmations = [],
   workspaceId,
 }: {
-  activeVersionByGroup?: Record<string, number>;
+  activeThreadRun?: ActiveThreadRun | null;
   activeIntervention?: ToolConfirmationIntervention | null;
   className?: string;
-  messageGroups?: VersionedMessageGroup[];
+  items?: ToolConfirmationItem[];
   onInterventionSettled?: (input: {
     decision: ToolConfirmationDecision;
     item: ToolConfirmationItem;
     result: Awaited<ReturnType<typeof connectorsClient.respondToConfirmation>>;
   }) => void;
+  onInterventionExpired?: (input: { item: ToolConfirmationItem }) => void;
+  onInterventionStale?: (input: { item: ToolConfirmationItem }) => void;
+  onStopWaiting?: () => void;
+  resolvedConfirmations?: ToolConfirmationResolution[];
   workspaceId?: string | null;
 }) {
-  const items = useMemo(
-    () => getActiveToolConfirmationItems(messageGroups, activeVersionByGroup),
-    [activeVersionByGroup, messageGroups],
+  const visibleItems = getVisibleToolConfirmationItems(
+    items ?? [],
+    resolvedConfirmations,
   );
-  const activeItems = activeIntervention
-    ? items.filter(
-        (item) =>
-          item.confirmation.id === activeIntervention.id &&
-          item.messageId === activeIntervention.messageId &&
-          item.toolCall.id === activeIntervention.toolCallId,
-      )
-    : [];
-  const visibleItems = activeItems.filter((item) => {
-    const status = item.confirmation.status ?? item.confirmation.action.status;
-    return (
-      !status ||
-      status === "proposed" ||
-      status === "approved" ||
-      status === "running" ||
-      status === "failed"
-    );
-  });
+  const defaultVisibleId = visibleItems[0]?.confirmation.id;
+  const activeVisibleId = visibleItems.some(
+    (item) => item.confirmation.id === activeIntervention?.id,
+  )
+    ? activeIntervention?.id
+    : defaultVisibleId;
+  const [selectedConfirmationId, setSelectedConfirmationId] =
+    useState(activeVisibleId);
+
+  useEffect(() => {
+    setSelectedConfirmationId(activeVisibleId);
+  }, [activeVisibleId]);
 
   if (visibleItems.length === 0) {
     return null;
@@ -451,30 +381,60 @@ export function ToolInterventionBar({
       )}
     >
       <div className="mx-auto w-full max-w-4xl">
-        <Tabs defaultValue={visibleItems[0]?.confirmation.id}>
-          {visibleItems.length > 1 ? (
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <TabsList className="max-w-[50vw] overflow-x-auto">
-                {visibleItems.map((item, index) => (
-                  <TabsTrigger
-                    className="min-w-0 max-w-40 truncate"
-                    key={item.confirmation.id}
-                    value={item.confirmation.id}
-                  >
-                    {index + 1}. {compactText(confirmationTitle(item.confirmation), 32)}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              <span className="text-muted-foreground text-xs">
-                {visibleItems.length} pending
-              </span>
+        <Tabs
+          value={selectedConfirmationId}
+          onValueChange={setSelectedConfirmationId}
+        >
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              {visibleItems.length > 1 ? (
+                <>
+                  <TabsList className="max-w-[50vw] overflow-x-auto">
+                    {visibleItems.map((item, index) => (
+                      <TabsTrigger
+                        className="min-w-0 max-w-40 truncate"
+                        key={item.confirmation.id}
+                        value={item.confirmation.id}
+                      >
+                        {index + 1}.{" "}
+                        {compactText(confirmationTitle(item.confirmation), 32)}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  <span className="text-muted-foreground text-xs">
+                    {visibleItems.length} pending
+                  </span>
+                </>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  Waiting for approval
+                </span>
+              )}
             </div>
-          ) : null}
+            {onStopWaiting ? (
+              <button
+                aria-label="End approval wait"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/20 disabled:opacity-60"
+                onClick={onStopWaiting}
+                title="End approval wait"
+                type="button"
+              >
+                <CircleStopIcon className="size-3.5" />
+                End
+              </button>
+            ) : null}
+          </div>
           {visibleItems.map((item) => (
-            <TabsContent key={item.confirmation.id} value={item.confirmation.id}>
+            <TabsContent
+              key={item.confirmation.id}
+              value={item.confirmation.id}
+            >
               <ToolConfirmationPanel
+                activeThreadRun={activeThreadRun}
                 item={item}
+                onExpired={onInterventionExpired}
                 onSettled={onInterventionSettled}
+                onStale={onInterventionStale}
                 workspaceId={workspaceId}
               />
             </TabsContent>

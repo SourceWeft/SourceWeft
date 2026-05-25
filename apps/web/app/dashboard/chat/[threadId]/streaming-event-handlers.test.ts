@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import type { ModelReasoningSegmentRecord } from "../_components/chat-canvas";
 import type { ChatMessageItem } from "./streaming-assistant-state";
 import { createStreamingRenderBuffer } from "./streaming-render-buffer";
 import { testExports } from "./streaming-event-handlers";
@@ -37,6 +38,7 @@ test("finish event stores finish reason on the streaming assistant message", () 
       resolveToolCallFromStreamEvent: () => {
         throw new Error("not used");
       },
+      resolveTraceEventFromStreamEvent: () => null,
       streamRenderBuffer: createStreamingRenderBuffer({
         maxDeltaBatchChars: 800,
       }),
@@ -62,8 +64,141 @@ test("finish event stores finish reason on the streaming assistant message", () 
   assert.deepEqual(message.metadata.threadRun, {
     idempotencyKey: "sourceweft-web-run:run-1",
     mode: "send",
-    status: "completed",
+    status: "waiting_for_approval",
   });
+});
+
+test("finish status marks tool confirmation pauses as waiting for approval", () => {
+  assert.equal(
+    testExports.resolveFinishedThreadRunStatus({
+      existingStatus: "running",
+      finishReason: "tool_confirmation_requested",
+    }),
+    "waiting_for_approval",
+  );
+  assert.equal(
+    testExports.resolveFinishedThreadRunStatus({
+      existingStatus: "running",
+      finishReason: "stop",
+    }),
+    "completed",
+  );
+  assert.equal(
+    testExports.resolveFinishedThreadRunStatus({
+      existingStatus: "failed",
+      finishReason: "tool_confirmation_requested",
+    }),
+    "failed",
+  );
+});
+
+test("finish event preserves approval requested tool calls", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map([
+    [
+      "tool-1",
+      {
+        id: "tool-1",
+        tool: "delete_notion_page",
+        input: {},
+        output: {
+          type: "tool_confirmation_request",
+          schemaVersion: 1,
+          id: "action-1",
+          domain: "connector",
+          subject: {
+            label: "Lei Qin",
+            provider: "notion",
+            connectorId: "connector-1",
+          },
+          action: {
+            type: "notion.page.trash",
+            toolName: "delete_notion_page",
+            label: "Delete",
+            riskLevel: "high",
+            status: "proposed",
+            requiresApproval: true,
+          },
+          preview: {
+            title: "Delete Notion page: Referenced",
+          },
+          decisionOptions: [
+            { decision: "reject", label: "Reject" },
+            { decision: "approve", label: "Approve" },
+          ],
+          execution: {
+            providerStatus: "not_executed",
+            executor: {
+              kind: "connector_action_run",
+              connectorId: "connector-1",
+              actionRunId: "action-1",
+            },
+          },
+          status: "proposed",
+          userMessage: "Waiting for confirmation.",
+        },
+        status: "approval_requested" as const,
+        latencyMs: 0,
+        error: null,
+      },
+    ],
+  ]);
+  let syncedToolCalls: unknown[] = [];
+
+  testExports.handleStreamingFinish({
+    context: {
+      appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
+      durableRunKey: "sourceweft-web-run:run-1",
+      isCompletedImageArtifactToolCall: () => false,
+      isCompletedWorkfileWriteToolCall: () => false,
+      isGeneratedImageArtifactToolName: () => false,
+      mergeThinkingStepRecords: () => undefined,
+      mode: "send",
+      normalizeCitationRecords: () => [],
+      normalizeModelReasoningSegmentRecord: () => null,
+      normalizeThinkingStepRecord: () => null,
+      normalizeThreadCommandRequest: () => undefined,
+      resolveToolCallFromStreamEvent: () => {
+        throw new Error("not used");
+      },
+      resolveTraceEventFromStreamEvent: () => null,
+      streamRenderBuffer: createStreamingRenderBuffer({
+        maxDeltaBatchChars: 800,
+      }),
+      streamThinkingStepsById: new Map(),
+      streamToolCallsById,
+      syncStreamingCitations: () => undefined,
+      syncStreamingThinkingSteps: () => undefined,
+      syncStreamingToolCalls: () => {
+        syncedToolCalls = [...streamToolCallsById.values()];
+      },
+      toNullableString: (value) => (typeof value === "string" ? value : null),
+      toObjectRecord: (value) =>
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : null,
+      updateChatTitle: () => undefined,
+      updateStreamingAssistantMessage: (updater) => {
+        message = updater(message);
+      },
+    },
+    finishReason: "tool_confirmation_requested",
+  });
+
+  assert.equal(streamToolCallsById.get("tool-1")?.status, "approval_requested");
+  assert.equal(
+    (syncedToolCalls[0] as { status?: string } | undefined)?.status,
+    "approval_requested",
+  );
+  assert.equal(message.metadata.finishReason, "tool_confirmation_requested");
 });
 
 test("approval refresh assistant message keeps the original assistant root", () => {
@@ -100,6 +235,7 @@ test("approval refresh assistant message keeps the original assistant root", () 
       resolveToolCallFromStreamEvent: () => {
         throw new Error("not used");
       },
+      resolveTraceEventFromStreamEvent: () => null,
       streamRenderBuffer: createStreamingRenderBuffer({
         maxDeltaBatchChars: 800,
       }),
@@ -147,4 +283,426 @@ test("approval refresh assistant message keeps the original assistant root", () 
     "assistant-interrupted",
     "assistant-resumed",
   ]);
+});
+
+test("streaming reasoning keeps interrupted model reasoning in separate segments", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const normalizeModelReasoningSegmentRecord = (
+    value: unknown,
+    fallbackSequence = 0,
+  ): ModelReasoningSegmentRecord | null => {
+    const record =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+    const text = typeof record?.text === "string" ? record.text.trim() : "";
+    if (!record || !text) {
+      return null;
+    }
+
+    return {
+      id:
+        typeof record.id === "string"
+          ? record.id
+          : `model-reasoning-${fallbackSequence + 1}`,
+      text,
+      sequence:
+        typeof record.sequence === "number"
+          ? record.sequence
+          : fallbackSequence,
+      durationMs:
+        typeof record.durationMs === "number" ? record.durationMs : undefined,
+      phase:
+        record.phase === "initial" || record.phase === "after_tool"
+          ? record.phase
+          : undefined,
+      toolCallId:
+        typeof record.toolCallId === "string" ? record.toolCallId : undefined,
+      tool: typeof record.tool === "string" ? record.tool : undefined,
+    };
+  };
+  const context = {
+    appendReasoningChunk: (current: string | undefined, next: string) =>
+      `${current ?? ""}${next}`,
+    durableRunKey: "sourceweft-web-run:run-1",
+    isCompletedImageArtifactToolCall: () => false,
+    isCompletedWorkfileWriteToolCall: () => false,
+    isGeneratedImageArtifactToolName: () => false,
+    mergeThinkingStepRecords: () => undefined,
+    mode: "send" as const,
+    normalizeCitationRecords: () => [],
+    normalizeModelReasoningSegmentRecord,
+    normalizeThinkingStepRecord: () => null,
+    normalizeThreadCommandRequest: () => undefined,
+    resolveToolCallFromStreamEvent: () => {
+      throw new Error("not used");
+    },
+    resolveTraceEventFromStreamEvent: () => null,
+    streamRenderBuffer: createStreamingRenderBuffer({
+      maxDeltaBatchChars: 800,
+    }),
+    streamThinkingStepsById: new Map(),
+    streamToolCallsById: new Map(),
+    syncStreamingCitations: () => undefined,
+    syncStreamingThinkingSteps: () => undefined,
+    syncStreamingToolCalls: () => undefined,
+    toNullableString: (value: unknown) =>
+      typeof value === "string" ? value : null,
+    toObjectRecord: (value: unknown) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null,
+    updateChatTitle: () => undefined,
+    updateStreamingAssistantMessage: (
+      updater: (current: ChatMessageItem) => ChatMessageItem,
+    ) => {
+      message = updater(message);
+    },
+  };
+
+  testExports.handleStreamingReasoning({
+    context,
+    reasoning: "before tool",
+    segment: {
+      id: "model-reasoning:run-1:1",
+      text: "before tool",
+      sequence: 1,
+      phase: "initial",
+    },
+  });
+  testExports.handleStreamingReasoning({
+    context,
+    reasoning: " after tool",
+    segment: {
+      id: "model-reasoning:run-1:1",
+      text: "after tool",
+      sequence: 3,
+      phase: "after_tool",
+      toolCallId: "tool-1",
+      tool: "search_notion_pages",
+    },
+  });
+
+  assert.equal(message.metadata.reasoning, "before tool after tool");
+  assert.deepEqual(
+    (
+      message.metadata.reasoningSegments as Array<{
+        id: string;
+        text: string;
+        toolCallId?: string;
+      }>
+    ).map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+      toolCallId: segment.toolCallId,
+    })),
+    [
+      {
+        id: "model-reasoning:run-1:1",
+        text: "after tool",
+        toolCallId: "tool-1",
+      },
+    ],
+  );
+});
+
+test("streaming reasoning deltas update one stable trace part", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const context = {
+    appendReasoningChunk: (current: string | undefined, next: string) =>
+      current ? `${current}${next}` : next,
+    durableRunKey: "sourceweft-web-run:run-1",
+    isCompletedImageArtifactToolCall: () => false,
+    isCompletedWorkfileWriteToolCall: () => false,
+    isGeneratedImageArtifactToolName: () => false,
+    mergeThinkingStepRecords: () => undefined,
+    mode: "send" as const,
+    normalizeCitationRecords: () => [],
+    normalizeModelReasoningSegmentRecord: (value: unknown) => {
+      const record =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : null;
+      const text = typeof record?.text === "string" ? record.text : "";
+      if (!record || !text) {
+        return null;
+      }
+      return {
+        id: typeof record.id === "string" ? record.id : "reasoning-1",
+        text,
+        sequence:
+          typeof record.sequence === "number" ? record.sequence : undefined,
+        phase: record.phase === "initial" ? "initial" : undefined,
+      } satisfies ModelReasoningSegmentRecord;
+    },
+    normalizeThinkingStepRecord: () => null,
+    normalizeThreadCommandRequest: () => undefined,
+    resolveToolCallFromStreamEvent: () => {
+      throw new Error("not used");
+    },
+    resolveTraceEventFromStreamEvent: () => null,
+    streamRenderBuffer: createStreamingRenderBuffer({
+      maxDeltaBatchChars: 800,
+    }),
+    streamThinkingStepsById: new Map(),
+    streamToolCallsById: new Map(),
+    syncStreamingCitations: () => undefined,
+    syncStreamingThinkingSteps: () => undefined,
+    syncStreamingToolCalls: () => undefined,
+    toNullableString: (value: unknown) =>
+      typeof value === "string" ? value : null,
+    toObjectRecord: (value: unknown) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null,
+    updateChatTitle: () => undefined,
+    updateStreamingAssistantMessage: (
+      updater: (current: ChatMessageItem) => ChatMessageItem,
+    ) => {
+      message = updater(message);
+    },
+  };
+
+  for (const text of ["用户想要", "用户想要创建", "用户想要创建页面"]) {
+    testExports.handleStreamingReasoning({
+      context,
+      reasoning: text,
+      segment: {
+        id: "reasoning-1",
+        text,
+        sequence: 1,
+        phase: "initial",
+      },
+    });
+  }
+
+  assert.deepEqual(
+    (
+      message.metadata.traceParts as Array<{
+        kind: string;
+        order: number;
+        text?: string;
+      }>
+    ).map((part) => `${part.order}:${part.kind}:${part.text ?? ""}`),
+    ["0:reasoning:用户想要创建页面"],
+  );
+  assert.deepEqual(
+    (
+      message.metadata.reasoningSegments as Array<{
+        id: string;
+        text: string;
+      }>
+    ).map((segment) => `${segment.id}:${segment.text}`),
+    ["reasoning-1:用户想要创建页面"],
+  );
+});
+
+test("streaming trace events preserve live display order across tools and reasoning", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map<string, {
+    id: string;
+    tool: string;
+    input: Record<string, unknown>;
+    output: unknown;
+    latencyMs: number | null;
+    status: "running" | "approval_requested" | "completed" | "error";
+    error: string | null;
+    sequence?: number;
+  }>();
+  const context = {
+    appendReasoningChunk: (current: string | undefined, next: string) =>
+      `${current ?? ""}${next}`,
+    durableRunKey: "sourceweft-web-run:run-1",
+    isCompletedImageArtifactToolCall: () => false,
+    isCompletedWorkfileWriteToolCall: () => false,
+    isGeneratedImageArtifactToolName: () => false,
+    mergeThinkingStepRecords: () => undefined,
+    mode: "send" as const,
+    normalizeCitationRecords: () => [],
+    normalizeModelReasoningSegmentRecord: (value: unknown) => {
+      const record =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : null;
+      const text = typeof record?.text === "string" ? record.text : "";
+      if (!record || !text) {
+        return null;
+      }
+      const phase: ModelReasoningSegmentRecord["phase"] =
+        record.phase === "initial" || record.phase === "after_tool"
+          ? record.phase
+          : undefined;
+      return {
+        id: typeof record.id === "string" ? record.id : "model-reasoning",
+        text,
+        sequence:
+          typeof record.sequence === "number" ? record.sequence : undefined,
+        phase,
+        toolCallId:
+          typeof record.toolCallId === "string" ? record.toolCallId : undefined,
+        tool: typeof record.tool === "string" ? record.tool : undefined,
+      };
+    },
+    normalizeThinkingStepRecord: () => null,
+    normalizeThreadCommandRequest: () => undefined,
+    resolveToolCallFromStreamEvent: ({
+      event,
+    }: {
+      event: { id?: string; type: string };
+    }) => {
+      const id = event.id ?? "tool-1";
+      const sequence = id === "search-tool" ? 2 : 4;
+      return {
+        id,
+        tool: id === "search-tool" ? "search_notion_pages" : "create_notion_page",
+        input: {},
+        output: null,
+        latencyMs: 10,
+        status: "completed" as const,
+        error: null,
+        sequence,
+      };
+    },
+    resolveTraceEventFromStreamEvent: ({
+      event,
+      toolCall,
+    }: {
+      event: { type: string };
+      toolCall: {
+        id: string;
+        tool: string;
+        sequence?: number;
+      };
+    }) => ({
+      type: "tool-call" as const,
+      id:
+        typeof toolCall.sequence === "number"
+          ? `${toolCall.id}:${toolCall.sequence}`
+          : toolCall.id,
+      itemId: toolCall.id,
+      sequence: toolCall.sequence,
+      eventType: event.type,
+      tool: toolCall.tool,
+      toolCall: {
+        ...toolCall,
+        input: {},
+        output: null,
+        latencyMs: 10,
+        status: "completed" as const,
+        error: null,
+      },
+      payload: event,
+    }),
+    streamRenderBuffer: createStreamingRenderBuffer({
+      maxDeltaBatchChars: 800,
+    }),
+    streamThinkingStepsById: new Map(),
+    streamToolCallsById,
+    syncStreamingCitations: () => undefined,
+    syncStreamingThinkingSteps: () => undefined,
+    syncStreamingToolCalls: () => undefined,
+    toNullableString: (value: unknown) =>
+      typeof value === "string" ? value : null,
+    toObjectRecord: (value: unknown) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null,
+    updateChatTitle: () => undefined,
+    updateStreamingAssistantMessage: (
+      updater: (current: ChatMessageItem) => ChatMessageItem,
+    ) => {
+      message = updater(message);
+    },
+  };
+
+  testExports.handleStreamingReasoning({
+    context,
+    reasoning: "initial",
+    segment: {
+      id: "reasoning-1",
+      text: "initial",
+      sequence: 1,
+      phase: "initial",
+    },
+  });
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => undefined,
+    event: {
+      type: "tool-call-result",
+      id: "search-tool",
+    },
+    refreshedArtifactToolIds: new Set(),
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: () => undefined,
+    setWorkfilesRefreshKey: () => undefined,
+  });
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => undefined,
+    event: {
+      type: "tool-call-result",
+      id: "create-tool",
+    },
+    refreshedArtifactToolIds: new Set(),
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: () => undefined,
+    setWorkfilesRefreshKey: () => undefined,
+  });
+  testExports.handleStreamingReasoning({
+    context,
+    reasoning: "after search",
+    segment: {
+      id: "reasoning-2",
+      text: "after search",
+      sequence: 3,
+      phase: "after_tool",
+      toolCallId: "search-tool",
+    },
+  });
+
+  assert.deepEqual(
+    (
+      message.metadata.traceParts as Array<{
+        kind: string;
+        order: number;
+        text?: string;
+        toolCallId?: string;
+        status?: string;
+      }>
+    ).map(
+      (part) =>
+        `${part.order}:${part.kind}:${part.toolCallId ?? ""}:${part.status ?? ""}:${part.text ?? ""}`,
+    ),
+    [
+      "0:reasoning:::initial",
+      "1:tool:search-tool:completed:",
+      "2:tool:create-tool:completed:",
+      "3:reasoning:search-tool::after search",
+    ],
+  );
 });

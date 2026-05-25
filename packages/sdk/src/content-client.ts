@@ -20,6 +20,7 @@ import type {
   DeleteByokCredentialResponse,
   DeleteByokModelResponse,
   DeleteCustomSkillVersionFileResponse,
+  DeleteWorkspaceMcpInstallResponse,
   DeleteSourceResponse,
   DeleteThreadResponse,
   DeleteWorkingFileResponse,
@@ -29,17 +30,27 @@ import type {
   GetThreadResponse,
   RefreshThreadRequest,
   RefreshThreadResponse,
+  ResumeThreadRequest,
+  ResumeThreadResponse,
   GetSourceDocumentResponse,
   GetSourceResponse,
   GetSkillCatalogDetailResponse,
   IndexSourceRequest,
   IndexSourceResponse,
   GetWorkingFileResponse,
+  GetWorkspaceMarketMcpResponse,
+  InstallMarketMcpRequest,
+  InstallMarketMcpResponse,
   ListArtifactsResponse,
   ListThreadModelCatalogResponse,
   ListByokProvidersResponse,
   ListByokModelCandidatesResponse,
   ListByokCredentialsResponse,
+  ListWorkspaceMarketMcpCategoriesResponse,
+  ListWorkspaceMarketMcpResponse,
+  ListWorkspaceMcpActionRunsResponse,
+  ListWorkspaceMcpInstallsResponse,
+  ListWorkspaceMcpRunsResponse,
   ListByokModelsResponse,
   ListSourceMentionsRequest,
   ListSourceMentionsResponse,
@@ -68,6 +79,8 @@ import type {
   StreamThreadRequest,
   StreamThreadResponse,
   UploadSourceResponse,
+  UpdateWorkspaceMcpInstallRequest,
+  UpdateWorkspaceMcpInstallResponse,
   UpdateThreadModelSettingsRequest,
   UpdateThreadModelSettingsResponse,
   UpdateCustomSkillVersionRequest,
@@ -75,6 +88,9 @@ import type {
   ListThreadMessagesRequest,
   UpdateSourceRequest,
   UpdateSourceResponse,
+  UpsertWorkspaceMcpCredentialsRequest,
+  UpsertWorkspaceMcpCredentialsResponse,
+  TestWorkspaceMcpInstallResponse,
   UpdateWorkspaceSkillRequest,
   UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
@@ -334,10 +350,12 @@ export class ContentClient {
       threadRun: {
         id: string;
         idempotencyKey: string;
-        status: "queued" | "running" | "cancel_requested";
-        mode: "send" | "refresh" | "edit";
+        status: "queued" | "running" | "cancel_requested" | "waiting_for_approval";
+        mode: "send" | "refresh" | "edit" | "resume";
         userMessageId: string | null;
         assistantMessageId: string | null;
+        approvalRequestedAt?: string | null;
+        approvalExpiresAt?: string | null;
       } | null;
     }>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/active-run`,
@@ -516,6 +534,110 @@ export class ContentClient {
     );
   }
 
+  listWorkspaceMarketMcp(workspaceId: string) {
+    return this.http.get<ListWorkspaceMarketMcpResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp`,
+    );
+  }
+
+  listWorkspaceMarketMcpCategories(workspaceId: string) {
+    return this.http.get<ListWorkspaceMarketMcpCategoriesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp/categories`,
+    );
+  }
+
+  getWorkspaceMarketMcp(workspaceId: string, identifier: string) {
+    return this.http.get<GetWorkspaceMarketMcpResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp/${encode(identifier)}`,
+    );
+  }
+
+  installMarketMcp(
+    workspaceId: string,
+    identifier: string,
+    input: InstallMarketMcpRequest = {},
+  ) {
+    return this.http.post<InstallMarketMcpResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp/${encode(identifier)}/install`,
+      input,
+    );
+  }
+
+  listWorkspaceMcpInstalls(workspaceId: string) {
+    return this.http.get<ListWorkspaceMcpInstallsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs`,
+    );
+  }
+
+  listWorkspaceMcpRuns(
+    workspaceId: string,
+    input: { cursor?: string | null; limit?: number } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    if (typeof input.limit === "number") {
+      params.set("limit", String(input.limit));
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+    return this.http.get<ListWorkspaceMcpRunsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-runs${suffix}`,
+    );
+  }
+
+  listWorkspaceMcpActionRuns(
+    workspaceId: string,
+    input: { cursor?: string | null; limit?: number } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    if (typeof input.limit === "number") {
+      params.set("limit", String(input.limit));
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+    return this.http.get<ListWorkspaceMcpActionRunsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-action-runs${suffix}`,
+    );
+  }
+
+  updateWorkspaceMcpInstall(
+    workspaceId: string,
+    installId: string,
+    input: UpdateWorkspaceMcpInstallRequest,
+  ) {
+    return this.http.patch<UpdateWorkspaceMcpInstallResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}`,
+      input,
+    );
+  }
+
+  deleteWorkspaceMcpInstall(workspaceId: string, installId: string) {
+    return this.http.delete<DeleteWorkspaceMcpInstallResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}`,
+    );
+  }
+
+  upsertWorkspaceMcpCredentials(
+    workspaceId: string,
+    installId: string,
+    input: UpsertWorkspaceMcpCredentialsRequest,
+  ) {
+    return this.http.post<UpsertWorkspaceMcpCredentialsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}/credentials`,
+      input,
+    );
+  }
+
+  testWorkspaceMcpInstall(workspaceId: string, installId: string) {
+    return this.http.post<TestWorkspaceMcpInstallResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}/test`,
+      {},
+    );
+  }
+
   listByokCredentials(workspaceId: string) {
     return this.http.get<ListByokCredentialsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/model-gateway/byok-credentials`,
@@ -608,6 +730,21 @@ export class ContentClient {
       {
         ...input,
         mode: "refresh",
+        stream: false,
+      },
+    );
+  }
+
+  resumeThread(
+    workspaceId: string,
+    threadId: string,
+    input: ResumeThreadRequest,
+  ) {
+    return this.http.post<ResumeThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
+      {
+        ...input,
+        mode: "resume",
         stream: false,
       },
     );

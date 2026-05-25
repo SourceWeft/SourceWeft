@@ -17,6 +17,7 @@ import {
   connectorActionApprovalPayload,
 } from "./agent-tool-payload";
 import { connectorToolResult } from "./agent-tool-errors";
+import { ConnectorError, toConnectorError } from "./errors";
 import {
   resolveConnectorActionExecutionRef,
   resolveConnectorActionToolIdempotencyKey,
@@ -24,6 +25,7 @@ import {
   type ConnectorActionExecutionCursor,
 } from "./agent-tool-idempotency";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
+import { logger } from "../../shared/logger";
 
 type ConnectorActionToolContext = {
   actionApprovalCursor?: ConnectorActionApprovalCursor;
@@ -112,10 +114,12 @@ function connectorActionIdempotencyKey(input: {
 function connectorActionExecutionRef(input: {
   connectorId?: string;
   context: ConnectorActionToolContext;
+  requestJson?: Record<string, unknown>;
   toolName: string;
 }) {
   return resolveConnectorActionExecutionRef(input.context, {
     connectorId: input.connectorId,
+    requestJson: input.requestJson,
     toolName: input.toolName,
   });
 }
@@ -124,9 +128,12 @@ function connectorActionToolOutput(input: {
   action: ConnectorActionRunRecord;
 }) {
   if (input.action.status === "succeeded") {
-    return input.action.resultJson ?? {
-      ok: true,
+    return {
+      ...(input.action.resultJson ?? { ok: true }),
       actionType: input.action.actionType,
+      ...(input.action.agentToolName
+        ? { toolName: input.action.agentToolName }
+        : {}),
     };
   }
   return {
@@ -176,6 +183,24 @@ function isDestructiveAction(action: ConnectorActionSpec) {
   return /\b(delete|trash|archive|move|remove)\b/i.test(
     `${action.type} ${action.agentToolName ?? ""} ${action.displayName}`,
   );
+}
+
+function directConnectorActionMeta(input: {
+  action: ConnectorActionSpec;
+  connector: SourceConnectorRecord;
+  context: ConnectorActionToolContext;
+  idempotencyKey?: string;
+}) {
+  return {
+    actionType: input.action.type,
+    agentToolName: input.action.agentToolName,
+    connectorId: input.connector.id,
+    connectorType: input.connector.connectorType,
+    idempotencyKey: input.idempotencyKey,
+    teamId: input.context.teamId,
+    userId: input.context.userId,
+    workspaceId: input.context.workspaceId,
+  };
 }
 
 export function createConnectorActionInterruptConfigs(
@@ -268,6 +293,8 @@ export async function createConnectorActionApprovalRequest(
     action: result.action,
     agentToolName: match.action.agentToolName,
     connector,
+    description: match.action.description,
+    displayName: match.action.displayName,
   });
 }
 
@@ -308,10 +335,11 @@ export async function createConnectorActionTools(
                   typeof rawArgs.connectorId === "string"
                     ? rawArgs.connectorId
                     : undefined;
+                const { connectorId: _connectorId, ...requestJson } = rawArgs;
                 if (action.requiresApproval) {
                   const executionRef = connectorActionExecutionRef({
                     context,
-                    connectorId,
+                    requestJson,
                     toolName: agentToolName,
                   });
                   if (executionRef) {
@@ -320,18 +348,23 @@ export async function createConnectorActionTools(
                       userId: context.userId,
                       connectorId: executionRef.connectorId,
                       actionRunId: executionRef.actionRunId,
+                      expected: {
+                        actionType: action.type,
+                        agentToolName: action.agentToolName,
+                        requestJson,
+                      },
                     });
                     return connectorActionToolOutput({
                       action: executed.action,
                     });
                   }
                 }
+
                 const connector = chooseConnector({
                   connectorId,
                   connectorType: manifest.type,
                   connectors: activeConnectors,
                 });
-                const { connectorId: _connectorId, ...requestJson } = rawArgs;
                 if (action.requiresApproval) {
                   const result = await connectorActionRunner.propose({
                     workspaceId: context.workspaceId,
@@ -346,15 +379,11 @@ export async function createConnectorActionTools(
                       toolName: agentToolName,
                     }),
                   });
-                  const executed = await connectorActionRunner.execute({
-                    workspaceId: context.workspaceId,
-                    userId: context.userId,
-                    connectorId: connector.id,
-                    actionRunId: result.action.id,
-                  });
-                  return connectorActionToolOutput({
-                    action: executed.action,
-                  });
+                  throw new ConnectorError(
+                    409,
+                    "CONNECTOR_ACTION_NOT_APPROVED",
+                    `Connector action ${result.action.id} requires approval before execution.`,
+                  );
                 }
 
                 const accessToken = await connectorOAuthService.getRuntimeToken({
@@ -366,18 +395,56 @@ export async function createConnectorActionTools(
                 const adapter = connectorRegistry.getAdapter(
                   connector.connectorType,
                 );
-                const result = await adapter.executeAction({
-                  teamId: context.teamId,
-                  workspaceId: context.workspaceId,
-                  connectorId: connector.id,
-                  connectorType: connector.connectorType,
-                  actionType: action.type,
-                  request: requestJson,
-                  config: connector.configJson,
-                  accessToken,
-                  idempotencyKey: `connector-read:${connector.id}:${action.type}:${Date.now()}`,
+                const idempotencyKey = `connector-read:${connector.id}:${action.type}:${Date.now()}`;
+                const logMeta = directConnectorActionMeta({
+                  action,
+                  connector,
+                  context,
+                  idempotencyKey,
                 });
-                return result.result;
+                logger.debug("Connector action direct execution selected", {
+                  ...logMeta,
+                  connectorName: connector.name,
+                  riskLevel: action.riskLevel,
+                });
+                logger.debug("Connector action direct adapter execution started", logMeta);
+                const startedAt = Date.now();
+                const result = await adapter
+                  .executeAction({
+                    teamId: context.teamId,
+                    workspaceId: context.workspaceId,
+                    connectorId: connector.id,
+                    connectorType: connector.connectorType,
+                    actionType: action.type,
+                    request: requestJson,
+                    config: connector.configJson,
+                    accessToken,
+                    idempotencyKey,
+                  })
+                  .catch((error) => {
+                    const connectorError = toConnectorError(error);
+                    logger.debug("Connector action direct adapter execution failed", {
+                      ...logMeta,
+                      errorCode: connectorError.code,
+                      errorMessage: connectorError.message,
+                      latencyMs: Date.now() - startedAt,
+                      rawResponseJson: connectorError.details?.rawResponseJson,
+                    });
+                    throw error;
+                  });
+                logger.debug("Connector action direct adapter execution succeeded", {
+                  ...logMeta,
+                  externalId: result.externalId ?? null,
+                  latencyMs: Date.now() - startedAt,
+                  rawResponseJson: result.rawResponseJson,
+                  resultJson: result.result,
+                  shouldResync: Boolean(result.shouldResync),
+                });
+                return {
+                  ...result.result,
+                  actionType: action.type,
+                  toolName: agentToolName,
+                };
               },
               {
                 connectorType: manifest.type,

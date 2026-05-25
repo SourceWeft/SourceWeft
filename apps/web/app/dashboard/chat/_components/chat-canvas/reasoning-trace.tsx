@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { ImageIcon, Loader2, WrenchIcon } from "lucide-react";
 import {
   isGeneratedImageArtifactToolName,
+  isAgentToolDomain,
   isRetrievalToolName,
   isWebFetchToolName,
   isWebSearchToolName,
   isWebToolName,
 } from "@sourceweft/sdk";
+import { isPendingToolConfirmation } from "@sourceweft/contracts";
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -19,7 +21,10 @@ import {
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { hasWebPageToolResults } from "../web-tool-results";
-import { getToolConfirmationOutput } from "./tool-confirmation";
+import {
+  getToolConfirmationOutput,
+  isToolCallActivelyRunning,
+} from "./tool-confirmation-state";
 import {
   compactText,
   getToolOutputContent,
@@ -29,11 +34,22 @@ import {
   resolveGeneratedImageArtifact,
 } from "./message-assets";
 import { GeneratedImagePreview } from "./generated-image-preview";
+import {
+  type ReasoningTraceTimelineItem,
+  getConnectorToolDisplayLabel,
+  getToolCallDetailParts,
+  getToolApprovalDisplayLabel,
+  getResolvedToolConfirmationMessage,
+  getReasoningTraceTitle,
+  isToolConfirmationResolved,
+  isReasoningTraceThinking,
+} from "./reasoning-trace-state";
 import type {
   ArtifactPreviewRecord,
-  ModelReasoningSegmentRecord,
   ThinkingStepRecord,
+  ToolConfirmationResolution,
   ToolCallRecord,
+  TracePartRecord,
 } from "./types";
 
 const GENERATED_IMAGE_DEFAULT_ASPECT_RATIO = "4 / 3";
@@ -66,46 +82,6 @@ function getToolQuery(toolCall: ToolCallRecord, toolStep?: ThinkingStepRecord) {
     : null;
 }
 
-function getToolHitCount(
-  toolCall: ToolCallRecord,
-  toolStep?: ThinkingStepRecord,
-) {
-  const output =
-    toolCall.output && typeof toolCall.output === "object"
-      ? (toolCall.output as Record<string, unknown>)
-      : undefined;
-  const outputHitCount = getRecordValue(output, "hitCount");
-  if (typeof outputHitCount === "number" && Number.isFinite(outputHitCount)) {
-    return outputHitCount;
-  }
-
-  const metadataHitCount = getRecordValue(toolStep?.metadata, "hitCount");
-  return typeof metadataHitCount === "number" &&
-    Number.isFinite(metadataHitCount)
-    ? metadataHitCount
-    : null;
-}
-
-function getToolResultCount(
-  toolCall: ToolCallRecord,
-  toolStep?: ThinkingStepRecord,
-) {
-  const output =
-    toolCall.output && typeof toolCall.output === "object"
-      ? (toolCall.output as Record<string, unknown>)
-      : undefined;
-  const outputCount =
-    getRecordValue(output, "resultCount") ?? getRecordValue(output, "urlCount");
-  if (typeof outputCount === "number" && Number.isFinite(outputCount)) {
-    return outputCount;
-  }
-
-  const metadataCount = getRecordValue(toolStep?.metadata, "resultCount");
-  return typeof metadataCount === "number" && Number.isFinite(metadataCount)
-    ? metadataCount
-    : null;
-}
-
 function getToolFetchUrls(toolCall: ToolCallRecord) {
   const items = getRecordValue(toolCall.input, "items");
   if (!Array.isArray(items)) {
@@ -123,29 +99,6 @@ function getToolFetchUrls(toolCall: ToolCallRecord) {
         : null;
     })
     .filter((url): url is string => url !== null);
-}
-
-function getToolFetchCount(
-  toolCall: ToolCallRecord,
-  toolStep?: ThinkingStepRecord,
-) {
-  const urls = getToolFetchUrls(toolCall);
-  if (urls.length > 0) {
-    return urls.length;
-  }
-
-  const metadataUrlCount = getRecordValue(toolStep?.metadata, "urlCount");
-  return typeof metadataUrlCount === "number" &&
-    Number.isFinite(metadataUrlCount)
-    ? metadataUrlCount
-    : null;
-}
-
-function getToolConcurrency(toolStep?: ThinkingStepRecord) {
-  const concurrency = getRecordValue(toolStep?.metadata, "concurrency");
-  return typeof concurrency === "number" && Number.isFinite(concurrency)
-    ? concurrency
-    : null;
 }
 
 function pluralize(count: number, singular: string, plural = `${singular}s`) {
@@ -187,7 +140,7 @@ function formatToolName(toolName: string) {
 }
 
 function getWebSearchStatusLabel(status: ToolCallRecord["status"]) {
-  if (status === "running") {
+  if (status === "running" || status === "approval_requested") {
     return "Searching web";
   }
   if (status === "error") {
@@ -197,7 +150,7 @@ function getWebSearchStatusLabel(status: ToolCallRecord["status"]) {
 }
 
 function getWebFetchStatusLabel(status: ToolCallRecord["status"]) {
-  if (status === "running") {
+  if (status === "running" || status === "approval_requested") {
     return "Fetching pages";
   }
   if (status === "error") {
@@ -301,21 +254,32 @@ function getGeneratedImagePrompt(toolCall: ToolCallRecord) {
     : null;
 }
 
-function getToolDisplayLabel(toolCall: ToolCallRecord) {
-  const confirmation = getToolConfirmationOutput(toolCall.output);
-  if (confirmation) {
-    const toolName = formatToolName(toolCall.tool);
-    if (toolCall.status === "error") {
-      return `${toolName} approval failed`;
-    }
-    return `${toolName} waiting for approval`;
+function getToolDisplayLabel(
+  toolCall: ToolCallRecord,
+  confirmationResolution?: ToolConfirmationResolution | null,
+) {
+  const approvalLabel = getToolApprovalDisplayLabel(
+    toolCall,
+    confirmationResolution,
+  );
+  if (approvalLabel) {
+    return approvalLabel;
+  }
+
+  const connectorResult = getConnectorToolResult(toolCall);
+  if (connectorResult) {
+    return (
+      getConnectorToolDisplayLabel(toolCall) ??
+      `${formatToolName(connectorResult.toolName)} completed`
+    );
   }
 
   if (isGeneratedImageArtifactToolName(toolCall.tool)) {
     const title = getGeneratedImageTitle(toolCall);
     const imageStatus = getGeneratedImageStatus(toolCall);
     const verb =
-      toolCall.status === "running"
+      toolCall.status === "running" ||
+      toolCall.status === "approval_requested"
         ? (imageStatus.label ?? "Generating image")
         : toolCall.status === "error"
           ? "Image generation failed"
@@ -360,13 +324,128 @@ function getToolDisplayLabel(toolCall: ToolCallRecord) {
   const prefix =
     toolCall.status === "running"
       ? "Using"
-      : toolCall.status === "error"
+      : toolCall.status === "approval_requested"
+        ? "Awaiting approval for"
+        : toolCall.status === "error"
         ? "Failed"
         : "Used";
 
   return inputPreview
     ? `${prefix} ${toolName} (${inputPreview})`
     : `${prefix} ${toolName}`;
+}
+
+function getConnectorResultSummary(
+  connectorResult: NonNullable<ReturnType<typeof getConnectorToolResult>>,
+) {
+  if (connectorResult.resultCount !== null) {
+    const query = connectorResult.query
+      ? ` for "${compactText(connectorResult.query, 56)}"`
+      : "";
+    return `Found ${connectorResult.resultCount} ${pluralize(connectorResult.resultCount, "page")}${query}.`;
+  }
+
+  if (connectorResult.pageId) {
+    return `Page ID: ${connectorResult.pageId}`;
+  }
+
+  return null;
+}
+
+function getToolOutputRecord(output: unknown) {
+  return output && typeof output === "object" && !Array.isArray(output)
+    ? (output as Record<string, unknown>)
+    : null;
+}
+
+function getConnectorToolResult(toolCall: ToolCallRecord) {
+  if (!isAgentToolDomain(toolCall.tool, "connector")) {
+    return null;
+  }
+  if (getToolConfirmationOutput(toolCall.output)) {
+    return null;
+  }
+  const output = getToolOutputRecord(toolCall.output);
+  if (output?.type !== "connector_tool_result") {
+    return null;
+  }
+  const actionType = getRecordValue(output, "actionType");
+  const connector = getRecordValue(output, "connector");
+  const title = getRecordValue(output, "title");
+  const outputToolName = getRecordValue(output, "toolName");
+  const url = getRecordValue(output, "url");
+  const pageId = getRecordValue(output, "pageId");
+  const query = getRecordValue(output, "query");
+  const resultCount = getRecordValue(output, "resultCount");
+  const pages = getRecordValue(output, "pages");
+  return {
+    actionType:
+      typeof actionType === "string" && actionType.trim()
+        ? actionType.trim()
+        : null,
+    pageId: typeof pageId === "string" && pageId.trim() ? pageId.trim() : null,
+    pages: normalizeConnectorPages(pages),
+    provider:
+      typeof connector === "string" && connector.trim()
+        ? formatToolName(connector.trim())
+        : "Connector",
+    query: typeof query === "string" && query.trim() ? query.trim() : null,
+    resultCount:
+      typeof resultCount === "number" && Number.isFinite(resultCount)
+        ? resultCount
+        : null,
+    title: typeof title === "string" && title.trim() ? title.trim() : null,
+    toolName:
+      typeof outputToolName === "string" && outputToolName.trim()
+        ? outputToolName.trim()
+        : toolCall.tool,
+    url: typeof url === "string" && url.trim() ? url.trim() : null,
+  };
+}
+
+function normalizeConnectorPages(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const record = item as Record<string, unknown>;
+      const pageId = getRecordValue(record, "pageId");
+      const title = getRecordValue(record, "title");
+      const url = getRecordValue(record, "url");
+      const lastEditedTime = getRecordValue(record, "lastEditedTime");
+      if (
+        typeof pageId !== "string" &&
+        typeof title !== "string" &&
+        typeof url !== "string"
+      ) {
+        return null;
+      }
+      return {
+        lastEditedTime:
+          typeof lastEditedTime === "string" && lastEditedTime.trim()
+            ? lastEditedTime.trim()
+            : null,
+        pageId:
+          typeof pageId === "string" && pageId.trim() ? pageId.trim() : null,
+        title: typeof title === "string" && title.trim() ? title.trim() : null,
+        url: typeof url === "string" && url.trim() ? url.trim() : null,
+      };
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        lastEditedTime: string | null;
+        pageId: string | null;
+        title: string | null;
+        url: string | null;
+      } => item !== null,
+    );
 }
 
 function formatThinkingMetadataValue(key: string, value: unknown) {
@@ -579,53 +658,15 @@ function getToolStepMetadataParts(
   return getThinkingMetadataParts(rest);
 }
 
-function getToolCallDetailParts(
-  toolCall: ToolCallRecord,
-  toolStep?: ThinkingStepRecord,
-) {
-  const hitCount = getToolHitCount(toolCall, toolStep);
-  const resultCount = isWebSearchToolName(toolCall.tool)
-    ? getToolResultCount(toolCall, toolStep)
-    : null;
-  const fetchCount = isWebFetchToolName(toolCall.tool)
-    ? getToolFetchCount(toolCall, toolStep)
-    : null;
-  const concurrency = isWebFetchToolName(toolCall.tool)
-    ? getToolConcurrency(toolStep)
-    : null;
-  const latencyMs =
-    toolCall.latencyMs ??
-    (typeof toolStep?.metadata?.latencyMs === "number"
-      ? toolStep.metadata.latencyMs
-      : null);
-  const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
-    ? getGeneratedImageStatus(toolCall)
-    : null;
-  const imagePrompt = isGeneratedImageArtifactToolName(toolCall.tool)
-    ? getGeneratedImagePrompt(toolCall)
-    : null;
-  return [
-    `status: ${toolCall.status}`,
-    imageStatus?.stage ? `stage: ${imageStatus.stage}` : null,
-    hitCount !== null ? `hits: ${hitCount}` : null,
-    resultCount !== null
-      ? `${resultCount} ${pluralize(resultCount, "result")}`
-      : null,
-    fetchCount !== null
-      ? `${fetchCount} ${pluralize(fetchCount, "URL")}`
-      : null,
-    concurrency !== null ? `concurrency: ${concurrency}` : null,
-    typeof latencyMs === "number" ? `time: ${Math.round(latencyMs)}ms` : null,
-  ].filter((part): part is string => part !== null);
-}
-
 function ToolCallDetails({
   onArtifactPreview,
+  resolvedConfirmations = [],
   toolCall,
   toolStep,
   workspaceId,
 }: {
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  resolvedConfirmations?: ToolConfirmationResolution[];
   toolCall: ToolCallRecord;
   toolStep?: ThinkingStepRecord;
   workspaceId?: string | null;
@@ -635,6 +676,20 @@ function ToolCallDetails({
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
   const toolConfirmation = getToolConfirmationOutput(toolCall.output);
+  const confirmationResolution = toolConfirmation
+    ? resolvedConfirmations.find(
+        (item) => item.confirmationId === toolConfirmation.id,
+      )
+    : null;
+  const isResolvedConfirmation = isToolConfirmationResolved({
+    confirmation: toolConfirmation,
+    confirmationResolution,
+  });
+  const resolvedConfirmationMessage = getResolvedToolConfirmationMessage({
+    confirmation: toolConfirmation,
+    confirmationResolution,
+  });
+  const connectorResult = getConnectorToolResult(toolCall);
   const imageArtifact = resolveGeneratedImageArtifact(toolCall, toolStep);
   const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
     ? getGeneratedImageStatus(toolCall)
@@ -727,9 +782,62 @@ function ToolCallDetails({
         </p>
       ) : null}
       {toolConfirmation ? (
+        isResolvedConfirmation ? (
+          <p>{resolvedConfirmationMessage}</p>
+        ) : (
+          <p>Waiting for your decision before this action runs.</p>
+        )
+      ) : null}
+      {connectorResult?.url ? (
         <p>
-          Waiting for your decision before this action runs.
+          <a
+            className="font-medium text-primary underline-offset-4 hover:underline"
+            href={connectorResult.url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open {connectorResult.title ?? connectorResult.provider} result
+          </a>
         </p>
+      ) : null}
+      {connectorResult ? (
+        <>
+          {(() => {
+            const summary = getConnectorResultSummary(connectorResult);
+            return summary ? <p>{summary}</p> : null;
+          })()}
+          {connectorResult.pages.length > 0 ? (
+            <ChainOfThoughtSearchResults>
+              {connectorResult.pages.slice(0, 8).map((page, index) => {
+                const label =
+                  page.title ?? page.pageId ?? page.url ?? `Page ${index + 1}`;
+                const badge = (
+                  <ChainOfThoughtSearchResult
+                    key={`${toolCall.id}:connector-page:${page.pageId ?? page.url ?? index}`}
+                    title={label}
+                  >
+                    <span className="max-w-[260px] truncate">
+                      {compactText(label, 96)}
+                    </span>
+                  </ChainOfThoughtSearchResult>
+                );
+                return page.url ? (
+                  <a
+                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    href={page.url}
+                    key={`${toolCall.id}:connector-page-link:${page.pageId ?? page.url ?? index}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {badge}
+                  </a>
+                ) : (
+                  badge
+                );
+              })}
+            </ChainOfThoughtSearchResults>
+          ) : null}
+        </>
       ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
       {toolCall.error ? (
@@ -891,7 +999,11 @@ export function GeneratedImageArtifacts({
       };
     })
     .filter(({ imageUrl, toolCall }) => {
-      if (toolCall.status === "running" || toolCall.status === "error") {
+      if (
+        toolCall.status === "running" ||
+        toolCall.status === "approval_requested" ||
+        toolCall.status === "error"
+      ) {
         return true;
       }
       return Boolean(imageUrl);
@@ -954,99 +1066,31 @@ export function GeneratedImageArtifactBlock({
   );
 }
 
-function formatThoughtDuration(durationMs: number | undefined) {
-  if (durationMs === undefined) {
-    return "Thought for a few seconds";
-  }
-
-  const duration = Math.max(1, Math.ceil(durationMs / 1000));
-  return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
-}
-
-function getReasoningTraceTitle(input: {
-  activeStep?: ThinkingStepRecord;
-  duration?: number;
-  hasModelReasoning: boolean;
-  isCancelled?: boolean;
-  isStreaming: boolean;
-  latestDisplayStep?: ThinkingStepRecord;
-  reasoningDurationMs?: number;
-}) {
-  if (input.isCancelled) {
-    return formatThoughtDuration(input.reasoningDurationMs ?? input.duration);
-  }
-
-  if (input.activeStep) {
-    return `Thinking · ${input.activeStep.title}`;
-  }
-
-  if (input.isStreaming) {
-    if (input.hasModelReasoning) {
-      return "Thinking · Chat model reasoning";
-    }
-
-    if (
-      input.latestDisplayStep &&
-      input.latestDisplayStep.status !== "completed" &&
-      !isVisionFallbackStep(input.latestDisplayStep)
-    ) {
-      return input.latestDisplayStep.title;
-    }
-
-    return "Thinking...";
-  }
-
-  if (input.hasModelReasoning) {
-    return formatThoughtDuration(input.reasoningDurationMs ?? input.duration);
-  }
-
-  return "Thinking...";
-}
-
 export function ReasoningTrace({
   isCancelled = false,
   isStreaming,
-  modelReasoning,
-  modelReasoningSegments,
   onArtifactPreview,
+  resolvedConfirmations = [],
   steps,
+  traceParts,
   toolCalls,
   workspaceId,
 }: {
   isCancelled?: boolean;
   isStreaming: boolean;
   modelReasoning?: string;
-  modelReasoningSegments?: ModelReasoningSegmentRecord[];
+  modelReasoningSegments?: unknown[];
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  resolvedConfirmations?: ToolConfirmationResolution[];
   steps: ThinkingStepRecord[] | undefined;
+  traceEvents?: unknown[];
+  traceParts?: TracePartRecord[];
   toolCalls: ToolCallRecord[] | undefined;
   workspaceId?: string | null;
 }) {
-  const safeReasoningSegments = (modelReasoningSegments ?? [])
-    .map((segment, index) => ({
-      ...segment,
-      id: segment.id || `model-reasoning-${index + 1}`,
-      text: segment.text.trim(),
-      sequence: segment.sequence ?? index,
-    }))
-    .filter((segment) => segment.text.length > 0);
-  const modelReasoningText = modelReasoning?.trim();
-  const fallbackReasoningSegments =
-    safeReasoningSegments.length === 0 && modelReasoningText
-      ? [
-          {
-            id: "model-reasoning",
-            text: modelReasoningText,
-            sequence: -1,
-            durationMs: undefined,
-          },
-        ]
-      : [];
-  const displayReasoningSegments =
-    safeReasoningSegments.length > 0
-      ? safeReasoningSegments
-      : fallbackReasoningSegments;
-  const hasModelReasoning = displayReasoningSegments.length > 0;
+  const resolvedConfirmationIds = new Set(
+    resolvedConfirmations.map((item) => item.confirmationId),
+  );
   const safeSteps = steps ?? [];
   const safeToolCalls = (toolCalls ?? []).filter((toolCall, index, calls) => {
     return calls.findIndex((call) => call.id === toolCall.id) === index;
@@ -1064,63 +1108,130 @@ export function ReasoningTrace({
           entry !== null,
       ),
   );
-  const toolCallIds = new Set(safeToolCalls.map((toolCall) => toolCall.id));
-  const displaySteps = safeSteps.filter((step) => {
-    const toolCallId = step.metadata?.toolCallId;
-    return !(typeof toolCallId === "string" && toolCallIds.has(toolCallId));
-  });
+  const tracePartItems = (traceParts ?? [])
+    .slice()
+    .sort((left, right) => left.order - right.order)
+    .map((part, index) => {
+      if (part.kind === "reasoning") {
+        return {
+          kind: "model-reasoning" as const,
+          key: `part:${part.id}`,
+          originalIndex: part.order,
+          phase: part.phase,
+          sequence: part.order,
+          text: part.text,
+          toolCallId: part.toolCallId,
+          durationMs: part.durationMs,
+        };
+      }
+      if (part.kind === "step") {
+        return {
+          kind: "step" as const,
+          key: `part:${part.id}`,
+          originalIndex: part.order,
+          sequence: part.order,
+          step: {
+            id: part.id,
+            title: part.title,
+            status: part.status,
+            items: part.items,
+            sequence: part.order,
+            description: null,
+            detail: null,
+            metadata: part.metadata,
+          } satisfies ThinkingStepRecord,
+        };
+      }
+      const matchedToolCall = safeToolCalls.find(
+        (toolCall) => toolCall.id === part.toolCallId,
+      );
+      const approvalState =
+        part.approvalState ?? matchedToolCall?.approvalState;
+      const approvalConfirmationId =
+        part.approvalConfirmationId ??
+        matchedToolCall?.approvalConfirmationId;
+      const toolCall: ToolCallRecord = {
+        id: part.toolCallId,
+        tool: part.tool,
+        input: part.input,
+        output: part.output,
+        latencyMs: part.latencyMs ?? null,
+        status: part.status,
+        error: part.error ?? null,
+        sequence: part.order,
+        ...(approvalState ? { approvalState } : {}),
+        ...(approvalConfirmationId ? { approvalConfirmationId } : {}),
+      };
+      return {
+        kind: "tool" as const,
+        key: `part:${part.id}`,
+        originalIndex: part.order,
+        sequence: part.order,
+        toolCall,
+        toolStep: stepByToolCallId.get(part.toolCallId),
+      };
+    });
   const activeStep = isCancelled
     ? undefined
-    : safeSteps.find((step) => step.status === "in_progress");
-  const latestDisplayStep = displaySteps
+    : tracePartItems.find(
+        (item) => item.kind === "step" && item.step.status === "in_progress",
+      )?.step;
+  const latestDisplayStep = tracePartItems
+    .filter((item) => item.kind === "step")
     .map((step, index) => ({ index, step }))
     .sort((left, right) => {
       const sequenceDelta =
-        (left.step.sequence ?? left.index) - (right.step.sequence ?? right.index);
+        (left.step.step.sequence ?? left.index) -
+        (right.step.step.sequence ?? right.index);
       return sequenceDelta === 0 ? left.index - right.index : sequenceDelta;
     })
-    .at(-1)?.step;
+    .at(-1)?.step.step;
   const hasRunningToolCall =
     !isCancelled &&
-    safeToolCalls.some((toolCall) => toolCall.status === "running");
-  const isThinking =
-    !isCancelled && (isStreaming || Boolean(activeStep) || hasRunningToolCall);
-  const hasTraceItems =
-    safeSteps.length + safeToolCalls.length + (hasModelReasoning ? 1 : 0) > 0;
+    tracePartItems.some(
+      (item) =>
+        item.kind === "tool" &&
+        isToolCallActivelyRunning({
+          resolvedConfirmationIds,
+          toolCall: item.toolCall,
+        }),
+    );
+  const waitingForConfirmation =
+    !isCancelled &&
+    tracePartItems.some((item) => {
+      if (item.kind !== "tool") {
+        return false;
+      }
+      const confirmation = getToolConfirmationOutput(item.toolCall.output);
+      return (
+        confirmation !== null &&
+        isPendingToolConfirmation(confirmation) &&
+        !resolvedConfirmationIds.has(confirmation.id)
+      );
+    });
+  const hasTraceItems = tracePartItems.length > 0;
+  const isThinking = isReasoningTraceThinking({
+    hasActiveStep: Boolean(activeStep),
+    hasRunningToolCall,
+    hasTraceItems,
+    isCancelled,
+    isStreaming,
+    waitingForConfirmation,
+  });
   const allComplete =
     hasTraceItems &&
-    safeSteps.every((step) => step.status === "completed") &&
+    tracePartItems.every(
+      (item) => item.kind !== "step" || item.step.status === "completed",
+    ) &&
     !hasRunningToolCall &&
+    !waitingForConfirmation &&
     !isStreaming;
   const [isOpen, setIsOpen] = useState(!allComplete);
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const startTimeRef = useRef<number | null>(null);
 
-  const timelineItems = [
-    ...displayReasoningSegments.map((segment) => ({
-      kind: "model-reasoning" as const,
-      key: `model-reasoning:${segment.id}`,
-      sequence: segment.sequence ?? -1,
-      text: segment.text,
-    })),
-    ...displaySteps.map((step, index) => ({
-      kind: "step" as const,
-      key: `step:${step.id}`,
-      sequence: step.sequence ?? index,
-      step,
-    })),
-    ...safeToolCalls.map((toolCall, index) => ({
-      kind: "tool" as const,
-      key: `tool:${toolCall.id}`,
-      sequence:
-        stepByToolCallId.get(toolCall.id)?.sequence ??
-        toolCall.sequence ??
-        safeSteps.length + index,
-      toolCall,
-      toolStep: stepByToolCallId.get(toolCall.id),
-    })),
-  ].sort((left, right) => left.sequence - right.sequence);
+  const timelineItems = tracePartItems;
   const timelineSignature = timelineItems
     .map((item) => {
       if (item.kind === "model-reasoning") {
@@ -1132,14 +1243,14 @@ export function ReasoningTrace({
       return `${item.key}:${item.toolCall.status}:${item.toolCall.latencyMs ?? ""}`;
     })
     .join("|");
-  const reasoningDurationMs = displayReasoningSegments.reduce<
+  const reasoningDurationMs = tracePartItems.reduce<
     number | undefined
-  >((longest, segment) => {
-    if (typeof segment.durationMs !== "number") {
+  >((longest, item) => {
+    if (item.kind !== "model-reasoning" || typeof item.durationMs !== "number") {
       return longest;
     }
 
-    return Math.max(longest ?? 0, segment.durationMs);
+    return Math.max(longest ?? 0, item.durationMs);
   }, undefined);
 
   useEffect(() => {
@@ -1169,11 +1280,19 @@ export function ReasoningTrace({
     }
   }, [isStreaming]);
 
+  const hasActiveStep = Boolean(activeStep);
+
   useEffect(() => {
-    if (activeStep) {
+    if (hasActiveStep || waitingForConfirmation) {
       setIsOpen(true);
     }
-  }, [activeStep?.id, activeStep?.status, activeStep?.title]);
+  }, [
+    hasActiveStep,
+    activeStep?.id,
+    activeStep?.status,
+    activeStep?.title,
+    waitingForConfirmation,
+  ]);
 
   if (!hasTraceItems && !isStreaming) {
     return null;
@@ -1182,11 +1301,16 @@ export function ReasoningTrace({
   const title = getReasoningTraceTitle({
     activeStep,
     duration,
-    hasModelReasoning,
+    hasRunningToolCall,
+    hasModelReasoning: tracePartItems.some(
+      (item) => item.kind === "model-reasoning",
+    ),
+    hasTraceItems,
     isCancelled,
     isStreaming,
     latestDisplayStep,
     reasoningDurationMs,
+    waitingForConfirmation,
   });
 
   return (
@@ -1209,7 +1333,7 @@ export function ReasoningTrace({
       </ChainOfThoughtHeader>
       {isOpen && timelineItems.length > 0 ? (
         <ChainOfThoughtContent
-          className="max-h-64 overflow-y-auto pr-1"
+          className="subtle-scrollbar max-h-64 overflow-y-auto overscroll-contain pr-2"
           ref={contentRef}
         >
           {timelineItems.map((item) => {
@@ -1218,7 +1342,7 @@ export function ReasoningTrace({
                 <ChainOfThoughtStep
                   key={item.key}
                   label="Chat model reasoning"
-                  status={isStreaming && !isCancelled ? "active" : "complete"}
+                  status={isThinking ? "active" : "complete"}
                 >
                   <div className="whitespace-pre-wrap break-words text-muted-foreground text-xs leading-5">
                     {item.text}
@@ -1301,8 +1425,23 @@ export function ReasoningTrace({
             }
 
             const { toolCall, toolStep } = item;
+            const toolConfirmation = getToolConfirmationOutput(toolCall.output);
+            const confirmationResolution = toolConfirmation
+              ? resolvedConfirmations.find(
+                  (resolution) =>
+                    resolution.confirmationId === toolConfirmation.id,
+                )
+              : null;
+            const isResolvedConfirmation = isToolConfirmationResolved({
+              confirmation: toolConfirmation,
+              confirmationResolution,
+            });
             const metadataParts = getToolStepMetadataParts(toolStep?.metadata);
-            const detailParts = getToolCallDetailParts(toolCall, toolStep);
+            const detailParts = getToolCallDetailParts(
+              toolCall,
+              toolStep,
+              confirmationResolution,
+            );
             const summary =
               [
                 toolStep?.description ?? null,
@@ -1311,24 +1450,33 @@ export function ReasoningTrace({
               ]
                 .filter((part): part is string => Boolean(part))
                 .join(" · ") || undefined;
+            const isActivelyRunningTool = isToolCallActivelyRunning({
+              resolvedConfirmationIds,
+              toolCall,
+            });
             const toolStatus =
-              toolCall.status === "running"
+              toolConfirmation && !isResolvedConfirmation
                 ? isCancelled
                   ? "pending"
                   : "active"
-                : toolCall.status === "error"
-                  ? "pending"
-                  : "complete";
+                : isActivelyRunningTool
+                  ? isCancelled
+                    ? "pending"
+                    : "active"
+                  : toolCall.status === "error"
+                    ? "pending"
+                    : "complete";
             return (
               <ChainOfThoughtStep
                 description={summary}
                 icon={WrenchIcon}
                 key={item.key}
-                label={getToolDisplayLabel(toolCall)}
+                label={getToolDisplayLabel(toolCall, confirmationResolution)}
                 status={toolStatus}
               >
                 <ToolCallDetails
                   onArtifactPreview={onArtifactPreview}
+                  resolvedConfirmations={resolvedConfirmations}
                   toolCall={toolCall}
                   toolStep={toolStep}
                   workspaceId={workspaceId}

@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CitationRecord } from "../../_components/chat-canvas";
+import type {
+  AssistantVersionIndexEntry,
+  CitationRecord,
+} from "../../_components/chat-canvas";
 import type { ThreadCitationRecord } from "../../_components/sources-hub";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import {
@@ -39,6 +42,22 @@ export function useThreadVersioning({
     () => buildVersionedMessageGroups(mergeStreamingAssistantIntoMessages(messages)),
     [mergeStreamingAssistantIntoMessages, messages],
   );
+  const assistantVersionById = useMemo(() => {
+    const index = new Map<string, AssistantVersionIndexEntry>();
+    for (const group of messageGroups) {
+      if (group.role !== "assistant") {
+        continue;
+      }
+      group.versions.forEach((version, branchIndex) => {
+        index.set(version.id, {
+          branchIndex,
+          groupId: group.groupId,
+          version,
+        });
+      });
+    }
+    return index;
+  }, [messageGroups]);
 
   const activeAssistantVersion = useMemo(() => {
     for (
@@ -287,6 +306,7 @@ export function useThreadVersioning({
 
   return {
     activeAssistantVersion,
+    assistantVersionById,
     activeVersionByGroup,
     displayedCitations,
     handleActiveVersionChange,

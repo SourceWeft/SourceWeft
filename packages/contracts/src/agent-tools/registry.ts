@@ -1,9 +1,11 @@
 import type {
   AgentToolCapability,
   AgentToolConfiguration,
+  AgentToolDefaultPermission,
   AgentToolDefinitionShape,
   AgentToolDomain,
   AgentToolRequirements,
+  AgentToolRiskLevel,
   AgentToolSlashCommand,
 } from "./define";
 import { artifactTools } from "./tools/generate-image";
@@ -79,6 +81,9 @@ export function getAgentToolSlashCommand(
     displayName: slash?.displayName ?? tool.name,
     ...(slash?.description ? { description: slash.description } : {}),
     ...(slash?.aliases ? { aliases: slash.aliases } : {}),
+    ...(slash?.supportsCommand !== undefined
+      ? { supportsCommand: slash.supportsCommand }
+      : {}),
     enabled: true,
   };
 }
@@ -214,4 +219,10 @@ export function isOversizedCurrentTurnToolName(
   return hasAgentToolCapability(value, "oversized_current_turn");
 }
 
-export type { AgentToolCapability, AgentToolDefinitionShape, AgentToolDomain };
+export type {
+  AgentToolCapability,
+  AgentToolDefaultPermission,
+  AgentToolDefinitionShape,
+  AgentToolDomain,
+  AgentToolRiskLevel,
+};

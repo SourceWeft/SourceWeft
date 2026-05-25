@@ -57,6 +57,8 @@ export function EmptyState({
   selectedSources,
   availableSkills,
   selectedSkillIds,
+  selectedMcpInstallIds,
+  selectedMcpToolIds,
   onRemoveSource,
   onSkillSelectionChange,
   searchEnabled,
@@ -79,6 +81,8 @@ export function EmptyState({
   selectedSources: SourceItem[];
   availableSkills?: ChatSkillItem[];
   selectedSkillIds?: string[];
+  selectedMcpInstallIds?: string[];
+  selectedMcpToolIds?: string[];
   onRemoveSource: (id: string) => void;
   onSkillSelectionChange?: (skillIds: string[]) => void;
   searchEnabled?: boolean;
@@ -161,6 +165,8 @@ export function EmptyState({
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}
             selectedSkillIds={selectedSkillIds}
+            selectedMcpInstallIds={selectedMcpInstallIds}
+            selectedMcpToolIds={selectedMcpToolIds}
             selectedSources={selectedSources}
             thinkingCapabilities={thinkingCapabilities}
             thinkingSettings={thinkingSettings}

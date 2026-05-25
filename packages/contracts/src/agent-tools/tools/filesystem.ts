@@ -15,6 +15,8 @@ export const lsTool = defineAgentTool({
   domain: "filesystem",
   capabilities: ["filesystem"],
   activation: filesystemActivation,
+  defaultPermission: "allow",
+  riskLevel: "low",
 });
 
 export const readFileTool = defineAgentTool({
@@ -23,6 +25,8 @@ export const readFileTool = defineAgentTool({
   domain: "filesystem",
   capabilities: ["filesystem", "read_tool_output", "oversized_current_turn"],
   activation: filesystemActivation,
+  defaultPermission: "allow",
+  riskLevel: "low",
 });
 
 export const globTool = defineAgentTool({
@@ -31,6 +35,8 @@ export const globTool = defineAgentTool({
   domain: "filesystem",
   capabilities: ["filesystem", "pattern_scope"],
   activation: filesystemActivation,
+  defaultPermission: "allow",
+  riskLevel: "low",
 });
 
 export const grepTool = defineAgentTool({
@@ -39,6 +45,8 @@ export const grepTool = defineAgentTool({
   domain: "filesystem",
   capabilities: ["filesystem", "oversized_current_turn"],
   activation: filesystemActivation,
+  defaultPermission: "allow",
+  riskLevel: "low",
 });
 
 export const writeFileTool = defineAgentTool({
@@ -47,6 +55,8 @@ export const writeFileTool = defineAgentTool({
   domain: "filesystem",
   capabilities: ["filesystem", "workfile_write"],
   activation: filesystemActivation,
+  defaultPermission: "ask",
+  riskLevel: "medium",
 });
 
 export const editFileTool = defineAgentTool({
@@ -55,6 +65,8 @@ export const editFileTool = defineAgentTool({
   domain: "filesystem",
   capabilities: ["filesystem", "workfile_write"],
   activation: filesystemActivation,
+  defaultPermission: "ask",
+  riskLevel: "medium",
 });
 
 export const filesystemTools = [

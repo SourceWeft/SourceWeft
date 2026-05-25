@@ -3,6 +3,7 @@ import { logger } from "../shared/logger";
 import { syncGlobalModelGatewayConfig } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
+import { durableChatRunService } from "../modules/content/threads/durable/service";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleExampleJob } from "./schedules/example-schedule";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
@@ -35,6 +36,7 @@ async function tick() {
     }
 
     jobs.push(scheduleConnectorSyncs());
+    jobs.push(durableChatRunService.expireWaitingApprovals());
 
     if (jobs.length === 0) {
       return;

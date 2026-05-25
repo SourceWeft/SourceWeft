@@ -40,8 +40,13 @@ import { toSseData } from "./helpers";
 import {
   resolveEditThreadStreamInput,
   resolveRefreshThreadStreamInput,
+  resolveResumeThreadStreamInput,
 } from "./input";
-import type { EditThreadInput, RefreshThreadInput } from "./types";
+import type {
+  EditThreadInput,
+  RefreshThreadInput,
+  ResumeThreadInput,
+} from "./types";
 import type {
   ThreadTitleGenerateJobPayload,
   ThreadTitleGenerateJobResult,
@@ -52,6 +57,14 @@ import type {
   ThinkingStepTrace,
   ToolCallTrace,
 } from "../turn/types";
+import {
+  normalizeTraceParts,
+  tracePartFromReasoningSegment,
+  tracePartFromThinkingStep,
+  tracePartFromToolCall,
+  type TracePart,
+  upsertTracePart,
+} from "../turn/trace-parts";
 
 type ThreadTitleJob = Job<Record<string, unknown>, unknown, string>;
 
@@ -274,7 +287,16 @@ function upsertToolCallTrace(
   callsById: Map<string, ToolCallTrace>,
   toolCall: ToolCallTrace,
 ) {
-  callsById.set(toolCall.id, toolCall);
+  const existing = callsById.get(toolCall.id);
+  const approvalState = toolCall.approvalState ?? existing?.approvalState;
+  const approvalConfirmationId =
+    toolCall.approvalConfirmationId ?? existing?.approvalConfirmationId;
+  callsById.set(toolCall.id, {
+    ...(existing ?? {}),
+    ...toolCall,
+    ...(approvalState ? { approvalState } : {}),
+    ...(approvalConfirmationId ? { approvalConfirmationId } : {}),
+  });
 }
 
 function upsertThinkingStepTrace(
@@ -418,6 +440,49 @@ function buildReasoningSegmentObservations(
   }));
 }
 
+function isSameReasoningSegment(
+  existing: ModelReasoningSegmentTrace | undefined,
+  next: ModelReasoningSegmentTrace,
+) {
+  return (
+    existing?.id === next.id &&
+    typeof existing.text === "string" &&
+    typeof next.text === "string"
+  );
+}
+
+function upsertReasoningSegmentTrace(
+  segmentsById: Map<string, ModelReasoningSegmentTrace>,
+  next: ModelReasoningSegmentTrace,
+) {
+  if (isSameReasoningSegment(segmentsById.get(next.id), next)) {
+    const existing = segmentsById.get(next.id);
+    segmentsById.set(next.id, {
+      ...(existing ?? next),
+      ...next,
+      id: next.id,
+      sequence: existing?.sequence ?? next.sequence,
+    });
+    return;
+  }
+
+  if (!segmentsById.has(next.id)) {
+    segmentsById.set(next.id, next);
+    return;
+  }
+
+  let suffix = 2;
+  let nextId = `${next.id}:${suffix}`;
+  while (segmentsById.has(nextId)) {
+    suffix += 1;
+    nextId = `${next.id}:${suffix}`;
+  }
+  segmentsById.set(nextId, {
+    ...next,
+    id: nextId,
+  });
+}
+
 function buildTraceOutput(outcome: DeepAgentTurnOutcome) {
   return {
     content: outcome.assistantContent,
@@ -441,6 +506,7 @@ function buildPartialErrorState(input: {
   preflightThinkingSteps?: ThinkingStepTrace[];
   reasoning?: string;
   reasoningSegmentsById: Map<string, ModelReasoningSegmentTrace>;
+  traceParts: TracePart[];
   toolCallsById: Map<string, ToolCallTrace>;
   thinkingStepsById: Map<string, ThinkingStepTrace>;
   renderBlocks?: MessageRenderBlock[];
@@ -450,6 +516,7 @@ function buildPartialErrorState(input: {
   return {
     reasoning: input.reasoning,
     reasoningSegments: [...input.reasoningSegmentsById.values()],
+    traceParts: input.traceParts,
     toolCalls: [...input.toolCallsById.values()].map(
       normalizeToolCallStatusForError,
     ),
@@ -945,6 +1012,20 @@ class ContentThreadStreamService {
     );
   }
 
+  async resumeThread(input: ResumeThreadInput) {
+    return this.streamThread(await resolveResumeThreadStreamInput(input));
+  }
+
+  async *resumeThreadEvents(
+    input: ResumeThreadInput,
+    options?: ThreadStreamRunOptions,
+  ): AsyncGenerator<string> {
+    yield* this.streamThreadEvents(
+      await resolveResumeThreadStreamInput(input),
+      options,
+    );
+  }
+
   async editThread(input: EditThreadInput) {
     return this.streamThread(await resolveEditThreadStreamInput(input));
   }
@@ -1052,10 +1133,14 @@ class ContentThreadStreamService {
     let assistantContent = "";
     let reasoning: string | undefined;
     const reasoningSegmentsById = new Map<string, ModelReasoningSegmentTrace>();
+    let traceParts: TracePart[] = normalizeTraceParts(
+      prepared.traceContinuation?.traceParts,
+    );
     const toolCallsById = new Map<string, ToolCallTrace>();
     const thinkingStepsById = new Map<string, ThinkingStepTrace>();
     for (const step of prepared.preflightThinkingSteps) {
       upsertThinkingStepTrace(thinkingStepsById, step);
+      traceParts = upsertTracePart(traceParts, tracePartFromThinkingStep(step));
     }
     let citations: AgentCitation[] = [];
     let availableCitations: AgentCitation[] = [];
@@ -1065,6 +1150,12 @@ class ContentThreadStreamService {
       yield toSseData({
         type: "start",
         messageId: prepared.userMessage.id,
+        threadRun:
+          assistantMetadata &&
+          typeof assistantMetadata.threadRun === "object" &&
+          assistantMetadata.threadRun !== null
+            ? assistantMetadata.threadRun
+            : undefined,
         mentionedSourceIds: prepared.mentionedSourceIds,
         effectiveMentionedSourceIds: prepared.effectiveMentionedSourceIds,
         sourceIds: prepared.selectedSourceIds,
@@ -1212,7 +1303,11 @@ class ContentThreadStreamService {
           }
           if (event.type === "reasoning") {
             reasoning = appendReasoningChunk(reasoning, event.reasoning);
-            reasoningSegmentsById.set(event.segment.id, event.segment);
+            upsertReasoningSegmentTrace(reasoningSegmentsById, event.segment);
+            traceParts = upsertTracePart(
+              traceParts,
+              tracePartFromReasoningSegment(event.segment),
+            );
           }
           if (
             event.type === "tool-call-start" ||
@@ -1222,9 +1317,17 @@ class ContentThreadStreamService {
             event.type === "tool-call-end"
           ) {
             upsertToolCallTrace(toolCallsById, event.toolCall);
+            traceParts = upsertTracePart(
+              traceParts,
+              tracePartFromToolCall(event.toolCall),
+            );
           }
           if (event.type === "thinking-step") {
             upsertThinkingStepTrace(thinkingStepsById, event.step);
+            traceParts = upsertTracePart(
+              traceParts,
+              tracePartFromThinkingStep(event.step),
+            );
           }
           if (event.type === "citations") {
             citations = event.citations;
@@ -1293,6 +1396,7 @@ class ContentThreadStreamService {
               ),
               renderBlocks: completedOutcome.renderBlocks,
               reasoningSegments: completedOutcome.reasoningSegments,
+              traceParts,
               llm: prepared.llm,
               operation: "chat.stream",
               assistantContent: completedOutcome.assistantContent,
@@ -1362,6 +1466,7 @@ class ContentThreadStreamService {
             preflightThinkingSteps: prepared.preflightThinkingSteps,
             reasoning,
             reasoningSegmentsById,
+            traceParts,
             toolCallsById,
             thinkingStepsById,
             renderBlocks: outcome?.renderBlocks,
@@ -1437,6 +1542,9 @@ class ContentThreadStreamService {
       yield toSseData({
         type: "finish",
         finishReason: outcome?.finishReason ?? null,
+        ...(outcome?.agentCheckpoint
+          ? { agentCheckpoint: outcome.agentCheckpoint }
+          : {}),
       });
       responseFinished = true;
     } finally {
@@ -1465,6 +1573,7 @@ class ContentThreadStreamService {
               preflightThinkingSteps: prepared.preflightThinkingSteps,
               reasoning,
               reasoningSegmentsById,
+              traceParts,
               toolCallsById,
               thinkingStepsById,
               renderBlocks: outcome?.renderBlocks,
@@ -1577,6 +1686,12 @@ class ContentThreadStreamService {
     let agentSpanCompleted = false;
     let traceEnded = false;
     let outcome: DeepAgentTurnOutcome | null = null;
+    let traceParts: TracePart[] = prepared.preflightThinkingSteps.reduce<
+      TracePart[]
+    >(
+      (parts, step) => upsertTracePart(parts, tracePartFromThinkingStep(step)),
+      normalizeTraceParts(prepared.traceContinuation?.traceParts),
+    );
 
     try {
       outcome = await (async () => {
@@ -1590,6 +1705,30 @@ class ContentThreadStreamService {
             parentSpanId: "agent_run",
           },
         })) {
+          if (event.type === "reasoning") {
+            traceParts = upsertTracePart(
+              traceParts,
+              tracePartFromReasoningSegment(event.segment),
+            );
+          }
+          if (
+            event.type === "tool-call-start" ||
+            event.type === "tool-call-event" ||
+            event.type === "tool-call-result" ||
+            event.type === "tool-call-error" ||
+            event.type === "tool-call-end"
+          ) {
+            traceParts = upsertTracePart(
+              traceParts,
+              tracePartFromToolCall(event.toolCall),
+            );
+          }
+          if (event.type === "thinking-step") {
+            traceParts = upsertTracePart(
+              traceParts,
+              tracePartFromThinkingStep(event.step),
+            );
+          }
           if (event.type === "done") {
             doneOutcome = event.outcome;
           }
@@ -1696,6 +1835,7 @@ class ContentThreadStreamService {
             ),
             renderBlocks: completedOutcome.renderBlocks,
             reasoningSegments: completedOutcome.reasoningSegments,
+            traceParts,
             llm: prepared.llm,
             operation: "chat.complete",
             assistantContent: completedOutcome.assistantContent,

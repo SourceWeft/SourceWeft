@@ -86,9 +86,9 @@ export type ConnectorSyncJobPayload = {
 
 export type ThreadChatRunJobResult =
   | {
-      status: "completed";
+      status: "completed" | "waiting_for_approval";
       runId: string;
-      assistantMessageId: string;
+      assistantMessageId: string | null;
     }
   | {
       status: "cancelled" | "failed";

@@ -8,11 +8,49 @@ import { meterBillableModelUsage } from "../../model-billing";
 import { consumeSourceWeftContextCompressionReport } from "../../agent/context-compression";
 import {
   createMessageRecord,
+  findMessageRecord,
   updateMessageRecord,
 } from "../message-repository";
 import { computeProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
+import { preserveTraceMetadata } from "./trace-metadata";
 import type { FinalizeThreadTurnInput } from "./types";
+
+export function preserveAssistantMetadataForContinuation(input: {
+  existingMetadata?: Record<string, unknown> | null;
+  nextMetadata: Record<string, unknown>;
+}) {
+  return preserveTraceMetadata(input);
+}
+
+export function appendAssistantContinuationContent(input: {
+  existingContent?: string | null;
+  nextContent: string;
+}) {
+  const existingContent = input.existingContent?.trimEnd() ?? "";
+  const nextContent = input.nextContent.trim();
+  if (!existingContent) {
+    return nextContent;
+  }
+  if (!nextContent) {
+    return existingContent;
+  }
+  if (nextContent.startsWith(existingContent)) {
+    return nextContent;
+  }
+  if (existingContent.endsWith(nextContent)) {
+    return existingContent;
+  }
+
+  const maxOverlap = Math.min(existingContent.length, nextContent.length);
+  for (let length = maxOverlap; length > 0; length -= 1) {
+    if (existingContent.endsWith(nextContent.slice(0, length))) {
+      return `${existingContent}${nextContent.slice(length)}`;
+    }
+  }
+
+  return `${existingContent}\n${nextContent}`;
+}
 
 export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   const { prepared, retrieval } = input;
@@ -103,7 +141,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   const totalCreditsConsumed =
     billing.consumedCredits + preflightCreditsConsumed;
 
-  const assistantMetadata = {
+  const nextAssistantMetadata = {
     userMessageId: prepared.userMessage.id,
     sourceUserMessageId: prepared.userMessage.id,
     traceId: prepared.traceContext?.traceId ?? prepared.userMessage.id,
@@ -128,6 +166,10 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     usage: input.usage,
     reasoning: input.reasoning,
     reasoningSegments: input.reasoningSegments,
+    traceParts: input.traceParts,
+    traceEvents: Array.isArray(input.assistantMetadata?.traceEvents)
+      ? input.assistantMetadata.traceEvents
+      : undefined,
     contextCompression,
     versionOf: prepared.assistantMessageParentId,
     gateway: buildGatewayAuditMetadata({
@@ -144,6 +186,10 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       latencyMs: call.latencyMs,
       error: call.error,
       sequence: call.sequence,
+      ...(call.approvalState ? { approvalState: call.approvalState } : {}),
+      ...(call.approvalConfirmationId
+        ? { approvalConfirmationId: call.approvalConfirmationId }
+        : {}),
     })),
     ...(input.renderBlocks && input.renderBlocks.length > 0
       ? { renderBlocks: input.renderBlocks }
@@ -158,6 +204,23 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     },
     ...(input.assistantMetadata ?? {}),
   };
+  const existingAssistantMessage = input.assistantMessageId
+    ? await findMessageRecord({
+        teamId: prepared.workspace.organizationId,
+        workspaceId: prepared.workspace.id,
+        messageId: input.assistantMessageId,
+      })
+    : null;
+  const assistantContent = input.assistantMessageId
+    ? appendAssistantContinuationContent({
+        existingContent: existingAssistantMessage?.content,
+        nextContent: input.assistantContent,
+      })
+    : input.assistantContent;
+  const assistantMetadata = preserveAssistantMetadataForContinuation({
+    existingMetadata: existingAssistantMessage?.metadata,
+    nextMetadata: nextAssistantMetadata,
+  });
 
   const assistantMessage = input.assistantMessageId
     ? await updateMessageRecord({
@@ -165,7 +228,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
         workspaceId: prepared.workspace.id,
         threadId: prepared.thread.id,
         messageId: input.assistantMessageId,
-        content: input.assistantContent,
+        content: assistantContent,
         model: input.modelForMessage || prepared.modelAlias,
         creditsConsumed: totalCreditsConsumed,
         metadata: assistantMetadata,
@@ -176,7 +239,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
         threadId: prepared.thread.id,
         parentMessageId: prepared.assistantMessageParentId,
         role: "assistant",
-        content: input.assistantContent,
+        content: assistantContent,
         createdBy: null,
         model: input.modelForMessage || prepared.modelAlias,
         creditsConsumed: totalCreditsConsumed,
@@ -216,3 +279,8 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     billing,
   };
 }
+
+export const testExports = {
+  appendAssistantContinuationContent,
+  preserveAssistantMetadataForContinuation,
+};

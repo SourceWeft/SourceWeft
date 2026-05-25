@@ -8,6 +8,8 @@ import type {
   ModelReasoningSegmentTrace,
   ThinkingStepTrace,
   ToolCallTrace,
+  ToolCallStatus,
+  TracePart,
 } from "../../threads";
 
 export type DeepAgentTurnOutcome = {
@@ -22,6 +24,7 @@ export type DeepAgentTurnOutcome = {
   thinkingSteps: ThinkingStepTrace[];
   renderBlocks?: MessageRenderBlock[];
   reasoningSegments: ModelReasoningSegmentTrace[];
+  traceParts?: TracePart[];
   usage?: UsageInfo;
   finishReason?: string;
   reasoning?: string;
@@ -82,7 +85,7 @@ export type DeepAgentTurnEvent =
       id: string;
       tool: string;
       latencyMs: number | null;
-      status: "completed" | "error";
+      status: Exclude<ToolCallStatus, "running">;
       toolCall: ToolCallTrace;
     }
   | {

@@ -4,23 +4,42 @@ import {
   enqueueThreadChatRunJob,
   type ThreadChatRunJobPayload,
 } from "../../queue";
-import { findMessageRecord } from "../message-repository";
+import { config } from "../../../../shared/config";
+import {
+  findMessageRecord,
+  updateMessageRecord,
+} from "../message-repository";
 import { findThreadRecord } from "../thread/repository";
-import type { EditThreadInput, RefreshThreadInput } from "../stream/types";
-import type { StreamThreadEventInput } from "../turn/types";
+import type {
+  EditThreadInput,
+  RefreshThreadInput,
+  ResumeThreadInput,
+} from "../stream/types";
+import type { StreamThreadEventInput, ToolCallTrace } from "../turn/types";
 import {
   createChatThreadRun,
   findActiveChatThreadRun,
   findChatThreadRunById,
   findChatThreadRunByIdempotencyKey,
+  listExpiredApprovalWaitingRuns,
   finishChatThreadRun,
   isActiveChatRunStatus,
+  markChatThreadRunWaitingForApproval,
   markChatThreadRunQueued,
   markChatThreadRunRunning,
   requestChatThreadRunCancel,
   touchChatThreadRunHeartbeat,
   updateChatThreadRunProgress,
+  updateChatThreadRunStatus,
 } from "./repository";
+import {
+  findActionRunRecordById,
+  updateActionRunRecord,
+} from "../../../connectors/repository";
+import {
+  findMcpActionRun,
+  updateMcpActionRun,
+} from "../../../mcp/repository";
 import {
   chatRunStreamManager,
   type ChatRunStreamEvent,
@@ -38,6 +57,18 @@ import type {
   MessageRecord,
   ThreadRecord,
 } from "../../types";
+import { preserveTraceMetadata } from "../turn/trace-metadata";
+import {
+  normalizeTraceParts,
+  tracePartFromToolCall,
+  upsertTracePart,
+  type TracePart,
+} from "../turn/trace-parts";
+import { logger } from "../../../../shared/logger";
+
+type RunSnapshotSource = {
+  snapshotJson?: Record<string, unknown> | null;
+};
 
 const ATTACH_POLL_MS = 100;
 const ATTACH_HEARTBEAT_MS = 15_000;
@@ -49,7 +80,10 @@ const STALE_ACTIVE_RUN_TIMEOUT_MS = 10 * 60_000;
 const CLIENT_CANCELLED_CODE = "CLIENT_CANCELLED";
 const CLIENT_CANCELLED_MESSAGE = "Chat run was cancelled";
 const STALE_CHAT_RUN_CODE = "CHAT_RUN_STALE";
+const TOOL_APPROVAL_EXPIRED_CODE = "TOOL_APPROVAL_EXPIRED";
+const TOOL_APPROVAL_EXPIRED_MESSAGE = "Tool approval request expired";
 const ACTIVE_RUN_CONSTRAINT = "chat_thread_runs_thread_active_uq";
+const EXPIRED_APPROVAL_SWEEP_LIMIT = 100;
 
 function wait(delayMs: number) {
   return new Promise<void>((resolve) => {
@@ -61,6 +95,215 @@ function isTerminalRunStatus(status: ChatThreadRunRecord["status"]) {
   return (
     status === "completed" || status === "failed" || status === "cancelled"
   );
+}
+
+function getSnapshotRecord(run: RunSnapshotSource): ChatRunSnapshot {
+  return run.snapshotJson && typeof run.snapshotJson === "object"
+    ? (run.snapshotJson as ChatRunSnapshot)
+    : {};
+}
+
+function parseStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function getObjectRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getToolConfirmationStatus(value: unknown): ToolCallTrace["approvalState"] {
+  const record = getObjectRecord(value);
+  if (record?.status === "approved" || record?.status === "rejected") {
+    return record.status;
+  }
+  const action = getObjectRecord(record?.action);
+  return action?.status === "approved" || action?.status === "rejected"
+    ? action.status
+    : undefined;
+}
+
+function replaceConfirmationInToolCalls(
+  toolCalls: unknown[] | undefined,
+  confirmationId: string,
+  confirmation: unknown,
+) {
+  let changed = false;
+  const nextToolCalls = (toolCalls ?? []).map((toolCall) => {
+    const record = getObjectRecord(toolCall);
+    const output = getObjectRecord(record?.output);
+    if (
+      !record ||
+      output?.type !== "tool_confirmation_request" ||
+      output.id !== confirmationId
+    ) {
+      return toolCall;
+    }
+    changed = true;
+    const approvalState = getToolConfirmationStatus(confirmation);
+    return {
+      ...record,
+      output: confirmation,
+      status: "completed",
+      ...(approvalState ? { approvalState } : {}),
+      approvalConfirmationId: confirmationId,
+    };
+  });
+  return {
+    changed,
+    toolCalls: nextToolCalls,
+  };
+}
+
+function mergeToolCallTraceState(
+  existing: ToolCallTrace | undefined,
+  next: ToolCallTrace,
+): ToolCallTrace {
+  return {
+    ...(existing ?? {}),
+    ...next,
+    approvalState: next.approvalState ?? existing?.approvalState,
+    approvalConfirmationId:
+      next.approvalConfirmationId ?? existing?.approvalConfirmationId,
+  };
+}
+
+function toToolCallTrace(value: unknown): ToolCallTrace | null {
+  const record = getObjectRecord(value);
+  if (!record) {
+    return null;
+  }
+  const id = typeof record.id === "string" ? record.id : null;
+  const tool = typeof record.tool === "string" ? record.tool : null;
+  const status = record.status;
+  if (
+    !id ||
+    !tool ||
+    (status !== "running" &&
+      status !== "approval_requested" &&
+      status !== "completed" &&
+      status !== "error")
+  ) {
+    return null;
+  }
+  return {
+    id,
+    tool,
+    input: getObjectRecord(record.input) ?? {},
+    output: record.output,
+    status,
+    latencyMs:
+      typeof record.latencyMs === "number" || record.latencyMs === null
+        ? record.latencyMs
+        : null,
+    error:
+      typeof record.error === "string" || record.error === null
+        ? record.error
+        : null,
+    sequence: typeof record.sequence === "number" ? record.sequence : 0,
+    approvalState:
+      record.approvalState === "approved" || record.approvalState === "rejected"
+        ? record.approvalState
+        : undefined,
+    approvalConfirmationId:
+      typeof record.approvalConfirmationId === "string"
+        ? record.approvalConfirmationId
+        : undefined,
+  };
+}
+
+function updateExistingTracePartsFromToolCalls(
+  traceParts: unknown,
+  toolCalls: unknown[] | undefined,
+): TracePart[] | undefined {
+  if (!Array.isArray(traceParts)) {
+    return undefined;
+  }
+  return (toolCalls ?? []).reduce<TracePart[]>(
+    (parts, toolCall) => {
+      const normalized = toToolCallTrace(toolCall);
+      if (
+        !normalized ||
+        !parts.some(
+          (part) =>
+            part.kind === "tool" && part.toolCallId === normalized.id,
+        )
+      ) {
+        return parts;
+      }
+      const existingToolPart = parts.find(
+        (part) => part.kind === "tool" && part.toolCallId === normalized.id,
+      );
+      const nextToolCall = mergeToolCallTraceState(
+        existingToolPart?.kind === "tool"
+          ? {
+              id: normalized.id,
+              tool: existingToolPart.tool,
+              input: existingToolPart.input,
+              output: existingToolPart.output,
+              status: existingToolPart.status,
+              latencyMs: existingToolPart.latencyMs ?? null,
+              error: existingToolPart.error ?? null,
+              sequence: existingToolPart.order,
+              approvalState: existingToolPart.approvalState,
+              approvalConfirmationId: existingToolPart.approvalConfirmationId,
+            }
+          : undefined,
+        normalized,
+      );
+      return upsertTracePart(parts, tracePartFromToolCall(nextToolCall));
+    },
+    normalizeTraceParts(traceParts),
+  );
+}
+
+function hasPendingConfirmations(toolCalls: unknown[] | undefined) {
+  return (toolCalls ?? []).some((toolCall) => {
+    const record = getObjectRecord(toolCall);
+    const output = getObjectRecord(record?.output);
+    return (
+      output?.type === "tool_confirmation_request" &&
+      output.status === "proposed"
+    );
+  });
+}
+
+function shouldCompleteApprovalRunWithoutPendingConfirmations(
+  run: ChatThreadRunRecord,
+) {
+  return (
+    run.status === "waiting_for_approval" &&
+    !hasPendingConfirmations(getSnapshotRecord(run).toolCalls)
+  );
+}
+
+export function getRunApprovalPauseState(run: RunSnapshotSource) {
+  const snapshot = getSnapshotRecord(run);
+  return {
+    requestedAt:
+      typeof snapshot.approvalRequestedAt === "string"
+        ? snapshot.approvalRequestedAt
+        : null,
+    expiresAt:
+      typeof snapshot.approvalExpiresAt === "string"
+        ? snapshot.approvalExpiresAt
+        : null,
+    confirmationIds: parseStringArray(snapshot.pendingConfirmationIds),
+  };
+}
+
+export function isApprovalWaitingRunExpired(
+  run: ChatThreadRunRecord,
+  nowMs = Date.now(),
+) {
+  if (run.status !== "waiting_for_approval") {
+    return false;
+  }
+  const expiresAtMs = parseRunTimestamp(getRunApprovalPauseState(run).expiresAt);
+  return expiresAtMs !== null && nowMs >= expiresAtMs;
 }
 
 export function toTerminalJobStatus(status: ChatThreadRunStatus) {
@@ -101,6 +344,9 @@ export function isStaleActiveRun(
   nowMs = Date.now(),
 ) {
   if (!isActiveChatRunStatus(run.status)) {
+    return false;
+  }
+  if (run.status === "waiting_for_approval") {
     return false;
   }
 
@@ -184,6 +430,117 @@ async function cancelRunBeforeMessages(run: ChatThreadRunRecord) {
   });
 }
 
+function buildStoppedRunFallback(run: ChatThreadRunRecord) {
+  return {
+    threadRun: {
+      id: run.id,
+      idempotencyKey: run.idempotencyKey,
+      status: run.status,
+      mode: run.mode,
+    },
+    billing: buildEmptyBilling(run.teamId),
+    retrieval: {
+      embeddingProfileId: null,
+      vectorStrategy: null,
+      annIndexUsed: null,
+      citations: [],
+      availableCitations: [],
+    },
+  };
+}
+
+async function forceCancelStoppedRun(
+  run: ChatThreadRunRecord,
+  dependencies: {
+    appendEvent?: typeof chatRunStreamManager.appendEvent;
+    findRunById?: typeof findChatThreadRunById;
+    finishRun?: typeof finishChatThreadRun;
+    updateAssistantMetadata?: typeof updateAssistantMessageThreadRunMetadata;
+  } = {},
+) {
+  if (isTerminalRunStatus(run.status)) {
+    return run;
+  }
+
+  const appendEvent =
+    dependencies.appendEvent ??
+    chatRunStreamManager.appendEvent.bind(chatRunStreamManager);
+  const finishRun = dependencies.finishRun ?? finishChatThreadRun;
+  const findRunById = dependencies.findRunById ?? findChatThreadRunById;
+  const updateAssistantMetadata =
+    dependencies.updateAssistantMetadata ??
+    updateAssistantMessageThreadRunMetadata;
+  const latestBeforeCancel = await findRunById({
+    runId: run.id,
+    teamId: run.teamId,
+    workspaceId: run.workspaceId,
+  });
+  if (isTerminalRunStatus(latestBeforeCancel?.status ?? run.status)) {
+    return latestBeforeCancel ?? run;
+  }
+  const activeRun = latestBeforeCancel ?? run;
+  const cancelledRun = {
+    ...activeRun,
+    status: "cancelled" as const,
+    errorCode: CLIENT_CANCELLED_CODE,
+    errorMessage: CLIENT_CANCELLED_MESSAGE,
+  };
+  const snapshot = withAssistantThreadRunMetadata(
+    {
+      ...getSnapshotRecord(activeRun),
+      errorCode: CLIENT_CANCELLED_CODE,
+      errorMessage: CLIENT_CANCELLED_MESSAGE,
+    },
+    cancelledRun,
+  );
+
+  await appendEvent(
+    activeRun.streamKey,
+    `data: ${JSON.stringify({
+      type: "error",
+      code: CLIENT_CANCELLED_CODE,
+      error: CLIENT_CANCELLED_MESSAGE,
+      ...(activeRun.userMessageId ? { userMessageId: activeRun.userMessageId } : {}),
+      ...(activeRun.assistantMessageId
+        ? { messageId: activeRun.assistantMessageId }
+        : {}),
+    })}\n\n`,
+  );
+  await appendEvent(
+    activeRun.streamKey,
+    `data: ${JSON.stringify({ type: "finish" })}\n\n`,
+  );
+
+  const finished =
+    (await finishRun({
+      runId: activeRun.id,
+      teamId: activeRun.teamId,
+      workspaceId: activeRun.workspaceId,
+      status: "cancelled",
+      assistantMessageId: activeRun.assistantMessageId,
+      snapshotJson: snapshot,
+      errorCode: CLIENT_CANCELLED_CODE,
+      errorMessage: CLIENT_CANCELLED_MESSAGE,
+    })) ?? cancelledRun;
+  const latestAfterCancel =
+    (await findRunById({
+      runId: activeRun.id,
+      teamId: activeRun.teamId,
+      workspaceId: activeRun.workspaceId,
+    })) ?? finished;
+  if (latestAfterCancel.status === "cancelled") {
+    await updateAssistantMetadata({
+      run: latestAfterCancel,
+      metadata: {
+        isCancelled: true,
+        error: CLIENT_CANCELLED_MESSAGE,
+        errorCode: CLIENT_CANCELLED_CODE,
+      },
+    });
+  }
+  return latestAfterCancel;
+}
+
 async function failStaleActiveRun(run: ChatThreadRunRecord) {
   await chatRunStreamManager.appendEvent(
     run.streamKey,
@@ -204,7 +561,167 @@ async function failStaleActiveRun(run: ChatThreadRunRecord) {
   });
 }
 
+async function cancelProposedConfirmationActions(
+  run: ChatThreadRunRecord,
+  error: { code: string; message: string },
+) {
+  const confirmationIds = getRunApprovalPauseState(run).confirmationIds;
+  if (confirmationIds.length === 0) {
+    return;
+  }
+
+  const results = await Promise.allSettled(
+    confirmationIds.map(async (confirmationId) => {
+      const connectorAction = await findActionRunRecordById({
+        teamId: run.teamId,
+        workspaceId: run.workspaceId,
+        actionRunId: confirmationId,
+      });
+      if (connectorAction) {
+        if (connectorAction.status === "proposed") {
+          await updateActionRunRecord({
+            teamId: run.teamId,
+            workspaceId: run.workspaceId,
+            connectorId: connectorAction.connectorId,
+            actionRunId: confirmationId,
+            status: "canceled",
+            errorCode: error.code,
+            errorMessage: error.message,
+          });
+        }
+        return;
+      }
+
+      const mcpAction = await findMcpActionRun({
+        teamId: run.teamId,
+        workspaceId: run.workspaceId,
+        actionRunId: confirmationId,
+      });
+      if (mcpAction?.status === "proposed") {
+        await updateMcpActionRun({
+          teamId: run.teamId,
+          workspaceId: run.workspaceId,
+          actionRunId: confirmationId,
+          status: "canceled",
+          errorCode: error.code,
+          errorMessage: error.message,
+        });
+      }
+    }),
+  );
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    logger.warn("Failed to cancel proposed confirmation actions", {
+      runId: run.id,
+      confirmationCount: confirmationIds.length,
+      failureCount: failures.length,
+    });
+  }
+}
+
+export async function expireApprovalWaitingRun(run: ChatThreadRunRecord) {
+  const expiredRun = {
+    ...run,
+    status: "cancelled" as const,
+    errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+    errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
+  };
+  const snapshot = withAssistantThreadRunMetadata(
+    {
+      ...getSnapshotRecord(run),
+      errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+      errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
+    },
+    expiredRun,
+  );
+  await cancelProposedConfirmationActions(run, {
+    code: TOOL_APPROVAL_EXPIRED_CODE,
+    message: TOOL_APPROVAL_EXPIRED_MESSAGE,
+  });
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({
+      type: "error",
+      code: TOOL_APPROVAL_EXPIRED_CODE,
+      error: TOOL_APPROVAL_EXPIRED_MESSAGE,
+      ...(run.userMessageId ? { userMessageId: run.userMessageId } : {}),
+      ...(run.assistantMessageId ? { messageId: run.assistantMessageId } : {}),
+    })}\n\n`,
+  );
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({ type: "finish" })}\n\n`,
+  );
+  const finished =
+    (await finishChatThreadRun({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      status: "cancelled",
+      assistantMessageId: run.assistantMessageId,
+      snapshotJson: snapshot,
+      errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+      errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
+    })) ?? expiredRun;
+  await updateAssistantMessageThreadRunMetadata({
+    run: finished,
+    metadata: {
+      isCancelled: true,
+      error: TOOL_APPROVAL_EXPIRED_MESSAGE,
+      errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+    },
+  });
+  return (
+    (await findChatThreadRunById({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+    })) ?? finished
+  );
+}
+
+async function expireRunIfApprovalExpired(run: ChatThreadRunRecord) {
+  if (!isApprovalWaitingRunExpired(run)) {
+    return run;
+  }
+  return expireApprovalWaitingRun(run);
+}
+
+async function completeApprovalRunIfNoPendingConfirmations(
+  run: ChatThreadRunRecord,
+) {
+  if (!shouldCompleteApprovalRunWithoutPendingConfirmations(run)) {
+    return run;
+  }
+  const snapshot = getSnapshotRecord(run);
+  const completedRun = {
+    ...run,
+    status: "completed" as const,
+  };
+  const finished =
+    (await finishChatThreadRun({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      status: "completed",
+      assistantMessageId: run.assistantMessageId,
+      snapshotJson: withAssistantThreadRunMetadata(snapshot, completedRun),
+    })) ?? completedRun;
+  await updateAssistantMessageThreadRunMetadata({
+    run: finished,
+  });
+  return (
+    (await findChatThreadRunById({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+    })) ?? finished
+  );
+}
+
 async function failRunIfStale(run: ChatThreadRunRecord) {
+  run = await expireRunIfApprovalExpired(run);
+  run = await completeApprovalRunIfNoPendingConfirmations(run);
   if (!isStaleActiveRun(run)) {
     return run;
   }
@@ -253,6 +770,159 @@ function buildEmptyBilling(teamId: string) {
     consumedThisCycle: 0,
     idempotencyReplayed: false,
   };
+}
+
+function buildThreadRunMetadata(run: ChatThreadRunRecord) {
+  return {
+    threadRun: {
+      id: run.id,
+      idempotencyKey: run.idempotencyKey,
+      status: run.status,
+      mode: run.mode,
+      streamKey: run.streamKey,
+    },
+  };
+}
+
+function withAssistantThreadRunMetadata(
+  snapshot: ChatRunSnapshot,
+  run: ChatThreadRunRecord,
+) {
+  if (!snapshot.assistantMessage) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    assistantMessage: {
+      ...snapshot.assistantMessage,
+      metadata: {
+        ...snapshot.assistantMessage.metadata,
+        ...buildThreadRunMetadata(run),
+      },
+    },
+  };
+}
+
+async function updateAssistantMessageThreadRunMetadata(input: {
+  run: ChatThreadRunRecord;
+  metadata?: Record<string, unknown>;
+}) {
+  if (!input.run.assistantMessageId) {
+    return null;
+  }
+  const current = await findMessageRecord({
+    teamId: input.run.teamId,
+    workspaceId: input.run.workspaceId,
+    messageId: input.run.assistantMessageId,
+  });
+  if (!current) {
+    return null;
+  }
+  const extraThreadRun = getObjectRecord(input.metadata?.threadRun);
+  return updateMessageRecord({
+    teamId: input.run.teamId,
+    workspaceId: input.run.workspaceId,
+    threadId: input.run.threadId,
+    messageId: input.run.assistantMessageId,
+    metadata: {
+      ...current.metadata,
+      ...(input.metadata ?? {}),
+      threadRun: {
+        ...buildThreadRunMetadata(input.run).threadRun,
+        ...(extraThreadRun ?? {}),
+      },
+    },
+  });
+}
+
+async function updateAssistantMessageConfirmationMetadata(input: {
+  run: ChatThreadRunRecord;
+  snapshot: ChatRunSnapshot;
+}) {
+  if (!input.run.assistantMessageId) {
+    return null;
+  }
+  const current = await findMessageRecord({
+    teamId: input.run.teamId,
+    workspaceId: input.run.workspaceId,
+    messageId: input.run.assistantMessageId,
+  });
+  if (!current) {
+    return null;
+  }
+  return updateMessageRecord({
+    teamId: input.run.teamId,
+    workspaceId: input.run.workspaceId,
+    threadId: input.run.threadId,
+    messageId: input.run.assistantMessageId,
+    metadata: buildAssistantMessageConfirmationMetadata({
+      currentMetadata: current.metadata,
+      run: input.run,
+      snapshot: input.snapshot,
+    }),
+  });
+}
+
+function buildAssistantMessageConfirmationMetadata(input: {
+  currentMetadata: Record<string, unknown>;
+  run: ChatThreadRunRecord;
+  snapshot: ChatRunSnapshot;
+}) {
+  const currentThreadRun = getObjectRecord(input.currentMetadata.threadRun);
+  const threadRun = buildThreadRunMetadata(input.run).threadRun;
+  const approvalRequestedAt =
+    input.snapshot.approvalRequestedAt ?? currentThreadRun?.approvalRequestedAt;
+  const approvalExpiresAt =
+    input.snapshot.approvalExpiresAt ?? currentThreadRun?.approvalExpiresAt;
+  const nextMetadata = {
+    ...(input.snapshot.reasoning !== undefined
+      ? { reasoning: input.snapshot.reasoning }
+      : {}),
+    ...(input.snapshot.reasoningSegments !== undefined
+      ? { reasoningSegments: input.snapshot.reasoningSegments }
+      : {}),
+    ...(input.snapshot.thinkingSteps !== undefined
+      ? { thinkingSteps: input.snapshot.thinkingSteps }
+      : {}),
+    ...(input.snapshot.traceEvents !== undefined
+      ? { traceEvents: input.snapshot.traceEvents }
+      : {}),
+    ...(input.snapshot.traceParts !== undefined
+      ? { traceParts: input.snapshot.traceParts }
+      : {}),
+    ...(input.snapshot.renderBlocks !== undefined
+      ? { renderBlocks: input.snapshot.renderBlocks }
+      : {}),
+    ...(input.snapshot.agentCheckpoint !== undefined
+      ? { agentCheckpoint: input.snapshot.agentCheckpoint }
+      : {}),
+    ...(input.snapshot.retrieval !== undefined
+      ? { retrieval: input.snapshot.retrieval }
+      : {}),
+    threadRun:
+      input.run.status === "waiting_for_approval"
+        ? {
+            ...threadRun,
+            ...(typeof approvalRequestedAt === "string"
+              ? { approvalRequestedAt }
+              : {}),
+            ...(typeof approvalExpiresAt === "string"
+              ? { approvalExpiresAt }
+              : {}),
+          }
+        : threadRun,
+    toolCalls:
+      input.snapshot.toolCalls ??
+      (Array.isArray(input.currentMetadata.toolCalls)
+        ? input.currentMetadata.toolCalls
+        : []),
+    finishReason:
+      input.snapshot.finishReason ?? input.currentMetadata.finishReason,
+  };
+  return preserveTraceMetadata({
+    existingMetadata: input.currentMetadata,
+    nextMetadata,
+  });
 }
 
 function normalizeVectorStrategy(value: unknown): EmbeddingVectorStrategy | null {
@@ -549,7 +1219,8 @@ export class DurableChatRunService {
     if (!run || run.userId !== input.userId) {
       return null;
     }
-    return failRunIfStale(run);
+    const current = await failRunIfStale(run);
+    return isActiveChatRunStatus(current.status) ? current : null;
   }
 
   async getOrCreateRun(input: {
@@ -558,7 +1229,11 @@ export class DurableChatRunService {
     userId: string;
     idempotencyKey: string;
     mode: ChatThreadRunMode;
-    request: StreamThreadEventInput | RefreshThreadInput | EditThreadInput;
+    request:
+      | StreamThreadEventInput
+      | RefreshThreadInput
+      | ResumeThreadInput
+      | EditThreadInput;
   }) {
     const workspace = await requireContentWorkspace(input);
     const existing = await findChatThreadRunByIdempotencyKey({
@@ -579,22 +1254,15 @@ export class DurableChatRunService {
       threadId: input.threadId,
     });
     if (active) {
-      if (isStaleActiveRun(active)) {
-        if (active.status === "queued" && !active.jobId) {
-          await failRunBeforeMessages(active, {
-            code: "CHAT_RUN_START_FAILED",
-            message: "Previous chat run failed before it started.",
-          });
-        } else {
-          await failStaleActiveRun(active);
-        }
-      } else {
+      const currentActive = await failRunIfStale(active);
+      if (isActiveChatRunStatus(currentActive.status)) {
         throw new ContentError(
           409,
           "CHAT_RUN_ALREADY_ACTIVE",
           "A chat run is already active for this thread",
         );
       }
+      // A stale or completed approval pause has been terminalized; a new run may start.
     }
 
     const remainingActive = await findActiveChatThreadRun({
@@ -685,14 +1353,21 @@ export class DurableChatRunService {
   }) {
     const run = await resolveOwnedRun(input);
     if (!isTerminalRunStatus(run.status)) {
+      await chatRunStreamManager.appendStop(run.streamKey);
+      if (run.status === "waiting_for_approval") {
+        await cancelProposedConfirmationActions(run, {
+          code: CLIENT_CANCELLED_CODE,
+          message: CLIENT_CANCELLED_MESSAGE,
+        });
+        return forceCancelStoppedRun(run);
+      }
       const updated =
         (await requestChatThreadRunCancel({
           runId: run.id,
           teamId: run.teamId,
           workspaceId: run.workspaceId,
         })) ?? run;
-      await chatRunStreamManager.appendStop(run.streamKey);
-      return updated;
+      return forceCancelStoppedRun(updated);
     }
     return run;
   }
@@ -713,23 +1388,15 @@ export class DurableChatRunService {
       userId: input.userId,
       idempotencyKey,
     });
-    if (stopped.status === "cancelled" && !stopped.userMessageId) {
-      return {
-        threadRun: {
-          id: stopped.id,
-          idempotencyKey: stopped.idempotencyKey,
-          status: stopped.status,
-          mode: stopped.mode,
-        },
-        billing: buildEmptyBilling(stopped.teamId),
-        retrieval: {
-          embeddingProfileId: null,
-          vectorStrategy: null,
-          annIndexUsed: null,
-          citations: [],
-          availableCitations: [],
-        },
-      };
+    if (stopped.status === "cancelled") {
+      try {
+        return await getRunResult(stopped);
+      } catch (error) {
+        if (error instanceof ContentError) {
+          return buildStoppedRunFallback(stopped);
+        }
+        throw error;
+      }
     }
     return waitForRunResult({
       run: stopped,
@@ -738,22 +1405,16 @@ export class DurableChatRunService {
       throwTerminalErrors: false,
     }).catch((error) => {
       if (error instanceof ContentError) {
-        return {
-          threadRun: {
-            id: stopped.id,
-            idempotencyKey: stopped.idempotencyKey,
-            status: stopped.status,
-            mode: stopped.mode,
-          },
-          billing: buildEmptyBilling(stopped.teamId),
-          retrieval: {
-            embeddingProfileId: null,
-            vectorStrategy: null,
-            annIndexUsed: null,
-            citations: [],
-            availableCitations: [],
-          },
-        };
+        return findChatThreadRunById({
+          runId: stopped.id,
+          teamId: stopped.teamId,
+          workspaceId: stopped.workspaceId,
+        }).then(async (latest) => {
+          const stoppedRun = isTerminalRunStatus(latest?.status ?? stopped.status)
+            ? (latest ?? stopped)
+            : await forceCancelStoppedRun(latest ?? stopped);
+          return buildStoppedRunFallback(stoppedRun);
+        });
       }
       throw error;
     });
@@ -855,7 +1516,7 @@ export class DurableChatRunService {
       teamId: run.teamId,
       workspaceId: run.workspaceId,
     });
-    return current?.status === "cancel_requested";
+    return current?.status === "cancel_requested" || current?.status === "cancelled";
   }
 
   async heartbeat(run: ChatThreadRunRecord) {
@@ -891,6 +1552,13 @@ export class DurableChatRunService {
         assistantMessageId: cancelledRun.assistantMessageId,
         errorCode: CLIENT_CANCELLED_CODE,
         errorMessage: CLIENT_CANCELLED_MESSAGE,
+      };
+    }
+    if (run.status === "waiting_for_approval") {
+      return {
+        status: "waiting_for_approval" as const,
+        runId: run.id,
+        assistantMessageId: run.assistantMessageId,
       };
     }
     if (run.status === "running") {
@@ -952,12 +1620,244 @@ export class DurableChatRunService {
       errorMessage: input.errorMessage,
     });
   }
+
+  async markWaitingForApproval(input: {
+    run: ChatThreadRunRecord;
+    assistantMessageId?: string | null;
+    snapshot: ChatRunSnapshot;
+    confirmationIds?: string[];
+    requestedAt?: Date;
+    expiresAt?: Date;
+  }) {
+    const requestedAt = input.requestedAt ?? new Date();
+    const expiresAt =
+      input.expiresAt ??
+      new Date(requestedAt.getTime() + config.chat.toolApprovalTtlMs);
+    const approvalRequestedAt = requestedAt.toISOString();
+    const approvalExpiresAt = expiresAt.toISOString();
+    const waitingRun = {
+      ...input.run,
+      status: "waiting_for_approval" as const,
+      assistantMessageId:
+        input.assistantMessageId ?? input.run.assistantMessageId,
+    };
+    const snapshot = withAssistantThreadRunMetadata(
+      {
+        ...input.snapshot,
+        approvalRequestedAt,
+        approvalExpiresAt,
+        pendingConfirmationIds: input.confirmationIds ?? [],
+      },
+      waitingRun,
+    );
+    if (snapshot.assistantMessage) {
+      snapshot.assistantMessage = {
+        ...snapshot.assistantMessage,
+        metadata: {
+          ...snapshot.assistantMessage.metadata,
+          threadRun: {
+            ...(getObjectRecord(snapshot.assistantMessage.metadata.threadRun) ??
+              {}),
+            approvalRequestedAt,
+            approvalExpiresAt,
+          },
+        },
+      };
+    }
+    const updated = await markChatThreadRunWaitingForApproval({
+      assistantMessageId: waitingRun.assistantMessageId,
+      runId: input.run.id,
+      teamId: input.run.teamId,
+      workspaceId: input.run.workspaceId,
+      snapshotJson: snapshot,
+    });
+    if (!updated) {
+      return null;
+    }
+    await updateAssistantMessageConfirmationMetadata({
+      run: updated,
+      snapshot,
+    });
+    return {
+      ...updated,
+      snapshotJson: {
+        ...updated.snapshotJson,
+        approvalRequestedAt,
+        approvalExpiresAt,
+        pendingConfirmationIds: input.confirmationIds ?? [],
+      },
+    };
+  }
+
+  async validateConfirmationResponse(input: {
+    workspaceId: string;
+    userId: string;
+    confirmationId: string;
+    threadRunId?: string;
+    assistantMessageId?: string;
+  }) {
+    if (!input.threadRunId) {
+      throw new ContentError(
+        400,
+        "CONFIRMATION_THREAD_RUN_REQUIRED",
+        "Confirmation response requires the active chat run id",
+      );
+    }
+    const workspace = await requireContentWorkspace(input);
+    const run = await findChatThreadRunById({
+      runId: input.threadRunId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+    if (!run || run.userId !== input.userId) {
+      throw new ContentError(409, "CHAT_RUN_NOT_ACTIVE", "Chat run is not active");
+    }
+    const current = await expireRunIfApprovalExpired(run);
+    if (current.status !== "waiting_for_approval") {
+      throw new ContentError(
+        409,
+        current.errorCode === TOOL_APPROVAL_EXPIRED_CODE
+          ? TOOL_APPROVAL_EXPIRED_CODE
+          : "CHAT_RUN_NOT_WAITING_FOR_APPROVAL",
+        current.errorMessage ?? "Chat run is not waiting for approval",
+      );
+    }
+    if (
+      input.assistantMessageId &&
+      current.assistantMessageId &&
+      input.assistantMessageId !== current.assistantMessageId
+    ) {
+      throw new ContentError(
+        409,
+        "CONFIRMATION_ASSISTANT_MESSAGE_MISMATCH",
+        "Confirmation does not belong to this assistant message",
+      );
+    }
+    const approval = getRunApprovalPauseState(current);
+    if (
+      approval.confirmationIds.length > 0 &&
+      !approval.confirmationIds.includes(input.confirmationId)
+    ) {
+      throw new ContentError(
+        409,
+        "CONFIRMATION_NOT_ACTIVE",
+        "Confirmation is no longer active",
+      );
+    }
+    return current;
+  }
+
+  async recordConfirmationResponse(input: {
+    run: ChatThreadRunRecord;
+    confirmationId: string;
+    confirmation: unknown;
+  }) {
+    if (input.run.status !== "waiting_for_approval") {
+      return input.run;
+    }
+    const snapshot = getSnapshotRecord(input.run);
+    const replaced = replaceConfirmationInToolCalls(
+      snapshot.toolCalls,
+      input.confirmationId,
+      input.confirmation,
+    );
+    if (!replaced.changed) {
+      return input.run;
+    }
+    const traceParts = updateExistingTracePartsFromToolCalls(
+      snapshot.traceParts,
+      replaced.toolCalls,
+    );
+    if (!hasPendingConfirmations(replaced.toolCalls)) {
+      const completedRun = {
+        ...input.run,
+        status: "completed" as const,
+      };
+      const completedSnapshot = withAssistantThreadRunMetadata(
+        {
+          ...snapshot,
+          toolCalls: replaced.toolCalls,
+          ...(traceParts !== undefined ? { traceParts } : {}),
+          pendingConfirmationIds: [],
+        },
+        completedRun,
+      );
+      const finished =
+        (await finishChatThreadRun({
+          runId: input.run.id,
+          teamId: input.run.teamId,
+          workspaceId: input.run.workspaceId,
+          status: "completed",
+          assistantMessageId: input.run.assistantMessageId,
+          snapshotJson: completedSnapshot,
+        })) ?? completedRun;
+      await updateAssistantMessageConfirmationMetadata({
+        run: finished,
+        snapshot: completedSnapshot,
+      });
+      await updateAssistantMessageThreadRunMetadata({
+        run: finished,
+      });
+      return (
+        (await findChatThreadRunById({
+          runId: input.run.id,
+          teamId: input.run.teamId,
+          workspaceId: input.run.workspaceId,
+        })) ?? finished
+      );
+    }
+    const nextSnapshot: ChatRunSnapshot = {
+      ...snapshot,
+      toolCalls: replaced.toolCalls,
+      ...(traceParts !== undefined ? { traceParts } : {}),
+      pendingConfirmationIds: getRunApprovalPauseState(input.run)
+        .confirmationIds.filter((id) => id !== input.confirmationId),
+    };
+    const updated =
+      (await updateChatThreadRunStatus({
+        runId: input.run.id,
+        teamId: input.run.teamId,
+        workspaceId: input.run.workspaceId,
+        status: "waiting_for_approval",
+        snapshotJson: nextSnapshot,
+      })) ?? input.run;
+    await updateAssistantMessageConfirmationMetadata({
+      run: updated,
+      snapshot: nextSnapshot,
+    });
+    return updated;
+  }
+
+  async expireWaitingApprovals(input: { limit?: number } = {}) {
+    const runs = await listExpiredApprovalWaitingRuns({
+      limit: input.limit ?? EXPIRED_APPROVAL_SWEEP_LIMIT,
+    });
+    const results = await Promise.allSettled(
+      runs.map((run) => expireApprovalWaitingRun(run)),
+    );
+    const expired = results.filter(
+      (result) => result.status === "fulfilled" && result.value.status === "cancelled",
+    ).length;
+    const failed = results.length - expired;
+    if (failed > 0) {
+      logger.warn("Failed to expire some waiting approval chat runs", {
+        attempted: results.length,
+        expired,
+        failed,
+      });
+    }
+    return { attempted: runs.length, expired, failed };
+  }
 }
 
 export const durableChatRunService = new DurableChatRunService();
 
 export const testExports = {
+  buildAssistantMessageConfirmationMetadata,
+  completeApprovalRunIfNoPendingConfirmations,
   failRunIfStale,
+  forceCancelStoppedRun,
   resolveAttachRunState,
+  shouldCompleteApprovalRunWithoutPendingConfirmations,
   waitForRunResult,
 };

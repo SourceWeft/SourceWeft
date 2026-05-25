@@ -19,13 +19,21 @@ export type {
   DeleteConnectorRequest,
   DeleteConnectorResponse,
   MessageContentJson,
+  McpAuthType,
+  WorkspaceMcpActionRun,
+  WorkspaceMcpToolRun,
+  McpToolSelection,
   SourceConnector,
   SkillCommand,
   ToolApprovalResume,
+  ToolConfirmationRequest,
   ThreadCommandRequest,
+  WorkspaceMcpInstall,
+  WorkspaceMcpTool,
 } from "@sourceweft/contracts";
 export {
   SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,
   SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
 } from "@sourceweft/contracts";
 export * from "@sourceweft/contracts/agent-tools";
+export * from "@sourceweft/contracts/mcp";

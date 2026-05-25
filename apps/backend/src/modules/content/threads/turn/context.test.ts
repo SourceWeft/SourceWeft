@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  filterMessagesBeforeEditAnchor,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
   resolveGenerateImageToolFromMessage,
@@ -140,6 +141,100 @@ test("isContextExcludedMessage excludes persisted assistant errors", () => {
   assert.equal(
     isContextExcludedMessage(message({}, { role: "assistant" })),
     false,
+  );
+});
+
+test("filterMessagesBeforeEditAnchor drops the edited turn and later branch state", () => {
+  const messages = [
+    message(
+      {},
+      {
+        id: "intro-user",
+        role: "user",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ),
+    message(
+      {
+        agentCheckpoint: {
+          final: { threadId: "agent-thread", checkpointId: "intro-final" },
+        },
+      },
+      {
+        id: "intro-assistant",
+        role: "assistant",
+        createdAt: "2026-01-01T00:01:00.000Z",
+      },
+    ),
+    message(
+      { sourceIds: ["old-source"] },
+      {
+        id: "user-1",
+        role: "user",
+        createdAt: "2026-01-01T00:02:00.000Z",
+      },
+    ),
+    message(
+      {
+        agentCheckpoint: {
+          final: { threadId: "agent-thread", checkpointId: "old-final" },
+        },
+      },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        createdAt: "2026-01-01T00:03:00.000Z",
+      },
+    ),
+    message(
+      { sourceIds: ["later-source"] },
+      {
+        id: "later-user",
+        role: "user",
+        createdAt: "2026-01-01T00:04:00.000Z",
+      },
+    ),
+  ];
+
+  assert.deepEqual(
+    filterMessagesBeforeEditAnchor({
+      anchorUserMessageId: "user-1",
+      messages,
+    }).map((item) => item.id),
+    ["intro-user", "intro-assistant"],
+  );
+});
+
+test("filterMessagesBeforeEditAnchor treats edited versions as their root turn", () => {
+  const messages = [
+    message({}, { id: "intro-user", role: "user" }),
+    message({}, { id: "intro-assistant", role: "assistant" }),
+    message({}, { id: "user-1", role: "user" }),
+    message({}, { id: "assistant-1", role: "assistant" }),
+    message(
+      {},
+      {
+        id: "user-2",
+        parentMessageId: "user-1",
+        role: "user",
+      },
+    ),
+    message(
+      {},
+      {
+        id: "assistant-2",
+        parentMessageId: "assistant-1",
+        role: "assistant",
+      },
+    ),
+  ];
+
+  assert.deepEqual(
+    filterMessagesBeforeEditAnchor({
+      anchorUserMessageId: "user-2",
+      messages,
+    }).map((item) => item.id),
+    ["intro-user", "intro-assistant"],
   );
 });
 

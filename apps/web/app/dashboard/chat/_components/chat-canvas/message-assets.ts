@@ -8,6 +8,8 @@ import type {
   ToolCallRecord,
 } from "./types";
 
+const TOOL_ONLY_EMPTY_RESPONSE_TEXT = "Model returned an empty response.";
+
 export type GeneratedImageArtifact = {
   artifactId: string | null;
   artifactUrl: string | null;
@@ -99,11 +101,15 @@ export function getMessageText(input: {
   version: MessageVersion;
   workspaceId?: string | null;
 }): string {
-  return stripGeneratedImageMarkdown({
+  const text = stripGeneratedImageMarkdown({
     content: input.version.content,
     toolCalls: input.version.toolCalls,
     workspaceId: input.workspaceId,
   });
+  return text.trim() === TOOL_ONLY_EMPTY_RESPONSE_TEXT &&
+    (input.version.toolCalls?.length ?? 0) > 0
+    ? ""
+    : text;
 }
 
 function matchGeneratedImageToolCall(input: {

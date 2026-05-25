@@ -5,9 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
-  Database,
   Loader2,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/com
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
+import { SkillIcon } from "../../_components/dashboard-icons";
 
 type SkillCatalogItem = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -51,10 +50,6 @@ function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
   return visibility.charAt(0).toUpperCase() + visibility.slice(1);
 }
 
-function iconForSkill(item: SkillCatalogItem) {
-  return item.sourceType === "builtin" ? Sparkles : Database;
-}
-
 function readmeFallback(item: SkillCatalogItem) {
   return [
     `# ${item.displayName}`,
@@ -64,7 +59,6 @@ function readmeFallback(item: SkillCatalogItem) {
 }
 
 function SkillAvatar({ item }: { item: SkillCatalogItem }) {
-  const Icon = iconForSkill(item);
   const palette =
     item.sourceType === "builtin"
       ? "from-sky-500/90 via-cyan-500/80 to-emerald-500/85"
@@ -78,7 +72,7 @@ function SkillAvatar({ item }: { item: SkillCatalogItem }) {
       )}
     >
       <span className="absolute inset-0 bg-black/10" />
-      <Icon className="relative h-5 w-5 drop-shadow" />
+      <SkillIcon className="relative h-5 w-5 drop-shadow" />
     </span>
   );
 }
@@ -290,7 +284,7 @@ export default function SkillDetailPage() {
                   ) : detail.skill.enabled ? (
                     <Trash2 className="h-4 w-4" />
                   ) : (
-                    <Sparkles className="h-4 w-4" />
+                    <SkillIcon className="h-4 w-4" />
                   )}
                   {detail.skill.enabled ? "Uninstall" : "Install"}
                 </Button>

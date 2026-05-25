@@ -77,6 +77,7 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
   status?: string;
   step?: unknown;
   text?: string;
+  threadRun?: unknown;
   threadId?: string;
   title?: string;
   tool?: string;
@@ -133,7 +134,7 @@ type RunChatStreamInput = {
     stepsById: Map<string, ThinkingStepRecord>,
     nextStep: ThinkingStepRecord,
   ) => void;
-  mode: "send" | "refresh" | "edit";
+  mode: "send" | "refresh" | "edit" | "resume";
   mentionedSourceIds?: string[];
   toolApprovalResume?: ToolApprovalResume | null;
   normalizeCitationRecords: (value: unknown) => CitationRecord[];
@@ -148,6 +149,7 @@ type RunChatStreamInput = {
   onPersistedAssistantMessageId: (messageId: string) => void;
   onPersistedUserMessageId: (messageId: string) => void;
   onPreparedEffectiveSourceIds: (sourceIds: string[] | null) => void;
+  onPreparedThreadRun?: (threadRun: Record<string, unknown>) => void;
   onStreamError: (error: Error) => void;
   onSuppressErrorToast: (suppressErrorToast: boolean) => void;
   onTitlePollScheduled?: () => void;
@@ -199,6 +201,7 @@ type RunChatStreamInput = {
 };
 
 export type RunChatStreamResult = {
+  finishReason: string | null;
   receivedFinishEvent: boolean;
   streamRenderBuffer: StreamingRenderBuffer;
   titlePollScheduled: boolean;
@@ -301,6 +304,7 @@ export async function runChatStream(
   let drainPromise: Promise<void> | null = null;
   let streamEnded = false;
   let receivedFinishEvent = false;
+  let finishReason: string | null = null;
   let pendingTitleJobId: string | null = null;
   let sawStreamError = false;
   let shouldPollThreadTitle = false;
@@ -425,7 +429,11 @@ export async function runChatStream(
     );
     const shouldShowTextPause =
       input.getAssistantText().length > 0 &&
-      toolCalls.some((toolCall) => toolCall.status === "running");
+      toolCalls.some(
+        (toolCall) =>
+          toolCall.status === "running" ||
+          toolCall.status === "approval_requested",
+      );
     input.updateStreamingAssistantMessage((message) => ({
       ...message,
       metadata: {
@@ -450,7 +458,11 @@ export async function runChatStream(
     );
     const shouldShowTextPause =
       input.getAssistantText().length > 0 &&
-      (toolCalls.some((toolCall) => toolCall.status === "running") ||
+      (toolCalls.some(
+        (toolCall) =>
+          toolCall.status === "running" ||
+          toolCall.status === "approval_requested",
+      ) ||
         thinkingSteps.some((step) => step.status === "in_progress"));
     input.updateStreamingAssistantMessage((message) => ({
       ...message,
@@ -522,6 +534,24 @@ export async function runChatStream(
         },
         streamToolCallsById,
       }),
+    resolveTraceEventFromStreamEvent: ({ event, toolCall }) => {
+      if (!event.type.startsWith("tool-call-")) {
+        return null;
+      }
+      return {
+        type: "tool-call",
+        id:
+          typeof toolCall.sequence === "number"
+            ? `${toolCall.id}:${toolCall.sequence}`
+            : toolCall.id,
+        itemId: toolCall.id,
+        sequence: toolCall.sequence,
+        eventType: event.type,
+        tool: toolCall.tool,
+        toolCall,
+        payload: event as Record<string, unknown>,
+      };
+    },
     streamRenderBuffer,
     streamThinkingStepsById: input.streamThinkingStepsById,
     streamToolCallsById: input.streamToolCallsById,
@@ -554,6 +584,11 @@ export async function runChatStream(
           setPersistedUserMessageId: input.onPersistedUserMessageId,
           setCreatedUserMessageId: input.onCreatedUserMessageId,
         });
+        if (data.threadRun && typeof data.threadRun === "object") {
+          input.onPreparedThreadRun?.(
+            data.threadRun as Record<string, unknown>,
+          );
+        }
       } else if (data.type === "text-delta" && typeof data.delta === "string") {
         handleStreamingTextDelta({
           context: streamingEventHandlerContext,
@@ -663,9 +698,10 @@ export async function runChatStream(
           setStreamingAssistantMessage: input.setStreamingAssistantMessage,
         });
       } else if (data.type === "finish") {
+        finishReason = data.finishReason ?? null;
         const finishState = handleStreamingFinish({
           context: streamingEventHandlerContext,
-          finishReason: data.finishReason ?? null,
+          finishReason,
         });
         receivedFinishEvent = finishState.receivedFinishEvent;
         streamEnded = finishState.streamEnded;
@@ -693,6 +729,7 @@ export async function runChatStream(
   }
 
   return {
+    finishReason,
     receivedFinishEvent,
     streamRenderBuffer,
     titlePollScheduled,

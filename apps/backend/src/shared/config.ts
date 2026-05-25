@@ -359,6 +359,12 @@ export const config = {
   queueName: process.env.JOB_QUEUE_NAME || "sourceweft-jobs",
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 2),
   schedulerIntervalMs: Number(process.env.SCHEDULER_INTERVAL_MS || 60000),
+  chat: {
+    toolApprovalTtlMs: parsePositiveNumber(
+      process.env.CHAT_TOOL_APPROVAL_TTL_MS,
+      30 * 60 * 1000,
+    ),
+  },
   s3: {
     region: process.env.S3_REGION || process.env.AWS_REGION || "us-east-1",
     bucket: process.env.S3_BUCKET || "",

@@ -44,4 +44,11 @@ test("buildRequestPreview prefers explicit action targets", () => {
     }),
     "fake.item.update on item-1",
   );
+  assert.equal(
+    buildRequestPreview({
+      actionType: "notion.page.trash",
+      request: { pageIds: ["page-1", "page-2"] },
+    }),
+    "notion.page.trash on 2 pages",
+  );
 });

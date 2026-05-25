@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "../../shared/database";
 import {
   workspaceMcpCredentials,
@@ -11,8 +11,11 @@ import {
 import type {
   McpActionRunRecord,
   McpActionRunStatus,
+  McpActionRunWithInstallRecord,
+  McpRunInstallSummary,
   McpToolRunRecord,
   McpToolRunStatus,
+  McpToolRunWithInstallRecord,
   WorkspaceMcpCredentialRecord,
   WorkspaceMcpInstallRecord,
   WorkspaceMcpToolRecord,
@@ -25,6 +28,9 @@ type ToolRow = typeof workspaceMcpTools.$inferSelect;
 type CredentialRow = typeof workspaceMcpCredentials.$inferSelect;
 type ActionRunRow = typeof mcpActionRuns.$inferSelect;
 type ToolRunRow = typeof mcpToolRuns.$inferSelect;
+
+const DEFAULT_RUN_LIST_LIMIT = 50;
+const MAX_RUN_LIST_LIMIT = 100;
 
 function iso(value: Date | null) {
   return value ? value.toISOString() : null;
@@ -83,6 +89,21 @@ function mapInstall(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     tools,
+  };
+}
+
+function mapRunInstallSummary(
+  row: Pick<
+    InstallRow,
+    "id" | "name" | "marketIdentifier" | "official" | "verified"
+  >,
+): McpRunInstallSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    marketIdentifier: row.marketIdentifier,
+    official: row.official,
+    verified: row.verified,
   };
 }
 
@@ -151,6 +172,33 @@ function mapToolRun(row: ToolRunRow): McpToolRunRecord {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function normalizeRunListLimit(limit?: number) {
+  if (!limit || !Number.isFinite(limit)) {
+    return DEFAULT_RUN_LIST_LIMIT;
+  }
+  return Math.max(1, Math.min(Math.floor(limit), MAX_RUN_LIST_LIMIT));
+}
+
+async function installSummariesById(input: { installIds: string[] }) {
+  const uniqueInstallIds = Array.from(
+    new Set(input.installIds.filter((id): id is string => Boolean(id))),
+  );
+  if (uniqueInstallIds.length === 0) {
+    return new Map<string, McpRunInstallSummary>();
+  }
+  const rows = await db
+    .select({
+      id: workspaceMcpInstalls.id,
+      name: workspaceMcpInstalls.name,
+      marketIdentifier: workspaceMcpInstalls.marketIdentifier,
+      official: workspaceMcpInstalls.official,
+      verified: workspaceMcpInstalls.verified,
+    })
+    .from(workspaceMcpInstalls)
+    .where(inArray(workspaceMcpInstalls.id, uniqueInstallIds));
+  return new Map(rows.map((row) => [row.id, mapRunInstallSummary(row)]));
 }
 
 export async function listWorkspaceMcpInstalls(input: {
@@ -453,6 +501,24 @@ export async function updateWorkspaceMcpInstall(input: {
     : null;
 }
 
+export async function deleteWorkspaceMcpInstall(input: {
+  teamId: string;
+  workspaceId: string;
+  installId: string;
+}) {
+  const rows = await db
+    .delete(workspaceMcpInstalls)
+    .where(
+      and(
+        eq(workspaceMcpInstalls.id, input.installId),
+        eq(workspaceMcpInstalls.teamId, input.teamId),
+        eq(workspaceMcpInstalls.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning({ id: workspaceMcpInstalls.id });
+  return rows.length > 0;
+}
+
 export async function setWorkspaceMcpToolsEnabled(input: {
   teamId: string;
   workspaceId: string;
@@ -730,4 +796,84 @@ export async function updateMcpToolRun(input: {
     )
     .returning();
   return row ? mapToolRun(row) : null;
+}
+
+export async function listMcpToolRuns(input: {
+  teamId: string;
+  workspaceId: string;
+  limit?: number;
+  cursor?: string | null;
+}) {
+  const limit = normalizeRunListLimit(input.limit);
+  const cursorDate = input.cursor ? new Date(input.cursor) : null;
+  const rows = await db
+    .select()
+    .from(mcpToolRuns)
+    .where(
+      and(
+        eq(mcpToolRuns.teamId, input.teamId),
+        eq(mcpToolRuns.workspaceId, input.workspaceId),
+        cursorDate && !Number.isNaN(cursorDate.getTime())
+          ? lt(mcpToolRuns.createdAt, cursorDate)
+          : undefined,
+      ),
+    )
+    .orderBy(desc(mcpToolRuns.createdAt))
+    .limit(limit + 1);
+  const pageRows = rows.slice(0, limit);
+  const installsById = await installSummariesById({
+    installIds: pageRows
+      .map((row) => row.installId)
+      .filter((id): id is string => Boolean(id)),
+  });
+  const items: McpToolRunWithInstallRecord[] = pageRows.map((row) => ({
+    ...mapToolRun(row),
+    install: row.installId ? (installsById.get(row.installId) ?? null) : null,
+  }));
+  return {
+    items,
+    nextCursor:
+      rows.length > limit
+        ? (pageRows.at(-1)?.createdAt.toISOString() ?? null)
+        : null,
+  };
+}
+
+export async function listMcpActionRuns(input: {
+  teamId: string;
+  workspaceId: string;
+  limit?: number;
+  cursor?: string | null;
+}) {
+  const limit = normalizeRunListLimit(input.limit);
+  const cursorDate = input.cursor ? new Date(input.cursor) : null;
+  const rows = await db
+    .select()
+    .from(mcpActionRuns)
+    .where(
+      and(
+        eq(mcpActionRuns.teamId, input.teamId),
+        eq(mcpActionRuns.workspaceId, input.workspaceId),
+        cursorDate && !Number.isNaN(cursorDate.getTime())
+          ? lt(mcpActionRuns.createdAt, cursorDate)
+          : undefined,
+      ),
+    )
+    .orderBy(desc(mcpActionRuns.createdAt))
+    .limit(limit + 1);
+  const pageRows = rows.slice(0, limit);
+  const installsById = await installSummariesById({
+    installIds: pageRows.map((row) => row.installId),
+  });
+  const items: McpActionRunWithInstallRecord[] = pageRows.map((row) => ({
+    ...mapActionRun(row),
+    install: installsById.get(row.installId) ?? null,
+  }));
+  return {
+    items,
+    nextCursor:
+      rows.length > limit
+        ? (pageRows.at(-1)?.createdAt.toISOString() ?? null)
+        : null,
+  };
 }

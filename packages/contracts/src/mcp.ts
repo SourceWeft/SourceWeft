@@ -3,6 +3,9 @@ import {
   mcpAuthTypeSchema,
   mcpRiskLevelSchema,
   mcpTransportSchema,
+  getMarketMcpResponseSchema,
+  listMarketCategoriesResponseSchema,
+  marketItemSummarySchema,
   marketMcpManifestSchema,
   marketMcpToolManifestSchema,
 } from "@sourceweft/market-contracts";
@@ -50,6 +53,25 @@ export const mcpToolSelectionSchema = z.object({
   installIds: z.array(z.string()).optional(),
   toolIds: z.array(z.string()).optional(),
 });
+
+export const mcpToolRunStatusSchema = z.enum([
+  "running",
+  "succeeded",
+  "failed",
+  "proposed",
+  "rejected",
+  "canceled",
+]);
+
+export const mcpActionRunStatusSchema = z.enum([
+  "proposed",
+  "approved",
+  "rejected",
+  "running",
+  "succeeded",
+  "failed",
+  "canceled",
+]);
 
 export const workspaceMcpToolSchema = z.object({
   id: z.string(),
@@ -101,14 +123,17 @@ export const workspaceMcpInstallSchema = z.object({
 export const listWorkspaceMarketMcpResponseSchema = z.object({
   items: z.array(
     z.object({
-      market: z.record(z.string(), z.unknown()),
+      market: marketItemSummarySchema,
       install: workspaceMcpInstallSchema.nullable(),
     }),
   ),
 });
 
+export const listWorkspaceMarketMcpCategoriesResponseSchema =
+  listMarketCategoriesResponseSchema;
+
 export const getWorkspaceMarketMcpResponseSchema = z.object({
-  market: z.record(z.string(), z.unknown()),
+  market: getMarketMcpResponseSchema,
   install: workspaceMcpInstallSchema.nullable(),
 });
 
@@ -124,6 +149,11 @@ export const updateWorkspaceMcpInstallResponseSchema = z.object({
   install: workspaceMcpInstallSchema,
 });
 
+export const deleteWorkspaceMcpInstallResponseSchema = z.object({
+  deleted: z.literal(true),
+  installId: z.string(),
+});
+
 export const upsertWorkspaceMcpCredentialsResponseSchema = z.object({
   install: workspaceMcpInstallSchema,
 });
@@ -131,6 +161,80 @@ export const upsertWorkspaceMcpCredentialsResponseSchema = z.object({
 export const testWorkspaceMcpInstallResponseSchema = z.object({
   install: workspaceMcpInstallSchema,
   toolCount: z.number(),
+});
+
+export const workspaceMcpToolRunSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  workspaceId: z.string(),
+  threadId: z.string().nullable(),
+  runId: z.string().nullable(),
+  toolCallId: z.string().nullable(),
+  installId: z.string().nullable(),
+  toolId: z.string().nullable(),
+  actionRunId: z.string().nullable(),
+  serverToolName: z.string(),
+  normalizedToolName: z.string(),
+  risk: mcpRiskLevelSchema,
+  status: mcpToolRunStatusSchema,
+  redactedInput: z.record(z.string(), z.unknown()),
+  redactedOutput: z.record(z.string(), z.unknown()),
+  latencyMs: z.number().nullable(),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  createdBy: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  install: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      marketIdentifier: z.string().nullable(),
+      official: z.boolean(),
+      verified: z.boolean(),
+    })
+    .nullable(),
+});
+
+export const workspaceMcpActionRunSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  workspaceId: z.string(),
+  installId: z.string(),
+  toolId: z.string().nullable(),
+  serverToolName: z.string(),
+  normalizedToolName: z.string(),
+  risk: mcpRiskLevelSchema,
+  status: mcpActionRunStatusSchema,
+  requestJson: z.record(z.string(), z.unknown()),
+  requestPreview: z.string(),
+  resultJson: z.record(z.string(), z.unknown()),
+  approvedBy: z.string().nullable(),
+  executedBy: z.string().nullable(),
+  idempotencyKey: z.string(),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  install: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      marketIdentifier: z.string().nullable(),
+      official: z.boolean(),
+      verified: z.boolean(),
+    })
+    .nullable(),
+});
+
+export const listWorkspaceMcpRunsResponseSchema = z.object({
+  items: z.array(workspaceMcpToolRunSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export const listWorkspaceMcpActionRunsResponseSchema = z.object({
+  items: z.array(workspaceMcpActionRunSchema),
+  nextCursor: z.string().nullable(),
 });
 
 export type WorkspaceMcpInstallStatus = z.infer<
@@ -150,10 +254,15 @@ export type UpsertWorkspaceMcpCredentialsRequest = z.infer<
   typeof upsertWorkspaceMcpCredentialsRequestSchema
 >;
 export type McpToolSelection = z.infer<typeof mcpToolSelectionSchema>;
+export type McpToolRunStatus = z.infer<typeof mcpToolRunStatusSchema>;
+export type McpActionRunStatus = z.infer<typeof mcpActionRunStatusSchema>;
 export type WorkspaceMcpTool = z.infer<typeof workspaceMcpToolSchema>;
 export type WorkspaceMcpInstall = z.infer<typeof workspaceMcpInstallSchema>;
 export type ListWorkspaceMarketMcpResponse = z.infer<
   typeof listWorkspaceMarketMcpResponseSchema
+>;
+export type ListWorkspaceMarketMcpCategoriesResponse = z.infer<
+  typeof listWorkspaceMarketMcpCategoriesResponseSchema
 >;
 export type GetWorkspaceMarketMcpResponse = z.infer<
   typeof getWorkspaceMarketMcpResponseSchema
@@ -167,12 +276,30 @@ export type ListWorkspaceMcpInstallsResponse = z.infer<
 export type UpdateWorkspaceMcpInstallResponse = z.infer<
   typeof updateWorkspaceMcpInstallResponseSchema
 >;
+export type DeleteWorkspaceMcpInstallResponse = z.infer<
+  typeof deleteWorkspaceMcpInstallResponseSchema
+>;
 export type UpsertWorkspaceMcpCredentialsResponse = z.infer<
   typeof upsertWorkspaceMcpCredentialsResponseSchema
 >;
 export type TestWorkspaceMcpInstallResponse = z.infer<
   typeof testWorkspaceMcpInstallResponseSchema
 >;
+export type WorkspaceMcpToolRun = z.infer<typeof workspaceMcpToolRunSchema>;
+export type WorkspaceMcpActionRun = z.infer<
+  typeof workspaceMcpActionRunSchema
+>;
+export type ListWorkspaceMcpRunsResponse = z.infer<
+  typeof listWorkspaceMcpRunsResponseSchema
+>;
+export type ListWorkspaceMcpActionRunsResponse = z.infer<
+  typeof listWorkspaceMcpActionRunsResponseSchema
+>;
 export type MarketMcpToolManifest = z.infer<
   typeof marketMcpToolManifestSchema
 >;
+export type {
+  McpAuthType,
+  McpRiskLevel,
+  McpTransport,
+} from "@sourceweft/market-contracts";

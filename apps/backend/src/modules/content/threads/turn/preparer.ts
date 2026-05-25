@@ -8,6 +8,7 @@ import type {
 import sharp from "sharp";
 import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { ContentBillingPort } from "../../billing-port";
+import type { MessageRecord } from "../../types";
 import { meterBillableModelUsage } from "../../model-billing";
 import {
   getModelGatewayClient,
@@ -40,6 +41,7 @@ import {
 } from "../model-settings";
 import {
   collapseSupersededMessages,
+  filterMessagesBeforeEditAnchor,
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
   resolveSourceIdsFromMessage,
@@ -51,6 +53,7 @@ import {
 import { assertSourcesExist } from "./source-validation";
 import type {
   PreparedThreadTurn,
+  ConnectorToolSelection,
   ResolvedThreadCommand,
   StreamThreadEventInput,
 } from "./types";
@@ -77,8 +80,16 @@ import {
 } from "./tool-selection";
 import {
   getAgentToolSlashCommand,
+  getAgentToolDefinition,
+  hasAgentToolCapability,
   isAgentToolName,
 } from "../../agent/tool-registry";
+import {
+  renderSkillActivationWorkflow,
+  renderSkillCommandWorkflow,
+  renderToolCommandWorkflow,
+  type ToolPermission,
+} from "./command-registry";
 import type {
   AgentMultimodalContentPart,
   ChatInputImage,
@@ -86,7 +97,9 @@ import type {
   MessageContentJson,
   PreflightBillingTrace,
   ThinkingStepTrace,
+  TraceContinuationMetadata,
 } from "./types";
+import { normalizeTraceParts } from "./trace-parts";
 
 const CHAT_IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -129,13 +142,84 @@ type VisionFallbackResult = {
   steps: ThinkingStepTrace[];
 };
 
+function getObjectRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getTraceSequence(value: unknown) {
+  const sequence = getObjectRecord(value)?.sequence;
+  return typeof sequence === "number" && Number.isFinite(sequence)
+    ? sequence
+    : null;
+}
+
+function resolveTraceContinuationMetadata(
+  assistantMessage: MessageRecord | null,
+): TraceContinuationMetadata | null {
+  if (!assistantMessage) {
+    return null;
+  }
+
+  const metadata = assistantMessage.metadata;
+  const traceParts = normalizeTraceParts(metadata.traceParts);
+  const traceGroups = [
+    ...(Array.isArray(metadata.traceEvents)
+      ? metadata.traceEvents
+      : []),
+    ...(Array.isArray(metadata.reasoningSegments)
+      ? metadata.reasoningSegments
+      : []),
+    ...(Array.isArray(metadata.thinkingSteps) ? metadata.thinkingSteps : []),
+    ...(Array.isArray(metadata.toolCalls) ? metadata.toolCalls : []),
+  ];
+  let maxSequence = 0;
+  for (const item of traceGroups) {
+    const sequence = getTraceSequence(item);
+    if (sequence !== null) {
+      maxSequence = Math.max(maxSequence, sequence);
+    }
+  }
+  for (const part of traceParts) {
+    maxSequence = Math.max(maxSequence, part.order + 1);
+  }
+
+  const toolSequenceById: Record<string, number> = {};
+  if (Array.isArray(metadata.toolCalls)) {
+    for (const toolCall of metadata.toolCalls) {
+      const record = getObjectRecord(toolCall);
+      const id = record?.id;
+      const sequence = getTraceSequence(record);
+      if (typeof id === "string" && id.length > 0 && sequence !== null) {
+        toolSequenceById[id] = sequence;
+      }
+    }
+  }
+  for (const part of traceParts) {
+    if (part.kind === "tool" && toolSequenceById[part.toolCallId] === undefined) {
+      toolSequenceById[part.toolCallId] = part.order + 1;
+    }
+  }
+
+  return maxSequence > 0 ||
+    Object.keys(toolSequenceById).length > 0 ||
+    traceParts.length > 0
+    ? {
+        maxSequence,
+        toolSequenceById,
+        traceParts,
+      }
+    : null;
+}
+
 function buildCommandAugmentedText(input: {
   command: ResolvedThreadCommand | null;
   text: string;
 }) {
   const args = input.command ? input.command.arguments : input.text;
-  if (input.command?.kind === "skill") {
-    return args;
+  if (input.command?.workflow) {
+    return input.command.workflow.renderedPrompt;
   }
   if (input.command?.kind === "tool") {
     return `<sourceweft_tool_command name="${input.command.toolName ?? input.command.canonicalName.replace(/^\//, "")}">\nUse the ${input.command.toolName ?? input.command.displayName} tool for this request. Treat the user request below as the tool input; do not answer without using the selected tool unless the input is invalid or the tool is unavailable.\n</sourceweft_tool_command>\n\n<user_request>\n${args}\n</user_request>`;
@@ -180,7 +264,8 @@ function unescapePromptMarkerLabel(value: string) {
 
 function parsePromptMarkers(content: string) {
   const markers: ParsedPromptMarker[] = [];
-  const pattern = /\[(skills|skill-command|tool|source):([^\]]+)\]\(((?:\\.|[^)])*)\)/g;
+  const pattern =
+    /\[(skills|skill-command|tool|source):([^\]]+)\]\(((?:\\.|[^)])*)\)/g;
   let cleanContent = "";
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -280,25 +365,13 @@ function resolveMarkerToolSelection(
 ): StreamThreadEventInput["tools"] {
   let next = tools;
   for (const marker of markers) {
-    if (
-      marker.type !== "command" ||
-      marker.kind !== "tool"
-    ) {
+    if (marker.type !== "command" || marker.kind !== "tool") {
       continue;
     }
     const toolName = resolveToolCommandName(marker.value);
-    if (toolName === AGENT_TOOL_NAMES.generateImage) {
-      next = {
-        ...(next ?? {}),
-        [AGENT_TOOL_NAMES.generateImage]: {
-          ...((next ?? {})[AGENT_TOOL_NAMES.generateImage] ?? {}),
-          enabled: true,
-          mode: "generate",
-        },
-      };
-      continue;
-    }
-    next = enableNotionToolSelection(next, toolName ?? "");
+    next = enableToolSelection(next, toolName ?? "", {
+      forceGenerateImage: true,
+    });
   }
   return next;
 }
@@ -313,6 +386,17 @@ function buildThreadCommandMetadata(command: ResolvedThreadCommand) {
     ...(command.commandName ? { commandName: command.commandName } : {}),
     ...(command.path ? { path: command.path } : {}),
     ...(command.toolName ? { toolName: command.toolName } : {}),
+    ...(command.workflow
+      ? {
+          workflow: {
+            kind: command.workflow.kind,
+            execution: command.workflow.execution,
+            defaultTools: command.workflow.defaultTools,
+            permissionOverrides: command.workflow.permissionOverrides,
+            successCriteria: command.workflow.successCriteria,
+          },
+        }
+      : {}),
   };
 }
 
@@ -1039,8 +1123,12 @@ export const testExports = {
   parsePromptMarkers,
   meterVisionFallbackBilling,
   parseRequestedCommand,
+  resolveLatestAssistantFinalCheckpoint,
+  resolveLatestSourceIds,
+  resolveTraceContinuationMetadata,
   resolveThreadCommand,
   resolveToolCommandName,
+  resolveToolPermissions,
   shouldRejectEmptyThreadMessage,
 };
 
@@ -1251,7 +1339,9 @@ export async function prepareThreadTurn(
   const resolvedChatModel = await resolveThreadChatProfile({
     threadModelSettings: normalizeThreadModelSettings(thread.modelSettings),
     requestedProfileAlias:
-      requestedExecutionMode === "BYOK" ? undefined : requestedProfileAlias || undefined,
+      requestedExecutionMode === "BYOK"
+        ? undefined
+        : requestedProfileAlias || undefined,
     requestedModelAlias:
       requestedExecutionMode === "BYOK"
         ? undefined
@@ -1260,7 +1350,9 @@ export async function prepareThreadTurn(
           : requestedModelAlias || undefined,
   });
 
-  const markerMentionedSourceIds = dedupeSourceIds(markerSourceIds(parsedPrompt.markers));
+  const markerMentionedSourceIds = dedupeSourceIds(
+    markerSourceIds(parsedPrompt.markers),
+  );
   const markerSourceTitleIds = await resolveSourceIdsByTitles({
     teamId: workspace.organizationId,
     workspaceId: workspace.id,
@@ -1285,8 +1377,12 @@ export async function prepareThreadTurn(
     workspaceId: workspace.id,
     threadId: thread.id,
   });
+  const contextMessageRecords = filterMessagesBeforeEditAnchor({
+    anchorUserMessageId: input.contextAnchorUserMessageId,
+    messages: messageRecords,
+  });
 
-  const fallbackSourceIds = resolveLatestSourceIds(messageRecords);
+  const fallbackSourceIds = resolveLatestSourceIds(contextMessageRecords);
   const selectedSourceIds =
     requestedSourceIds.length > 0 ? requestedSourceIds : fallbackSourceIds;
   const sourceScope = await resolveSourceTreeScope({
@@ -1312,7 +1408,8 @@ export async function prepareThreadTurn(
             arguments: messageContent,
             kind: "tool",
             name: markerToolCommand.value,
-            toolName: resolveToolCommandName(markerToolCommand.value) ?? undefined,
+            toolName:
+              resolveToolCommandName(markerToolCommand.value) ?? undefined,
           }
         : input.command,
   });
@@ -1347,17 +1444,20 @@ export async function prepareThreadTurn(
     enabledSkills,
   });
   const commandSkillId =
-    resolvedCommand?.kind === "skill" || resolvedCommand?.kind === "skill-command"
+    resolvedCommand?.kind === "skill" ||
+    resolvedCommand?.kind === "skill-command"
       ? enabledSkills.find((skill) => skill.name === resolvedCommand.skillSlug)
           ?.workspaceSkillId
       : undefined;
   const effectiveInvokedSkillIds = Array.from(
-    new Set([
-      ...invokedSkillIds,
-      ...(commandSkillId ? [commandSkillId] : []),
-    ]),
+    new Set([...invokedSkillIds, ...(commandSkillId ? [commandSkillId] : [])]),
   ).slice(0, 5);
   const toolsWithCommand = mergeCommandTools(toolsWithMarkers, resolvedCommand);
+  const toolPermissions = resolveToolPermissions({
+    tools: toolsWithCommand,
+    command: resolvedCommand,
+    enabledSkills,
+  });
   const generateImageTool = resolveGenerateImageToolSelection(toolsWithCommand);
   const imageExecution =
     input.image?.executionMode === "BYOK"
@@ -1398,7 +1498,27 @@ export async function prepareThreadTurn(
     tools: toolsWithCommand,
     enabledSkills,
   });
-  const notionTools = resolveNotionToolSelections(toolsWithCommand);
+  const resolvedNotionTools = resolveNotionToolSelections(toolsWithCommand);
+  const notionConnectorId = Object.values(resolvedNotionTools).find(
+    (selection) => selection.connectorId,
+  )?.connectorId;
+  const notionTools = {
+    ...Object.fromEntries(
+      Object.entries(toolPermissions)
+        .filter(
+          ([toolName, permission]) =>
+            hasAgentToolCapability(toolName, "notion") && permission !== "deny",
+        )
+        .map(([toolName]) => [
+          toolName,
+          {
+            ...(notionConnectorId ? { connectorId: notionConnectorId } : {}),
+            enabled: true,
+          },
+        ]),
+    ),
+    ...resolvedNotionTools,
+  } satisfies Record<string, ConnectorToolSelection>;
   const mcpTools = resolveMcpToolSelection(toolsWithCommand);
 
   await assertSourcesExist({
@@ -1409,14 +1529,12 @@ export async function prepareThreadTurn(
     ),
   });
 
-  const normalizedThreadSettings = normalizeThreadModelSettings(
-    {
-      ...normalizeThreadModelSettings(thread.modelSettings),
-      ...(input.visionProfileAlias !== undefined
-        ? { visionProfileAlias: input.visionProfileAlias }
-        : {}),
-    },
-  );
+  const normalizedThreadSettings = normalizeThreadModelSettings({
+    ...normalizeThreadModelSettings(thread.modelSettings),
+    ...(input.visionProfileAlias !== undefined
+      ? { visionProfileAlias: input.visionProfileAlias }
+      : {}),
+  });
   await validateThreadModelSettings(normalizedThreadSettings);
   const normalizedThreadSettingsWithSnapshots =
     await resolveThreadModelSettingsSnapshots(normalizedThreadSettings);
@@ -1447,13 +1565,14 @@ export async function prepareThreadTurn(
       : modelAlias);
   const userMessageId = existingUserMessage?.id ?? randomUUID();
   const hasSubmittedImages = (input.images?.length ?? 0) > 0;
-  const savedInputImages = existingUserMessage || !hasSubmittedImages
-    ? []
-    : await saveChatInputImages({
-        workspaceId: workspace.id,
-        messageId: userMessageId,
-        images: input.images,
-      });
+  const savedInputImages =
+    existingUserMessage || !hasSubmittedImages
+      ? []
+      : await saveChatInputImages({
+          workspaceId: workspace.id,
+          messageId: userMessageId,
+          images: input.images,
+        });
   const existingImageParts =
     input.existingImageParts ??
     extractImagePartsFromContentJson(input.existingUserMessage?.contentJson);
@@ -1614,7 +1733,7 @@ export async function prepareThreadTurn(
   const agentMode = input.agentMode ?? "continue";
   const latestAssistantCheckpoint =
     agentMode === "continue"
-      ? resolveLatestAssistantFinalCheckpoint(messageRecords)
+      ? resolveLatestAssistantFinalCheckpoint(contextMessageRecords)
       : null;
   const agentBaseCheckpoint =
     input.agentBaseCheckpoint !== undefined
@@ -1629,6 +1748,15 @@ export async function prepareThreadTurn(
 
   const agentRunThreadId = input.agentRunThreadId ?? thread.id;
   const toolApprovalResume = input.toolApprovalResume ?? null;
+  const traceContinuation = resolveTraceContinuationMetadata(
+    input.assistantMessageId
+      ? (messageRecords.find(
+          (message) =>
+            message.id === input.assistantMessageId &&
+            message.role === "assistant",
+        ) ?? null)
+      : null,
+  );
   const runTraceId = existingUserMessage
     ? `thread-run:${randomUUID()}`
     : userMessage.id;
@@ -1683,6 +1811,10 @@ export async function prepareThreadTurn(
     notionTools,
     mcpTools: mcpTools ?? {},
     command: resolvedCommand,
+    commandSuccessCriteria: resolvedCommand?.workflow?.successCriteria ?? {
+      kind: "none",
+    },
+    toolPermissions,
     generateImageTool: effectiveGenerateImageTool,
     artifactIntent: artifactPipeline.decision,
     imageProfile: artifactPipeline.imageProfile,
@@ -1703,6 +1835,7 @@ export async function prepareThreadTurn(
     agentBaseCheckpoint,
     agentRunThreadId,
     toolApprovalResume,
+    traceContinuation,
     isFirstAssistantResponse,
     isFirstAssistantAttempt,
     initialTitle,
@@ -1775,7 +1908,9 @@ function resolveToolCommandName(name: string) {
   }
   for (const candidate of Object.values(AGENT_TOOL_NAMES)) {
     const slash = getAgentToolSlashCommand(candidate);
-    if (slash?.aliases?.some((alias) => alias.toLowerCase() === raw.toLowerCase())) {
+    if (
+      slash?.aliases?.some((alias) => alias.toLowerCase() === raw.toLowerCase())
+    ) {
       return candidate;
     }
   }
@@ -1828,15 +1963,32 @@ function resolveThreadCommand(input: {
   const toolName = resolveToolCommandName(input.command.name);
   if (toolName) {
     const slashCommand = getAgentToolSlashCommand(toolName);
+    const canonicalName = `/${toolName}`;
+    const argumentsText = input.command.arguments;
+    const displayName = slashCommand?.displayName ?? toolName;
+    const workflow = renderToolCommandWorkflow({
+      arguments: argumentsText,
+      canonicalName,
+      displayName,
+      toolName,
+    });
+    if (!workflow) {
+      throw new ContentError(
+        404,
+        "COMMAND_NOT_FOUND",
+        `Tool command ${input.command.name} is not available for slash invocation`,
+      );
+    }
     return {
       name: input.command.name,
-      canonicalName: `/${toolName}`,
-      arguments: input.command.arguments,
+      canonicalName,
+      arguments: argumentsText,
       kind: "tool",
-      displayName: slashCommand?.displayName ?? toolName,
+      displayName,
       toolName,
       skillSlug: "",
       description: slashCommand?.description ?? `Run ${toolName}`,
+      workflow,
     };
   }
   if (input.command.kind === "tool") {
@@ -1879,6 +2031,11 @@ function resolveThreadCommand(input: {
       displayName: skill.displayName ?? skill.name,
       skillSlug: normalized.skillSlug,
       description: skill.description,
+      workflow: renderSkillActivationWorkflow({
+        arguments: input.command.arguments,
+        canonicalName: normalized.canonicalName,
+        skill,
+      }),
     };
   }
 
@@ -1922,6 +2079,12 @@ function resolveThreadCommand(input: {
     instruction: command.instruction,
     ...(command.tools ? { tools: command.tools } : {}),
     ...(command.skillSlugs ? { skillSlugs: command.skillSlugs } : {}),
+    workflow: renderSkillCommandWorkflow({
+      arguments: input.command.arguments,
+      canonicalName: command.canonicalName,
+      command,
+      skill,
+    }),
   };
 }
 
@@ -1929,35 +2092,176 @@ function mergeCommandTools(
   tools: StreamThreadEventInput["tools"],
   command: ResolvedThreadCommand | null,
 ): StreamThreadEventInput["tools"] {
-  if (command?.kind === "tool" && command.toolName === AGENT_TOOL_NAMES.generateImage) {
+  const isDenied = (toolName: string) => {
+    const selection = (tools as Record<string, unknown> | undefined)?.[
+      toolName
+    ];
+    return (
+      selection &&
+      typeof selection === "object" &&
+      !Array.isArray(selection) &&
+      (selection as { enabled?: unknown }).enabled === false
+    );
+  };
+  let next = tools;
+  const isToolCommand = command?.kind === "tool";
+  for (const toolName of command?.workflow?.defaultTools ?? []) {
+    if (!isDenied(toolName)) {
+      next = enableToolSelection(next, toolName, {
+        forceGenerateImage: isToolCommand,
+      });
+    }
+  }
+  if (command?.kind === "tool" && command.toolName) {
+    return isDenied(command.toolName)
+      ? next
+      : enableToolSelection(next, command.toolName, {
+          forceGenerateImage: true,
+        });
+  }
+  if (!command?.tools?.length) {
+    return next;
+  }
+
+  next = { ...(next ?? {}) };
+  if (command.tools.includes(AGENT_TOOL_NAMES.webSearch)) {
+    next[AGENT_TOOL_NAMES.webSearch] = { enabled: true };
+  }
+  for (const toolName of command.tools) {
+    Object.assign(next, enableToolSelection(next, toolName));
+  }
+  return next;
+}
+
+function enableToolSelection(
+  tools: StreamThreadEventInput["tools"],
+  toolName: string,
+  options: { forceGenerateImage?: boolean } = {},
+): StreamThreadEventInput["tools"] {
+  if (!toolName) {
+    return tools;
+  }
+  if (toolName === AGENT_TOOL_NAMES.generateImage) {
     return {
       ...(tools ?? {}),
       [AGENT_TOOL_NAMES.generateImage]: {
         ...((tools ?? {})[AGENT_TOOL_NAMES.generateImage] ?? {}),
         enabled: true,
-        mode: "generate",
+        ...(options.forceGenerateImage ? { mode: "generate" as const } : {}),
       },
     };
   }
-  if (command?.kind === "tool" && command.toolName) {
-    return enableNotionToolSelection(tools, command.toolName);
-  }
-  if (!command?.tools?.length) {
-    return tools;
-  }
-
-  const next = { ...(tools ?? {}) };
-  if (command.tools.includes(AGENT_TOOL_NAMES.webSearch)) {
-    next[AGENT_TOOL_NAMES.webSearch] = { enabled: true };
-  }
-  if (command.tools.includes(AGENT_TOOL_NAMES.generateImage)) {
-    next[AGENT_TOOL_NAMES.generateImage] = {
-      ...(next[AGENT_TOOL_NAMES.generateImage] ?? {}),
-      enabled: true,
+  if (toolName === AGENT_TOOL_NAMES.webSearch) {
+    return {
+      ...(tools ?? {}),
+      [AGENT_TOOL_NAMES.webSearch]: {
+        enabled: true,
+      },
     };
   }
-  for (const toolName of command.tools) {
-    Object.assign(next, enableNotionToolSelection(next, toolName));
+  return enableNotionToolSelection(tools, toolName);
+}
+
+function resolveToolPermissions(input: {
+  tools: StreamThreadEventInput["tools"];
+  command: ResolvedThreadCommand | null;
+  enabledSkills?: PreparedThreadTurn["enabledSkills"];
+}): Record<string, ToolPermission> {
+  const permissions: Record<string, ToolPermission> = {};
+  const getDefaultPermission = (toolName: string): ToolPermission => {
+    const definition = getAgentToolDefinition(toolName);
+    if (!definition) {
+      return "deny";
+    }
+    const shape = definition as {
+      activation: { default: "always" | "off" };
+      defaultPermission?: ToolPermission;
+    };
+    return (
+      shape.defaultPermission ??
+      (shape.activation.default === "always" ? "allow" : "deny")
+    );
+  };
+  const setPermission = (
+    toolName: string,
+    enabled: boolean | undefined,
+    source: "default" | "selection",
+  ) => {
+    if (!toolName) {
+      return;
+    }
+    const defaultPermission = getDefaultPermission(toolName);
+    permissions[toolName] =
+      enabled === false
+        ? "deny"
+        : enabled === true
+          ? defaultPermission === "deny"
+            ? "allow"
+            : defaultPermission
+          : source === "default"
+            ? defaultPermission
+            : "allow";
+  };
+
+  const tools = input.tools;
+  for (const toolName of Object.values(AGENT_TOOL_NAMES)) {
+    const definition = getAgentToolDefinition(toolName);
+    if (definition?.activation.default === "always") {
+      setPermission(toolName, undefined, "default");
+    }
   }
-  return next;
+  const explicitWebSearchEnabled =
+    tools?.[AGENT_TOOL_NAMES.webSearch]?.enabled ?? tools?.webSearchEnabled;
+  if (typeof explicitWebSearchEnabled === "boolean") {
+    setPermission(
+      AGENT_TOOL_NAMES.webSearch,
+      explicitWebSearchEnabled,
+      "selection",
+    );
+  }
+  for (const skill of input.enabledSkills ?? []) {
+    for (const toolName of skill.tools ?? []) {
+      if (getAgentToolDefinition(toolName)?.activation.skill.activates) {
+        setPermission(toolName, true, "selection");
+      }
+    }
+  }
+  for (const toolName of Object.values(AGENT_TOOL_NAMES)) {
+    const selection = (tools as Record<string, unknown> | undefined)?.[
+      toolName
+    ];
+    if (
+      selection &&
+      typeof selection === "object" &&
+      !Array.isArray(selection) &&
+      "enabled" in selection
+    ) {
+      setPermission(
+        toolName,
+        typeof (selection as { enabled?: unknown }).enabled === "boolean"
+          ? (selection as { enabled?: boolean }).enabled
+          : undefined,
+        "selection",
+      );
+    }
+  }
+
+  return {
+    ...permissions,
+    ...Object.fromEntries(
+      Object.entries(input.command?.workflow?.permissionOverrides ?? {}).filter(
+        ([toolName]) => {
+          const selection = (tools as Record<string, unknown> | undefined)?.[
+            toolName
+          ];
+          return !(
+            selection &&
+            typeof selection === "object" &&
+            !Array.isArray(selection) &&
+            (selection as { enabled?: unknown }).enabled === false
+          );
+        },
+      ),
+    ),
+  };
 }

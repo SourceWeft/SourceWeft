@@ -1,18 +1,26 @@
 import type { MeterConsumeResponse } from "@sourceweft/contracts";
 import type { MessageRecord, ThreadRecord } from "../../types";
 import type { AgentCitation } from "../../agent/citation-registry";
-import type { EditThreadInput, RefreshThreadInput } from "../stream/types";
-import type { StreamThreadEventInput } from "../turn/types";
+import type {
+  EditThreadInput,
+  RefreshThreadInput,
+  ResumeThreadInput,
+} from "../stream/types";
+import type {
+  AgentCheckpointMetadata,
+  StreamThreadEventInput,
+} from "../turn/types";
 
 export type ChatThreadRunStatus =
   | "queued"
   | "running"
   | "cancel_requested"
+  | "waiting_for_approval"
   | "completed"
   | "failed"
   | "cancelled";
 
-export type ChatThreadRunMode = "send" | "refresh" | "edit";
+export type ChatThreadRunMode = "send" | "refresh" | "edit" | "resume";
 
 export type ChatThreadRunRecord = {
   id: string;
@@ -42,7 +50,8 @@ export type ChatThreadRunRecord = {
 export type DurableRunRequestSnapshot =
   | (StreamThreadEventInput & { mode: "send" })
   | (RefreshThreadInput & { mode: "refresh" })
-  | (EditThreadInput & { mode: "edit" });
+  | (EditThreadInput & { mode: "edit" })
+  | (ResumeThreadInput & { mode: "resume" });
 
 export type DurableRunResultSnapshot = {
   thread?: ThreadRecord;
@@ -66,8 +75,15 @@ export type ChatRunSnapshot = DurableRunResultSnapshot & {
   reasoningSegments?: unknown[];
   toolCalls?: unknown[];
   thinkingSteps?: unknown[];
+  traceEvents?: unknown[];
+  traceParts?: unknown[];
   renderBlocks?: unknown[];
   citations?: unknown[];
   availableCitations?: unknown[];
   lastEventType?: string;
+  finishReason?: string | null;
+  agentCheckpoint?: AgentCheckpointMetadata | null;
+  approvalRequestedAt?: string | null;
+  approvalExpiresAt?: string | null;
+  pendingConfirmationIds?: string[];
 };

@@ -1,6 +1,27 @@
-import { MarketClient } from "@sourceweft/market-sdk";
+import { MarketClient, MarketClientError } from "@sourceweft/market-sdk";
 import { config } from "../../shared/config";
 import { McpError } from "./errors";
+
+function marketError(error: unknown) {
+  if (error instanceof MarketClientError) {
+    return new McpError(
+      error.status,
+      error.code,
+      error.message,
+      error.details,
+    );
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return new McpError(
+    503,
+    "MARKET_API_UNAVAILABLE",
+    `Market API is unavailable: ${message}`,
+  );
+}
+
+function emptyMcpList() {
+  return { items: [], nextCursor: null };
+}
 
 export class MarketService {
   private readonly client = new MarketClient({
@@ -26,23 +47,46 @@ export class MarketService {
     limit?: number;
   }) {
     if (!this.isApiBacked()) {
-      return { items: [], nextCursor: null };
+      return emptyMcpList();
     }
-    return this.client.listMcp(input);
+    try {
+      return await this.client.listMcp(input);
+    } catch (error) {
+      return emptyMcpList();
+    }
+  }
+
+  async listMcpCategories() {
+    if (!this.isApiBacked()) {
+      return { items: [] };
+    }
+    try {
+      return await this.client.listMcpCategories();
+    } catch {
+      return { items: [] };
+    }
   }
 
   async getMcp(identifier: string) {
     if (!this.isApiBacked()) {
       throw new McpError(404, "MARKET_DISABLED", "Market API is not enabled");
     }
-    return this.client.getMcp(identifier);
+    try {
+      return await this.client.getMcp(identifier);
+    } catch (error) {
+      throw marketError(error);
+    }
   }
 
   async getMcpManifest(identifier: string, input: { version?: string } = {}) {
     if (!this.isApiBacked()) {
       throw new McpError(404, "MARKET_DISABLED", "Market API is not enabled");
     }
-    return this.client.getMcpManifest(identifier, input);
+    try {
+      return await this.client.getMcpManifest(identifier, input);
+    } catch (error) {
+      throw marketError(error);
+    }
   }
 }
 

@@ -42,11 +42,15 @@ export type AgentToolConfiguration = {
   configKeys?: readonly string[];
 };
 
+export type AgentToolDefaultPermission = "allow" | "ask" | "deny";
+export type AgentToolRiskLevel = "low" | "medium" | "high";
+
 export type AgentToolSlashCommand = {
   aliases?: readonly string[];
   description?: string;
   displayName: string;
   enabled?: boolean;
+  supportsCommand?: boolean;
 };
 
 export type AgentToolDefinitionShape = {
@@ -57,6 +61,8 @@ export type AgentToolDefinitionShape = {
   requirements?: AgentToolRequirements;
   activation: AgentToolActivation;
   configuration?: AgentToolConfiguration;
+  defaultPermission?: AgentToolDefaultPermission;
+  riskLevel?: AgentToolRiskLevel;
   slash?: AgentToolSlashCommand;
 };
 

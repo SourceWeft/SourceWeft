@@ -1,4 +1,8 @@
-export type ToolCallStatus = "running" | "completed" | "error";
+export type ToolCallStatus =
+  | "running"
+  | "approval_requested"
+  | "completed"
+  | "error";
 
 export function resolveToolCallId(input: {
   toolCallId?: string;

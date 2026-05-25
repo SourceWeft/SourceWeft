@@ -6,10 +6,10 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   MessageSquareText,
-  Sparkles,
   User,
 } from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { McpIcon, SkillIcon } from "./dashboard-icons";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
 
 const items = [
@@ -28,8 +28,14 @@ const items = [
   {
     label: "Skills",
     href: "/dashboard/skills",
-    icon: Sparkles,
+    icon: SkillIcon,
     match: (pathname: string) => pathname.startsWith("/dashboard/skills"),
+  },
+  {
+    label: "MCP",
+    href: "/dashboard/mcp",
+    icon: McpIcon,
+    match: (pathname: string) => pathname.startsWith("/dashboard/mcp"),
   },
 ] as const;
 
@@ -40,7 +46,7 @@ export function DashboardMobileBottomNav() {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 backdrop-blur md:hidden">
-      <div className="grid grid-cols-4 gap-1">
+      <div className="grid grid-cols-5 gap-1">
         {items.map((item) => {
           const Icon = item.icon;
           const active = view === "main" && item.match(pathname);

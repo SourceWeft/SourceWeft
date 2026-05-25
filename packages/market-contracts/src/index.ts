@@ -34,6 +34,12 @@ export const mcpRiskLevelSchema = z.enum([
   "destructive",
   "unknown",
 ]);
+export const mcpRuntimeSchema = z.enum(["web", "desktop", "hybrid"]);
+export const mcpVerificationStatusSchema = z.enum([
+  "official",
+  "verified",
+  "unverified",
+]);
 
 export const marketMcpAuthRequirementSchema = z.object({
   type: mcpAuthTypeSchema,
@@ -61,6 +67,10 @@ export const marketMcpManifestSchema = z.object({
   name: z.string(),
   summary: z.string(),
   description: z.string().optional(),
+  providerName: z.string().optional(),
+  homepageUrl: z.string().url().optional(),
+  license: z.string().optional(),
+  language: z.string().optional(),
   transport: mcpTransportSchema,
   endpointUrl: z.string().url().optional(),
   desktopOnly: z.boolean().default(false),
@@ -77,6 +87,7 @@ export const marketMcpManifestSchema = z.object({
   riskSummary: z.string().optional(),
   sourceUrl: z.string().url().optional(),
   repoUrl: z.string().url().optional(),
+  lastIndexedAt: z.string().optional(),
 });
 
 export const marketItemSummarySchema = z.object({
@@ -85,15 +96,26 @@ export const marketItemSummarySchema = z.object({
   identifier: z.string(),
   name: z.string(),
   summary: z.string(),
+  providerName: z.string().nullable().default(null),
+  homepageUrl: z.string().url().nullable().default(null),
+  sourceUrl: z.string().url().nullable().default(null),
+  repoUrl: z.string().url().nullable().default(null),
+  license: z.string().nullable().default(null),
+  language: z.string().nullable().default(null),
   status: marketItemStatusSchema,
   visibility: marketItemVisibilitySchema,
   categories: z.array(z.string()).default([]),
   latestVersion: z.string().nullable().default(null),
+  transport: mcpTransportSchema.nullable().default(null),
   official: z.boolean().default(false),
   verified: z.boolean().default(false),
+  verificationStatus: mcpVerificationStatusSchema.default("unverified"),
   desktopOnly: z.boolean().default(false),
   webExecutable: z.boolean().default(true),
+  runtime: mcpRuntimeSchema.default("web"),
   requiresAuth: z.boolean().default(false),
+  toolsCount: z.number().int().min(0).default(0),
+  lastIndexedAt: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
   publishedAt: z.string().nullable().default(null),
@@ -113,6 +135,10 @@ export const marketItemVersionSchema = z.object({
 export const listMarketMcpRequestSchema = z.object({
   query: z.string().optional(),
   category: z.string().optional(),
+  transport: mcpTransportSchema.optional(),
+  official: z.boolean().optional(),
+  verified: z.boolean().optional(),
+  runtime: mcpRuntimeSchema.optional(),
   includeDesktopOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
@@ -153,6 +179,10 @@ export type MarketItemVisibility = z.infer<typeof marketItemVisibilitySchema>;
 export type McpTransport = z.infer<typeof mcpTransportSchema>;
 export type McpAuthType = z.infer<typeof mcpAuthTypeSchema>;
 export type McpRiskLevel = z.infer<typeof mcpRiskLevelSchema>;
+export type McpRuntime = z.infer<typeof mcpRuntimeSchema>;
+export type McpVerificationStatus = z.infer<
+  typeof mcpVerificationStatusSchema
+>;
 export type MarketMcpAuthRequirement = z.infer<
   typeof marketMcpAuthRequirementSchema
 >;

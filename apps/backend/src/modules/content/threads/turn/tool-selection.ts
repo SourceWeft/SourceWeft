@@ -290,4 +290,5 @@ type StreamThreadToolsSelectionLike = ThreadToolsSelection | undefined;
 
 export const testExports = {
   assertSelectedSkillsAllowedByTools,
+  resolveMcpToolSelectionFromToolsMetadata,
 };

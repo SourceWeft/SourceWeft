@@ -34,7 +34,6 @@ import {
 } from "../../../../../lib/desktop-bridge";
 import { connectorsClient } from "../../../../../lib/sdk";
 import type { SourceConnector } from "@sourceweft/sdk";
-import type { ToolApprovalResume } from "@sourceweft/sdk";
 import { useChatStreamRunnerControl } from "../chat-stream-runner-control";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
 import { useThreadMessages } from "./use-thread-messages";
@@ -50,6 +49,12 @@ import {
   getDisplayErrorMessage,
   throwStreamRequestError,
 } from "./message-normalizers";
+import {
+  buildToolConfirmationResumeStreamInput,
+  flushPendingToolConfirmationResume,
+  resolveToolConfirmationResumeRequest,
+  type ToolConfirmationResumeRequest,
+} from "./tool-confirmation-resume-queue";
 import {
   resolveContextSourceIds,
   resolveEditSourceIds,
@@ -103,6 +108,7 @@ export function useThreadPageController({
 
   const isPersistentLayout = useMediaQuery("(min-width: 768px)");
   const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
+  const handledConnectorOAuthHubRef = useRef(false);
   const [workfilesRefreshKey, setWorkfilesRefreshKey] = useState(0);
   const [artifactsRefreshKey, setArtifactsRefreshKey] = useState(0);
   const [composerInitialInput, setComposerInitialInput] = useState("");
@@ -116,15 +122,25 @@ export function useThreadPageController({
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
   const [toolConfirmationInterventionSignal, setToolConfirmationInterventionSignal] =
     useState<ToolConfirmationInterventionSignal | null>(null);
+  const pendingToolConfirmationResumeRef =
+    useRef<ToolConfirmationResumeRequest | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (handledConnectorOAuthHubRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const oauthStatus = params.get("connector_oauth");
     if (oauthStatus === "success" || oauthStatus === "error") {
+      handledConnectorOAuthHubRef.current = true;
+      if (window.matchMedia("(min-width: 768px)").matches) {
+        if (!sourcesVisible) {
+          toggleSourcesVisible();
+        }
+        return;
+      }
       setHubDrawerOpen(true);
     }
-  }, []);
+  }, [sourcesVisible, toggleSourcesVisible]);
 
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
 
@@ -138,6 +154,8 @@ export function useThreadPageController({
   );
 
   const {
+    activeMcpInstallIds,
+    activeMcpToolIds,
     activeSkillIds,
     activeSourceIds,
     availableSkills,
@@ -152,12 +170,21 @@ export function useThreadPageController({
     loadSourceMentions,
     persistActiveSourceIds,
     selectedSources,
+    setActiveMcpInstallIds,
+    setActiveMcpToolIds,
     setActiveSkillIds,
     setDisabledToolNames,
   } = useThreadSources({ threadId, workspaceId });
   const handleConnectorsChange = useCallback((connectors: SourceConnector[]) => {
     setActiveConnectorTools(resolveActiveConnectorToolState(connectors));
   }, []);
+  const handleMcpSelectionChange = useCallback(
+    (selection: { installIds?: string[]; toolIds?: string[] }) => {
+      setActiveMcpInstallIds(selection.installIds ?? []);
+      setActiveMcpToolIds(selection.toolIds ?? []);
+    },
+    [setActiveMcpInstallIds, setActiveMcpToolIds],
+  );
 
   const {
     availableModels,
@@ -198,6 +225,7 @@ export function useThreadPageController({
 
   const {
     attachedRunKeyRef,
+    activeThreadRun,
     clearAttachedRunKeyIfCurrent,
     clearRunIfCurrent,
     isStopping,
@@ -206,6 +234,7 @@ export function useThreadPageController({
     markRunTerminal,
     setActiveThreadRun,
     stopStreaming: handleStopStreaming,
+    updateActiveRunIfCurrent,
   } = useChatStreamRunnerControl({
     getDisplayErrorMessage,
     threadId,
@@ -235,6 +264,7 @@ export function useThreadPageController({
 
   const {
     activeAssistantVersion,
+    assistantVersionById,
     activeVersionByGroup,
     displayedCitations,
     handleActiveVersionChange,
@@ -371,6 +401,7 @@ export function useThreadPageController({
     streamWithSelectedLlm,
     thinkingSettings,
     threadId,
+    updateActiveRunIfCurrent,
     updateChatSourceCount,
     updateChatTitle,
     workspaceId,
@@ -420,10 +451,16 @@ export function useThreadPageController({
   });
 
   const handleSendMessage = useCallback(
-    async (input: ChatSendInput) => {
+    async (
+      input: ChatSendInput,
+      options?: { allowWhileStreaming?: boolean },
+    ) => {
       const text = input.content.trim();
       const images = input.images ?? [];
-      if ((!text && images.length === 0) || isStreaming) {
+      if (
+        (!text && images.length === 0) ||
+        (isStreaming && !options?.allowWhileStreaming)
+      ) {
         return;
       }
       if (modelCatalogStatus !== "ready") {
@@ -446,6 +483,18 @@ export function useThreadPageController({
       const mentionedSourceIds = mergeSourceIds(input.mentionedSourceIds);
       const sendSourceIds = mergeSourceIds(contextSourceIds);
       const selectedSkillIds = input.skillIds ?? effectiveActiveSkillIds;
+      const selectedMcp =
+        input.tools?.mcp ??
+        (activeMcpInstallIds.length > 0 || activeMcpToolIds.length > 0
+          ? {
+              enabled: true,
+              installIds: activeMcpInstallIds,
+              toolIds: activeMcpToolIds,
+            }
+          : undefined);
+      const tools = selectedMcp
+        ? { ...(input.tools ?? {}), mcp: selectedMcp }
+        : input.tools;
 
       if (editingMessageId) {
         const editingAssistantGroup = editingAssistantMessageId
@@ -507,7 +556,7 @@ export function useThreadPageController({
           mentionedSourceIds,
           sourceIds: mergedEditSourceIds,
           skillIds: selectedSkillIds,
-          tools: input.tools,
+          tools,
           command: input.command,
           searchEnabled,
           userMessageId: editingMessageId,
@@ -523,7 +572,7 @@ export function useThreadPageController({
         mentionedSourceIds,
         sourceIds: sendSourceIds,
         skillIds: selectedSkillIds,
-        tools: input.tools,
+        tools,
         command: input.command,
         searchEnabled,
       });
@@ -538,6 +587,8 @@ export function useThreadPageController({
       messageGroups,
       messages,
       activeSourceIds,
+      activeMcpInstallIds,
+      activeMcpToolIds,
       effectiveActiveSkillIds,
       searchEnabled,
       selectedModels.llm,
@@ -552,7 +603,6 @@ export function useThreadPageController({
       groupId: string;
       assistantMessageId: string;
       branchIndex: number;
-      toolApprovalResume?: ToolApprovalResume | null;
     }) => {
       if (isStreaming) {
         return;
@@ -561,19 +611,17 @@ export function useThreadPageController({
       const assistantGroup = messageGroups.find(
         (group) => group.groupId === input.groupId,
       );
-      if (!input.toolApprovalResume) {
-        const nextBranchIndex = assistantGroup
-          ? assistantGroup.versions.length
-          : input.branchIndex + 1;
+      const nextBranchIndex = assistantGroup
+        ? assistantGroup.versions.length
+        : input.branchIndex + 1;
 
-        setActiveVersionByGroup((previous) => ({
-          ...previous,
-          [input.groupId]: Math.max(
-            previous[input.groupId] ?? 0,
-            nextBranchIndex,
-          ),
-        }));
-      }
+      setActiveVersionByGroup((previous) => ({
+        ...previous,
+        [input.groupId]: Math.max(
+          previous[input.groupId] ?? 0,
+          nextBranchIndex,
+        ),
+      }));
       pendingLatestVersionSelectionRef.current = {
         assistantGroupId: input.groupId,
         turnId: assistantGroup?.turnId,
@@ -591,8 +639,6 @@ export function useThreadPageController({
         skillIds: effectiveActiveSkillIds,
         searchEnabled,
         assistantMessageId: input.assistantMessageId,
-        attachOnly: Boolean(input.toolApprovalResume),
-        toolApprovalResume: input.toolApprovalResume ?? null,
       });
     },
     [
@@ -606,6 +652,40 @@ export function useThreadPageController({
       streamThreadAction,
     ],
   );
+
+  const runToolConfirmationResume = useCallback(
+    async (input: ToolConfirmationResumeRequest) => {
+      await streamThreadAction(buildToolConfirmationResumeStreamInput(input));
+    },
+    [streamThreadAction],
+  );
+
+  const handleResumeToolConfirmation = useCallback(
+    async (input: ToolConfirmationResumeRequest) => {
+      const next = resolveToolConfirmationResumeRequest({
+        isStreaming,
+        request: input,
+      });
+      pendingToolConfirmationResumeRef.current = next.pending;
+      if (!next.runnable) {
+        return;
+      }
+      await runToolConfirmationResume(next.runnable);
+    },
+    [isStreaming, runToolConfirmationResume],
+  );
+
+  useEffect(() => {
+    const next = flushPendingToolConfirmationResume({
+      isStreaming,
+      pending: pendingToolConfirmationResumeRef.current,
+    });
+    pendingToolConfirmationResumeRef.current = next.pending;
+    if (!next.runnable) {
+      return;
+    }
+    void runToolConfirmationResume(next.runnable);
+  }, [isStreaming, runToolConfirmationResume]);
 
   const handleRestartFromMessage = useCallback(
     (input: {
@@ -663,7 +743,11 @@ export function useThreadPageController({
 
   return {
     activeAssistantVersion,
+    assistantVersionById,
+    activeThreadRun,
     activeCitationIndex,
+    activeMcpInstallIds,
+    activeMcpToolIds,
     activeSkillIds,
     activeConnectorTools,
     activeSourceIds,
@@ -689,8 +773,10 @@ export function useThreadPageController({
     handleConnectorsChange,
     handleLibrarySourcesLoad,
     handleLibrarySourcesMerge,
+    handleMcpSelectionChange,
     handleModelSelect,
     handleRefreshLatest,
+    handleResumeToolConfirmation,
     handleRestartFromMessage,
     handleSendMessage,
     handleSourceHubCitationOpen,
@@ -711,6 +797,7 @@ export function useThreadPageController({
     librarySources,
     loadAvailableSkills,
     loadOlderThreadMessages,
+    loadThreadMessages,
     loadSourceMentions,
     messageGroups,
     olderMessagesCursor,

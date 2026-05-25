@@ -7,10 +7,7 @@ on:
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  id-token: write
 
 concurrency:
   group: publish-market-contracts-${{ github.ref }}
@@ -23,20 +20,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10.19.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
-          cache: pnpm
-          registry-url: https://npm.pkg.github.com
-          scope: "@sourceweft"
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile --filter @sourceweft/market-contracts
@@ -60,6 +56,4 @@ jobs:
 
       - name: Publish
         working-directory: packages/market-contracts
-        run: pnpm publish --no-git-checks --access restricted
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish --access public

@@ -24,6 +24,54 @@ export function collapseSupersededMessages(items: MessageRecord[]) {
   return items.filter((item) => !supersededIds.has(item.id));
 }
 
+function resolveMessageRootId(input: {
+  messageById: Map<string, MessageRecord>;
+  messageId: string;
+}) {
+  let current = input.messageById.get(input.messageId);
+  const seen = new Set<string>();
+  while (current?.parentMessageId && !seen.has(current.id)) {
+    seen.add(current.id);
+    const parent = input.messageById.get(current.parentMessageId);
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+
+  return current?.id ?? input.messageId;
+}
+
+export function filterMessagesBeforeEditAnchor(input: {
+  anchorUserMessageId?: string | null;
+  messages: MessageRecord[];
+}) {
+  if (!input.anchorUserMessageId) {
+    return input.messages;
+  }
+
+  const messageById = new Map(
+    input.messages.map((message) => [message.id, message]),
+  );
+  const anchorMessage = messageById.get(input.anchorUserMessageId);
+  if (!anchorMessage) {
+    return input.messages;
+  }
+
+  const anchorRootId = resolveMessageRootId({
+    messageById,
+    messageId: anchorMessage.id,
+  });
+  const anchorRootIndex = input.messages.findIndex(
+    (message) => message.id === anchorRootId,
+  );
+  if (anchorRootIndex < 0) {
+    return input.messages;
+  }
+
+  return input.messages.slice(0, anchorRootIndex);
+}
+
 export function isContextExcludedMessage(
   message: MessageRecord | null | undefined,
 ) {

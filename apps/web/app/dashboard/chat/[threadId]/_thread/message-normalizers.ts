@@ -1,16 +1,21 @@
 import {
   HttpClientError,
+  isAgentToolDomain,
   isGeneratedImageArtifactToolName,
   isWorkfileWriteToolName,
   SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,
+  type ToolApprovalResume,
 } from "@sourceweft/sdk";
+import { isPendingToolConfirmation } from "@sourceweft/contracts";
 import type {
   ChatSendInput,
   CitationRecord,
   MessageRenderBlock,
   ModelReasoningSegmentRecord,
+  ReasoningTraceEventRecord,
   ThinkingStepRecord,
   ToolCallRecord,
+  TracePartRecord,
 } from "../../_components/chat-canvas";
 import type { contentClient } from "../../../../../lib/sdk";
 import type { ChatStreamEventPayload, ChatStreamToolCallEventType } from "../chat-stream-runner";
@@ -58,6 +63,10 @@ const STREAM_RENDER_KEY = "renderKey";
 const THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS = [300, 1000, 2500] as const;
 
 const THREAD_MESSAGES_INITIAL_PAGE_SIZE = 80;
+
+function normalizeApprovalState(value: unknown): ToolCallRecord["approvalState"] {
+  return value === "approved" || value === "rejected" ? value : undefined;
+}
 
 function appendReasoningChunk(current: string | undefined, next: string) {
   if (!current) {
@@ -228,7 +237,8 @@ function resolveThreadRunMetadata(metadata: Record<string, unknown>) {
     !idempotencyKey?.startsWith(SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX) ||
     (status !== "queued" &&
       status !== "running" &&
-      status !== "cancel_requested")
+      status !== "cancel_requested" &&
+      status !== "waiting_for_approval")
   ) {
     return null;
   }
@@ -236,10 +246,17 @@ function resolveThreadRunMetadata(metadata: Record<string, unknown>) {
   const mode = toNullableString(threadRun?.mode);
   return {
     id: toNullableString(threadRun?.id) ?? undefined,
+    assistantMessageId: toNullableString(threadRun?.assistantMessageId),
     idempotencyKey,
     status,
+    userMessageId: toNullableString(threadRun?.userMessageId),
+    approvalRequestedAt: toNullableString(threadRun?.approvalRequestedAt),
+    approvalExpiresAt: toNullableString(threadRun?.approvalExpiresAt),
     mode:
-      mode === "send" || mode === "refresh" || mode === "edit"
+      mode === "send" ||
+      mode === "refresh" ||
+      mode === "edit" ||
+      mode === "resume"
         ? mode
         : undefined,
   } satisfies ActiveThreadRun;
@@ -253,7 +270,13 @@ function findLatestActiveThreadRunMessage(messages: ChatMessageItem[]) {
 
     const run = resolveThreadRunMetadata(message.metadata);
     if (run) {
-      return { message, run };
+      return {
+        message,
+        run: {
+          ...run,
+          assistantMessageId: run.assistantMessageId ?? message.id,
+        },
+      };
     }
   }
 
@@ -281,6 +304,8 @@ function createActiveThreadRunPlaceholder(input: {
         idempotencyKey: input.run.idempotencyKey,
         status: input.run.status,
         mode: input.run.mode,
+        approvalRequestedAt: input.run.approvalRequestedAt,
+        approvalExpiresAt: input.run.approvalExpiresAt,
       },
     },
     createdAt: new Date().toISOString(),
@@ -360,9 +385,16 @@ function normalizeToolCallStatus(
   value: unknown,
   fallback: ToolCallRecord["status"],
 ): ToolCallRecord["status"] {
-  return value === "running" || value === "completed" || value === "error"
+  return value === "running" ||
+    value === "approval_requested" ||
+    value === "completed" ||
+    value === "error"
     ? value
     : fallback;
+}
+
+function isConnectorToolName(toolName: string) {
+  return isAgentToolDomain(toolName, "connector");
 }
 
 function normalizeToolCallRecord(
@@ -386,16 +418,25 @@ function normalizeToolCallRecord(
     record.status,
     options?.defaultStatus ?? "completed",
   );
+  const output = normalizePublicToolOutput(tool, normalizeToolOutput(record.output));
+  const confirmation = getToolConfirmationRecord(output);
+  const normalizedStatus =
+    status === "completed" && isPendingToolConfirmation(confirmation)
+      ? "approval_requested"
+      : status;
 
   return {
     id,
     tool,
-    input: toObjectRecord(record.input) ?? {},
-    output: normalizeToolOutput(record.output),
+    input: isConnectorToolName(tool) ? {} : (toObjectRecord(record.input) ?? {}),
+    output,
     latencyMs: toNullableNumber(record.latencyMs),
-    status,
+    status: normalizedStatus,
     error: toNullableString(record.error),
     sequence: toNullableNumber(record.sequence) ?? undefined,
+    approvalState: normalizeApprovalState(record.approvalState),
+    approvalConfirmationId:
+      toNullableString(record.approvalConfirmationId) ?? undefined,
   };
 }
 
@@ -430,6 +471,119 @@ function normalizeToolOutput(value: unknown): unknown {
   }
 
   return value;
+}
+
+function parseJsonObjectString(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    return toObjectRecord(JSON.parse(trimmed) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function getToolMessageContentRecord(output: unknown) {
+  const record = toObjectRecord(output);
+  const content = typeof record?.content === "string" ? record.content : null;
+  return content ? parseJsonObjectString(content) : null;
+}
+
+function getToolConfirmationRecord(output: unknown) {
+  const record = toObjectRecord(output);
+  if (record?.type === "tool_confirmation_request") {
+    return record;
+  }
+
+  const contentRecord = getToolMessageContentRecord(output);
+  return contentRecord?.type === "tool_confirmation_request"
+    ? contentRecord
+    : null;
+}
+
+function normalizePublicToolConfirmationOutput(
+  confirmation: Record<string, unknown>,
+) {
+  const preview = toObjectRecord(confirmation.preview);
+  const normalized = {
+    ...confirmation,
+    preview: preview
+      ? Object.fromEntries(
+          Object.entries(preview).filter(([key]) => key !== "requestJson"),
+        )
+      : confirmation.preview,
+  } as Record<string, unknown>;
+  delete normalized.editableArgs;
+  return normalized;
+}
+
+function normalizePublicToolOutput(toolName: string, output: unknown) {
+  const confirmation = getToolConfirmationRecord(output);
+  if (confirmation) {
+    return normalizePublicToolConfirmationOutput(confirmation);
+  }
+
+  if (!isConnectorToolName(toolName)) {
+    return output;
+  }
+
+  const record = toObjectRecord(output);
+  const contentRecord = getToolMessageContentRecord(output);
+  const publicRecord = contentRecord ?? record;
+  if (publicRecord?.type === "connector_tool_error") {
+    return publicRecord;
+  }
+  const actionType = toNullableString(publicRecord?.actionType)?.trim();
+  const outputToolName = toNullableString(publicRecord?.toolName)?.trim() ?? toolName;
+  const title = toNullableString(publicRecord?.title)?.trim();
+  const url = toNullableString(publicRecord?.url)?.trim();
+  const pageId = toNullableString(publicRecord?.pageId)?.trim();
+  const query = toNullableString(publicRecord?.query)?.trim();
+  const resultCount = toNullableNumber(publicRecord?.resultCount);
+  const pages = normalizePublicConnectorPages(publicRecord?.pages);
+  return {
+    type: "connector_tool_result",
+    connector: "notion",
+    toolName: outputToolName,
+    ...(actionType ? { actionType } : {}),
+    ...(title ? { title } : {}),
+    ...(url ? { url } : {}),
+    ...(pageId ? { pageId } : {}),
+    ...(query ? { query } : {}),
+    ...(resultCount !== null ? { resultCount } : {}),
+    ...(pages.length > 0 ? { pages } : {}),
+  };
+}
+
+function normalizePublicConnectorPages(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const record = toObjectRecord(item);
+      if (!record) {
+        return null;
+      }
+      const pageId = toNullableString(record.pageId)?.trim();
+      const title = toNullableString(record.title)?.trim();
+      const url = toNullableString(record.url)?.trim();
+      const lastEditedTime = toNullableString(record.lastEditedTime)?.trim();
+      if (!pageId && !title && !url) {
+        return null;
+      }
+      return {
+        ...(pageId ? { pageId } : {}),
+        ...(title ? { title } : {}),
+        ...(url ? { url } : {}),
+        ...(lastEditedTime ? { lastEditedTime } : {}),
+      };
+    })
+    .filter((item): item is Record<string, string> => item !== null);
 }
 
 function normalizeThinkingStepRecord(
@@ -512,6 +666,12 @@ function normalizeModelReasoningSegmentRecord(
     text,
     sequence: toNullableNumber(record.sequence) ?? undefined,
     durationMs: toNullableNumber(record.durationMs) ?? undefined,
+    phase:
+      record.phase === "initial" || record.phase === "after_tool"
+        ? record.phase
+        : undefined,
+    toolCallId: toNullableString(record.toolCallId) ?? undefined,
+    tool: toNullableString(record.tool) ?? undefined,
   };
 }
 
@@ -525,6 +685,196 @@ function resolveModelReasoningSegmentsFromMetadata(
   return metadata.reasoningSegments
     .map((item, index) => normalizeModelReasoningSegmentRecord(item, index))
     .filter((item): item is ModelReasoningSegmentRecord => item !== null);
+}
+
+function normalizeReasoningTraceEventRecord(
+  value: unknown,
+): ReasoningTraceEventRecord | null {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const id = toNullableString(record.id);
+  if (!id) {
+    return null;
+  }
+
+  const sequence = toNullableNumber(record.sequence) ?? undefined;
+  const displayOrder = toNullableNumber(record.displayOrder) ?? undefined;
+  const itemId = toNullableString(record.itemId) ?? undefined;
+  if (record.type === "reasoning") {
+    const segment = normalizeModelReasoningSegmentRecord(record.segment);
+    return segment
+      ? {
+          type: "reasoning",
+          id,
+          displayOrder,
+          itemId,
+          sequence,
+          reasoning: toNullableString(record.reasoning) ?? undefined,
+          segment,
+        }
+      : null;
+  }
+
+  if (record.type === "tool-call") {
+    const toolCall = normalizeToolCallRecord(record.toolCall);
+    return {
+      type: "tool-call",
+      id,
+      displayOrder,
+      itemId,
+      sequence,
+      eventType: toNullableString(record.eventType) ?? undefined,
+      tool: toNullableString(record.tool) ?? toolCall?.tool,
+      toolCall: toolCall ?? undefined,
+      payload: toObjectRecord(record.payload) ?? undefined,
+    };
+  }
+
+  if (record.type === "thinking-step") {
+    const step = normalizeThinkingStepRecord(record.step);
+    return step
+      ? {
+          type: "thinking-step",
+          id,
+          displayOrder,
+          itemId,
+          sequence,
+          step,
+        }
+      : null;
+  }
+
+  return null;
+}
+
+function resolveReasoningTraceEventsFromMetadata(
+  metadata: Record<string, unknown>,
+) {
+  if (!Array.isArray(metadata.traceEvents)) {
+    return [] as ReasoningTraceEventRecord[];
+  }
+
+  return metadata.traceEvents
+    .map((item) => normalizeReasoningTraceEventRecord(item))
+    .filter((item): item is ReasoningTraceEventRecord => item !== null);
+}
+
+function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
+  const record = toObjectRecord(value);
+  if (!record) {
+    return null;
+  }
+  const id = toNullableString(record.id);
+  const order = toNullableNumber(record.order);
+  const createdAt = toNullableString(record.createdAt);
+  const updatedAt = toNullableString(record.updatedAt);
+  if (!id || order === null || !createdAt || !updatedAt) {
+    return null;
+  }
+
+  if (record.kind === "reasoning") {
+    const text = toNullableString(record.text);
+    if (!text) {
+      return null;
+    }
+    return {
+      id,
+      kind: "reasoning",
+      order,
+      createdAt,
+      updatedAt,
+      text,
+      phase:
+        record.phase === "initial" || record.phase === "after_tool"
+          ? record.phase
+          : undefined,
+      toolCallId: toNullableString(record.toolCallId) ?? undefined,
+      tool: toNullableString(record.tool) ?? undefined,
+      durationMs: toNullableNumber(record.durationMs) ?? undefined,
+    };
+  }
+
+  if (record.kind === "tool") {
+    const toolCallId = toNullableString(record.toolCallId);
+    const tool = toNullableString(record.tool);
+    const status = record.status;
+    if (
+      !toolCallId ||
+      !tool ||
+      (status !== "running" &&
+        status !== "approval_requested" &&
+        status !== "completed" &&
+        status !== "error")
+    ) {
+      return null;
+    }
+    return {
+      id,
+      kind: "tool",
+      order,
+      createdAt,
+      updatedAt,
+      toolCallId,
+      tool,
+      status,
+      input: toObjectRecord(record.input) ?? {},
+      output: record.output,
+      error:
+        typeof record.error === "string" || record.error === null
+          ? record.error
+          : undefined,
+      latencyMs:
+        record.latencyMs === null
+          ? null
+          : (toNullableNumber(record.latencyMs) ?? undefined),
+      title: toNullableString(record.title) ?? undefined,
+      approvalState: normalizeApprovalState(record.approvalState),
+      approvalConfirmationId:
+        toNullableString(record.approvalConfirmationId) ?? undefined,
+    };
+  }
+
+  if (record.kind === "step") {
+    const title = toNullableString(record.title);
+    const status = record.status;
+    if (
+      !title ||
+      (status !== "pending" &&
+        status !== "in_progress" &&
+        status !== "completed")
+    ) {
+      return null;
+    }
+    return {
+      id,
+      kind: "step",
+      order,
+      createdAt,
+      updatedAt,
+      title,
+      status,
+      items: Array.isArray(record.items)
+        ? record.items.filter((item): item is string => typeof item === "string")
+        : [],
+      metadata: toObjectRecord(record.metadata) ?? undefined,
+    };
+  }
+
+  return null;
+}
+
+function resolveTracePartsFromMetadata(metadata: Record<string, unknown>) {
+  if (!Array.isArray(metadata.traceParts)) {
+    return [] as TracePartRecord[];
+  }
+
+  return metadata.traceParts
+    .map((item) => normalizeTracePartRecord(item))
+    .filter((item): item is TracePartRecord => item !== null)
+    .sort((left, right) => left.order - right.order);
 }
 
 function shouldRenderToolCall(
@@ -588,7 +938,9 @@ function resolveToolCallFromStreamEvent(input: {
       ? input.event.tool
       : (existing?.tool ?? "tool"));
 
-  const eventInput = toObjectRecord(input.event.input);
+  const eventInput = isConnectorToolName(tool)
+    ? null
+    : toObjectRecord(input.event.input);
   const normalizedInput = {
     ...(existing?.input ?? {}),
     ...(eventInput ?? {}),
@@ -616,7 +968,8 @@ function resolveToolCallFromStreamEvent(input: {
       input.event.type === "tool-call-end" &&
       eventOutput === null &&
       normalizedToolOutput === null &&
-      existing?.status === "completed"
+      (existing?.status === "completed" ||
+        existing?.status === "approval_requested")
     ) {
       return existing?.output ?? null;
     }
@@ -644,7 +997,10 @@ function resolveToolCallFromStreamEvent(input: {
 
     return normalizedToolOutput ?? eventOutput ?? existing?.output ?? null;
   })();
-  const normalizedOutput = normalizeToolOutput(mergedOutput);
+  const normalizedOutput = normalizePublicToolOutput(
+    tool,
+    normalizeToolOutput(mergedOutput),
+  );
 
   const normalizedStatus = (() => {
     if (input.event.type === "tool-call-error") {
@@ -652,10 +1008,20 @@ function resolveToolCallFromStreamEvent(input: {
     }
 
     if (input.event.type === "tool-call-result") {
+      if (
+        isPendingToolConfirmation(getToolConfirmationRecord(normalizedOutput))
+      ) {
+        return "approval_requested" as const;
+      }
       return "completed" as const;
     }
 
     if (input.event.type === "tool-call-end") {
+      if (
+        isPendingToolConfirmation(getToolConfirmationRecord(normalizedOutput))
+      ) {
+        return "approval_requested" as const;
+      }
       return normalizeToolCallStatus(
         input.event.status,
         existing?.status ?? "completed",
@@ -691,6 +1057,11 @@ function resolveToolCallFromStreamEvent(input: {
     latencyMs: normalizedLatencyMs,
     status: normalizedStatus,
     error: normalizedError,
+    approvalState:
+      normalizedToolCall?.approvalState ?? existing?.approvalState,
+    approvalConfirmationId:
+      normalizedToolCall?.approvalConfirmationId ??
+      existing?.approvalConfirmationId,
   };
 }
 
@@ -726,6 +1097,10 @@ function isCompletedWorkfileWriteToolCall(
   toolCall: ToolCallRecord,
   event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
 ) {
+  if (toolCall.status !== "completed") {
+    return false;
+  }
+
   if (
     event.type !== "tool-call-result" &&
     !(event.type === "tool-call-end" && toolCall.status === "completed")
@@ -747,6 +1122,10 @@ function isCompletedImageArtifactToolCall(
   toolCall: ToolCallRecord,
   event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
 ) {
+  if (toolCall.status !== "completed") {
+    return false;
+  }
+
   return (
     isGeneratedImageArtifactToolName(toolCall.tool) &&
     (event.type === "tool-call-result" ||
@@ -765,6 +1144,158 @@ function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
     .filter((item) =>
       shouldRenderToolCall(item, resolveThinkingStepsFromMetadata(metadata)),
     );
+}
+
+function getToolConfirmationId(output: unknown) {
+  const record = toObjectRecord(output);
+  return record?.type === "tool_confirmation_request" &&
+    typeof record.id === "string"
+    ? record.id
+    : null;
+}
+
+function getResolvedToolConfirmationStatus(input: {
+  confirmationId: string;
+  confirmationIds: string[] | undefined;
+  toolApprovalResume: ToolApprovalResume | null | undefined;
+}) {
+  const index = input.confirmationIds?.indexOf(input.confirmationId) ?? -1;
+  if (index < 0) {
+    return null;
+  }
+
+  const decision = input.toolApprovalResume?.decisions[index];
+  if (!decision) {
+    return null;
+  }
+
+  return decision.type === "reject" ? "rejected" : "approved";
+}
+
+function resolveToolConfirmationOutput(input: {
+  output: unknown;
+  status: "approved" | "rejected";
+}) {
+  const record = getToolConfirmationRecord(input.output);
+  if (!record) {
+    return input.output;
+  }
+
+  return normalizePublicToolConfirmationOutput({
+    ...record,
+    action: {
+      ...(toObjectRecord(record.action) ?? {}),
+      status: input.status,
+    },
+    status: input.status,
+    userMessage:
+      input.status === "rejected"
+        ? "Approval rejected. The action was not run."
+        : "Approval recorded. The action may now run.",
+  });
+}
+
+function resolveToolConfirmationCall(input: {
+  toolCall: ToolCallRecord;
+  status: "approved" | "rejected";
+}) {
+  const confirmationId = getToolConfirmationId(input.toolCall.output);
+  return {
+    ...input.toolCall,
+    output: resolveToolConfirmationOutput({
+      output: input.toolCall.output,
+      status: input.status,
+    }),
+    status: "completed" as const,
+    approvalState: input.status,
+    approvalConfirmationId:
+      confirmationId ?? input.toolCall.approvalConfirmationId,
+  };
+}
+
+function resolveTracePartToolConfirmation(input: {
+  part: TracePartRecord;
+  status: "approved" | "rejected";
+}) {
+  if (input.part.kind !== "tool") {
+    return input.part;
+  }
+  const confirmationId = getToolConfirmationId(input.part.output);
+  return {
+    ...input.part,
+    output: resolveToolConfirmationOutput({
+      output: input.part.output,
+      status: input.status,
+    }),
+    status: "completed" as const,
+    approvalState: input.status,
+    approvalConfirmationId:
+      confirmationId ?? input.part.approvalConfirmationId,
+    updatedAt: new Date().toISOString(),
+  } satisfies TracePartRecord;
+}
+
+function excludeResolvedToolConfirmationCalls(
+  toolCalls: ToolCallRecord[],
+  confirmationIds: string[] | undefined,
+) {
+  if (!confirmationIds?.length) {
+    return toolCalls;
+  }
+  const resolvedIds = new Set(confirmationIds);
+  return toolCalls.filter((toolCall) => {
+    const confirmationId = getToolConfirmationId(toolCall.output);
+    return !confirmationId || !resolvedIds.has(confirmationId);
+  });
+}
+
+function resolveToolConfirmationCalls(
+  toolCalls: ToolCallRecord[],
+  confirmationIds: string[] | undefined,
+  toolApprovalResume?: ToolApprovalResume | null,
+) {
+  if (!confirmationIds?.length) {
+    return toolCalls;
+  }
+  return toolCalls.map((toolCall) => {
+    const confirmationId = getToolConfirmationId(toolCall.output);
+    if (!confirmationId) {
+      return toolCall;
+    }
+    const status = getResolvedToolConfirmationStatus({
+      confirmationId,
+      confirmationIds,
+      toolApprovalResume,
+    });
+    return status
+      ? resolveToolConfirmationCall({ toolCall, status })
+      : toolCall;
+  });
+}
+
+function resolveTracePartToolConfirmations(
+  traceParts: TracePartRecord[],
+  confirmationIds: string[] | undefined,
+  toolApprovalResume?: ToolApprovalResume | null,
+) {
+  if (!confirmationIds?.length) {
+    return traceParts;
+  }
+  return traceParts.map((part) => {
+    if (part.kind !== "tool") {
+      return part;
+    }
+    const confirmationId = getToolConfirmationId(part.output);
+    if (!confirmationId) {
+      return part;
+    }
+    const status = getResolvedToolConfirmationStatus({
+      confirmationId,
+      confirmationIds,
+      toolApprovalResume,
+    });
+    return status ? resolveTracePartToolConfirmation({ part, status }) : part;
+  });
 }
 
 function normalizeMessageRenderBlock(
@@ -820,6 +1351,7 @@ export {
   basename,
   createActiveThreadRunPlaceholder,
   createDurableRunKey,
+  excludeResolvedToolConfirmationCalls,
   findLatestActiveThreadRunMessage,
   formatBytes,
   getDisplayErrorMessage,
@@ -831,11 +1363,16 @@ export {
   normalizeModelReasoningSegmentRecord,
   normalizeThinkingStepRecord,
   normalizeThreadCommandRequest,
+  normalizeToolCallRecord,
   resolveCitationMetadata,
   resolveModelReasoningFromMetadata,
   resolveModelReasoningSegmentsFromMetadata,
+  resolveReasoningTraceEventsFromMetadata,
+  resolveTracePartToolConfirmations,
+  resolveTracePartsFromMetadata,
   resolveRenderBlocksFromMetadata,
   resolveThinkingStepsFromMetadata,
+  resolveToolConfirmationCalls,
   resolveToolCallFromStreamEvent,
   resolveToolCallsFromMetadata,
   shouldRenderToolCall,

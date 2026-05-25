@@ -15,7 +15,6 @@ import {
   Loader2,
   RotateCcw,
   SlidersHorizontal,
-  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -67,6 +66,7 @@ import {
   isNotionToolName,
 } from "@sourceweft/sdk";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { SkillIcon } from "../../../_components/dashboard-icons";
 import type { SourceItem } from "../source-types";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
@@ -281,9 +281,11 @@ export function Composer({
   selectedSources = [],
   availableSkills = [],
   selectedSkillIds = [],
+  selectedMcpInstallIds = [],
+  selectedMcpToolIds = [],
   onRemoveSource,
   onSkillSelectionChange,
-  disabled,
+  submitDisabled = false,
   searchEnabled = false,
   onSearchEnabledChange,
   thinkingCapabilities,
@@ -318,9 +320,11 @@ export function Composer({
   selectedSources?: SourceItem[];
   availableSkills?: ChatSkillItem[];
   selectedSkillIds?: string[];
+  selectedMcpInstallIds?: string[];
+  selectedMcpToolIds?: string[];
   onRemoveSource?: (id: string) => void;
   onSkillSelectionChange?: (skillIds: string[]) => void;
-  disabled?: boolean;
+  submitDisabled?: boolean;
   searchEnabled?: boolean;
   onSearchEnabledChange?: (enabled: boolean) => void;
   thinkingCapabilities?: PromptThinkingCapabilities;
@@ -415,6 +419,8 @@ export function Composer({
   const imageToolChanged = imageOptionsChanged || !imageGenerationEnabled;
   const imageOptionSummary = imageConfigSummary(effectiveImageConfig);
   const notionToolChanged = notionToolsAvailable && !notionToolsEnabled;
+  const mcpToolChanged =
+    selectedMcpInstallIds.length > 0 || selectedMcpToolIds.length > 0;
   const notionSummary = notionOptionSummary(
     notionToolsEnabled,
     notionConnectorId,
@@ -444,6 +450,7 @@ export function Composer({
   const optionCount =
     (imageToolChanged ? 1 : 0) +
     (notionToolChanged ? 1 : 0) +
+    (mcpToolChanged ? 1 : 0) +
     (supportsThinking && activeThinkingSettings.mode !== "auto" ? 1 : 0);
   const thinkingEnabled = activeThinkingSettings.mode !== "off";
   const supportedThinkingEfforts = thinkingEffortOptions.filter((option) =>
@@ -497,6 +504,20 @@ export function Composer({
               : [];
           })
         : [];
+      const notionCommands: PromptInputSlashCommand[] =
+        notionToolCommands.length > 0
+          ? [
+              {
+                children: notionToolCommands,
+                description: "Search, create, update, and save Notion pages",
+                group: "Tools",
+                id: "tool-group:notion",
+                kind: "tool" as const,
+                label: "Notion",
+                value: "/notion",
+              },
+            ]
+          : [];
       const toolCommands: PromptInputSlashCommand[] =
         imageSupported && generateImageSlash
           ? [
@@ -557,7 +578,7 @@ export function Composer({
         }));
       return [
         ...toolCommands,
-        ...notionToolCommands,
+        ...notionCommands,
         ...skillCommands,
         ...skillActivationCommands,
       ];
@@ -818,7 +839,7 @@ export function Composer({
   }, [isEditing]);
 
   useEffect(() => {
-    if (!isEditing || disabled) {
+    if (!isEditing) {
       return;
     }
 
@@ -853,7 +874,7 @@ export function Composer({
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [disabled, isEditing, inputKey]);
+  }, [isEditing, inputKey]);
 
   return (
     <div className={className} ref={rootRef}>
@@ -867,8 +888,9 @@ export function Composer({
           maxFileSize={10 * 1024 * 1024}
           maxFiles={8}
           multiple
+          submitDisabled={submitDisabled}
           onSubmit={(message) => {
-            if (disabled) {
+            if (submitDisabled) {
               return;
             }
             const submittedSegments = message.segments ?? draftSegments;
@@ -921,22 +943,10 @@ export function Composer({
                     }
                   : undefined;
             const tools = buildComposerToolsSelection({
-              imageGenerationEnabled:
-                imageGenerationEnabled ||
-                tokenResolvedCommands.some(
-                  (command) =>
-                    command.kind === "tool-command" &&
-                    command.toolName === AGENT_TOOL_NAMES.generateImage,
-                ),
+              imageGenerationEnabled,
               imageSupported,
               notionConnectorId,
-              notionToolsEnabled:
-                notionToolsEnabled ||
-                tokenResolvedCommands.some(
-                  (command) =>
-                    command.kind === "tool-command" &&
-                    isNotionToolName(command.toolName),
-                ),
+              notionToolsEnabled,
               selectedSkills: availableSkills.filter((skill) =>
                 turnSkillIds.includes(skill.id),
               ),
@@ -951,15 +961,6 @@ export function Composer({
             const toolsWithTokenCommands = toolCommandNames.size
               ? {
                   ...(tools ?? {}),
-                  ...(toolCommandNames.has(AGENT_TOOL_NAMES.generateImage)
-                    ? {
-                        [AGENT_TOOL_NAMES.generateImage]: {
-                          ...(tools?.[AGENT_TOOL_NAMES.generateImage] ?? {}),
-                          enabled: true,
-                          mode: "generate" as const,
-                        },
-                      }
-                    : {}),
                   ...Object.fromEntries(
                     Array.from(toolCommandNames).flatMap((toolName) => {
                       if (!isNotionToolName(toolName)) {
@@ -991,9 +992,20 @@ export function Composer({
                     invokedSkillIds,
                   }
                 : toolsWithTokenCommands;
+            const toolsWithMcp =
+              selectedMcpInstallIds.length > 0 || selectedMcpToolIds.length > 0
+                ? {
+                    ...(toolsWithInvokedSkills ?? {}),
+                    mcp: {
+                      enabled: true,
+                      installIds: selectedMcpInstallIds,
+                      toolIds: selectedMcpToolIds,
+                    },
+                  }
+                : toolsWithInvokedSkills;
             (onSubmit ?? (() => undefined))(
               submittedMessage,
-              toolsWithInvokedSkills,
+              toolsWithMcp,
               commandRequest,
               turnSkillIds,
               markerContent,
@@ -1007,9 +1019,8 @@ export function Composer({
           />
           <PromptInputBody>
             <PromptInputMentionEditor
-              autoFocus={isEditing && !disabled}
+              autoFocus={isEditing}
               data-chat-prompt-editor="true"
-              disabled={disabled}
               initialSegments={initialPromptSegments}
               initialValue={initialInput}
               onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
@@ -1020,7 +1031,7 @@ export function Composer({
                 }
 
                 if (
-                  disabled &&
+                  submitDisabled &&
                   event.key === "Enter" &&
                   !event.shiftKey &&
                   !event.nativeEvent.isComposing
@@ -1042,11 +1053,6 @@ export function Composer({
                   return;
                 }
                 if (meta.kind === "tool-command") {
-                  if (meta.tool === AGENT_TOOL_NAMES.generateImage) {
-                    updateImageGenerationEnabled(true);
-                  } else if (isNotionToolName(meta.tool)) {
-                    updateNotionToolsEnabled(true);
-                  }
                   return;
                 }
                 if (meta.kind === "skill") {
@@ -1336,7 +1342,7 @@ export function Composer({
                     type="button"
                     variant="secondary"
                   >
-                    <Sparkles className="size-4" />
+                    <SkillIcon className="size-4" />
                     <span className="sr-only">Selected skills</span>
                   </PromptInputButton>
                 ) : null}
@@ -1413,10 +1419,10 @@ export function Composer({
                   </PromptInputButton>
                 ) : null}
 
-                <ComposerAddImageButton disabled={disabled} />
+                <ComposerAddImageButton />
 
                 <div>
-                  {disabled && onStopStreaming ? (
+                  {submitDisabled && onStopStreaming ? (
                     <PromptInputButton
                       className="size-9 shrink-0 rounded-full px-0 shadow-xs"
                       disabled={isStopping}
@@ -1437,18 +1443,18 @@ export function Composer({
                     </PromptInputButton>
                   ) : (
                     <PromptInputSubmit
-                      aria-disabled={disabled || undefined}
+                      aria-disabled={submitDisabled || undefined}
                       className="size-9 shrink-0 rounded-full px-0 shadow-xs"
                       onClick={
-                        disabled
+                        submitDisabled
                           ? (event) => {
                               event.preventDefault();
                             }
                           : undefined
                       }
-                      status={disabled ? "streaming" : undefined}
-                      tabIndex={disabled ? -1 : undefined}
-                      type={disabled ? "button" : "submit"}
+                      status={submitDisabled ? "streaming" : undefined}
+                      tabIndex={submitDisabled ? -1 : undefined}
+                      type={submitDisabled ? "button" : "submit"}
                     >
                       <ArrowUp className="size-4" />
                       <span className="sr-only">Send</span>

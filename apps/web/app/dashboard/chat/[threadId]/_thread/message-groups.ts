@@ -9,8 +9,10 @@ import {
   resolveCitationMetadata,
   resolveModelReasoningFromMetadata,
   resolveModelReasoningSegmentsFromMetadata,
+  resolveReasoningTraceEventsFromMetadata,
   resolveRenderBlocksFromMetadata,
   resolveThinkingStepsFromMetadata,
+  resolveTracePartsFromMetadata,
   resolveToolCallsFromMetadata,
   STREAM_RENDER_KEY,
   STREAM_TEXT_INTERRUPTED_KEY,
@@ -489,6 +491,10 @@ function buildVersionedMessageGroups(
             group.role === "assistant"
               ? resolveCitationMetadata(version.metadata)
               : null;
+          const threadRun =
+            group.role === "assistant"
+              ? toObjectRecord(version.metadata.threadRun)
+              : null;
 
           return {
             id: version.id,
@@ -516,6 +522,28 @@ function buildVersionedMessageGroups(
               group.role === "assistant"
                 ? (toNullableString(version.metadata.finishReason) ??
                   undefined)
+                : undefined,
+            threadRun:
+              group.role === "assistant" && threadRun
+                ? {
+                    id: toNullableString(threadRun.id) ?? undefined,
+                    idempotencyKey:
+                      toNullableString(threadRun.idempotencyKey) ?? undefined,
+                    status: toNullableString(threadRun.status) ?? undefined,
+                    mode:
+                      threadRun.mode === "send" ||
+                      threadRun.mode === "refresh" ||
+                      threadRun.mode === "edit" ||
+                      threadRun.mode === "resume"
+                        ? threadRun.mode
+                        : undefined,
+                    approvalRequestedAt: toNullableString(
+                      threadRun.approvalRequestedAt,
+                    ),
+                    approvalExpiresAt: toNullableString(
+                      threadRun.approvalExpiresAt,
+                    ),
+                  }
                 : undefined,
             isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
             isTextInterrupted:
@@ -562,6 +590,14 @@ function buildVersionedMessageGroups(
             modelReasoningSegments:
               group.role === "assistant"
                 ? resolveModelReasoningSegmentsFromMetadata(version.metadata)
+                : undefined,
+            traceEvents:
+              group.role === "assistant"
+                ? resolveReasoningTraceEventsFromMetadata(version.metadata)
+                : undefined,
+            traceParts:
+              group.role === "assistant"
+                ? resolveTracePartsFromMetadata(version.metadata)
                 : undefined,
           };
         }),

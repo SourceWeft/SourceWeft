@@ -13,6 +13,8 @@ export const searchSourcesTool = defineAgentTool({
       activates: false,
     },
   },
+  defaultPermission: "allow",
+  riskLevel: "low",
 });
 
 export const retrievalTools = [searchSourcesTool] as const;

@@ -1,9 +1,240 @@
 {
-  "id": "22222222-2222-4222-8222-222222222222",
-  "prevId": "9d56994e-84ff-44fa-86b1-90218c97c902",
+  "id": "4588133a-3069-4a10-a5fa-67fe33e9238e",
+  "prevId": "22222222-2222-4222-8222-222222222222",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.agent_tool_trust_rules": {
+      "name": "agent_tool_trust_rules",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tool_name": {
+          "name": "tool_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connector_id": {
+          "name": "connector_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allowed_risk_levels": {
+          "name": "allowed_risk_levels",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_from_confirmation_id": {
+          "name": "created_from_confirmation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_tool_trust_rules_scope_idx": {
+          "name": "agent_tool_trust_rules_scope_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "domain",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tool_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_tool_trust_rules_connector_idx": {
+          "name": "agent_tool_trust_rules_connector_idx",
+          "columns": [
+            {
+              "expression": "connector_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_tool_trust_rules_workspace_id_workspaces_id_fk": {
+          "name": "agent_tool_trust_rules_workspace_id_workspaces_id_fk",
+          "tableFrom": "agent_tool_trust_rules",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "agent_tool_trust_rules_connector_id_source_connectors_id_fk": {
+          "name": "agent_tool_trust_rules_connector_id_source_connectors_id_fk",
+          "tableFrom": "agent_tool_trust_rules",
+          "tableTo": "source_connectors",
+          "columnsFrom": [
+            "connector_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "agent_tool_trust_rules_workspace_team_fk": {
+          "name": "agent_tool_trust_rules_workspace_team_fk",
+          "tableFrom": "agent_tool_trust_rules",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id",
+            "team_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "agent_tool_trust_rules_connector_workspace_team_fk": {
+          "name": "agent_tool_trust_rules_connector_workspace_team_fk",
+          "tableFrom": "agent_tool_trust_rules",
+          "tableTo": "source_connectors",
+          "columnsFrom": [
+            "connector_id",
+            "workspace_id",
+            "team_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id",
+            "team_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "agent_tool_trust_rules_status_check": {
+          "name": "agent_tool_trust_rules_status_check",
+          "value": "\"agent_tool_trust_rules\".\"status\" in ('active', 'revoked')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.artifact_sources": {
       "name": "artifact_sources",
       "schema": "",
@@ -2530,6 +2761,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "agent_tool_name": {
+          "name": "agent_tool_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "risk_level": {
           "name": "risk_level",

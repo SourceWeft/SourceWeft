@@ -225,10 +225,11 @@ type ChatThreadRunStatus =
   | "queued"
   | "running"
   | "cancel_requested"
+  | "waiting_for_approval"
   | "completed"
   | "failed"
   | "cancelled";
-type ChatThreadRunMode = "send" | "refresh" | "edit";
+type ChatThreadRunMode = "send" | "refresh" | "edit" | "resume";
 type LlmSpanKind =
   | "agent"
   | "tool"
@@ -2891,11 +2892,11 @@ export const chatThreadRuns = pgTable(
     }).onDelete("cascade"),
     check(
       "chat_thread_runs_status_check",
-      sql`${table.status} in ('queued', 'running', 'cancel_requested', 'completed', 'failed', 'cancelled')`,
+      sql`${table.status} in ('queued', 'running', 'cancel_requested', 'waiting_for_approval', 'completed', 'failed', 'cancelled')`,
     ),
     check(
       "chat_thread_runs_mode_check",
-      sql`${table.mode} in ('send', 'refresh', 'edit')`,
+      sql`${table.mode} in ('send', 'refresh', 'edit', 'resume')`,
     ),
     check(
       "chat_thread_runs_event_offset_check",
@@ -2908,7 +2909,7 @@ export const chatThreadRuns = pgTable(
     ),
     uniqueIndex("chat_thread_runs_thread_active_uq")
       .on(table.teamId, table.workspaceId, table.threadId)
-      .where(sql`${table.status} in ('queued', 'running', 'cancel_requested')`),
+      .where(sql`${table.status} in ('queued', 'running', 'cancel_requested', 'waiting_for_approval')`),
     index("chat_thread_runs_thread_status_created_idx").on(
       table.teamId,
       table.workspaceId,

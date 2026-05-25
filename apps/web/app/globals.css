@@ -221,6 +221,18 @@ html:lang(he) .font-brand {
   }
 }
 
+@layer utilities {
+  .subtle-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-color: transparent transparent;
+    scrollbar-width: none;
+  }
+
+  .subtle-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @keyframes image-sheen {
   0% {
     background-position: 140% 0;

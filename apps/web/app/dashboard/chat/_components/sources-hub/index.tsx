@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type ComponentType,
   type CSSProperties,
   type MouseEvent,
   type ReactNode,
@@ -43,7 +44,6 @@ import {
   Upload,
   Webhook,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -51,7 +51,9 @@ import {
   type ConnectorWebhookEvent,
   type ConnectorActivityItem,
   type ConnectorWebhookConfigResponse,
+  type McpToolSelection,
   type SourceConnector,
+  type WorkspaceMcpInstall,
 } from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
@@ -123,11 +125,11 @@ import {
   parseConnectorOAuthCompletionMessage,
   type ConnectorOAuthCompletionMessage,
 } from "../../../connectors/oauth/_components/oauth-messaging";
+import { McpIcon, SkillIcon } from "../../../_components/dashboard-icons";
 import { SkillsGallery } from "../../../skills/_components/skills-gallery";
 import type { CitationRecord } from "../chat-canvas";
 import { SourcePreviewPanel } from "../source-preview-panel";
 import { expandSelectedSources, type SourceItem } from "../source-types";
-import { ArtifactPreviewPanel } from "./artifact-preview-panel";
 import {
   artifactMatchesQuery,
   artifactTitle,
@@ -172,6 +174,16 @@ import {
   persistSourceTreeExpansion as persistSourceTreeExpansionStorage,
   readStoredSourceTreeExpansion as readStoredSourceTreeExpansionStorage,
 } from "./storage";
+import {
+  ACTIVE_SYNC_RUN_POLL_MS,
+  CONNECTOR_SYNC_RUN_CHANNEL_PREFIX,
+  SYNC_RUN_LEADER_CHECK_MS,
+  SYNC_RUN_LEADER_ELECTION_MS,
+  SYNC_RUN_LEADER_HEARTBEAT_MS,
+  type ConnectorSyncRunLeaderCandidate,
+  getConnectorSyncRunPollDecision,
+  selectConnectorSyncRunLeader,
+} from "./sync-run-polling";
 import { TypeBadge } from "./type-badge";
 import type { ArtifactListItem } from "./types";
 import { useVirtualRows } from "./use-virtual-rows";
@@ -185,6 +197,7 @@ const tabs = [
   "Artifacts",
   "Connectors",
   "Skills",
+  "MCP",
 ] as const;
 const addTabs = ["File", "URL", "Text"] as const;
 const HUB_ACTIVE_TAB_STORAGE_KEY = "chat:sources-hub:active-tab:v1";
@@ -197,6 +210,7 @@ const SOURCE_TREE_VIRTUALIZE_THRESHOLD = 400;
 const SOURCE_TREE_ROW_HEIGHT_PX = 40;
 const SOURCE_TREE_OVERSCAN_ROWS = 12;
 const SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS = 1000;
+const ACTIVE_SYNC_RUN_TABS = new Set<HubTab>(["Sources", "Connectors"]);
 const CONNECTOR_OAUTH_URL_PARAMS = [
   "connector_oauth",
   "connector_type",
@@ -369,6 +383,27 @@ type WorkfileDetail = Awaited<
 type ConnectorAccountItem = Awaited<
   ReturnType<typeof connectorsClient.listAccounts>
 >["items"][number];
+type WorkspaceConnectorSyncRunsResult = Awaited<
+  ReturnType<typeof connectorsClient.listWorkspaceSyncRuns>
+>;
+type ConnectorSyncRunBroadcastMessage =
+  | {
+      type: "hello" | "leader-heartbeat";
+      tabId: string;
+      visible: boolean;
+      sentAt: number;
+    }
+  | {
+      type: "sync-runs-result";
+      tabId: string;
+      sentAt: number;
+      result: WorkspaceConnectorSyncRunsResult;
+    }
+  | {
+      type: "sync-runs-wake";
+      tabId: string;
+      sentAt: number;
+    };
 
 const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
 const workspaceArtifactsCursorCache = new Map<string, string | null>();
@@ -431,6 +466,7 @@ const searchPlaceholders: Record<HubTab, string> = {
   Workfiles: "Search workfiles...",
   Artifacts: "Search artifacts...",
   Skills: "Search installed skills...",
+  MCP: "Search MCP tools...",
   Citations: "Search citations...",
   Connectors: "Search connectors...",
 };
@@ -440,6 +476,7 @@ const searchScopeLabels: Record<HubTab, string> = {
   Workfiles: "Workfiles",
   Artifacts: "Artifacts",
   Skills: "Skills",
+  MCP: "MCP",
   Citations: "Citations",
   Connectors: "Connectors",
 };
@@ -734,6 +771,42 @@ function getIncrementalUpdatedAfter(value: string | null) {
   return new Date(
     Math.max(0, timestamp - SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS),
   ).toISOString();
+}
+
+function createSourcesHubTabId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isDocumentVisible() {
+  return typeof document === "undefined"
+    ? true
+    : document.visibilityState !== "hidden";
+}
+
+function shouldPollConnectorSyncRuns(tab: HubTab) {
+  return ACTIVE_SYNC_RUN_TABS.has(tab);
+}
+
+function parseConnectorSyncRunBroadcastMessage(
+  value: unknown,
+): ConnectorSyncRunBroadcastMessage | null {
+  if (!value || typeof value !== "object") return null;
+  const message = value as Partial<ConnectorSyncRunBroadcastMessage>;
+  if (typeof message.type !== "string" || typeof message.tabId !== "string") {
+    return null;
+  }
+  if (
+    message.type !== "hello" &&
+    message.type !== "leader-heartbeat" &&
+    message.type !== "sync-runs-result" &&
+    message.type !== "sync-runs-wake"
+  ) {
+    return null;
+  }
+  return value as ConnectorSyncRunBroadcastMessage;
 }
 
 function mergeSourceSelectionFromTree(
@@ -1441,7 +1514,7 @@ function HubEmptyState({
   title,
 }: {
   description: string;
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string }>;
   title: string;
 }) {
   return (
@@ -3036,7 +3109,7 @@ function SkillRow({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <Sparkles
+          <SkillIcon
             className={cn(
               "size-3 shrink-0",
               selected ? "text-primary" : "text-muted-foreground",
@@ -3120,7 +3193,7 @@ function SkillsTab({
             ? "Try a different skill name, slug, description, or source."
             : "Install skills to add reusable creation workflows and agent capabilities to this project."
         }
-        icon={Sparkles}
+        icon={SkillIcon}
         title={
           searchQuery
             ? `No installed skills match "${searchQuery}"`
@@ -3142,6 +3215,265 @@ function SkillsTab({
           onToggle={toggleSkill}
           selected={selectedSet.has(skill.id)}
           skill={skill}
+        />
+      ))}
+    </div>
+  );
+}
+
+function McpRow({
+  install,
+  selectedInstallIds,
+  selectedToolIds,
+  onSelectionChange,
+}: {
+  install: WorkspaceMcpInstall;
+  selectedInstallIds: string[];
+  selectedToolIds: string[];
+  onSelectionChange: (selection: McpToolSelection) => void;
+}) {
+  const selectedInstallSet = useMemo(
+    () => new Set(selectedInstallIds),
+    [selectedInstallIds],
+  );
+  const selectedToolSet = useMemo(
+    () => new Set(selectedToolIds),
+    [selectedToolIds],
+  );
+  const disabled =
+    !install.enabled ||
+    !install.webExecutable ||
+    install.desktopOnly ||
+    (install.authType !== "none" && install.credentialStatus !== "configured");
+  const selected = selectedInstallSet.has(install.id);
+  const enabledTools = install.tools.filter((tool) => tool.enabled);
+  const selectedToolCount = enabledTools.filter((tool) =>
+    selectedToolSet.has(tool.id),
+  ).length;
+
+  function emit(nextInstallIds: string[], nextToolIds = selectedToolIds) {
+    onSelectionChange({
+      enabled: nextInstallIds.length > 0 || nextToolIds.length > 0,
+      installIds: nextInstallIds,
+      toolIds: nextToolIds,
+    });
+  }
+
+  function toggleInstall() {
+    if (disabled) return;
+    if (selected) {
+      emit(
+        selectedInstallIds.filter((id) => id !== install.id),
+        selectedToolIds.filter(
+          (id) => !enabledTools.some((tool) => tool.id === id),
+        ),
+      );
+      return;
+    }
+    emit([...selectedInstallIds, install.id], selectedToolIds);
+  }
+
+  function toggleTool(toolId: string) {
+    if (disabled || selected) return;
+    const nextToolIds = selectedToolSet.has(toolId)
+      ? selectedToolIds.filter((id) => id !== toolId)
+      : [...selectedToolIds, toolId];
+    emit(selectedInstallIds, nextToolIds);
+  }
+
+  return (
+    <article
+      className={cn(
+        "rounded-md px-2 py-2 transition-colors",
+        selected || selectedToolCount > 0
+          ? "bg-primary/5"
+          : "hover:bg-accent/60",
+        disabled && "opacity-55",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <Checkbox
+          checked={selected}
+          className="mt-0.5"
+          disabled={disabled}
+          onCheckedChange={toggleInstall}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <McpIcon
+              className={cn(
+                "size-3 shrink-0",
+                selected ? "text-primary" : "text-muted-foreground",
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+              {install.name}
+            </span>
+            <TypeBadge
+              label={
+                install.official
+                  ? "Official"
+                  : install.verified
+                    ? "Verified"
+                    : "Unverified"
+              }
+            />
+          </div>
+          <p className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-muted-foreground">
+            {install.summary}
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <TypeBadge label={install.transport.replaceAll("_", " ")} />
+            {install.authType !== "none" ? (
+              <TypeBadge
+                label={
+                  install.credentialStatus === "configured"
+                    ? "Auth configured"
+                    : "Auth required"
+                }
+              />
+            ) : null}
+            {!install.webExecutable || install.desktopOnly ? (
+              <TypeBadge label="Desktop only" />
+            ) : null}
+            {!install.enabled ? <TypeBadge label="Disabled" /> : null}
+          </div>
+        </div>
+      </div>
+
+      {enabledTools.length > 0 ? (
+        <div className="mt-2 space-y-1 pl-6">
+          {enabledTools.slice(0, 8).map((tool) => (
+            <label
+              className={cn(
+                "flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-[11px] hover:bg-accent/60",
+                (disabled || selected) && "cursor-not-allowed hover:bg-transparent",
+              )}
+              key={tool.id}
+            >
+              <Checkbox
+                checked={selected || selectedToolSet.has(tool.id)}
+                className="mt-0.5 size-3.5"
+                disabled={disabled || selected}
+                onCheckedChange={() => toggleTool(tool.id)}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-foreground">
+                  {tool.title ?? tool.serverToolName}
+                </span>
+                {tool.description ? (
+                  <span className="line-clamp-1 text-[10px] text-muted-foreground">
+                    {tool.description}
+                  </span>
+                ) : null}
+              </span>
+              <TypeBadge label={tool.risk} />
+            </label>
+          ))}
+          {enabledTools.length > 8 ? (
+            <div className="px-1.5 text-[10px] text-muted-foreground">
+              {enabledTools.length - 8} more tools are available when the server
+              is selected.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function McpTab({
+  installs,
+  isLoading,
+  loadingError,
+  onRefresh,
+  onSelectionChange,
+  searchQuery,
+  selectedInstallIds,
+  selectedToolIds,
+}: {
+  installs: WorkspaceMcpInstall[];
+  isLoading: boolean;
+  loadingError: string | null;
+  onRefresh: () => void;
+  onSelectionChange: (selection: McpToolSelection) => void;
+  searchQuery: string;
+  selectedInstallIds: string[];
+  selectedToolIds: string[];
+}) {
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      q
+        ? installs.filter(
+            (install) =>
+              install.name.toLowerCase().includes(q) ||
+              install.summary.toLowerCase().includes(q) ||
+              install.tools.some(
+                (tool) =>
+                  tool.serverToolName.toLowerCase().includes(q) ||
+                  (tool.title ?? "").toLowerCase().includes(q) ||
+                  (tool.description ?? "").toLowerCase().includes(q),
+              ),
+          )
+        : installs,
+    [installs, q],
+  );
+
+  if (loadingError) {
+    return (
+      <HubEmptyState
+        description={loadingError}
+        icon={CircleAlert}
+        title="MCP tools could not be loaded."
+      />
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+        <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+        Loading MCP tools...
+      </div>
+    );
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <HubEmptyState
+        description={
+          searchQuery
+            ? "Try a different server, tool, or description."
+            : "Install MCP servers from the MCP Market to use them in chat."
+        }
+        icon={McpIcon}
+        title={searchQuery ? `No MCP tools match "${searchQuery}"` : "No MCP tools installed."}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="mb-2 flex justify-end">
+        <Button
+          onClick={onRefresh}
+          size="icon-xs"
+          title="Refresh MCP tools"
+          type="button"
+          variant="ghost"
+        >
+          <RotateCcw className="size-3.5" />
+          <span className="sr-only">Refresh MCP tools</span>
+        </Button>
+      </div>
+      {filtered.map((install) => (
+        <McpRow
+          install={install}
+          key={install.id}
+          onSelectionChange={onSelectionChange}
+          selectedInstallIds={selectedInstallIds}
+          selectedToolIds={selectedToolIds}
         />
       ))}
     </div>
@@ -5445,6 +5777,9 @@ export function SourcesHub({
   installedSkills = [],
   selectedSkillIds = [],
   onSkillSelectionChange = () => {},
+  selectedMcpInstallIds = [],
+  selectedMcpToolIds = [],
+  onMcpSelectionChange = () => {},
   disabledToolNames = [],
   onClose,
   variant = "panel",
@@ -5476,6 +5811,9 @@ export function SourcesHub({
   installedSkills?: HubSkillItem[];
   selectedSkillIds?: string[];
   onSkillSelectionChange?: (ids: string[]) => void;
+  selectedMcpInstallIds?: string[];
+  selectedMcpToolIds?: string[];
+  onMcpSelectionChange?: (selection: McpToolSelection) => void;
   disabledToolNames?: string[];
   onClose?: () => void;
   variant?: "panel" | "drawer";
@@ -5487,6 +5825,7 @@ export function SourcesHub({
     Workfiles: "",
     Artifacts: "",
     Skills: "",
+    MCP: "",
     Citations: "",
     Connectors: "",
   });
@@ -5510,6 +5849,9 @@ export function SourcesHub({
   const [artifactsNextCursor, setArtifactsNextCursor] = useState<string | null>(
     null,
   );
+  const [mcpInstalls, setMcpInstalls] = useState<WorkspaceMcpInstall[]>([]);
+  const [isLoadingMcp, setIsLoadingMcp] = useState(false);
+  const [mcpLoadingError, setMcpLoadingError] = useState<string | null>(null);
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
@@ -5631,9 +5973,27 @@ export function SourcesHub({
   const activeSyncRunsRef = useRef<Map<string, ActiveConnectorSyncRun>>(
     new Map(),
   );
+  const syncRunPollTimerRef = useRef<number | null>(null);
+  const syncRunLeaderTimerRef = useRef<number | null>(null);
+  const syncRunHeartbeatTimerRef = useRef<number | null>(null);
+  const syncRunPollInFlightRef = useRef(false);
+  const syncRunPollErrorCountRef = useRef(0);
+  const syncRunNeedsCooldownConfirmationRef = useRef(false);
+  const syncRunPollStoppedRef = useRef(false);
+  const syncRunLeaderCandidatesRef = useRef<
+    Map<string, ConnectorSyncRunLeaderCandidate>
+  >(new Map());
+  const syncRunIsLeaderRef = useRef(false);
+  const syncRunChannelRef = useRef<BroadcastChannel | null>(null);
+  const requestSyncRunPollRef = useRef<((delayMs?: number) => void) | null>(
+    null,
+  );
+  const sourcesHubTabIdRef = useRef<string | null>(null);
+  if (sourcesHubTabIdRef.current === null) {
+    sourcesHubTabIdRef.current = createSourcesHubTabId();
+  }
 
   const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([]);
-  const [activeSyncRunTick, setActiveSyncRunTick] = useState(0);
 
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -5891,7 +6251,16 @@ export function SourcesHub({
         lastSourceUpdatedAt: null,
         hasFinalRefreshed: false,
       });
-      setActiveSyncRunTick((value) => value + 1);
+      syncRunNeedsCooldownConfirmationRef.current = false;
+      syncRunPollErrorCountRef.current = 0;
+      requestSyncRunPollRef.current?.(0);
+      const tabId = sourcesHubTabIdRef.current ?? createSourcesHubTabId();
+      sourcesHubTabIdRef.current = tabId;
+      syncRunChannelRef.current?.postMessage({
+        type: "sync-runs-wake",
+        tabId,
+        sentAt: Date.now(),
+      } satisfies ConnectorSyncRunBroadcastMessage);
     },
     [],
   );
@@ -6314,6 +6683,49 @@ export function SourcesHub({
     }
   }, [onConnectorsChange, workspaceId]);
 
+  const refreshMcpInstalls = useCallback(async () => {
+    if (!workspaceId) {
+      setMcpInstalls([]);
+      setMcpLoadingError(null);
+      return;
+    }
+
+    setIsLoadingMcp(true);
+    setMcpLoadingError(null);
+    try {
+      const result = await contentClient.listWorkspaceMcpInstalls(workspaceId);
+      setMcpInstalls(result.items);
+      const installIds = new Set(result.items.map((install) => install.id));
+      const toolIds = new Set(
+        result.items.flatMap((install) => install.tools.map((tool) => tool.id)),
+      );
+      const nextInstallIds = selectedMcpInstallIds.filter((id) =>
+        installIds.has(id),
+      );
+      const nextToolIds = selectedMcpToolIds.filter((id) => toolIds.has(id));
+      if (
+        nextInstallIds.length !== selectedMcpInstallIds.length ||
+        nextToolIds.length !== selectedMcpToolIds.length
+      ) {
+        onMcpSelectionChange({
+          enabled: nextInstallIds.length > 0 || nextToolIds.length > 0,
+          installIds: nextInstallIds,
+          toolIds: nextToolIds,
+        });
+      }
+    } catch (error) {
+      setMcpInstalls([]);
+      setMcpLoadingError(getErrorMessage(error, "Failed to load MCP tools."));
+    } finally {
+      setIsLoadingMcp(false);
+    }
+  }, [
+    onMcpSelectionChange,
+    selectedMcpInstallIds,
+    selectedMcpToolIds,
+    workspaceId,
+  ]);
+
   const refreshConnectorSettingsActivity = useCallback(
     async (connectorId?: string | null, options: { silent?: boolean } = {}) => {
       if (!workspaceId || !connectorId) {
@@ -6454,6 +6866,10 @@ export function SourcesHub({
   }, [refreshConnectors]);
 
   useEffect(() => {
+    void refreshMcpInstalls();
+  }, [refreshMcpInstalls]);
+
+  useEffect(() => {
     if (!connectorSettingsConnectorId) {
       setConnectorSettingsActivity([]);
       setConnectorSettingsActivityError(null);
@@ -6544,12 +6960,285 @@ export function SourcesHub({
 
   useEffect(() => {
     if (!workspaceId) {
+      activeSyncRunsRef.current.clear();
+      syncRunNeedsCooldownConfirmationRef.current = false;
+      syncRunPollErrorCountRef.current = 0;
       return;
     }
 
     const activeWorkspaceId = workspaceId;
+    const tabId = sourcesHubTabIdRef.current ?? createSourcesHubTabId();
+    sourcesHubTabIdRef.current = tabId;
+    const leaderCandidates = syncRunLeaderCandidatesRef.current;
     let cancelled = false;
+    syncRunPollStoppedRef.current = false;
+
+    function clearPollTimer() {
+      if (syncRunPollTimerRef.current !== null) {
+        window.clearTimeout(syncRunPollTimerRef.current);
+        syncRunPollTimerRef.current = null;
+      }
+    }
+
+    function clearHeartbeatTimer() {
+      if (syncRunHeartbeatTimerRef.current !== null) {
+        window.clearInterval(syncRunHeartbeatTimerRef.current);
+        syncRunHeartbeatTimerRef.current = null;
+      }
+    }
+
+    function postSyncRunMessage(message: ConnectorSyncRunBroadcastMessage) {
+      syncRunChannelRef.current?.postMessage(message);
+    }
+
+    function updateSelfLeaderCandidate() {
+      leaderCandidates.set(tabId, {
+        id: tabId,
+        lastSeenAt: Date.now(),
+        visible: isDocumentVisible() && shouldPollConnectorSyncRuns(activeTab),
+      });
+    }
+
+    function startLeaderHeartbeat() {
+      if (syncRunHeartbeatTimerRef.current !== null) {
+        return;
+      }
+      postSyncRunMessage({
+        type: "leader-heartbeat",
+        tabId,
+        visible: isDocumentVisible(),
+        sentAt: Date.now(),
+      });
+      syncRunHeartbeatTimerRef.current = window.setInterval(() => {
+        if (
+          cancelled ||
+          !syncRunIsLeaderRef.current ||
+          !isDocumentVisible()
+        ) {
+          return;
+        }
+        postSyncRunMessage({
+          type: "leader-heartbeat",
+          tabId,
+          visible: true,
+          sentAt: Date.now(),
+        });
+      }, SYNC_RUN_LEADER_HEARTBEAT_MS);
+    }
+
+    function setSyncRunLeader(value: boolean) {
+      if (syncRunIsLeaderRef.current === value) {
+        return;
+      }
+      syncRunIsLeaderRef.current = value;
+      if (value) {
+        startLeaderHeartbeat();
+        requestSyncRunPollRef.current?.(0);
+      } else {
+        clearHeartbeatTimer();
+      }
+    }
+
+    function electSyncRunLeader() {
+      updateSelfLeaderCandidate();
+      const leaderId = selectConnectorSyncRunLeader(
+        Array.from(leaderCandidates.values()),
+        Date.now(),
+      );
+      setSyncRunLeader(leaderId === tabId);
+    }
+
+    function requestSyncRunPoll(delayMs = 0) {
+      if (
+        cancelled ||
+        syncRunPollStoppedRef.current ||
+        !shouldPollConnectorSyncRuns(activeTab) ||
+        (syncRunChannelRef.current && !syncRunIsLeaderRef.current)
+      ) {
+        return;
+      }
+      clearPollTimer();
+      syncRunPollTimerRef.current = window.setTimeout(() => {
+        syncRunPollTimerRef.current = null;
+        void pollActiveSyncRuns();
+      }, delayMs);
+    }
+
+    requestSyncRunPollRef.current = requestSyncRunPoll;
+
+    function scheduleNextSyncRunPoll() {
+      const decision = getConnectorSyncRunPollDecision({
+        errorCount: syncRunPollErrorCountRef.current,
+        hasActiveRuns: activeSyncRunsRef.current.size > 0,
+        isVisible: isDocumentVisible(),
+        needsCooldownConfirmation: syncRunNeedsCooldownConfirmationRef.current,
+      });
+      requestSyncRunPoll(decision.delayMs);
+    }
+
+    async function handleSyncRunResult(result: WorkspaceConnectorSyncRunsResult) {
+      if (cancelled) {
+        return;
+      }
+
+      const activeRunIds = new Set(result.items.map((run) => run.id));
+      const incrementalRequests: Array<Promise<SourceItem[]>> = [];
+
+      for (const run of result.items) {
+        const connectorId = run.connectorId;
+        if (!connectorId) {
+          continue;
+        }
+        const tracked = activeSyncRunsRef.current.get(run.id) ?? {
+          connectorId,
+          discoveredCount: 0,
+          indexedCount: 0,
+          failedCount: 0,
+          lastSourceUpdatedAt: null,
+          hasFinalRefreshed: false,
+        };
+        const countsChanged =
+          run.discoveredCount !== tracked.discoveredCount ||
+          run.indexedCount !== tracked.indexedCount ||
+          run.failedCount !== tracked.failedCount;
+        activeSyncRunsRef.current.set(run.id, {
+          ...tracked,
+          connectorId,
+          discoveredCount: run.discoveredCount,
+          indexedCount: run.indexedCount,
+          failedCount: run.failedCount,
+        });
+
+        if (!countsChanged && tracked.lastSourceUpdatedAt !== null) {
+          continue;
+        }
+
+        const updatedAfter = getIncrementalUpdatedAfter(
+          tracked.lastSourceUpdatedAt,
+        );
+        incrementalRequests.push(
+          contentClient
+            .listSources(activeWorkspaceId, {
+              view: "tree",
+              connectorId,
+              syncRunId: run.id,
+              ...(updatedAfter ? { updatedAfter } : {}),
+            })
+            .then((sourcesResult) => {
+              const mapped = mapSourcesToUi(sourcesResult.items);
+              const newestUpdatedAt = sourcesResult.items
+                .map((item) => item.updatedAt)
+                .filter(Boolean)
+                .sort()
+                .at(-1);
+              const current = activeSyncRunsRef.current.get(run.id);
+              if (current && newestUpdatedAt) {
+                activeSyncRunsRef.current.set(run.id, {
+                  ...current,
+                  lastSourceUpdatedAt: newestUpdatedAt,
+                });
+              }
+              return mapped;
+            })
+            .catch(() => []),
+        );
+      }
+
+      const completedRuns = Array.from(
+        activeSyncRunsRef.current.entries(),
+      ).filter(
+        ([runId, tracked]) =>
+          !activeRunIds.has(runId) && !tracked.hasFinalRefreshed,
+      );
+
+      if (incrementalRequests.length > 0) {
+        const batches = await Promise.all(incrementalRequests);
+        if (!cancelled) {
+          mergeIncrementalSources(batches.flat());
+        }
+      }
+
+      if (completedRuns.length > 0) {
+        const completedConnectorIds = new Set(
+          completedRuns
+            .map(([, tracked]) => tracked.connectorId)
+            .filter((connectorId): connectorId is string =>
+              Boolean(connectorId),
+            ),
+        );
+        const activeConnectorIds = new Set(
+          result.items
+            .map((run) => run.connectorId)
+            .filter((connectorId): connectorId is string =>
+              Boolean(connectorId),
+            ),
+        );
+        const finalRefreshes = Array.from(completedConnectorIds)
+          .filter((connectorId) => !activeConnectorIds.has(connectorId))
+          .map((connectorId) =>
+            contentClient
+              .listSources(activeWorkspaceId, {
+                view: "tree",
+                connectorId,
+              })
+              .then((sourcesResult) => ({
+                connectorId,
+                items: mapSourcesToUi(sourcesResult.items),
+              }))
+              .catch(() => ({ connectorId, items: [] })),
+          );
+        for (const [runId, tracked] of completedRuns) {
+          activeSyncRunsRef.current.set(runId, {
+            ...tracked,
+            hasFinalRefreshed: true,
+          });
+        }
+        if (finalRefreshes.length > 0) {
+          const batches = await Promise.all(finalRefreshes);
+          if (!cancelled) {
+            replaceConnectorSources(batches);
+          }
+        }
+        for (const [runId] of completedRuns) {
+          activeSyncRunsRef.current.delete(runId);
+        }
+        if (!cancelled) {
+          void refreshConnectors();
+        }
+      }
+
+      if (result.items.length > 0) {
+        syncRunNeedsCooldownConfirmationRef.current = false;
+        return;
+      }
+      if (completedRuns.length > 0) {
+        syncRunNeedsCooldownConfirmationRef.current = true;
+        return;
+      }
+      syncRunNeedsCooldownConfirmationRef.current = false;
+    }
+
     async function pollActiveSyncRuns() {
+      if (
+        cancelled ||
+        !shouldPollConnectorSyncRuns(activeTab) ||
+        syncRunPollStoppedRef.current
+      ) {
+        return;
+      }
+      if (!isDocumentVisible()) {
+        scheduleNextSyncRunPoll();
+        return;
+      }
+      if (syncRunChannelRef.current && !syncRunIsLeaderRef.current) {
+        return;
+      }
+      if (syncRunPollInFlightRef.current) {
+        requestSyncRunPoll(ACTIVE_SYNC_RUN_POLL_MS);
+        return;
+      }
+
+      syncRunPollInFlightRef.current = true;
       try {
         const result = await connectorsClient.listWorkspaceSyncRuns(
           activeWorkspaceId,
@@ -6560,146 +7249,152 @@ export function SourcesHub({
         if (cancelled) {
           return;
         }
-
-        const activeRunIds = new Set(result.items.map((run) => run.id));
-        const incrementalRequests: Array<Promise<SourceItem[]>> = [];
-
-        for (const run of result.items) {
-          const connectorId = run.connectorId;
-          if (!connectorId) {
-            continue;
-          }
-          const tracked = activeSyncRunsRef.current.get(run.id) ?? {
-            connectorId,
-            discoveredCount: 0,
-            indexedCount: 0,
-            failedCount: 0,
-            lastSourceUpdatedAt: null,
-            hasFinalRefreshed: false,
-          };
-          const countsChanged =
-            run.discoveredCount !== tracked.discoveredCount ||
-            run.indexedCount !== tracked.indexedCount ||
-            run.failedCount !== tracked.failedCount;
-          activeSyncRunsRef.current.set(run.id, {
-            ...tracked,
-            connectorId,
-            discoveredCount: run.discoveredCount,
-            indexedCount: run.indexedCount,
-            failedCount: run.failedCount,
-          });
-
-          if (!countsChanged && tracked.lastSourceUpdatedAt !== null) {
-            continue;
-          }
-
-          const updatedAfter = getIncrementalUpdatedAfter(
-            tracked.lastSourceUpdatedAt,
-          );
-          incrementalRequests.push(
-            contentClient
-              .listSources(activeWorkspaceId, {
-                view: "tree",
-                connectorId,
-                syncRunId: run.id,
-                ...(updatedAfter ? { updatedAfter } : {}),
-              })
-              .then((sourcesResult) => {
-                const mapped = mapSourcesToUi(sourcesResult.items);
-                const newestUpdatedAt = sourcesResult.items
-                  .map((item) => item.updatedAt)
-                  .filter(Boolean)
-                  .sort()
-                  .at(-1);
-                const current = activeSyncRunsRef.current.get(run.id);
-                if (current && newestUpdatedAt) {
-                  activeSyncRunsRef.current.set(run.id, {
-                    ...current,
-                    lastSourceUpdatedAt: newestUpdatedAt,
-                  });
-                }
-                return mapped;
-              })
-              .catch(() => []),
-          );
-        }
-
-        const completedRuns = Array.from(
-          activeSyncRunsRef.current.entries(),
-        ).filter(
-          ([runId, tracked]) =>
-            !activeRunIds.has(runId) && !tracked.hasFinalRefreshed,
-        );
-
-        if (incrementalRequests.length > 0) {
-          const batches = await Promise.all(incrementalRequests);
-          if (!cancelled) {
-            mergeIncrementalSources(batches.flat());
-          }
-        }
-
-        if (completedRuns.length > 0) {
-          const completedConnectorIds = new Set(
-            completedRuns
-              .map(([, tracked]) => tracked.connectorId)
-              .filter((connectorId): connectorId is string =>
-                Boolean(connectorId),
-              ),
-          );
-          const activeConnectorIds = new Set(
-            result.items
-              .map((run) => run.connectorId)
-              .filter((connectorId): connectorId is string =>
-                Boolean(connectorId),
-              ),
-          );
-          const finalRefreshes = Array.from(completedConnectorIds)
-            .filter((connectorId) => !activeConnectorIds.has(connectorId))
-            .map((connectorId) =>
-              contentClient
-                .listSources(activeWorkspaceId, {
-                  view: "tree",
-                  connectorId,
-                })
-                .then((sourcesResult) => ({
-                  connectorId,
-                  items: mapSourcesToUi(sourcesResult.items),
-                }))
-                .catch(() => ({ connectorId, items: [] })),
-            );
-          for (const [runId, tracked] of completedRuns) {
-            activeSyncRunsRef.current.set(runId, {
-              ...tracked,
-              hasFinalRefreshed: true,
-            });
-          }
-          if (finalRefreshes.length > 0) {
-            const batches = await Promise.all(finalRefreshes);
-            if (!cancelled) {
-              replaceConnectorSources(batches);
-            }
-          }
-          for (const [runId] of completedRuns) {
-            activeSyncRunsRef.current.delete(runId);
-          }
-          if (!cancelled) {
-            void refreshConnectors();
-            setActiveSyncRunTick((value) => value + 1);
-          }
-        }
+        syncRunPollErrorCountRef.current = 0;
+        postSyncRunMessage({
+          type: "sync-runs-result",
+          tabId,
+          sentAt: Date.now(),
+          result,
+        });
+        await handleSyncRunResult(result);
       } catch {
+        syncRunPollErrorCountRef.current += 1;
         // The regular connector/source refresh surfaces visible errors.
+      } finally {
+        syncRunPollInFlightRef.current = false;
+        if (!cancelled) {
+          scheduleNextSyncRunPoll();
+        }
       }
     }
 
-    void pollActiveSyncRuns();
-    const timer = window.setInterval(pollActiveSyncRuns, 2000);
+    if (!shouldPollConnectorSyncRuns(activeTab)) {
+      return () => {
+        requestSyncRunPollRef.current = null;
+      };
+    }
+
+    function handleVisibilityChange() {
+      updateSelfLeaderCandidate();
+      postSyncRunMessage({
+        type: "hello",
+        tabId,
+        visible: isDocumentVisible(),
+        sentAt: Date.now(),
+      });
+      electSyncRunLeader();
+      if (!isDocumentVisible()) {
+        clearPollTimer();
+        setSyncRunLeader(false);
+        return;
+      }
+      if (syncRunIsLeaderRef.current) {
+        requestSyncRunPoll(0);
+      }
+    }
+
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        const channel = new BroadcastChannel(
+          `${CONNECTOR_SYNC_RUN_CHANNEL_PREFIX}:${activeWorkspaceId}`,
+        );
+        syncRunChannelRef.current = channel;
+        channel.onmessage = (event: MessageEvent) => {
+          const message = parseConnectorSyncRunBroadcastMessage(event.data);
+          if (!message || message.tabId === tabId) {
+            return;
+          }
+          if (
+            message.type === "hello" ||
+            message.type === "leader-heartbeat"
+          ) {
+            leaderCandidates.set(message.tabId, {
+              id: message.tabId,
+              lastSeenAt: message.sentAt,
+              visible: message.visible,
+            });
+            electSyncRunLeader();
+            return;
+          }
+          if (message.type === "sync-runs-result") {
+            syncRunPollErrorCountRef.current = 0;
+            void handleSyncRunResult(message.result);
+            return;
+          }
+          if (message.type === "sync-runs-wake") {
+            if (syncRunIsLeaderRef.current) {
+              requestSyncRunPoll(0);
+            }
+          }
+        };
+        updateSelfLeaderCandidate();
+        postSyncRunMessage({
+          type: "hello",
+          tabId,
+          visible: isDocumentVisible(),
+          sentAt: Date.now(),
+        });
+        const electionTimer = window.setTimeout(() => {
+          electSyncRunLeader();
+        }, SYNC_RUN_LEADER_ELECTION_MS);
+        syncRunLeaderTimerRef.current = window.setInterval(() => {
+          electSyncRunLeader();
+        }, SYNC_RUN_LEADER_CHECK_MS);
+        if (typeof document !== "undefined") {
+          document.addEventListener("visibilitychange", handleVisibilityChange);
+        }
+        return () => {
+          cancelled = true;
+          syncRunPollStoppedRef.current = true;
+          window.clearTimeout(electionTimer);
+          clearPollTimer();
+          clearHeartbeatTimer();
+          if (syncRunLeaderTimerRef.current !== null) {
+            window.clearInterval(syncRunLeaderTimerRef.current);
+            syncRunLeaderTimerRef.current = null;
+          }
+          if (typeof document !== "undefined") {
+            document.removeEventListener(
+              "visibilitychange",
+              handleVisibilityChange,
+            );
+          }
+          channel.close();
+          syncRunChannelRef.current = null;
+          syncRunIsLeaderRef.current = false;
+          leaderCandidates.clear();
+          if (requestSyncRunPollRef.current === requestSyncRunPoll) {
+            requestSyncRunPollRef.current = null;
+          }
+        };
+      } catch {
+        syncRunChannelRef.current = null;
+      }
+    }
+
+    syncRunIsLeaderRef.current = true;
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+    requestSyncRunPoll(0);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      syncRunPollStoppedRef.current = true;
+      clearPollTimer();
+      clearHeartbeatTimer();
+      if (typeof document !== "undefined") {
+        document.removeEventListener(
+          "visibilitychange",
+          handleVisibilityChange,
+        );
+      }
+      syncRunIsLeaderRef.current = false;
+      if (requestSyncRunPollRef.current === requestSyncRunPoll) {
+        requestSyncRunPollRef.current = null;
+      }
     };
   }, [
-    activeSyncRunTick,
+    activeTab,
     mergeIncrementalSources,
     replaceConnectorSources,
     refreshConnectors,
@@ -6745,6 +7440,7 @@ export function SourcesHub({
     Workfiles: workfiles.length,
     Artifacts: artifacts.length,
     Skills: selectedSkillIds.length,
+    MCP: selectedMcpInstallIds.length + selectedMcpToolIds.length,
     Citations: citations.length,
     Connectors: connectors.length,
   };
@@ -8160,7 +8856,7 @@ export function SourcesHub({
                   type="button"
                   variant="outline"
                 >
-                  <Sparkles className="size-3.5" />
+                  <SkillIcon className="size-3.5" />
                   Skills gallery
                 </Button>
               </div>
@@ -8172,6 +8868,46 @@ export function SourcesHub({
                 searchQuery={deferredSearchQuery}
                 selectedSkillIds={selectedSkillIds}
                 skills={installedSkills}
+              />
+            </section>
+          )}
+
+          {activeTab === "MCP" && (
+            <section className="space-y-1">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-medium text-foreground">MCP</h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    {mcpInstalls.length} installed
+                  </span>
+                  {selectedMcpInstallIds.length + selectedMcpToolIds.length > 0 ? (
+                    <span className="text-[10px] text-primary">
+                      {selectedMcpInstallIds.length + selectedMcpToolIds.length} selected
+                    </span>
+                  ) : null}
+                </div>
+                <Button
+                  asChild
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  <a href="/dashboard/mcp">
+                    <McpIcon className="size-3.5" />
+                    MCP Market
+                  </a>
+                </Button>
+              </div>
+
+              <McpTab
+                installs={mcpInstalls}
+                isLoading={isLoadingMcp}
+                loadingError={mcpLoadingError}
+                onRefresh={() => void refreshMcpInstalls()}
+                onSelectionChange={onMcpSelectionChange}
+                searchQuery={deferredSearchQuery}
+                selectedInstallIds={selectedMcpInstallIds}
+                selectedToolIds={selectedMcpToolIds}
               />
             </section>
           )}

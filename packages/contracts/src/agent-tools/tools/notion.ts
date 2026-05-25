@@ -19,9 +19,31 @@ export const searchNotionPagesTool = defineAgentTool({
     configurable: true,
     configKeys: ["connectorId"],
   },
+  defaultPermission: "allow",
+  riskLevel: "low",
   slash: {
-    description: "Search indexed Notion pages",
-    displayName: "Search Notion pages",
+    description: "Find Notion pages and return page IDs",
+    displayName: "Find Notion pages",
+    supportsCommand: true,
+  },
+});
+
+export const readNotionPageTool = defineAgentTool({
+  id: "readNotionPage",
+  name: "read_notion_page",
+  domain: "connector",
+  capabilities: ["connector", "notion", "connector_read"],
+  activation: notionActivation,
+  configuration: {
+    configurable: true,
+    configKeys: ["connectorId"],
+  },
+  defaultPermission: "allow",
+  riskLevel: "low",
+  slash: {
+    description: "Read Notion page content by page ID",
+    displayName: "Read Notion page",
+    supportsCommand: true,
   },
 });
 
@@ -35,9 +57,13 @@ export const createNotionPageTool = defineAgentTool({
     configurable: true,
     configKeys: ["connectorId"],
   },
+  defaultPermission: "ask",
+  riskLevel: "medium",
   slash: {
-    description: "Propose creating a Notion page",
+    description:
+      "Create a Notion page in the authorized workspace unless an explicit parent page or data source ID is provided",
     displayName: "Create Notion page",
+    supportsCommand: true,
   },
 });
 
@@ -51,15 +77,18 @@ export const appendNotionPageTool = defineAgentTool({
     configurable: true,
     configKeys: ["connectorId"],
   },
+  defaultPermission: "ask",
+  riskLevel: "medium",
   slash: {
     description: "Propose appending content to a Notion page",
     displayName: "Append Notion page",
+    supportsCommand: true,
   },
 });
 
-export const updateNotionPageByTitleTool = defineAgentTool({
-  id: "updateNotionPageByTitle",
-  name: "update_notion_page_by_title",
+export const updateNotionPageTool = defineAgentTool({
+  id: "updateNotionPage",
+  name: "update_notion_page",
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write"],
   activation: notionActivation,
@@ -67,15 +96,18 @@ export const updateNotionPageByTitleTool = defineAgentTool({
     configurable: true,
     configKeys: ["connectorId"],
   },
+  defaultPermission: "ask",
+  riskLevel: "medium",
   slash: {
-    description: "Propose updating a Notion page by exact title",
+    description: "Propose updating a Notion page by page ID",
     displayName: "Update Notion page",
+    supportsCommand: true,
   },
 });
 
-export const deleteNotionPageByTitleTool = defineAgentTool({
-  id: "deleteNotionPageByTitle",
-  name: "delete_notion_page_by_title",
+export const deleteNotionPageTool = defineAgentTool({
+  id: "deleteNotionPage",
+  name: "delete_notion_page",
   domain: "connector",
   capabilities: ["connector", "notion", "connector_write"],
   activation: notionActivation,
@@ -83,9 +115,12 @@ export const deleteNotionPageByTitleTool = defineAgentTool({
     configurable: true,
     configKeys: ["connectorId"],
   },
+  defaultPermission: "ask",
+  riskLevel: "high",
   slash: {
-    description: "Propose moving a Notion page to trash by exact title",
+    description: "Move Notion pages to trash by page ID",
     displayName: "Delete Notion page",
+    supportsCommand: true,
   },
 });
 
@@ -99,9 +134,12 @@ export const saveArtifactToNotionTool = defineAgentTool({
     configurable: true,
     configKeys: ["connectorId"],
   },
+  defaultPermission: "ask",
+  riskLevel: "medium",
   slash: {
     description: "Propose saving an artifact reference to Notion",
     displayName: "Save artifact to Notion",
+    supportsCommand: true,
   },
 });
 
@@ -115,18 +153,22 @@ export const saveFinalAnswerToNotionTool = defineAgentTool({
     configurable: true,
     configKeys: ["connectorId"],
   },
+  defaultPermission: "ask",
+  riskLevel: "medium",
   slash: {
     description: "Propose saving the final answer to Notion",
     displayName: "Save answer to Notion",
+    supportsCommand: true,
   },
 });
 
 export const notionTools = [
   searchNotionPagesTool,
+  readNotionPageTool,
   createNotionPageTool,
   appendNotionPageTool,
-  updateNotionPageByTitleTool,
-  deleteNotionPageByTitleTool,
+  updateNotionPageTool,
+  deleteNotionPageTool,
   saveArtifactToNotionTool,
   saveFinalAnswerToNotionTool,
 ] as const;

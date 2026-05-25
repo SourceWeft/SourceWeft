@@ -18,6 +18,7 @@ import type {
 } from "../../_components/chat-canvas";
 import type { SourceItem } from "../../_components/source-types";
 import type { SourceConnector } from "@sourceweft/sdk";
+import type { McpToolSelection } from "@sourceweft/sdk";
 
 const SourcesHub = dynamic(
   () => import("../../_components/sources-hub").then((mod) => mod.SourcesHub),
@@ -49,6 +50,8 @@ function SourcesHubSkeleton({ className }: { className?: string }) {
 export function ThreadSidePanels({
   activeCitationIndex,
   activeCitationMessageId,
+  activeMcpInstallIds,
+  activeMcpToolIds,
   activeSkillIds,
   activeSourceIds,
   artifactsRefreshKey,
@@ -69,6 +72,7 @@ export function ThreadSidePanels({
   onHubDrawerOpenChange,
   onLibrarySourcesLoad,
   onLibrarySourcesMerge,
+  onMcpSelectionChange,
   onSelectionChange,
   onSkillSelectionChange,
   previewArtifact,
@@ -81,6 +85,8 @@ export function ThreadSidePanels({
 }: {
   activeCitationIndex: number | null;
   activeCitationMessageId: string | null;
+  activeMcpInstallIds: string[];
+  activeMcpToolIds: string[];
   activeSkillIds: string[];
   activeSourceIds: string[];
   artifactsRefreshKey: number;
@@ -104,6 +110,7 @@ export function ThreadSidePanels({
   onHubDrawerOpenChange: (open: boolean) => void;
   onLibrarySourcesLoad: (sources: SourceItem[]) => void;
   onLibrarySourcesMerge: (sources: SourceItem[]) => void;
+  onMcpSelectionChange: (selection: McpToolSelection) => void;
   onSelectionChange: (sourceIds: string[]) => void;
   onSkillSelectionChange: (skillIds: string[]) => void;
   previewArtifact: ArtifactListItem | null;
@@ -133,11 +140,14 @@ export function ThreadSidePanels({
           onSkillSelectionChange={onSkillSelectionChange}
           onSelectionChange={onSelectionChange}
           onSkillsCatalogChange={loadAvailableSkills}
+          onMcpSelectionChange={onMcpSelectionChange}
           onConnectorsChange={onConnectorsChange}
           onSourceLoad={onLibrarySourcesLoad}
           onSourceMerge={onLibrarySourcesMerge}
           selectedIds={activeSourceIds}
           selectedSkillIds={activeSkillIds}
+          selectedMcpInstallIds={activeMcpInstallIds}
+          selectedMcpToolIds={activeMcpToolIds}
           threadCitations={threadCitations}
           threadId={threadId}
           workfilesRefreshKey={workfilesRefreshKey}
@@ -207,11 +217,14 @@ export function ThreadSidePanels({
             onSkillSelectionChange={onSkillSelectionChange}
             onSelectionChange={onSelectionChange}
             onSkillsCatalogChange={loadAvailableSkills}
+            onMcpSelectionChange={onMcpSelectionChange}
             onConnectorsChange={onConnectorsChange}
             onSourceLoad={onLibrarySourcesLoad}
             onSourceMerge={onLibrarySourcesMerge}
             selectedIds={activeSourceIds}
             selectedSkillIds={activeSkillIds}
+            selectedMcpInstallIds={activeMcpInstallIds}
+            selectedMcpToolIds={activeMcpToolIds}
             threadCitations={threadCitations}
             threadId={threadId}
             variant="drawer"

@@ -8,10 +8,16 @@ import { dispatchDashboardBillingSummaryRefresh } from "../../_components/dashbo
 export type ActiveThreadRun = {
   id?: string;
   idempotencyKey: string;
-  status: "queued" | "running" | "cancel_requested";
-  mode?: "send" | "refresh" | "edit";
+  status:
+    | "queued"
+    | "running"
+    | "cancel_requested"
+    | "waiting_for_approval";
+  mode?: "send" | "refresh" | "edit" | "resume";
   userMessageId?: string | null;
   assistantMessageId?: string | null;
+  approvalRequestedAt?: string | null;
+  approvalExpiresAt?: string | null;
 };
 
 type StreamRequestErrorHandler = (response: Response) => Promise<never>;
@@ -48,6 +54,18 @@ export function useChatStreamRunnerControl({
     [setActiveThreadRun],
   );
 
+  const updateActiveRunIfCurrent = useCallback(
+    (
+      durableRunKey: string,
+      updater: (run: ActiveThreadRun) => ActiveThreadRun,
+    ) => {
+      setActiveThreadRun((current) =>
+        current?.idempotencyKey === durableRunKey ? updater(current) : current,
+      );
+    },
+    [],
+  );
+
   const clearAttachedRunKeyIfCurrent = useCallback((durableRunKey: string) => {
     attachedRunKeyRef.current =
       attachedRunKeyRef.current === durableRunKey
@@ -61,20 +79,59 @@ export function useChatStreamRunnerControl({
     );
   }, []);
 
+  const markRunStopped = useCallback(
+    (durableRunKey: string) => {
+      setIsStreaming(false);
+      setIsStopping(false);
+      clearRunIfCurrent(durableRunKey);
+      clearAttachedRunKeyIfCurrent(durableRunKey);
+      dispatchDashboardBillingSummaryRefresh({
+        reason: "chat-turn-terminal",
+      });
+    },
+    [clearAttachedRunKeyIfCurrent, clearRunIfCurrent],
+  );
+
   const markRunTerminal = useCallback(
-    (input: { detachedWithoutFinish: boolean; durableRunKey: string }) => {
+    (input: {
+      detachedWithoutFinish: boolean;
+      durableRunKey: string;
+      waitingForApproval?: boolean;
+    }) => {
       if (!input.detachedWithoutFinish) {
         setIsStreaming(false);
         setIsStopping(false);
-        clearRunIfCurrent(input.durableRunKey);
+        if (input.waitingForApproval) {
+          setActiveThreadRun((current) =>
+            current?.idempotencyKey === input.durableRunKey
+              ? {
+                  ...current,
+                  status: "waiting_for_approval",
+                }
+              : current,
+          );
+        } else {
+          clearRunIfCurrent(input.durableRunKey);
+        }
         dispatchDashboardBillingSummaryRefresh({
           reason: "chat-turn-terminal",
         });
       } else {
+        if (
+          activeThreadRunRef.current?.idempotencyKey === input.durableRunKey &&
+          activeThreadRunRef.current.status === "cancel_requested"
+        ) {
+          setIsStreaming(false);
+          clearRunIfCurrent(input.durableRunKey);
+          clearAttachedRunKeyIfCurrent(input.durableRunKey);
+          dispatchDashboardBillingSummaryRefresh({
+            reason: "chat-turn-terminal",
+          });
+        }
         setIsStopping(false);
       }
     },
-    [clearRunIfCurrent],
+    [clearAttachedRunKeyIfCurrent, clearRunIfCurrent],
   );
 
   const stopStreaming = useCallback(() => {
@@ -104,6 +161,7 @@ export function useChatStreamRunnerControl({
         if (!response.ok) {
           await throwStreamRequestError(response);
         }
+        markRunStopped(run.idempotencyKey);
       })
       .catch((error) => {
         toast.error(getDisplayErrorMessage(error));
@@ -115,6 +173,7 @@ export function useChatStreamRunnerControl({
   }, [
     getDisplayErrorMessage,
     isStopping,
+    markRunStopped,
     threadId,
     throwStreamRequestError,
     workspaceId,
@@ -131,6 +190,7 @@ export function useChatStreamRunnerControl({
     markRunTerminal,
     setActiveThreadRun,
     stopStreaming,
+    updateActiveRunIfCurrent,
   };
 }
 

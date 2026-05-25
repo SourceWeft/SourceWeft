@@ -3,6 +3,7 @@ import { test } from "vitest";
 import { ContentError } from "../../errors";
 import {
   buildThreadToolsMetadata,
+  resolveMcpToolSelection,
   resolveNotionToolSelections,
   resolveGenerateImageToolSelection,
   resolveWebSearchEnabled,
@@ -80,15 +81,69 @@ test("buildThreadToolsMetadata stores canonical tool-name keyed fields", () => {
   );
 });
 
+test("buildThreadToolsMetadata stores mcp install and tool selections", () => {
+  const metadata = buildThreadToolsMetadata({
+    skillIds: [],
+    webSearchEnabled: false,
+    mcpTools: {
+      enabled: true,
+      installIds: ["mcp_install_1"],
+      toolIds: ["mcp_tool_1"],
+    },
+  });
+
+  assert.deepEqual(metadata.mcp, {
+    enabled: true,
+    installIds: ["mcp_install_1"],
+    toolIds: ["mcp_tool_1"],
+  });
+});
+
+test("resolveMcpToolSelection keeps only concrete string ids", () => {
+  assert.deepEqual(
+    resolveMcpToolSelection({
+      mcp: {
+        enabled: true,
+        installIds: ["mcp_install_1", "", 1],
+        toolIds: ["mcp_tool_1", null],
+      },
+    } as unknown as Parameters<typeof resolveMcpToolSelection>[0]),
+    {
+      enabled: true,
+      installIds: ["mcp_install_1"],
+      toolIds: ["mcp_tool_1"],
+    },
+  );
+});
+
+test("resolveMcpToolSelectionFromToolsMetadata reads persisted mcp selection", () => {
+  assert.deepEqual(
+    testExports.resolveMcpToolSelectionFromToolsMetadata({
+      mcp: {
+        enabled: false,
+        installIds: ["mcp_install_1"],
+        toolIds: ["mcp_tool_1"],
+      },
+    }),
+    {
+      enabled: false,
+      installIds: ["mcp_install_1"],
+      toolIds: ["mcp_tool_1"],
+    },
+  );
+});
+
 test("resolveNotionToolSelections keeps notion connector tool selections only", () => {
   assert.deepEqual(
     resolveNotionToolSelections({
       search_notion_pages: { enabled: true, connectorId: "connector_1" },
+      delete_notion_page: { enabled: true },
       create_notion_page: { enabled: false },
       web_search: { enabled: true },
     }),
     {
       search_notion_pages: { enabled: true, connectorId: "connector_1" },
+      delete_notion_page: { enabled: true },
       create_notion_page: { enabled: false },
     },
   );

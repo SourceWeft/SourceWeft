@@ -16,6 +16,14 @@ function parseBooleanQuery(value: string | undefined) {
   return value === "true" || value === "1";
 }
 
+function parseLimitQuery(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function registerMcpRoutes(app: Hono) {
   app.get("/market/mcp", async (c) => {
     const session = await requireSession(c);
@@ -29,6 +37,19 @@ export function registerMcpRoutes(app: Hono) {
       query: c.req.query("query"),
       category: c.req.query("category"),
       includeDesktopOnly: parseBooleanQuery(c.req.query("includeDesktopOnly")),
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/market/mcp/categories", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await mcpService.listMarketMcpCategories({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
     });
     return ApiResponse.success(c, result);
   });
@@ -83,6 +104,36 @@ export function registerMcpRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
+  app.get("/mcp-runs", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await mcpService.listToolRuns({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      limit: parseLimitQuery(c.req.query("limit")),
+      cursor: c.req.query("cursor"),
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/mcp-action-runs", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await mcpService.listActionRuns({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      limit: parseLimitQuery(c.req.query("limit")),
+      cursor: c.req.query("cursor"),
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.patch("/mcp-installs/:installId", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -102,6 +153,20 @@ export function registerMcpRoutes(app: Hono) {
       installId: requireRouteParam(c, "installId"),
       enabled: parsed.data.enabled,
       toolIds: parsed.data.toolIds,
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.delete("/mcp-installs/:installId", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await mcpService.deleteInstall({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      installId: requireRouteParam(c, "installId"),
     });
     return ApiResponse.success(c, result);
   });

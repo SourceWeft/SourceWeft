@@ -16,6 +16,8 @@ export const webFetchTool = defineAgentTool({
       activates: false,
     },
   },
+  defaultPermission: "allow",
+  riskLevel: "low",
 });
 
 export const webSearchTool = defineAgentTool({
@@ -34,6 +36,8 @@ export const webSearchTool = defineAgentTool({
       activates: true,
     },
   },
+  defaultPermission: "allow",
+  riskLevel: "low",
 });
 
 export const webTools = [webFetchTool, webSearchTool] as const;

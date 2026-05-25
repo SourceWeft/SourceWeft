@@ -134,3 +134,19 @@ export type McpToolRunRecord = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type McpRunInstallSummary = {
+  id: string;
+  name: string;
+  marketIdentifier: string | null;
+  official: boolean;
+  verified: boolean;
+};
+
+export type McpToolRunWithInstallRecord = McpToolRunRecord & {
+  install: McpRunInstallSummary | null;
+};
+
+export type McpActionRunWithInstallRecord = McpActionRunRecord & {
+  install: McpRunInstallSummary | null;
+};

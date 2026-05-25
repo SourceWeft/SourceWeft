@@ -1,6 +1,5 @@
 import { memo, useMemo, useState } from "react";
 import {
-  BookOpenIcon,
   Copy,
   Loader2,
   Pencil,
@@ -38,6 +37,7 @@ import {
 } from "@sourceweft/ui-web/components/ai-elements/attachments";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { SkillIcon } from "../../../_components/dashboard-icons";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import { WebToolResults } from "../web-tool-results";
 import {
@@ -65,6 +65,7 @@ import type {
   ChatMessageImagePart,
   MessageRenderBlock,
   MessageVersion,
+  ToolConfirmationResolution,
   ToolCallRecord,
   VersionedMessageGroup,
 } from "./types";
@@ -261,7 +262,7 @@ function UserCommandSegmentView({
   if (!label) {
     return null;
   }
-  const Icon = command.kind === "tool" ? WrenchIcon : BookOpenIcon;
+  const Icon = command.kind === "tool" ? WrenchIcon : SkillIcon;
   return (
     <span
       className="inline-flex max-w-full items-center gap-1 align-baseline text-sm font-semibold leading-6 text-blue-600 dark:text-blue-400"
@@ -528,6 +529,7 @@ type MessageListProps = {
   onLoadOlderMessages?: () => void;
   onSourcePreview?: (source: SourceItem) => void;
   onWorkfileClick?: (path: string) => void;
+  resolvedConfirmations?: ToolConfirmationResolution[];
   onRestartFromMessage?: (input: {
     groupId: string;
     messageId: string;
@@ -539,7 +541,6 @@ type MessageListProps = {
     groupId: string;
     assistantMessageId: string;
     branchIndex: number;
-    toolApprovalResume?: import("@sourceweft/sdk").ToolApprovalResume | null;
   }) => void;
   workspaceId?: string | null;
 };
@@ -771,7 +772,8 @@ function areMessageVersionsRenderEqual(
     (left.availableCitations?.length ?? 0) ===
       (right.availableCitations?.length ?? 0) &&
     (left.modelReasoningSegments?.length ?? 0) ===
-      (right.modelReasoningSegments?.length ?? 0)
+      (right.modelReasoningSegments?.length ?? 0) &&
+    (left.traceEvents?.length ?? 0) === (right.traceEvents?.length ?? 0)
   );
 }
 
@@ -805,6 +807,7 @@ type MessageGroupItemProps = {
   onRestartFromMessage?: MessageListProps["onRestartFromMessage"];
   onSourcePreview?: MessageListProps["onSourcePreview"];
   onWorkfileClick?: MessageListProps["onWorkfileClick"];
+  resolvedConfirmations?: ToolConfirmationResolution[];
   selectedAssistantVersionForUser: MessageVersion | null;
   selectedUserVersionIdForAssistant: string | null;
   selectedSourceIdsByKey: SelectedSourceIdsResolver;
@@ -826,6 +829,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
   onRestartFromMessage,
   onSourcePreview,
   onWorkfileClick,
+  resolvedConfirmations = [],
   selectedAssistantVersionForUser,
   selectedSourceIdsByKey,
   selectedUserVersionIdForAssistant,
@@ -930,7 +934,10 @@ const MessageGroupItem = memo(function MessageGroupItem({
                         isStreaming={isStreamingThisVersion}
                         modelReasoning={version.modelReasoning}
                         modelReasoningSegments={version.modelReasoningSegments}
+                        traceEvents={version.traceEvents}
+                        traceParts={version.traceParts}
                         onArtifactPreview={onArtifactPreview}
+                        resolvedConfirmations={resolvedConfirmations}
                         steps={version.thinkingSteps}
                         toolCalls={version.toolCalls}
                         workspaceId={workspaceId}
@@ -1075,7 +1082,11 @@ function areMessageGroupItemPropsEqual(
     previous.onRefreshLatest !== next.onRefreshLatest ||
     previous.onRestartFromMessage !== next.onRestartFromMessage ||
     previous.onSourcePreview !== next.onSourcePreview ||
-    previous.onWorkfileClick !== next.onWorkfileClick
+    previous.onWorkfileClick !== next.onWorkfileClick ||
+    !areConfirmationResolutionsEqual(
+      previous.resolvedConfirmations,
+      next.resolvedConfirmations,
+    )
   ) {
     return false;
   }
@@ -1120,6 +1131,24 @@ function areNullableMessageVersionsRenderEqual(
   return areMessageVersionsRenderEqual(previous, next);
 }
 
+function summarizeConfirmationResolutions(
+  resolutions: ToolConfirmationResolution[] | undefined,
+) {
+  return (resolutions ?? [])
+    .map((item) => `${item.confirmationId}:${item.decision}`)
+    .join("|");
+}
+
+function areConfirmationResolutionsEqual(
+  previous: ToolConfirmationResolution[] | undefined,
+  next: ToolConfirmationResolution[] | undefined,
+) {
+  return (
+    summarizeConfirmationResolutions(previous) ===
+    summarizeConfirmationResolutions(next)
+  );
+}
+
 export function MessageList({
   activeVersionByGroup = {},
   allSources = [],
@@ -1134,6 +1163,7 @@ export function MessageList({
   onLoadOlderMessages,
   onSourcePreview,
   onWorkfileClick,
+  resolvedConfirmations = [],
   onRestartFromMessage,
   onRefreshLatest,
   workspaceId,
@@ -1283,6 +1313,7 @@ export function MessageList({
                 onRestartFromMessage={onRestartFromMessage}
                 onSourcePreview={onSourcePreview}
                 onWorkfileClick={onWorkfileClick}
+                resolvedConfirmations={resolvedConfirmations}
                 selectedAssistantVersionForUser={
                   selectedAssistantVersionForUser
                 }
