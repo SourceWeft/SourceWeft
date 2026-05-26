@@ -77,6 +77,13 @@ test("notion adapter declares install-integration OAuth manifest", () => {
     manifest.sync.resources.map((resource) => resource.type),
     ["notion_page"],
   );
+  assert.deepEqual(manifest.configSchema, {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      includePages: { type: "boolean" },
+    },
+  });
 });
 
 test("notion client always sends API version 2026-03-11", async () => {

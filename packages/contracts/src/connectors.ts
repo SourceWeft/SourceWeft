@@ -388,44 +388,6 @@ export const connectorWebhookConfigResponseSchema = z.object({
   setupRequired: z.boolean(),
 });
 
-export const connectorNotionWriteRequestSchema = z.object({
-  target: z.object({
-    connectorId: z.string().trim().min(1).optional(),
-    pageId: z.string().trim().min(1).optional(),
-    pageTitle: z.string().trim().min(1).optional(),
-    parentPageId: z.string().trim().min(1).optional(),
-    dataSourceId: z.string().trim().min(1).optional(),
-  }),
-  title: z.string().trim().min(1).max(200).optional(),
-  contentMarkdown: z.string().max(200_000).optional(),
-  artifactId: z.string().trim().min(1).optional(),
-  mode: z.enum(["create", "append", "update"]),
-});
-
-export const lookupNotionPagesRequestSchema = z.object({
-  connectorId: z.string().trim().min(1).optional(),
-  title: z.string().trim().min(1).optional(),
-  fuzzyTitle: z.string().trim().min(1).optional(),
-  externalId: z.string().trim().min(1).optional(),
-  externalUri: z.string().trim().min(1).optional(),
-  limit: z.number().int().positive().max(50).optional(),
-});
-
-export const lookupNotionPagesResponseSchema = z.object({
-  items: z.array(
-    z.object({
-      sourceId: z.string(),
-      connectorId: z.string().nullable(),
-      title: z.string(),
-      externalId: z.string().nullable(),
-      externalUri: z.string().nullable(),
-      status: z.string(),
-      metadata: jsonObjectSchema,
-      updatedAt: z.string(),
-    }),
-  ),
-});
-
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
 export type ConnectorOAuthAccount = z.infer<typeof connectorOAuthAccountSchema>;
 export type SourceConnector = z.infer<typeof sourceConnectorSchema>;
@@ -439,9 +401,6 @@ export type ConnectorActionCapability = z.infer<
 >;
 export type ConnectorWebhookEvent = z.infer<typeof connectorWebhookEventSchema>;
 export type ConnectorActivityItem = z.infer<typeof connectorActivityItemSchema>;
-export type ConnectorNotionWriteRequest = z.infer<
-  typeof connectorNotionWriteRequestSchema
->;
 export type StartConnectorOAuthRequest = z.infer<
   typeof startConnectorOAuthRequestSchema
 >;
@@ -529,10 +488,4 @@ export type ListConnectorWebhookEventsResponse = z.infer<
 >;
 export type ConnectorWebhookConfigResponse = z.infer<
   typeof connectorWebhookConfigResponseSchema
->;
-export type LookupNotionPagesRequest = z.infer<
-  typeof lookupNotionPagesRequestSchema
->;
-export type LookupNotionPagesResponse = z.infer<
-  typeof lookupNotionPagesResponseSchema
 >;

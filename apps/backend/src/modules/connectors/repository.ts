@@ -4,7 +4,6 @@ import {
   asc,
   desc,
   eq,
-  ilike,
   inArray,
   isNull,
   lte,
@@ -35,7 +34,6 @@ import {
   mapSyncRun,
   mapWebhookEvent,
 } from "./mappers";
-import { mapSource } from "../content/sources/mappers";
 import { redactConnectorSecrets } from "./security";
 import type {
   ConnectorActionRiskLevel,
@@ -959,89 +957,6 @@ export async function listWebhookEventRecords(input: {
     .limit(50);
 
   return rows.map(mapWebhookEvent);
-}
-
-export async function lookupConnectorSourceRecords(input: {
-  teamId: string;
-  workspaceId: string;
-  connectorType: string;
-  connectorId?: string;
-  fuzzyTitle?: string;
-  title?: string;
-  externalId?: string;
-  externalUri?: string;
-  limit: number;
-}) {
-  const connectorRows = input.connectorId
-    ? await db
-        .select({ id: sourceConnectors.id })
-        .from(sourceConnectors)
-        .where(
-          and(
-            eq(sourceConnectors.id, input.connectorId),
-            eq(sourceConnectors.teamId, input.teamId),
-            eq(sourceConnectors.workspaceId, input.workspaceId),
-            eq(sourceConnectors.connectorType, input.connectorType),
-          ),
-        )
-    : await db
-        .select({ id: sourceConnectors.id })
-        .from(sourceConnectors)
-        .where(
-          and(
-            eq(sourceConnectors.teamId, input.teamId),
-            eq(sourceConnectors.workspaceId, input.workspaceId),
-            eq(sourceConnectors.connectorType, input.connectorType),
-            ne(sourceConnectors.status, "disabled"),
-          ),
-        );
-  const connectorIds = connectorRows.map((row) => row.id);
-  if (connectorIds.length === 0) {
-    return [];
-  }
-
-  const conditions = [
-    eq(sources.teamId, input.teamId),
-    eq(sources.workspaceId, input.workspaceId),
-    inArray(sources.connectorId, connectorIds),
-    eq(sources.ingestKind, "connector"),
-    ne(sources.status, "archived"),
-  ];
-  if (input.externalId) {
-    conditions.push(eq(sources.externalId, input.externalId));
-  }
-  if (input.externalUri) {
-    conditions.push(eq(sources.externalUri, input.externalUri));
-  }
-  if (input.title) {
-    conditions.push(
-      sql`lower(${sources.title}) = lower(${input.title})` as never,
-    );
-  }
-  if (input.fuzzyTitle) {
-    conditions.push(ilike(sources.title, `%${input.fuzzyTitle}%`));
-  }
-
-  const rows = await db
-    .select()
-    .from(sources)
-    .where(and(...conditions))
-    .orderBy(
-      input.fuzzyTitle
-        ? sql`
-          case
-            when lower(${sources.title}) = lower(${input.fuzzyTitle}) then 0
-            when lower(${sources.title}) like lower(${input.fuzzyTitle} || '%') then 1
-            else 2
-          end
-        `
-        : asc(sources.title),
-      desc(sources.updatedAt),
-      asc(sources.title),
-    )
-    .limit(input.limit);
-
-  return rows.map(mapSource);
 }
 
 export async function updateWebhookEventRecord(input: {

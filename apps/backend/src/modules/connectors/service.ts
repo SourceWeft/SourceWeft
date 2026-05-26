@@ -1,8 +1,5 @@
 import { ConnectorError } from "./errors";
-import {
-  normalizeConnectorConfigJson,
-  validateObjectWithJsonSchema,
-} from "./config-validation";
+import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   createSourceConnectorRecord,
@@ -74,10 +71,7 @@ export class ConnectorService {
       permission: "connector.manage",
     });
     const manifest = this.registry.getManifest(input.connectorType);
-    const configJson = normalizeConnectorConfigJson({
-      connectorType: input.connectorType,
-      value: input.configJson ?? {},
-    }).value;
+    const configJson = input.configJson ?? {};
     validateObjectWithJsonSchema({
       schema: manifest.configSchema,
       value: configJson,
@@ -217,11 +211,7 @@ export class ConnectorService {
     }
 
     const manifest = this.registry.getManifest(current.connectorType);
-    const normalizedConfig = normalizeConnectorConfigJson({
-      connectorType: current.connectorType,
-      value: input.configJson ?? current.configJson,
-    });
-    const nextConfig = normalizedConfig.value;
+    const nextConfig = input.configJson ?? current.configJson;
     validateObjectWithJsonSchema({
       schema: manifest.configSchema,
       value: nextConfig,
@@ -247,10 +237,7 @@ export class ConnectorService {
       workspaceId: workspace.id,
       connectorId: input.connectorId,
       name: input.name,
-      configJson:
-        input.configJson === undefined && !normalizedConfig.changed
-          ? undefined
-          : nextConfig,
+      configJson: input.configJson === undefined ? undefined : nextConfig,
       status: input.status,
       periodicIndexingEnabled,
       indexingFrequencyMinutes: periodicIndexingEnabled ? frequency : null,

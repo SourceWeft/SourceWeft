@@ -526,7 +526,6 @@ const notionManifest: ConnectorManifest = {
     additionalProperties: false,
     properties: {
       includePages: { type: "boolean" },
-      rootPageIds: { type: "array" },
     },
   },
 };

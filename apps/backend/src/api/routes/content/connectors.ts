@@ -10,7 +10,6 @@ import {
   listConnectorOAuthAccountsRequestSchema,
   listWorkspaceConnectorSyncRunsRequestSchema,
   listConnectorWebhookEventsRequestSchema,
-  lookupNotionPagesRequestSchema,
   startConnectorOAuthRequestSchema,
   updateConnectorRequestSchema,
 } from "@sourceweft/contracts";
@@ -26,7 +25,6 @@ import { requireConnectorWorkspace } from "../../../modules/connectors/permissio
 import {
   findSourceConnectorRecord,
   listConnectorActivityRecords,
-  lookupConnectorSourceRecords,
 } from "../../../modules/connectors/repository";
 import { enqueueConnectorSyncJob } from "../../../modules/content/queue";
 import {
@@ -548,54 +546,4 @@ export function registerConnectorRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
-  app.get("/connectors/notion/pages", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const parsed = lookupNotionPagesRequestSchema.safeParse({
-      connectorId: c.req.query("connectorId"),
-      title: c.req.query("title"),
-      fuzzyTitle: c.req.query("fuzzyTitle"),
-      externalId: c.req.query("externalId"),
-      externalUri: c.req.query("externalUri"),
-      limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
-    });
-    if (!parsed.success) {
-      throw ApiError.validation(
-        parsed.error.flatten() as Record<string, unknown>,
-      );
-    }
-
-    const workspaceId = requireRouteParam(c, "workspaceId");
-    const { workspace } = await requireConnectorWorkspace({
-      workspaceId,
-      userId: getSessionUserId(session),
-      permission: "connector.read",
-    });
-    const items = await lookupConnectorSourceRecords({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      connectorType: "notion",
-      connectorId: parsed.data.connectorId,
-      title: parsed.data.title,
-      fuzzyTitle: parsed.data.fuzzyTitle,
-      externalId: parsed.data.externalId,
-      externalUri: parsed.data.externalUri,
-      limit: parsed.data.limit ?? 20,
-    });
-    return ApiResponse.success(c, {
-      items: items.map((source) => ({
-        sourceId: source.id,
-        connectorId: source.connectorId,
-        title: source.title,
-        externalId: source.externalId,
-        externalUri: source.externalUri,
-        status: source.status,
-        metadata: source.metadata,
-        updatedAt: source.updatedAt,
-      })),
-    });
-  });
 }
