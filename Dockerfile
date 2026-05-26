@@ -19,6 +19,8 @@ COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/credits-core/package.json packages/credits-core/package.json
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/eslint-config/package.json packages/eslint-config/package.json
+COPY packages/market-contracts/package.json packages/market-contracts/package.json
+COPY packages/market-sdk/package.json packages/market-sdk/package.json
 COPY packages/model-gateway/package.json packages/model-gateway/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY packages/tailwind-config/package.json packages/tailwind-config/package.json
@@ -45,6 +47,7 @@ ENV NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID}
 ENV NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED=${NEXT_PUBLIC_SOURCEWEFT_SAAS_ENABLED}
 ENV NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED=${NEXT_PUBLIC_BILLING_CHECKOUT_ENABLED}
 COPY . .
+RUN pnpm --filter @sourceweft/market-contracts build
 RUN pnpm --filter @sourceweft/ui-web build
 RUN pnpm --filter web build
 RUN pnpm --filter @sourceweft/backend build
@@ -61,6 +64,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY apps/backend/package.json apps/backend/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/credits-core/package.json packages/credits-core/package.json
+COPY packages/market-contracts/package.json packages/market-contracts/package.json
+COPY packages/market-sdk/package.json packages/market-sdk/package.json
 COPY packages/model-gateway/package.json packages/model-gateway/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json
 RUN apk add --no-cache --virtual .runtime-build-deps make g++ python3 \
@@ -82,6 +87,9 @@ COPY --chown=sourceweft:sourceweft --from=builder /app/packages/contracts/src pa
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/contracts/tsconfig.json packages/contracts/tsconfig.json
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/credits-core/src packages/credits-core/src
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/credits-core/tsconfig.json packages/credits-core/tsconfig.json
+COPY --chown=sourceweft:sourceweft --from=builder /app/packages/market-contracts/dist packages/market-contracts/dist
+COPY --chown=sourceweft:sourceweft --from=builder /app/packages/market-sdk/src packages/market-sdk/src
+COPY --chown=sourceweft:sourceweft --from=builder /app/packages/market-sdk/tsconfig.json packages/market-sdk/tsconfig.json
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/model-gateway/src packages/model-gateway/src
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/model-gateway/tsconfig.json packages/model-gateway/tsconfig.json
 COPY --chown=sourceweft:sourceweft --from=builder /app/packages/typescript-config packages/typescript-config

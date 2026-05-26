@@ -14,7 +14,9 @@ const MCP_LIST_LIMIT = 100;
 
 function marketApiBaseUrl() {
   return (
+    // eslint-disable-next-line turbo/no-undeclared-env-vars -- Runtime market service configuration is supplied by deployment/Compose, not Turbo cache inputs.
     process.env.MARKET_API_BASE_URL?.trim() ||
+    // eslint-disable-next-line turbo/no-undeclared-env-vars -- Runtime market service configuration is supplied by deployment/Compose, not Turbo cache inputs.
     process.env.MARKET_API_URL?.trim() ||
     DEFAULT_MARKET_API_BASE_URL
   );
@@ -23,6 +25,7 @@ function marketApiBaseUrl() {
 function marketClient() {
   return new MarketClient({
     baseUrl: marketApiBaseUrl(),
+    // eslint-disable-next-line turbo/no-undeclared-env-vars -- Runtime market service configuration is supplied by deployment/Compose, not Turbo cache inputs.
     getToken: () => process.env.MARKET_SERVICE_TOKEN?.trim() || undefined,
   });
 }

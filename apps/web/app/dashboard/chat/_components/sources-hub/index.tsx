@@ -56,6 +56,7 @@ import {
   type WorkspaceMcpInstall,
 } from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
+import { RawImage } from "../../../../_components/raw-image";
 import {
   Alert,
   AlertDescription,
@@ -934,8 +935,7 @@ function SourceProviderBadge({
   const content = (
     <>
       {catalogItem?.logoSrc ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <RawImage
           alt=""
           className="size-3 shrink-0 object-contain"
           src={catalogItem.logoSrc}
@@ -1783,8 +1783,7 @@ const ArtifactsTab = memoComponent(function ArtifactsTab({
           >
             {artifact.artifactType === "image" && fileUrl ? (
               <span className="block h-14 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-                {/* eslint-disable-next-line @next/next/no-img-element -- Artifact thumbnails use authenticated API URLs and should not go through Next image optimization. */}
-                <img
+                <RawImage
                   alt={artifactTitle(artifact)}
                   className="h-full w-full object-cover"
                   loading="lazy"
@@ -4072,7 +4071,7 @@ function ConnectorLogo({
       )}
     >
       {logoSrc ? (
-        <img
+        <RawImage
           alt=""
           aria-hidden="true"
           className="size-6 object-contain"

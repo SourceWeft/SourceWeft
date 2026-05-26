@@ -43,6 +43,7 @@ import {
 } from "./dashboard-team-selector-shared";
 import { dispatchDashboardShortcutsOpen } from "./dashboard-shortcuts";
 import { DashboardSettingsCenterModalSkeleton } from "./dashboard-settings-center-modal-skeleton";
+import { RawImage } from "../../_components/raw-image";
 
 const DashboardSettingsCenterModal = React.lazy(
   async () => {
@@ -129,8 +130,7 @@ export function DashboardAccountMenu({
                 type="button"
               >
                 {userImage ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <RawImage
                     alt={userName ?? "User"}
                     className="h-8 w-8 rounded-lg object-cover"
                     src={userImage}

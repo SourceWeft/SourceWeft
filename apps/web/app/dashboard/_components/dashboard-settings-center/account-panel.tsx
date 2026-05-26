@@ -7,6 +7,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { authClient } from "../../../../lib/auth-client";
+import { RawImage } from "../../../_components/raw-image";
 
 export function AccountPanel({
   userName,
@@ -133,8 +134,7 @@ export function AccountPanel({
               type="button"
             >
               {avatarPreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <RawImage
                   alt="Avatar"
                   className="h-full w-full object-cover"
                   src={avatarPreview}

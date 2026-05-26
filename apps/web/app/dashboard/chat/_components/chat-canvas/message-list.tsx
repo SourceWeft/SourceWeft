@@ -38,6 +38,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { SkillIcon } from "../../../_components/dashboard-icons";
+import { RawImage } from "../../../../_components/raw-image";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import { WebToolResults } from "../web-tool-results";
 import {
@@ -134,7 +135,7 @@ function UserMessageImageReference({ image }: { image: ChatMessageImagePart }) {
       <AttachmentHoverCardContent>
         <div className="space-y-3">
           <div className="flex max-h-96 w-80 items-center justify-center overflow-hidden rounded-md border bg-muted/30">
-            <img
+            <RawImage
               alt={label}
               className="max-h-full max-w-full object-contain"
               height={384}

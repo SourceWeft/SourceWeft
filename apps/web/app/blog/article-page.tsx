@@ -20,6 +20,7 @@ import { CopyShareUrlButton } from "./copy-share-url-button";
 import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
 import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
+import { RawImage } from "../_components/raw-image";
 import { OG_IMAGE, SITE_NAME, SITE_URL } from "../seo";
 
 const blogContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
@@ -140,7 +141,7 @@ function HeroMedia({ post }: { post: BlogPostDetail }) {
 
   return (
     <figure className="mx-auto mb-10 w-fit max-w-full overflow-hidden rounded-lg border border-zinc-300 bg-zinc-100 shadow-[0_18px_60px_rgba(39,39,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
-      <img
+      <RawImage
         alt={post.coverAltText || post.title}
         className="block max-h-[18rem] max-w-full object-contain sm:max-h-[22rem]"
         src={post.coverPublicUrl}

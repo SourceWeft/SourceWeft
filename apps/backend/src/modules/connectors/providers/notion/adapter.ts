@@ -343,7 +343,7 @@ const notionManifest: ConnectorManifest = {
     scopes: [],
     redirectUri: getNotionRedirectUri(),
     authorizationParams: {
-      client_id: getNotionClientId(),
+      client_id: getOptionalNotionClientId(),
       owner: "user",
     },
     sendScope: false,
@@ -530,8 +530,26 @@ const notionManifest: ConnectorManifest = {
   },
 };
 
+function getNotionManifest(): ConnectorManifest {
+  return {
+    ...notionManifest,
+    auth: {
+      ...notionManifest.auth,
+      authorizationParams: {
+        client_id: getOptionalNotionClientId(),
+        owner: "user",
+      },
+      redirectUri: getNotionRedirectUri(),
+    },
+  };
+}
+
+function getOptionalNotionClientId() {
+  return process.env.NOTION_CLIENT_ID?.trim() || "";
+}
+
 function getNotionClientId() {
-  const value = process.env.NOTION_CLIENT_ID?.trim();
+  const value = getOptionalNotionClientId();
   if (!value) {
     throw new ConnectorError(
       500,
@@ -2623,7 +2641,7 @@ async function attachFileUploadToPageAction(
 
 export const notionAdapter: ConnectorAdapter = {
   getManifest() {
-    return notionManifest;
+    return getNotionManifest();
   },
 
   verifyWebhook(input: ConnectorWebhookVerifyInput) {

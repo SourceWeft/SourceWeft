@@ -26,6 +26,7 @@ import {
   getVisibleTeamOrganizations,
   useDashboardTeamSelector,
 } from "./dashboard-team-selector-shared";
+import { RawImage } from "../../_components/raw-image";
 
 type MobileMePanel = SettingsCenterTab;
 
@@ -149,8 +150,7 @@ export function DashboardMobileMe() {
             <div className="mb-4 rounded-xl border border-border bg-card p-4">
               <div className="flex items-center gap-3">
                 {userImage ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <RawImage
                     alt={userName || "User avatar"}
                     className="h-16 w-16 shrink-0 rounded-2xl object-cover"
                     src={userImage}

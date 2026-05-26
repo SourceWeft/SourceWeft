@@ -17,6 +17,7 @@ import {
 import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
 import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
+import { RawImage } from "../_components/raw-image";
 import { SITE_NAME, SITE_URL } from "../seo";
 
 export const dynamic = "force-dynamic";
@@ -155,7 +156,7 @@ function CoverVisual({
         compact ? "aspect-[1.7]" : "min-h-[21rem]"
       }`}
     >
-      <img
+      <RawImage
         alt={post.coverAltText || post.title}
         className="h-full w-full object-cover"
         src={post.coverPublicUrl}

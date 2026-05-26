@@ -64,7 +64,7 @@ test("notion adapter declares install-integration OAuth manifest", () => {
   assert.deepEqual(manifest.auth.scopes, []);
   assert.equal(manifest.auth.sendScope, false);
   assert.deepEqual(manifest.auth.authorizationParams, {
-    client_id: process.env.NOTION_CLIENT_ID,
+    client_id: process.env.NOTION_CLIENT_ID?.trim() ?? "",
     owner: "user",
   });
   assert.ok(
@@ -84,6 +84,25 @@ test("notion adapter declares install-integration OAuth manifest", () => {
       includePages: { type: "boolean" },
     },
   });
+});
+
+test("notion adapter manifest does not require OAuth env at startup", () => {
+  const originalClientId = process.env.NOTION_CLIENT_ID;
+  delete process.env.NOTION_CLIENT_ID;
+
+  try {
+    const manifest = notionAdapter.getManifest();
+    assert.deepEqual(manifest.auth.authorizationParams, {
+      client_id: "",
+      owner: "user",
+    });
+  } finally {
+    if (originalClientId === undefined) {
+      delete process.env.NOTION_CLIENT_ID;
+    } else {
+      process.env.NOTION_CLIENT_ID = originalClientId;
+    }
+  }
 });
 
 test("notion client always sends API version 2026-03-11", async () => {

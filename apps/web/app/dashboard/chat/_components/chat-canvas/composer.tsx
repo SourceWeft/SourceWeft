@@ -67,6 +67,7 @@ import {
 } from "@sourceweft/sdk";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { SkillIcon } from "../../../_components/dashboard-icons";
+import { RawImage } from "../../../../_components/raw-image";
 import type { SourceItem } from "../source-types";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
@@ -1571,7 +1572,7 @@ function ComposerImageAttachment({
         <div className="space-y-3">
           {attachment.url ? (
             <div className="flex max-h-96 w-80 items-center justify-center overflow-hidden rounded-md border bg-muted/30">
-              <img
+              <RawImage
                 alt={label}
                 className="max-h-full max-w-full object-contain"
                 height={384}

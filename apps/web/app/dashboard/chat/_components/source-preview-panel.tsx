@@ -30,6 +30,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
+import { RawImage } from "../../../_components/raw-image";
 import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./source-types";
 
@@ -534,8 +535,7 @@ export function SourcePreviewPanel({
                           <div className="absolute inset-0 bg-[linear-gradient(45deg,hsl(var(--border)/0.28)_25%,transparent_25%,transparent_75%,hsl(var(--border)/0.28)_75%,hsl(var(--border)/0.28)),linear-gradient(45deg,hsl(var(--border)/0.28)_25%,transparent_25%,transparent_75%,hsl(var(--border)/0.28)_75%,hsl(var(--border)/0.28))] bg-[position:0_0,14px_14px] bg-[size:28px_28px] opacity-[0.18]" />
                           <div className="relative max-h-[72vh] w-full overflow-hidden rounded-[24px] border border-white/60 bg-white/88 p-4 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.45)] backdrop-blur dark:border-white/10 dark:bg-black/20">
                             <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
+                            <RawImage
                               alt={title}
                               className="max-h-[calc(72vh-2rem)] w-full rounded-[18px] object-contain"
                               src={sourcePreviewUrl}

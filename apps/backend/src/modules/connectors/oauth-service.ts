@@ -49,6 +49,27 @@ function normalizeScopes(tokenSet: OAuthTokenSet, fallback: string[]) {
   return Array.from(new Set(scopes));
 }
 
+function assertAuthorizationParamsConfigured(input: {
+  connectorType: string;
+  manifest: {
+    auth: { authorizationParams?: Record<string, string> };
+    displayName: string;
+  };
+}) {
+  for (const [key, value] of Object.entries(
+    input.manifest.auth.authorizationParams ?? {},
+  )) {
+    if (!value.trim()) {
+      throw new ConnectorError(
+        500,
+        "CONNECTOR_OAUTH_CONFIG_MISSING",
+        `${input.manifest.displayName} OAuth is not configured: ${key} is missing`,
+        { connectorType: input.connectorType, parameter: key },
+      );
+    }
+  }
+}
+
 export class ConnectorOAuthService {
   constructor(private readonly registry: ConnectorRegistry = connectorRegistry) {}
 
@@ -64,6 +85,10 @@ export class ConnectorOAuthService {
       permission: "connector.manage",
     });
     const manifest = this.registry.getManifest(input.connectorType);
+    assertAuthorizationParamsConfigured({
+      connectorType: input.connectorType,
+      manifest,
+    });
     const state = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS);
 

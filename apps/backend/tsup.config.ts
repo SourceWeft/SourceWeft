@@ -14,6 +14,8 @@ export default defineConfig({
   noExternal: [
     /^@sourceweft\/contracts(\/.*)?$/,
     /^@sourceweft\/credits-core(\/.*)?$/,
+    /^@sourceweft\/market-contracts(\/.*)?$/,
+    /^@sourceweft\/market-sdk(\/.*)?$/,
     /^@sourceweft\/model-gateway(\/.*)?$/,
   ],
   outDir: "dist",

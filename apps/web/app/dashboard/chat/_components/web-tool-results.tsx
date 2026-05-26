@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, FileText, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { isWebToolName } from "@sourceweft/sdk";
+import { RawImage } from "../../../_components/raw-image";
 import type { CitationRecord, ToolCallRecord } from "./chat-canvas";
 
 type WebPageToolResult = {
@@ -180,8 +181,7 @@ export function WebToolResults({
                 >
                   <span className="flex size-4 items-center justify-center overflow-hidden rounded-sm bg-muted">
                     {faviconUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <RawImage
                         alt=""
                         className="size-4"
                         onError={(event) => {

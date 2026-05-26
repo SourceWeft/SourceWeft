@@ -36,6 +36,7 @@ import {
   TooltipTrigger,
 } from "@sourceweft/ui-web/components/ui/tooltip";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { RawImage } from "../../../../_components/raw-image";
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
@@ -212,8 +213,7 @@ export function GeneratedImagePreview({
               )}
               title={title}
             />
-            {/* eslint-disable-next-line @next/next/no-img-element -- Generated artifact URLs can be API-backed and are already rendered lazily. */}
-            <img
+            <RawImage
               alt={title}
               className={cn(
                 "max-h-[520px] max-w-full rounded-lg object-contain transition duration-150 group-hover:shadow-md",
@@ -248,8 +248,7 @@ export function GeneratedImagePreview({
         >
           <div className="max-h-[calc(100dvh-5.75rem)] max-w-[calc(100vw-1rem)] overflow-auto rounded-lg sm:max-h-[calc(100dvh-6.5rem)] sm:max-w-[calc(100vw-2rem)]">
             <div className="flex min-h-full min-w-full items-center justify-center">
-              {/* eslint-disable-next-line @next/next/no-img-element -- Previewing API-backed generated artifact URLs. */}
-              <img
+              <RawImage
                 alt={title}
                 className={cn(
                   "h-auto w-auto select-none rounded-lg bg-background/20 shadow-2xl transition-transform duration-150",

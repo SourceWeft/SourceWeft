@@ -92,6 +92,7 @@ const PUBLIC_BLOG_LOCALE: BlogLocale = "en";
 function getPool() {
   if (!globalForBlogPool.sourceweftBlogPool) {
     globalForBlogPool.sourceweftBlogPool = new Pool({
+      // eslint-disable-next-line turbo/no-undeclared-env-vars -- Runtime database configuration is supplied by deployment/Compose, not Turbo cache inputs.
       connectionString: process.env.DATABASE_URL || DEFAULT_DATABASE_URL,
     });
   }

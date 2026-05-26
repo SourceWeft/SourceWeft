@@ -20,6 +20,7 @@ import {
 } from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { RawImage } from "../../../../_components/raw-image";
 import { hasWebPageToolResults } from "../web-tool-results";
 import {
   getToolConfirmationOutput,
@@ -35,7 +36,6 @@ import {
 } from "./message-assets";
 import { GeneratedImagePreview } from "./generated-image-preview";
 import {
-  type ReasoningTraceTimelineItem,
   getConnectorToolDisplayLabel,
   getToolCallDetailParts,
   getToolApprovalDisplayLabel,
@@ -613,7 +613,7 @@ function VisionFallbackStepDetails({ step }: { step: ThinkingStepRecord }) {
               className="mt-0"
               key={image.imageId}
             >
-              <img
+              <RawImage
                 alt={image.fileName}
                 className="max-h-40 w-full object-contain"
                 height={160}
@@ -1111,7 +1111,7 @@ export function ReasoningTrace({
   const tracePartItems = (traceParts ?? [])
     .slice()
     .sort((left, right) => left.order - right.order)
-    .map((part, index) => {
+    .map((part) => {
       if (part.kind === "reasoning") {
         return {
           kind: "model-reasoning" as const,
