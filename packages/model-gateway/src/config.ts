@@ -21,6 +21,7 @@ export const DEFAULT_ALLOWED_MODEL_ALIASES: readonly string[] = [
   "embed-default",
   "rerank-default",
   "asr-default",
+  "tts-default",
   "image-default",
 ];
 

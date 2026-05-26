@@ -4,6 +4,7 @@ import { ModelGatewayChatEndpoint } from "./endpoints/chat";
 import { ModelGatewayEmbeddingsEndpoint } from "./endpoints/embeddings";
 import { ModelGatewayImagesEndpoint } from "./endpoints/images";
 import { ModelGatewayRerankEndpoint } from "./endpoints/rerank";
+import { ModelGatewayTtsEndpoint } from "./endpoints/tts";
 import type {
   AsrTranscribeInput,
   AsrTranscribeResult,
@@ -22,6 +23,8 @@ import type {
   RequestOptions,
   RerankInput,
   RerankResult,
+  TtsSpeechInput,
+  TtsSpeechResult,
 } from "./types";
 
 export class ModelGatewayClient implements ModelGateway {
@@ -33,6 +36,8 @@ export class ModelGatewayClient implements ModelGateway {
 
   private readonly asrEndpoint: ModelGatewayAsrEndpoint;
 
+  private readonly ttsEndpoint: ModelGatewayTtsEndpoint;
+
   private readonly imagesEndpoint: ModelGatewayImagesEndpoint;
 
   constructor(config: ModelGatewayConfig) {
@@ -41,6 +46,7 @@ export class ModelGatewayClient implements ModelGateway {
     this.embeddingsEndpoint = new ModelGatewayEmbeddingsEndpoint(resolved);
     this.rerankEndpoint = new ModelGatewayRerankEndpoint(resolved);
     this.asrEndpoint = new ModelGatewayAsrEndpoint(resolved);
+    this.ttsEndpoint = new ModelGatewayTtsEndpoint(resolved);
     this.imagesEndpoint = new ModelGatewayImagesEndpoint(resolved);
   }
 
@@ -78,6 +84,13 @@ export class ModelGatewayClient implements ModelGateway {
       input: AsrTranscribeInput,
       opts?: RequestOptions,
     ): Promise<AsrTranscribeResult> => this.asrEndpoint.transcribe(input, opts),
+  };
+
+  readonly tts = {
+    speech: async (
+      input: TtsSpeechInput,
+      opts?: RequestOptions,
+    ): Promise<TtsSpeechResult> => this.ttsEndpoint.speech(input, opts),
   };
 
   readonly images = {

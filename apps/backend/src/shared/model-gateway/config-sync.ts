@@ -624,6 +624,7 @@ async function syncGlobalModelGatewayConfigFromFile(
   const configuredChatProfileAliases = buildProfileAliasSet(loaded.chatProfiles);
   const configuredImageProfileAliases = buildProfileAliasSet(loaded.imageProfiles);
   const configuredVisionProfileAliases = buildProfileAliasSet(loaded.visionProfiles);
+  const configuredTtsProfileAliases = buildProfileAliasSet(loaded.ttsProfiles);
 
   const chatProfilesToSync = [
     ...loaded.chatProfiles,
@@ -655,7 +656,12 @@ async function syncGlobalModelGatewayConfigFromFile(
     ...loaded.asrProfiles,
     ...(dynamicByKind.get("asr") ?? []),
   ];
-  const ttsProfilesToSync = dynamicByKind.get("tts") ?? [];
+  const ttsProfilesToSync = [
+    ...loaded.ttsProfiles,
+    ...(dynamicByKind.get("tts") ?? []).filter((entry) =>
+      !hasProfileAlias(configuredTtsProfileAliases, entry.profileAlias)
+    ),
+  ];
   const videoProfilesToSync = dynamicByKind.get("video") ?? [];
 
   assertUniqueProfiles("chat", chatProfilesToSync);
@@ -928,7 +934,7 @@ async function syncGlobalModelGatewayConfigFromFile(
       tx,
     });
     await deactivateMissingStaticProfiles({
-      aliases: new Set<string>(),
+      aliases: new Set(loaded.ttsProfiles.map((entry) => entry.profileAlias)),
       kind: "tts",
       now,
       tx,

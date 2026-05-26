@@ -17,6 +17,7 @@ import { OpenAICompatibleImageGenerationTransport } from "./openai-compatible-im
 import { OpenAICompatibleRerankTransport } from "./openai-compatible-rerank";
 import { OpenRouterChatAdapter } from "./openrouter-chat";
 import { OpenRouterImageGenerationTransport } from "./openrouter-images";
+import { OpenRouterTtsTransport } from "./openrouter-tts";
 import { SiliconflowCNAsrTransport } from "./siliconflow-cn-asr";
 import { SiliconflowCNChatAdapter } from "./siliconflow-cn-chat";
 import { SiliconflowCNEmbeddingsAdapter } from "./siliconflow-cn-embeddings";
@@ -28,6 +29,7 @@ import type {
   EmbeddingsAdapter,
   ImageGenerationTransport,
   RerankTransport,
+  TtsTransport,
 } from "./types";
 
 const openAICompatibleChat = new OpenAICompatibleChatAdapter();
@@ -38,6 +40,7 @@ const openAICompatibleAsr = new OpenAICompatibleAsrTransport();
 const openAICompatibleImages = new OpenAICompatibleImageGenerationTransport();
 const deepInfraImages = new DeepInfraImagesGenerationTransport();
 const openRouterImages = new OpenRouterImageGenerationTransport();
+const openRouterTts = new OpenRouterTtsTransport();
 const deepInfraChat = new DeepInfraChatAdapter();
 const deepInfraEmbeddings = new DeepInfraEmbeddingsAdapter();
 const deepInfraRerank = new DeepInfraRerankTransport();
@@ -82,6 +85,10 @@ const asrTransports = new Map<ProviderKind, AsrTransport>([
   ["deepinfra", deepInfraAsr],
   ["siliconflow-cn", siliconflowCNAsr],
   ["openai", openAICompatibleAsr],
+]);
+
+const ttsTransports = new Map<ProviderKind, TtsTransport>([
+  ["openrouter", openRouterTts],
 ]);
 
 const imageGenerationTransports = new Map<
@@ -138,6 +145,18 @@ export function getAsrTransport(kind: ProviderKind): AsrTransport {
     throw new ModelGatewayError({
       code: "BAD_REQUEST",
       message: `Provider '${kind}' does not support ASR in this gateway`,
+      retryable: false,
+    });
+  }
+  return transport;
+}
+
+export function getTtsTransport(kind: ProviderKind): TtsTransport {
+  const transport = ttsTransports.get(kind);
+  if (!transport) {
+    throw new ModelGatewayError({
+      code: "BAD_REQUEST",
+      message: `Provider '${kind}' does not support TTS in this gateway`,
       retryable: false,
     });
   }

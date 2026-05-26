@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
 import { loadGlobalModelGatewayConfig } from "./global-config";
 
 function baseConfig(): Record<string, unknown> & {
   chatProfiles: Array<Record<string, unknown>>;
+  gateways: Array<Record<string, unknown>>;
 } {
   return {
     gateways: [
@@ -107,4 +108,46 @@ test("loadGlobalModelGatewayConfig preserves litellm pricing presets", async () 
     outputCostPerReasoningToken: undefined,
     outputCostPerToken: undefined,
   });
+});
+
+test("loadGlobalModelGatewayConfig allows missing provider API key env", async () => {
+  const config = baseConfig();
+  config.gateways = [
+    {
+      ...(config.gateways[0] as Record<string, unknown>),
+      apiKeyEnv: "SOURCEWEFT_TEST_MISSING_PROVIDER_KEY",
+    },
+  ];
+  const original = process.env.SOURCEWEFT_TEST_MISSING_PROVIDER_KEY;
+  delete process.env.SOURCEWEFT_TEST_MISSING_PROVIDER_KEY;
+
+  try {
+    const loaded = await loadConfig(config);
+
+    assert.equal(loaded?.gateways[0]?.apiKey, undefined);
+    assert.equal(
+      loaded?.gateways[0]?.apiKeyEnv,
+      "SOURCEWEFT_TEST_MISSING_PROVIDER_KEY",
+    );
+  } finally {
+    if (original === undefined) {
+      delete process.env.SOURCEWEFT_TEST_MISSING_PROVIDER_KEY;
+    } else {
+      process.env.SOURCEWEFT_TEST_MISSING_PROVIDER_KEY = original;
+    }
+  }
+});
+
+test("default global config includes tts-default", async () => {
+  const loaded = await loadGlobalModelGatewayConfig(
+    resolve("config/model-gateway.global.json"),
+  );
+
+  const ttsDefault = loaded?.ttsProfiles.find(
+    (entry) => entry.profileAlias === "tts-default",
+  );
+
+  assert.equal(ttsDefault?.targetModel, "openai/gpt-4o-mini-tts-2025-12-15");
+  assert.equal(ttsDefault?.gatewaySlug, "openrouter-default");
+  assert.equal(ttsDefault?.providerName, "openrouter");
 });

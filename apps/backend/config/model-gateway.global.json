@@ -15,6 +15,7 @@
         "chat",
         "embeddings",
         "rerank",
+        "tts",
         "image",
         "tool_calling",
         "json_schema"
@@ -231,6 +232,20 @@
       "gatewaySlug": "deepinfra-default",
       "providerName": "deepinfra",
       "targetModel": "openai/whisper-large-v3",
+      "routingStrategy": "priority",
+      "priority": 1,
+      "weight": 100,
+      "isDefault": true,
+      "isActive": true
+    }
+  ],
+  "ttsProfiles": [
+    {
+      "profileAlias": "tts-default",
+      "modelAlias": "tts-default",
+      "gatewaySlug": "openrouter-default",
+      "providerName": "openrouter",
+      "targetModel": "openai/gpt-4o-mini-tts-2025-12-15",
       "routingStrategy": "priority",
       "priority": 1,
       "weight": 100,

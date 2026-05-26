@@ -89,5 +89,8 @@ export type {
   ToolCall,
   ToolChoice,
   ToolDefinition,
+  TtsResponseFormat,
+  TtsSpeechInput,
+  TtsSpeechResult,
   UsageInfo,
 } from "./types";

@@ -5,6 +5,7 @@ export type ModelKind =
   | "embedding"
   | "rerank"
   | "asr"
+  | "tts"
   | "image"
   | "vision"
   | "video";
@@ -320,6 +321,7 @@ export type GatewayOperation =
   | "embeddings.embedBatch"
   | "rerank.rank"
   | "asr.transcribe"
+  | "tts.speech"
   | "images.generate";
 
 export interface LangChainChatModelLike {
@@ -547,6 +549,38 @@ export interface AsrTranscribeResult {
   raw: Record<string, unknown>;
 }
 
+export type TtsResponseFormat =
+  | "mp3"
+  | "opus"
+  | "aac"
+  | "flac"
+  | "wav"
+  | "pcm"
+  | (string & {});
+
+export interface TtsSpeechInput extends GatewayExecutionInput {
+  model: string;
+  input: string;
+  voice?: string;
+  instructions?: string;
+  responseFormat?: TtsResponseFormat;
+  speed?: number;
+  metadata?: GatewayRequestMetadata;
+  extraBody?: Record<string, unknown>;
+}
+
+export interface TtsSpeechResult {
+  model: string;
+  audio: ArrayBuffer;
+  mimeType?: string;
+  usage?: UsageInfo;
+  provider?: string;
+  providerModel?: string;
+  routeDecision?: RouteDecision;
+  traceId?: string;
+  raw: Record<string, unknown>;
+}
+
 export type ImageAspectRatio =
   | "auto"
   | "1:1"
@@ -626,6 +660,12 @@ export interface ModelGateway {
       input: AsrTranscribeInput,
       opts?: RequestOptions,
     ): Promise<AsrTranscribeResult>;
+  };
+  tts: {
+    speech(
+      input: TtsSpeechInput,
+      opts?: RequestOptions,
+    ): Promise<TtsSpeechResult>;
   };
   images: {
     generate(

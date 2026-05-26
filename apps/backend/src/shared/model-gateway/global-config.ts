@@ -101,6 +101,7 @@ export type GlobalModelGatewayConfig = {
   visionProfiles: GlobalModelProfileEntry[];
   rerankProfiles: GlobalModelProfileEntry[];
   asrProfiles: GlobalModelProfileEntry[];
+  ttsProfiles: GlobalModelProfileEntry[];
   embeddingProfiles: GlobalEmbeddingProfileEntry[];
 };
 
@@ -230,6 +231,7 @@ type RawGlobalModelGatewayConfig = {
   visionProfiles?: unknown;
   rerankProfiles?: unknown;
   asrProfiles?: unknown;
+  ttsProfiles?: unknown;
   embeddingProfiles?: unknown;
 };
 
@@ -492,12 +494,6 @@ function parseGatewayEntry(
     typeof entry.apiKeyEnv === "string" ? entry.apiKeyEnv.trim() : "";
   const apiKey = apiKeyEnv.length > 0 ? process.env[apiKeyEnv]?.trim() : "";
 
-  if (apiKeyEnv.length > 0 && !apiKey) {
-    throw new Error(
-      `Missing required env '${apiKeyEnv}' for global model gateway '${String(entry.slug ?? `index-${index}`)}'`,
-    );
-  }
-
   const slug = asNonEmptyString(entry.slug, `gateways[${index}].slug`);
 
   const modelCatalog =
@@ -556,7 +552,8 @@ function parseModelProfileEntry(
     | "imageProfiles"
     | "visionProfiles"
     | "rerankProfiles"
-    | "asrProfiles",
+    | "asrProfiles"
+    | "ttsProfiles",
 ): GlobalModelProfileEntry {
   const modelAlias = asNonEmptyString(
     entry.modelAlias,
@@ -813,6 +810,15 @@ function parseGlobalModelGatewayConfig(
         ),
       )
     : [];
+  const ttsProfiles = Array.isArray(raw.ttsProfiles)
+    ? raw.ttsProfiles.map((entry, index) =>
+        parseModelProfileEntry(
+          entry as RawGlobalModelProfileEntry,
+          index,
+          "ttsProfiles",
+        ),
+      )
+    : [];
   const embeddingProfiles = raw.embeddingProfiles.map((entry, index) =>
     parseEmbeddingProfileEntry(entry as RawGlobalEmbeddingProfileEntry, index),
   );
@@ -824,6 +830,7 @@ function parseGlobalModelGatewayConfig(
     ...visionProfiles,
     ...rerankProfiles,
     ...asrProfiles,
+    ...ttsProfiles,
     ...embeddingProfiles,
   ]) {
     if (profileAliasSet.has(profile.profileAlias)) {
@@ -840,6 +847,7 @@ function parseGlobalModelGatewayConfig(
     ...visionProfiles,
     ...rerankProfiles,
     ...asrProfiles,
+    ...ttsProfiles,
     ...embeddingProfiles,
   ]) {
     if (!gatewaySlugSet.has(profile.gatewaySlug)) {
@@ -866,6 +874,9 @@ function parseGlobalModelGatewayConfig(
   if (asrProfiles.length > 0) {
     assertSingleDefault(asrProfiles, "asrProfiles");
   }
+  if (ttsProfiles.length > 0) {
+    assertSingleDefault(ttsProfiles, "ttsProfiles");
+  }
   assertSingleDefault(embeddingProfiles, "embeddingProfiles");
 
   return {
@@ -877,6 +888,7 @@ function parseGlobalModelGatewayConfig(
     visionProfiles,
     rerankProfiles,
     asrProfiles,
+    ttsProfiles,
     embeddingProfiles,
   };
 }

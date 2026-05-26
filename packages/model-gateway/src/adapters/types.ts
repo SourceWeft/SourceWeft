@@ -13,6 +13,8 @@ import type {
   ResolvedRequestTarget,
   RerankInput,
   RerankResult,
+  TtsSpeechInput,
+  TtsSpeechResult,
 } from "../types";
 
 export interface ChatAdapter {
@@ -56,6 +58,17 @@ export interface AsrTransport {
     options?: RequestOptions;
     fetch: typeof globalThis.fetch;
   }): Promise<AsrTranscribeResult>;
+}
+
+export interface TtsTransport {
+  readonly kind: ProviderKind;
+
+  execute(input: {
+    target: ResolvedRequestTarget;
+    payload: TtsSpeechInput;
+    options?: RequestOptions;
+    fetch: typeof globalThis.fetch;
+  }): Promise<TtsSpeechResult>;
 }
 
 export interface ImageGenerationTransport {

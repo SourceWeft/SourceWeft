@@ -13,6 +13,7 @@ import type {
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RerankInput,
+  TtsSpeechInput,
   UsageInfo,
 } from "../types";
 
@@ -120,7 +121,7 @@ function buildChatLifecycleAttributes(messages: ChatCompleteInput["messages"]) {
 
 function buildLifecycleAttributes(
   operation: GatewayOperation,
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | TtsSpeechInput | ImageGenerateInput,
 ) {
   if (operation !== "chat.complete" && operation !== "chat.stream") {
     return {};
@@ -226,7 +227,7 @@ function summarizeToolCalls(
 }
 
 function resolveModelParameters(
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | TtsSpeechInput | ImageGenerateInput,
 ) {
   return compactRecord({
     ...("temperature" in payload && payload.temperature !== undefined
@@ -280,6 +281,15 @@ function resolveModelParameters(
     ...("timestampGranularities" in payload && payload.timestampGranularities !== undefined
       ? { timestampGranularities: payload.timestampGranularities }
       : {}),
+    ...("voice" in payload && payload.voice !== undefined
+      ? { voice: payload.voice }
+      : {}),
+    ...("instructions" in payload && payload.instructions !== undefined
+      ? { instructions: textSummary(payload.instructions) }
+      : {}),
+    ...("speed" in payload && payload.speed !== undefined
+      ? { speed: payload.speed }
+      : {}),
     ...("aspectRatio" in payload && payload.aspectRatio !== undefined
       ? { aspectRatio: payload.aspectRatio }
       : {}),
@@ -297,7 +307,7 @@ function resolveModelParameters(
 
 function buildInput(
   operation: GatewayOperation,
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput,
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | TtsSpeechInput | ImageGenerateInput,
 ) {
   if (operation === "chat.complete" || operation === "chat.stream") {
     const chat = payload as ChatCompleteInput;
@@ -366,6 +376,17 @@ function buildInput(
     };
   }
 
+  if (operation === "tts.speech") {
+    const tts = payload as TtsSpeechInput;
+    return {
+      input: textSummary(tts.input),
+      voice: tts.voice,
+      responseFormat: tts.responseFormat,
+      speed: tts.speed,
+      hasInstructions: typeof tts.instructions === "string" && tts.instructions.length > 0,
+    };
+  }
+
   const rerank = payload as RerankInput;
   return {
     query: textSummary(rerank.query),
@@ -378,7 +399,7 @@ function buildInput(
 
 export function createGenerationObservation(input: {
   operation: GatewayOperation;
-  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | ImageGenerateInput;
+  payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | TtsSpeechInput | ImageGenerateInput;
   options?: RequestOptions;
   target: ResolvedRequestTarget;
 }) {
