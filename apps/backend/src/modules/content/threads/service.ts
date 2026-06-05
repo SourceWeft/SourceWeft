@@ -113,6 +113,7 @@ export type StartThreadTurnInput = {
   sourceIds?: string[];
   tools?: StreamThreadEventInput["tools"];
   command?: StreamThreadEventInput["command"];
+  invocation?: StreamThreadEventInput["invocation"];
   timezone?: string;
   idempotencyKey: string;
   llm?: StreamThreadEventInput["llm"];
@@ -364,6 +365,7 @@ class ContentThreadService {
       sourceIds: input.sourceIds,
       tools: input.tools,
       command: input.command,
+      invocation: input.invocation,
       timezone: input.timezone,
       idempotencyKey: input.idempotencyKey,
       llm: input.llm,

@@ -295,6 +295,7 @@ export async function createConnectorActionApprovalRequest(
     connector,
     description: match.action.description,
     displayName: match.action.displayName,
+    toolCallId: input.toolCallId,
   });
 }
 
@@ -383,6 +384,15 @@ export async function createConnectorActionTools(
                     409,
                     "CONNECTOR_ACTION_NOT_APPROVED",
                     `Connector action ${result.action.id} requires approval before execution.`,
+                    {
+                      sourceRef: {
+                        kind: "builtin_tool",
+                        toolName: agentToolName,
+                        connectorId: connector.id,
+                        actionRunId: result.action.id,
+                      },
+                      recoverable: true,
+                    },
                   );
                 }
 

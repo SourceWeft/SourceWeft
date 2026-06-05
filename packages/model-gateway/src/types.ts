@@ -258,6 +258,12 @@ export type ToolChoice =
   | string
   | Record<string, unknown>;
 
+export interface ToolBindingOptions {
+  toolChoice?: ToolChoice;
+  parallelToolCalls?: boolean;
+  [key: string]: unknown;
+}
+
 export interface StructuredOutputConfig {
   method?: "json_schema" | "json_mode" | "function_calling";
   name?: string;
@@ -382,6 +388,7 @@ export interface ChatCompleteInput extends GatewayExecutionInput {
   stop?: string[];
   tools?: ToolDefinition[];
   toolChoice?: ToolChoice;
+  toolBindingOptions?: ToolBindingOptions;
   responseFormat?: ResponseFormat;
   structuredOutput?: StructuredOutputConfig;
   metadata?: GatewayRequestMetadata;

@@ -365,6 +365,44 @@ export const config = {
       30 * 60 * 1000,
     ),
   },
+  sandbox: {
+    enabled: parseBoolean(process.env.SOURCEWEFT_SANDBOX_ENABLED, false),
+    provider: process.env.SOURCEWEFT_SANDBOX_PROVIDER || "daytona",
+    ttlSeconds: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_TTL_SECONDS,
+      3600,
+    ),
+    commandTimeoutMs: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_COMMAND_TIMEOUT_MS,
+      120000,
+    ),
+    maxOutputChars: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_MAX_OUTPUT_CHARS,
+      80000,
+    ),
+    maxPrepareFileBytes: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_MAX_PREPARE_FILE_BYTES,
+      10 * 1024 * 1024,
+    ),
+    maxPrepareTotalBytes: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_MAX_PREPARE_TOTAL_BYTES,
+      25 * 1024 * 1024,
+    ),
+    maxCollectFileBytes: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_MAX_COLLECT_FILE_BYTES,
+      25 * 1024 * 1024,
+    ),
+    maxCollectTotalBytes: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_MAX_COLLECT_TOTAL_BYTES,
+      50 * 1024 * 1024,
+    ),
+    daytona: {
+      apiUrl: stripTrailingSlash(process.env.DAYTONA_API_URL || ""),
+      apiKey: process.env.DAYTONA_API_KEY?.trim() || "",
+      defaultSnapshot: process.env.DAYTONA_DEFAULT_SNAPSHOT?.trim() || "",
+      browserSnapshot: process.env.DAYTONA_BROWSER_SNAPSHOT?.trim() || "",
+    },
+  },
   s3: {
     region: process.env.S3_REGION || process.env.AWS_REGION || "us-east-1",
     bucket: process.env.S3_BUCKET || "",

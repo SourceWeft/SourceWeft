@@ -1,8 +1,15 @@
-import { isGeneratedImageArtifactToolName } from "@sourceweft/sdk";
-import { apiBaseUrl } from "../../../../../lib/sdk";
+import {
+  isGeneratedImageArtifactToolName,
+  isPresentationArtifactToolName,
+  isVideoPresentationArtifactToolName,
+} from "@sourceweft/sdk";
+import {
+  normalizeWebAssetUrl,
+  resolveArtifactPageUrlFromArtifact,
+  resolveArtifactProxyFileUrlFromArtifact,
+} from "../artifact-urls";
 import type {
   ChatMessageImagePart,
-  MessageRenderBlock,
   MessageVersion,
   ThinkingStepRecord,
   ToolCallRecord,
@@ -15,6 +22,29 @@ export type GeneratedImageArtifact = {
   artifactUrl: string | null;
   title: string | null;
 };
+
+export type GeneratedPresentationArtifact = {
+  artifactId: string | null;
+  artifactUrl: string | null;
+  editable: boolean | null;
+  fileName: string | null;
+  generationMode: "visual_html" | "editable_native" | null;
+  htmlUrl: string | null;
+  previewRenderer: "html_iframe" | "pptxviewjs" | null;
+  pptxUrl: string | null;
+  renderStrategy: string | null;
+  slideCount: number | null;
+  sourceJsonUrl: string | null;
+  status: GeneratedPresentationArtifactStatus | null;
+  title: string | null;
+};
+
+export type GeneratedPresentationArtifactStatus =
+  | "pending"
+  | "running"
+  | "ready"
+  | "failed"
+  | "archived";
 
 function extractArtifactIdFromUrl(value: string) {
   const match = value.match(/\/artifacts\/([^/?#]+)\/file(?:[?#].*)?$/);
@@ -112,126 +142,6 @@ export function getMessageText(input: {
     : text;
 }
 
-function matchGeneratedImageToolCall(input: {
-  artifactIds: Set<string>;
-  artifactUrls: Set<string>;
-  toolCalls?: ToolCallRecord[];
-  url: string;
-}) {
-  const normalizedUrl = normalizeAssetUrl(input.url);
-  const artifactId = extractArtifactIdFromUrl(input.url);
-
-  return (
-    (input.toolCalls ?? []).find((toolCall) => {
-      if (!isGeneratedImageArtifactToolName(toolCall.tool)) {
-        return false;
-      }
-
-      const artifact = resolveGeneratedImageArtifact(toolCall);
-      if (!artifact) {
-        return false;
-      }
-
-      if (artifactId && input.artifactIds.has(artifactId)) {
-        const toolArtifactId = artifact.artifactId;
-        if (toolArtifactId && toolArtifactId === artifactId) {
-          return true;
-        }
-      }
-
-      const candidateUrls = [
-        artifact.artifactUrl,
-        resolveArtifactUrl({ artifact, workspaceId: null }),
-      ]
-        .filter((value): value is string => Boolean(value))
-        .map((value) => normalizeAssetUrl(value));
-
-      return (
-        candidateUrls.includes(normalizedUrl) ||
-        (artifactId ? candidateUrls.some((value) => extractArtifactIdFromUrl(value) === artifactId) : false)
-      );
-    }) ?? null
-  );
-}
-
-export function buildRenderBlocksFromMessageContent(input: {
-  content: string;
-  toolCalls?: ToolCallRecord[];
-  workspaceId?: string | null;
-}) {
-  const artifactRefs = getGeneratedImageArtifactRefs({
-    toolCalls: input.toolCalls,
-    workspaceId: input.workspaceId,
-  });
-  if (
-    artifactRefs.artifactIds.size === 0 &&
-    artifactRefs.artifactUrls.size === 0
-  ) {
-    return null;
-  }
-
-  const blocks: MessageRenderBlock[] = [];
-  const seenToolCallIds = new Set<string>();
-  const imageMarkdownPattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
-  let nextTextId = 1;
-  let lastIndex = 0;
-
-  for (const match of input.content.matchAll(imageMarkdownPattern)) {
-    const fullMatch = match[0];
-    const rawUrl = match[1];
-    const matchIndex = match.index ?? -1;
-    if (!fullMatch || !rawUrl || matchIndex < 0) {
-      continue;
-    }
-
-    const toolCall = matchGeneratedImageToolCall({
-      artifactIds: artifactRefs.artifactIds,
-      artifactUrls: artifactRefs.artifactUrls,
-      toolCalls: input.toolCalls,
-      url: rawUrl,
-    });
-    if (!toolCall) {
-      continue;
-    }
-
-    const textBefore = input.content.slice(lastIndex, matchIndex);
-    if (textBefore) {
-      blocks.push({
-        id: `fallback-text-${nextTextId}`,
-        type: "text",
-        text: textBefore,
-      });
-      nextTextId += 1;
-    }
-
-    if (!seenToolCallIds.has(toolCall.id)) {
-      blocks.push({
-        id: `fallback-generated-image-${toolCall.id}`,
-        type: "generated_image",
-        toolCallId: toolCall.id,
-      });
-      seenToolCallIds.add(toolCall.id);
-    }
-
-    lastIndex = matchIndex + fullMatch.length;
-  }
-
-  if (blocks.length === 0) {
-    return null;
-  }
-
-  const trailingText = input.content.slice(lastIndex);
-  if (trailingText) {
-    blocks.push({
-      id: `fallback-text-${nextTextId}`,
-      type: "text",
-      text: trailingText,
-    });
-  }
-
-  return blocks;
-}
-
 export function getMessageImageParts(version: MessageVersion) {
   const parts = version.contentJson?.parts;
   if (!Array.isArray(parts)) {
@@ -255,7 +165,7 @@ export function compactText(value: string, maxLength = 160) {
 }
 
 export function normalizeAssetUrl(value: string) {
-  return value.startsWith("/v1/") ? `${apiBaseUrl}${value}` : value;
+  return normalizeWebAssetUrl(value);
 }
 
 export function resolveMessageAssetUrl(value: unknown) {
@@ -266,24 +176,66 @@ export function resolveMessageAssetUrl(value: unknown) {
   return normalizeAssetUrl(value);
 }
 
-function getToolOutputField(output: unknown, key: string) {
+function getToolOutputRecordFromContent(output: unknown) {
+  const content = getToolOutputContent(output);
+  if (!content) {
+    return null;
+  }
+
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getToolOutputValue(output: unknown, key: string) {
   if (typeof output === "object" && output !== null) {
     const direct = (output as Record<string, unknown>)[key];
-    if (typeof direct === "string" && direct.trim().length > 0) {
-      return direct.trim();
+    if (direct !== undefined && direct !== null) {
+      return direct;
     }
 
-    const content = getToolOutputContent(output);
-    if (content) {
-      const match = content.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-      return match?.[1]?.trim() ?? null;
+    const contentRecord = getToolOutputRecordFromContent(output);
+    if (contentRecord && contentRecord[key] !== undefined) {
+      return contentRecord[key];
     }
 
     return null;
   }
 
+  const contentRecord = getToolOutputRecordFromContent(output);
+  if (contentRecord && contentRecord[key] !== undefined) {
+    return contentRecord[key];
+  }
+
+  return null;
+}
+
+function getToolOutputField(output: unknown, key: string) {
+  const value = getToolOutputValue(output, key);
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
   if (typeof output !== "string") {
-    return null;
+    const content = getToolOutputContent(output);
+    if (!content) {
+      return null;
+    }
+    const match = content.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    return match?.[1]?.trim() ?? null;
   }
 
   const match = output.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
@@ -322,32 +274,156 @@ export function resolveGeneratedImageArtifact(
   };
 }
 
+function getToolOutputNumberField(output: unknown, key: string) {
+  const direct = getToolOutputValue(output, key);
+  if (typeof direct === "number" && Number.isFinite(direct)) {
+    return direct;
+  }
+  if (typeof direct === "string" && direct.trim().length > 0) {
+    const parsed = Number(direct);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const text = getToolOutputField(output, key);
+  if (!text) {
+    return null;
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function normalizeGeneratedPresentationArtifactStatus(
+  value: string | null,
+): GeneratedPresentationArtifactStatus | null {
+  const normalized = value?.toLowerCase();
+  if (
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "ready" ||
+    normalized === "failed" ||
+    normalized === "archived"
+  ) {
+    return normalized;
+  }
+  if (normalized === "queued") {
+    return "pending";
+  }
+  if (normalized === "generating" || normalized === "rendering") {
+    return "running";
+  }
+  if (normalized === "completed" || normalized === "success") {
+    return "ready";
+  }
+  if (normalized === "error") {
+    return "failed";
+  }
+  return null;
+}
+
+export function resolveGeneratedPresentationArtifact(
+  toolCall: ToolCallRecord,
+  toolStep?: ThinkingStepRecord,
+): GeneratedPresentationArtifact | null {
+  if (
+    !isPresentationArtifactToolName(toolCall.tool) &&
+    !isVideoPresentationArtifactToolName(toolCall.tool)
+  ) {
+    return null;
+  }
+
+  const metadata = toolStep?.metadata;
+  const artifactId =
+    (typeof metadata?.artifactId === "string"
+      ? metadata.artifactId.trim()
+      : "") || getToolOutputField(toolCall.output, "artifact_id");
+  const artifactUrl =
+    (typeof metadata?.artifactUrl === "string"
+      ? metadata.artifactUrl.trim()
+      : "") ||
+    getToolOutputField(toolCall.output, "artifact_url") ||
+    getToolOutputField(toolCall.output, "pptx_url");
+  const title =
+    getToolOutputField(toolCall.output, "title") ||
+    (typeof metadata?.title === "string" ? metadata.title.trim() : "");
+  const fileName = getToolOutputField(toolCall.output, "file_name");
+  const slideCount = getToolOutputNumberField(toolCall.output, "slide_count");
+  const sourceJsonUrl = getToolOutputField(toolCall.output, "source_json_url");
+  const generationModeValue = getToolOutputField(
+    toolCall.output,
+    "generation_mode",
+  );
+  const generationMode =
+    generationModeValue === "visual_html" ||
+    generationModeValue === "editable_native"
+      ? generationModeValue
+      : null;
+  const previewRendererValue = getToolOutputField(
+    toolCall.output,
+    "preview_renderer",
+  );
+  const previewRenderer =
+    previewRendererValue === "html_iframe" ||
+    previewRendererValue === "pptxviewjs"
+      ? previewRendererValue
+      : null;
+  const editableValue = getToolOutputValue(toolCall.output, "editable");
+  const editable =
+    typeof editableValue === "boolean"
+      ? editableValue
+      : generationMode
+        ? generationMode === "editable_native"
+        : null;
+  const htmlUrl = getToolOutputField(toolCall.output, "html_url");
+  const pptxUrl = getToolOutputField(toolCall.output, "pptx_url");
+  const renderStrategy = getToolOutputField(toolCall.output, "render_strategy");
+  const status = normalizeGeneratedPresentationArtifactStatus(
+    getToolOutputField(toolCall.output, "status"),
+  );
+
+  if (!artifactId && !artifactUrl) {
+    return null;
+  }
+
+  return {
+    artifactId: artifactId || null,
+    artifactUrl: artifactUrl || null,
+    editable,
+    fileName: fileName || null,
+    generationMode,
+    htmlUrl: htmlUrl || null,
+    previewRenderer,
+    pptxUrl: pptxUrl || null,
+    renderStrategy: renderStrategy || null,
+    slideCount,
+    sourceJsonUrl: sourceJsonUrl || null,
+    status,
+    title: title || null,
+  };
+}
+
 export function resolveArtifactUrl(input: {
   artifact: GeneratedImageArtifact;
   workspaceId?: string | null;
 }) {
-  if (input.workspaceId && input.artifact.artifactId) {
-    return `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifact.artifactId)}/file`;
-  }
-
-  if (input.artifact.artifactUrl) {
-    return input.artifact.artifactUrl.startsWith("http")
-      ? input.artifact.artifactUrl
-      : `${apiBaseUrl}${input.artifact.artifactUrl}`;
-  }
-
-  return null;
+  return resolveArtifactPageUrlFromArtifact({
+    artifactId: input.artifact.artifactId,
+    fallbackUrl: input.artifact.artifactUrl,
+    workspaceId: input.workspaceId,
+  });
 }
 
 export function resolveArtifactDownloadUrl(input: {
-  artifact: GeneratedImageArtifact;
+  artifact: Pick<GeneratedImageArtifact, "artifactId"> & {
+    artifactUrl?: string | null;
+  };
   workspaceId?: string | null;
 }) {
-  if (!input.workspaceId || !input.artifact.artifactId) {
-    return null;
-  }
-
-  return `${apiBaseUrl}/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifact.artifactId)}/download`;
+  return resolveArtifactProxyFileUrlFromArtifact({
+    artifactId: input.artifact.artifactId,
+    download: true,
+    fallbackUrl: input.artifact.artifactUrl,
+    workspaceId: input.workspaceId,
+  });
 }
 
 export function getToolOutputContent(output: unknown) {

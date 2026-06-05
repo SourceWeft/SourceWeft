@@ -188,6 +188,7 @@ export function mapDeepAgentEventToSse(
       id: event.id,
       tool: event.tool,
       data: event.data,
+      toolCall: normalizeToolCallForSse(event.toolCall),
     });
   }
 

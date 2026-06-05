@@ -6,6 +6,8 @@ import { findThreadRecord } from "../thread/repository";
 import { listMessageRecordsByThread } from "../message-repository";
 import {
   resolveGenerateImageToolFromToolsMetadata,
+  resolveGeneratePptxToolFromToolsMetadata,
+  resolveGenerateVideoPresentationToolFromToolsMetadata,
   resolveMcpToolSelectionFromToolsMetadata,
   resolveNotionToolSelectionsFromToolsMetadata,
   resolveWebSearchEnabledFromToolsMetadata,
@@ -174,6 +176,30 @@ export function resolveGenerateImageToolFromMessage(
         })
       : undefined;
   return resolveGenerateImageToolFromToolsMetadata(metadata?.tools);
+}
+
+export function resolveGeneratePptxToolFromMessage(
+  message: MessageRecord | null | undefined,
+) {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          tools?: unknown;
+        })
+      : undefined;
+  return resolveGeneratePptxToolFromToolsMetadata(metadata?.tools);
+}
+
+export function resolveGenerateVideoPresentationToolFromMessage(
+  message: MessageRecord | null | undefined,
+) {
+  const metadata =
+    message?.metadata && typeof message.metadata === "object"
+      ? (message.metadata as {
+          tools?: unknown;
+        })
+      : undefined;
+  return resolveGenerateVideoPresentationToolFromToolsMetadata(metadata?.tools);
 }
 
 export function resolveNotionToolSelectionsFromMessage(

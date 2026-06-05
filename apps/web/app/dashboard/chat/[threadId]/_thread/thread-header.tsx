@@ -50,6 +50,7 @@ export function ThreadHeader({
   byokProviders,
   byokSelections,
   isPersistentLayout,
+  isModelCatalogLoading,
   onAddByokModel,
   onByokSelect,
   onModelSelect,
@@ -66,6 +67,7 @@ export function ThreadHeader({
   byokProviders: ByokProviderOption[];
   byokSelections: Partial<Record<ModelType, ByokModelSelection | null>>;
   isPersistentLayout: boolean;
+  isModelCatalogLoading?: boolean;
   onAddByokModel: (input: HeaderAddByokModelInput) => void;
   onByokSelect: (input: HeaderByokSelectInput) => void;
   onModelSelect: (input: { type: ModelType; model: ModelItem }) => void;
@@ -103,6 +105,7 @@ export function ThreadHeader({
             byokModels={byokModels}
             byokProviders={byokProviders}
             byokSelections={byokSelections}
+            isLoading={isModelCatalogLoading}
             onAddByokModel={onAddByokModel}
             onByokSelect={onByokSelect}
             onModelSelect={onModelSelect}

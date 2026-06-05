@@ -18,6 +18,7 @@ import type {
   ToolCallTrace,
 } from "../turn/types";
 import type { TracePart } from "../turn/trace-parts";
+import { sanitizeClientErrorMessage } from "../../model-gateway-error";
 
 export type ThreadStreamPartialErrorState = {
   reasoning?: string;
@@ -36,6 +37,9 @@ export async function recordThreadStreamFailure(input: {
   operation: "chat.stream" | "chat.complete";
   llm?: LlmExecutionConfig;
 }) {
+  const clientErrorMessage = sanitizeClientErrorMessage(
+    input.contentError.message,
+  );
   try {
     await recordGatewayOperationEvent({
       teamId: input.prepared.workspace.organizationId,
@@ -53,7 +57,7 @@ export async function recordThreadStreamFailure(input: {
         input.prepared.traceContext?.traceId ?? input.prepared.userMessage.id,
       success: false,
       errorCode: input.contentError.code,
-      errorMessage: input.contentError.message,
+      errorMessage: clientErrorMessage,
       attributes: {
         retrievalCalls: summarizeRetrievalCalls([]),
       },
@@ -93,9 +97,12 @@ export async function createThreadStreamErrorMessage(input: {
     return null;
   }
 
+  const clientErrorMessage = sanitizeClientErrorMessage(
+    input.contentError.message,
+  );
   const assistantContent =
     input.partialAssistantContent === undefined
-      ? input.contentError.message
+      ? clientErrorMessage
       : input.partialAssistantContent.trimEnd();
   const preflightCreditsConsumed = input.prepared.preflightBilling.reduce(
     (sum, item) => sum + item.consumedCredits,
@@ -115,7 +122,7 @@ export async function createThreadStreamErrorMessage(input: {
     metadata: {
       isError: true,
       excludeFromContext: true,
-      error: input.contentError.message,
+      error: clientErrorMessage,
       errorCode: input.contentError.code,
       userMessageId: input.prepared.userMessage.id,
       sourceUserMessageId: input.prepared.userMessage.id,

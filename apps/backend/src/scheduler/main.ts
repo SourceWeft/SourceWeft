@@ -4,6 +4,8 @@ import { syncGlobalModelGatewayConfig } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
 import { durableChatRunService } from "../modules/content/threads/durable/service";
+import { cleanupExpiredDaytonaSandboxes } from "../modules/content/agent/sandbox";
+import { logSandboxStartupWarning } from "../modules/content/agent/sandbox/startup-log";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleExampleJob } from "./schedules/example-schedule";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
@@ -37,6 +39,7 @@ async function tick() {
 
     jobs.push(scheduleConnectorSyncs());
     jobs.push(durableChatRunService.expireWaitingApprovals());
+    jobs.push(cleanupExpiredDaytonaSandboxes());
 
     if (jobs.length === 0) {
       return;
@@ -102,6 +105,7 @@ logger.info("Scheduler started", {
   billingReconcileEnabled:
     config.billing.teamBillingEnabled && config.billing.reconcileEnabled,
 });
+logSandboxStartupWarning("scheduler");
 
 async function shutdown() {
   clearInterval(timer);

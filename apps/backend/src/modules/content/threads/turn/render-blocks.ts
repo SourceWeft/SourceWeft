@@ -1,9 +1,5 @@
 import type { MessageRenderBlock } from "./types";
 
-function hasGeneratedImageBlock(blocks: MessageRenderBlock[]) {
-  return blocks.some((block) => block.type === "generated_image");
-}
-
 function cloneBlocks(blocks: MessageRenderBlock[]) {
   return blocks.map((block) => ({ ...block })) as MessageRenderBlock[];
 }
@@ -37,21 +33,9 @@ export function finalizeMessageRenderBlocks(input: {
   blocks: MessageRenderBlock[];
   finalText: string;
 }) {
-  if (!hasGeneratedImageBlock(input.blocks)) {
+  if (input.blocks.length === 0) {
     return [] as MessageRenderBlock[];
   }
-
-  const renderedText = input.blocks
-    .filter((block): block is Extract<MessageRenderBlock, { type: "text" }> =>
-      block.type === "text",
-    )
-    .map((block) => block.text)
-    .join("");
-
-  if (renderedText.trim() !== input.finalText.trim()) {
-    return [] as MessageRenderBlock[];
-  }
-
   return trimOuterTextBlocks(input.blocks);
 }
 
@@ -77,6 +61,67 @@ export function createMessageRenderBlockBuilder() {
         toolCallId,
       });
     },
+    appendGeneratedPresentation(toolCallId: string) {
+      if (
+        blocks.some(
+          (block) =>
+            block.type === "generated_presentation" &&
+            block.toolCallId === toolCallId,
+        )
+      ) {
+        return;
+      }
+
+      blocks.push({
+        id: `generated-presentation-${toolCallId}`,
+        type: "generated_presentation",
+        toolCallId,
+      });
+    },
+    appendTool(toolCallId: string) {
+      if (
+        blocks.some(
+          (block) => block.type === "tool" && block.toolCallId === toolCallId,
+        )
+      ) {
+        return;
+      }
+
+      blocks.push({
+        id: `tool-${toolCallId}`,
+        type: "tool",
+        toolCallId,
+      });
+    },
+    appendReasoning(input: {
+      durationMs?: number;
+      id: string;
+      text: string;
+    }) {
+      if (!input.text) {
+        return;
+      }
+
+      const existing = blocks.find(
+        (block) => block.type === "reasoning" && block.id === input.id,
+      );
+      if (existing?.type === "reasoning") {
+        existing.text += input.text;
+        if (typeof input.durationMs === "number") {
+          existing.durationMs = input.durationMs;
+        }
+        return;
+      }
+
+      blocks.push({
+        id: input.id,
+        type: "reasoning",
+        text: input.text,
+        ...(typeof input.durationMs === "number"
+          ? { durationMs: input.durationMs }
+          : {}),
+      });
+    },
     appendText(text: string) {
       if (!text) {
         return;
@@ -86,6 +131,48 @@ export function createMessageRenderBlockBuilder() {
       if (last?.type === "text") {
         last.text += text;
         return;
+      }
+
+      blocks.push({
+        id: `text-${nextTextId}`,
+        type: "text",
+        text,
+      });
+      nextTextId += 1;
+    },
+    replaceText(text: string) {
+      if (!text) {
+        for (let index = blocks.length - 1; index >= 0; index -= 1) {
+          if (blocks[index]?.type === "text") {
+            blocks.splice(index, 1);
+          }
+        }
+        return;
+      }
+
+      let lastTextIndex = -1;
+      for (let index = blocks.length - 1; index >= 0; index -= 1) {
+        if (blocks[index]?.type === "text") {
+          lastTextIndex = index;
+          break;
+        }
+      }
+      if (lastTextIndex >= 0) {
+        const prefix = blocks
+          .slice(0, lastTextIndex)
+          .map((block) => (block.type === "text" ? block.text : ""))
+          .join("");
+        const lastText = blocks[lastTextIndex];
+        if (lastText?.type === "text" && text.startsWith(prefix)) {
+          lastText.text = text.slice(prefix.length);
+          return;
+        }
+      }
+
+      for (let index = blocks.length - 1; index >= 0; index -= 1) {
+        if (blocks[index]?.type === "text") {
+          blocks.splice(index, 1);
+        }
       }
 
       blocks.push({

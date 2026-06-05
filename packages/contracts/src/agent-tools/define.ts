@@ -3,13 +3,16 @@ export type AgentToolDomain =
   | "retrieval"
   | "web"
   | "artifact"
-  | "connector";
+  | "connector"
+  | "sandbox";
 
 export type AgentToolCapability =
   | "artifact"
   | "filesystem"
   | "workfile_write"
   | "generated_image_artifact"
+  | "presentation_artifact"
+  | "video_presentation_artifact"
   | "pattern_scope"
   | "oversized_current_turn"
   | "read_tool_output"
@@ -21,11 +24,14 @@ export type AgentToolCapability =
   | "connector_read"
   | "web"
   | "web_page_fetch"
-  | "web_query";
+  | "web_query"
+  | "sandbox"
+  | "sandbox_execute"
+  | "sandbox_file_transfer";
 
 export type AgentToolRequirements = {
   provider?: "web";
-  modelKind?: "image";
+  modelKind?: "image" | "tts";
 };
 
 export type AgentToolActivation = {
@@ -44,12 +50,16 @@ export type AgentToolConfiguration = {
 
 export type AgentToolDefaultPermission = "allow" | "ask" | "deny";
 export type AgentToolRiskLevel = "low" | "medium" | "high";
+export type GlobalIconName = string;
+export type GlobalIconTone = "brand" | "mono";
 
 export type AgentToolSlashCommand = {
   aliases?: readonly string[];
   description?: string;
   displayName: string;
   enabled?: boolean;
+  iconName?: GlobalIconName;
+  iconTone?: GlobalIconTone;
   supportsCommand?: boolean;
 };
 

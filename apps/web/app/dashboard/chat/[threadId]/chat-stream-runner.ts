@@ -2,11 +2,14 @@ import type { ByokModelSelection } from "../_components/byok-state";
 import type {
   ChatSendInput,
   CitationRecord,
+  LiveToolConfirmation,
   ModelReasoningSegmentRecord,
   PromptThinkingSettings,
   ThinkingStepRecord,
   ToolCallRecord,
 } from "../_components/chat-canvas";
+import { getToolConfirmationOutput } from "../_components/chat-canvas/tool-confirmation-state";
+import { isPendingToolConfirmation } from "@sourceweft/contracts";
 import type { ToolApprovalResume } from "@sourceweft/sdk";
 import type {
   ModelType,
@@ -116,11 +119,16 @@ type RunChatStreamInput = {
     toolCall: ToolCallRecord,
     event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
   ) => boolean;
+  isCompletedPresentationArtifactToolCall: (
+    toolCall: ToolCallRecord,
+    event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
+  ) => boolean;
   isCompletedWorkfileWriteToolCall: (
     toolCall: ToolCallRecord,
     event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
   ) => boolean;
   isGeneratedImageArtifactToolName: (toolName: string) => boolean;
+  isPresentationArtifactToolName: (toolName: string) => boolean;
   markStreamingAssistantAsError: (errorInput: {
     code?: string | null;
     error: string;
@@ -145,7 +153,9 @@ type RunChatStreamInput = {
   normalizeThinkingStepRecord: (value: unknown) => ThinkingStepRecord | null;
   normalizeThreadCommandRequest: (value: unknown) => unknown;
   onCreatedUserMessageId: (messageId: string) => void;
-  onToolConfirmationRequested?: () => void;
+  onToolConfirmationRequested?: (input: {
+    liveConfirmations: LiveToolConfirmation[];
+  }) => void;
   onPersistedAssistantMessageId: (messageId: string) => void;
   onPersistedUserMessageId: (messageId: string) => void;
   onPreparedEffectiveSourceIds: (sourceIds: string[] | null) => void;
@@ -309,6 +319,29 @@ export async function runChatStream(
   let sawStreamError = false;
   let shouldPollThreadTitle = false;
   let titlePollScheduled = false;
+  const liveConfirmationsById = new Map<string, LiveToolConfirmation>();
+
+  function collectLiveToolConfirmation(event: ChatStreamEventPayload) {
+    const eventToolCall = input.toObjectRecord(event.toolCall);
+    const toolCallId =
+      typeof eventToolCall?.id === "string"
+        ? eventToolCall.id
+        : typeof event.id === "string"
+          ? event.id
+          : null;
+    if (!toolCallId) {
+      return;
+    }
+    const toolCall = input.streamToolCallsById.get(toolCallId);
+    if (!toolCall) {
+      return;
+    }
+    const confirmation = getToolConfirmationOutput(toolCall.output);
+    if (!confirmation || !isPendingToolConfirmation(confirmation)) {
+      return;
+    }
+    liveConfirmationsById.set(confirmation.id, { confirmation, toolCall });
+  }
 
   const pollThreadTitleJob = async (jobId: string) => {
     const startedAt = Date.now();
@@ -514,12 +547,18 @@ export async function runChatStream(
         toolCall,
         event as ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
       ),
+    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+      input.isCompletedPresentationArtifactToolCall(
+        toolCall,
+        event as ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
+      ),
     isCompletedWorkfileWriteToolCall: (toolCall, event) =>
       input.isCompletedWorkfileWriteToolCall(
         toolCall,
         event as ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
       ),
     isGeneratedImageArtifactToolName: input.isGeneratedImageArtifactToolName,
+    isPresentationArtifactToolName: input.isPresentationArtifactToolName,
     mergeThinkingStepRecords: input.mergeThinkingStepRecords,
     mode: input.mode,
     normalizeCitationRecords: input.normalizeCitationRecords,
@@ -622,6 +661,7 @@ export async function runChatStream(
           setArtifactsRefreshKey: input.setArtifactsRefreshKey,
           setWorkfilesRefreshKey: input.setWorkfilesRefreshKey,
         });
+        collectLiveToolConfirmation(data);
       } else if (data.type === "thinking-step") {
         handleStreamingThinkingStep({
           context: streamingEventHandlerContext,
@@ -706,7 +746,9 @@ export async function runChatStream(
         receivedFinishEvent = finishState.receivedFinishEvent;
         streamEnded = finishState.streamEnded;
         if (data.finishReason === "tool_confirmation_requested") {
-          input.onToolConfirmationRequested?.();
+          input.onToolConfirmationRequested?.({
+            liveConfirmations: [...liveConfirmationsById.values()],
+          });
         }
         break readLoop;
       }

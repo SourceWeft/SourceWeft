@@ -12,7 +12,8 @@ import {
 import { contentClient } from "../../../../../lib/sdk";
 import {
   createActiveThreadRunPlaceholder,
-  findLatestActiveThreadRunMessage,
+  dropStaleActiveThreadRunMessages,
+  findActiveThreadRunMessage,
   mapThreadMessagesToChatMessages,
   shouldRetryThreadMessagesLoad,
   THREAD_MESSAGES_INITIAL_PAGE_SIZE,
@@ -25,6 +26,7 @@ import type {
 
 type UseThreadMessagesInput = {
   attachedRunKeyRef: RefObject<string | null>;
+  clearTerminalLocalRunState: () => void;
   setActiveThreadRun: (run: ActiveThreadRun | null) => void;
   streamThreadActionRef: RefObject<
     ((input: ThreadStreamActionInput) => Promise<void>) | null
@@ -43,6 +45,7 @@ function normalizeActiveThreadRun(run: ActiveThreadRun): ActiveThreadRun {
 
 export function useThreadMessages({
   attachedRunKeyRef,
+  clearTerminalLocalRunState,
   setActiveThreadRun,
   streamThreadActionRef,
   threadId,
@@ -68,6 +71,7 @@ export function useThreadMessages({
       loadedThreadMessagesKeyRef.current = null;
       setMessages([]);
       setStreamingAssistantSnapshot(null);
+      clearTerminalLocalRunState();
       setOlderMessagesCursor(null);
       return;
     }
@@ -98,14 +102,11 @@ export function useThreadMessages({
 
         loadedThreadMessagesKeyRef.current = threadMessagesKey;
         setOlderMessagesCursor(messagesResult.nextCursor ?? null);
+        const runningRun = activeRun ? normalizeActiveThreadRun(activeRun) : null;
         let runningAssistant:
           | { message: ChatMessageItem; run: ActiveThreadRun }
-          | null = findLatestActiveThreadRunMessage(serverMessages);
-        const runningRun = runningAssistant?.run
-          ? normalizeActiveThreadRun(runningAssistant.run)
-          : activeRun
-            ? normalizeActiveThreadRun(activeRun)
-            : null;
+          | null = findActiveThreadRunMessage(serverMessages, runningRun);
+        const matchedRunningAssistant = runningAssistant;
         if (runningRun && !runningAssistant) {
           const latestUserMessage = [...serverMessages]
             .reverse()
@@ -117,19 +118,23 @@ export function useThreadMessages({
           serverMessages = [...serverMessages, placeholder];
           runningAssistant = { message: placeholder, run: runningRun };
         }
-        setActiveThreadRun(runningRun);
+        const resolvedRunningRun = matchedRunningAssistant?.run ?? runningRun;
+        setActiveThreadRun(resolvedRunningRun);
         setMessages(serverMessages);
         setStreamingAssistantSnapshot(null);
+        if (!resolvedRunningRun) {
+          clearTerminalLocalRunState();
+        }
         if (
-          runningRun &&
-          runningRun.status !== "waiting_for_approval" &&
+          resolvedRunningRun &&
+          resolvedRunningRun.status !== "waiting_for_approval" &&
           runningAssistant &&
-          runningRun.idempotencyKey !== attachedRunKeyRef.current
+          resolvedRunningRun.idempotencyKey !== attachedRunKeyRef.current
         ) {
-          attachedRunKeyRef.current = runningRun.idempotencyKey;
+          attachedRunKeyRef.current = resolvedRunningRun.idempotencyKey;
           void streamThreadActionRef.current?.({
-            mode: runningRun.mode ?? "send",
-            durableRunKey: runningRun.idempotencyKey,
+            mode: resolvedRunningRun.mode ?? "send",
+            durableRunKey: resolvedRunningRun.idempotencyKey,
             attachOnly: true,
             assistantMessageId: runningAssistant.message.id,
             baseMessages: serverMessages,
@@ -159,6 +164,7 @@ export function useThreadMessages({
     }
   }, [
     attachedRunKeyRef,
+    clearTerminalLocalRunState,
     setActiveThreadRun,
     setStreamingAssistantSnapshot,
     streamThreadActionRef,
@@ -190,10 +196,12 @@ export function useThreadMessages({
             message,
           ]),
         );
-        return Array.from(mergedById.values()).sort(
-          (left, right) =>
-            new Date(left.createdAt).getTime() -
-            new Date(right.createdAt).getTime(),
+        return dropStaleActiveThreadRunMessages(
+          Array.from(mergedById.values()).sort(
+            (left, right) =>
+              new Date(left.createdAt).getTime() -
+              new Date(right.createdAt).getTime(),
+          ),
         );
       });
       setOlderMessagesCursor(result.nextCursor ?? null);

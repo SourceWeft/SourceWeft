@@ -17,6 +17,9 @@ export const lsTool = defineAgentTool({
   activation: filesystemActivation,
   defaultPermission: "allow",
   riskLevel: "low",
+  slash: {
+    displayName: "ls",
+  },
 });
 
 export const readFileTool = defineAgentTool({

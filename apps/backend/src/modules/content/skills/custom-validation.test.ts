@@ -123,6 +123,29 @@ test("validateCustomSkillBundle accepts models, tools, and tool defaultConfig", 
   });
 });
 
+test("validateCustomSkillBundle accepts generate_pptx tool declarations", () => {
+  const bundle = validateCustomSkillBundle({
+    files: [
+      { path: "SKILL.md", contentText: skillMd },
+      {
+        path: "skill.json",
+        contentText: JSON.stringify({
+          slug: "custom-review",
+          displayName: "Custom Review",
+          version: "1.0.0",
+          description: "Use this skill when reviewing custom material.",
+          visibility: "workspace",
+          categories: ["visual"],
+          tools: ["generate_pptx"],
+        }),
+      },
+    ],
+  });
+
+  assert.deepEqual(bundle.manifestJson.tools, ["generate_pptx"]);
+});
+
+
 test("validateCustomSkillBundle rejects defaultConfig for undeclared tools", () => {
   assert.throws(
     () =>

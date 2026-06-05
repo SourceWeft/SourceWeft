@@ -14,8 +14,12 @@ import { EmptyState } from "./empty-state";
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import { ToolInterventionBar } from "./tool-confirmation";
-import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-control";
+import type {
+  ActiveThreadRun,
+  ChatExecutionState,
+} from "../../[threadId]/chat-stream-runner-control";
 import {
+  getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
   shouldLockComposerForRun,
@@ -33,6 +37,7 @@ import {
 import type {
   AssistantVersionIndexEntry,
   ArtifactPreviewRecord,
+  ArtifactStatusSnapshot,
   ChatSendInput,
   ChatMessageImagePart,
   ChatSkillItem,
@@ -111,6 +116,7 @@ function countSelectedTools(tools: ChatSendInput["tools"]) {
 
 export function ChatCanvas({
   activeVersionByGroup = {},
+  artifactStatuses,
   composerInitialCommand = null,
   composerInitialInput,
   composerResetKey,
@@ -118,6 +124,7 @@ export function ChatCanvas({
   highlightedMessageId = null,
   hasOlderMessages = false,
   activeThreadRun = null,
+  chatExecutionState,
   isEditing = false,
   isLoadingOlderMessages = false,
   isStreaming = false,
@@ -164,7 +171,9 @@ export function ChatCanvas({
   onDisabledToolNamesChange,
 }: {
   activeVersionByGroup?: Record<string, number>;
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   activeThreadRun?: ActiveThreadRun | null;
+  chatExecutionState?: ChatExecutionState;
   composerInitialCommand?: ChatSendInput["command"] | null;
   composerInitialInput?: string;
   composerResetKey?: number;
@@ -282,7 +291,18 @@ export function ChatCanvas({
       }),
     [activeThreadRun, assistantVersionById],
   );
-  const activeConfirmationItems = toolConfirmationLookup.items;
+  const liveConfirmationItems = useMemo(
+    () =>
+      getLiveToolConfirmationItemsForRun({
+        activeThreadRun,
+        signal: toolConfirmationInterventionSignal,
+      }),
+    [activeThreadRun, toolConfirmationInterventionSignal],
+  );
+  const activeConfirmationItems =
+    liveConfirmationItems.length > 0
+      ? liveConfirmationItems
+      : toolConfirmationLookup.items;
   const toolConfirmationRunKey = getToolConfirmationRunKey(activeThreadRun);
   const confirmationResolutions = toolConfirmationState.resolutions;
   const activeIntervention = toolConfirmationState.activeIntervention;
@@ -298,28 +318,35 @@ export function ChatCanvas({
     activeThreadRun?.status === "waiting_for_approval";
   const hasPendingConfirmationItems = pendingConfirmationItems.length > 0;
   const isSubmitDisabledForRun = shouldLockComposerForRun({
+    chatExecutionState,
     isStreaming,
     isWaitingForApproval,
     pendingConfirmationCount: pendingConfirmationItems.length,
   });
 
-  const applyToolConfirmationState = useCallback(function applyToolConfirmationState(
-    nextState: ToolConfirmationControllerState,
-  ) {
-    toolConfirmationStateRef.current = nextState;
-    setToolConfirmationState(nextState);
-    return nextState;
-  }, []);
+  const applyToolConfirmationState = useCallback(
+    function applyToolConfirmationState(
+      nextState: ToolConfirmationControllerState,
+    ) {
+      toolConfirmationStateRef.current = nextState;
+      setToolConfirmationState(nextState);
+      return nextState;
+    },
+    [],
+  );
 
-  const updateToolConfirmationState = useCallback(function updateToolConfirmationState(
-    updater: (
-      state: ToolConfirmationControllerState,
-    ) => ToolConfirmationControllerState,
-  ) {
-    return applyToolConfirmationState(
-      updater(toolConfirmationStateRef.current),
-    );
-  }, [applyToolConfirmationState]);
+  const updateToolConfirmationState = useCallback(
+    function updateToolConfirmationState(
+      updater: (
+        state: ToolConfirmationControllerState,
+      ) => ToolConfirmationControllerState,
+    ) {
+      return applyToolConfirmationState(
+        updater(toolConfirmationStateRef.current),
+      );
+    },
+    [applyToolConfirmationState],
+  );
 
   useEffect(() => {
     updateToolConfirmationState((current) =>
@@ -329,9 +356,16 @@ export function ChatCanvas({
         state: current,
       }),
     );
-  }, [activeConfirmationItems, toolConfirmationRunKey, updateToolConfirmationState]);
+  }, [
+    activeConfirmationItems,
+    toolConfirmationRunKey,
+    updateToolConfirmationState,
+  ]);
 
   useEffect(() => {
+    if (liveConfirmationItems.length > 0) {
+      return;
+    }
     if (toolConfirmationLookup.reason === "missing_assistant_message") {
       const runKey =
         activeThreadRun?.id ?? activeThreadRun?.idempotencyKey ?? "unknown";
@@ -395,7 +429,12 @@ export function ChatCanvas({
           : "Failed to reload thread messages.";
       toast.error(message);
     });
-  }, [activeThreadRun, onReloadMessages, toolConfirmationLookup]);
+  }, [
+    activeThreadRun,
+    liveConfirmationItems.length,
+    onReloadMessages,
+    toolConfirmationLookup,
+  ]);
 
   useEffect(() => {
     if (
@@ -507,9 +546,11 @@ export function ChatCanvas({
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background [scrollbar-gutter:stable]">
       <MessageList
+        activeThreadRun={activeThreadRun}
         activeVersionByGroup={activeVersionByGroup}
+        artifactStatuses={artifactStatuses}
         allSources={allSources}
         hasOlderMessages={hasOlderMessages}
         highlightedMessageId={highlightedMessageId}
@@ -622,7 +663,7 @@ export function ChatCanvas({
       />
 
       <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           <Composer
             className="w-full"
             allSources={allSources}
@@ -638,13 +679,7 @@ export function ChatCanvas({
             onRemoveSource={handleRemoveSource}
             onSkillSelectionChange={handleSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(
-              message,
-              tools,
-              command,
-              skillIds,
-              content,
-            ) =>
+            onSubmit={(message, tools, command, skillIds, content) =>
               handleSendMessage({
                 content: content ?? message.text.trim(),
                 images: promptFilesToImages(message.files),

@@ -2,6 +2,8 @@ import {
   HttpClientError,
   isAgentToolDomain,
   isGeneratedImageArtifactToolName,
+  isPresentationArtifactToolName,
+  isVideoPresentationArtifactToolName,
   isWorkfileWriteToolName,
   SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX,
   type ToolApprovalResume,
@@ -31,7 +33,7 @@ type WorkfileDetail = Awaited<
 >["file"];
 
 function mapThreadMessagesToChatMessages(messages: ThreadMessageItem[]) {
-  return messages
+  const normalizedMessages = messages
     .filter(
       (
         message,
@@ -52,6 +54,7 @@ function mapThreadMessagesToChatMessages(messages: ThreadMessageItem[]) {
       (left, right) =>
         new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
     );
+  return dropStaleActiveThreadRunMessages(normalizedMessages);
 }
 
 const STREAM_TEXT_PAUSED_KEY = "isTextPaused";
@@ -82,7 +85,31 @@ function appendReasoningChunk(current: string | undefined, next: string) {
 }
 
 function getDisplayErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Failed to send message.";
+  if (!(error instanceof Error)) {
+    return "Failed to send message.";
+  }
+  return sanitizeClientErrorMessage(error.message) ?? "Failed to send message.";
+}
+
+export function sanitizeClientErrorMessage(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) {
+    return null;
+  }
+  if (
+    /Error invoking tool/i.test(text) ||
+    /Received tool input did not match expected schema/i.test(text) ||
+    /\bkwargs\b/i.test(text) ||
+    /Invalid input: expected .*received/i.test(text)
+  ) {
+    const toolName =
+      text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
+      text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
+    return toolName
+      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
+      : "The generated tool arguments were invalid. Please retry.";
+  }
+  return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
 }
 
 type ApiErrorPayload = {
@@ -230,6 +257,10 @@ function createDurableRunKey() {
 }
 
 function resolveThreadRunMetadata(metadata: Record<string, unknown>) {
+  if (isTerminalMessageMetadata(metadata)) {
+    return null;
+  }
+
   const threadRun = toObjectRecord(metadata.threadRun);
   const idempotencyKey = toNullableString(threadRun?.idempotencyKey);
   const status = toNullableString(threadRun?.status);
@@ -260,6 +291,116 @@ function resolveThreadRunMetadata(metadata: Record<string, unknown>) {
         ? mode
         : undefined,
   } satisfies ActiveThreadRun;
+}
+
+function isTerminalMessageMetadata(metadata: Record<string, unknown>) {
+  if (
+    metadata.isError === true ||
+    metadata.isCancelled === true ||
+    typeof metadata.errorCode === "string"
+  ) {
+    return true;
+  }
+
+  const threadRun = toObjectRecord(metadata.threadRun);
+  const status = toNullableString(threadRun?.status);
+  if (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled"
+  ) {
+    return true;
+  }
+
+  const finishReason = toNullableString(metadata.finishReason);
+  return Boolean(finishReason && finishReason !== "tool_confirmation_requested");
+}
+
+function getThreadRunIdentities(metadata: Record<string, unknown>) {
+  const threadRun = toObjectRecord(metadata.threadRun);
+  const id = toNullableString(threadRun?.id);
+  const idempotencyKey = toNullableString(threadRun?.idempotencyKey);
+  return [id, idempotencyKey].filter((value): value is string => Boolean(value));
+}
+
+function hasActiveThreadRunStatus(metadata: Record<string, unknown>) {
+  const threadRun = toObjectRecord(metadata.threadRun);
+  const status = toNullableString(threadRun?.status);
+  return (
+    status === "queued" ||
+    status === "running" ||
+    status === "cancel_requested" ||
+    status === "waiting_for_approval"
+  );
+}
+
+function dropStaleActiveThreadRunMessages(messages: ChatMessageItem[]) {
+  const terminalThreadRuns = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "assistant" || !isTerminalMessageMetadata(message.metadata)) {
+      continue;
+    }
+    for (const identity of getThreadRunIdentities(message.metadata)) {
+      terminalThreadRuns.add(identity);
+    }
+  }
+
+  if (terminalThreadRuns.size === 0) {
+    return messages;
+  }
+
+  return messages.filter((message) => {
+    if (
+      message.role !== "assistant" ||
+      isTerminalMessageMetadata(message.metadata) ||
+      !hasActiveThreadRunStatus(message.metadata)
+    ) {
+      return true;
+    }
+    return !getThreadRunIdentities(message.metadata).some((identity) =>
+      terminalThreadRuns.has(identity),
+    );
+  });
+}
+
+function findActiveThreadRunMessage(
+  messages: ChatMessageItem[],
+  activeRun: ActiveThreadRun | null | undefined,
+) {
+  if (!activeRun) {
+    return null;
+  }
+
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+
+    const run = resolveThreadRunMetadata(message.metadata);
+    if (!run) {
+      continue;
+    }
+
+    const matchesRun =
+      (Boolean(activeRun.assistantMessageId) &&
+        activeRun.assistantMessageId === message.id) ||
+      (Boolean(activeRun.id) && Boolean(run.id) && activeRun.id === run.id) ||
+      run.idempotencyKey === activeRun.idempotencyKey;
+    if (!matchesRun) {
+      continue;
+    }
+
+    return {
+      message,
+      run: {
+        ...activeRun,
+        assistantMessageId:
+          activeRun.assistantMessageId ?? run.assistantMessageId ?? message.id,
+      },
+    };
+  }
+
+  return null;
 }
 
 function findLatestActiveThreadRunMessage(messages: ChatMessageItem[]) {
@@ -432,7 +573,7 @@ function normalizeToolCallRecord(
     output,
     latencyMs: toNullableNumber(record.latencyMs),
     status: normalizedStatus,
-    error: toNullableString(record.error),
+    error: sanitizeClientErrorMessage(toNullableString(record.error)),
     sequence: toNullableNumber(record.sequence) ?? undefined,
     approvalState: normalizeApprovalState(record.approvalState),
     approvalConfirmationId:
@@ -628,14 +769,27 @@ function normalizeThinkingStepRecord(
   };
 }
 
+function normalizeTerminalThinkingStepRecord(step: ThinkingStepRecord) {
+  return step.status === "in_progress"
+    ? {
+        ...step,
+        status: "completed" as const,
+      }
+    : step;
+}
+
 function resolveThinkingStepsFromMetadata(metadata: Record<string, unknown>) {
   if (!Array.isArray(metadata.thinkingSteps)) {
     return [] as ThinkingStepRecord[];
   }
 
+  const isTerminal = isTerminalMessageMetadata(metadata);
   return metadata.thinkingSteps
     .map((item) => normalizeThinkingStepRecord(item))
-    .filter((item): item is ThinkingStepRecord => item !== null);
+    .filter((item): item is ThinkingStepRecord => item !== null)
+    .map((item) =>
+      isTerminal ? normalizeTerminalThinkingStepRecord(item) : item,
+    );
 }
 
 function resolveModelReasoningFromMetadata(metadata: Record<string, unknown>) {
@@ -750,6 +904,17 @@ function normalizeReasoningTraceEventRecord(
   return null;
 }
 
+function normalizeTerminalReasoningTraceEventRecord(
+  event: ReasoningTraceEventRecord,
+) {
+  return event.type === "thinking-step"
+    ? {
+        ...event,
+        step: normalizeTerminalThinkingStepRecord(event.step),
+      }
+    : event;
+}
+
 function resolveReasoningTraceEventsFromMetadata(
   metadata: Record<string, unknown>,
 ) {
@@ -757,9 +922,13 @@ function resolveReasoningTraceEventsFromMetadata(
     return [] as ReasoningTraceEventRecord[];
   }
 
+  const isTerminal = isTerminalMessageMetadata(metadata);
   return metadata.traceEvents
     .map((item) => normalizeReasoningTraceEventRecord(item))
-    .filter((item): item is ReasoningTraceEventRecord => item !== null);
+    .filter((item): item is ReasoningTraceEventRecord => item !== null)
+    .map((item) =>
+      isTerminal ? normalizeTerminalReasoningTraceEventRecord(item) : item,
+    );
 }
 
 function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
@@ -866,14 +1035,25 @@ function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
   return null;
 }
 
+function normalizeTerminalTracePartRecord(part: TracePartRecord) {
+  return part.kind === "step" && part.status === "in_progress"
+    ? {
+        ...part,
+        status: "completed" as const,
+      }
+    : part;
+}
+
 function resolveTracePartsFromMetadata(metadata: Record<string, unknown>) {
   if (!Array.isArray(metadata.traceParts)) {
     return [] as TracePartRecord[];
   }
 
+  const isTerminal = isTerminalMessageMetadata(metadata);
   return metadata.traceParts
     .map((item) => normalizeTracePartRecord(item))
     .filter((item): item is TracePartRecord => item !== null)
+    .map((item) => (isTerminal ? normalizeTerminalTracePartRecord(item) : item))
     .sort((left, right) => left.order - right.order);
 }
 
@@ -1044,9 +1224,11 @@ function resolveToolCallFromStreamEvent(input: {
   const normalizedError =
     normalizedToolCall?.error ??
     (input.event.type === "tool-call-error"
-      ? (toNullableString(input.event.error) ?? "Tool execution failed.")
+      ? (sanitizeClientErrorMessage(toNullableString(input.event.error)) ??
+        "Tool execution failed.")
       : normalizedStatus === "error"
-        ? (existing?.error ?? "Tool execution failed.")
+        ? (sanitizeClientErrorMessage(existing?.error) ??
+          "Tool execution failed.")
         : null);
 
   return {
@@ -1128,6 +1310,22 @@ function isCompletedImageArtifactToolCall(
 
   return (
     isGeneratedImageArtifactToolName(toolCall.tool) &&
+    (event.type === "tool-call-result" ||
+      (event.type === "tool-call-end" && toolCall.status === "completed"))
+  );
+}
+
+function isCompletedPresentationArtifactToolCall(
+  toolCall: ToolCallRecord,
+  event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
+) {
+  if (toolCall.status !== "completed") {
+    return false;
+  }
+
+  return (
+    (isPresentationArtifactToolName(toolCall.tool) ||
+      isVideoPresentationArtifactToolName(toolCall.tool)) &&
     (event.type === "tool-call-result" ||
       (event.type === "tool-call-end" && toolCall.status === "completed"))
   );
@@ -1322,12 +1520,47 @@ function normalizeMessageRenderBlock(
       : null;
   }
 
+  if (record.type === "reasoning") {
+    const text = toNullableString(record.text);
+    const durationMs = toNullableNumber(record.durationMs);
+    return text && text.length > 0
+      ? {
+          id,
+          type: "reasoning",
+          text,
+          ...(durationMs !== null ? { durationMs } : {}),
+        }
+      : null;
+  }
+
   if (record.type === "generated_image") {
     const toolCallId = toNullableString(record.toolCallId);
     return toolCallId
       ? {
           id,
           type: "generated_image",
+          toolCallId,
+        }
+      : null;
+  }
+
+  if (record.type === "tool") {
+    const toolCallId = toNullableString(record.toolCallId);
+    return toolCallId
+      ? {
+          id,
+          type: "tool",
+          toolCallId,
+        }
+      : null;
+  }
+
+  if (record.type === "generated_presentation") {
+    const toolCallId = toNullableString(record.toolCallId);
+    return toolCallId
+      ? {
+          id,
+          type: "generated_presentation",
           toolCallId,
         }
       : null;
@@ -1346,16 +1579,24 @@ function resolveRenderBlocksFromMetadata(metadata: Record<string, unknown>) {
     .filter((item): item is MessageRenderBlock => item !== null);
 }
 
+function hasRenderBlocksMetadata(metadata: Record<string, unknown>) {
+  return Array.isArray(metadata.renderBlocks);
+}
+
 export {
   appendReasoningChunk,
   basename,
   createActiveThreadRunPlaceholder,
   createDurableRunKey,
+  dropStaleActiveThreadRunMessages,
   excludeResolvedToolConfirmationCalls,
+  findActiveThreadRunMessage,
   findLatestActiveThreadRunMessage,
   formatBytes,
   getDisplayErrorMessage,
+  hasRenderBlocksMetadata,
   isCompletedImageArtifactToolCall,
+  isCompletedPresentationArtifactToolCall,
   isCompletedWorkfileWriteToolCall,
   mapThreadMessagesToChatMessages,
   mergeThinkingStepRecords,
@@ -1383,6 +1624,7 @@ export {
   THREAD_MESSAGES_INITIAL_PAGE_SIZE,
   THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS,
   throwStreamRequestError,
+  toNullableNumber,
   toNullableString,
   toObjectRecord,
   waitForThreadMessagesRetry,

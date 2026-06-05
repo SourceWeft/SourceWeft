@@ -17,6 +17,34 @@ import type {
   ToolConfirmationRequest,
 } from "@sourceweft/contracts";
 
+function resumeDecisionFromSandboxInput(input: {
+  confirmation?: ToolConfirmationRequest;
+  decision: "approve" | "reject";
+  editedArgs?: Record<string, unknown>;
+  note?: string;
+}): ToolApprovalResumeDecision {
+  if (input.decision === "reject") {
+    return {
+      type: "reject",
+      message: input.note ?? "User rejected the sandbox action in SourceWeft.",
+    };
+  }
+  if (input.editedArgs && input.confirmation?.action.toolName) {
+    return {
+      type: "edit",
+      editedAction: {
+        name: input.confirmation.action.toolName,
+        args: input.editedArgs,
+      },
+    };
+  }
+  return { type: "approve" };
+}
+
+function resolvedConfirmationStatus(decision: "approve" | "reject") {
+  return decision === "reject" ? "rejected" : "approved";
+}
+
 function connectorTargetFromConfirmation(
   confirmation?: ToolConfirmationRequest,
 ) {
@@ -74,6 +102,12 @@ function hitlInterruptIdFromConfirmation(
   return confirmation?.execution.sourceweft?.hitlInterruptId;
 }
 
+function sandboxExecuteToolCallIdFromConfirmation(
+  confirmation?: ToolConfirmationRequest,
+) {
+  return confirmation?.execution.sourceweft?.sandboxExecuteToolCallId;
+}
+
 function connectorActionMetadata(action: ConnectorActionRunRecord) {
   const manifest = connectorRegistry
     .listManifests()
@@ -97,6 +131,53 @@ export class ToolConfirmationRunner {
     editedArgs?: Record<string, unknown>;
     note?: string;
   }) {
+    if (input.confirmation?.domain === "sandbox") {
+      const resume: ToolApprovalResume = {
+        decisions: [
+          resumeDecisionFromSandboxInput({
+            confirmation: input.confirmation,
+            decision: input.decision,
+            editedArgs: input.editedArgs,
+            note: input.note,
+          }),
+        ],
+        ...(hitlInterruptIdFromConfirmation(input.confirmation) ||
+        sandboxExecuteToolCallIdFromConfirmation(input.confirmation)
+          ? {
+              sourceweft: {
+                ...(hitlInterruptIdFromConfirmation(input.confirmation)
+                  ? {
+                      hitlInterruptId: hitlInterruptIdFromConfirmation(
+                        input.confirmation,
+                      ),
+                    }
+                  : {}),
+                ...(sandboxExecuteToolCallIdFromConfirmation(input.confirmation)
+                  ? {
+                      sandboxExecuteToolCallId:
+                        sandboxExecuteToolCallIdFromConfirmation(
+                          input.confirmation,
+                        ),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+      };
+      const status = resolvedConfirmationStatus(input.decision);
+      return {
+        confirmation: {
+          ...input.confirmation,
+          action: {
+            ...input.confirmation.action,
+            status,
+          },
+          status,
+        },
+        resume,
+      };
+    }
+
     if (
       input.confirmation?.domain === "mcp" ||
       input.confirmation?.execution.executor.kind === "mcp_action_run"

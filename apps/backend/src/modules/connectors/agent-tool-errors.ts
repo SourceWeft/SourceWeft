@@ -10,6 +10,7 @@ export type ConnectorToolErrorPayload = {
   code: string;
   message: string;
   statusCode: number;
+  recoverable?: boolean;
 };
 
 function errorLogFields(error: unknown) {
@@ -67,6 +68,7 @@ export async function connectorToolResult<T>(
         connectorError,
       }),
       statusCode: connectorError.statusCode,
+      ...(connectorError.recoverable ? { recoverable: true } : {}),
     };
   }
 }

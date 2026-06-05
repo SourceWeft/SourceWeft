@@ -4,15 +4,25 @@ import { useCallback } from "react";
 import { toast } from "sonner";
 import {
   isGeneratedImageArtifactToolName,
+  isPresentationArtifactToolName,
+  isVideoPresentationArtifactToolName,
   type ToolApprovalResume,
 } from "@sourceweft/sdk";
 import {
   buildByokModelExecution,
   type ByokModelSelection,
 } from "../../_components/byok-state";
-import { buildChatToolsRequest, type ChatSendInput, type PromptThinkingSettings, type ThinkingStepRecord, type ToolCallRecord } from "../../_components/chat-canvas";
+import {
+  buildChatToolsRequest,
+  type ChatSendInput,
+  type LiveToolConfirmation,
+  type PromptThinkingSettings,
+  type ThinkingStepRecord,
+  type ToolCallRecord,
+} from "../../_components/chat-canvas";
 import type { ModelType, SelectedModels } from "../../_components/model-catalog-utils";
 import { expandSelectedSources, type SourceItem } from "../../_components/source-types";
+import { contentClient } from "../../../../../lib/sdk";
 import { runChatStream } from "../chat-stream-runner";
 import type { RequestThinkingConfig } from "../streaming-request-body";
 import type { ChatMessageItem, StreamingAssistantSnapshot } from "../streaming-assistant-state";
@@ -22,6 +32,7 @@ import {
   createDurableRunKey,
   getDisplayErrorMessage,
   isCompletedImageArtifactToolCall,
+  isCompletedPresentationArtifactToolCall,
   isCompletedWorkfileWriteToolCall,
   mergeThinkingStepRecords,
   normalizeCitationRecords,
@@ -88,7 +99,12 @@ type UseThreadStreamActionInput = {
     waitingForApproval?: boolean;
   }) => void;
   messages: ChatMessageItem[];
-  onToolConfirmationRequested?: () => void;
+  onToolConfirmationRequested?: (input: {
+    assistantMessageId: string | null;
+    liveConfirmations: LiveToolConfirmation[];
+    runKey: string;
+    threadRunId: string | null;
+  }) => void;
   searchEnabled: boolean;
   selectedByokModels: Partial<Record<ModelType, ByokModelSelection | null>>;
   selectedModels: SelectedModels;
@@ -114,6 +130,14 @@ function appendResumeContinuationSeparator(content: string) {
   return content.length > 0 && !content.endsWith("\n")
     ? `${content}\n`
     : content;
+}
+
+function normalizeActiveThreadRun(run: ActiveThreadRun): ActiveThreadRun {
+  return {
+    ...run,
+    approvalRequestedAt: run.approvalRequestedAt ?? null,
+    approvalExpiresAt: run.approvalExpiresAt ?? null,
+  };
 }
 
 export function useThreadStreamAction({
@@ -318,6 +342,7 @@ export function useThreadStreamAction({
       let persistedUserMessageId = tempUserId ?? input.userMessageId ?? null;
       let createdUserMessageId: string | null = tempUserId;
       let persistedAssistantMessageId: string | null = null;
+      let preparedThreadRunId: string | null = null;
       let hasServerPersistedAssistantMessage = false;
       const streamToolCallsById = new Map<string, ToolCallRecord>();
       const streamThinkingStepsById = new Map<string, ThinkingStepRecord>();
@@ -616,8 +641,12 @@ export function useThreadStreamAction({
           images: input.images,
           assistantMessageId: input.assistantMessageId,
           isCompletedImageArtifactToolCall,
+          isCompletedPresentationArtifactToolCall,
           isCompletedWorkfileWriteToolCall,
           isGeneratedImageArtifactToolName,
+          isPresentationArtifactToolName: (toolName) =>
+            isPresentationArtifactToolName(toolName) ||
+            isVideoPresentationArtifactToolName(toolName),
           markStreamingAssistantAsError,
           mergeThinkingStepRecords,
           mode: input.mode,
@@ -631,7 +660,15 @@ export function useThreadStreamAction({
               createdUserMessageId = messageId;
             }
           },
-          onToolConfirmationRequested,
+          onToolConfirmationRequested: ({ liveConfirmations }) => {
+            onToolConfirmationRequested?.({
+              assistantMessageId:
+                persistedAssistantMessageId ?? streamingAssistantMessageId ?? null,
+              liveConfirmations,
+              runKey: durableRunKey,
+              threadRunId: preparedThreadRunId,
+            });
+          },
           onPersistedAssistantMessageId: (messageId) => {
             persistedAssistantMessageId = messageId;
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
@@ -650,6 +687,7 @@ export function useThreadStreamAction({
             preparedEffectiveSourceIds = sourceIds;
           },
           onPreparedThreadRun: (threadRun) => {
+            preparedThreadRunId = toNullableString(threadRun.id);
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
               ...run,
               id: toNullableString(threadRun.id) ?? run.id,
@@ -734,14 +772,51 @@ export function useThreadStreamAction({
         }
 
         if (waitingForApproval) {
-          if (persistedAssistantMessageId) {
-            updateActiveRunIfCurrent(durableRunKey, (run) => ({
-              ...run,
-              assistantMessageId: persistedAssistantMessageId,
-              status: "waiting_for_approval",
-            }));
-          }
+          const activeRunResult = await contentClient
+            .getActiveThreadRun(workspaceId, threadId)
+            .catch(() => null);
+          const activeRun =
+            activeRunResult?.threadRun?.idempotencyKey === durableRunKey
+              ? normalizeActiveThreadRun(activeRunResult.threadRun)
+              : null;
+          updateActiveRunIfCurrent(durableRunKey, (run) => ({
+            ...run,
+            ...(activeRun ?? {}),
+            assistantMessageId:
+              activeRun?.assistantMessageId ??
+              persistedAssistantMessageId ??
+              streamingAssistantMessageId ??
+              run.assistantMessageId,
+            status: "waiting_for_approval",
+          }));
           clearAttachedRunKeyIfCurrent(durableRunKey);
+          return;
+        }
+
+        const activeRunResult = await contentClient
+          .getActiveThreadRun(workspaceId, threadId)
+          .catch(() => null);
+        const activeRun =
+          activeRunResult?.threadRun?.idempotencyKey === durableRunKey
+            ? normalizeActiveThreadRun(activeRunResult.threadRun)
+            : null;
+        if (activeRun) {
+          detachedWithoutFinish = true;
+          updateActiveRunIfCurrent(durableRunKey, (run) => ({
+            ...run,
+            ...activeRun,
+          }));
+          console.info(
+            "Chat stream emitted finish while durable run is still active; reloading thread state.",
+            {
+              durableRunKey,
+              status: activeRun.status,
+              threadId,
+            },
+          );
+          window.setTimeout(() => {
+            void loadThreadMessages();
+          }, 0);
           return;
         }
 

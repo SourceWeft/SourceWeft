@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test, vi } from "vitest";
+import { beforeEach, test, vi } from "vitest";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 
 const mocks = vi.hoisted(() => ({
@@ -22,7 +22,10 @@ vi.mock("../connectors", () => ({
       this.code = code;
     }
   },
-  connectorActionRunner: {},
+  connectorActionRunner: {
+    get: vi.fn(),
+    reject: vi.fn(),
+  },
   connectorRegistry: {
     listManifests: vi.fn(() => []),
   },
@@ -42,6 +45,14 @@ vi.mock("../connectors/agent-tool-payload", () => ({
 }));
 
 import { ToolConfirmationRunner } from "./runner";
+import { connectorActionRunner } from "../connectors";
+import { connectorActionApprovalPayload } from "../connectors/agent-tool-payload";
+import { findSourceConnectorRecord } from "../connectors/repository";
+import { requireConnectorWorkspace } from "../connectors/permissions";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 function mcpConfirmation(): ToolConfirmationRequest {
   return {
@@ -86,6 +97,46 @@ function mcpConfirmation(): ToolConfirmationRequest {
   };
 }
 
+function sandboxConfirmation(
+  overrides: Partial<ToolConfirmationRequest> = {},
+): ToolConfirmationRequest {
+  return {
+    type: "tool_confirmation_request",
+    schemaVersion: 1,
+    id: "sandbox_call_1",
+    domain: "sandbox",
+    subject: { label: "Sandbox runtime", provider: "sandbox" },
+    action: {
+      type: "execute",
+      toolName: "execute",
+      label: "execute",
+      riskLevel: "high",
+      status: "proposed",
+      requiresApproval: true,
+    },
+    preview: {
+      title: "Review sandbox action: execute",
+      requestJson: { command: "npm test" },
+    },
+    editableArgs: {
+      value: { command: "npm test" },
+      schema: { type: "object" },
+    },
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+    execution: {
+      providerStatus: "not_executed",
+      executor: { kind: "sandbox_tool_call" },
+      sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+    },
+    status: "proposed",
+    userMessage: "Waiting for sandbox action confirmation.",
+    ...overrides,
+  };
+}
+
 test("ToolConfirmationRunner forwards edited args to MCP approvals", async () => {
   const confirmation = mcpConfirmation();
   mocks.mcpRespondToApproval.mockResolvedValue({
@@ -113,4 +164,226 @@ test("ToolConfirmationRunner forwards edited args to MCP approvals", async () =>
     note: "Looks good",
   });
   assert.deepEqual(result.resume, { decisions: [{ type: "approve" }] });
+});
+
+test("ToolConfirmationRunner resumes approved sandbox HITL edits locally", async () => {
+  const confirmation = sandboxConfirmation();
+
+  const result = await new ToolConfirmationRunner().respond({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    confirmationId: "sandbox_call_1",
+    confirmation,
+    decision: "approve",
+    editedArgs: { command: "pnpm test", workingDir: "/workspace/work" },
+  });
+
+  assert.equal(result.confirmation.status, "approved");
+  assert.deepEqual(result.resume, {
+    decisions: [
+      {
+        type: "edit",
+        editedAction: {
+          name: "execute",
+          args: { command: "pnpm test", workingDir: "/workspace/work" },
+        },
+      },
+    ],
+    sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+  });
+  assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
+});
+
+test("ToolConfirmationRunner resumes approved sandbox HITL without edits locally", async () => {
+  const confirmation = sandboxConfirmation();
+
+  const result = await new ToolConfirmationRunner().respond({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    confirmationId: "sandbox_call_1",
+    confirmation,
+    decision: "approve",
+  });
+
+  assert.equal(result.confirmation.status, "approved");
+  assert.equal(result.confirmation.action.status, "approved");
+  assert.deepEqual(result.resume, {
+    decisions: [{ type: "approve" }],
+    sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+  });
+  assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
+});
+
+test("ToolConfirmationRunner uses default sandbox rejection note locally", async () => {
+  const confirmation = sandboxConfirmation({ id: "sandbox_call_2" });
+
+  const result = await new ToolConfirmationRunner().respond({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    confirmationId: "sandbox_call_2",
+    confirmation,
+    decision: "reject",
+  });
+
+  assert.equal(result.confirmation.status, "rejected");
+  assert.equal(result.confirmation.action.status, "rejected");
+  assert.deepEqual(result.resume, {
+    decisions: [
+      {
+        type: "reject",
+        message: "User rejected the sandbox action in SourceWeft.",
+      },
+    ],
+    sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+  });
+  assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
+});
+
+test("ToolConfirmationRunner resumes DeepAgents HITL after connector rejection without execution refs", async () => {
+  const confirmation: ToolConfirmationRequest = {
+    type: "tool_confirmation_request",
+    schemaVersion: 1,
+    id: "connector_action_1",
+    domain: "connector",
+    subject: {
+      label: "Notion",
+      provider: "notion",
+      connectorId: "connector-1",
+    },
+    action: {
+      type: "notion.page.create",
+      toolName: "create_notion_page",
+      label: "Create page",
+      riskLevel: "medium",
+      status: "proposed",
+      requiresApproval: true,
+    },
+    preview: {
+      title: "Create Notion page",
+      requestJson: { title: "Rejected page" },
+    },
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+    execution: {
+      providerStatus: "not_executed",
+      executor: {
+        kind: "connector_action_run",
+        connectorId: "connector-1",
+        actionRunId: "connector_action_1",
+      },
+      sourceweft: { hitlInterruptId: "interrupt-1" },
+    },
+    status: "proposed",
+    userMessage: "Waiting for confirmation.",
+  };
+  vi.mocked(requireConnectorWorkspace).mockResolvedValue({
+    workspace: { id: "workspace_1", organizationId: "team_1" },
+  } as never);
+  vi.mocked(connectorActionRunner.get).mockResolvedValue({
+    action: {
+      id: "connector_action_1",
+      actionType: "notion.page.create",
+      agentToolName: "create_notion_page",
+      connectorId: "connector-1",
+      connectorType: "notion",
+      requestJson: { title: "Rejected page" },
+      status: "proposed",
+    },
+  } as never);
+  vi.mocked(findSourceConnectorRecord).mockResolvedValue({
+    id: "connector-1",
+    connectorType: "notion",
+  } as never);
+  vi.mocked(connectorActionRunner.reject).mockResolvedValue({
+    action: {
+      id: "connector_action_1",
+      actionType: "notion.page.create",
+      agentToolName: "create_notion_page",
+      connectorId: "connector-1",
+      connectorType: "notion",
+      requestJson: { title: "Rejected page" },
+      status: "rejected",
+    },
+  } as never);
+  vi.mocked(connectorActionApprovalPayload).mockReturnValue({
+    ...confirmation,
+    status: "rejected",
+    action: { ...confirmation.action, status: "rejected" },
+  });
+
+  const result = await new ToolConfirmationRunner().respond({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    confirmationId: "connector_action_1",
+    confirmation,
+    decision: "reject",
+  });
+
+  assert.deepEqual(result.resume, {
+    decisions: [
+      {
+        type: "reject",
+        message: "User rejected the action in SourceWeft.",
+      },
+    ],
+    sourceweft: { hitlInterruptId: "interrupt-1" },
+  });
+});
+
+test("ToolConfirmationRunner resumes rejected sandbox HITL locally", async () => {
+  const confirmation: ToolConfirmationRequest = {
+    type: "tool_confirmation_request",
+    schemaVersion: 1,
+    id: "sandbox_call_2",
+    domain: "sandbox",
+    subject: { label: "Sandbox runtime", provider: "sandbox" },
+    action: {
+      type: "collect_sandbox_outputs",
+      toolName: "collect_sandbox_outputs",
+      label: "collectSandboxOutputs",
+      riskLevel: "high",
+      status: "proposed",
+      requiresApproval: true,
+    },
+    preview: {
+      title: "Review sandbox action: collect_sandbox_outputs",
+      requestJson: {
+        outputs: [
+          {
+            sandboxPath: "/workspace/output/report.md",
+            target: { kind: "workfile", path: "/work/report.md" },
+          },
+        ],
+      },
+    },
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+    execution: {
+      providerStatus: "not_executed",
+      executor: { kind: "sandbox_tool_call" },
+    },
+    status: "proposed",
+    userMessage: "Waiting for sandbox action confirmation.",
+  };
+
+  const result = await new ToolConfirmationRunner().respond({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    confirmationId: "sandbox_call_2",
+    confirmation,
+    decision: "reject",
+    note: "Do not persist this output.",
+  });
+
+  assert.equal(result.confirmation.status, "rejected");
+  assert.deepEqual(result.resume, {
+    decisions: [
+      { type: "reject", message: "Do not persist this output." },
+    ],
+  });
+  assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
 });

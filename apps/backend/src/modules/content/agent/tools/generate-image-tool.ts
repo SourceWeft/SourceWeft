@@ -15,8 +15,32 @@ import type { ArtifactImageConfig } from "../../artifacts/types";
 import type { ContentBillingPort } from "../../billing-port";
 import { meterBillableModelUsage } from "../../model-billing";
 import { AGENT_TOOL_NAMES } from "../tool-names";
+import type { RuntimePromptContext } from "../prompts/tool-prompt-provider";
 
 export const GENERATED_IMAGE_PROGRESS_EVENT_TYPE = "generate_image_progress";
+
+export function buildImageRuntimePromptLines(input: {
+  config: ArtifactImageConfig;
+}): string[] {
+  const { config } = input;
+  return [
+    `Image generation defaults: aspect_ratio=${config.aspectRatio}, quality=${config.quality}, style=${config.style}.`,
+    `${AGENT_TOOL_NAMES.generateImage} is available in auto mode. Use it when the user asks you to create a new visual artifact or deliverable; otherwise answer normally.`,
+    `For ambiguous requests, decide semantically from the user's goal rather than matching literal keywords. If the user expects a kept visual output, call ${AGENT_TOOL_NAMES.generateImage}.`,
+    "If the prompt is missing essential visual details for a requested image, make a reasonable concise prompt instead of asking a separate confirmation.",
+    `Never claim an image was created unless ${AGENT_TOOL_NAMES.generateImage} completed successfully.`,
+    `After ${AGENT_TOOL_NAMES.generateImage} succeeds, decide whether a short natural-language wrap-up is useful. The application displays the generated image automatically; do not include image markdown or raw artifact URLs.`,
+  ];
+}
+
+export const imageRuntimePromptProvider: import("../prompts/tool-prompt-provider").ArtifactToolRuntimePromptProvider = {
+  buildLines(context: RuntimePromptContext) {
+    if (context.artifactIntent?.kind !== "image") {
+      return [];
+    }
+    return buildImageRuntimePromptLines({ config: context.artifactIntent.config });
+  },
+};
 
 function compactText(value: string, maxLength = 120) {
   const compacted = value.replace(/\s+/g, " ").trim();
@@ -154,6 +178,17 @@ function formatToolResult(input: {
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
+}
+
+function buildArtifactPreviewUrl(input: {
+  artifactId: string;
+  workspaceId: string;
+}) {
+  const params = new URLSearchParams({
+    artifactId: input.artifactId,
+    workspaceId: input.workspaceId,
+  });
+  return `/artifact-preview?${params.toString()}`;
 }
 
 export function createGenerateImageTool(input: {
@@ -294,7 +329,10 @@ export function createGenerateImageTool(input: {
         },
       });
 
-      const artifactUrl = `/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/file`;
+      const artifactUrl = buildArtifactPreviewUrl({
+        workspaceId: input.workspaceId,
+        artifactId,
+      });
 
       emitProgress("billing", {
         artifactId,

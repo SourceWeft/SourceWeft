@@ -1,11 +1,19 @@
 "use client";
 
+import { useMemo } from "react";
 import { ChatCanvas } from "../../_components/chat-canvas";
 import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-skeleton";
+import type { ChatUiState } from "../../_components/chat-ui-state";
 import { ThreadDialogs } from "./thread-dialogs";
 import { ThreadHeader } from "./thread-header";
 import { ThreadSidePanels } from "./thread-side-panels";
 import type { useThreadPageController } from "./use-thread-page-controller";
+import {
+  useChatHubContext,
+  useRegisterChatHub,
+  type ChatHubRegistration,
+} from "../../_components/chat-hub-context";
+import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "../../_components/chat-workspace-shell-feature-flag";
 
 function ModelCatalogErrorState() {
   return (
@@ -22,10 +30,35 @@ function ModelCatalogErrorState() {
   );
 }
 
+function ThreadUnavailableState() {
+  return (
+    <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background px-6 py-10">
+      <div className="max-w-sm text-center">
+        <h2 className="text-sm font-semibold text-foreground">
+          Thread unavailable
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This chat may have been deleted, moved, or you may no longer have
+          access to it.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function shouldRenderThreadSkeleton(chatUiState: ChatUiState) {
+  return (
+    chatUiState.skeletonPolicy === "canvas" ||
+    chatUiState.skeletonPolicy === "overlay"
+  );
+}
+
 export function DashboardChatThreadPageView({
   activeAssistantVersion,
   assistantVersionById,
   activeThreadRun,
+  chatExecutionState,
+  chatUiState,
   activeConnectorTools,
   activeCitationIndex,
   activeMcpInstallIds,
@@ -33,6 +66,7 @@ export function DashboardChatThreadPageView({
   activeSkillIds,
   activeSourceIds,
   activeVersionByGroup,
+  artifactStatuses,
   artifactsRefreshKey,
   availableModels,
   availableSkills,
@@ -81,7 +115,6 @@ export function DashboardChatThreadPageView({
   loadThreadMessages,
   loadSourceMentions,
   messageGroups,
-  modelCatalogStatus,
   olderMessagesCursor,
   persistActiveSourceIds,
   previewArtifact,
@@ -120,6 +153,75 @@ export function DashboardChatThreadPageView({
   workspaceId,
   workspaceName,
 }: ReturnType<typeof useThreadPageController>) {
+  const chatHubContext = useChatHubContext();
+  const chatHubRegistration = useMemo<ChatHubRegistration>(
+    () => ({
+      activeCitationIndex,
+      activeCitationMessageId: activeAssistantVersion?.id ?? null,
+      activeMcpInstallIds,
+      activeMcpToolIds,
+      activeSkillIds,
+      activeSourceIds,
+      artifactsRefreshKey,
+      availableSkills,
+      disabledToolNames,
+      displayedCitations,
+      initialSources: initialSourcesForWorkspace,
+      initialSourcesLoaded: hasCachedWorkspaceSources(workspaceId),
+      mode: "thread",
+      onArtifactOpen: setPreviewArtifact,
+      onArtifactPreviewClose: () => setPreviewArtifact(null),
+      onCitationLocate: scrollToMessage,
+      onCitationOpen: handleSourceHubCitationOpen,
+      onConnectorsChange: handleConnectorsChange,
+      onMcpSelectionChange: handleMcpSelectionChange,
+      onSelectionChange: persistActiveSourceIds,
+      onSkillSelectionChange: setActiveSkillIds,
+      onSkillsCatalogChange: loadAvailableSkills,
+      onSourceLoad: handleLibrarySourcesLoad,
+      onSourceMerge: handleLibrarySourcesMerge,
+      previewArtifact,
+      threadCitations,
+      threadId,
+      workfilesRefreshKey,
+      workspaceId,
+      workspaceName,
+    }),
+    [
+      activeAssistantVersion?.id,
+      activeCitationIndex,
+      activeMcpInstallIds,
+      activeMcpToolIds,
+      activeSkillIds,
+      activeSourceIds,
+      artifactsRefreshKey,
+      availableSkills,
+      disabledToolNames,
+      displayedCitations,
+      handleConnectorsChange,
+      handleLibrarySourcesLoad,
+      handleLibrarySourcesMerge,
+      handleMcpSelectionChange,
+      handleSourceHubCitationOpen,
+      initialSourcesForWorkspace,
+      loadAvailableSkills,
+      persistActiveSourceIds,
+      previewArtifact,
+      scrollToMessage,
+      setActiveSkillIds,
+      setPreviewArtifact,
+      threadCitations,
+      threadId,
+      workfilesRefreshKey,
+      workspaceId,
+      workspaceName,
+    ],
+  );
+  useRegisterChatHub(
+    chatHubRegistration,
+    HUB_STABILITY_PERSISTENT_SHELL_ENABLED,
+  );
+
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -129,11 +231,18 @@ export function DashboardChatThreadPageView({
           byokModels={byokModels}
           byokProviders={byokProviders}
           byokSelections={selectedByokModels}
+          isModelCatalogLoading={chatUiState.status === "model-loading"}
           isPersistentLayout={isPersistentLayout}
           onAddByokModel={setByokModelConfig}
           onByokSelect={handleThreadByokSelect}
           onModelSelect={handleModelSelect}
-          onOpenHub={() => setHubDrawerOpen(true)}
+          onOpenHub={() => {
+            if (HUB_STABILITY_PERSISTENT_SHELL_ENABLED) {
+              chatHubContext?.setMobileHubOpen(true);
+              return;
+            }
+            setHubDrawerOpen(true);
+          }}
           onToggleSources={toggleSourcesVisible}
           selectedModels={selectedModels}
           setSelectedModels={setSelectedModels}
@@ -141,11 +250,19 @@ export function DashboardChatThreadPageView({
           threadTitle={threadTitle}
         />
 
-        {modelCatalogStatus === "ready" ? (
+        {chatUiState.status === "model-error" ? (
+          <ModelCatalogErrorState />
+        ) : chatUiState.status === "empty" &&
+          chatUiState.errorKind === "thread" ? (
+          <ThreadUnavailableState />
+        ) : shouldRenderThreadSkeleton(chatUiState) ? (
+          <ChatCanvasPanelSkeleton variant="thread" />
+        ) : (
           <ChatCanvas
             activeVersionByGroup={activeVersionByGroup}
             assistantVersionById={assistantVersionById}
             activeThreadRun={activeThreadRun}
+            chatExecutionState={chatExecutionState}
             allSources={librarySources}
             availableSkills={availableSkills}
             composerInitialCommand={composerInitialCommand}
@@ -161,6 +278,7 @@ export function DashboardChatThreadPageView({
             messageGroups={messageGroups}
             mode="thread"
             onActiveVersionChange={handleActiveVersionChange}
+            artifactStatuses={artifactStatuses}
             onArtifactPreview={handleArtifactPreview}
             onCancelEditing={cancelEditing}
             onCitationClick={handleCitationClick}
@@ -202,10 +320,6 @@ export function DashboardChatThreadPageView({
             threadTitle={threadTitle}
             workspaceId={workspaceId}
           />
-        ) : modelCatalogStatus === "error" ? (
-          <ModelCatalogErrorState />
-        ) : (
-          <ChatCanvasPanelSkeleton variant="thread" />
         )}
       </div>
 
@@ -244,6 +358,7 @@ export function DashboardChatThreadPageView({
         workfilesRefreshKey={workfilesRefreshKey}
         workspaceId={workspaceId}
         workspaceName={workspaceName}
+        usePersistentHub={HUB_STABILITY_PERSISTENT_SHELL_ENABLED}
       />
 
       <ThreadDialogs

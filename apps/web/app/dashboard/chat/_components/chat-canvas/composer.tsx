@@ -3,19 +3,24 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type KeyboardEvent,
 } from "react";
 import type { FileUIPart } from "ai";
 import {
   ArrowUp,
   Brain,
-  FileText,
+  Brush,
   Globe,
   Image as ImageIcon,
+  LayoutTemplate,
   Loader2,
+  Palette,
+  PanelTop,
   RotateCcw,
   SlidersHorizontal,
   Square,
+  Table2,
   X,
 } from "lucide-react";
 import {
@@ -37,6 +42,7 @@ import {
   PromptInputHeader,
   PromptInputMentionEditor,
   PromptInputProvider,
+  PromptCommandIcon,
   PromptInputSubmit,
   PromptInputTools,
   usePromptInputAttachments,
@@ -68,12 +74,17 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { SkillIcon } from "../../../_components/dashboard-icons";
 import { RawImage } from "../../../../_components/raw-image";
+import {
+  getPromptInputActionIcon,
+  getSerializableActionIcon,
+} from "../action-icons";
 import type { SourceItem } from "../source-types";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
   buildComposerToolsSelection,
   clampImageConfigToCapabilities,
   DEFAULT_IMAGE_ARTIFACT_CONFIG,
+  DEFAULT_PPTX_ARTIFACT_CONFIG,
   DEFAULT_PROMPT_THINKING_SETTINGS,
   imageAspectRatioOptions,
   imageConfigFromSkills,
@@ -82,14 +93,20 @@ import {
   imageQualityOptions,
   imageStyleOptions,
   notionAgentToolNames,
+  pptxAspectRatioOptions,
+  pptxLanguageOptions,
+  pptxStylePresetOptions,
   skillSupportsImageGeneration,
   skillSupportsNotion,
+  skillSupportsPptxGeneration,
+  skillSupportsVideoPresentationGeneration,
   thinkingEffortOptions,
 } from "./tool-selection";
 import type {
   ChatSendInput,
   ChatConnectorToolSelection,
   ChatImageArtifactConfig,
+  ChatPptxArtifactConfig,
   ChatSkillItem,
   ChatToolName,
   ChatToolsSelection,
@@ -97,6 +114,9 @@ import type {
   ImageModelCapabilities,
   ImageQuality,
   ImageStyle,
+  PptxAspectRatio,
+  PptxLanguage,
+  PptxStylePreset,
   PromptThinkingCapabilities,
   PromptThinkingSettings,
   ThinkingEffort,
@@ -129,9 +149,16 @@ function commandDisplayNameFallback(command: ChatSendInput["command"]) {
     ? command.name
     : `/${command.name}`;
   if (command.kind === "tool" || command.toolName) {
-    return normalized === "/generate_image" ? "Generate image" : normalized;
+    return (
+      getAgentToolSlashCommand(
+        command.toolName ?? normalized.replace(/^\//, ""),
+      )?.displayName ?? normalized
+    );
   }
-  const name = command.commandName ?? normalized.replace(/^\//, "").split(":")[0] ?? normalized;
+  const name =
+    command.commandName ??
+    normalized.replace(/^\//, "").split(":")[0] ??
+    normalized;
   return name
     .split(/[-_.\s]+/)
     .filter(Boolean)
@@ -184,7 +211,10 @@ function createPromptCommandMarker(input: {
 }
 
 function escapeMarkerLabel(value: string) {
-  return value.replaceAll("\\", "\\\\").replaceAll("]", "\\]").replaceAll(")", "\\)");
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("]", "\\]")
+    .replaceAll(")", "\\)");
 }
 
 function createPromptSourceMarker(input: { sourceId: string; title: string }) {
@@ -348,6 +378,11 @@ export function Composer({
   const [imageConfig, setImageConfig] = useState<ChatImageArtifactConfig>(
     DEFAULT_IMAGE_ARTIFACT_CONFIG,
   );
+  const [pptxConfig, setPptxConfig] = useState<ChatPptxArtifactConfig>(
+    DEFAULT_PPTX_ARTIFACT_CONFIG,
+  );
+  const [videoPresentationNarrationEnabled, setVideoPresentationNarrationEnabled] =
+    useState(true);
   const [imageConfigPinned, setImageConfigPinned] = useState(false);
   const disabledToolNameSet = useMemo(
     () => new Set(disabledToolNames),
@@ -355,6 +390,12 @@ export function Composer({
   );
   const imageGenerationEnabled = !disabledToolNameSet.has(
     AGENT_TOOL_NAMES.generateImage,
+  );
+  const pptxGenerationEnabled = !disabledToolNameSet.has(
+    AGENT_TOOL_NAMES.generatePptx,
+  );
+  const videoPresentationGenerationEnabled = !disabledToolNameSet.has(
+    AGENT_TOOL_NAMES.generateVideoPresentation,
   );
   const notionToolsAvailable = Boolean(notionConnectorId);
   const notionToolsEnabled =
@@ -370,6 +411,15 @@ export function Composer({
         if (!imageGenerationEnabled && skillSupportsImageGeneration(skill)) {
           return false;
         }
+        if (!pptxGenerationEnabled && skillSupportsPptxGeneration(skill)) {
+          return false;
+        }
+        if (
+          !videoPresentationGenerationEnabled &&
+          skillSupportsVideoPresentationGeneration(skill)
+        ) {
+          return false;
+        }
         if (!notionToolsEnabled && skillSupportsNotion(skill)) {
           return false;
         }
@@ -379,7 +429,9 @@ export function Composer({
       availableSkills,
       imageGenerationEnabled,
       notionToolsEnabled,
+      pptxGenerationEnabled,
       selectedSkillIds,
+      videoPresentationGenerationEnabled,
     ],
   );
   const effectiveSelectedSkillIdSet = useMemo(
@@ -419,7 +471,41 @@ export function Composer({
     effectiveImageConfig.style !== "auto";
   const imageToolChanged = imageOptionsChanged || !imageGenerationEnabled;
   const imageOptionSummary = imageConfigSummary(effectiveImageConfig);
+  const pptxStyleLabel =
+    pptxStylePresetOptions.find(
+      (option) => option.value === pptxConfig.design.stylePreset,
+    )?.label ?? pptxConfig.design.stylePreset;
+  const pptxLanguageLabel =
+    pptxConfig.design.language !== "auto"
+      ? (pptxLanguageOptions.find(
+          (option) => option.value === pptxConfig.design.language,
+        )?.label ?? pptxConfig.design.language)
+      : null;
+  const pptxOptionSummary = [
+    "Native editable PPTX",
+    pptxStyleLabel,
+    pptxConfig.design.aspectRatio,
+    pptxLanguageLabel,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
   const notionToolChanged = notionToolsAvailable && !notionToolsEnabled;
+  const pptxOptionsChanged =
+    pptxConfig.design.aspectRatio !==
+      DEFAULT_PPTX_ARTIFACT_CONFIG.design.aspectRatio ||
+    pptxConfig.design.language !==
+      DEFAULT_PPTX_ARTIFACT_CONFIG.design.language ||
+    pptxConfig.design.stylePreset !==
+      DEFAULT_PPTX_ARTIFACT_CONFIG.design.stylePreset;
+  const pptxToolChanged = !pptxGenerationEnabled || pptxOptionsChanged;
+  const videoPresentationToolChanged =
+    !videoPresentationGenerationEnabled || !videoPresentationNarrationEnabled;
+  const videoPresentationOptionSummary =
+    videoPresentationGenerationEnabled
+      ? videoPresentationNarrationEnabled
+        ? "Narration on"
+        : "Narration off"
+      : "Off";
   const mcpToolChanged =
     selectedMcpInstallIds.length > 0 || selectedMcpToolIds.length > 0;
   const notionSummary = notionOptionSummary(
@@ -450,6 +536,8 @@ export function Composer({
     : DEFAULT_PROMPT_THINKING_SETTINGS;
   const optionCount =
     (imageToolChanged ? 1 : 0) +
+    (pptxToolChanged ? 1 : 0) +
+    (videoPresentationToolChanged ? 1 : 0) +
     (notionToolChanged ? 1 : 0) +
     (mcpToolChanged ? 1 : 0) +
     (supportsThinking && activeThinkingSettings.mode !== "auto" ? 1 : 0);
@@ -479,113 +567,156 @@ export function Composer({
       title: source.title,
       type: source.type,
     }));
-  const slashCommandOptions = useMemo<PromptInputSlashCommand[]>(
-    () => {
-      const generateImageSlash = getAgentToolSlashCommand(
-        AGENT_TOOL_NAMES.generateImage,
-      );
-      const notionToolCommands: PromptInputSlashCommand[] = notionToolsAvailable
-        ? notionAgentToolNames.flatMap((toolName) => {
-            const slash = getAgentToolSlashCommand(toolName);
-            return slash
-              ? [
-                  {
-                    description: slash.description,
-                    group: "Notion",
-                    id: `tool-command:${toolName}`,
-                    kind: "tool" as const,
-                    label: slash.displayName,
-                    meta: {
-                      kind: "tool-command",
-                      tool: toolName,
-                    } satisfies ComposerSlashCommandMeta,
-                    value: `/${toolName}`,
-                  },
-                ]
-              : [];
-          })
+  const slashCommandOptions = useMemo<PromptInputSlashCommand[]>(() => {
+    const generateImageSlash = getAgentToolSlashCommand(
+      AGENT_TOOL_NAMES.generateImage,
+    );
+    const generatePptxSlash = getAgentToolSlashCommand(
+      AGENT_TOOL_NAMES.generatePptx,
+    );
+    const generateVideoPresentationSlash = getAgentToolSlashCommand(
+      AGENT_TOOL_NAMES.generateVideoPresentation,
+    );
+    const notionToolCommands: PromptInputSlashCommand[] = notionToolsAvailable
+      ? notionAgentToolNames.flatMap((toolName) => {
+          const slash = getAgentToolSlashCommand(toolName);
+          return slash
+            ? [
+                {
+                  description: slash.description,
+                  group: "Notion",
+                  id: `tool-command:${toolName}`,
+                  ...getPromptInputActionIcon(toolName),
+                  kind: "tool" as const,
+                  label: slash.displayName,
+                  meta: {
+                    kind: "tool-command",
+                    tool: toolName,
+                  } satisfies ComposerSlashCommandMeta,
+                  value: `/${toolName}`,
+                },
+              ]
+            : [];
+        })
+      : [];
+    const notionCommands: PromptInputSlashCommand[] =
+      notionToolCommands.length > 0
+        ? [
+            {
+              children: notionToolCommands,
+              description: "Search, create, update, and save Notion pages",
+              group: "Tools",
+              id: "tool-group:notion",
+              ...getPromptInputActionIcon(notionAgentToolNames[0]),
+              kind: "tool" as const,
+              label: "Notion",
+              value: "/notion",
+            },
+          ]
         : [];
-      const notionCommands: PromptInputSlashCommand[] =
-        notionToolCommands.length > 0
-          ? [
-              {
-                children: notionToolCommands,
-                description: "Search, create, update, and save Notion pages",
-                group: "Tools",
-                id: "tool-group:notion",
-                kind: "tool" as const,
-                label: "Notion",
-                value: "/notion",
-              },
-            ]
-          : [];
-      const toolCommands: PromptInputSlashCommand[] =
-        imageSupported && generateImageSlash
-          ? [
-              {
-                description: generateImageSlash.description,
-                group: "Tools",
-                id: "tool-command:generate_image",
-                kind: "tool",
-                label: generateImageSlash.displayName,
-                meta: {
-                  kind: "tool-command",
-                  tool: AGENT_TOOL_NAMES.generateImage,
-                } satisfies ComposerSlashCommandMeta,
-                value: "/generate_image",
-              },
-            ]
-          : [];
-      const skillCommands = availableSkills.flatMap((skill) =>
-        skill.slash === false || skill.slashConfig?.enabled === false
-          ? []
-          : (skill.commands ?? [])
-              .filter((command) => command.slash !== false)
-              .map((command) => ({
-                description: [skill.displayName, command.description]
-                  .filter(Boolean)
-                  .join(" · "),
-                group: skill.displayName,
-                id: `${skill.id}:${command.id}`,
-                kind: "skill-command" as const,
-                label:
-                  sanitizeCommandDisplayName(command.displayName) ||
-                  command.title ||
-                  humanizeCommandName(command.name),
-                meta: {
-                  command,
-                  kind: "skill-command",
-                  skill,
-                } satisfies ComposerSlashCommandMeta,
-                value: command.canonicalName,
-              })),
-      );
-      const skillActivationCommands = availableSkills
-        .filter(
-          (skill) =>
-            skill.slash !== false && skill.slashConfig?.enabled !== false,
-        )
-        .map((skill) => ({
-          description: skill.description,
-          group: "Skills",
-          id: `skill:${skill.id}`,
-          kind: "skill" as const,
-          label: skill.displayName,
-          meta: {
-            kind: "skill",
-            skill,
-          } satisfies ComposerSlashCommandMeta,
-          value: `/${skill.slug}`,
-        }));
-      return [
-        ...toolCommands,
-        ...notionCommands,
-        ...skillCommands,
-        ...skillActivationCommands,
-      ];
-    },
-    [availableSkills, imageSupported, notionToolsAvailable],
-  );
+    const toolCommands: PromptInputSlashCommand[] = [
+      ...(imageSupported && generateImageSlash
+        ? [
+            {
+              description: generateImageSlash.description,
+              group: "Tools",
+              id: "tool-command:generate_image",
+              ...getPromptInputActionIcon(AGENT_TOOL_NAMES.generateImage),
+              kind: "tool" as const,
+              label: generateImageSlash.displayName,
+              meta: {
+                kind: "tool-command",
+                tool: AGENT_TOOL_NAMES.generateImage,
+              } satisfies ComposerSlashCommandMeta,
+              value: "/generate_image",
+            },
+          ]
+        : []),
+      ...(generatePptxSlash
+        ? [
+            {
+              description: generatePptxSlash.description,
+              group: "Tools",
+              id: "tool-command:generate_pptx",
+              ...getPromptInputActionIcon(AGENT_TOOL_NAMES.generatePptx),
+              kind: "tool" as const,
+              label: generatePptxSlash.displayName,
+              meta: {
+                kind: "tool-command",
+                tool: AGENT_TOOL_NAMES.generatePptx,
+              } satisfies ComposerSlashCommandMeta,
+              value: "/generate_pptx",
+            },
+          ]
+        : []),
+      ...(generateVideoPresentationSlash
+        ? [
+            {
+              description: generateVideoPresentationSlash.description,
+              group: "Tools",
+              id: "tool-command:generate_video_presentation",
+              ...getPromptInputActionIcon(
+                AGENT_TOOL_NAMES.generateVideoPresentation,
+              ),
+              kind: "tool" as const,
+              label: generateVideoPresentationSlash.displayName,
+              meta: {
+                kind: "tool-command",
+                tool: AGENT_TOOL_NAMES.generateVideoPresentation,
+              } satisfies ComposerSlashCommandMeta,
+              value: "/generate_video_presentation",
+            },
+          ]
+        : []),
+    ];
+    const skillCommands = availableSkills.flatMap((skill) =>
+      skill.slash === false || skill.slashConfig?.enabled === false
+        ? []
+        : (skill.commands ?? [])
+            .filter((command) => command.slash !== false)
+            .map((command) => ({
+              description: [skill.displayName, command.description]
+                .filter(Boolean)
+                .join(" · "),
+              group: skill.displayName,
+              id: `${skill.id}:${command.id}`,
+              kind: "skill-command" as const,
+              label:
+                sanitizeCommandDisplayName(command.displayName) ||
+                command.title ||
+                humanizeCommandName(command.name),
+              meta: {
+                command,
+                kind: "skill-command",
+                skill,
+              } satisfies ComposerSlashCommandMeta,
+              value: command.canonicalName,
+            })),
+    );
+    const skillActivationCommands = availableSkills
+      .filter(
+        (skill) =>
+          skill.slash !== false && skill.slashConfig?.enabled !== false,
+      )
+      .map((skill) => ({
+        description: skill.description,
+        group: "Skills",
+        id: `skill:${skill.id}`,
+        kind: "skill" as const,
+        label: skill.displayName,
+        meta: {
+          kind: "skill",
+          skill,
+        } satisfies ComposerSlashCommandMeta,
+        value: `/${skill.slug}`,
+      }));
+    return [
+      ...toolCommands,
+      ...notionCommands,
+      ...skillCommands,
+      ...skillActivationCommands,
+    ];
+  }, [availableSkills, imageSupported, notionToolsAvailable]);
   const commandByCanonicalName = useMemo(() => {
     const map = new Map<
       string,
@@ -606,9 +737,7 @@ export function Composer({
     skill: ChatSkillItem | undefined,
   ): skill is ChatSkillItem {
     return Boolean(
-      skill &&
-        skill.slash !== false &&
-        skill.slashConfig?.enabled !== false,
+      skill && skill.slash !== false && skill.slashConfig?.enabled !== false,
     );
   }
 
@@ -628,6 +757,9 @@ export function Composer({
     return [
       {
         command: {
+          ...(commandKindForPromptInput(command) === "tool"
+            ? getSerializableActionIcon(canonicalName)
+            : {}),
           kind: commandKindForPromptInput(command) ?? "skill",
           label: commandDisplayNameFallback(command),
           marker: createPromptCommandMarker({
@@ -639,7 +771,9 @@ export function Composer({
         },
         type: "command",
       },
-      ...(initialInput ? [{ text: ` ${initialInput}`, type: "text" } as const] : []),
+      ...(initialInput
+        ? [{ text: ` ${initialInput}`, type: "text" } as const]
+        : []),
     ];
   }, [initialCommand, initialInput]);
   function updateThinkingSettings(next: PromptThinkingSettings) {
@@ -670,6 +804,19 @@ export function Composer({
     setImageConfigPinned(true);
   }
 
+  function updatePptxConfig(next: {
+    design?: Partial<ChatPptxArtifactConfig["design"]>;
+    output?: Partial<ChatPptxArtifactConfig["output"]>;
+    rendering?: Partial<ChatPptxArtifactConfig["rendering"]>;
+  }) {
+    setPptxConfig((current) => ({
+      ...current,
+      design: { ...current.design, ...(next.design ?? {}) },
+      output: { ...current.output, ...(next.output ?? {}) },
+      rendering: { ...current.rendering, ...(next.rendering ?? {}) },
+    }));
+  }
+
   function updateImageGenerationEnabled(next: boolean) {
     const nextDisabledTools = next
       ? disabledToolNames.filter(
@@ -683,6 +830,31 @@ export function Composer({
       const remainingSkillIds = selectedSkillIds.filter((skillId) => {
         const skill = availableSkills.find((item) => item.id === skillId);
         return !skill || !skillSupportsImageGeneration(skill);
+      });
+      if (remainingSkillIds.length !== selectedSkillIds.length) {
+        onSkillSelectionChange?.(remainingSkillIds);
+      }
+    }
+  }
+
+  function updateToolEnabled(toolName: ChatToolName, next: boolean) {
+    const nextDisabledTools = next
+      ? disabledToolNames.filter((candidate) => candidate !== toolName)
+      : Array.from(new Set([...disabledToolNames, toolName]));
+    onDisabledToolNamesChange?.(nextDisabledTools);
+    if (!next && toolName === AGENT_TOOL_NAMES.generatePptx) {
+      const remainingSkillIds = selectedSkillIds.filter((skillId) => {
+        const skill = availableSkills.find((item) => item.id === skillId);
+        return !skill || !skillSupportsPptxGeneration(skill);
+      });
+      if (remainingSkillIds.length !== selectedSkillIds.length) {
+        onSkillSelectionChange?.(remainingSkillIds);
+      }
+    }
+    if (!next && toolName === AGENT_TOOL_NAMES.generateVideoPresentation) {
+      const remainingSkillIds = selectedSkillIds.filter((skillId) => {
+        const skill = availableSkills.find((item) => item.id === skillId);
+        return !skill || !skillSupportsVideoPresentationGeneration(skill);
       });
       if (remainingSkillIds.length !== selectedSkillIds.length) {
         onSkillSelectionChange?.(remainingSkillIds);
@@ -706,12 +878,20 @@ export function Composer({
     }
   }
 
-  function applyCommandTools(command: NonNullable<ChatSkillItem["commands"]>[number]) {
+  function applyCommandTools(
+    command: NonNullable<ChatSkillItem["commands"]>[number],
+  ) {
     if (command.tools?.includes(AGENT_TOOL_NAMES.webSearch)) {
       onSearchEnabledChange?.(true);
     }
     if (command.tools?.includes(AGENT_TOOL_NAMES.generateImage)) {
       updateImageGenerationEnabled(true);
+    }
+    if (command.tools?.includes(AGENT_TOOL_NAMES.generatePptx)) {
+      updateToolEnabled(AGENT_TOOL_NAMES.generatePptx, true);
+    }
+    if (command.tools?.includes(AGENT_TOOL_NAMES.generateVideoPresentation)) {
+      updateToolEnabled(AGENT_TOOL_NAMES.generateVideoPresentation, true);
     }
     if (command.tools?.some((toolName) => isNotionToolName(toolName))) {
       updateNotionToolsEnabled(true);
@@ -734,6 +914,22 @@ export function Composer({
         kind: "tool-command",
         name: "/generate_image",
         toolName: AGENT_TOOL_NAMES.generateImage,
+      };
+    }
+    if (normalizedToolName === AGENT_TOOL_NAMES.generatePptx) {
+      return {
+        arguments: args,
+        kind: "tool-command",
+        name: "/generate_pptx",
+        toolName: AGENT_TOOL_NAMES.generatePptx,
+      };
+    }
+    if (normalizedToolName === AGENT_TOOL_NAMES.generateVideoPresentation) {
+      return {
+        arguments: args,
+        kind: "tool-command",
+        name: "/generate_video_presentation",
+        toolName: AGENT_TOOL_NAMES.generateVideoPresentation,
       };
     }
     const notionToolName = notionAgentToolNames.find(
@@ -761,7 +957,9 @@ export function Composer({
       };
     }
 
-    const resolvedCommand = commandByCanonicalName.get(commandName.toLowerCase());
+    const resolvedCommand = commandByCanonicalName.get(
+      commandName.toLowerCase(),
+    );
     if (
       resolvedCommand &&
       supportsSkillSlash(resolvedCommand.skill) &&
@@ -779,7 +977,9 @@ export function Composer({
   }
 
   function resolveTokenCommands(
-    commands: Array<Extract<PromptInputSegment, { type: "command" }>["command"]>,
+    commands: Array<
+      Extract<PromptInputSegment, { type: "command" }>["command"]
+    >,
   ) {
     const resolved: ResolvedComposerCommand[] = [];
     const seenSkillIds = new Set<string>();
@@ -794,7 +994,10 @@ export function Composer({
         continue;
       }
 
-      if (tokenCommand.kind === "skill" && seenSkillIds.has(tokenCommand.skill.id)) {
+      if (
+        tokenCommand.kind === "skill" &&
+        seenSkillIds.has(tokenCommand.skill.id)
+      ) {
         continue;
       }
       if (
@@ -897,7 +1100,8 @@ export function Composer({
             const submittedSegments = message.segments ?? draftSegments;
             const submittedCommandSegments =
               uniqueCommandSegments(submittedSegments);
-            const markerContent = promptSegmentsToMarkerContent(submittedSegments);
+            const markerContent =
+              promptSegmentsToMarkerContent(submittedSegments);
             const userTextContent = promptSegmentsToUserText(submittedSegments);
             const tokenResolvedCommands = resolveTokenCommands(
               submittedCommandSegments.map((segment) => segment.command),
@@ -916,8 +1120,7 @@ export function Composer({
               ...new Set(
                 tokenResolvedCommands
                   .flatMap((command) =>
-                    command.kind === "skill" ||
-                    command.kind === "skill-command"
+                    command.kind === "skill" || command.kind === "skill-command"
                       ? buildCommandSkillIds(command.skill)
                       : [],
                   )
@@ -946,6 +1149,11 @@ export function Composer({
             const tools = buildComposerToolsSelection({
               imageGenerationEnabled,
               imageSupported,
+              pptxConfig,
+              pptxGenerationEnabled,
+              videoPresentationGenerationEnabled,
+              videoPresentationNarrationEnabled,
+              videoPresentationUserConfigured: videoPresentationToolChanged,
               notionConnectorId,
               notionToolsEnabled,
               selectedSkills: availableSkills.filter((skill) =>
@@ -959,33 +1167,44 @@ export function Composer({
                 .filter((command) => command.kind === "tool-command")
                 .map((command) => command.toolName),
             );
-            const toolsWithTokenCommands = toolCommandNames.size
-              ? {
-                  ...(tools ?? {}),
-                  ...Object.fromEntries(
-                    Array.from(toolCommandNames).flatMap((toolName) => {
-                      if (!isNotionToolName(toolName)) {
-                        return [];
+            const toolsWithTokenCommands: ChatToolsSelection | undefined =
+              toolCommandNames.size
+                ? (() => {
+                    const nextTools: ChatToolsSelection = { ...(tools ?? {}) };
+                    for (const toolName of toolCommandNames) {
+                      if (toolName === AGENT_TOOL_NAMES.generatePptx) {
+                        nextTools[AGENT_TOOL_NAMES.generatePptx] = {
+                          ...(nextTools[AGENT_TOOL_NAMES.generatePptx] ?? {}),
+                          enabled: true,
+                        };
+                      } else if (
+                        toolName === AGENT_TOOL_NAMES.generateVideoPresentation
+                      ) {
+                        nextTools[
+                          AGENT_TOOL_NAMES.generateVideoPresentation
+                        ] = {
+                          ...(nextTools[
+                            AGENT_TOOL_NAMES.generateVideoPresentation
+                          ] ?? {}),
+                          enabled: true,
+                        };
+                      } else if (isNotionToolName(toolName)) {
+                        const connectorTools = nextTools as Record<
+                          string,
+                          ChatConnectorToolSelection | undefined
+                        >;
+                        connectorTools[toolName] = {
+                          ...(connectorTools[toolName] ?? {}),
+                          ...(notionConnectorId
+                            ? { connectorId: notionConnectorId }
+                            : {}),
+                          enabled: true,
+                        };
                       }
-                      const connectorTools = tools as
-                        | Record<string, ChatConnectorToolSelection | undefined>
-                        | undefined;
-                      return [
-                        [
-                          toolName,
-                          {
-                            ...(connectorTools?.[toolName] ?? {}),
-                            ...(notionConnectorId
-                              ? { connectorId: notionConnectorId }
-                              : {}),
-                            enabled: true,
-                          },
-                        ] as const,
-                      ];
-                    }),
-                  ),
-                }
-              : tools;
+                    }
+                    return nextTools;
+                  })()
+                : tools;
             const toolsWithInvokedSkills =
               invokedSkillIds.length > 0
                 ? {
@@ -1049,7 +1268,9 @@ export function Composer({
                 setDraftSegments(segments);
               }}
               onSlashCommandSelect={(option: PromptInputSlashCommand) => {
-                const meta = option.meta as ComposerSlashCommandMeta | undefined;
+                const meta = option.meta as
+                  | ComposerSlashCommandMeta
+                  | undefined;
                 if (!meta) {
                   return;
                 }
@@ -1098,7 +1319,13 @@ export function Composer({
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
                         <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                          <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                          <PromptCommandIcon
+                            className="size-3.5 shrink-0 text-muted-foreground"
+                            fallbackIconName="tool"
+                            {...getPromptInputActionIcon(
+                              AGENT_TOOL_NAMES.generateImage,
+                            )}
+                          />
                           <span className="shrink-0">Image generation</span>
                           <span
                             className={cn(
@@ -1199,12 +1426,238 @@ export function Composer({
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                     <DropdownMenuSeparator />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                          <PromptCommandIcon
+                            className="size-3.5 shrink-0 text-muted-foreground"
+                            fallbackIconName="tool"
+                            {...getPromptInputActionIcon(
+                              AGENT_TOOL_NAMES.generatePptx,
+                            )}
+                          />
+                          <span className="shrink-0">Generate PPTX</span>
+                          <span
+                            className={cn(
+                              "ml-auto min-w-0 max-w-[112px] truncate text-right text-muted-foreground",
+                              pptxToolChanged && "text-primary",
+                            )}
+                          >
+                            {pptxGenerationEnabled ? pptxOptionSummary : "Off"}
+                          </span>
+                        </span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent
+                        alignOffset={-6}
+                        className="max-h-[min(620px,var(--radix-dropdown-menu-content-available-height))] w-[420px] overflow-y-auto p-3"
+                        sideOffset={8}
+                      >
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                                <PromptCommandIcon
+                                  className="size-3.5 text-muted-foreground"
+                                  fallbackIconName="tool"
+                                  {...getPromptInputActionIcon(
+                                    AGENT_TOOL_NAMES.generatePptx,
+                                  )}
+                                />
+                                Generate PPTX
+                              </div>
+                              <div className="text-[11px] text-muted-foreground">
+                                SourceWeft creates a native editable,
+                                high-quality PowerPoint deck.
+                              </div>
+                            </div>
+                            <Switch
+                              checked={pptxGenerationEnabled}
+                              onCheckedChange={(checked) =>
+                                updateToolEnabled(
+                                  AGENT_TOOL_NAMES.generatePptx,
+                                  Boolean(checked),
+                                )
+                              }
+                              size="sm"
+                            />
+                          </div>
+
+                          <PptxStylePresetGroup
+                            disabled={!pptxGenerationEnabled}
+                            onValueChange={(stylePreset) =>
+                              updatePptxConfig({
+                                design: { stylePreset },
+                              })
+                            }
+                            value={pptxConfig.design.stylePreset}
+                          />
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <PptxConfigGroup
+                              disabled={!pptxGenerationEnabled}
+                              icon={<PanelTop className="size-3.5" />}
+                              label="Canvas"
+                              onValueChange={(value) =>
+                                updatePptxConfig({
+                                  design: {
+                                    aspectRatio: value as PptxAspectRatio,
+                                  },
+                                })
+                              }
+                              options={pptxAspectRatioOptions}
+                              value={pptxConfig.design.aspectRatio}
+                            />
+                            <PptxConfigGroup
+                              disabled={!pptxGenerationEnabled}
+                              icon={<LayoutTemplate className="size-3.5" />}
+                              label="Language"
+                              onValueChange={(value) =>
+                                updatePptxConfig({
+                                  design: {
+                                    language: value as PptxLanguage,
+                                  },
+                                })
+                              }
+                              options={pptxLanguageOptions}
+                              value={pptxConfig.design.language}
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between border-border/60 border-t pt-2">
+                            <span className="max-w-[280px] truncate text-[11px] text-muted-foreground">
+                              {pptxGenerationEnabled
+                                ? pptxOptionSummary
+                                : "Off"}
+                            </span>
+                            <button
+                              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              onClick={() => {
+                                setPptxConfig(DEFAULT_PPTX_ARTIFACT_CONFIG);
+                                updateToolEnabled(
+                                  AGENT_TOOL_NAMES.generatePptx,
+                                  true,
+                                );
+                              }}
+                              type="button"
+                            >
+                              <RotateCcw className="size-3" />
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                          <PromptCommandIcon
+                            className="size-3.5 shrink-0 text-muted-foreground"
+                            fallbackIconName="tool"
+                            {...getPromptInputActionIcon(
+                              AGENT_TOOL_NAMES.generateVideoPresentation,
+                            )}
+                          />
+                          <span className="shrink-0">Video presentation</span>
+                          <span
+                            className={cn(
+                              "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
+                              videoPresentationToolChanged && "text-primary",
+                            )}
+                          >
+                            {videoPresentationOptionSummary}
+                          </span>
+                        </span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-72 p-3">
+                        <div className="space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                                <PromptCommandIcon
+                                  className="size-3.5 text-muted-foreground"
+                                  fallbackIconName="tool"
+                                  {...getPromptInputActionIcon(
+                                    AGENT_TOOL_NAMES.generateVideoPresentation,
+                                  )}
+                                />
+                                Video presentation
+                              </div>
+                              <div className="text-[11px] leading-4 text-muted-foreground">
+                                Browser-rendered video project. Put style,
+                                pacing, and audience direction in the prompt.
+                              </div>
+                            </div>
+                            <Switch
+                              checked={videoPresentationGenerationEnabled}
+                              onCheckedChange={(checked) =>
+                                updateToolEnabled(
+                                  AGENT_TOOL_NAMES.generateVideoPresentation,
+                                  Boolean(checked),
+                                )
+                              }
+                              size="sm"
+                            />
+                          </div>
+                          <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-xs font-medium text-foreground">
+                                  Narration
+                                </div>
+                                <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                                  {videoPresentationNarrationEnabled
+                                    ? "Voiceover audio"
+                                    : "Silent video"}
+                                </div>
+                              </div>
+                              <Switch
+                                checked={videoPresentationNarrationEnabled}
+                                disabled={!videoPresentationGenerationEnabled}
+                                onCheckedChange={(checked) =>
+                                  setVideoPresentationNarrationEnabled(
+                                    Boolean(checked),
+                                  )
+                                }
+                                size="sm"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between border-border/60 border-t pt-2">
+                            <span className="truncate text-[11px] text-muted-foreground">
+                              {videoPresentationOptionSummary}
+                            </span>
+                            <button
+                              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              onClick={() => {
+                                setVideoPresentationNarrationEnabled(true);
+                                updateToolEnabled(
+                                  AGENT_TOOL_NAMES.generateVideoPresentation,
+                                  true,
+                                );
+                              }}
+                              type="button"
+                            >
+                              <RotateCcw className="size-3" />
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSeparator />
                     {notionToolsAvailable ? (
                       <>
                         <DropdownMenuSub>
                           <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
                             <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                              <PromptCommandIcon
+                                className="size-3.5 shrink-0"
+                                fallbackIconName="tool"
+                                {...getPromptInputActionIcon(
+                                  notionAgentToolNames[0],
+                                )}
+                              />
                               <span className="shrink-0">Notion</span>
                               <span
                                 className={cn(
@@ -1637,6 +2090,120 @@ function ImageConfigGroup({
   return (
     <div className="space-y-1.5">
       <div className="text-[11px] font-medium text-foreground/85">{label}</div>
+      <div className="flex flex-wrap gap-1">
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              aria-pressed={selected}
+              className={cn(
+                "h-7 rounded-md border px-2 text-xs transition-colors",
+                selected
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                disabled &&
+                  "cursor-not-allowed opacity-45 hover:bg-background hover:text-muted-foreground",
+              )}
+              disabled={disabled}
+              key={option.value}
+              onClick={() => onValueChange(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PptxStylePresetGroup({
+  disabled,
+  onValueChange,
+  value,
+}: {
+  disabled?: boolean;
+  onValueChange: (value: PptxStylePreset) => void;
+  value: PptxStylePreset;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-foreground/85">
+        <Palette className="size-3.5 text-muted-foreground" />
+        Style
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {pptxStylePresetOptions.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              aria-pressed={selected}
+              className={cn(
+                "min-h-[58px] rounded-lg border p-2 text-left transition-colors",
+                selected
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border/70 bg-background text-foreground hover:bg-muted",
+                disabled && "cursor-not-allowed opacity-45 hover:bg-background",
+              )}
+              disabled={disabled}
+              key={option.value}
+              onClick={() => onValueChange(option.value)}
+              type="button"
+            >
+              <span className="flex items-center gap-1.5 text-xs font-medium">
+                {option.value === "editorial" ? (
+                  <Brush className="size-3.5" />
+                ) : option.value === "data-heavy" ? (
+                  <Table2 className="size-3.5" />
+                ) : option.value === "technical" ? (
+                  <LayoutTemplate className="size-3.5" />
+                ) : (
+                  <PromptCommandIcon
+                    className="size-3.5"
+                    fallbackIconName="tool"
+                    iconName="presentation"
+                  />
+                )}
+                {option.label}
+              </span>
+              <span
+                className={cn(
+                  "mt-1 line-clamp-2 block text-[10px] leading-snug",
+                  selected ? "text-background/70" : "text-muted-foreground",
+                )}
+              >
+                {option.description}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PptxConfigGroup({
+  disabled,
+  icon,
+  label,
+  onValueChange,
+  options,
+  value,
+}: {
+  disabled?: boolean;
+  icon: ReactNode;
+  label: string;
+  onValueChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  value: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-foreground/85">
+        <span className="text-muted-foreground">{icon}</span>
+        {label}
+      </div>
       <div className="flex flex-wrap gap-1">
         {options.map((option) => {
           const selected = option.value === value;

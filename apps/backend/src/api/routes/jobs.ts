@@ -78,6 +78,7 @@ export function registerJobRoutes(app: Hono) {
       createdAtMs: job.timestamp,
       processedAtMs: job.processedOn,
       finishedAtMs: job.finishedOn,
+      progress: job.progress,
       returnvalue: job.returnvalue,
       failedReason: job.failedReason,
     }));

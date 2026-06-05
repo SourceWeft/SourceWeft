@@ -10,7 +10,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { ListThreadModelCatalogResponse } from "@sourceweft/contracts";
+import type {
+  DashboardChatBootstrapCacheHints,
+  ListThreadModelCatalogResponse,
+} from "@sourceweft/contracts";
 import { authClient } from "../../../lib/auth-client";
 import { ensureDashboardWorkspace } from "../../../lib/dashboard-workspace-bootstrap";
 import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
@@ -20,6 +23,11 @@ import {
   workspaceClient,
 } from "../../../lib/sdk";
 import { clearStoredSourceSelection } from "../chat/_components/source-selection-storage";
+import {
+  resolveWorkspaceSwitchTransition,
+  type WorkspaceSwitchStatus,
+  type WorkspaceSwitchTransitionState,
+} from "./dashboard-chat-transitions";
 import type { ChatItem } from "./dashboard-chat-types";
 
 type ThreadModelSettingsInput = {
@@ -48,7 +56,11 @@ type DashboardChatState = {
   isLoadingPrivateChats: boolean;
   isWorkspaceHydrating: boolean;
   hasWorkspaceHydrated: boolean;
+  pendingWorkspaceId: string | null;
+  workspaceSwitchStatus: WorkspaceSwitchStatus;
+  lastChatTransitionError: string | null;
   bootstrapModelCatalog: ListThreadModelCatalogResponse | null;
+  bootstrapCacheHints: DashboardChatBootstrapCacheHints | null;
   consumeBootstrapModelCatalog: (
     workspaceId: string,
   ) => ListThreadModelCatalogResponse | null;
@@ -64,7 +76,7 @@ type DashboardChatState = {
   switchWorkspace: (
     workspaceId: string,
     workspaceName?: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   loadMorePrivateChats: () => Promise<void>;
   startNewChat: () => void;
   createChat: (input?: {
@@ -173,14 +185,25 @@ export function DashboardChatStateProvider({
   const [isLoadingPrivateChats, setIsLoadingPrivateChats] = useState(false);
   const [isWorkspaceHydrating, setIsWorkspaceHydrating] = useState(true);
   const [hasWorkspaceHydrated, setHasWorkspaceHydrated] = useState(false);
+  const [pendingWorkspaceId, setPendingWorkspaceId] = useState<string | null>(
+    null,
+  );
+  const [workspaceSwitchStatus, setWorkspaceSwitchStatus] =
+    useState<WorkspaceSwitchStatus>("idle");
+  const [lastChatTransitionError, setLastChatTransitionError] = useState<
+    string | null
+  >(null);
   const [bootstrapModelCatalog, setBootstrapModelCatalog] =
     useState<ListThreadModelCatalogResponse | null>(null);
+  const [bootstrapCacheHints, setBootstrapCacheHints] =
+    useState<DashboardChatBootstrapCacheHints | null>(null);
   const bootstrapModelCatalogWorkspaceRef = useRef<string | null>(null);
 
   const [activeChatId, setActiveChatId] = useState("");
   const [threadTitle, setThreadTitle] = useState("New chat");
   const activeOrganizationRef = useRef<string | null>(null);
   const hydrateGenerationRef = useRef(0);
+  const workspaceSwitchGenerationRef = useRef(0);
   const toggleSourcesVisible = useCallback(() => {
     setSourcesVisible((value) => !value);
   }, []);
@@ -288,7 +311,11 @@ export function DashboardChatStateProvider({
         setActiveChatId("");
         setThreadTitle("New chat");
         setMode("new");
+        setPendingWorkspaceId(null);
+        setWorkspaceSwitchStatus("idle");
+        setLastChatTransitionError(null);
         setBootstrapModelCatalog(null);
+        setBootstrapCacheHints(null);
         bootstrapModelCatalogWorkspaceRef.current = null;
         setIsLoadingPrivateChats(true);
         setHasWorkspaceHydrated(false);
@@ -322,6 +349,7 @@ export function DashboardChatStateProvider({
         setPrivateChatsCursor(result.privateChats.nextCursor);
         setHasMorePrivateChats(Boolean(result.privateChats.nextCursor));
         setBootstrapModelCatalog(result.modelCatalog);
+        setBootstrapCacheHints(result.cacheHints);
         bootstrapModelCatalogWorkspaceRef.current = result.modelCatalog
           ? result.activeWorkspace.id
           : null;
@@ -421,8 +449,12 @@ export function DashboardChatStateProvider({
       setWorkspaceId(nextWorkspace.id);
       setWorkspaceName(nextWorkspace.name);
       setStoredDashboardWorkspaceId(organizationId, nextWorkspace.id);
-      setBootstrapModelCatalog(null);
-      bootstrapModelCatalogWorkspaceRef.current = null;
+        setBootstrapModelCatalog(null);
+        setBootstrapCacheHints(null);
+        bootstrapModelCatalogWorkspaceRef.current = null;
+      setPendingWorkspaceId(null);
+      setWorkspaceSwitchStatus("idle");
+      setLastChatTransitionError(null);
       setPrivateChats([]);
       setPrivateChatsCursor(null);
       setHasMorePrivateChats(false);
@@ -478,23 +510,44 @@ export function DashboardChatStateProvider({
           ? { id: nextWorkspaceId, name: nextWorkspaceName }
           : null);
       if (!target) {
-        return;
+        return false;
       }
+
+      const generation = ++workspaceSwitchGenerationRef.current;
+      const isCurrent = () =>
+        workspaceSwitchGenerationRef.current === generation;
+
+      const currentTransition = {
+        mode,
+        activeChatId,
+        threadTitle,
+        pendingWorkspaceId,
+        workspaceSwitchStatus,
+        lastChatTransitionError,
+      } satisfies WorkspaceSwitchTransitionState;
+      const applyTransition = (transition: WorkspaceSwitchTransitionState) => {
+        setMode(transition.mode);
+        setActiveChatId(transition.activeChatId);
+        setThreadTitle(transition.threadTitle);
+        setPendingWorkspaceId(transition.pendingWorkspaceId);
+        setWorkspaceSwitchStatus(transition.workspaceSwitchStatus);
+        setLastChatTransitionError(transition.lastChatTransitionError);
+      };
 
       setWorkspaces((value) =>
         value.some((item) => item.id === target.id)
           ? value
           : [...value, target],
       );
-      setWorkspaceId(target.id);
-      setWorkspaceName(target.name);
-      setStoredDashboardWorkspaceId(organizationId, target.id);
+      applyTransition(
+        resolveWorkspaceSwitchTransition(currentTransition, {
+          type: "start",
+          targetWorkspaceId: target.id,
+        }),
+      );
       setBootstrapModelCatalog(null);
       bootstrapModelCatalogWorkspaceRef.current = null;
       setIsLoadingPrivateChats(true);
-      setPrivateChats([]);
-      setPrivateChatsCursor(null);
-      setHasMorePrivateChats(false);
 
       try {
         await workspaceClient.setWorkspaceContext(target.id);
@@ -504,19 +557,54 @@ export function DashboardChatStateProvider({
 
       try {
         const threads = await fetchPrivateChatsPage(target.id);
+        if (!isCurrent()) {
+          return false;
+        }
+
+        setWorkspaceId(target.id);
+        setWorkspaceName(target.name);
+        setStoredDashboardWorkspaceId(organizationId, target.id);
         setPrivateChats(threads.items);
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
-        setMode("new");
-        setActiveChatId("");
-        setThreadTitle("New chat");
-      } catch {
-        // leave previous list in place if fetch fails
+        applyTransition(
+          resolveWorkspaceSwitchTransition(currentTransition, {
+            type: "success",
+          }),
+        );
+        return true;
+      } catch (error) {
+        if (!isCurrent()) {
+          return false;
+        }
+
+        applyTransition(
+          resolveWorkspaceSwitchTransition(currentTransition, {
+            type: "failure",
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : "Failed to switch workspace.",
+          }),
+        );
+        return false;
       } finally {
-        setIsLoadingPrivateChats(false);
+        if (isCurrent()) {
+          setIsLoadingPrivateChats(false);
+        }
       }
     },
-    [organizationId, workspaces, fetchPrivateChatsPage],
+    [
+      activeChatId,
+      fetchPrivateChatsPage,
+      lastChatTransitionError,
+      mode,
+      organizationId,
+      pendingWorkspaceId,
+      threadTitle,
+      workspaceSwitchStatus,
+      workspaces,
+    ],
   );
 
   const loadMorePrivateChats = useCallback(async () => {
@@ -811,7 +899,11 @@ export function DashboardChatStateProvider({
       isLoadingPrivateChats,
       isWorkspaceHydrating,
       hasWorkspaceHydrated,
+      pendingWorkspaceId,
+      workspaceSwitchStatus,
+      lastChatTransitionError,
       bootstrapModelCatalog,
+      bootstrapCacheHints,
       consumeBootstrapModelCatalog,
       toggleSourcesVisible,
       setWorkspaceName,
@@ -848,7 +940,11 @@ export function DashboardChatStateProvider({
       isLoadingPrivateChats,
       isWorkspaceHydrating,
       hasWorkspaceHydrated,
+      pendingWorkspaceId,
+      workspaceSwitchStatus,
+      lastChatTransitionError,
       bootstrapModelCatalog,
+      bootstrapCacheHints,
       consumeBootstrapModelCatalog,
       toggleSourcesVisible,
       createWorkspace,

@@ -497,6 +497,7 @@ export class ContentService {
     sourceIds?: string[];
     tools?: import("./threads").StartThreadTurnInput["tools"];
     command?: import("./threads").StartThreadTurnInput["command"];
+    invocation?: import("./threads").StartThreadTurnInput["invocation"];
     timezone?: string;
     idempotencyKey: string;
     llm?: import("./threads").StartThreadTurnInput["llm"];
@@ -542,6 +543,31 @@ export class ContentService {
     userId: string;
   }) {
     return contentArtifactsService.getArtifactFile(input);
+  }
+
+  async getArtifact(input: {
+    workspaceId: string;
+    artifactId: string;
+    userId: string;
+  }) {
+    return contentArtifactsService.getArtifact(input);
+  }
+
+  async getArtifactSourceJson(input: {
+    workspaceId: string;
+    artifactId: string;
+    userId: string;
+  }) {
+    return contentArtifactsService.getArtifactSourceJson(input);
+  }
+
+  async getArtifactAsset(input: {
+    workspaceId: string;
+    artifactId: string;
+    userId: string;
+    fileName: string;
+  }) {
+    return contentArtifactsService.getArtifactAsset(input);
   }
 
   async listArtifacts(input: {

@@ -120,12 +120,14 @@ export function GeneratedImagePreview({
   className,
   downloadUrl,
   imageUrl,
+  onClick,
   onImageLoad,
   title,
 }: {
   className?: string;
   downloadUrl?: string | null;
   imageUrl: string;
+  onClick?: () => void;
   onImageLoad?: () => void;
   title: string;
 }) {
@@ -194,15 +196,24 @@ export function GeneratedImagePreview({
     }
   }, [downloadUrl, imageUrl, title]);
 
+  const handleTriggerClick = useCallback(() => {
+    if (onClick) {
+      onClick();
+      return;
+    }
+    setOpen(true);
+  }, [onClick]);
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
+      <DialogTrigger asChild disabled={Boolean(onClick)}>
         <button
           aria-label={`Preview ${title}`}
           className={cn(
             "group block w-fit max-w-full cursor-zoom-in rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
             className,
           )}
+          onClick={handleTriggerClick}
           type="button"
         >
           <span className="relative block min-h-48 min-w-64 max-w-full overflow-hidden rounded-lg bg-muted/40">

@@ -159,20 +159,6 @@ test("connectorActionApprovalPayload returns structured redacted approval output
           externalUri: null,
         },
       },
-      editableArgs: {
-        value: {
-          title: "Demo",
-          accessToken: "[REDACTED]",
-        },
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string" },
-            accessToken: { type: "string" },
-          },
-        },
-      },
       decisionOptions: [
         {
           decision: "reject",
@@ -192,6 +178,7 @@ test("connectorActionApprovalPayload returns structured redacted approval output
           connectorId: "connector_1",
           actionRunId: "action_1",
         },
+        sourceweft: { toolCallId: "key" },
       },
       status: "proposed",
       userMessage:
@@ -237,20 +224,6 @@ test("connectorActionApprovalPayload marks completed confirmations as succeeded"
           accessToken: "[REDACTED]",
         },
       },
-      editableArgs: {
-        value: {
-          title: "Demo",
-          accessToken: "[REDACTED]",
-        },
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string" },
-            accessToken: { type: "string" },
-          },
-        },
-      },
       decisionOptions: [
         {
           decision: "reject",
@@ -270,6 +243,7 @@ test("connectorActionApprovalPayload marks completed confirmations as succeeded"
           connectorId: "connector_1",
           actionRunId: "action_1",
         },
+        sourceweft: { toolCallId: "key" },
       },
       status: "succeeded",
       userMessage:
@@ -342,6 +316,10 @@ test("createConnectorActionApprovalRequest includes connector tool display metad
     assert.match(
       confirmation?.action.description ?? "",
       /Move one or more existing Notion pages to trash by page ID/,
+    );
+    assert.equal(
+      confirmation?.execution.sourceweft?.toolCallId,
+      "tool_call_1",
     );
   } finally {
     listConnectors.mockRestore();
@@ -767,6 +745,7 @@ test("approval-required connector tools do not execute without an approved execu
       message:
         "Approved action was not found for this resumed tool call. Please retry the confirmation.",
       statusCode: 409,
+      recoverable: true,
     });
   } finally {
     listConnectors.mockRestore();
@@ -922,6 +901,54 @@ test("approval-required connector tools execute approved ref even when default c
     listConnectors.mockRestore();
     propose.mockRestore();
     execute.mockRestore();
+  }
+});
+
+test("search_notion_pages returns recoverable error for empty query", async () => {
+  const listConnectors = vi
+    .spyOn(connectorRepository, "listSourceConnectorRecords")
+    .mockResolvedValue([
+      connector({
+        connectorType: "notion",
+        name: "Notion",
+      }),
+    ]);
+  const runtimeToken = vi
+    .spyOn(connectorOAuthService, "getRuntimeToken")
+    .mockResolvedValue("runtime-token");
+  const errorLog = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+  const originalFetch = globalThis.fetch;
+  const fetchMock = vi.fn();
+  globalThis.fetch = fetchMock;
+
+  try {
+    const tools = await createConnectorActionTools({
+      teamId: "team_1",
+      workspaceId: "workspace_1",
+      userId: "user_1",
+    });
+    const searchPages = asInvokableConnectorTool(
+      tools.find((candidate) => candidate.name === "search_notion_pages"),
+    );
+
+    for (const query of ["", "   "]) {
+      const result = await searchPages.invoke({ query });
+
+      assert.deepEqual(result, {
+        type: "connector_tool_error",
+        code: "CONNECTOR_TOOL_INPUT_INVALID",
+        message:
+          "search_notion_pages requires a non-empty page title, keyword, or topic. Ask the user what Notion page to find.",
+        statusCode: 400,
+        recoverable: true,
+      });
+    }
+    assert.equal(fetchMock.mock.calls.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    errorLog.mockRestore();
+    runtimeToken.mockRestore();
+    listConnectors.mockRestore();
   }
 });
 

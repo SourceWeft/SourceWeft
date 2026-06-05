@@ -45,6 +45,8 @@ function buildChatSystemPromptSuffix() {
 - Do not place all citations only before or after a table when the table contains source-grounded facts.
 - If multiple tool results support the same point, include all relevant citation markers on that sentence or bullet.
 - For summaries, attach citations to the specific sentences or bullets they support. Do not place all citations only at the final sentence.
+- When summarizing, listing, or synthesizing workspace sources, include inline citation markers in the final user-visible summary even if the same turn also performs an external action such as creating a Notion page.
+- Do not provide an uncited source summary before or after a tool approval request. If source facts are mentioned, cite them inline.
 - For multi-source answers, source-specific claims must cite evidence from the same source. Do not use a citation from one source to support claims about another source.
 - For source-wide answers, every source-specific summary must include at least one citation from that source when evidence is available.
 - Before sending the final answer, perform a citation self-check: if any sentence, bullet, table value, or paragraph is based on source content and lacks an exact [citation:id] marker, rewrite that part with the marker before finalizing.

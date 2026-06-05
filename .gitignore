@@ -68,3 +68,12 @@ apps/mobile/src-tauri/gen/apple/*.dSYM.zip
 
 reference-*
 .anycrawl
+
+.omo
+.opencode
+.playwright-mcp
+skills-lock.json
+.working_plan
+.octto
+.pnpm-store
+thoughts

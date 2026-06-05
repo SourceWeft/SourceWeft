@@ -10,6 +10,7 @@
     "./billing": "./src/billing.ts",
     "./pricing": "./src/pricing.ts",
     "./content": "./src/content.ts",
+    "./video-presentation": "./src/video-presentation.ts",
     "./connectors": "./src/connectors.ts",
     "./dashboard": "./src/dashboard.ts",
     "./mcp": "./src/mcp.ts",

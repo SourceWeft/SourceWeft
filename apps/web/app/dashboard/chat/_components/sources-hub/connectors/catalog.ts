@@ -96,7 +96,8 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     capabilities: ["Pages", "Webhooks", "Write actions"],
     postOAuthMode: "auto_create",
     icon: FileText,
-    logoSrc: "/connectors/notion.svg",
+    logoIconName: "notion",
+    logoIconTone: "brand",
     supportsActions: true,
     supportsWebhook: true,
     webhookSupportNote:

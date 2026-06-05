@@ -43,6 +43,7 @@ export const toolApprovalResumeSchema = z.object({
         )
         .optional(),
       hitlInterruptId: z.string().min(1).optional(),
+      sandboxExecuteToolCallId: z.string().min(1).optional(),
     })
     .optional(),
 });
@@ -138,7 +139,9 @@ export const toolConfirmationRequestSchema = z.object({
     executor: toolConfirmationExecutorSchema,
     sourceweft: z
       .object({
+        toolCallId: z.string().min(1).optional(),
         hitlInterruptId: z.string().min(1).optional(),
+        sandboxExecuteToolCallId: z.string().min(1).optional(),
       })
       .optional(),
   }),

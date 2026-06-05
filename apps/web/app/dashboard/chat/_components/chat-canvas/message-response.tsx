@@ -7,8 +7,10 @@ import {
 } from "react";
 import { FileText } from "lucide-react";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
+import { LoadingDots } from "@sourceweft/ui-web/components/ui/loading-dots";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { resolveMessageAssetUrl } from "./message-assets";
+import { shouldShowPossibleEvidence } from "./message-evidence";
 import type { CitationRecord } from "./types";
 
 const CITATION_PATTERN =
@@ -276,10 +278,14 @@ export function CitationAwareMessageResponse({
     CITATION_PATTERN.lastIndex = 0;
     return CITATION_PATTERN.test(children);
   })();
-  const possibleEvidence =
-    !hasInlineCitationMarkers && (citations?.length ?? 0) === 0
-      ? (availableCitations ?? [])
-      : [];
+  const possibleEvidence = shouldShowPossibleEvidence({
+    availableCitations,
+    citations,
+    hasInlineCitationMarkers,
+    showLoading,
+  })
+    ? (availableCitations ?? [])
+    : [];
   const textComponent = ({
     children: nodeChildren,
   }: {
@@ -414,16 +420,7 @@ export function CitationAwareMessageResponse({
       >
         {children}
       </MessageResponse>
-      {showLoading ? (
-        <span
-          className="mt-1 inline-flex items-center gap-1 text-muted-foreground"
-          aria-label="Thinking"
-        >
-          <span className="size-1 animate-pulse rounded-full bg-current" />
-          <span className="size-1 animate-pulse rounded-full bg-current [animation-delay:120ms]" />
-          <span className="size-1 animate-pulse rounded-full bg-current [animation-delay:240ms]" />
-        </span>
-      ) : null}
+      {showLoading ? <LoadingDots /> : null}
       <PossibleEvidenceStrip
         evidence={possibleEvidence}
         onCitationClick={onCitationClick}

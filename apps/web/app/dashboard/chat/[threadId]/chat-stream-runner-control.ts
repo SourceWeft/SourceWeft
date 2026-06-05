@@ -20,6 +20,12 @@ export type ActiveThreadRun = {
   approvalExpiresAt?: string | null;
 };
 
+export type ChatExecutionState =
+  | "idle"
+  | "executing"
+  | "waiting_for_approval"
+  | "stopping";
+
 type StreamRequestErrorHandler = (response: Response) => Promise<never>;
 
 type ChatStreamRunnerControlOptions = {
@@ -28,6 +34,22 @@ type ChatStreamRunnerControlOptions = {
   throwStreamRequestError: StreamRequestErrorHandler;
   workspaceId: string | null | undefined;
 };
+
+export function resolveChatExecutionState(input: {
+  activeThreadRun: ActiveThreadRun | null;
+  isStopping: boolean;
+}): ChatExecutionState {
+  if (input.isStopping || input.activeThreadRun?.status === "cancel_requested") {
+    return "stopping";
+  }
+  if (input.activeThreadRun?.status === "waiting_for_approval") {
+    return "waiting_for_approval";
+  }
+  if (input.activeThreadRun) {
+    return "executing";
+  }
+  return "idle";
+}
 
 export function useChatStreamRunnerControl({
   getDisplayErrorMessage,
@@ -39,6 +61,10 @@ export function useChatStreamRunnerControl({
   const [isStopping, setIsStopping] = useState(false);
   const [activeThreadRun, setActiveThreadRun] =
     useState<ActiveThreadRun | null>(null);
+  const chatExecutionState = resolveChatExecutionState({
+    activeThreadRun,
+    isStopping,
+  });
   const activeThreadRunRef = useRef<ActiveThreadRun | null>(null);
   const attachedRunKeyRef = useRef<string | null>(null);
 
@@ -77,6 +103,13 @@ export function useChatStreamRunnerControl({
     setActiveThreadRun((current) =>
       current?.idempotencyKey === durableRunKey ? null : current,
     );
+  }, []);
+
+  const clearTerminalLocalRunState = useCallback(() => {
+    setIsStreaming(false);
+    setIsStopping(false);
+    setActiveThreadRun(null);
+    attachedRunKeyRef.current = null;
   }, []);
 
   const markRunStopped = useCallback(
@@ -182,6 +215,8 @@ export function useChatStreamRunnerControl({
   return {
     activeThreadRun,
     attachedRunKeyRef,
+    chatExecutionState,
+    clearTerminalLocalRunState,
     clearAttachedRunKeyIfCurrent,
     clearRunIfCurrent,
     isStopping,

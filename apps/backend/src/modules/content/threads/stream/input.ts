@@ -8,6 +8,8 @@ import {
   isContextExcludedMessage,
   resolveAgentCheckpointMetadata,
   resolveGenerateImageToolFromMessage,
+  resolveGeneratePptxToolFromMessage,
+  resolveGenerateVideoPresentationToolFromMessage,
   resolveMentionedSourceIdsFromMessage,
   resolveMcpToolSelectionFromMessage,
   resolveNotionToolSelectionsFromMessage,
@@ -20,6 +22,8 @@ import { normalizeSkillIds } from "../../skills/selection";
 import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
 import {
   buildThreadToolsMetadata,
+  resolveGeneratePptxToolSelection,
+  resolveGenerateVideoPresentationToolSelection,
   resolveMcpToolSelection,
   resolveNotionToolSelections,
 } from "../turn/tool-selection";
@@ -308,6 +312,14 @@ export async function resolveRefreshThreadStreamInput(
   const generateImageTool =
     input.tools?.[AGENT_TOOL_NAMES.generateImage] ??
     resolveGenerateImageToolFromMessage(latestUserMessage);
+  const generatePptxTool =
+    input.tools !== undefined
+      ? resolveGeneratePptxToolSelection(input.tools)
+      : resolveGeneratePptxToolFromMessage(latestUserMessage);
+  const generateVideoPresentationTool =
+    input.tools !== undefined
+      ? resolveGenerateVideoPresentationToolSelection(input.tools)
+      : resolveGenerateVideoPresentationToolFromMessage(latestUserMessage);
   const notionTools =
     input.tools !== undefined
       ? resolveNotionToolSelections(input.tools)
@@ -333,10 +345,13 @@ export async function resolveRefreshThreadStreamInput(
       skillIds,
       webSearchEnabled,
       generateImageTool,
+      generatePptxTool,
+      generateVideoPresentationTool,
       notionTools,
       mcpTools,
     }),
     command: input.command,
+    invocation: input.invocation,
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
@@ -396,6 +411,14 @@ export async function resolveResumeThreadStreamInput(
   const generateImageTool =
     input.tools?.[AGENT_TOOL_NAMES.generateImage] ??
     resolveGenerateImageToolFromMessage(latestUserMessage);
+  const generatePptxTool =
+    input.tools !== undefined
+      ? resolveGeneratePptxToolSelection(input.tools)
+      : resolveGeneratePptxToolFromMessage(latestUserMessage);
+  const generateVideoPresentationTool =
+    input.tools !== undefined
+      ? resolveGenerateVideoPresentationToolSelection(input.tools)
+      : resolveGenerateVideoPresentationToolFromMessage(latestUserMessage);
   const notionTools =
     input.tools !== undefined
       ? resolveNotionToolSelections(input.tools)
@@ -425,10 +448,13 @@ export async function resolveResumeThreadStreamInput(
       skillIds,
       webSearchEnabled,
       generateImageTool,
+      generatePptxTool,
+      generateVideoPresentationTool,
       notionTools,
       mcpTools,
     }),
     command: input.command,
+    invocation: input.invocation,
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,
@@ -481,6 +507,14 @@ export async function resolveEditThreadStreamInput(
   const generateImageTool =
     input.tools?.[AGENT_TOOL_NAMES.generateImage] ??
     resolveGenerateImageToolFromMessage(latestUserMessage);
+  const generatePptxTool =
+    input.tools !== undefined
+      ? resolveGeneratePptxToolSelection(input.tools)
+      : resolveGeneratePptxToolFromMessage(latestUserMessage);
+  const generateVideoPresentationTool =
+    input.tools !== undefined
+      ? resolveGenerateVideoPresentationToolSelection(input.tools)
+      : resolveGenerateVideoPresentationToolFromMessage(latestUserMessage);
   const notionTools =
     input.tools !== undefined
       ? resolveNotionToolSelections(input.tools)
@@ -514,10 +548,13 @@ export async function resolveEditThreadStreamInput(
       skillIds,
       webSearchEnabled,
       generateImageTool,
+      generatePptxTool,
+      generateVideoPresentationTool,
       notionTools,
       mcpTools,
     }),
     command: input.command,
+    invocation: input.invocation,
     timezone: input.timezone,
     idempotencyKey: input.idempotencyKey,
     llm: input.llm,

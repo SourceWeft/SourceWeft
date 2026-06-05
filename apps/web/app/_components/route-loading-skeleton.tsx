@@ -18,6 +18,14 @@ function SkeletonLine({ className }: SkeletonProps) {
   return <SkeletonBlock className={cx("h-3", className)} />;
 }
 
+function ChatSoftBlock({ className }: SkeletonProps) {
+  return <div className={cx("rounded-md bg-muted/60", className)} />;
+}
+
+function ChatSoftLine({ className }: SkeletonProps) {
+  return <ChatSoftBlock className={cx("h-2.5 rounded-full", className)} />;
+}
+
 function DashboardFrame({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden bg-background text-foreground">
@@ -41,8 +49,10 @@ function isSkillDetailRoute(pathname?: string | null) {
     return false;
   }
   const normalized = pathname.replace(/\/+$/, "");
-  return normalized.startsWith("/dashboard/skills/") &&
-    normalized !== "/dashboard/skills";
+  return (
+    normalized.startsWith("/dashboard/skills/") &&
+    normalized !== "/dashboard/skills"
+  );
 }
 
 function isSkillsListRoute(pathname?: string | null) {
@@ -55,10 +65,14 @@ function DashboardSkeletonContentForPath({
   pathname?: string | null;
 }) {
   if (isChatIndexRoute(pathname)) {
-    return <DashboardDeferredContent />;
+    return <ChatSkeletonContent variant="new" />;
   }
   if (isChatRoute(pathname)) {
-    return <ChatSkeletonContent variant={isChatIndexRoute(pathname) ? "new" : "thread"} />;
+    return (
+      <ChatSkeletonContent
+        variant={isChatIndexRoute(pathname) ? "new" : "thread"}
+      />
+    );
   }
   if (pathname?.startsWith("/dashboard/observability")) {
     return <ObservabilitySkeletonContent />;
@@ -75,11 +89,7 @@ function DashboardSkeletonContentForPath({
   return <DashboardHomeSkeletonContent />;
 }
 
-function DashboardSidebarSkeleton({
-  pathname,
-}: {
-  pathname?: string | null;
-}) {
+function DashboardSidebarSkeleton({ pathname }: { pathname?: string | null }) {
   const hasChatPanel = isChatRoute(pathname);
 
   return (
@@ -170,7 +180,7 @@ export function DashboardShellRouteSkeleton({
   pathname?: string | null;
 }) {
   return (
-    <main className="flex h-svh min-h-0 w-full overflow-hidden bg-background text-foreground">
+    <main className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground">
       <DashboardSidebarSkeleton pathname={pathname} />
       <section className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <DashboardSkeletonContentForPath pathname={pathname} />
@@ -382,12 +392,12 @@ function ChatHeaderSkeleton() {
     <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
       <div className="flex min-h-16 flex-wrap items-start justify-between gap-2 px-3 py-2 md:h-16 md:flex-nowrap md:items-center md:gap-3 md:px-6 md:py-0 xl:px-8">
         <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 overflow-hidden md:gap-2.5">
-          <SkeletonBlock className="size-8 rounded-md md:hidden" />
-          <SkeletonLine className="h-4 w-32" />
+          <ChatSoftBlock className="size-8 md:hidden" />
+          <ChatSoftLine className="h-4 w-32" />
         </div>
         <div className="contents md:ml-auto md:flex md:h-10 md:shrink-0 md:items-center md:gap-2">
-          <SkeletonBlock className="h-8 w-36 rounded-xl md:h-10 md:w-44" />
-          <SkeletonBlock className="size-8 rounded-md md:size-10" />
+          <ChatSoftBlock className="h-8 w-36 rounded-xl md:h-10 md:w-44" />
+          <ChatSoftBlock className="size-8 md:size-10" />
         </div>
       </div>
     </header>
@@ -395,45 +405,53 @@ function ChatHeaderSkeleton() {
 }
 
 function ChatCanvasThreadSkeletonContent() {
+  const rows = [
+    { role: "user", widths: ["w-56 max-w-[58vw]", "w-36 max-w-[42vw]"] },
+    { role: "assistant", widths: ["w-56", "w-80 max-w-[70vw]"] },
+    {
+      role: "assistant",
+      widths: ["w-72 max-w-[68vw]", "w-44"],
+    },
+  ] as const;
+
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <div className="min-h-0 flex-1 space-y-5 overflow-hidden px-4 py-6 md:px-8 lg:px-12">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <div
-            className={cx("flex gap-3", index % 2 === 1 && "justify-end")}
-            key={index}
-          >
-            {index % 2 === 0 ? (
-              <SkeletonBlock className="size-8 shrink-0 rounded-full" />
-            ) : null}
-            <div
-              className={cx(
-                "space-y-2 rounded-lg border border-border bg-card p-3",
-                index % 2 === 0
-                  ? "w-[min(720px,82%)]"
-                  : "w-[min(520px,72%)]",
-              )}
-            >
-              <SkeletonLine className="w-24" />
-              <SkeletonLine className="w-full" />
-              <SkeletonLine className="w-4/5" />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="shrink-0 border-t border-border bg-background p-3 md:p-4">
-        <div className="mx-auto max-w-4xl rounded-lg border border-border bg-card p-3">
-          <SkeletonLine className="mb-4 w-3/5" />
-          <div className="flex items-center justify-between">
-            <div className="flex gap-2">
-              <SkeletonBlock className="size-8 rounded-md" />
-              <SkeletonBlock className="size-8 rounded-md" />
-              <SkeletonBlock className="h-8 w-24 rounded-md" />
-            </div>
-            <SkeletonBlock className="h-8 w-20 rounded-md" />
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background [scrollbar-gutter:stable]">
+      <div className="h-full min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <div className="px-6 py-8">
+          <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-4">
+            {rows.map((row, index) => (
+              <div
+                className={cx(
+                  "flex w-full",
+                  row.role === "user" ? "justify-end" : "justify-start",
+                )}
+                key={index}
+              >
+                <div
+                  className={cx(
+                    "flex flex-col",
+                    row.role === "user"
+                      ? "max-w-[86%] items-end gap-1.5"
+                      : "max-w-[95%] items-start gap-2",
+                  )}
+                >
+                  {row.widths.map((width, lineIndex) => (
+                    <ChatSoftLine
+                      className={cx(
+                        lineIndex === 0 ? "h-3.5" : "h-3",
+                        width,
+                        row.role === "user" && "bg-secondary",
+                      )}
+                      key={lineIndex}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
+      <ChatComposerSkeleton />
     </section>
   );
 }
@@ -442,15 +460,16 @@ function ChatComposerSkeleton() {
   return (
     <div className="shrink-0 border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
-        <div className="rounded-xl border border-border bg-card p-3 shadow-xs">
-          <SkeletonLine className="mb-4 w-3/5" />
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 gap-2">
-              <SkeletonBlock className="size-8 rounded-md" />
-              <SkeletonBlock className="size-8 rounded-md" />
-              <SkeletonBlock className="h-8 w-24 rounded-md" />
+        <div className="relative flex h-auto w-full min-w-0 flex-col items-center rounded-lg border border-input outline-none">
+          <div className="min-h-16 w-full px-3 py-2">
+            <ChatSoftLine className="h-3.5 w-3/5 max-w-md" />
+          </div>
+          <div className="flex w-full items-center justify-between gap-1 px-2.5 pb-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ChatSoftBlock className="size-8 rounded-full" />
+              <ChatSoftBlock className="h-8 w-20 rounded-full" />
             </div>
-            <SkeletonBlock className="h-8 w-20 rounded-md" />
+            <ChatSoftBlock className="size-8 rounded-full" />
           </div>
         </div>
       </div>
@@ -463,29 +482,16 @@ function ChatCanvasNewSkeletonContent() {
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
         <div className="mx-auto flex w-full max-w-4xl flex-col items-start justify-center gap-8">
-          <div className="w-full space-y-4">
-            <SkeletonLine className="h-3 w-20" />
+          <div className="w-full max-w-2xl space-y-5">
+            <ChatSoftLine className="h-3 w-20" />
+            <ChatSoftBlock className="h-11 w-full rounded-[28px] sm:h-12" />
             <div className="space-y-3">
-              <SkeletonBlock className="h-9 w-full max-w-2xl rounded-lg sm:h-11" />
-              <SkeletonLine className="h-4 w-full max-w-xl" />
-              <SkeletonLine className="h-4 w-4/5 max-w-lg" />
+              <ChatSoftLine className="h-3.5 w-5/6 max-w-xl" />
+              <ChatSoftLine className="h-3.5 w-2/3 max-w-lg" />
             </div>
-            <div className="flex max-w-2xl flex-wrap gap-2 pt-2">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <SkeletonBlock
-                  className={cx(
-                    "h-9 rounded-full",
-                    index === 0
-                      ? "w-52"
-                      : index === 1
-                        ? "w-64"
-                        : index === 2
-                          ? "w-56"
-                          : "w-48",
-                  )}
-                  key={index}
-                />
-              ))}
+            <div className="flex max-w-2xl flex-wrap gap-2 pt-1">
+              <ChatSoftBlock className="h-9 w-52 rounded-full" />
+              <ChatSoftBlock className="h-9 w-60 rounded-full" />
             </div>
           </div>
         </div>
@@ -562,9 +568,7 @@ function SourcesHubSkeletonContent({
                 >
                   <SkeletonBlock className="size-5 shrink-0 rounded-md" />
                   <div className="min-w-0 flex-1 space-y-2">
-                    <SkeletonLine
-                      className={rowIndex % 2 ? "w-36" : "w-48"}
-                    />
+                    <SkeletonLine className={rowIndex % 2 ? "w-36" : "w-48"} />
                     <SkeletonLine className="w-20" />
                   </div>
                 </div>
@@ -583,6 +587,15 @@ export function ChatCanvasPanelSkeleton({
   variant?: "new" | "thread";
 }) {
   return <ChatCanvasSkeletonContent variant={variant} />;
+}
+
+export function ChatThreadPagePanelSkeleton() {
+  return (
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <ChatHeaderSkeleton />
+      <ChatCanvasSkeletonContent variant="thread" />
+    </div>
+  );
 }
 
 export function SourcesHubPanelSkeleton({
@@ -851,7 +864,10 @@ function BillingSkeletonContent() {
         <SkeletonLine className="mx-auto mb-6 w-56 max-w-full" />
         <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 text-left">
           {Array.from({ length: 4 }).map((_, index) => (
-            <div className="flex items-center justify-between gap-3" key={index}>
+            <div
+              className="flex items-center justify-between gap-3"
+              key={index}
+            >
               <SkeletonLine className="w-28" />
               <SkeletonLine className="w-20" />
             </div>
@@ -923,10 +939,7 @@ function SettingsSkeletonContent() {
             <div className="flex w-48 flex-col gap-1 lg:w-60">
               {Array.from({ length: 4 }).map((_, index) => (
                 <SkeletonBlock
-                  className={cx(
-                    "h-10 rounded-md",
-                    index === 0 && "bg-muted",
-                  )}
+                  className={cx("h-10 rounded-md", index === 0 && "bg-muted")}
                   key={index}
                 />
               ))}

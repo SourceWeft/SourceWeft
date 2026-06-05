@@ -3,6 +3,7 @@ export * from "./jobs";
 export * from "./billing";
 export * from "./pricing";
 export * from "./content";
+export * from "./video-presentation";
 export * from "./connectors";
 export * from "./dashboard";
 export * from "./mcp";

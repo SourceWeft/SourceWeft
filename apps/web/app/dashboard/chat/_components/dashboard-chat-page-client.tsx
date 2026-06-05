@@ -108,6 +108,13 @@ import {
   ChatCanvasPanelSkeleton,
   SourcesHubPanelSkeleton,
 } from "../../../_components/route-loading-skeleton";
+import { resolveChatUiState } from "./chat-ui-state";
+import {
+  useChatHubContext,
+  useRegisterChatHub,
+  type ChatHubRegistration,
+} from "./chat-hub-context";
+import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
@@ -356,10 +363,15 @@ export function DashboardChatPageClient() {
     startNewChat,
     switchWorkspace,
     toggleSourcesVisible,
+    hasWorkspaceHydrated,
+    isWorkspaceHydrating,
+    pendingWorkspaceId,
     workspaceId,
     workspaceName,
+    workspaceSwitchStatus,
     workspaces,
   } = useDashboardChatState();
+  const chatHubContext = useChatHubContext();
 
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
@@ -371,6 +383,8 @@ export function DashboardChatPageClient() {
   const [activeConnectorTools, setActiveConnectorTools] =
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
   const [isStartingChat, setIsStartingChat] = useState(false);
+  const [composerRecoveryInput, setComposerRecoveryInput] = useState("");
+  const [composerRecoveryKey, setComposerRecoveryKey] = useState(0);
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
   const isPersistentLayout = useMediaQuery("(min-width: 768px)");
@@ -427,7 +441,7 @@ export function DashboardChatPageClient() {
     if (handledConnectorOAuthHubRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const oauthStatus = params.get("connector_oauth");
-    if (oauthStatus === "success" || oauthStatus === "error") {
+      if (oauthStatus === "success" || oauthStatus === "error") {
       handledConnectorOAuthHubRef.current = true;
       if (window.matchMedia("(min-width: 768px)").matches) {
         if (!sourcesVisible) {
@@ -435,9 +449,13 @@ export function DashboardChatPageClient() {
         }
         return;
       }
+      if (HUB_STABILITY_PERSISTENT_SHELL_ENABLED) {
+        chatHubContext?.setMobileHubOpen(true);
+        return;
+      }
       setHubDrawerOpen(true);
     }
-  }, [sourcesVisible, toggleSourcesVisible]);
+  }, [chatHubContext, sourcesVisible, toggleSourcesVisible]);
 
   const handleArtifactPreview = useCallback(
     (artifact: ArtifactPreviewRecord) => {
@@ -486,7 +504,7 @@ export function DashboardChatPageClient() {
 
   useEffect(() => {
     const preloadThreadRoute = () => {
-      void import("../[threadId]/dashboard-chat-thread-page-client");
+      void import("../[threadId]/_thread/dashboard-chat-thread-page-root");
     };
     const idleWindow = window as IdleSchedulerWindow;
 
@@ -945,11 +963,13 @@ export function DashboardChatPageClient() {
         return;
       }
 
-      startNewChat();
-      void switchWorkspace(targetWorkspaceId);
-      router.push("/dashboard/chat");
+      void switchWorkspace(targetWorkspaceId).then((switched) => {
+        if (switched) {
+          router.push("/dashboard/chat");
+        }
+      });
     },
-    [router, startNewChat, switchWorkspace, workspaceId],
+    [router, switchWorkspace, workspaceId],
   );
 
   const shortcutDefinitions = useMemo<DashboardShortcutDefinition[]>(
@@ -972,12 +992,97 @@ export function DashboardChatPageClient() {
     librarySources,
     activeSourceIds,
   );
+  const chatUiState = useMemo(
+    () =>
+      resolveChatUiState({
+        routeKind: "new",
+        shellStatus:
+          isWorkspaceHydrating && !hasWorkspaceHydrated ? "loading" : "ready",
+        workspaceStatus:
+          (isWorkspaceHydrating && !hasWorkspaceHydrated) || pendingWorkspaceId
+            ? "loading"
+            : "ready",
+        modelCatalogStatus,
+        sourcesStatus: "ready",
+        creationStatus: isStartingChat ? "loading" : "idle",
+        hasMessages: false,
+        isWorkspaceShortcutPending: workspaceSwitchStatus === "loading",
+      }),
+    [
+      hasWorkspaceHydrated,
+      isStartingChat,
+      isWorkspaceHydrating,
+      modelCatalogStatus,
+      pendingWorkspaceId,
+      workspaceSwitchStatus,
+    ],
+  );
+  const isCreatingFirstThread =
+    chatUiState.status === "creating-thread" &&
+    chatUiState.skeletonPolicy === "inline";
+  const shouldShowModelCatalogError =
+    chatUiState.status === "model-error" &&
+    chatUiState.errorKind === "model-catalog";
   const handleMcpSelectionChange = useCallback(
     (selection: { installIds?: string[]; toolIds?: string[] }) => {
       setActiveMcpInstallIds(selection.installIds ?? []);
       setActiveMcpToolIds(selection.toolIds ?? []);
     },
     [],
+  );
+  const chatHubRegistration = useMemo<ChatHubRegistration>(
+    () => ({
+      activeCitationIndex: null,
+      activeCitationMessageId: null,
+      activeMcpInstallIds,
+      activeMcpToolIds,
+      activeSkillIds,
+      activeSourceIds,
+      artifactsRefreshKey: 0,
+      availableSkills,
+      disabledToolNames,
+      displayedCitations: [],
+      initialSources: initialSourcesForWorkspace,
+      initialSourcesLoaded: hasCachedWorkspaceSources(workspaceId),
+      mode: "new",
+      onArtifactOpen: setPreviewArtifact,
+      onArtifactPreviewClose: () => setPreviewArtifact(null),
+      onMcpSelectionChange: handleMcpSelectionChange,
+      onSelectionChange: persistActiveSourceIds,
+      onSkillSelectionChange: setActiveSkillIds,
+      onSkillsCatalogChange: loadAvailableSkills,
+      onSourceLoad: handleLibrarySourcesLoad,
+      onSourceMerge: handleLibrarySourcesMerge,
+      onConnectorsChange: handleConnectorsChange,
+      previewArtifact,
+      threadCitations: [],
+      threadId: null,
+      workfilesRefreshKey: 0,
+      workspaceId,
+      workspaceName,
+    }),
+    [
+      activeMcpInstallIds,
+      activeMcpToolIds,
+      activeSkillIds,
+      activeSourceIds,
+      availableSkills,
+      disabledToolNames,
+      handleConnectorsChange,
+      handleLibrarySourcesLoad,
+      handleLibrarySourcesMerge,
+      handleMcpSelectionChange,
+      initialSourcesForWorkspace,
+      loadAvailableSkills,
+      persistActiveSourceIds,
+      previewArtifact,
+      workspaceId,
+      workspaceName,
+    ],
+  );
+  useRegisterChatHub(
+    chatHubRegistration,
+    HUB_STABILITY_PERSISTENT_SHELL_ENABLED,
   );
 
   useEffect(() => {
@@ -1064,6 +1169,7 @@ export function DashboardChatPageClient() {
 
       isStartingChatRef.current = true;
       setIsStartingChat(true);
+      setComposerRecoveryInput("");
       try {
         const result = await contentClient.createThread(workspaceId, {
           title: "New chat",
@@ -1108,6 +1214,8 @@ export function DashboardChatPageClient() {
         toast.error("Failed to create conversation.");
         isStartingChatRef.current = false;
         setIsStartingChat(false);
+        setComposerRecoveryInput(input.content);
+        setComposerRecoveryKey((value) => value + 1);
       } finally {
         if (!isStartingChatRef.current) {
           setIsStartingChat(false);
@@ -1155,6 +1263,7 @@ export function DashboardChatPageClient() {
                 byokModels={byokModels}
                 byokProviders={byokProviders}
                 byokSelections={selectedByokModels}
+                isLoading={modelCatalogStatus === "loading"}
                 onAddByokModel={(input) => setByokModelConfig(input)}
                 onByokSelect={({ model, selection, type }) => {
                   setModelSelectionSources((current) => ({
@@ -1208,6 +1317,10 @@ export function DashboardChatPageClient() {
                     toggleSourcesVisible();
                     return;
                   }
+                  if (HUB_STABILITY_PERSISTENT_SHELL_ENABLED) {
+                    chatHubContext?.setMobileHubOpen(true);
+                    return;
+                  }
                   setHubDrawerOpen(true);
                 }}
                 size="icon-sm"
@@ -1238,11 +1351,15 @@ export function DashboardChatPageClient() {
           </div>
         </header>
 
-        {modelCatalogStatus === "ready" ? (
+        {shouldShowModelCatalogError ? (
+          <ModelCatalogErrorState />
+        ) : (
           <ChatCanvas
-            isStreaming={isStartingChat}
+            isStreaming={isCreatingFirstThread}
             mode="new"
             availableSkills={availableSkills}
+            composerInitialInput={composerRecoveryInput}
+            composerResetKey={composerRecoveryKey}
             onArtifactPreview={handleArtifactPreview}
             onRemoveSource={(id) =>
               persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
@@ -1270,38 +1387,40 @@ export function DashboardChatPageClient() {
             threadTitle="New chat"
             workspaceId={workspaceId}
           />
-        ) : modelCatalogStatus === "error" ? (
-          <ModelCatalogErrorState />
-        ) : (
-          <ChatCanvasSkeleton />
         )}
       </div>
 
-      {sourcesVisible && isPersistentLayout && !previewArtifact ? (
-          <SourcesHub
-            mode="new"
-            disabledToolNames={disabledToolNames}
-            installedSkills={availableSkills}
-            selectedMcpInstallIds={activeMcpInstallIds}
-            selectedMcpToolIds={activeMcpToolIds}
-            onMcpSelectionChange={handleMcpSelectionChange}
-            onArtifactOpen={setPreviewArtifact}
-            onSkillSelectionChange={setActiveSkillIds}
-            onSelectionChange={persistActiveSourceIds}
-            onSkillsCatalogChange={loadAvailableSkills}
-            initialSources={initialSourcesForWorkspace}
-            initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
-            onSourceLoad={handleLibrarySourcesLoad}
-            onSourceMerge={handleLibrarySourcesMerge}
-            onConnectorsChange={handleConnectorsChange}
-            selectedIds={activeSourceIds}
-            selectedSkillIds={activeSkillIds}
-            workspaceId={workspaceId}
-            workspaceName={workspaceName}
-          />
-        ) : null}
+      {sourcesVisible &&
+      isPersistentLayout &&
+      !previewArtifact &&
+      !HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? (
+        <SourcesHub
+          mode="new"
+          disabledToolNames={disabledToolNames}
+          installedSkills={availableSkills}
+          selectedMcpInstallIds={activeMcpInstallIds}
+          selectedMcpToolIds={activeMcpToolIds}
+          onMcpSelectionChange={handleMcpSelectionChange}
+          onArtifactOpen={setPreviewArtifact}
+          onSkillSelectionChange={setActiveSkillIds}
+          onSelectionChange={persistActiveSourceIds}
+          onSkillsCatalogChange={loadAvailableSkills}
+          initialSources={initialSourcesForWorkspace}
+          initialSourcesLoaded={hasCachedWorkspaceSources(workspaceId)}
+          onSourceLoad={handleLibrarySourcesLoad}
+          onSourceMerge={handleLibrarySourcesMerge}
+          onConnectorsChange={handleConnectorsChange}
+          selectedIds={activeSourceIds}
+          selectedSkillIds={activeSkillIds}
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+        />
+      ) : null}
 
-      {sourcesVisible && previewArtifact && isDesktopPanel ? (
+      {sourcesVisible &&
+      previewArtifact &&
+      isDesktopPanel &&
+      !HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? (
         <ArtifactPreviewPanel
           artifact={previewArtifact}
           className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
@@ -1386,7 +1505,12 @@ export function DashboardChatPageClient() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={hubDrawerOpen} onOpenChange={setHubDrawerOpen}>
+      <Sheet
+        open={
+          HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? false : hubDrawerOpen
+        }
+        onOpenChange={setHubDrawerOpen}
+      >
         <SheetContent
           className="w-[calc(100vw-1rem)] max-w-[360px] gap-0 overflow-hidden p-0 sm:w-[380px] sm:max-w-[380px] [&>button]:hidden"
           side="right"

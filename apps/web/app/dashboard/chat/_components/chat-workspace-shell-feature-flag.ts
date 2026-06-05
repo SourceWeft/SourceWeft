@@ -1,0 +1,1 @@
+export const HUB_STABILITY_PERSISTENT_SHELL_ENABLED = true;

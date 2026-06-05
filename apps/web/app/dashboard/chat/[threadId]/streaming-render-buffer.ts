@@ -37,6 +37,70 @@ export function createStreamingRenderBuffer({
       });
     },
 
+    appendGeneratedPresentationBlock(toolCallId: string) {
+      if (
+        renderBlocks.some(
+          (block) =>
+            block.type === "generated_presentation" &&
+            block.toolCallId === toolCallId,
+        )
+      ) {
+        return;
+      }
+
+      renderBlocks.push({
+        id: `stream-generated-presentation-${toolCallId}`,
+        type: "generated_presentation",
+        toolCallId,
+      });
+    },
+
+    appendToolBlock(toolCallId: string) {
+      if (
+        renderBlocks.some(
+          (block) => block.type === "tool" && block.toolCallId === toolCallId,
+        )
+      ) {
+        return;
+      }
+
+      renderBlocks.push({
+        id: `stream-tool-${toolCallId}`,
+        type: "tool",
+        toolCallId,
+      });
+    },
+
+    appendReasoningBlock(input: {
+      durationMs?: number;
+      id: string;
+      text: string;
+    }) {
+      if (!input.text) {
+        return;
+      }
+
+      const existing = renderBlocks.find(
+        (block) => block.type === "reasoning" && block.id === input.id,
+      );
+      if (existing?.type === "reasoning") {
+        existing.text += input.text;
+        if (typeof input.durationMs === "number") {
+          existing.durationMs = input.durationMs;
+        }
+        return;
+      }
+
+      renderBlocks.push({
+        id: input.id,
+        type: "reasoning",
+        text: input.text,
+        ...(typeof input.durationMs === "number"
+          ? { durationMs: input.durationMs }
+          : {}),
+      });
+    },
+
     appendText(text: string) {
       if (!text) {
         return;
@@ -86,6 +150,49 @@ export function createStreamingRenderBuffer({
       renderBlocks.length = 0;
       renderBlocks.push(...nextRenderBlocks.map(cloneRenderBlock));
       nextTextBlockId = renderBlocks.length + 1;
+    },
+
+    replaceText(text: string) {
+      if (!text) {
+        for (let index = renderBlocks.length - 1; index >= 0; index -= 1) {
+          if (renderBlocks[index]?.type === "text") {
+            renderBlocks.splice(index, 1);
+          }
+        }
+        return;
+      }
+
+      let lastTextIndex = -1;
+      for (let index = renderBlocks.length - 1; index >= 0; index -= 1) {
+        if (renderBlocks[index]?.type === "text") {
+          lastTextIndex = index;
+          break;
+        }
+      }
+      if (lastTextIndex >= 0) {
+        const prefix = renderBlocks
+          .slice(0, lastTextIndex)
+          .map((block) => (block.type === "text" ? block.text : ""))
+          .join("");
+        const lastText = renderBlocks[lastTextIndex];
+        if (lastText?.type === "text" && text.startsWith(prefix)) {
+          lastText.text = text.slice(prefix.length);
+          return;
+        }
+      }
+
+      for (let index = renderBlocks.length - 1; index >= 0; index -= 1) {
+        if (renderBlocks[index]?.type === "text") {
+          renderBlocks.splice(index, 1);
+        }
+      }
+
+      renderBlocks.push({
+        id: `stream-text-${nextTextBlockId}`,
+        type: "text",
+        text,
+      });
+      nextTextBlockId += 1;
     },
 
     snapshotRenderBlocks() {

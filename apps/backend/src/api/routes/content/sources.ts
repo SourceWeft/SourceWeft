@@ -16,6 +16,19 @@ import { getSessionUserId, requireSession } from "../../middleware/auth-session"
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
+function parseOptionalBooleanQuery(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return value;
+}
+
 export function registerSourceRoutes(app: Hono) {
   app.post("/sources/upload", async (c) => {
     const session = await requireSession(c);
@@ -61,7 +74,7 @@ export function registerSourceRoutes(app: Hono) {
 
     const parsed = listSourcesRequestSchema.safeParse({
       view: c.req.query("view"),
-      includeContent: c.req.query("includeContent"),
+      includeContent: parseOptionalBooleanQuery(c.req.query("includeContent")),
       limit: c.req.query("limit"),
       cursor: c.req.query("cursor"),
       parentSourceId:

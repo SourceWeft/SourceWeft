@@ -12,6 +12,7 @@ type ConnectorActionPayloadInput = {
     actionType: string;
     agentToolName?: string | null;
     id: string;
+    idempotencyKey: string;
     requestJson: Record<string, unknown>;
     requestPreview: string;
     riskLevel: ConnectorActionRiskLevel;
@@ -21,6 +22,7 @@ type ConnectorActionPayloadInput = {
   description?: string;
   displayName?: string;
   connector: SourceConnectorRecord;
+  toolCallId?: string;
   target?: {
     externalUri?: string | null;
     id?: string | null;
@@ -65,26 +67,6 @@ function formatActionLabel(actionType: string) {
       ?.replace(/[_-]+/g, " ")
       .replace(/\b\w/g, (match) => match.toUpperCase()) ?? actionType
   );
-}
-
-function schemaForEditableArgs(input: ConnectorActionPayloadInput) {
-  return {
-    type: "object",
-    additionalProperties: false,
-    properties: Object.fromEntries(
-      Object.entries(input.action.requestJson).map(([key, value]) => [
-        key,
-        {
-          type:
-            typeof value === "boolean"
-              ? "boolean"
-              : typeof value === "number"
-                ? "number"
-                : "string",
-        },
-      ]),
-    ),
-  };
 }
 
 export function connectorActionApprovalPayload(
@@ -154,10 +136,6 @@ export function connectorActionApprovalPayload(
       requestJson: request,
       ...(target ? { target } : {}),
     },
-    editableArgs: {
-      value: request,
-      schema: schemaForEditableArgs(input),
-    },
     decisionOptions,
     execution: {
       providerStatus,
@@ -165,6 +143,9 @@ export function connectorActionApprovalPayload(
         kind: "connector_action_run",
         connectorId: input.connector.id,
         actionRunId: input.action.id,
+      },
+      sourceweft: {
+        toolCallId: input.toolCallId ?? input.action.idempotencyKey,
       },
     },
     status: input.action.status,

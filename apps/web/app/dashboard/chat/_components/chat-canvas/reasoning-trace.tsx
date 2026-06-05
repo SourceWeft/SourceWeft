@@ -1,9 +1,19 @@
-import { useEffect, useRef, useState } from "react";
-import { ImageIcon, Loader2, WrenchIcon } from "lucide-react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
+  ChevronDownIcon,
+  Download,
+  ImageIcon,
+  Loader2,
+  Presentation,
+  WrenchIcon,
+} from "lucide-react";
+import {
+  getAgentToolSlashCommand,
   isGeneratedImageArtifactToolName,
   isAgentToolDomain,
+  isPresentationArtifactToolName,
   isRetrievalToolName,
+  isVideoPresentationArtifactToolName,
   isWebFetchToolName,
   isWebSearchToolName,
   isWebToolName,
@@ -21,6 +31,8 @@ import {
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { RawImage } from "../../../../_components/raw-image";
+import { apiBaseUrl } from "../../../../../lib/sdk";
+import { resolveArtifactPageUrl } from "../artifact-urls";
 import { hasWebPageToolResults } from "../web-tool-results";
 import {
   getToolConfirmationOutput,
@@ -28,11 +40,13 @@ import {
 } from "./tool-confirmation-state";
 import {
   compactText,
+  type GeneratedPresentationArtifactStatus,
   getToolOutputContent,
   normalizeAssetUrl,
   resolveArtifactDownloadUrl,
   resolveArtifactUrl,
   resolveGeneratedImageArtifact,
+  resolveGeneratedPresentationArtifact,
 } from "./message-assets";
 import { GeneratedImagePreview } from "./generated-image-preview";
 import {
@@ -44,15 +58,87 @@ import {
   isToolConfirmationResolved,
   isReasoningTraceThinking,
 } from "./reasoning-trace-state";
+import { getSandboxToolSafeErrorMessage } from "./sandbox-tool-result-display";
 import type {
   ArtifactPreviewRecord,
+  ArtifactStatusSnapshot,
   ThinkingStepRecord,
   ToolConfirmationResolution,
   ToolCallRecord,
   TracePartRecord,
 } from "./types";
 
+type ReasoningTraceTimelineItem =
+  | {
+      kind: "model-reasoning";
+      key: string;
+      originalIndex: number;
+      phase?: "initial" | "after_tool";
+      sequence: number;
+      text: string;
+      toolCallId?: string;
+      durationMs?: number;
+    }
+  | {
+      kind: "step";
+      key: string;
+      originalIndex: number;
+      sequence: number;
+      step: ThinkingStepRecord;
+    }
+  | {
+      kind: "tool";
+      key: string;
+      originalIndex: number;
+      sequence: number;
+      toolCall: ToolCallRecord;
+      toolStep?: ThinkingStepRecord;
+    };
+
+type ToolTimelineItem = Extract<ReasoningTraceTimelineItem, { kind: "tool" }>;
+
+function artifactPreviewCapabilities(input: {
+  fileBacked: boolean;
+  previewInline?: boolean;
+  renderClientVideo?: boolean;
+}) {
+  return {
+    canDownloadFile: input.fileBacked,
+    canOpenFile: input.fileBacked,
+    canPreviewInline: input.previewInline ?? input.fileBacked,
+    canRenderClientVideo: input.renderClientVideo ?? false,
+  };
+}
+
+function isStepTimelineItem(
+  item: ReasoningTraceTimelineItem,
+): item is Extract<ReasoningTraceTimelineItem, { kind: "step" }> {
+  return item.kind === "step";
+}
+
 const GENERATED_IMAGE_DEFAULT_ASPECT_RATIO = "4 / 3";
+const ILLEGAL_FILENAME_CHARS = new Set([
+  "<",
+  ">",
+  ":",
+  '"',
+  "/",
+  "\\",
+  "|",
+  "?",
+  "*",
+]);
+
+function replaceIllegalFilenameCharacters(value: string) {
+  return Array.from(value)
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code <= 31 || code === 127 || ILLEGAL_FILENAME_CHARS.has(char)
+        ? "-"
+        : char;
+    })
+    .join("");
+}
 
 function getRecordValue(
   record: Record<string, unknown> | undefined,
@@ -139,6 +225,12 @@ function formatToolName(toolName: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+function getToolDisplayName(toolName: string) {
+  return (
+    getAgentToolSlashCommand(toolName)?.displayName ?? formatToolName(toolName)
+  );
+}
+
 function getWebSearchStatusLabel(status: ToolCallRecord["status"]) {
   if (status === "running" || status === "approval_requested") {
     return "Searching web";
@@ -183,9 +275,7 @@ function getGeneratedImageStatus(toolCall: ToolCallRecord) {
   const input = toolCall.input;
   const stage = getRecordValue(output, "stage");
   const normalizedStage =
-    typeof stage === "string" && stage.trim().length > 0
-      ? stage.trim()
-      : null;
+    typeof stage === "string" && stage.trim().length > 0 ? stage.trim() : null;
   const outputWidth = getRecordValue(output, "width");
   const outputHeight = getRecordValue(output, "height");
   const width =
@@ -199,9 +289,9 @@ function getGeneratedImageStatus(toolCall: ToolCallRecord) {
   const aspectRatio =
     width && height && height > 0
       ? `${width} / ${height}`
-      : parseAspectRatio(getRecordValue(output, "aspectRatio")) ??
+      : (parseAspectRatio(getRecordValue(output, "aspectRatio")) ??
         parseAspectRatio(getRecordValue(input, "aspectRatio")) ??
-        GENERATED_IMAGE_DEFAULT_ASPECT_RATIO;
+        GENERATED_IMAGE_DEFAULT_ASPECT_RATIO);
 
   return {
     aspectRatio,
@@ -254,6 +344,233 @@ function getGeneratedImagePrompt(toolCall: ToolCallRecord) {
     : null;
 }
 
+function getGeneratedPresentationTitle(toolCall: ToolCallRecord) {
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
+  const outputTitle = getRecordValue(output, "title");
+  if (typeof outputTitle === "string" && outputTitle.trim().length > 0) {
+    return outputTitle.trim();
+  }
+
+  const inputTitle = getRecordValue(toolCall.input, "title");
+  return typeof inputTitle === "string" && inputTitle.trim().length > 0
+    ? inputTitle.trim()
+    : null;
+}
+
+function getGeneratedPresentationPrompt(toolCall: ToolCallRecord) {
+  const brief = getRecordValue(toolCall.input, "brief");
+  if (typeof brief === "string" && brief.trim().length > 0) {
+    return brief.trim();
+  }
+
+  const output =
+    toolCall.output && typeof toolCall.output === "object"
+      ? (toolCall.output as Record<string, unknown>)
+      : undefined;
+  const outputPrompt = getRecordValue(output, "prompt");
+  return typeof outputPrompt === "string" && outputPrompt.trim().length > 0
+    ? outputPrompt.trim()
+    : null;
+}
+
+function downloadPresentationFileName(title: string, extension = "pptx") {
+  const normalized = replaceIllegalFilenameCharacters(
+    title.normalize("NFKC").trim(),
+  )
+    .replace(/\s+/g, " ")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[\s.-]+|[\s.-]+$/g, "")
+    .slice(0, 120);
+  const fallback = normalized || "generated-presentation";
+  const suffix = `.${extension}`;
+  const lowerFallback = fallback.toLowerCase();
+  if (lowerFallback.endsWith(suffix)) {
+    return fallback;
+  }
+  const withoutPresentationExtension = fallback.replace(
+    /\.(?:pptx|html)$/i,
+    "",
+  );
+  return `${withoutPresentationExtension}${suffix}`;
+}
+
+function downloadVideoPresentationFileName(title: string) {
+  const normalized = replaceIllegalFilenameCharacters(
+    title.normalize("NFKC").trim(),
+  )
+    .replace(/\s+/g, " ")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[\s.-]+|[\s.-]+$/g, "")
+    .slice(0, 120);
+  const fallback = normalized || "generated-video-presentation";
+  return fallback.toLowerCase().endsWith(".mp4") ? fallback : `${fallback}.mp4`;
+}
+
+function getGeneratedPresentationFileName(input: {
+  artifactFileName?: string | null;
+  generationMode?: "visual_html" | "editable_native" | null;
+  title?: string | null;
+  videoPresentation?: boolean;
+}) {
+  if (input.videoPresentation) {
+    return downloadVideoPresentationFileName(
+      input.title ?? input.artifactFileName ?? "",
+    );
+  }
+  return downloadPresentationFileName(
+    input.artifactFileName ?? input.title ?? "",
+    input.generationMode === "visual_html" ? "html" : "pptx",
+  );
+}
+
+function getPresentationArtifactPreviewStatus(input: {
+  isVideoPresentation: boolean;
+  status?: GeneratedPresentationArtifactStatus | null;
+}): ArtifactPreviewRecord["status"] {
+  if (!input.isVideoPresentation) {
+    return "ready";
+  }
+  return input.status ?? "pending";
+}
+
+function isPresentationArtifactPending(
+  status?: GeneratedPresentationArtifactStatus | null,
+) {
+  return status === "pending" || status === "running";
+}
+
+function getVideoProjectStageLabel(
+  payload: Record<string, unknown> | undefined,
+) {
+  const generation =
+    payload?.generation &&
+    typeof payload.generation === "object" &&
+    !Array.isArray(payload.generation)
+      ? (payload.generation as Record<string, unknown>)
+      : null;
+  const stage = typeof generation?.stage === "string" ? generation.stage : null;
+  if (stage === "planning") {
+    return "Planning video scenes...";
+  }
+  if (stage === "generating_audio") {
+    return "Generating narration audio...";
+  }
+  if (stage === "finalizing_project") {
+    return "Finalizing video project...";
+  }
+  if (stage === "project_ready") {
+    return "Ready for browser video export.";
+  }
+  if (stage === "failed") {
+    return "Video project failed.";
+  }
+  return null;
+}
+
+function buildGeneratedPresentationPreviewArtifact(input: {
+  artifactId: string | null;
+  description?: string | null;
+  fileUrl: string | null;
+  generationMode: "visual_html" | "editable_native" | null;
+  isVideoPresentation: boolean;
+  source: {
+    editable?: boolean | null;
+    fileName?: string | null;
+    htmlUrl?: string | null;
+    pptxUrl?: string | null;
+    previewRenderer?: "html_iframe" | "pptxviewjs" | null;
+    renderStrategy?: string | null;
+    slideCount?: number | null;
+    status?: GeneratedPresentationArtifactStatus | null;
+  };
+  title: string | null;
+  workspaceId?: string | null;
+}): ArtifactPreviewRecord | null {
+  if (
+    !input.artifactId ||
+    !input.workspaceId ||
+    (!input.fileUrl && !input.isVideoPresentation)
+  ) {
+    return null;
+  }
+
+  const status = getPresentationArtifactPreviewStatus({
+    isVideoPresentation: input.isVideoPresentation,
+    status: input.source.status,
+  });
+  const generationMode =
+    input.generationMode ??
+    (input.source.htmlUrl ? "visual_html" : "editable_native");
+
+  return {
+    id: input.artifactId,
+    teamId: "",
+    workspaceId: input.workspaceId,
+    threadId: null,
+    artifactType: input.isVideoPresentation ? "video_presentation" : "slides",
+    status,
+    title: input.title,
+    promptText: input.description ?? null,
+    payloadJson: {
+      artifactKind: input.isVideoPresentation
+        ? "video_presentation"
+        : undefined,
+      editable: input.isVideoPresentation
+        ? false
+        : (input.source.editable ?? generationMode === "editable_native"),
+      generationMode,
+      renderStrategy: input.source.renderStrategy ?? undefined,
+      videoDownloadOnly: input.isVideoPresentation ? true : undefined,
+      html:
+        !input.isVideoPresentation &&
+        input.source.htmlUrl &&
+        input.source.fileName
+          ? {
+              assetUrl: input.source.htmlUrl,
+              fileName: input.source.fileName,
+            }
+          : undefined,
+      previewRenderer:
+        input.source.previewRenderer ??
+        (generationMode === "editable_native" ? "pptxviewjs" : "html_iframe"),
+      pptx:
+        input.source.pptxUrl && input.source.fileName
+          ? {
+              assetUrl: input.source.pptxUrl,
+              fileName: input.source.fileName,
+            }
+          : undefined,
+      slideCount: input.source.slideCount ?? undefined,
+    },
+    storageBucket: null,
+    storageKey: input.artifactId,
+    errorCode: null,
+    errorMessage: null,
+    createdBy: null,
+    completedAt: status === "ready" ? new Date().toISOString() : null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    previewUrl:
+      input.fileUrl ??
+      (input.isVideoPresentation
+        ? resolveArtifactPageUrl({
+            artifactId: input.artifactId,
+            workspaceId: input.workspaceId,
+          })
+        : null),
+    capabilities: artifactPreviewCapabilities({
+      fileBacked: !input.isVideoPresentation,
+      previewInline: true,
+      renderClientVideo: input.isVideoPresentation && status === "ready",
+    }),
+  };
+}
+
 function getToolDisplayLabel(
   toolCall: ToolCallRecord,
   confirmationResolution?: ToolConfirmationResolution | null,
@@ -270,7 +587,7 @@ function getToolDisplayLabel(
   if (connectorResult) {
     return (
       getConnectorToolDisplayLabel(toolCall) ??
-      `${formatToolName(connectorResult.toolName)} completed`
+      `${getToolDisplayName(connectorResult.toolName)} completed`
     );
   }
 
@@ -278,12 +595,34 @@ function getToolDisplayLabel(
     const title = getGeneratedImageTitle(toolCall);
     const imageStatus = getGeneratedImageStatus(toolCall);
     const verb =
-      toolCall.status === "running" ||
-      toolCall.status === "approval_requested"
+      toolCall.status === "running" || toolCall.status === "approval_requested"
         ? (imageStatus.label ?? "Generating image")
         : toolCall.status === "error"
           ? "Image generation failed"
           : "Generated image";
+    return title ? `${verb}: ${compactText(title, 72)}` : verb;
+  }
+
+  if (
+    isPresentationArtifactToolName(toolCall.tool) ||
+    isVideoPresentationArtifactToolName(toolCall.tool)
+  ) {
+    const isVideoPresentation = isVideoPresentationArtifactToolName(
+      toolCall.tool,
+    );
+    const title = getGeneratedPresentationTitle(toolCall);
+    const verb =
+      toolCall.status === "running" || toolCall.status === "approval_requested"
+        ? isVideoPresentation
+          ? "Generating video presentation"
+          : "Generating presentation"
+        : toolCall.status === "error"
+          ? isVideoPresentation
+            ? "Video presentation generation failed"
+            : "Presentation generation failed"
+          : isVideoPresentation
+            ? "Generated video presentation"
+            : "Generated presentation";
     return title ? `${verb}: ${compactText(title, 72)}` : verb;
   }
 
@@ -320,15 +659,15 @@ function getToolDisplayLabel(
     )
     .find((value): value is string => value !== null);
 
-  const toolName = formatToolName(toolCall.tool);
+  const toolName = getToolDisplayName(toolCall.tool);
   const prefix =
     toolCall.status === "running"
       ? "Using"
       : toolCall.status === "approval_requested"
         ? "Awaiting approval for"
         : toolCall.status === "error"
-        ? "Failed"
-        : "Used";
+          ? "Failed"
+          : "Used";
 
   return inputPreview
     ? `${prefix} ${toolName} (${inputPreview})`
@@ -659,12 +998,14 @@ function getToolStepMetadataParts(
 }
 
 function ToolCallDetails({
+  artifactStatuses,
   onArtifactPreview,
   resolvedConfirmations = [],
   toolCall,
   toolStep,
   workspaceId,
 }: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   resolvedConfirmations?: ToolConfirmationResolution[];
   toolCall: ToolCallRecord;
@@ -691,6 +1032,10 @@ function ToolCallDetails({
   });
   const connectorResult = getConnectorToolResult(toolCall);
   const imageArtifact = resolveGeneratedImageArtifact(toolCall, toolStep);
+  const presentationArtifact = resolveGeneratedPresentationArtifact(
+    toolCall,
+    toolStep,
+  );
   const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
     ? getGeneratedImageStatus(toolCall)
     : null;
@@ -700,6 +1045,31 @@ function ToolCallDetails({
   const imageUrl = imageArtifact
     ? resolveArtifactUrl({ artifact: imageArtifact, workspaceId })
     : null;
+  const presentationUrl = presentationArtifact
+    ? resolveArtifactUrl({ artifact: presentationArtifact, workspaceId })
+    : null;
+  const presentationTitle =
+    presentationArtifact?.title ?? getGeneratedPresentationTitle(toolCall);
+  const presentationFileName = presentationArtifact
+    ? getGeneratedPresentationFileName({
+        artifactFileName: presentationArtifact.fileName,
+        title: presentationTitle,
+        videoPresentation: isVideoPresentationArtifactToolName(toolCall.tool),
+      })
+    : null;
+  const isVideoPresentationTool = isVideoPresentationArtifactToolName(
+    toolCall.tool,
+  );
+  const presentationArtifactStatus = getPresentationArtifactPreviewStatus({
+    isVideoPresentation: isVideoPresentationTool,
+    status:
+      (presentationArtifact?.artifactId
+        ? artifactStatuses?.get(presentationArtifact.artifactId)?.status
+        : null) ?? presentationArtifact?.status,
+  });
+  const presentationArtifactStatusSnapshot = presentationArtifact?.artifactId
+    ? artifactStatuses?.get(presentationArtifact.artifactId)
+    : undefined;
   const previewArtifact =
     imageArtifact?.artifactId && workspaceId && imageUrl
       ? ({
@@ -721,11 +1091,61 @@ function ToolCallDetails({
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           previewUrl: imageUrl,
+          capabilities: artifactPreviewCapabilities({ fileBacked: true }),
         } satisfies ArtifactPreviewRecord)
       : null;
+  const presentationPreviewArtifact =
+    presentationArtifact && (presentationUrl || isVideoPresentationTool)
+      ? buildGeneratedPresentationPreviewArtifact({
+          artifactId: presentationArtifact.artifactId,
+          description: getGeneratedPresentationPrompt(toolCall),
+          fileUrl: presentationUrl,
+          generationMode: presentationArtifact.generationMode,
+          isVideoPresentation: isVideoPresentationTool,
+          source: presentationArtifact,
+          title: presentationTitle,
+          workspaceId,
+        })
+      : null;
+  const effectivePresentationPreviewArtifact =
+    presentationPreviewArtifact &&
+    isVideoPresentationTool &&
+    presentationArtifactStatus
+      ? ({
+          ...presentationPreviewArtifact,
+          payloadJson:
+            presentationArtifactStatusSnapshot?.payloadJson ??
+            presentationPreviewArtifact.payloadJson,
+          capabilities:
+            presentationArtifactStatusSnapshot?.capabilities ??
+            presentationPreviewArtifact.capabilities,
+          previewUrl:
+            presentationArtifactStatusSnapshot?.previewUrl ??
+            presentationPreviewArtifact.previewUrl,
+          status: presentationArtifactStatus,
+          storageBucket:
+            presentationArtifactStatusSnapshot?.storageBucket ??
+            presentationPreviewArtifact.storageBucket,
+          storageKey:
+            presentationArtifactStatusSnapshot?.storageKey ??
+            presentationPreviewArtifact.storageKey,
+          completedAt:
+            presentationArtifactStatus === "ready"
+              ? (presentationArtifactStatusSnapshot?.completedAt ??
+                presentationPreviewArtifact.completedAt ??
+                new Date().toISOString())
+              : presentationPreviewArtifact.completedAt,
+          updatedAt:
+            presentationArtifactStatusSnapshot?.updatedAt ??
+            new Date().toISOString(),
+        } satisfies ArtifactPreviewRecord)
+      : presentationPreviewArtifact;
+  const canOpenPresentationArtifact =
+    presentationArtifactStatus === "ready" || !isVideoPresentationTool;
   const shouldShowOutputSummary = Boolean(
     outputSummary &&
       !imageArtifact &&
+      !presentationArtifact &&
       !toolConfirmation &&
       !isRetrievalToolName(toolCall.tool) &&
       !isWebToolName(toolCall.tool) &&
@@ -779,6 +1199,40 @@ function ToolCallDetails({
           >
             {imageArtifact.title ?? "Open generated image"}
           </button>
+        </p>
+      ) : null}
+      {presentationArtifact && presentationUrl ? (
+        <p>
+          <span className="font-medium text-foreground/80">Artifact:</span>{" "}
+          <button
+            className="text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            disabled={!canOpenPresentationArtifact}
+            onClick={() => {
+              if (!canOpenPresentationArtifact) {
+                return;
+              }
+              if (effectivePresentationPreviewArtifact && onArtifactPreview) {
+                onArtifactPreview(effectivePresentationPreviewArtifact);
+                return;
+              }
+              window.open(presentationUrl, "_blank", "noopener,noreferrer");
+            }}
+            type="button"
+          >
+            {presentationFileName ??
+              (isVideoPresentationTool
+                ? "Open generated video presentation"
+                : "Open generated PPTX")}
+          </button>
+          {isVideoPresentationTool && presentationArtifactStatus !== "ready" ? (
+            <span className="ml-1 text-muted-foreground">
+              (
+              {presentationArtifactStatus === "failed"
+                ? "project failed"
+                : "project preparing"}
+              )
+            </span>
+          ) : null}
         </p>
       ) : null}
       {toolConfirmation ? (
@@ -841,7 +1295,12 @@ function ToolCallDetails({
       ) : null}
       {shouldShowOutputSummary ? <p>{outputSummary}</p> : null}
       {toolCall.error ? (
-        <p className="text-destructive">{toolCall.error}</p>
+        <p className="text-destructive">
+          {getSandboxToolSafeErrorMessage({
+            error: toolCall.error,
+            toolName: toolCall.tool,
+          })}
+        </p>
       ) : null}
     </div>
   );
@@ -910,6 +1369,7 @@ function GeneratedImageArtifactItem({
   aspectRatio,
   downloadUrl,
   imageUrl,
+  onArtifactPreview,
   stageLabel,
   stageProgress,
   status,
@@ -918,6 +1378,7 @@ function GeneratedImageArtifactItem({
   aspectRatio: string;
   downloadUrl?: string | null;
   imageUrl?: string | null;
+  onArtifactPreview?: () => void;
   stageLabel: string;
   stageProgress: number | null;
   status: ToolCallRecord["status"];
@@ -961,6 +1422,7 @@ function GeneratedImageArtifactItem({
         )}
         downloadUrl={downloadUrl ?? imageUrl}
         imageUrl={imageUrl}
+        onClick={onArtifactPreview}
         onImageLoad={() => setIsImageLoaded(true)}
         title={title}
       />
@@ -975,9 +1437,11 @@ function GeneratedImageArtifactItem({
 }
 
 export function GeneratedImageArtifacts({
+  onArtifactPreview,
   toolCalls,
   workspaceId,
 }: {
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   toolCalls: ToolCallRecord[] | undefined;
   workspaceId?: string | null;
 }) {
@@ -991,10 +1455,40 @@ export function GeneratedImageArtifacts({
       const downloadUrl = artifact
         ? resolveArtifactDownloadUrl({ artifact, workspaceId })
         : null;
+      const title =
+        artifact?.title ||
+        getGeneratedImageTitle(toolCall) ||
+        "Generated image";
+      const prompt = getGeneratedImagePrompt(toolCall);
+      const previewArtifact =
+        artifact?.artifactId && workspaceId && imageUrl
+          ? ({
+              id: artifact.artifactId,
+              teamId: "",
+              workspaceId,
+              threadId: null,
+              artifactType: "image",
+              status: "ready",
+              title,
+              promptText: prompt,
+              payloadJson: {},
+              storageBucket: null,
+              storageKey: artifact.artifactId,
+              errorCode: null,
+              errorMessage: null,
+              createdBy: null,
+              completedAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              previewUrl: imageUrl,
+              capabilities: artifactPreviewCapabilities({ fileBacked: true }),
+            } satisfies ArtifactPreviewRecord)
+          : null;
       return {
-        artifact,
         downloadUrl,
         imageUrl,
+        previewArtifact,
+        title,
         toolCall,
       };
     })
@@ -1015,58 +1509,749 @@ export function GeneratedImageArtifacts({
 
   return (
     <div className="space-y-3">
-      {imageItems.map(({ artifact, downloadUrl, imageUrl, toolCall }) => {
-        const title =
-          artifact?.title ||
-          getGeneratedImageTitle(toolCall) ||
-          "Generated image";
-        const imageStatus = getGeneratedImageStatus(toolCall);
-        const stageLabel = imageStatus.label ?? "Rendering";
+      {imageItems.map(
+        ({ downloadUrl, imageUrl, previewArtifact, title, toolCall }) => {
+          const imageStatus = getGeneratedImageStatus(toolCall);
+          const stageLabel = imageStatus.label ?? "Rendering";
 
-        if (toolCall.status === "error") {
+          if (toolCall.status === "error") {
+            return (
+              <div
+                className="max-w-xl rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                key={toolCall.id}
+              >
+                {toolCall.error ?? "Image generation failed."}
+              </div>
+            );
+          }
+
           return (
-            <div
-              className="max-w-xl rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            <GeneratedImageArtifactItem
+              aspectRatio={imageStatus.aspectRatio}
+              downloadUrl={downloadUrl ?? imageUrl}
+              imageUrl={imageUrl}
               key={toolCall.id}
-            >
-              {toolCall.error ?? "Image generation failed."}
-            </div>
+              onArtifactPreview={
+                previewArtifact && onArtifactPreview
+                  ? () => onArtifactPreview(previewArtifact)
+                  : undefined
+              }
+              stageLabel={stageLabel}
+              stageProgress={imageStatus.progress ?? null}
+              status={toolCall.status}
+              title={title}
+            />
           );
-        }
-
-        return (
-          <GeneratedImageArtifactItem
-            aspectRatio={imageStatus.aspectRatio}
-            downloadUrl={downloadUrl ?? imageUrl}
-            imageUrl={imageUrl}
-            key={toolCall.id}
-            stageLabel={stageLabel}
-            stageProgress={imageStatus.progress ?? null}
-            status={toolCall.status}
-            title={title}
-          />
-        );
-      })}
+        },
+      )}
     </div>
   );
 }
 
 export function GeneratedImageArtifactBlock({
+  onArtifactPreview,
   toolCall,
   workspaceId,
 }: {
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   toolCall: ToolCallRecord | undefined;
   workspaceId?: string | null;
 }) {
   return (
     <GeneratedImageArtifacts
+      onArtifactPreview={onArtifactPreview}
       toolCalls={toolCall ? [toolCall] : []}
       workspaceId={workspaceId}
     />
   );
 }
 
+function GeneratedPresentationArtifactItem({
+  artifactStatus,
+  artifactStatusSnapshot,
+  artifactPreview,
+  artifactFileName,
+  description,
+  downloadUrl,
+  generationMode,
+  isVideoPresentation,
+  modeLabel,
+  onArtifactPreview,
+  slideCount,
+  sourceJsonUrl,
+  status,
+  title,
+}: {
+  artifactStatus?: GeneratedPresentationArtifactStatus | null;
+  artifactStatusSnapshot?: ArtifactStatusSnapshot;
+  artifactPreview?: ArtifactPreviewRecord | null;
+  artifactFileName?: string | null;
+  description?: string | null;
+  downloadUrl?: string | null;
+  generationMode?: "visual_html" | "editable_native" | null;
+  isVideoPresentation?: boolean;
+  modeLabel: string;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  slideCount?: number | null;
+  sourceJsonUrl?: string | null;
+  status: ToolCallRecord["status"];
+  title: string;
+}) {
+  const previewStatus = artifactStatus ?? artifactPreview?.status ?? "pending";
+  const effectiveArtifactPreview =
+    artifactPreview && isVideoPresentation
+      ? ({
+          ...artifactPreview,
+          payloadJson:
+            artifactStatusSnapshot?.payloadJson ?? artifactPreview.payloadJson,
+          capabilities:
+            artifactStatusSnapshot?.capabilities ?? artifactPreview.capabilities,
+          previewUrl:
+            artifactStatusSnapshot?.previewUrl ?? artifactPreview.previewUrl,
+          status: previewStatus,
+          storageBucket:
+            artifactStatusSnapshot?.storageBucket ??
+            artifactPreview.storageBucket,
+          storageKey:
+            artifactStatusSnapshot?.storageKey ?? artifactPreview.storageKey,
+          completedAt:
+            artifactStatus === "ready"
+              ? (artifactStatusSnapshot?.completedAt ??
+                artifactPreview.completedAt ??
+                new Date().toISOString())
+              : artifactPreview.completedAt,
+          updatedAt:
+            artifactStatusSnapshot?.updatedAt ?? new Date().toISOString(),
+        } satisfies ArtifactPreviewRecord)
+      : artifactPreview;
+  const isArtifactPending = isPresentationArtifactPending(artifactStatus);
+  const isArtifactError = artifactStatus === "failed";
+  const videoProjectStageLabel = isVideoPresentation
+    ? getVideoProjectStageLabel(
+        artifactStatusSnapshot?.payloadJson ?? artifactPreview?.payloadJson,
+      )
+    : null;
+  const isPending =
+    status === "running" ||
+    status === "approval_requested" ||
+    isArtifactPending;
+  const isError = status === "error" || isArtifactError;
+  const canPreview =
+    Boolean(effectiveArtifactPreview && onArtifactPreview) &&
+    !isPending &&
+    !isError;
+  const effectiveDownloadUrl = isVideoPresentation ? null : downloadUrl;
+  const handleDownload = () => {
+    if (!effectiveDownloadUrl) {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = effectiveDownloadUrl;
+    link.download = getGeneratedPresentationFileName({
+      artifactFileName,
+      generationMode,
+      title,
+      videoPresentation: isVideoPresentation,
+    });
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+  const handlePreview = () => {
+    if (effectiveArtifactPreview && onArtifactPreview && canPreview) {
+      onArtifactPreview(effectiveArtifactPreview);
+    }
+  };
+  const handlePreviewKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    handlePreview();
+  };
+
+  return (
+    <div
+      aria-label={canPreview ? `Open artifact preview for ${title}` : undefined}
+      className={cn(
+        "w-full max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-sm transition-colors",
+        canPreview &&
+          "cursor-pointer hover:border-foreground/25 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      )}
+      onClick={canPreview ? handlePreview : undefined}
+      onKeyDown={canPreview ? handlePreviewKeyDown : undefined}
+      role={canPreview ? "button" : undefined}
+      tabIndex={canPreview ? 0 : undefined}
+    >
+      <div className="flex items-start gap-3 p-3">
+        <div className="grid size-11 shrink-0 place-items-center rounded-md border border-border bg-muted/60">
+          {isPending ? (
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          ) : (
+            <Presentation className="size-5 text-foreground/80" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">
+                {title}
+              </p>
+              {description ? (
+                <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                  {description}
+                </p>
+              ) : null}
+            </div>
+            <button
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+              disabled={
+                isPending ||
+                isError ||
+                (isVideoPresentation ? !canPreview : !effectiveDownloadUrl)
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                if (isVideoPresentation) {
+                  handlePreview();
+                  return;
+                }
+                handleDownload();
+              }}
+              title={
+                isVideoPresentation
+                  ? "Open video presentation"
+                  : modeLabel === "Visual deck"
+                    ? "Download HTML deck"
+                    : "Download PPTX"
+              }
+              type="button"
+            >
+              <Download className="size-3.5" />
+              {isVideoPresentation ? "Download Video" : "Download"}
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5">
+              {modeLabel}
+            </span>
+            {typeof slideCount === "number" ? (
+              <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5">
+                {slideCount} slides
+              </span>
+            ) : null}
+            {sourceJsonUrl && !isPending && !isError ? (
+              <a
+                className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                href={sourceJsonUrl}
+                onClick={(event) => event.stopPropagation()}
+                rel="noopener"
+              >
+                Source JSON
+              </a>
+            ) : null}
+            {isPending ? (
+              <span>
+                {isVideoPresentation
+                  ? (videoProjectStageLabel ??
+                    (artifactStatus === "running"
+                      ? "Preparing video project..."
+                      : "Preparing video project..."))
+                  : "Generating presentation..."}
+              </span>
+            ) : null}
+          </div>
+          {isError ? (
+            <p className="mt-2 text-xs text-destructive">
+              {isVideoPresentation
+                ? (videoProjectStageLabel ??
+                  "Video presentation generation failed.")
+                : "PPTX generation failed."}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function GeneratedPresentationArtifacts({
+  artifactStatuses,
+  onArtifactPreview,
+  toolCalls,
+  workspaceId,
+}: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  toolCalls: ToolCallRecord[] | undefined;
+  workspaceId?: string | null;
+}) {
+  const presentationItems = (toolCalls ?? [])
+    .filter(
+      (toolCall) =>
+        isPresentationArtifactToolName(toolCall.tool) ||
+        isVideoPresentationArtifactToolName(toolCall.tool),
+    )
+    .map((toolCall) => {
+      const isVideoPresentation = isVideoPresentationArtifactToolName(
+        toolCall.tool,
+      );
+      const artifact = resolveGeneratedPresentationArtifact(toolCall);
+      const fileUrl = artifact
+        ? resolveArtifactUrl({ artifact, workspaceId })
+        : null;
+      const downloadUrl = artifact
+        ? resolveArtifactDownloadUrl({ artifact, workspaceId })
+        : null;
+      const sourceJsonUrl =
+        artifact?.sourceJsonUrl &&
+        (artifact.sourceJsonUrl.startsWith("http")
+          ? artifact.sourceJsonUrl
+          : `${apiBaseUrl}${artifact.sourceJsonUrl}`);
+      const title =
+        artifact?.title ||
+        getGeneratedPresentationTitle(toolCall) ||
+        (isVideoPresentation
+          ? "Generated video presentation"
+          : "Generated presentation");
+      const description = getGeneratedPresentationPrompt(toolCall);
+      const generationMode =
+        artifact?.generationMode ??
+        (artifact?.htmlUrl ? "visual_html" : "editable_native");
+      const modeLabel = isVideoPresentation
+        ? "Video presentation"
+        : generationMode === "editable_native"
+          ? "Editable PowerPoint"
+          : "Visual deck";
+      const artifactStatus = getPresentationArtifactPreviewStatus({
+        isVideoPresentation,
+        status:
+          (artifact?.artifactId
+            ? artifactStatuses?.get(artifact.artifactId)?.status
+            : null) ?? artifact?.status,
+      });
+      const artifactStatusSnapshot = artifact?.artifactId
+        ? artifactStatuses?.get(artifact.artifactId)
+        : undefined;
+      const previewArtifact =
+        artifact && (fileUrl || isVideoPresentation)
+          ? buildGeneratedPresentationPreviewArtifact({
+              artifactId: artifact.artifactId,
+              description,
+              fileUrl:
+                fileUrl ??
+                (artifact.artifactId && workspaceId
+                  ? resolveArtifactPageUrl({
+                      artifactId: artifact.artifactId,
+                      workspaceId,
+                    })
+                  : null),
+              generationMode,
+              isVideoPresentation,
+              source: artifact,
+              title,
+              workspaceId,
+            })
+          : null;
+      return {
+        artifact,
+        artifactStatus,
+        artifactStatusSnapshot,
+        downloadUrl,
+        fileUrl: isVideoPresentation ? null : fileUrl,
+        generationMode,
+        isVideoPresentation,
+        previewArtifact,
+        description,
+        modeLabel,
+        sourceJsonUrl,
+        title,
+        toolCall,
+      };
+    })
+    .filter(({ fileUrl, isVideoPresentation, previewArtifact, toolCall }) => {
+      if (
+        toolCall.status === "running" ||
+        toolCall.status === "approval_requested" ||
+        toolCall.status === "error"
+      ) {
+        return true;
+      }
+      return Boolean(fileUrl || (isVideoPresentation && previewArtifact));
+    })
+    .filter((item, index, items) => {
+      if (!item.artifact?.artifactId) {
+        return true;
+      }
+      return (
+        items.findIndex(
+          (candidate) =>
+            candidate.artifact?.artifactId === item.artifact?.artifactId,
+        ) === index
+      );
+    });
+
+  if (presentationItems.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3">
+      {presentationItems.map(
+        ({
+          artifact,
+          artifactStatus,
+          artifactStatusSnapshot,
+          description,
+          downloadUrl,
+          fileUrl,
+          generationMode,
+          isVideoPresentation,
+          modeLabel,
+          previewArtifact,
+          title,
+          sourceJsonUrl,
+          toolCall,
+        }) => {
+          if (toolCall.status === "error") {
+            return (
+              <div
+                className="max-w-xl rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                key={toolCall.id}
+              >
+                {toolCall.error ??
+                  (isVideoPresentation
+                    ? "Video presentation generation failed."
+                    : "PPTX generation failed.")}
+              </div>
+            );
+          }
+
+          return (
+            <GeneratedPresentationArtifactItem
+              artifactStatus={artifactStatus}
+              artifactStatusSnapshot={artifactStatusSnapshot}
+              artifactPreview={previewArtifact}
+              artifactFileName={artifact?.fileName}
+              description={description}
+              downloadUrl={downloadUrl ?? fileUrl}
+              generationMode={generationMode}
+              isVideoPresentation={isVideoPresentation}
+              key={toolCall.id}
+              modeLabel={modeLabel}
+              onArtifactPreview={onArtifactPreview}
+              slideCount={artifact?.slideCount}
+              sourceJsonUrl={sourceJsonUrl}
+              status={toolCall.status}
+              title={title}
+            />
+          );
+        },
+      )}
+    </div>
+  );
+}
+
+export function GeneratedPresentationArtifactBlock({
+  artifactStatuses,
+  onArtifactPreview,
+  toolCall,
+  workspaceId,
+}: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  toolCall: ToolCallRecord | undefined;
+  workspaceId?: string | null;
+}) {
+  return (
+    <GeneratedPresentationArtifacts
+      artifactStatuses={artifactStatuses}
+      onArtifactPreview={onArtifactPreview}
+      toolCalls={toolCall ? [toolCall] : []}
+      workspaceId={workspaceId}
+    />
+  );
+}
+
+function getToolTraceRenderState({
+  isCancelled,
+  resolvedConfirmationIds,
+  resolvedConfirmations,
+  toolCall,
+  toolStep,
+}: {
+  isCancelled: boolean;
+  resolvedConfirmationIds: Set<string>;
+  resolvedConfirmations: ToolConfirmationResolution[];
+  toolCall: ToolCallRecord;
+  toolStep?: ThinkingStepRecord;
+}) {
+  const toolConfirmation = getToolConfirmationOutput(toolCall.output);
+  const confirmationResolution = toolConfirmation
+    ? resolvedConfirmations.find(
+        (resolution) => resolution.confirmationId === toolConfirmation.id,
+      )
+    : null;
+  const isResolvedConfirmation = isToolConfirmationResolved({
+    confirmation: toolConfirmation,
+    confirmationResolution,
+  });
+  const metadataParts = getToolStepMetadataParts(toolStep?.metadata);
+  const detailParts = getToolCallDetailParts(
+    toolCall,
+    toolStep,
+    confirmationResolution,
+  );
+  const summary =
+    [
+      toolStep?.description ?? null,
+      detailParts.length > 0 ? detailParts.join(" · ") : null,
+      metadataParts.length > 0 ? metadataParts.join(" · ") : null,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(" · ") || undefined;
+  const isActivelyRunningTool = isToolCallActivelyRunning({
+    resolvedConfirmationIds,
+    toolCall,
+  });
+  const toolStatus: "complete" | "active" | "pending" =
+    toolConfirmation && !isResolvedConfirmation
+      ? isCancelled
+        ? "pending"
+        : "active"
+      : isActivelyRunningTool
+        ? isCancelled
+          ? "pending"
+          : "active"
+        : toolCall.status === "error"
+          ? "pending"
+          : "complete";
+
+  return {
+    confirmationResolution,
+    label: getToolDisplayLabel(toolCall, confirmationResolution),
+    summary,
+    toolStatus,
+  };
+}
+
+function ToolTraceStep({
+  artifactStatuses,
+  className,
+  icon = WrenchIcon,
+  isCancelled,
+  onArtifactPreview,
+  resolvedConfirmationIds,
+  resolvedConfirmations,
+  toolCall,
+  toolStep,
+  workspaceId,
+}: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
+  className?: string;
+  icon?: typeof WrenchIcon;
+  isCancelled: boolean;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  resolvedConfirmationIds: Set<string>;
+  resolvedConfirmations: ToolConfirmationResolution[];
+  toolCall: ToolCallRecord;
+  toolStep?: ThinkingStepRecord;
+  workspaceId?: string | null;
+}) {
+  const { label, summary, toolStatus } = getToolTraceRenderState({
+    isCancelled,
+    resolvedConfirmationIds,
+    resolvedConfirmations,
+    toolCall,
+    toolStep,
+  });
+
+  return (
+    <ChainOfThoughtStep
+      className={className}
+      description={summary}
+      icon={icon}
+      label={label}
+      status={toolStatus}
+    >
+      <ToolCallDetails
+        artifactStatuses={artifactStatuses}
+        onArtifactPreview={onArtifactPreview}
+        resolvedConfirmations={resolvedConfirmations}
+        toolCall={toolCall}
+        toolStep={toolStep}
+        workspaceId={workspaceId}
+      />
+    </ChainOfThoughtStep>
+  );
+}
+
+function ToolCallGroup({
+  artifactStatuses,
+  isCancelled,
+  items,
+  onArtifactPreview,
+  resolvedConfirmationIds,
+  resolvedConfirmations,
+  workspaceId,
+}: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
+  isCancelled: boolean;
+  items: ToolTimelineItem[];
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  resolvedConfirmationIds: Set<string>;
+  resolvedConfirmations: ToolConfirmationResolution[];
+  workspaceId?: string | null;
+}) {
+  const [header, ...children] = items;
+  const hasChildren = children.length > 0;
+  const shouldDefaultOpen = items.some(
+    (item) =>
+      item.toolCall.status === "error" ||
+      isToolCallActivelyRunning({
+        resolvedConfirmationIds,
+        toolCall: item.toolCall,
+      }),
+  );
+  const [isOpen, setIsOpen] = useState(shouldDefaultOpen);
+
+  useEffect(() => {
+    if (shouldDefaultOpen) {
+      setIsOpen(true);
+    }
+  }, [shouldDefaultOpen]);
+
+  if (!header) {
+    return null;
+  }
+
+  const headerState = getToolTraceRenderState({
+    isCancelled,
+    resolvedConfirmationIds,
+    resolvedConfirmations,
+    toolCall: header.toolCall,
+    toolStep: header.toolStep,
+  });
+  const groupSummary =
+    items.length > 1
+      ? [headerState.summary, `${items.length} tool calls`]
+          .filter((part): part is string => Boolean(part))
+          .join(" · ")
+      : headerState.summary;
+
+  return (
+    <div className="fade-in-0 slide-in-from-top-2 animate-in space-y-2 text-sm">
+      <button
+        className={cn(
+          "group flex w-full items-start gap-2 rounded-md text-left transition-colors hover:bg-muted/50",
+          hasChildren ? "cursor-pointer" : "cursor-default",
+        )}
+        disabled={!hasChildren}
+        onClick={() => {
+          if (hasChildren) {
+            setIsOpen((value) => !value);
+          }
+        }}
+        type="button"
+      >
+        <div className="relative mt-0.5 text-muted-foreground">
+          <WrenchIcon className="size-4" />
+          {hasChildren ? (
+            <div className="absolute top-7 bottom-0 left-1/2 -mx-px w-px bg-border" />
+          ) : null}
+        </div>
+        <div className="min-w-0 flex-1 space-y-1 overflow-hidden">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {hasChildren ? (
+              <ChevronDownIcon
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                  isOpen ? "rotate-0" : "-rotate-90",
+                )}
+              />
+            ) : null}
+            <span className="truncate text-muted-foreground">
+              {headerState.label}
+            </span>
+          </div>
+          {groupSummary ? (
+            <div className="text-muted-foreground text-xs">{groupSummary}</div>
+          ) : null}
+        </div>
+      </button>
+      {!hasChildren || isOpen ? (
+        <div className={hasChildren ? "ml-6" : undefined}>
+          <ToolCallDetails
+            artifactStatuses={artifactStatuses}
+            onArtifactPreview={onArtifactPreview}
+            resolvedConfirmations={resolvedConfirmations}
+            toolCall={header.toolCall}
+            toolStep={header.toolStep}
+            workspaceId={workspaceId}
+          />
+        </div>
+      ) : null}
+      {hasChildren && isOpen ? (
+        <div className="ml-6 space-y-2 border-border/70 border-l pl-3">
+          {children.map((item) => (
+            <ToolTraceStep
+              artifactStatuses={artifactStatuses}
+              className="text-muted-foreground"
+              isCancelled={isCancelled}
+              key={item.key}
+              onArtifactPreview={onArtifactPreview}
+              resolvedConfirmationIds={resolvedConfirmationIds}
+              resolvedConfirmations={resolvedConfirmations}
+              toolCall={item.toolCall}
+              toolStep={item.toolStep}
+              workspaceId={workspaceId}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function groupTimelineItems(items: ReasoningTraceTimelineItem[]) {
+  const grouped: Array<
+    | ReasoningTraceTimelineItem
+    | { kind: "tool-group"; key: string; items: ToolTimelineItem[] }
+  > = [];
+  let pendingTools: ToolTimelineItem[] = [];
+
+  const flushTools = () => {
+    if (pendingTools.length === 0) {
+      return;
+    }
+    grouped.push({
+      kind: "tool-group",
+      key: `tool-group:${pendingTools.map((item) => item.key).join(":")}`,
+      items: pendingTools,
+    });
+    pendingTools = [];
+  };
+
+  for (const item of items) {
+    if (item.kind === "tool") {
+      pendingTools.push(item);
+      continue;
+    }
+    flushTools();
+    grouped.push(item);
+  }
+
+  flushTools();
+  return grouped;
+}
+
 export function ReasoningTrace({
+  artifactStatuses,
   isCancelled = false,
   isStreaming,
   onArtifactPreview,
@@ -1076,6 +2261,7 @@ export function ReasoningTrace({
   toolCalls,
   workspaceId,
 }: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   isCancelled?: boolean;
   isStreaming: boolean;
   modelReasoning?: string;
@@ -1108,7 +2294,7 @@ export function ReasoningTrace({
           entry !== null,
       ),
   );
-  const tracePartItems = (traceParts ?? [])
+  const tracePartItems: ReasoningTraceTimelineItem[] = (traceParts ?? [])
     .slice()
     .sort((left, right) => left.order - right.order)
     .map((part) => {
@@ -1148,8 +2334,7 @@ export function ReasoningTrace({
       const approvalState =
         part.approvalState ?? matchedToolCall?.approvalState;
       const approvalConfirmationId =
-        part.approvalConfirmationId ??
-        matchedToolCall?.approvalConfirmationId;
+        part.approvalConfirmationId ?? matchedToolCall?.approvalConfirmationId;
       const toolCall: ToolCallRecord = {
         id: part.toolCallId,
         tool: part.tool,
@@ -1173,11 +2358,16 @@ export function ReasoningTrace({
     });
   const activeStep = isCancelled
     ? undefined
-    : tracePartItems.find(
-        (item) => item.kind === "step" && item.step.status === "in_progress",
-      )?.step;
+    : tracePartItems
+        .filter(
+          (
+            item,
+          ): item is Extract<ReasoningTraceTimelineItem, { kind: "step" }> =>
+            item.kind === "step" && item.step.status === "in_progress",
+        )
+        .at(-1)?.step;
   const latestDisplayStep = tracePartItems
-    .filter((item) => item.kind === "step")
+    .filter(isStepTimelineItem)
     .map((step, index) => ({ index, step }))
     .sort((left, right) => {
       const sequenceDelta =
@@ -1231,7 +2421,20 @@ export function ReasoningTrace({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const startTimeRef = useRef<number | null>(null);
 
-  const timelineItems = tracePartItems;
+  const toolTraceIds = new Set(
+    tracePartItems
+      .filter((item): item is ToolTimelineItem => item.kind === "tool")
+      .map((item) => item.toolCall.id),
+  );
+  const timelineItems = tracePartItems.filter((item) => {
+    if (item.kind !== "step") {
+      return true;
+    }
+
+    const toolCallId = item.step.metadata?.toolCallId;
+    return typeof toolCallId !== "string" || !toolTraceIds.has(toolCallId);
+  });
+  const renderTimelineItems = groupTimelineItems(timelineItems);
   const timelineSignature = timelineItems
     .map((item) => {
       if (item.kind === "model-reasoning") {
@@ -1243,15 +2446,19 @@ export function ReasoningTrace({
       return `${item.key}:${item.toolCall.status}:${item.toolCall.latencyMs ?? ""}`;
     })
     .join("|");
-  const reasoningDurationMs = tracePartItems.reduce<
-    number | undefined
-  >((longest, item) => {
-    if (item.kind !== "model-reasoning" || typeof item.durationMs !== "number") {
-      return longest;
-    }
+  const reasoningDurationMs = tracePartItems.reduce<number | undefined>(
+    (longest, item) => {
+      if (
+        item.kind !== "model-reasoning" ||
+        typeof item.durationMs !== "number"
+      ) {
+        return longest;
+      }
 
-    return Math.max(longest ?? 0, item.durationMs);
-  }, undefined);
+      return Math.max(longest ?? 0, item.durationMs);
+    },
+    undefined,
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -1336,18 +2543,17 @@ export function ReasoningTrace({
           className="subtle-scrollbar max-h-64 overflow-y-auto overscroll-contain pr-2"
           ref={contentRef}
         >
-          {timelineItems.map((item) => {
+          {renderTimelineItems.map((item) => {
             if (item.kind === "model-reasoning") {
               return (
-                <ChainOfThoughtStep
+                <div
+                  className="fade-in-0 slide-in-from-top-2 animate-in rounded-md px-1 py-0.5 text-[13px] text-foreground/85 leading-[1.6]"
                   key={item.key}
-                  label="Chat model reasoning"
-                  status={isThinking ? "active" : "complete"}
                 >
-                  <div className="whitespace-pre-wrap break-words text-muted-foreground text-xs leading-5">
+                  <div className="whitespace-pre-wrap break-words">
                     {item.text}
                   </div>
-                </ChainOfThoughtStep>
+                </div>
               );
             }
 
@@ -1424,65 +2630,22 @@ export function ReasoningTrace({
               );
             }
 
-            const { toolCall, toolStep } = item;
-            const toolConfirmation = getToolConfirmationOutput(toolCall.output);
-            const confirmationResolution = toolConfirmation
-              ? resolvedConfirmations.find(
-                  (resolution) =>
-                    resolution.confirmationId === toolConfirmation.id,
-                )
-              : null;
-            const isResolvedConfirmation = isToolConfirmationResolved({
-              confirmation: toolConfirmation,
-              confirmationResolution,
-            });
-            const metadataParts = getToolStepMetadataParts(toolStep?.metadata);
-            const detailParts = getToolCallDetailParts(
-              toolCall,
-              toolStep,
-              confirmationResolution,
-            );
-            const summary =
-              [
-                toolStep?.description ?? null,
-                detailParts.length > 0 ? detailParts.join(" · ") : null,
-                metadataParts.length > 0 ? metadataParts.join(" · ") : null,
-              ]
-                .filter((part): part is string => Boolean(part))
-                .join(" · ") || undefined;
-            const isActivelyRunningTool = isToolCallActivelyRunning({
-              resolvedConfirmationIds,
-              toolCall,
-            });
-            const toolStatus =
-              toolConfirmation && !isResolvedConfirmation
-                ? isCancelled
-                  ? "pending"
-                  : "active"
-                : isActivelyRunningTool
-                  ? isCancelled
-                    ? "pending"
-                    : "active"
-                  : toolCall.status === "error"
-                    ? "pending"
-                    : "complete";
-            return (
-              <ChainOfThoughtStep
-                description={summary}
-                icon={WrenchIcon}
-                key={item.key}
-                label={getToolDisplayLabel(toolCall, confirmationResolution)}
-                status={toolStatus}
-              >
-                <ToolCallDetails
+            if (item.kind === "tool-group") {
+              return (
+                <ToolCallGroup
+                  artifactStatuses={artifactStatuses}
+                  isCancelled={isCancelled}
+                  items={item.items}
+                  key={item.key}
                   onArtifactPreview={onArtifactPreview}
+                  resolvedConfirmationIds={resolvedConfirmationIds}
                   resolvedConfirmations={resolvedConfirmations}
-                  toolCall={toolCall}
-                  toolStep={toolStep}
                   workspaceId={workspaceId}
                 />
-              </ChainOfThoughtStep>
-            );
+              );
+            }
+
+            return null;
           })}
         </ChainOfThoughtContent>
       ) : null}

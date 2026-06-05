@@ -34,6 +34,7 @@ export function presentJobState(input: {
   finishedAtMs?: number;
   returnvalue?: unknown;
   failedReason?: string;
+  progress?: unknown;
 }) {
   const updatedAtMs = input.finishedAtMs ?? input.processedAtMs ?? input.createdAtMs;
 
@@ -43,6 +44,7 @@ export function presentJobState(input: {
     status: mapBullMqStateToStatus(input.state),
     createdAt: new Date(input.createdAtMs).toISOString(),
     updatedAt: new Date(updatedAtMs).toISOString(),
+    progress: input.progress ?? null,
     result: input.returnvalue ?? null,
     error: input.failedReason ?? null,
   };

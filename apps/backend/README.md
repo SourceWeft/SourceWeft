@@ -46,6 +46,11 @@ Auth and workspace MVP notes:
 
 Environment template: `apps/backend/.env.example`.
 
+Sandbox developer notes live in
+`src/modules/content/agent/sandbox/README.md`. They describe the provider-neutral
+runtime model, Daytona adapter boundary, backend-provided `execute`, prepare and
+collect bridge semantics, audit states, and current idempotency limitations.
+
 Model gateway catalog sync:
 
 - Global provider keys remain optional environment variables.

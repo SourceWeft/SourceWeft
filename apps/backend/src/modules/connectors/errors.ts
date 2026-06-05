@@ -1,19 +1,34 @@
+export type ConnectorErrorMetadata = {
+  details?: Record<string, unknown>;
+  sourceRef?: Record<string, unknown>;
+  recoverable?: boolean;
+};
+
 export class ConnectorError extends Error {
   readonly statusCode: number;
   readonly code: string;
   readonly details?: Record<string, unknown>;
+  readonly sourceRef?: Record<string, unknown>;
+  readonly recoverable?: boolean;
 
   constructor(
     statusCode: number,
     code: string,
     message: string,
-    details?: Record<string, unknown>,
+    detailsOrMetadata?: Record<string, unknown> | ConnectorErrorMetadata,
   ) {
     super(message);
     this.name = "ConnectorError";
     this.statusCode = statusCode;
     this.code = code;
-    this.details = details;
+    if (detailsOrMetadata && "sourceRef" in detailsOrMetadata) {
+      const metadata = detailsOrMetadata as ConnectorErrorMetadata;
+      this.details = metadata.details;
+      this.sourceRef = metadata.sourceRef;
+      this.recoverable = metadata.recoverable;
+    } else {
+      this.details = detailsOrMetadata as Record<string, unknown> | undefined;
+    }
   }
 }
 

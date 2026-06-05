@@ -31,6 +31,7 @@ import {
   MoreHorizontal,
   MoveRight,
   Pencil,
+  Presentation,
   Play,
   Power,
   PowerOff,
@@ -56,6 +57,11 @@ import {
   type WorkspaceMcpInstall,
 } from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
+import {
+  GlobalIcon,
+  type GlobalIconName,
+  type GlobalIconTone,
+} from "@sourceweft/ui-web/components/ui/global-icon";
 import { RawImage } from "../../../../_components/raw-image";
 import {
   Alert,
@@ -135,7 +141,7 @@ import {
   artifactMatchesQuery,
   artifactTitle,
   artifactTypeLabel,
-  resolveArtifactFileUrl,
+  resolveArtifactProxyFileUrl,
 } from "./artifacts";
 import { cloneItems, getThreadWorkfilesCacheKey } from "./cache";
 import {
@@ -188,6 +194,11 @@ import {
 import { TypeBadge } from "./type-badge";
 import type { ArtifactListItem } from "./types";
 import { useVirtualRows } from "./use-virtual-rows";
+import {
+  getCachedWorkspaceHubValue,
+  setCachedWorkspaceHubValue,
+} from "./workspace-hub-cache";
+import { resolveWorkspaceSourceHydration } from "./source-refresh-state";
 
 export { ArtifactPreviewPanel } from "./artifact-preview-panel";
 export type { ArtifactListItem } from "./types";
@@ -409,6 +420,25 @@ type ConnectorSyncRunBroadcastMessage =
 const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
 const workspaceArtifactsCursorCache = new Map<string, string | null>();
 const threadWorkfilesCache = new Map<string, WorkfileListItem[]>();
+const WORKSPACE_ARTIFACTS_CACHE_BUCKET = "artifacts";
+const WORKSPACE_CONNECTORS_CACHE_BUCKET = "connectors";
+const WORKSPACE_MCP_CACHE_BUCKET = "mcp";
+
+type WorkspaceArtifactsCacheValue = {
+  items: ArtifactListItem[];
+  nextCursor: string | null;
+};
+
+type WorkspaceConnectorsCacheValue = {
+  accounts: ConnectorAccountItem[];
+  connectors: ConnectorItem[];
+  webhookConfigsById: Record<string, ConnectorWebhookConfig | null>;
+  webhookEventsById: Record<string, ConnectorWebhookEventItem[]>;
+};
+
+type WorkspaceMcpCacheValue = {
+  installs: WorkspaceMcpInstall[];
+};
 
 function cloneArtifactItems(items: ArtifactListItem[]) {
   return cloneItems(items);
@@ -528,9 +558,7 @@ function createConnectorOAuthMessageId(input: {
   ].join(":");
 }
 
-function readConnectorOAuthCompletionFromUrl():
-  | ConnectorOAuthCompletionMessage
-  | null {
+function readConnectorOAuthCompletionFromUrl(): ConnectorOAuthCompletionMessage | null {
   if (typeof window === "undefined") return null;
   const url = new URL(window.location.href);
   const status = url.searchParams.get("connector_oauth");
@@ -552,8 +580,8 @@ function readConnectorOAuthCompletionFromUrl():
     status,
     error:
       status === "error"
-        ? url.searchParams.get("error") ??
-          "Connector authorization did not complete."
+        ? (url.searchParams.get("error") ??
+          "Connector authorization did not complete.")
         : null,
     createdAt: new Date().toISOString(),
   };
@@ -934,7 +962,14 @@ function SourceProviderBadge({
   const canOpenSettings = Boolean(connectorId && openSettings);
   const content = (
     <>
-      {catalogItem?.logoSrc ? (
+      {catalogItem?.logoIconName ? (
+        <GlobalIcon
+          className="size-3 shrink-0"
+          fallbackIconName="tool"
+          iconName={catalogItem.logoIconName}
+          iconTone={catalogItem.logoIconTone ?? "brand"}
+        />
+      ) : catalogItem?.logoSrc ? (
         <RawImage
           alt=""
           className="size-3 shrink-0 object-contain"
@@ -1771,7 +1806,10 @@ const ArtifactsTab = memoComponent(function ArtifactsTab({
   return (
     <div className="space-y-2">
       {filtered.map((artifact) => {
-        const fileUrl = resolveArtifactFileUrl({ artifact, workspaceId });
+        const proxyFileUrl = resolveArtifactProxyFileUrl({
+          artifact,
+          workspaceId,
+        });
 
         return (
           <button
@@ -1781,15 +1819,19 @@ const ArtifactsTab = memoComponent(function ArtifactsTab({
             title={`Preview ${artifactTitle(artifact)}`}
             type="button"
           >
-            {artifact.artifactType === "image" && fileUrl ? (
+            {artifact.artifactType === "image" && proxyFileUrl ? (
               <span className="block h-14 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
                 <RawImage
                   alt={artifactTitle(artifact)}
                   className="h-full w-full object-cover"
                   loading="lazy"
-                  src={fileUrl}
+                  src={proxyFileUrl}
                 />
               </span>
+            ) : artifact.artifactType === "slides" ? (
+              <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">
+                <Presentation className="size-4 text-muted-foreground" />
+              </div>
             ) : (
               <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">
                 <Sparkles className="size-4 text-muted-foreground" />
@@ -1892,7 +1934,11 @@ function SourcesTab({
 }) {
   const tree = useMemo(
     () =>
-      buildSourceTreeFromIndex(sourceTreeIndex, searchQuery, sourceMatchesQuery),
+      buildSourceTreeFromIndex(
+        sourceTreeIndex,
+        searchQuery,
+        sourceMatchesQuery,
+      ),
     [sourceTreeIndex, searchQuery],
   );
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -3346,7 +3392,8 @@ function McpRow({
             <label
               className={cn(
                 "flex cursor-pointer items-start gap-2 rounded px-1.5 py-1 text-[11px] hover:bg-accent/60",
-                (disabled || selected) && "cursor-not-allowed hover:bg-transparent",
+                (disabled || selected) &&
+                  "cursor-not-allowed hover:bg-transparent",
               )}
               key={tool.id}
             >
@@ -3447,7 +3494,11 @@ function McpTab({
             : "Install MCP servers from the MCP Market to use them in chat."
         }
         icon={McpIcon}
-        title={searchQuery ? `No MCP tools match "${searchQuery}"` : "No MCP tools installed."}
+        title={
+          searchQuery
+            ? `No MCP tools match "${searchQuery}"`
+            : "No MCP tools installed."
+        }
       />
     );
   }
@@ -4051,12 +4102,16 @@ function ActivityList({
 
 function ConnectorLogo({
   icon: Icon,
+  logoIconName,
+  logoIconTone,
   logoSrc,
   label,
   active,
   className,
 }: {
   icon: ConnectorIcon;
+  logoIconName?: GlobalIconName;
+  logoIconTone?: GlobalIconTone;
   logoSrc?: string;
   label?: string;
   active?: boolean;
@@ -4070,7 +4125,14 @@ function ConnectorLogo({
         className,
       )}
     >
-      {logoSrc ? (
+      {logoIconName ? (
+        <GlobalIcon
+          className="size-6"
+          fallbackIconName="tool"
+          iconName={logoIconName}
+          iconTone={logoIconTone ?? "brand"}
+        />
+      ) : logoSrc ? (
         <RawImage
           alt=""
           aria-hidden="true"
@@ -4145,6 +4207,8 @@ const ConnectorCatalogCard = memoComponent(function ConnectorCatalogCard({
           active={status.kind === "active" || status.kind === "connected"}
           icon={item.icon}
           label={item.name}
+          logoIconName={item.logoIconName}
+          logoIconTone={item.logoIconTone}
           logoSrc={item.logoSrc}
         />
         <div className="min-w-0 flex-1">
@@ -4319,6 +4383,8 @@ const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
           active={connector.status === "active"}
           icon={icon}
           label={providerName}
+          logoIconName={catalogItem?.logoIconName}
+          logoIconTone={catalogItem?.logoIconTone}
           logoSrc={catalogItem?.logoSrc}
         />
         <div className="min-w-0 flex-1">
@@ -4619,6 +4685,8 @@ function ConnectorSettingsDialog({
               active={connector.status === "active"}
               icon={catalogItem?.icon ?? Link2}
               label={providerName}
+              logoIconName={catalogItem?.logoIconName}
+              logoIconTone={catalogItem?.logoIconTone}
               logoSrc={catalogItem?.logoSrc}
             />
             <div className="min-w-0 flex-1">
@@ -5371,31 +5439,6 @@ function ConnectorsTab({
         </Alert>
       ) : null}
 
-      <div className="rounded-lg border bg-muted/25 p-3">
-        <div className="flex items-start gap-2.5">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
-            <Link2 className="size-4 text-muted-foreground" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-foreground">
-              Connector catalog
-            </p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              Connect Notion or preview upcoming integrations for your
-              workspace.
-            </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <TypeBadge label={`${activeConnectors.length} active`} />
-              <TypeBadge label={`${connectorCatalog.length} available`} />
-              {errorConnectors.length > 0 ? (
-                <TypeBadge label={`${errorConnectors.length} error`} />
-              ) : null}
-              {needsWebhookSetup ? <TypeBadge label="Webhook setup" /> : null}
-            </div>
-          </div>
-        </div>
-      </div>
-
       {activeConnectors.length > 0 ? (
         <div className="space-y-1.5">
           {activeConnectors.map((connector) => {
@@ -5419,6 +5462,8 @@ function ConnectorsTab({
                     className="size-8"
                     icon={catalogItem?.icon ?? Link2}
                     label={providerName}
+                    logoIconName={catalogItem?.logoIconName}
+                    logoIconTone={catalogItem?.logoIconTone}
                     logoSrc={catalogItem?.logoSrc}
                   />
                   <div className="min-w-0 flex-1">
@@ -6337,9 +6382,14 @@ export function SourcesHub({
     }
 
     const activeWorkspaceId = workspaceId;
+    const isInitialLoad =
+      loadedSourcesWorkspaceIdRef.current !== activeWorkspaceId ||
+      sourcesRef.current.length === 0;
     setIsLoading(true);
     setLoadingError(null);
-    commitSources([]);
+    if (isInitialLoad) {
+      commitSources([]);
+    }
     try {
       const result = await contentClient.listSources(activeWorkspaceId, {
         view: "tree",
@@ -6488,7 +6538,6 @@ export function SourcesHub({
         cloneWorkfileItems(result.items),
       );
     } catch (error) {
-      setWorkfiles([]);
       setWorkfilesLoadingError(
         getErrorMessage(error, "Failed to load workfiles."),
       );
@@ -6526,9 +6575,15 @@ export function SourcesHub({
         activeWorkspaceId,
         result.nextCursor ?? null,
       );
+      setCachedWorkspaceHubValue<WorkspaceArtifactsCacheValue>(
+        WORKSPACE_ARTIFACTS_CACHE_BUCKET,
+        activeWorkspaceId,
+        {
+          items: result.items,
+          nextCursor: result.nextCursor ?? null,
+        },
+      );
     } catch (error) {
-      setArtifacts([]);
-      setArtifactsNextCursor(null);
       setArtifactsLoadingError(
         getErrorMessage(error, "Failed to load artifacts."),
       );
@@ -6568,6 +6623,14 @@ export function SourcesHub({
           activeWorkspaceId,
           cloneArtifactItems(merged),
         );
+        setCachedWorkspaceHubValue<WorkspaceArtifactsCacheValue>(
+          WORKSPACE_ARTIFACTS_CACHE_BUCKET,
+          activeWorkspaceId,
+          {
+            items: merged,
+            nextCursor: result.nextCursor ?? null,
+          },
+        );
         return merged;
       });
       setArtifactsNextCursor(result.nextCursor ?? null);
@@ -6596,13 +6659,17 @@ export function SourcesHub({
       return;
     }
 
+    const activeWorkspaceId = workspaceId;
     setIsLoadingConnectors(true);
     setConnectorsLoadingError(null);
     try {
       const [result, accounts] = await Promise.all([
-        connectorsClient.list(workspaceId, { includeDisabled: true }),
-        connectorsClient.listAccounts(workspaceId),
+        connectorsClient.list(activeWorkspaceId, { includeDisabled: true }),
+        connectorsClient.listAccounts(activeWorkspaceId),
       ]);
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
       const uiConnectors = result.items.map(mapConnectorToUi);
       onConnectorsChange?.(result.items);
       setConnectorReadinessById((prev) => {
@@ -6638,8 +6705,8 @@ export function SourcesHub({
       const webhookResults = await Promise.allSettled(
         webhookConnectors.map(async (connector) => {
           const [webhookConfig, webhookEvents] = await Promise.allSettled([
-            connectorsClient.getWebhookConfig(workspaceId, connector.id),
-            connectorsClient.listWebhookEvents(workspaceId, {
+            connectorsClient.getWebhookConfig(activeWorkspaceId, connector.id),
+            connectorsClient.listWebhookEvents(activeWorkspaceId, {
               connectorType: connector.raw.connectorType,
               connectorId: connector.id,
             }),
@@ -6667,18 +6734,29 @@ export function SourcesHub({
         nextWebhookEvents[result.value.connectorId] =
           result.value.webhookEvents;
       }
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
       setConnectorWebhookConfigsById(nextWebhookConfigs);
       setConnectorWebhookEventsById(nextWebhookEvents);
+      setCachedWorkspaceHubValue<WorkspaceConnectorsCacheValue>(
+        WORKSPACE_CONNECTORS_CACHE_BUCKET,
+        activeWorkspaceId,
+        {
+          accounts: accounts.items,
+          connectors: uiConnectors,
+          webhookConfigsById: nextWebhookConfigs,
+          webhookEventsById: nextWebhookEvents,
+        },
+      );
     } catch (error) {
-      setConnectors([]);
-      setConnectorAccounts([]);
-      setConnectorWebhookEventsById({});
-      setConnectorWebhookConfigsById({});
       setConnectorsLoadingError(
         getErrorMessage(error, "Failed to load connectors."),
       );
     } finally {
-      setIsLoadingConnectors(false);
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        setIsLoadingConnectors(false);
+      }
     }
   }, [onConnectorsChange, workspaceId]);
 
@@ -6689,11 +6767,20 @@ export function SourcesHub({
       return;
     }
 
+    const activeWorkspaceId = workspaceId;
     setIsLoadingMcp(true);
     setMcpLoadingError(null);
     try {
-      const result = await contentClient.listWorkspaceMcpInstalls(workspaceId);
+      const result = await contentClient.listWorkspaceMcpInstalls(activeWorkspaceId);
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
       setMcpInstalls(result.items);
+      setCachedWorkspaceHubValue<WorkspaceMcpCacheValue>(
+        WORKSPACE_MCP_CACHE_BUCKET,
+        activeWorkspaceId,
+        { installs: result.items },
+      );
       const installIds = new Set(result.items.map((install) => install.id));
       const toolIds = new Set(
         result.items.flatMap((install) => install.tools.map((tool) => tool.id)),
@@ -6713,10 +6800,11 @@ export function SourcesHub({
         });
       }
     } catch (error) {
-      setMcpInstalls([]);
       setMcpLoadingError(getErrorMessage(error, "Failed to load MCP tools."));
     } finally {
-      setIsLoadingMcp(false);
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        setIsLoadingMcp(false);
+      }
     }
   }, [
     onMcpSelectionChange,
@@ -6760,25 +6848,32 @@ export function SourcesHub({
   );
 
   useEffect(() => {
-    if (!workspaceId) {
+    const sourceHydration = resolveWorkspaceSourceHydration({
+      initializedWorkspaceId: initializedSourcesWorkspaceIdRef.current,
+      initialSources,
+      initialSourcesLoaded,
+      workspaceId,
+    });
+
+    if (sourceHydration.kind === "clear") {
       loadedSourcesWorkspaceIdRef.current = null;
-      initializedSourcesWorkspaceIdRef.current = null;
+      initializedSourcesWorkspaceIdRef.current = sourceHydration.initializedWorkspaceId;
       expansionWorkspaceIdRef.current = workspaceId;
       expandedDirectoryIdsRef.current = new Set();
       userCollapsedDirectoryIdsRef.current = new Set();
       setExpandedDirectoryIds(new Set());
       setUserCollapsedDirectoryIds(new Set());
-      commitSources([]);
+      commitSources(sourceHydration.sources);
       setLoadingError(null);
       setIsLoading(false);
       setPendingSourceIds([]);
       return;
     }
 
-    if (initializedSourcesWorkspaceIdRef.current === workspaceId) {
+    if (sourceHydration.kind === "skip") {
       return;
     }
-    initializedSourcesWorkspaceIdRef.current = workspaceId;
+    initializedSourcesWorkspaceIdRef.current = sourceHydration.initializedWorkspaceId;
     const storedExpansion = readStoredSourceTreeExpansion(workspaceId);
     expansionWorkspaceIdRef.current = workspaceId;
     expandedDirectoryIdsRef.current = storedExpansion.expandedDirectoryIds;
@@ -6801,11 +6896,7 @@ export function SourcesHub({
     resetAddSourceDialog();
     setDirectoryParentSourceId(null);
 
-    if (initialSourcesLoaded) {
-      commitSources(initialSources);
-    } else {
-      commitSources([]);
-    }
+    commitSources(sourceHydration.sources);
     void refreshSources();
   }, [
     commitSources,
@@ -6845,15 +6936,27 @@ export function SourcesHub({
       return;
     }
 
-    if (workspaceArtifactsCache.has(workspaceId)) {
-      const cached = workspaceArtifactsCache.get(workspaceId) ?? [];
-      setArtifacts(cloneArtifactItems(cached));
-      setArtifactsNextCursor(
-        workspaceArtifactsCursorCache.get(workspaceId) ?? null,
+    const inMemoryCached = workspaceArtifactsCache.has(workspaceId)
+      ? {
+          items: workspaceArtifactsCache.get(workspaceId) ?? [],
+          nextCursor: workspaceArtifactsCursorCache.get(workspaceId) ?? null,
+        }
+      : null;
+    const cached =
+      inMemoryCached ??
+      getCachedWorkspaceHubValue<WorkspaceArtifactsCacheValue>(
+        WORKSPACE_ARTIFACTS_CACHE_BUCKET,
+        workspaceId,
       );
+    if (cached) {
+      workspaceArtifactsCache.set(workspaceId, cloneArtifactItems(cached.items));
+      workspaceArtifactsCursorCache.set(workspaceId, cached.nextCursor);
+      setArtifacts(cloneArtifactItems(cached.items));
+      setArtifactsNextCursor(cached.nextCursor);
       setArtifactsLoadingError(null);
       setIsLoadingArtifacts(false);
       setIsLoadingMoreArtifacts(false);
+      void refreshArtifacts();
       return;
     }
 
@@ -6861,12 +6964,43 @@ export function SourcesHub({
   }, [refreshArtifacts, workspaceId]);
 
   useEffect(() => {
+    if (!workspaceId) {
+      void refreshConnectors();
+      return;
+    }
+
+    const cached = getCachedWorkspaceHubValue<WorkspaceConnectorsCacheValue>(
+      WORKSPACE_CONNECTORS_CACHE_BUCKET,
+      workspaceId,
+    );
+    if (cached) {
+      setConnectors(cached.connectors);
+      setConnectorAccounts(cached.accounts);
+      setConnectorWebhookConfigsById(cached.webhookConfigsById);
+      setConnectorWebhookEventsById(cached.webhookEventsById);
+      setConnectorsLoadingError(null);
+      setIsLoadingConnectors(false);
+    }
     void refreshConnectors();
-  }, [refreshConnectors]);
+  }, [refreshConnectors, workspaceId]);
 
   useEffect(() => {
+    if (!workspaceId) {
+      void refreshMcpInstalls();
+      return;
+    }
+
+    const cached = getCachedWorkspaceHubValue<WorkspaceMcpCacheValue>(
+      WORKSPACE_MCP_CACHE_BUCKET,
+      workspaceId,
+    );
+    if (cached) {
+      setMcpInstalls(cached.installs);
+      setMcpLoadingError(null);
+      setIsLoadingMcp(false);
+    }
     void refreshMcpInstalls();
-  }, [refreshMcpInstalls]);
+  }, [refreshMcpInstalls, workspaceId]);
 
   useEffect(() => {
     if (!connectorSettingsConnectorId) {
@@ -7009,11 +7143,7 @@ export function SourcesHub({
         sentAt: Date.now(),
       });
       syncRunHeartbeatTimerRef.current = window.setInterval(() => {
-        if (
-          cancelled ||
-          !syncRunIsLeaderRef.current ||
-          !isDocumentVisible()
-        ) {
+        if (cancelled || !syncRunIsLeaderRef.current || !isDocumentVisible()) {
           return;
         }
         postSyncRunMessage({
@@ -7075,7 +7205,9 @@ export function SourcesHub({
       requestSyncRunPoll(decision.delayMs);
     }
 
-    async function handleSyncRunResult(result: WorkspaceConnectorSyncRunsResult) {
+    async function handleSyncRunResult(
+      result: WorkspaceConnectorSyncRunsResult,
+    ) {
       if (cancelled) {
         return;
       }
@@ -7303,10 +7435,7 @@ export function SourcesHub({
           if (!message || message.tabId === tabId) {
             return;
           }
-          if (
-            message.type === "hello" ||
-            message.type === "leader-heartbeat"
-          ) {
+          if (message.type === "hello" || message.type === "leader-heartbeat") {
             leaderCandidates.set(message.tabId, {
               id: message.tabId,
               lastSeenAt: message.sentAt,
@@ -7613,7 +7742,8 @@ export function SourcesHub({
       }
 
       const requestKey = `${workspaceId}:${item.id}:${accountId}`;
-      const existingRequest = ensureConnectorPromisesRef.current.get(requestKey);
+      const existingRequest =
+        ensureConnectorPromisesRef.current.get(requestKey);
       if (existingRequest) {
         return existingRequest;
       }
@@ -7627,7 +7757,9 @@ export function SourcesHub({
           const account = accounts.items.find((item) => item.id === accountId);
           if (!account) {
             if (!options.silentMissingAccount) {
-              toast.error(`Reconnect ${item.name} before creating a connector.`);
+              toast.error(
+                `Reconnect ${item.name} before creating a connector.`,
+              );
             }
             return null;
           }
@@ -7667,7 +7799,9 @@ export function SourcesHub({
             );
           } else {
             clearConnectorReadiness(created.connector.id);
-            toast.success(`${item.name} connector enabled. Initial sync queued.`);
+            toast.success(
+              `${item.name} connector enabled. Initial sync queued.`,
+            );
           }
           await refreshConnectors();
           return mapConnectorToUi(created.connector);
@@ -7687,7 +7821,10 @@ export function SourcesHub({
             );
           } else {
             toast.error(
-              getErrorMessage(error, `Failed to enable ${item.name} connector.`),
+              getErrorMessage(
+                error,
+                `Failed to enable ${item.name} connector.`,
+              ),
             );
           }
           return null;
@@ -8879,18 +9016,15 @@ export function SourcesHub({
                   <span className="text-[10px] text-muted-foreground">
                     {mcpInstalls.length} installed
                   </span>
-                  {selectedMcpInstallIds.length + selectedMcpToolIds.length > 0 ? (
+                  {selectedMcpInstallIds.length + selectedMcpToolIds.length >
+                  0 ? (
                     <span className="text-[10px] text-primary">
-                      {selectedMcpInstallIds.length + selectedMcpToolIds.length} selected
+                      {selectedMcpInstallIds.length + selectedMcpToolIds.length}{" "}
+                      selected
                     </span>
                   ) : null}
                 </div>
-                <Button
-                  asChild
-                  size="xs"
-                  type="button"
-                  variant="outline"
-                >
+                <Button asChild size="xs" type="button" variant="outline">
                   <a href="/dashboard/mcp">
                     <McpIcon className="size-3.5" />
                     MCP Market

@@ -24,7 +24,7 @@ const SourcesHub = dynamic(
   () => import("../../_components/sources-hub").then((mod) => mod.SourcesHub),
   {
     loading: () => (
-      <SourcesHubSkeleton className="hidden w-[min(420px,34vw)] shrink-0 md:block" />
+      <SourcesHubPanelSkeleton className="hidden h-full w-[410px] shrink-0 border-l md:flex" />
     ),
     ssr: false,
   },
@@ -37,15 +37,11 @@ const ArtifactPreviewPanel = dynamic(
     ),
   {
     loading: () => (
-      <SourcesHubSkeleton className="hidden w-[min(640px,45vw)] shrink-0 md:block" />
+      <SourcesHubPanelSkeleton className="hidden w-[min(640px,45vw)] shrink-0 md:block" />
     ),
     ssr: false,
   },
 );
-
-function SourcesHubSkeleton({ className }: { className?: string }) {
-  return <SourcesHubPanelSkeleton className={className} />;
-}
 
 export function ThreadSidePanels({
   activeCitationIndex,
@@ -82,6 +78,7 @@ export function ThreadSidePanels({
   workfilesRefreshKey,
   workspaceId,
   workspaceName,
+  usePersistentHub = false,
 }: {
   activeCitationIndex: number | null;
   activeCitationMessageId: string | null;
@@ -120,10 +117,14 @@ export function ThreadSidePanels({
   workfilesRefreshKey: number;
   workspaceId: string | null;
   workspaceName: string | null;
+  usePersistentHub?: boolean;
 }) {
   return (
     <>
-      {sourcesVisible && isPersistentLayout && !previewArtifact ? (
+      {sourcesVisible &&
+      isPersistentLayout &&
+      !previewArtifact &&
+      !usePersistentHub ? (
         <SourcesHub
           activeCitationIndex={activeCitationIndex}
           artifactsRefreshKey={artifactsRefreshKey}
@@ -156,7 +157,7 @@ export function ThreadSidePanels({
         />
       ) : null}
 
-      {sourcesVisible && previewArtifact && isDesktopPanel ? (
+      {sourcesVisible && previewArtifact && isDesktopPanel && !usePersistentHub ? (
         <ArtifactPreviewPanel
           artifact={previewArtifact}
           className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
@@ -191,7 +192,10 @@ export function ThreadSidePanels({
         </SheetContent>
       </Sheet>
 
-      <Sheet open={hubDrawerOpen} onOpenChange={onHubDrawerOpenChange}>
+      <Sheet
+        open={usePersistentHub ? false : hubDrawerOpen}
+        onOpenChange={onHubDrawerOpenChange}
+      >
         <SheetContent
           className="w-[calc(100vw-1rem)] max-w-[360px] gap-0 overflow-hidden p-0 sm:w-[380px] sm:max-w-[380px] [&>button]:hidden"
           side="right"

@@ -247,18 +247,20 @@ export const listSourcesResponseSchema = z.object({
 
 export const listSourcesRequestSchema = z.object({
   view: z.enum(["tree", "page"]).optional(),
-  includeContent: z
-    .union([
-      z.boolean(),
-      z.enum(["true", "false"]).transform((value) => value === "true"),
-    ])
-    .optional(),
+  includeContent: z.boolean().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   cursor: z.string().trim().min(1).max(1024).optional(),
   parentSourceId: z.string().trim().min(1).nullable().optional(),
   connectorId: z.string().trim().min(1).optional(),
   syncRunId: z.string().trim().min(1).optional(),
   updatedAfter: z.string().datetime().optional(),
+});
+
+export const artifactCapabilitiesSchema = z.object({
+  canOpenFile: z.boolean(),
+  canDownloadFile: z.boolean(),
+  canPreviewInline: z.boolean(),
+  canRenderClientVideo: z.boolean(),
 });
 
 export const artifactSchema = z.object({
@@ -273,6 +275,7 @@ export const artifactSchema = z.object({
     "podcast",
     "audio_overview",
     "video_overview",
+    "video_presentation",
     "flashcards",
     "quiz",
     "table",
@@ -292,11 +295,16 @@ export const artifactSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   previewUrl: z.string().nullable(),
+  capabilities: artifactCapabilitiesSchema,
 });
 
 export const listArtifactsResponseSchema = z.object({
   items: z.array(artifactSchema),
   nextCursor: z.string().nullable().optional(),
+});
+
+export const getArtifactResponseSchema = z.object({
+  artifact: artifactSchema,
 });
 
 const sourceMentionSchema = sourceSchema.pick({
@@ -531,13 +539,10 @@ const llmExecutionConfigSchema = z
       path: ["byokModelId"],
     },
   )
-  .refine(
-    (value) => value.executionMode !== "BYOK" || !value.profileAlias,
-    {
-      message: "profileAlias is only valid for GLOBAL execution",
-      path: ["profileAlias"],
-    },
-  )
+  .refine((value) => value.executionMode !== "BYOK" || !value.profileAlias, {
+    message: "profileAlias is only valid for GLOBAL execution",
+    path: ["profileAlias"],
+  })
   .strict();
 
 export const streamThreadModeSchema = z.enum([
@@ -605,6 +610,116 @@ const generateImageToolSelectionSchema = z
     modelAlias: z.string().trim().min(1).max(512).optional(),
     execution: llmExecutionConfigSchema.optional(),
     config: imageArtifactConfigSchema.optional(),
+  })
+  .strict();
+
+const generatePptxToolSelectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    generationMode: z.enum(["visual_html", "editable_native"]).optional(),
+    design: z
+      .object({
+        aspectRatio: z.enum(["16:9", "16:10", "4:3"]).optional(),
+        language: z.enum(["zh", "en", "auto"]).optional(),
+        stylePreset: z
+          .enum(["executive", "technical", "editorial", "data-heavy", "custom"])
+          .optional(),
+        customBrief: z.string().trim().max(2000).optional(),
+        visualSystem: z
+          .object({
+            palette: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+            typography: z
+              .array(z.string().trim().min(1).max(120))
+              .max(8)
+              .optional(),
+            layoutPrinciples: z
+              .array(z.string().trim().min(1).max(200))
+              .max(12)
+              .optional(),
+            styleFamily: z
+              .enum([
+                "auto",
+                "swiss",
+                "magazine",
+                "education",
+                "blueprint",
+                "data-report",
+                "editorial",
+              ])
+              .optional(),
+            density: z.enum(["airy", "balanced", "dense"]).optional(),
+            geometry: z
+              .enum(["sharp", "soft", "editorial", "technical"])
+              .optional(),
+            chrome: z
+              .enum(["minimal", "magazine", "lecture", "report"])
+              .optional(),
+            illustration: z
+              .enum(["none", "icons", "diagrams", "image-led", "handdrawn"])
+              .optional(),
+            layoutPolicy: z
+              .object({
+                strict: z.boolean().optional(),
+                diversity: z.enum(["normal", "high"]).optional(),
+              })
+              .strict()
+              .optional(),
+            coverTreatment: z.string().trim().max(80).optional(),
+            compositionStyle: z
+              .enum([
+                "auto",
+                "axis",
+                "poster",
+                "split",
+                "notebook",
+                "schematic",
+                "report",
+              ])
+              .optional(),
+            backgroundTreatment: z
+              .enum([
+                "auto",
+                "plain",
+                "grid",
+                "paper",
+                "image",
+                "gradient",
+                "diagram",
+              ])
+              .optional(),
+            motifs: z.array(z.string().trim().min(1).max(80)).max(8).optional(),
+            imageDirection: z.string().trim().max(1000).optional(),
+            motion: z.string().trim().max(1000).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    output: z
+      .object({
+        includeSourceJson: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    rendering: z
+      .object({
+        preferHtmlTables: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+const generateVideoPresentationToolSelectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    narration: z
+      .object({
+        enabled: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -679,18 +794,32 @@ export const threadCommandRequestSchema = z
   })
   .strict();
 
+const invocationSelectionRequestSchema = z
+  .object({
+    selectableId: z.string().trim().min(1).max(256),
+    userInput: z.string().max(20000),
+    structuredArgs: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
 const threadToolsRequestSchema = z
   .object({
     skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
-    invokedSkillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
+    invokedSkillIds: z
+      .array(z.string().trim().min(1).max(128))
+      .max(5)
+      .optional(),
     webSearchEnabled: z.boolean().optional(),
     artifact: artifactToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.generateImage]: generateImageToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.generateImage]:
+      generateImageToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.generatePptx]: generatePptxToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.generateVideoPresentation]:
+      generateVideoPresentationToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.webSearch]: webSearchToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.searchNotionPages]:
       connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.readNotionPage]:
-      connectorToolSelectionSchema.optional(),
+    [AGENT_TOOL_NAMES.readNotionPage]: connectorToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.createNotionPage]:
       connectorToolSelectionSchema.optional(),
     [AGENT_TOOL_NAMES.appendNotionPage]:
@@ -714,6 +843,7 @@ export const streamThreadRequestSchema = z.object({
   mentionedSourceIds: z.array(z.string()).max(100).optional(),
   tools: threadToolsRequestSchema.optional(),
   command: threadCommandRequestSchema.optional(),
+  invocation: invocationSelectionRequestSchema.optional(),
   stream: z.boolean().optional(),
   timezone: z.string().trim().min(1).max(100).optional(),
   userMessageId: z.string().trim().min(1).max(128).optional(),
@@ -794,11 +924,7 @@ export const listThreadMessagesResponseSchema = z.object({
 
 export const listThreadMessagesRequestSchema = z.object({
   cursor: z.string().trim().min(1).max(1024).optional(),
-  include: z
-    .string()
-    .trim()
-    .max(128)
-    .optional(),
+  include: z.string().trim().max(128).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
@@ -1282,9 +1408,8 @@ export type CreateUrlSourceResponse = z.infer<
 export type ListSourcesResponse = z.infer<typeof listSourcesResponseSchema>;
 export type ListSourcesRequest = z.infer<typeof listSourcesRequestSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
-export type ListArtifactsResponse = z.infer<
-  typeof listArtifactsResponseSchema
->;
+export type GetArtifactResponse = z.infer<typeof getArtifactResponseSchema>;
+export type ListArtifactsResponse = z.infer<typeof listArtifactsResponseSchema>;
 export type SourceMention = z.infer<typeof sourceMentionSchema>;
 export type ListSourceMentionsRequest = z.infer<
   typeof listSourceMentionsRequestSchema
@@ -1351,6 +1476,12 @@ export type ImageArtifactConfig = z.infer<typeof imageArtifactConfigSchema>;
 export type ArtifactToolSelection = z.infer<typeof artifactToolSelectionSchema>;
 export type GenerateImageToolSelection = z.infer<
   typeof generateImageToolSelectionSchema
+>;
+export type GeneratePptxToolSelection = z.infer<
+  typeof generatePptxToolSelectionSchema
+>;
+export type GenerateVideoPresentationToolSelection = z.infer<
+  typeof generateVideoPresentationToolSelectionSchema
 >;
 export type WebSearchToolSelection = z.infer<
   typeof webSearchToolSelectionSchema

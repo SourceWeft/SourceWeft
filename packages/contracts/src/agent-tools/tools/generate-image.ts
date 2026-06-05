@@ -25,6 +25,7 @@ export const generateImageTool = defineAgentTool({
   slash: {
     description: "Generate an image directly from your prompt",
     displayName: "Generate image",
+    iconName: "image",
     supportsCommand: true,
   },
 });

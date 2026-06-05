@@ -62,6 +62,14 @@ test("base chat system prompt treats kb as source evidence and work as user-visi
     CHAT_SYSTEM_PROMPT,
     /SourceWeft displays pending tool confirmations in the intervention UI/,
   );
+  assert.match(
+    CHAT_SYSTEM_PROMPT,
+    /summarizing, listing, or synthesizing workspace sources/,
+  );
+  assert.match(
+    CHAT_SYSTEM_PROMPT,
+    /Do not provide an uncited source summary before or after a tool approval request/,
+  );
   assert.equal(CHAT_SYSTEM_PROMPT.includes("/skills"), false);
 });
 

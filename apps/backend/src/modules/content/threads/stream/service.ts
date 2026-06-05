@@ -11,7 +11,10 @@ import type { EmbeddingVectorStrategy, MessageRecord } from "../../types";
 import type { ContentBillingPort } from "../../billing-port";
 import { ContentError } from "../../errors";
 import { requireContentWorkspace } from "../../content-support";
-import { toContentServiceError } from "../../model-gateway-error";
+import {
+  sanitizeClientErrorMessage,
+  toContentServiceError,
+} from "../../model-gateway-error";
 import { logger } from "../../../../shared/logger";
 import {
   buildGatewayAuditMetadata,
@@ -67,6 +70,8 @@ import {
 } from "../turn/trace-parts";
 
 type ThreadTitleJob = Job<Record<string, unknown>, unknown, string>;
+
+const DEEPAGENTS_WRITE_TODOS_TOOL_NAME = "write_todos";
 
 type ThreadTitleJobCompletion = {
   jobId: string;
@@ -278,9 +283,54 @@ function normalizeThinkingStepStatusForError(
   return step.status === "in_progress"
     ? {
         ...step,
-        status: "completed",
+        status: "completed" as const,
       }
     : step;
+}
+
+function normalizeTracePartStatusForError(part: TracePart): TracePart {
+  if (part.kind === "step" && part.status === "in_progress") {
+    return {
+      ...part,
+      status: "completed",
+    };
+  }
+  if (part.kind === "tool" && part.status === "running") {
+    return {
+      ...part,
+      status: "error",
+      error: part.error ?? "Tool execution failed.",
+    };
+  }
+  return part;
+}
+
+function normalizeTracePartStatusForSuccess(part: TracePart): TracePart {
+  if (part.kind === "step" && part.status === "in_progress") {
+    return {
+      ...part,
+      status: "completed",
+    };
+  }
+  if (part.kind === "tool" && part.status === "running") {
+    return {
+      ...part,
+      status: "completed",
+    };
+  }
+  return part;
+}
+
+function normalizeTracePartsForError(traceParts: TracePart[]) {
+  return normalizeTraceParts(traceParts).map(normalizeTracePartStatusForError);
+}
+
+function normalizeTracePartsForSuccess(traceParts: TracePart[]) {
+  return normalizeTraceParts(traceParts).map(normalizeTracePartStatusForSuccess);
+}
+
+function isVisibleTracePart(part: TracePart) {
+  return part.kind !== "tool" || part.tool !== DEEPAGENTS_WRITE_TODOS_TOOL_NAME;
 }
 
 function upsertToolCallTrace(
@@ -513,22 +563,48 @@ function buildPartialErrorState(input: {
   citations: AgentCitation[];
   availableCitations: AgentCitation[];
 }): ThreadStreamPartialErrorState {
+  const terminalThinkingSteps = [...input.thinkingStepsById.values()].map(
+    normalizeThinkingStepStatusForError,
+  );
   return {
     reasoning: input.reasoning,
     reasoningSegments: [...input.reasoningSegmentsById.values()],
-    traceParts: input.traceParts,
+    traceParts: normalizeTracePartsForError(
+      terminalThinkingSteps.reduce(
+        (parts, step) => upsertTracePart(parts, tracePartFromThinkingStep(step)),
+        input.traceParts,
+      ),
+    ).filter(isVisibleTracePart),
     toolCalls: [...input.toolCallsById.values()].map(
       normalizeToolCallStatusForError,
     ),
     thinkingSteps: mergeThinkingSteps(
       input.preflightThinkingSteps ?? [],
-      [...input.thinkingStepsById.values()].map(
-        normalizeThinkingStepStatusForError,
-      ),
+      terminalThinkingSteps,
     ),
     renderBlocks: input.renderBlocks,
     citations: input.citations,
     availableCitations: input.availableCitations,
+  };
+}
+
+function buildTerminalTraceState(input: {
+  preflightThinkingSteps: ThinkingStepTrace[];
+  runtimeThinkingSteps: ThinkingStepTrace[];
+  traceParts: TracePart[];
+}) {
+  const thinkingSteps = mergeThinkingSteps(
+    input.preflightThinkingSteps,
+    input.runtimeThinkingSteps,
+  ).map(normalizeThinkingStepStatusForError);
+  return {
+    thinkingSteps,
+    traceParts: normalizeTracePartsForSuccess(
+      thinkingSteps.reduce(
+        (parts, step) => upsertTracePart(parts, tracePartFromThinkingStep(step)),
+        input.traceParts,
+      ),
+    ).filter(isVisibleTracePart),
   };
 }
 
@@ -1347,6 +1423,11 @@ class ContentThreadStreamService {
           );
         }
         const completedOutcome = outcome;
+        const terminalTraceState = buildTerminalTraceState({
+          preflightThinkingSteps: prepared.preflightThinkingSteps,
+          runtimeThinkingSteps: completedOutcome.thinkingSteps,
+          traceParts,
+        });
 
         await threadStreamObservability.endSpan({
           traceId: prepared.traceContext.traceId,
@@ -1390,18 +1471,15 @@ class ContentThreadStreamService {
               availableCitations: completedOutcome.availableCitations,
               retrievalCalls: completedOutcome.retrievalCalls,
               toolCalls: completedOutcome.toolCalls,
-              thinkingSteps: mergeThinkingSteps(
-                prepared.preflightThinkingSteps,
-                completedOutcome.thinkingSteps,
-              ),
+              thinkingSteps: terminalTraceState.thinkingSteps,
               renderBlocks: completedOutcome.renderBlocks,
               reasoningSegments: completedOutcome.reasoningSegments,
-              traceParts,
+              traceParts: terminalTraceState.traceParts,
               llm: prepared.llm,
               operation: "chat.stream",
               assistantContent: completedOutcome.assistantContent,
               usage: completedOutcome.usage,
-              finishReason: completedOutcome.finishReason,
+              finishReason: completedOutcome.finishReason ?? "stop",
               reasoning: completedOutcome.reasoning,
               agentCheckpoint: completedOutcome.agentCheckpoint,
               latencyMs: Date.now() - chatStartedAt,
@@ -1518,10 +1596,13 @@ class ContentThreadStreamService {
 
         yield toSseData({ type: "text-end", id: textId });
 
+        const clientErrorMessage = sanitizeClientErrorMessage(
+          contentError.message,
+        );
         yield toSseData({
           type: "error",
           code: contentError.code,
-          error: contentError.message,
+          error: clientErrorMessage,
           userMessageId: prepared.userMessage.id,
           messageId: errorMessage?.id,
           parentMessageId: errorMessage?.parentMessageId,
@@ -1541,7 +1622,7 @@ class ContentThreadStreamService {
       }
       yield toSseData({
         type: "finish",
-        finishReason: outcome?.finishReason ?? null,
+        finishReason: outcome?.finishReason ?? "stop",
         ...(outcome?.agentCheckpoint
           ? { agentCheckpoint: outcome.agentCheckpoint }
           : {}),
@@ -1788,6 +1869,11 @@ class ContentThreadStreamService {
       });
 
       const completedOutcome = outcome;
+      const terminalTraceState = buildTerminalTraceState({
+        preflightThinkingSteps: prepared.preflightThinkingSteps,
+        runtimeThinkingSteps: completedOutcome.thinkingSteps,
+        traceParts,
+      });
       await threadStreamObservability.endSpan({
         traceId: prepared.traceContext.traceId,
         teamId: prepared.traceContext.teamId,
@@ -1829,18 +1915,15 @@ class ContentThreadStreamService {
             availableCitations: completedOutcome.availableCitations,
             retrievalCalls: completedOutcome.retrievalCalls,
             toolCalls: completedOutcome.toolCalls,
-            thinkingSteps: mergeThinkingSteps(
-              prepared.preflightThinkingSteps,
-              completedOutcome.thinkingSteps,
-            ),
+            thinkingSteps: terminalTraceState.thinkingSteps,
             renderBlocks: completedOutcome.renderBlocks,
             reasoningSegments: completedOutcome.reasoningSegments,
-            traceParts,
+            traceParts: terminalTraceState.traceParts,
             llm: prepared.llm,
             operation: "chat.complete",
             assistantContent: completedOutcome.assistantContent,
             usage: completedOutcome.usage,
-            finishReason: completedOutcome.finishReason,
+            finishReason: completedOutcome.finishReason ?? "stop",
             reasoning: completedOutcome.reasoning,
             agentCheckpoint: completedOutcome.agentCheckpoint,
             latencyMs: Date.now() - chatStartedAt,

@@ -82,12 +82,29 @@ vi.mock("./repository", () => ({
   upsertWorkspaceMcpTools: mocks.upsertWorkspaceMcpTools,
 }));
 
-import { McpService } from "./service";
+import { McpService, stripLangChainMcpToolPrefix } from "./service";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 
 let toolsByInstallId = new Map<string, DynamicStructuredTool[]>();
 let clientCloseMocks: Array<ReturnType<typeof vi.fn>> = [];
+
+test("stripLangChainMcpToolPrefix handles server keys with underscores", () => {
+  assert.equal(
+    stripLangChainMcpToolPrefix({
+      serverKey: "github_mcp_server",
+      toolName: "mcp__github_mcp_server__create_issue",
+    }),
+    "create_issue",
+  );
+  assert.equal(
+    stripLangChainMcpToolPrefix({
+      serverKey: "github",
+      toolName: "mcp__github_mcp_server__create_issue",
+    }),
+    "mcp__github_mcp_server__create_issue",
+  );
+});
 
 function mcpTool(
   input: Partial<WorkspaceMcpToolRecord> = {},
@@ -657,6 +674,7 @@ test("createApprovalForInterruptedTool returns redacted MCP confirmation payload
         kind: "mcp_action_run",
         actionRunId: "mcp_action_confirmation",
       },
+      sourceweft: { toolCallId: "call_write" },
     },
     status: "proposed",
     userMessage:

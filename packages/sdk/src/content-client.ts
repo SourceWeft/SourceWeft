@@ -34,6 +34,7 @@ import type {
   ResumeThreadResponse,
   GetSourceDocumentResponse,
   GetSourceResponse,
+  GetArtifactResponse,
   GetSkillCatalogDetailResponse,
   IndexSourceRequest,
   IndexSourceResponse,
@@ -168,6 +169,12 @@ export class ContentClient {
 
     return this.http.get<ListArtifactsResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts${suffix}`,
+    );
+  }
+
+  getArtifact(workspaceId: string, artifactId: string) {
+    return this.http.get<GetArtifactResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}`,
     );
   }
 

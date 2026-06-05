@@ -12,6 +12,7 @@ function createFakeChatModel(input: {
   streamChunks?: Record<string, unknown>[];
   omitBindTools?: boolean;
   capture?: {
+    bindKwargs?: Record<string, unknown>;
     boundTools?: unknown[];
     messages?: unknown;
   };
@@ -23,8 +24,9 @@ function createFakeChatModel(input: {
     _streamResponseChunks() {
       return (async function* () {})();
     },
-    bindTools(tools: unknown[]) {
+    bindTools(tools: unknown[], kwargs?: Record<string, unknown>) {
       if (input.capture) {
+        input.capture.bindKwargs = kwargs;
         input.capture.boundTools = tools;
       }
       return this;
@@ -56,7 +58,11 @@ function createFakeChatModel(input: {
 }
 
 test("chat.complete normalizes LangChain message output into gateway result", async () => {
-  const capture: { boundTools?: unknown[]; messages?: unknown } = {};
+  const capture: {
+    bindKwargs?: Record<string, unknown>;
+    boundTools?: unknown[];
+    messages?: unknown;
+  } = {};
 
   const gateway = createModelGateway({
     baseUrl: "https://gateway.example.com",
@@ -130,6 +136,202 @@ test("chat.complete normalizes LangChain message output into gateway result", as
     },
   ]);
   assert.equal(Array.isArray(capture.boundTools), true);
+  assert.deepEqual(capture.bindKwargs, { tool_choice: "auto" });
+});
+
+test("createLangChainChatModel forwards execution toolChoice to bindTools", async () => {
+  const capture: {
+    bindKwargs?: Record<string, unknown>;
+    boundTools?: unknown[];
+  } = {};
+  const config: ModelGatewayConfig = {
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({
+          capture,
+          invokeResult: { content: "ok" },
+        }),
+    },
+  };
+
+  const model = (await createLangChainChatModel({
+    modelAlias: "chat-default",
+    config,
+    execution: {
+      toolChoice: {
+        type: "function",
+        function: { name: "lookup" },
+      },
+    },
+  })) as LangChainChatModelLike;
+
+  model.bindTools?.([{ name: "lookup" }]);
+
+  assert.deepEqual(capture.bindKwargs, {
+    tool_choice: {
+      type: "function",
+      function: { name: "lookup" },
+    },
+  });
+});
+
+test("createLangChainChatModel forwards tool binding options without toolChoice", async () => {
+  const capture: {
+    bindKwargs?: Record<string, unknown>;
+    boundTools?: unknown[];
+  } = {};
+  const config: ModelGatewayConfig = {
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({
+          capture,
+          invokeResult: { content: "ok" },
+        }),
+    },
+  };
+
+  const model = (await createLangChainChatModel({
+    modelAlias: "chat-default",
+    config,
+    execution: {
+      toolBindingOptions: {
+        parallelToolCalls: false,
+        strict: true,
+      },
+    },
+  })) as LangChainChatModelLike;
+
+  model.bindTools?.([{ name: "lookup" }]);
+
+  assert.deepEqual(capture.bindKwargs, {
+    parallel_tool_calls: false,
+    strict: true,
+  });
+});
+
+test("createLangChainChatModel lets explicit bindTools kwargs override defaults", async () => {
+  const capture: {
+    bindKwargs?: Record<string, unknown>;
+    boundTools?: unknown[];
+  } = {};
+  const config: ModelGatewayConfig = {
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({
+          capture,
+          invokeResult: { content: "ok" },
+        }),
+    },
+  };
+
+  const model = (await createLangChainChatModel({
+    modelAlias: "chat-default",
+    config,
+    execution: {
+      toolBindingOptions: {
+        parallelToolCalls: false,
+        strict: true,
+        toolChoice: "auto",
+      },
+    },
+  })) as LangChainChatModelLike;
+
+  model.bindTools?.([{ name: "lookup" }], {
+    parallel_tool_calls: true,
+    tool_choice: "required",
+  });
+
+  assert.deepEqual(capture.bindKwargs, {
+    parallel_tool_calls: true,
+    strict: true,
+    tool_choice: "required",
+  });
+});
+
+test("createLangChainChatModel leaves bindTools kwargs unset without tool binding options", async () => {
+  const capture: {
+    bindKwargs?: Record<string, unknown>;
+    boundTools?: unknown[];
+  } = {};
+  const config: ModelGatewayConfig = {
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({
+          capture,
+          invokeResult: { content: "ok" },
+        }),
+    },
+  };
+
+  const model = (await createLangChainChatModel({
+    modelAlias: "chat-default",
+    config,
+  })) as LangChainChatModelLike;
+
+  model.bindTools?.([{ name: "lookup" }]);
+
+  assert.deepEqual(capture.boundTools, [{ name: "lookup" }]);
+  assert.equal(capture.bindKwargs, undefined);
 });
 
 test("chat.complete keeps top-level cache tokens out of input token totals", async () => {
@@ -466,7 +668,14 @@ test("observed LangChain chat model summarizes tool call loop inputs", async () 
     },
   })) as LangChainChatModelLike;
 
-  await model.invoke([
+  const boundModel = model.bindTools?.([{ name: "generate_pptx" }], {
+    tool_choice: {
+      type: "function",
+      function: { name: "generate_pptx" },
+    },
+  });
+
+  await boundModel?.invoke([
     { type: "system", content: "System prompt" },
     { type: "human", content: "list selected files" },
     {
@@ -521,7 +730,12 @@ test("observed LangChain chat model summarizes tool call loop inputs", async () 
         toolCallCount: 0,
       },
     ],
-    toolCount: 0,
+    toolCount: 1,
+    tools: ["generate_pptx"],
+    toolChoice: {
+      type: "function",
+      function: { name: "generate_pptx" },
+    },
     stream: true,
   });
 });

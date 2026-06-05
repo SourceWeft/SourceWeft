@@ -9,9 +9,12 @@ import type {
   AgentToolSlashCommand,
 } from "./define";
 import { artifactTools } from "./tools/generate-image";
+import { presentationTools } from "./tools/generate-pptx";
+import { videoPresentationTools } from "./tools/generate-video-presentation";
 import { filesystemTools } from "./tools/filesystem";
 import { notionTools } from "./tools/notion";
 import { retrievalTools } from "./tools/retrieval";
+import { sandboxTools } from "./tools/sandbox";
 import { webTools } from "./tools/web";
 
 export const AGENT_TOOLS = [
@@ -20,6 +23,9 @@ export const AGENT_TOOLS = [
   ...retrievalTools,
   ...webTools,
   ...notionTools,
+  ...presentationTools,
+  ...videoPresentationTools,
+  ...sandboxTools,
 ] as const;
 
 export type AgentToolDefinition = (typeof AGENT_TOOLS)[number];
@@ -30,9 +36,6 @@ export type AgentToolModelKind = Extract<
   AgentToolDefinition,
   { requirements: { modelKind: string } }
 >["requirements"]["modelKind"];
-
-export type AgentToolFamily = AgentToolDomainName;
-export type AgentToolTrait = AgentToolCapability;
 
 export const AGENT_TOOL_NAMES = Object.fromEntries(
   AGENT_TOOLS.map((tool) => [tool.id, tool.name]),
@@ -81,6 +84,8 @@ export function getAgentToolSlashCommand(
     displayName: slash?.displayName ?? tool.name,
     ...(slash?.description ? { description: slash.description } : {}),
     ...(slash?.aliases ? { aliases: slash.aliases } : {}),
+    ...(slash?.iconName ? { iconName: slash.iconName } : {}),
+    ...(slash?.iconTone ? { iconTone: slash.iconTone } : {}),
     ...(slash?.supportsCommand !== undefined
       ? { supportsCommand: slash.supportsCommand }
       : {}),
@@ -106,16 +111,12 @@ export function hasAgentToolCapability(
   return capabilities?.includes(capability) === true;
 }
 
-export const hasAgentToolTrait = hasAgentToolCapability;
-
 export function isAgentToolDomain(
   value: string,
   domain: AgentToolDomain,
 ): value is AgentToolName {
   return getAgentToolDefinition(value)?.domain === domain;
 }
-
-export const isAgentToolFamily = isAgentToolDomain;
 
 export function isSkillDeclarableAgentTool(
   value: string,
@@ -162,8 +163,6 @@ export function agentToolNamesByCapability(capability: AgentToolCapability) {
   ).map((tool) => tool.name);
 }
 
-export const agentToolNamesByTrait = agentToolNamesByCapability;
-
 export function agentToolRequiredForModelKind(kind: AgentToolModelKind) {
   return (
     AGENT_TOOLS.find((tool) => getAgentToolRequirements(tool)?.modelKind === kind)
@@ -187,10 +186,36 @@ export function isWebFetchToolName(value: string): value is AgentToolName {
   return hasAgentToolCapability(value, "web_page_fetch");
 }
 
+export function isSandboxToolName(value: string): value is AgentToolName {
+  return isAgentToolDomain(value, "sandbox");
+}
+
+export function isSandboxExecuteToolName(value: string): value is AgentToolName {
+  return hasAgentToolCapability(value, "sandbox_execute");
+}
+
+export function isSandboxFileTransferToolName(
+  value: string,
+): value is AgentToolName {
+  return hasAgentToolCapability(value, "sandbox_file_transfer");
+}
+
 export function isGeneratedImageArtifactToolName(
   value: string,
 ): value is AgentToolName {
   return hasAgentToolCapability(value, "generated_image_artifact");
+}
+
+export function isPresentationArtifactToolName(
+  value: string,
+): value is AgentToolName {
+  return hasAgentToolCapability(value, "presentation_artifact");
+}
+
+export function isVideoPresentationArtifactToolName(
+  value: string,
+): value is AgentToolName {
+  return hasAgentToolCapability(value, "video_presentation_artifact");
 }
 
 export function isNotionToolName(value: string): value is AgentToolName {

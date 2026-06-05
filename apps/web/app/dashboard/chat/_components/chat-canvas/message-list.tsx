@@ -1,11 +1,5 @@
 import { memo, useMemo, useState } from "react";
-import {
-  Copy,
-  Loader2,
-  Pencil,
-  RotateCcw,
-  WrenchIcon,
-} from "lucide-react";
+import { Copy, Loader2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import {
   Conversation,
@@ -35,14 +29,15 @@ import {
   Attachments,
   getAttachmentLabel,
 } from "@sourceweft/ui-web/components/ai-elements/attachments";
+import { PromptCommandIcon } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { SkillIcon } from "../../../_components/dashboard-icons";
+import { getAgentToolSlashCommand } from "@sourceweft/sdk";
 import { RawImage } from "../../../../_components/raw-image";
+import { getActionIcon } from "../action-icons";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import { WebToolResults } from "../web-tool-results";
 import {
-  buildRenderBlocksFromMessageContent,
   getMessageImageParts,
   getMessageText,
   normalizeAssetUrl,
@@ -50,59 +45,76 @@ import {
 } from "./message-assets";
 import { CitationAwareMessageResponse } from "./message-response";
 import {
-  GeneratedImageArtifactBlock,
-  GeneratedImageArtifacts,
-  ReasoningTrace,
-} from "./reasoning-trace";
+  AssistantActivityRenderItems,
+  AssistantActivityStack,
+  type AssistantActivityPlaceholderPhase,
+} from "./assistant-activity-stack";
+import { buildAssistantActivityItems } from "./assistant-activity-items";
+import {
+  buildAssistantRenderSegments,
+} from "./assistant-render-segments";
+import { findLastAnswerSegmentId } from "./message-evidence";
+import { AssistantWorkflowAccordion } from "./assistant-workflow-accordion";
+import { buildAssistantTimelineSegments } from "./assistant-timeline-segments";
 import {
   mergeSourceIds,
   SourceIcon,
   toAttachmentData,
   UserMessageText,
 } from "./source-rendering";
+import {
+  resolveMessageVersionRunLifecycle,
+  summarizeActiveThreadRun,
+  summarizeMessageVersionThreadRun,
+} from "./thread-run-state";
 import type {
+  ArtifactStatusSnapshot,
   ArtifactPreviewRecord,
   CitationRecord,
   ChatMessageImagePart,
-  MessageRenderBlock,
   MessageVersion,
   ToolConfirmationResolution,
-  ToolCallRecord,
   VersionedMessageGroup,
 } from "./types";
+import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-control";
 
-function hasRenderBlocks(blocks: MessageRenderBlock[] | undefined) {
-  return blocks !== undefined && blocks.length > 0;
+function sanitizeClientErrorMessage(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) {
+    return null;
+  }
+  if (
+    /Error invoking tool/i.test(text) ||
+    /Received tool input did not match expected schema/i.test(text) ||
+    /\bkwargs\b/i.test(text) ||
+    /Invalid input: expected .*received/i.test(text)
+  ) {
+    const toolName =
+      text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
+      text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
+    return toolName
+      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
+      : "The generated tool arguments were invalid. Please retry.";
+  }
+  return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
 }
 
-function getToolCallById(toolCalls: ToolCallRecord[] | undefined) {
-  return new Map((toolCalls ?? []).map((toolCall) => [toolCall.id, toolCall]));
-}
+const messageTimestampFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
-function getInlineGeneratedImageToolIds(input: {
-  blocks: MessageRenderBlock[] | undefined;
-  toolCallById: Map<string, ToolCallRecord>;
-}) {
-  return new Set(
-    (input.blocks ?? [])
-      .filter(
-        (
-          block,
-        ): block is Extract<MessageRenderBlock, { type: "generated_image" }> =>
-          block.type === "generated_image",
-      )
-      .filter((block) => input.toolCallById.has(block.toolCallId))
-      .map((block) => block.toolCallId),
-  );
-}
+function formatMessageTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
 
-function getTrailingGeneratedImageToolCalls(input: {
-  inlineToolIds: Set<string>;
-  toolCalls?: ToolCallRecord[];
-}) {
-  return (input.toolCalls ?? []).filter(
-    (toolCall) => !input.inlineToolIds.has(toolCall.id),
-  );
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return messageTimestampFormatter.format(parsed);
 }
 
 function toImageAttachmentData(image: ChatMessageImagePart) {
@@ -177,13 +189,17 @@ function unescapeMarkerLabel(value: string) {
 
 function parseMarkerContent(content: string): UserContentToken[] {
   const tokens: UserContentToken[] = [];
-  const pattern = /\[(skills|skill-command|tool|source):([^\]]+)\]\(((?:\\.|[^)])*)\)/g;
+  const pattern =
+    /\[(skills|skill-command|tool|source):([^\]]+)\]\(((?:\\.|[^)])*)\)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(content)) !== null) {
     if (match.index > lastIndex) {
-      tokens.push({ text: content.slice(lastIndex, match.index), type: "text" });
+      tokens.push({
+        text: content.slice(lastIndex, match.index),
+        type: "text",
+      });
     }
 
     const rawKind = match[1];
@@ -244,7 +260,10 @@ function commandTokenDisplayName(
     ? command.value
     : `/${command.value}`;
   if (command.kind === "tool") {
-    return normalized === "/generate_image" ? "Generate image" : normalized;
+    return (
+      getAgentToolSlashCommand(normalized.replace(/^\//, ""))?.displayName ??
+      normalized
+    );
   }
   const skillSlug = normalized.replace(/^\//, "").split(":")[0] ?? normalized;
   return skillSlug
@@ -263,13 +282,27 @@ function UserCommandSegmentView({
   if (!label) {
     return null;
   }
-  const Icon = command.kind === "tool" ? WrenchIcon : SkillIcon;
+  const actionIcon =
+    command.kind === "tool" ? getActionIcon(command.value) : null;
+  const fallbackIconName = command.kind === "tool" ? "tool" : "skill";
+  const useMutedIcon =
+    actionIcon?.iconName &&
+    actionIcon.iconName !== fallbackIconName &&
+    actionIcon.iconTone !== "brand";
   return (
     <span
       className="inline-flex max-w-full items-center gap-1 align-baseline text-sm font-semibold leading-6 text-blue-600 dark:text-blue-400"
       title={command.value}
     >
-      <Icon className="size-3.5 shrink-0" />
+      <PromptCommandIcon
+        className={cn(
+          "size-3.5 shrink-0",
+          useMutedIcon && "text-muted-foreground",
+        )}
+        fallbackIconName={fallbackIconName}
+        iconName={actionIcon?.iconName}
+        iconTone={actionIcon?.iconTone}
+      />
       <span className="truncate">{label}</span>
     </span>
   );
@@ -288,7 +321,9 @@ function UserMessageContent({
 }) {
   const tokens = parseMarkerContent(content);
 
-  const sourceFromToken = (token: Extract<UserContentToken, { type: "source" }>) =>
+  const sourceFromToken = (
+    token: Extract<UserContentToken, { type: "source" }>,
+  ) =>
     sourceById.get(token.sourceId) ?? {
       contentText: "",
       id: token.sourceId,
@@ -397,85 +432,77 @@ function UserMessageReferences({
 }
 
 function AssistantMessageBody({
+  artifactStatuses,
   isStreaming,
-  messageText,
+  onArtifactPreview,
   onCitationClick,
   onWorkfileClick,
+  resolvedConfirmations,
   version,
   workspaceId,
 }: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   isStreaming: boolean;
-  messageText: string;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
+  resolvedConfirmations?: ToolConfirmationResolution[];
   version: MessageVersion;
   workspaceId?: string | null;
 }) {
-  const fallbackRenderBlocks = !hasRenderBlocks(version.renderBlocks)
-    ? buildRenderBlocksFromMessageContent({
-        content: version.content,
-        toolCalls: version.toolCalls,
-        workspaceId,
-      })
-    : null;
-  const renderBlocks = hasRenderBlocks(version.renderBlocks)
-    ? (version.renderBlocks ?? [])
-    : fallbackRenderBlocks;
-  const toolCallById = getToolCallById(version.toolCalls);
-  const inlineToolIds = getInlineGeneratedImageToolIds({
-    blocks: renderBlocks ?? [],
-    toolCallById,
-  });
-  const trailingImageToolCalls = getTrailingGeneratedImageToolCalls({
-    inlineToolIds,
-    toolCalls: version.toolCalls,
-  });
+  const renderBlocks = version.renderBlocks ?? [];
   const cancelledNotice = version.isCancelled ? "已由用户停止生成。" : null;
-
-  if (!renderBlocks) {
-    return (
-      <>
-        {messageText.length > 0 ? (
-          <CitationAwareMessageResponse
-            availableCitations={version.availableCitations}
-            citations={version.citations}
-            onCitationClick={onCitationClick}
-            onWorkfileClick={onWorkfileClick}
-            showLoading={
-              isStreaming &&
-              version.isTextPaused === true &&
-              messageText.length > 0
-            }
-          >
-            {messageText}
-          </CitationAwareMessageResponse>
-        ) : null}
-        {cancelledNotice ? (
-          <p className="text-sm text-muted-foreground">{cancelledNotice}</p>
-        ) : null}
-        <GeneratedImageArtifacts
-          toolCalls={version.toolCalls}
-          workspaceId={workspaceId}
-        />
-      </>
-    );
+  const isWorkflowRunning =
+    isStreaming ||
+    version.threadRun?.status === "running" ||
+    version.threadRun?.status === "queued";
+  const segments = buildAssistantRenderSegments(renderBlocks, {
+    includeTrailingTextInWorkflow: isWorkflowRunning,
+  });
+  const workflowSegmentCount = segments.filter(
+    (segment) => segment.type === "workflow",
+  ).length;
+  let lastWorkflowSegmentId: string | null = null;
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index];
+    if (segment?.type === "workflow") {
+      lastWorkflowSegmentId = segment.id;
+      break;
+    }
   }
+  const lastAnswerSegmentId = findLastAnswerSegmentId({
+    segments,
+    version,
+    workspaceId,
+  });
 
   return (
     <>
-      {renderBlocks.map((block) => {
-        if (block.type === "generated_image") {
+      {segments.map((segment) => {
+        if (segment.type === "workflow") {
           return (
-            <GeneratedImageArtifactBlock
-              key={block.id}
-              toolCall={toolCallById.get(block.toolCallId)}
+            <AssistantWorkflowAccordion
+              artifactStatuses={artifactStatuses}
+              blocks={segment.blocks}
+              durationMs={
+                workflowSegmentCount === 1 ? version.threadRun?.durationMs : null
+              }
+              isRunning={
+                segment.id === lastWorkflowSegmentId && isWorkflowRunning
+              }
+              key={segment.id}
+              onArtifactPreview={onArtifactPreview}
+              onCitationClick={onCitationClick}
+              onWorkfileClick={onWorkfileClick}
+              resolvedConfirmations={resolvedConfirmations}
+              version={version}
               workspaceId={workspaceId}
             />
           );
         }
 
         const blockText = stripGeneratedImageMarkdown({
-          content: block.text,
+          content: segment.blocks.map((block) => block.text).join(""),
           toolCalls: version.toolCalls,
           trim: false,
           workspaceId,
@@ -486,15 +513,16 @@ function AssistantMessageBody({
 
         return (
           <CitationAwareMessageResponse
-            availableCitations={version.availableCitations}
+            availableCitations={
+              segment.id === lastAnswerSegmentId ? version.availableCitations : []
+            }
             citations={version.citations}
-            key={block.id}
+            key={segment.id}
             onCitationClick={onCitationClick}
             onWorkfileClick={onWorkfileClick}
             showLoading={
               isStreaming &&
-              version.isTextPaused === true &&
-              version.renderBlocks?.at(-1)?.id === block.id &&
+              renderBlocks.at(-1)?.id === segment.blocks.at(-1)?.id &&
               blockText.length > 0
             }
           >
@@ -505,16 +533,156 @@ function AssistantMessageBody({
       {cancelledNotice ? (
         <p className="text-sm text-muted-foreground">{cancelledNotice}</p>
       ) : null}
-      <GeneratedImageArtifacts
-        toolCalls={trailingImageToolCalls}
-        workspaceId={workspaceId}
+    </>
+  );
+}
+
+function AssistantTimeline({
+  artifactStatuses,
+  activityPlaceholderPhase,
+  isCancelled,
+  isStreaming,
+  messageText,
+  onArtifactPreview,
+  onCitationClick,
+  onWorkfileClick,
+  resolvedConfirmations,
+  version,
+  workspaceId,
+}: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
+  activityPlaceholderPhase?: AssistantActivityPlaceholderPhase | null;
+  isCancelled: boolean;
+  isStreaming: boolean;
+  messageText: string;
+  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  onCitationClick?: (citation: CitationRecord) => void;
+  onWorkfileClick?: (path: string) => void;
+  resolvedConfirmations?: ToolConfirmationResolution[];
+  version: MessageVersion;
+  workspaceId?: string | null;
+}) {
+  if ((version.renderBlocks?.length ?? 0) > 0) {
+    const activityItems = buildAssistantActivityItems({
+      assistantText: messageText,
+      steps: version.thinkingSteps,
+      toolCalls: version.toolCalls,
+      traceParts: version.traceParts,
+    }).filter((item) => item.type === "step" && !item.toolCallId);
+
+    return (
+      <>
+        {activityItems.length > 0 ? (
+          <div
+            className="my-1.5 max-w-2xl space-y-1 text-sm"
+            data-assistant-activity-stack="true"
+          >
+            <AssistantActivityRenderItems
+              items={activityItems}
+              onWorkfileClick={onWorkfileClick}
+              resolvedConfirmations={resolvedConfirmations}
+            />
+          </div>
+        ) : null}
+        <AssistantMessageBody
+          artifactStatuses={artifactStatuses}
+          isStreaming={isStreaming}
+          onArtifactPreview={onArtifactPreview}
+          onCitationClick={onCitationClick}
+          onWorkfileClick={onWorkfileClick}
+          resolvedConfirmations={resolvedConfirmations}
+          version={version}
+          workspaceId={workspaceId}
+        />
+      </>
+    );
+  }
+
+  const activityItems = buildAssistantActivityItems({
+    assistantText: "",
+    steps: version.thinkingSteps,
+    toolCalls: version.toolCalls,
+    traceParts: version.traceParts,
+  });
+  const segments = buildAssistantTimelineSegments({
+    assistantText: "",
+    isTextInterrupted: version.isTextInterrupted,
+    items: activityItems,
+  });
+
+  if (segments.length === 0) {
+    return (
+      <AssistantActivityStack
+        assistantText={messageText}
+        isCancelled={isCancelled}
+        isStreaming={isStreaming}
+        onWorkfileClick={onWorkfileClick}
+        placeholderPhase={activityPlaceholderPhase}
+        resolvedConfirmations={resolvedConfirmations}
+        version={version}
       />
+    );
+  }
+
+  return (
+    <>
+      {segments.map((segment) => {
+        if (segment.type === "workflow") {
+          return (
+            <div
+              className="my-1.5 max-w-2xl space-y-1 text-sm"
+              data-assistant-activity-stack="true"
+              key={segment.key}
+            >
+              <AssistantActivityRenderItems
+                items={segment.items}
+                onWorkfileClick={onWorkfileClick}
+                resolvedConfirmations={resolvedConfirmations}
+              />
+            </div>
+          );
+        }
+
+        if (segment.text.trim().length === 0) {
+          return null;
+        }
+
+        if (segment.key === "assistant-final-text") {
+          return (
+            <CitationAwareMessageResponse
+              availableCitations={version.availableCitations}
+              citations={version.citations}
+              key={segment.key}
+              onCitationClick={onCitationClick}
+              onWorkfileClick={onWorkfileClick}
+              showLoading={isStreaming}
+            >
+              {segment.text}
+            </CitationAwareMessageResponse>
+          );
+        }
+
+        return (
+          <CitationAwareMessageResponse
+            availableCitations={[]}
+            citations={version.citations}
+            key={segment.key}
+            onCitationClick={onCitationClick}
+            onWorkfileClick={onWorkfileClick}
+            showLoading={false}
+          >
+            {segment.text}
+          </CitationAwareMessageResponse>
+        );
+      })}
     </>
   );
 }
 
 type MessageListProps = {
+  activeThreadRun?: ActiveThreadRun | null;
   activeVersionByGroup?: Record<string, number>;
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   allSources?: SourceItem[];
   hasOlderMessages?: boolean;
   highlightedMessageId?: string | null;
@@ -587,7 +755,10 @@ function resolveActiveOriginalBranchIndex(input: {
   desiredOriginalBranchIndexRaw?: number;
   versionEntries: MessageVersionEntry[];
 }) {
-  const latestVisibleVersionIndex = Math.max(input.versionEntries.length - 1, 0);
+  const latestVisibleVersionIndex = Math.max(
+    input.versionEntries.length - 1,
+    0,
+  );
   const defaultOriginalBranchIndex =
     input.versionEntries[latestVisibleVersionIndex]?.originalIndex ?? 0;
   const desiredOriginalBranchIndex =
@@ -664,7 +835,8 @@ function resolveSelectedAssistantVersionForUser(input: {
   const preferredAssistantVersion =
     assistantGroup.versions[preferredAssistantIndex] ?? null;
   if (
-    preferredAssistantVersion?.sourceUserMessageId === input.selectedUserVersionId
+    preferredAssistantVersion?.sourceUserMessageId ===
+    input.selectedUserVersionId
   ) {
     return preferredAssistantVersion;
   }
@@ -730,10 +902,19 @@ function summarizeRenderBlocks(blocks: MessageVersion["renderBlocks"]) {
   return (blocks ?? [])
     .map((block) => {
       if (block.type === "text") {
-        return `${block.id}:text:${block.text.length}`;
+        return `${block.id}:text:${block.text}`;
+      }
+      if (block.type === "reasoning") {
+        return `${block.id}:reasoning:${block.durationMs ?? ""}:${block.text}`;
+      }
+      if (block.type === "tool") {
+        return `${block.id}:tool:${block.toolCallId}`;
       }
       if (block.type === "generated_image") {
         return `${block.id}:generated_image:${block.toolCallId}`;
+      }
+      if (block.type === "generated_presentation") {
+        return `${block.id}:generated_presentation:${block.toolCallId}`;
       }
       return "";
     })
@@ -764,11 +945,14 @@ function areMessageVersionsRenderEqual(
       left.effectiveMentionedSourceIds,
       right.effectiveMentionedSourceIds,
     ) &&
-    summarizeToolCalls(left.toolCalls) === summarizeToolCalls(right.toolCalls) &&
+    summarizeToolCalls(left.toolCalls) ===
+      summarizeToolCalls(right.toolCalls) &&
     summarizeThinkingSteps(left.thinkingSteps) ===
       summarizeThinkingSteps(right.thinkingSteps) &&
     summarizeRenderBlocks(left.renderBlocks) ===
       summarizeRenderBlocks(right.renderBlocks) &&
+    summarizeMessageVersionThreadRun(left.threadRun) ===
+      summarizeMessageVersionThreadRun(right.threadRun) &&
     (left.citations?.length ?? 0) === (right.citations?.length ?? 0) &&
     (left.availableCitations?.length ?? 0) ===
       (right.availableCitations?.length ?? 0) &&
@@ -789,13 +973,18 @@ function areMessageGroupsRenderEqual(
     left.turnId === right.turnId &&
     left.versions.length === right.versions.length &&
     left.versions.every((version, index) =>
-      areMessageVersionsRenderEqual(version, right.versions[index] as MessageVersion),
+      areMessageVersionsRenderEqual(
+        version,
+        right.versions[index] as MessageVersion,
+      ),
     )
   );
 }
 
 type MessageGroupItemProps = {
   activeOriginalBranchIndexRaw?: number;
+  activeThreadRun?: ActiveThreadRun | null;
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   group: VersionedMessageGroup;
   highlightedMessageId: string | null;
   isLatestAssistantGroup: boolean;
@@ -818,6 +1007,8 @@ type MessageGroupItemProps = {
 
 const MessageGroupItem = memo(function MessageGroupItem({
   activeOriginalBranchIndexRaw,
+  activeThreadRun,
+  artifactStatuses,
   group,
   highlightedMessageId,
   isLatestAssistantGroup,
@@ -868,18 +1059,29 @@ const MessageGroupItem = memo(function MessageGroupItem({
     >
       <MessageBranchContent>
         {versionEntries.map(({ version }, versionIndex) => {
-          const messageText = getMessageText({
+          const rawMessageText = getMessageText({
             version,
             workspaceId,
           });
+          const messageText =
+            version.isError && !version.isCancelled
+              ? (sanitizeClientErrorMessage(rawMessageText) ?? rawMessageText)
+              : rawMessageText;
           const userMessageImages = !isAssistant
             ? getMessageImageParts(version)
             : [];
+          const versionRunLifecycle =
+            isAssistant && versionIndex === activeVisibleBranchIndex
+              ? resolveMessageVersionRunLifecycle({
+                  activeThreadRun,
+                  isLatestAssistantGroup,
+                  isStreaming,
+                  version,
+                })
+              : "idle";
           const isStreamingThisVersion =
-            isStreaming &&
-            isAssistant &&
-            isLatestAssistantGroup &&
-            versionIndex === activeVisibleBranchIndex;
+            versionRunLifecycle === "live" ||
+            versionRunLifecycle === "waiting_for_approval";
           const referencedSources = !isAssistant
             ? selectedSourceIdsByKey
                 .resolve(version)
@@ -894,6 +1096,14 @@ const MessageGroupItem = memo(function MessageGroupItem({
                 .map((sourceId) => sourceById.get(sourceId))
                 .filter((source): source is SourceItem => Boolean(source))
             : [];
+          const activityPlaceholderPhase: AssistantActivityPlaceholderPhase | null =
+            isAssistant &&
+            versionIndex === activeVisibleBranchIndex &&
+            !version.isCancelled &&
+            isStreamingThisVersion
+              ? "thinking"
+              : null;
+          const messageTimestamp = formatMessageTimestamp(version.createdAt);
 
           return (
             <div
@@ -910,6 +1120,17 @@ const MessageGroupItem = memo(function MessageGroupItem({
                   images={userMessageImages}
                   sources={referencedSources}
                 />
+              ) : null}
+              {messageTimestamp ? (
+                <div
+                  className={cn(
+                    "flex min-h-5 px-1 text-[11px] leading-5 text-muted-foreground",
+                    isAssistant ? "justify-start" : "justify-end",
+                    toolbarVisibilityClass,
+                  )}
+                >
+                  <span>{messageTimestamp}</span>
+                </div>
               ) : null}
               <Message from={group.role}>
                 <MessageContent
@@ -930,17 +1151,17 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <ReasoningTrace
+                      <AssistantTimeline
+                        artifactStatuses={artifactStatuses}
+                        activityPlaceholderPhase={activityPlaceholderPhase}
                         isCancelled={version.isCancelled === true}
                         isStreaming={isStreamingThisVersion}
-                        modelReasoning={version.modelReasoning}
-                        modelReasoningSegments={version.modelReasoningSegments}
-                        traceEvents={version.traceEvents}
-                        traceParts={version.traceParts}
+                        messageText={messageText}
                         onArtifactPreview={onArtifactPreview}
+                        onCitationClick={onCitationClick}
+                        onWorkfileClick={onWorkfileClick}
                         resolvedConfirmations={resolvedConfirmations}
-                        steps={version.thinkingSteps}
-                        toolCalls={version.toolCalls}
+                        version={version}
                         workspaceId={workspaceId}
                       />
                       <WebToolResults
@@ -948,19 +1169,13 @@ const MessageGroupItem = memo(function MessageGroupItem({
                         onCitationClick={onCitationClick}
                         toolCalls={version.toolCalls}
                       />
-                      <AssistantMessageBody
-                        isStreaming={isStreamingThisVersion}
-                        messageText={messageText}
-                        onCitationClick={onCitationClick}
-                        onWorkfileClick={onWorkfileClick}
-                        version={version}
-                        workspaceId={workspaceId}
-                      />
                       {version.isError && !version.isCancelled ? (
                         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                           <p className="font-medium">Message failed</p>
                           <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
-                            {version.error ?? messageText}
+                            {sanitizeClientErrorMessage(
+                              version.error ?? messageText,
+                            ) ?? "Model error"}
                           </p>
                           {version.errorCode ? (
                             <p className="mt-1 text-xs text-destructive/70">
@@ -1070,6 +1285,8 @@ function areMessageGroupItemPropsEqual(
   if (
     previous.activeOriginalBranchIndexRaw !==
       next.activeOriginalBranchIndexRaw ||
+    summarizeActiveThreadRun(previous.activeThreadRun) !==
+      summarizeActiveThreadRun(next.activeThreadRun) ||
     previous.isLatestAssistantGroup !== next.isLatestAssistantGroup ||
     previous.isLatestUserGroup !== next.isLatestUserGroup ||
     previous.selectedUserVersionIdForAssistant !==
@@ -1151,8 +1368,10 @@ function areConfirmationResolutionsEqual(
 }
 
 export function MessageList({
+  activeThreadRun = null,
   activeVersionByGroup = {},
   allSources = [],
+  artifactStatuses,
   hasOlderMessages = false,
   highlightedMessageId = null,
   isLoadingOlderMessages = false,
@@ -1222,6 +1441,7 @@ export function MessageList({
   const collapsedHistoryCount =
     !showCollapsedHistory &&
     !isStreaming &&
+    !activeThreadRun &&
     messageGroups.length > MESSAGE_HISTORY_COLLAPSE_THRESHOLD
       ? messageGroups.length - MESSAGE_HISTORY_VISIBLE_TAIL_COUNT
       : 0;
@@ -1231,7 +1451,7 @@ export function MessageList({
       : messageGroups;
 
   return (
-    <Conversation className="h-full min-h-0 flex-1 overflow-hidden">
+    <Conversation className="h-full min-h-0 flex-1 overflow-hidden [scrollbar-gutter:stable]">
       <ConversationContent className="px-6 py-8">
         <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-4">
           {hasOlderMessages ? (
@@ -1279,7 +1499,8 @@ export function MessageList({
             });
             const { activeOriginalBranchIndex } =
               resolveActiveOriginalBranchIndex({
-                desiredOriginalBranchIndexRaw: activeVersionByGroup[group.groupId],
+                desiredOriginalBranchIndexRaw:
+                  activeVersionByGroup[group.groupId],
                 versionEntries,
               });
             const selectedUserVersionId =
@@ -1301,6 +1522,8 @@ export function MessageList({
                 activeOriginalBranchIndexRaw={
                   activeVersionByGroup[group.groupId]
                 }
+                activeThreadRun={activeThreadRun}
+                artifactStatuses={artifactStatuses}
                 group={group}
                 highlightedMessageId={highlightedMessageId}
                 isLatestAssistantGroup={isLatestAssistantGroup}

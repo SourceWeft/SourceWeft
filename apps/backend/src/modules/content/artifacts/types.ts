@@ -38,6 +38,62 @@ export type GenerateImageToolSelection = {
   config?: Partial<ArtifactImageConfig>;
 };
 
+export type GeneratePptxToolSelection = {
+  enabled?: boolean;
+  generationMode?: "visual_html" | "editable_native";
+  design?: {
+    aspectRatio?: "16:9" | "16:10" | "4:3";
+    customBrief?: string;
+    language?: "zh" | "en" | "auto";
+    stylePreset?:
+      | "executive"
+      | "technical"
+      | "editorial"
+      | "data-heavy"
+      | "custom";
+    visualSystem?: {
+      backgroundTreatment?: "auto" | "plain" | "grid" | "paper" | "image" | "gradient" | "diagram";
+      chrome?: "minimal" | "magazine" | "lecture" | "report";
+      compositionStyle?: "auto" | "axis" | "poster" | "split" | "notebook" | "schematic" | "report";
+      coverTreatment?: string;
+      density?: "airy" | "balanced" | "dense";
+      geometry?: "sharp" | "soft" | "editorial" | "technical";
+      illustration?: "none" | "icons" | "diagrams" | "image-led" | "handdrawn";
+      palette?: string[];
+      typography?: string[];
+      layoutPrinciples?: string[];
+      motifs?: string[];
+      layoutPolicy?: {
+        strict?: boolean;
+        diversity?: "normal" | "high";
+      };
+      styleFamily?:
+        | "auto"
+        | "swiss"
+        | "magazine"
+        | "education"
+        | "blueprint"
+        | "data-report"
+        | "editorial";
+      imageDirection?: string;
+      motion?: string;
+    };
+  };
+  output?: {
+    includeSourceJson?: boolean;
+  };
+  rendering?: {
+    preferHtmlTables?: boolean;
+  };
+};
+
+export type GenerateVideoPresentationToolSelection = {
+  enabled?: boolean;
+  narration?: {
+    enabled?: boolean;
+  };
+};
+
 export type ImageModelCapabilities = {
   supported: boolean;
   provider?: string;
@@ -89,7 +145,13 @@ const IMAGE_ASPECT_RATIOS = [
   "1:8",
   "8:1",
 ] as const;
-const IMAGE_QUALITIES = ["auto", "low", "standard", "higher", "highest"] as const;
+const IMAGE_QUALITIES = [
+  "auto",
+  "low",
+  "standard",
+  "higher",
+  "highest",
+] as const;
 const IMAGE_STYLES = ["auto", "ghibli", "pixar", "cartoon", "pixel"] as const;
 
 function normalizeEnumValue<T extends readonly string[]>(
@@ -110,7 +172,9 @@ function normalizeOptionalEnumValue<T extends readonly string[]>(
   if (typeof value !== "string") {
     return undefined;
   }
-  return allowed.includes(value as T[number]) ? (value as T[number]) : undefined;
+  return allowed.includes(value as T[number])
+    ? (value as T[number])
+    : undefined;
 }
 
 export function normalizeArtifactImageConfig(
@@ -159,19 +223,13 @@ export function normalizePartialArtifactImageConfig(
     }
   }
   if (record.quality !== undefined) {
-    const quality = normalizeOptionalEnumValue(
-      record.quality,
-      IMAGE_QUALITIES,
-    );
+    const quality = normalizeOptionalEnumValue(record.quality, IMAGE_QUALITIES);
     if (quality) {
       config.quality = quality;
     }
   }
   if (record.style !== undefined) {
-    const style = normalizeOptionalEnumValue(
-      record.style,
-      IMAGE_STYLES,
-    );
+    const style = normalizeOptionalEnumValue(record.style, IMAGE_STYLES);
     if (style) {
       config.style = style;
     }
@@ -221,7 +279,9 @@ export function normalizeGenerateImageToolSelection(
       : undefined;
   const config = normalizePartialArtifactImageConfig(record.config);
   const execution =
-    record.execution && typeof record.execution === "object" && !Array.isArray(record.execution)
+    record.execution &&
+    typeof record.execution === "object" &&
+    !Array.isArray(record.execution)
       ? (record.execution as GenerateImageToolSelection["execution"])
       : undefined;
   const enabled =

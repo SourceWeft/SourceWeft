@@ -76,6 +76,7 @@ export async function uploadArtifactObject(input: {
   key: string;
   body: Buffer;
   contentType: string;
+  signal?: AbortSignal;
 }) {
   await s3Client.send(
     new PutObjectCommand({
@@ -84,6 +85,7 @@ export async function uploadArtifactObject(input: {
       Body: input.body,
       ContentType: input.contentType,
     }),
+    { abortSignal: input.signal },
   );
 }
 

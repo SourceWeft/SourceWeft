@@ -68,6 +68,16 @@ test("buildThreadToolsMetadata stores canonical tool-name keyed fields", () => {
       generateImageTool: {
         config: { style: "cartoon" },
       },
+      generatePptxTool: {
+        enabled: true,
+        generationMode: "editable_native",
+        design: { aspectRatio: "16:10", stylePreset: "technical" },
+        rendering: { preferHtmlTables: true },
+      },
+      generateVideoPresentationTool: {
+        enabled: true,
+        narration: { enabled: true },
+      },
       notionTools: {
         search_notion_pages: { enabled: true, connectorId: "connector_1" },
       },
@@ -75,8 +85,74 @@ test("buildThreadToolsMetadata stores canonical tool-name keyed fields", () => {
     {
       skillIds: ["skill-1"],
       web_search: { enabled: true },
-      generate_image: { config: { style: "cartoon" } },
+      generate_image: { enabled: true, config: { style: "cartoon" } },
+      generate_pptx: {
+        enabled: true,
+        generationMode: "editable_native",
+        design: { aspectRatio: "16:10", stylePreset: "technical" },
+        rendering: { preferHtmlTables: true },
+      },
+      generate_video_presentation: {
+        enabled: true,
+        narration: { enabled: true },
+      },
       search_notion_pages: { enabled: true, connectorId: "connector_1" },
+    },
+  );
+});
+
+test("resolveGeneratePptxToolSelection keeps design, rendering, and output settings", () => {
+  assert.deepEqual(
+    testExports.resolveGeneratePptxToolSelection({
+      generate_pptx: {
+        enabled: true,
+        generationMode: "visual_html",
+        design: {
+          aspectRatio: "4:3",
+          language: "zh",
+          stylePreset: "data-heavy",
+        },
+        output: {
+          includeSourceJson: true,
+        },
+        rendering: {
+          preferHtmlTables: false,
+        },
+      },
+    }),
+    {
+      enabled: true,
+      generationMode: "visual_html",
+      design: {
+        aspectRatio: "4:3",
+        language: "zh",
+        stylePreset: "data-heavy",
+      },
+      output: {
+        includeSourceJson: true,
+      },
+      rendering: {
+        preferHtmlTables: false,
+      },
+    },
+  );
+});
+
+test("resolveGenerateVideoPresentationToolSelection keeps only enabled and narration settings", () => {
+  assert.deepEqual(
+    testExports.resolveGenerateVideoPresentationToolSelection({
+      generate_video_presentation: {
+        enabled: true,
+        narration: {
+          enabled: false,
+        },
+      },
+    }),
+    {
+      enabled: true,
+      narration: {
+        enabled: false,
+      },
     },
   );
 });
@@ -158,6 +234,40 @@ test("assertSelectedSkillsAllowedByTools rejects image skill when generate_image
           skill({
             name: "image-skill",
             tools: ["generate_image"],
+          }),
+        ],
+      }),
+    (error) =>
+      error instanceof ContentError && error.code === "SKILL_TOOL_DISABLED",
+  );
+});
+
+test("assertSelectedSkillsAllowedByTools rejects ppt skill when generate_pptx is disabled", () => {
+  assert.throws(
+    () =>
+      testExports.assertSelectedSkillsAllowedByTools({
+        generatePptxTool: { enabled: false },
+        enabledSkills: [
+          skill({
+            name: "ppt-skill",
+            tools: ["generate_pptx"],
+          }),
+        ],
+      }),
+    (error) =>
+      error instanceof ContentError && error.code === "SKILL_TOOL_DISABLED",
+  );
+});
+
+test("assertSelectedSkillsAllowedByTools rejects video presentation skill when disabled", () => {
+  assert.throws(
+    () =>
+      testExports.assertSelectedSkillsAllowedByTools({
+        generateVideoPresentationTool: { enabled: false },
+        enabledSkills: [
+          skill({
+            name: "video-presentation-skill",
+            tools: ["generate_video_presentation"],
           }),
         ],
       }),

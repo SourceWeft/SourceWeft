@@ -62,6 +62,22 @@ Self-host SourceWeft, use your own models for chat, embeddings, rerank, image, a
 
 5. **Use it everywhere.** Continue from the web app, desktop app, or browser extension with your sources and team workspace in sync.
 
+## Sandbox Execution (Alpha)
+
+SourceWeft can optionally run approved commands in an isolated, temporary sandbox runtime. The sandbox is a scratch execution environment; SourceWeft `/work` remains the durable working-file area.
+
+Mental model:
+
+- `/work` is durable SourceWeft workspace storage.
+- Sandbox `/workspace` is temporary and disposable.
+- Selected `/work` files may be copied into sandbox `/workspace/input` or `/workspace/work` only after explicit approval.
+- `/kb` source evidence is not mounted or copied directly into the sandbox.
+- Commands run in the sandbox only after human approval.
+- Outputs are not durable until collected back into `/work` or published through a supported artifact pipeline.
+- Sandbox-generated outputs are not citable evidence unless verified against citable sources.
+
+The sandbox provider is an operator detail; users should think in terms of an isolated temporary execution environment rather than a specific provider.
+
 ---
 
 ## Self-host with Docker
@@ -79,6 +95,10 @@ docker compose -f docker/docker-compose.yml up -d
 ```
 
 Open **http://localhost:3000**, sign up, and start.
+
+Sandbox execution is disabled in the base compose file. To enable sandbox
+execution, point the `DAYTONA_*` values in `docker/.env` at an external Daytona
+deployment and review the sandbox TTL, timeout, and file/output byte limits.
 
 SaaS billing and payment checkout are opt-in. See the SaaS billing block in
 `docker/.env.example` for the required `SOURCEWEFT_SAAS_ENABLED`,

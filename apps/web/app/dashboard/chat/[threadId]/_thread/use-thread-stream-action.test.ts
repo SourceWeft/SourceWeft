@@ -3,7 +3,10 @@ import { test } from "vitest";
 import type { ToolCallRecord, TracePartRecord } from "../../_components/chat-canvas";
 import {
   excludeResolvedToolConfirmationCalls,
+  resolveReasoningTraceEventsFromMetadata,
   resolveTracePartToolConfirmations,
+  resolveTracePartsFromMetadata,
+  resolveThinkingStepsFromMetadata,
   resolveToolConfirmationCalls,
 } from "./message-normalizers";
 
@@ -138,5 +141,61 @@ test("approval continuations mark resolved trace parts terminal", () => {
       ? (resolvedPart.output as { status?: string } | undefined)?.status
       : null,
     "rejected",
+  );
+});
+
+test("terminal messages normalize stale running thinking steps", () => {
+  const metadata = {
+    finishReason: "command_success_criteria_failed",
+    threadRun: {
+      status: "failed",
+    },
+    thinkingSteps: [
+      {
+        id: "command-retry",
+        title: "Retrying command",
+        status: "in_progress",
+        items: [],
+      },
+    ],
+    traceEvents: [
+      {
+        type: "thinking-step",
+        id: "step-event-1",
+        step: {
+          id: "command-retry",
+          title: "Retrying command",
+          status: "in_progress",
+          items: [],
+        },
+      },
+    ],
+    traceParts: [
+      {
+        id: "command-retry",
+        kind: "step",
+        order: 0,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        title: "Retrying command",
+        status: "in_progress",
+        items: [],
+      },
+    ],
+  };
+
+  assert.equal(
+    resolveThinkingStepsFromMetadata(metadata)[0]?.status,
+    "completed",
+  );
+  const traceEvent = resolveReasoningTraceEventsFromMetadata(metadata)[0];
+  assert.equal(
+    traceEvent?.type === "thinking-step" ? traceEvent.step.status : null,
+    "completed",
+  );
+  const tracePart = resolveTracePartsFromMetadata(metadata)[0];
+  assert.equal(
+    tracePart?.kind === "step" ? tracePart.status : null,
+    "completed",
   );
 });

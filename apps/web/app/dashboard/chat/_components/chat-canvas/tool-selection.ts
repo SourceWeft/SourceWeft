@@ -2,17 +2,25 @@ import {
   AGENT_TOOL_NAMES,
   isGeneratedImageArtifactToolName,
   isNotionToolName,
+  isPresentationArtifactToolName,
+  isVideoPresentationArtifactToolName,
   isSkillActivatedAgentTool,
 } from "@sourceweft/sdk";
 import type {
+  ChatGeneratePptxToolSelection,
+  ChatGenerateVideoPresentationToolSelection,
   ChatGenerateImageToolSelection,
   ChatImageArtifactConfig,
+  ChatPptxArtifactConfig,
   ChatSkillItem,
   ChatToolsSelection,
   ImageAspectRatio,
   ImageModelCapabilities,
   ImageQuality,
   ImageStyle,
+  PptxAspectRatio,
+  PptxLanguage,
+  PptxStylePreset,
   PromptThinkingSettings,
   ThinkingEffort,
 } from "./types";
@@ -54,6 +62,18 @@ export function buildChatToolsRequest(input: {
     },
     ...(generateImageWithExecution
       ? { [AGENT_TOOL_NAMES.generateImage]: generateImageWithExecution }
+      : {}),
+    ...(input.tools?.[AGENT_TOOL_NAMES.generatePptx]
+      ? {
+          [AGENT_TOOL_NAMES.generatePptx]:
+            input.tools[AGENT_TOOL_NAMES.generatePptx],
+        }
+      : {}),
+    ...(input.tools?.[AGENT_TOOL_NAMES.generateVideoPresentation]
+      ? {
+          [AGENT_TOOL_NAMES.generateVideoPresentation]:
+            input.tools[AGENT_TOOL_NAMES.generateVideoPresentation],
+        }
       : {}),
     ...Object.fromEntries(
       notionAgentToolNames.flatMap((toolName) => {
@@ -116,6 +136,56 @@ export const imageStyleOptions: Array<{ value: ImageStyle; label: string }> = [
   { value: "pixel", label: "Pixel" },
 ];
 
+export const pptxStylePresetOptions: Array<{
+  value: PptxStylePreset;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "executive",
+    label: "Executive",
+    description: "Quiet strategy deck with crisp claims and restrained color.",
+  },
+  {
+    value: "technical",
+    label: "Technical",
+    description: "System diagrams, dense labels, and precise structure.",
+  },
+  {
+    value: "editorial",
+    label: "Editorial",
+    description: "Narrative pacing, bold typography, and image-led moments.",
+  },
+  {
+    value: "data-heavy",
+    label: "Data-heavy",
+    description: "Tables, charts, KPI grids, and appendix-ready layouts.",
+  },
+  {
+    value: "custom",
+    label: "Custom",
+    description: "Let the agent infer a bespoke visual direction.",
+  },
+];
+
+export const pptxAspectRatioOptions: Array<{
+  value: PptxAspectRatio;
+  label: string;
+}> = [
+  { value: "16:9", label: "16:9" },
+  { value: "16:10", label: "16:10" },
+  { value: "4:3", label: "4:3" },
+];
+
+export const pptxLanguageOptions: Array<{
+  value: PptxLanguage;
+  label: string;
+}> = [
+  { value: "auto", label: "Auto" },
+  { value: "zh", label: "中文" },
+  { value: "en", label: "English" },
+];
+
 function optionLabel<T extends string>(
   options: Array<{ value: T; label: string }>,
   value: T,
@@ -139,6 +209,27 @@ export function imageConfigSummary(config: ChatImageArtifactConfig) {
   return parts.length > 0 ? parts.join(" · ") : "Auto";
 }
 
+export function pptxConfigSummary(config: ChatPptxArtifactConfig) {
+  const mode =
+    config.generationMode === "editable_native"
+      ? "Editable PowerPoint"
+      : "Visual deck";
+  const style =
+    pptxStylePresetOptions.find(
+      (option) => option.value === config.design.stylePreset,
+    )?.label ?? config.design.stylePreset;
+  return [
+    mode,
+    style,
+    config.design.aspectRatio,
+    config.design.language !== "auto"
+      ? optionLabel(pptxLanguageOptions, config.design.language)
+      : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+}
+
 export const DEFAULT_PROMPT_THINKING_SETTINGS: PromptThinkingSettings = {
   mode: "auto",
   effort: "medium",
@@ -150,12 +241,47 @@ export const DEFAULT_IMAGE_ARTIFACT_CONFIG: ChatImageArtifactConfig = {
   style: "auto",
 };
 
+export const DEFAULT_PPTX_ARTIFACT_CONFIG: ChatPptxArtifactConfig = {
+  generationMode: "visual_html",
+  design: {
+    aspectRatio: "16:9",
+    language: "auto",
+    stylePreset: "custom",
+  },
+  output: {
+    includeSourceJson: false,
+  },
+  rendering: {
+    preferHtmlTables: true,
+  },
+};
+
 export function skillSupportsImageGeneration(skill: ChatSkillItem) {
   return (
     skill.tools?.some(
       (toolName) =>
         isSkillActivatedAgentTool(toolName) &&
         isGeneratedImageArtifactToolName(toolName),
+    ) === true
+  );
+}
+
+export function skillSupportsPptxGeneration(skill: ChatSkillItem) {
+  return (
+    skill.tools?.some(
+      (toolName) =>
+        isSkillActivatedAgentTool(toolName) &&
+        isPresentationArtifactToolName(toolName),
+    ) === true
+  );
+}
+
+export function skillSupportsVideoPresentationGeneration(skill: ChatSkillItem) {
+  return (
+    skill.tools?.some(
+      (toolName) =>
+        isSkillActivatedAgentTool(toolName) &&
+        isVideoPresentationArtifactToolName(toolName),
     ) === true
   );
 }
@@ -289,9 +415,91 @@ function buildGenerateImageToolSelection(input: {
   };
 }
 
+function buildGeneratePptxToolSelection(input: {
+  config: ChatPptxArtifactConfig;
+  enabled: boolean;
+  selectedSkills: ChatSkillItem[];
+}): ChatGeneratePptxToolSelection | undefined {
+  if (!input.enabled) {
+    return { enabled: false };
+  }
+
+  const skillTriggered = input.selectedSkills.some(skillSupportsPptxGeneration);
+  const hasCustomGenerationMode =
+    input.config.generationMode !== DEFAULT_PPTX_ARTIFACT_CONFIG.generationMode;
+  const hasCustomDesign =
+    input.config.design.aspectRatio !==
+      DEFAULT_PPTX_ARTIFACT_CONFIG.design.aspectRatio ||
+    input.config.design.language !==
+      DEFAULT_PPTX_ARTIFACT_CONFIG.design.language ||
+    input.config.design.stylePreset !==
+      DEFAULT_PPTX_ARTIFACT_CONFIG.design.stylePreset;
+  const supportedOutput: ChatPptxArtifactConfig["output"] = {
+    includeSourceJson: input.config.output.includeSourceJson,
+  };
+  const hasCustomOutput =
+    supportedOutput.includeSourceJson !==
+    DEFAULT_PPTX_ARTIFACT_CONFIG.output.includeSourceJson;
+  const hasCustomRendering =
+    input.config.rendering.preferHtmlTables !==
+    DEFAULT_PPTX_ARTIFACT_CONFIG.rendering.preferHtmlTables;
+
+  if (
+    !skillTriggered &&
+    !hasCustomGenerationMode &&
+    !hasCustomDesign &&
+    !hasCustomOutput &&
+    !hasCustomRendering
+  ) {
+    return undefined;
+  }
+
+  return {
+    enabled: true,
+    ...(hasCustomGenerationMode || skillTriggered
+      ? { generationMode: input.config.generationMode }
+      : {}),
+    ...(hasCustomDesign || skillTriggered
+      ? { design: input.config.design }
+      : {}),
+    ...(hasCustomOutput ? { output: supportedOutput } : {}),
+    ...(hasCustomRendering || skillTriggered
+      ? { rendering: input.config.rendering }
+      : {}),
+  };
+}
+
+function buildGenerateVideoPresentationToolSelection(input: {
+  enabled: boolean;
+  narrationEnabled: boolean;
+  selectedSkills: ChatSkillItem[];
+  userConfigured?: boolean;
+}): ChatGenerateVideoPresentationToolSelection | undefined {
+  if (!input.enabled) {
+    return { enabled: false };
+  }
+
+  const hasCustomNarration = input.narrationEnabled !== true;
+  return input.userConfigured ||
+    hasCustomNarration ||
+    input.selectedSkills.some(skillSupportsVideoPresentationGeneration)
+    ? {
+        enabled: true,
+        ...(hasCustomNarration
+          ? { narration: { enabled: input.narrationEnabled } }
+          : {}),
+      }
+    : undefined;
+}
+
 export function buildComposerToolsSelection(input: {
   imageGenerationEnabled: boolean;
   imageSupported: boolean;
+  pptxConfig: ChatPptxArtifactConfig;
+  pptxGenerationEnabled?: boolean;
+  videoPresentationGenerationEnabled?: boolean;
+  videoPresentationNarrationEnabled?: boolean;
+  videoPresentationUserConfigured?: boolean;
   notionConnectorId?: string | null;
   notionToolsEnabled?: boolean;
   selectedSkills: ChatSkillItem[];
@@ -309,6 +517,31 @@ export function buildComposerToolsSelection(input: {
 
   if (generateImage) {
     tools[AGENT_TOOL_NAMES.generateImage] = generateImage;
+  }
+
+  if (input.pptxGenerationEnabled !== undefined) {
+    const generatePptx = buildGeneratePptxToolSelection({
+      config: input.pptxConfig,
+      enabled: input.pptxGenerationEnabled,
+      selectedSkills: input.selectedSkills,
+    });
+    if (generatePptx) {
+      tools[AGENT_TOOL_NAMES.generatePptx] = generatePptx;
+    }
+  }
+
+  if (input.videoPresentationGenerationEnabled !== undefined) {
+    const generateVideoPresentation =
+      buildGenerateVideoPresentationToolSelection({
+        enabled: input.videoPresentationGenerationEnabled,
+        narrationEnabled: input.videoPresentationNarrationEnabled ?? true,
+        selectedSkills: input.selectedSkills,
+        userConfigured: input.videoPresentationUserConfigured,
+      });
+    if (generateVideoPresentation) {
+      tools[AGENT_TOOL_NAMES.generateVideoPresentation] =
+        generateVideoPresentation;
+    }
   }
 
   if (input.notionConnectorId && input.notionToolsEnabled !== undefined) {

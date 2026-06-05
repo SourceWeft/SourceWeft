@@ -24,6 +24,17 @@ import {
   resolveSelectedSkills,
   resolveSkillIdsWithSlashCommand,
 } from "../../skills/selection";
+import { runInvocationPipeline } from "../../../invocations/pipeline";
+import { evaluateInvocationPolicy } from "../../../invocations/policy-evaluator";
+import type { InvocationEnvelope } from "../../../invocations/types";
+import type { SelectableInvocationRegistry } from "../../../invocations/registry";
+import { createSelectableInvocationRegistry } from "../../../invocations/registry";
+import { createBuiltinToolInvocationProvider } from "../../../invocations/providers/builtin-tools";
+import { createSkillCommandInvocationProvider } from "../../../invocations/providers/skills";
+import { createWorkspaceMcpInvocationProvider } from "../../../invocations/providers/workspace-mcp";
+import type { WorkspaceMcpInstall } from "../../../invocations/mcp-install";
+import type { WorkspaceMcpInstallRecord } from "../../../mcp/types";
+import { listWorkspaceMcpInstalls } from "../../../mcp/repository";
 import {
   findThreadRecord,
   updateThreadModelSettingsRecord,
@@ -54,6 +65,7 @@ import { assertSourcesExist } from "./source-validation";
 import type {
   PreparedThreadTurn,
   ConnectorToolSelection,
+  ResolvedThreadInvocation,
   ResolvedThreadCommand,
   StreamThreadEventInput,
 } from "./types";
@@ -74,6 +86,8 @@ import {
   buildThreadToolsMetadata,
   enableNotionToolSelection,
   resolveGenerateImageToolSelection,
+  resolveGeneratePptxToolSelection,
+  resolveGenerateVideoPresentationToolSelection,
   resolveMcpToolSelection,
   resolveNotionToolSelections,
   resolveWebSearchEnabled,
@@ -182,7 +196,10 @@ function resolveTraceContinuationMetadata(
     }
   }
   for (const part of traceParts) {
-    maxSequence = Math.max(maxSequence, part.order + 1);
+    const partSequence = getTraceSequence(part);
+    if (partSequence !== null) {
+      maxSequence = Math.max(maxSequence, partSequence);
+    }
   }
 
   const toolSequenceById: Record<string, number> = {};
@@ -194,11 +211,6 @@ function resolveTraceContinuationMetadata(
       if (typeof id === "string" && id.length > 0 && sequence !== null) {
         toolSequenceById[id] = sequence;
       }
-    }
-  }
-  for (const part of traceParts) {
-    if (part.kind === "tool" && toolSequenceById[part.toolCallId] === undefined) {
-      toolSequenceById[part.toolCallId] = part.order + 1;
     }
   }
 
@@ -235,6 +247,22 @@ function buildCommandAugmentedText(input: {
     ? ` path="/skills/${input.command.skillSlug}/${input.command.path}"`
     : "";
   return `<sourceweft_command name="${input.command.canonicalName}"${path}>\n${instruction}\n</sourceweft_command>\n\n<user_request>\n${args}\n</user_request>`;
+}
+
+function buildInvocationAugmentedText(input: {
+  invocation: ResolvedThreadInvocation | null;
+  text: string;
+}) {
+  if (!input.invocation) {
+    return input.text;
+  }
+  if (input.invocation.kind === "context_injection") {
+    return `<sourceweft_invocation id="${input.invocation.selectableId}" kind="context_injection">\n${input.invocation.instruction}\n</sourceweft_invocation>\n\n<user_request>\n${input.invocation.userInput}\n</user_request>`;
+  }
+  if (input.invocation.kind === "fixed_tool_choice") {
+    return `<sourceweft_invocation id="${input.invocation.selectableId}" kind="fixed_tool_choice" tool="${input.invocation.toolName}">\nUse the backend-selected tool for this request. Do not infer runtime semantics from the client payload.\n</sourceweft_invocation>\n\n<user_request>\n${input.invocation.userInput}\n</user_request>`;
+  }
+  return `<sourceweft_invocation id="${input.invocation.selectableId}" kind="direct_execute">\nThe backend resolved this selection for direct execution with structured arguments.\n</sourceweft_invocation>`;
 }
 
 type ParsedPromptMarker =
@@ -1120,16 +1148,21 @@ export const testExports = {
   buildVisionFallbackDescriptionPrompt,
   buildVisionFallbackGatewayMetadata,
   buildCommandAugmentedText,
+  buildInvocationAugmentedText,
   parsePromptMarkers,
   meterVisionFallbackBilling,
   parseRequestedCommand,
   resolveLatestAssistantFinalCheckpoint,
   resolveLatestSourceIds,
+  mergeCommandTools,
+  mergeInvocationTools,
   resolveTraceContinuationMetadata,
   resolveThreadCommand,
+  resolveThreadInvocation,
   resolveToolCommandName,
   resolveToolPermissions,
   shouldRejectEmptyThreadMessage,
+  buildTurnInvocationRegistry,
 };
 
 function normalizeSupportedParameters(value: unknown) {
@@ -1290,7 +1323,10 @@ async function resolvePreparedLlmConfig(input: {
 
 export async function prepareThreadTurn(
   input: StreamThreadEventInput,
-  dependencies: { billing?: ContentBillingPort } = {},
+  dependencies: {
+    billing?: ContentBillingPort;
+    invocationRegistry?: SelectableInvocationRegistry;
+  } = {},
 ): Promise<PreparedThreadTurn> {
   const displayMessageContent =
     input.existingUserMessage?.content.trim() ?? input.content.trim();
@@ -1443,6 +1479,20 @@ export async function prepareThreadTurn(
     command: requestedCommand,
     enabledSkills,
   });
+  const resolvedInvocation = resolveThreadInvocation({
+    envelope: input.invocation,
+    registry:
+      dependencies.invocationRegistry ??
+      buildTurnInvocationRegistry({
+        enabledSkills,
+        workspaceMcpInstalls: await resolveWorkspaceMcpInvocationInstalls({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+        }),
+      }),
+    workspaceId: workspace.id,
+    userId: input.userId,
+  });
   const commandSkillId =
     resolvedCommand?.kind === "skill" ||
     resolvedCommand?.kind === "skill-command"
@@ -1452,7 +1502,10 @@ export async function prepareThreadTurn(
   const effectiveInvokedSkillIds = Array.from(
     new Set([...invokedSkillIds, ...(commandSkillId ? [commandSkillId] : [])]),
   ).slice(0, 5);
-  const toolsWithCommand = mergeCommandTools(toolsWithMarkers, resolvedCommand);
+  const toolsWithCommand = mergeInvocationTools(
+    mergeCommandTools(toolsWithMarkers, resolvedCommand),
+    resolvedInvocation,
+  );
   const toolPermissions = resolveToolPermissions({
     tools: toolsWithCommand,
     command: resolvedCommand,
@@ -1490,9 +1543,14 @@ export async function prepareThreadTurn(
               : {}),
         }
       : generateImageTool;
+  const generatePptxTool = resolveGeneratePptxToolSelection(toolsWithCommand);
+  const generateVideoPresentationTool =
+    resolveGenerateVideoPresentationToolSelection(toolsWithCommand);
   assertSelectedSkillsAllowedByTools({
     enabledSkills,
     generateImageTool: effectiveGenerateImageTool,
+    generatePptxTool,
+    generateVideoPresentationTool,
   });
   const webSearchEnabled = resolveWebSearchEnabled({
     tools: toolsWithCommand,
@@ -1538,8 +1596,12 @@ export async function prepareThreadTurn(
   await validateThreadModelSettings(normalizedThreadSettings);
   const normalizedThreadSettingsWithSnapshots =
     await resolveThreadModelSettingsSnapshots(normalizedThreadSettings);
+  const shouldRunImageArtifactIntent = !(
+    resolvedCommand?.kind === "tool" &&
+    resolvedCommand.toolName !== AGENT_TOOL_NAMES.generateImage
+  );
   const artifactPipeline = await runArtifactIntentPipeline({
-    tools: effectiveGenerateImageTool
+    tools: shouldRunImageArtifactIntent && effectiveGenerateImageTool
       ? { [AGENT_TOOL_NAMES.generateImage]: effectiveGenerateImageTool }
       : undefined,
     enabledSkills,
@@ -1590,9 +1652,12 @@ export async function prepareThreadTurn(
   let preflightBilling: PreflightBillingTrace[] = [];
   let pendingVisionFallbackBilling: VisionFallbackBillingItem[] = [];
   const preflightThinkingSteps: ThinkingStepTrace[] = [];
-  const agentText = buildCommandAugmentedText({
-    command: resolvedCommand,
-    text: messageContent,
+  const agentText = buildInvocationAugmentedText({
+    invocation: resolvedInvocation,
+    text: buildCommandAugmentedText({
+      command: resolvedCommand,
+      text: messageContent,
+    }),
   });
   let agentMessageContent: string | AgentMultimodalContentPart[] = agentText;
   if (savedImages.length > 0) {
@@ -1689,6 +1754,8 @@ export async function prepareThreadTurn(
             : {}),
           webSearchEnabled,
           generateImageTool: effectiveGenerateImageTool,
+          generatePptxTool,
+          generateVideoPresentationTool,
           notionTools,
           mcpTools,
         }),
@@ -1811,11 +1878,14 @@ export async function prepareThreadTurn(
     notionTools,
     mcpTools: mcpTools ?? {},
     command: resolvedCommand,
+    invocation: resolvedInvocation,
     commandSuccessCriteria: resolvedCommand?.workflow?.successCriteria ?? {
       kind: "none",
     },
     toolPermissions,
     generateImageTool: effectiveGenerateImageTool,
+    generatePptxTool,
+    generateVideoPresentationTool,
     artifactIntent: artifactPipeline.decision,
     imageProfile: artifactPipeline.imageProfile,
     timezone,
@@ -1977,6 +2047,9 @@ function resolveThreadCommand(input: {
         404,
         "COMMAND_NOT_FOUND",
         `Tool command ${input.command.name} is not available for slash invocation`,
+        {
+          sourceRef: { kind: "builtin_tool", toolName },
+        },
       );
     }
     return {
@@ -1996,6 +2069,9 @@ function resolveThreadCommand(input: {
       404,
       "COMMAND_NOT_FOUND",
       `Tool command ${input.command.name} is not available for slash invocation`,
+      {
+        sourceRef: { kind: "builtin_tool", toolName: input.command.name },
+      },
     );
   }
 
@@ -2014,6 +2090,13 @@ function resolveThreadCommand(input: {
         404,
         "COMMAND_NOT_FOUND",
         `Skill ${normalized.canonicalName} is not available for this turn`,
+        {
+          sourceRef: {
+            kind: "skill_command",
+            skillSlug: normalized.skillSlug,
+            commandName: normalized.canonicalName,
+          },
+        },
       );
     }
     if (skill.slash === false || skill.slashConfig?.enabled === false) {
@@ -2021,6 +2104,13 @@ function resolveThreadCommand(input: {
         404,
         "COMMAND_NOT_FOUND",
         `Skill ${normalized.canonicalName} does not support slash invocation`,
+        {
+          sourceRef: {
+            kind: "skill_command",
+            skillSlug: normalized.skillSlug,
+            commandName: normalized.canonicalName,
+          },
+        },
       );
     }
     return {
@@ -2051,6 +2141,13 @@ function resolveThreadCommand(input: {
       404,
       "COMMAND_NOT_FOUND",
       `Command ${normalized.canonicalName} is not available for this turn`,
+      {
+        sourceRef: {
+          kind: "skill_command",
+          skillSlug: normalized.skillSlug,
+          commandName: normalized.commandName,
+        },
+      },
     );
   }
   if (
@@ -2062,6 +2159,13 @@ function resolveThreadCommand(input: {
       404,
       "COMMAND_NOT_FOUND",
       `Command ${normalized.canonicalName} does not support slash invocation`,
+      {
+        sourceRef: {
+          kind: "skill_command",
+          skillSlug: normalized.skillSlug,
+          commandName: normalized.commandName,
+        },
+      },
     );
   }
 
@@ -2088,6 +2192,235 @@ function resolveThreadCommand(input: {
   };
 }
 
+function buildTurnInvocationRegistry(input: {
+  enabledSkills: PreparedThreadTurn["enabledSkills"];
+  workspaceMcpInstalls?: WorkspaceMcpInstall[];
+  providers?: Parameters<typeof createSelectableInvocationRegistry>[0]["providers"];
+}) {
+  return createSelectableInvocationRegistry({
+    providers: input.providers ?? [
+      createBuiltinToolInvocationProvider({
+        tools: Object.values(AGENT_TOOL_NAMES).map((toolName) => {
+          const slashCommand = getAgentToolSlashCommand(toolName);
+          return {
+            name: toolName,
+            label: slashCommand?.displayName ?? toolName,
+            description: slashCommand?.description,
+            slashAlias: slashCommand?.aliases?.[0],
+          };
+        }),
+      }),
+      createSkillCommandInvocationProvider({
+        skills: input.enabledSkills.map((skill) => ({
+          workspaceSkillId: skill.workspaceSkillId,
+          skillSlug: skill.name,
+          displayName: skill.displayName ?? skill.name,
+          enabled: skill.slash !== false && skill.slashConfig?.enabled !== false,
+          commands: (skill.commands ?? [])
+            .filter((command) => command.instruction)
+            .map((command) => ({
+              name: command.name,
+              title: command.title ?? command.displayName,
+              description: command.description,
+              workflow: renderSkillCommandWorkflow({
+                arguments: "$ARGUMENTS",
+                canonicalName: command.canonicalName,
+                command,
+                skill,
+              }).renderedPrompt,
+            })),
+        })),
+      }),
+      createWorkspaceMcpInvocationProvider({
+        installs: input.workspaceMcpInstalls ?? [],
+      }),
+    ],
+  });
+}
+
+async function resolveWorkspaceMcpInvocationInstalls(input: {
+  teamId: string;
+  workspaceId: string;
+}): Promise<WorkspaceMcpInstall[]> {
+  const installs = await listWorkspaceMcpInstalls(input);
+  return installs.map(mapWorkspaceMcpInstallForInvocation);
+}
+
+function mapWorkspaceMcpInstallForInvocation(
+  install: WorkspaceMcpInstallRecord,
+): WorkspaceMcpInstall {
+  const status = !install.enabled || install.status === "disabled"
+    ? "disabled"
+    : install.credentialStatus === "required" ||
+        install.credentialStatus === "invalid"
+      ? "needs_auth"
+      : install.status === "error"
+        ? "unreachable"
+        : "active";
+
+  return {
+    id: install.id,
+    workspaceId: install.workspaceId,
+    source: install.source === "market" ? "marketplace" : "custom_remote",
+    ...(install.marketIdentifier ? { marketIdentifier: install.marketIdentifier } : {}),
+    transport: install.transport,
+    endpointUrl: install.endpointUrl,
+    enabled: install.enabled,
+    status,
+    credentialStatus: install.credentialStatus,
+    manifest: {
+      serverInstallId: install.id,
+      discoveredAt: install.updatedAt,
+      schemaHash: install.signature ?? install.updatedAt,
+      tools: install.tools.map((tool) => ({
+        id: tool.id,
+        serverInstallId: install.id,
+        serverToolName: tool.serverToolName,
+        normalizedToolName: tool.normalizedToolName,
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
+        risk: tool.risk,
+        enabled: tool.enabled,
+        schemaHash: tool.lastDiscoveredHash ?? "",
+      })),
+      prompts: [],
+      resources: [],
+    },
+  };
+}
+
+function resolveThreadInvocation(input: {
+  envelope?: InvocationEnvelope;
+  registry: SelectableInvocationRegistry;
+  workspaceId: string;
+  userId: string;
+}): ResolvedThreadInvocation | null {
+  if (!input.envelope) {
+    return null;
+  }
+  const output = runInvocationPipeline({
+    registry: input.registry,
+    envelope: input.envelope,
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    policyEvaluator: (context) => evaluateInvocationPolicy({ plan: context.plan }),
+  });
+  if (output.status === "error") {
+    throw new ContentError(
+      400,
+      output.error.code,
+      output.error.message,
+      {
+        details: output.error.details,
+        recoverable: output.error.recoverable,
+        sourceRef: output.error.sourceRef,
+      },
+    );
+  }
+  if (output.status === "approval_required") {
+    throw new ContentError(
+      409,
+      "INVOCATION_APPROVAL_REQUIRED",
+      output.decision.reason,
+      {
+        recoverable: true,
+        sourceRef: output.decision.sourceRef,
+      },
+    );
+  }
+  if (output.status === "direct_execute_ready") {
+    throw new ContentError(
+      400,
+      "INVOCATION_UNSUPPORTED_PLAN",
+      "Direct MCP invocation execution is not available in thread turns",
+      {
+        sourceRef: output.plan.sourceRef,
+      },
+    );
+  }
+  if (output.plan.kind === "bind_tool_choice") {
+    return {
+      kind: "fixed_tool_choice",
+      selectableId: output.plan.selectableId,
+      target: output.plan.semantics.target,
+      toolName: output.plan.semantics.toolName,
+      sourceRef: output.plan.sourceRef,
+      userInput: output.plan.userInput,
+      events: output.events,
+    };
+  }
+  if (output.plan.kind === "inject_context") {
+    return {
+      kind: "context_injection",
+      selectableId: output.plan.selectableId,
+      sourceRef: output.plan.sourceRef,
+      instruction: output.plan.semantics.workflow.replaceAll(
+        "$ARGUMENTS",
+        output.plan.userInput,
+      ),
+      userInput: output.plan.userInput,
+      events: output.events,
+    };
+  }
+  throw new ContentError(
+    400,
+    "INVOCATION_UNSUPPORTED_PLAN",
+    "Invocation selection cannot be prepared for a thread turn",
+    {
+      sourceRef: output.plan.sourceRef,
+    },
+  );
+}
+
+function mergeInvocationTools(
+  tools: StreamThreadEventInput["tools"],
+  invocation: ResolvedThreadInvocation | null,
+): StreamThreadEventInput["tools"] {
+  if (invocation?.kind !== "fixed_tool_choice") {
+    return tools;
+  }
+  if (invocation.target === "builtin_tool") {
+    return enableToolSelection(tools, invocation.toolName, {
+      forceGenerateImage: true,
+      forceEditablePptx: invocation.toolName === AGENT_TOOL_NAMES.generatePptx,
+    });
+  }
+  if (invocation.sourceRef.kind !== "mcp_tool") {
+    return tools;
+  }
+  if (!invocation.sourceRef.toolId) {
+    throw new ContentError(
+      400,
+      "INVOCATION_UNAVAILABLE",
+      "MCP invocation is missing a manifest tool record id",
+      {
+        sourceRef: invocation.sourceRef,
+      },
+    );
+  }
+  return {
+    ...(tools ?? {}),
+    mcp: {
+      ...tools?.mcp,
+      enabled: true,
+      installIds: Array.from(
+        new Set([
+          ...(tools?.mcp?.installIds ?? []),
+          invocation.sourceRef.serverInstallId,
+        ]),
+      ),
+      toolIds: Array.from(
+        new Set([
+          ...(tools?.mcp?.toolIds ?? []),
+          invocation.sourceRef.toolId,
+        ]),
+      ),
+    },
+  };
+}
+
 function mergeCommandTools(
   tools: StreamThreadEventInput["tools"],
   command: ResolvedThreadCommand | null,
@@ -2109,6 +2442,8 @@ function mergeCommandTools(
     if (!isDenied(toolName)) {
       next = enableToolSelection(next, toolName, {
         forceGenerateImage: isToolCommand,
+        forceEditablePptx:
+          isToolCommand && toolName === AGENT_TOOL_NAMES.generatePptx,
       });
     }
   }
@@ -2117,6 +2452,7 @@ function mergeCommandTools(
       ? next
       : enableToolSelection(next, command.toolName, {
           forceGenerateImage: true,
+          forceEditablePptx: command.toolName === AGENT_TOOL_NAMES.generatePptx,
         });
   }
   if (!command?.tools?.length) {
@@ -2136,7 +2472,7 @@ function mergeCommandTools(
 function enableToolSelection(
   tools: StreamThreadEventInput["tools"],
   toolName: string,
-  options: { forceGenerateImage?: boolean } = {},
+  options: { forceGenerateImage?: boolean; forceEditablePptx?: boolean } = {},
 ): StreamThreadEventInput["tools"] {
   if (!toolName) {
     return tools;
@@ -2155,6 +2491,27 @@ function enableToolSelection(
     return {
       ...(tools ?? {}),
       [AGENT_TOOL_NAMES.webSearch]: {
+        enabled: true,
+      },
+    };
+  }
+  if (toolName === AGENT_TOOL_NAMES.generatePptx) {
+    return {
+      ...(tools ?? {}),
+      [AGENT_TOOL_NAMES.generatePptx]: {
+        ...((tools ?? {})[AGENT_TOOL_NAMES.generatePptx] ?? {}),
+        enabled: true,
+        ...(options.forceEditablePptx
+          ? { generationMode: "editable_native" as const }
+          : {}),
+      },
+    };
+  }
+  if (toolName === AGENT_TOOL_NAMES.generateVideoPresentation) {
+    return {
+      ...(tools ?? {}),
+      [AGENT_TOOL_NAMES.generateVideoPresentation]: {
+        ...((tools ?? {})[AGENT_TOOL_NAMES.generateVideoPresentation] ?? {}),
         enabled: true,
       },
     };

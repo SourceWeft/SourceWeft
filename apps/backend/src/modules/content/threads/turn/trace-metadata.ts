@@ -189,6 +189,56 @@ function appendTraceParts(existing: unknown, next: unknown) {
   );
 }
 
+function areRenderBlocksEqual(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function appendRenderBlocks(existing: unknown, next: unknown) {
+  const existingItems = Array.isArray(existing) ? existing : [];
+  const nextItems = Array.isArray(next) ? next : [];
+  if (nextItems.length === 0) {
+    return existingItems;
+  }
+  if (existingItems.length === 0) {
+    return nextItems;
+  }
+  if (
+    existingItems.every((item, index) =>
+      areRenderBlocksEqual(item, nextItems[index]),
+    )
+  ) {
+    return nextItems;
+  }
+
+  const usedIds = new Set<string>();
+  for (const item of existingItems) {
+    const id = getTraceItemId(item);
+    if (typeof id === "string" && id.length > 0) {
+      usedIds.add(id);
+    }
+  }
+
+  return [
+    ...existingItems,
+    ...nextItems.map((item, index) => {
+      const record = getObjectRecord(item);
+      const id = typeof record?.id === "string" ? record.id : null;
+      if (!record || !id || !usedIds.has(id)) {
+        if (id) {
+          usedIds.add(id);
+        }
+        return item;
+      }
+      const nextId = `${id}:continued-${existingItems.length + index + 1}`;
+      usedIds.add(nextId);
+      return {
+        ...record,
+        id: nextId,
+      };
+    }),
+  ];
+}
+
 export function preserveTraceMetadata(input: {
   existingMetadata?: Record<string, unknown> | null;
   nextMetadata: Record<string, unknown>;
@@ -226,5 +276,9 @@ export function preserveTraceMetadata(input: {
       existingMetadata.thinkingSteps,
       input.nextMetadata.thinkingSteps,
     ),
+    renderBlocks:
+      input.nextMetadata.renderBlocks !== undefined
+        ? input.nextMetadata.renderBlocks
+        : existingMetadata.renderBlocks,
   };
 }

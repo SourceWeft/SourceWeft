@@ -6,6 +6,7 @@ import type {
 } from "../../_components/chat-canvas";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import {
+  hasRenderBlocksMetadata,
   resolveCitationMetadata,
   resolveModelReasoningFromMetadata,
   resolveModelReasoningSegmentsFromMetadata,
@@ -14,9 +15,11 @@ import {
   resolveThinkingStepsFromMetadata,
   resolveTracePartsFromMetadata,
   resolveToolCallsFromMetadata,
+  sanitizeClientErrorMessage,
   STREAM_RENDER_KEY,
   STREAM_TEXT_INTERRUPTED_KEY,
   STREAM_TEXT_PAUSED_KEY,
+  toNullableNumber,
   toNullableString,
   toObjectRecord,
 } from "./message-normalizers";
@@ -501,6 +504,7 @@ function buildVersionedMessageGroups(
             renderKey:
               toNullableString(version.metadata[STREAM_RENDER_KEY]) ??
               undefined,
+            createdAt: version.createdAt,
             content: version.content,
             contentJson: version.contentJson,
             command:
@@ -516,7 +520,9 @@ function buildVersionedMessageGroups(
               version.metadata.errorCode === "CLIENT_CANCELLED" ||
               toObjectRecord(version.metadata.threadRun)?.status ===
                 "cancelled",
-            error: toNullableString(version.metadata.error),
+            error: sanitizeClientErrorMessage(
+              toNullableString(version.metadata.error),
+            ),
             errorCode: toNullableString(version.metadata.errorCode),
             finishReason:
               group.role === "assistant"
@@ -543,6 +549,9 @@ function buildVersionedMessageGroups(
                     approvalExpiresAt: toNullableString(
                       threadRun.approvalExpiresAt,
                     ),
+                    startedAt: toNullableString(threadRun.startedAt),
+                    completedAt: toNullableString(threadRun.completedAt),
+                    durationMs: toNullableNumber(threadRun.durationMs),
                   }
                 : undefined,
             isTextPaused: version.metadata[STREAM_TEXT_PAUSED_KEY] === true,
@@ -576,7 +585,8 @@ function buildVersionedMessageGroups(
                 : undefined,
             toolCalls: resolveToolCallsFromMetadata(version.metadata),
             renderBlocks:
-              group.role === "assistant"
+              group.role === "assistant" &&
+              hasRenderBlocksMetadata(version.metadata)
                 ? resolveRenderBlocksFromMetadata(version.metadata)
                 : undefined,
             thinkingSteps:

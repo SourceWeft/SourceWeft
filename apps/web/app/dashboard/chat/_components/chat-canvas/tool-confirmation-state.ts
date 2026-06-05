@@ -6,6 +6,7 @@ import {
 } from "@sourceweft/contracts";
 import type {
   AssistantVersionIndexEntry,
+  ToolConfirmationInterventionSignal,
   MessageVersion,
   ToolCallRecord,
   ToolConfirmationResolution,
@@ -22,6 +23,7 @@ type ToolConfirmationItem = {
 type ActiveToolConfirmationRun = {
   assistantMessageId?: string | null;
   id?: string;
+  idempotencyKey?: string;
   status?: string;
 };
 
@@ -172,6 +174,41 @@ export function getToolConfirmationItemsForRun(input: {
   };
 }
 
+export function getLiveToolConfirmationItemsForRun(input: {
+  activeThreadRun: ActiveToolConfirmationRun | null | undefined;
+  signal: ToolConfirmationInterventionSignal | null | undefined;
+}): ToolConfirmationItem[] {
+  if (input.activeThreadRun?.status !== "waiting_for_approval") {
+    return [];
+  }
+  const liveConfirmations = input.signal?.liveConfirmations ?? [];
+  if (liveConfirmations.length === 0) {
+    return [];
+  }
+  const signalMatchesRun =
+    !input.signal?.runKey ||
+    input.signal.runKey === input.activeThreadRun.idempotencyKey ||
+    input.signal.threadRunId === input.activeThreadRun.id;
+  if (!signalMatchesRun) {
+    return [];
+  }
+  const assistantMessageId =
+    input.signal?.assistantMessageId ?? input.activeThreadRun.assistantMessageId;
+  if (!assistantMessageId) {
+    return [];
+  }
+
+  return liveConfirmations
+    .filter((item) => isPendingToolConfirmation(item.confirmation))
+    .map((item) => ({
+      assistantMessageId,
+      confirmation: item.confirmation,
+      messageId: assistantMessageId,
+      threadRunId: input.signal?.threadRunId ?? input.activeThreadRun?.id ?? null,
+      toolCall: item.toolCall,
+    }));
+}
+
 function uniqueConnectorActions(
   actions: NonNullable<
     NonNullable<ToolApprovalResume["sourceweft"]>["connectorActions"]
@@ -306,10 +343,14 @@ export function shouldLockComposerForApproval(input: {
 }
 
 export function shouldLockComposerForRun(input: {
+  chatExecutionState?: "idle" | "executing" | "waiting_for_approval" | "stopping";
   isStreaming: boolean;
   isWaitingForApproval: boolean;
   pendingConfirmationCount: number;
 }) {
+  if (input.chatExecutionState) {
+    return input.chatExecutionState !== "idle";
+  }
   if (
     input.isStreaming &&
     !(input.isWaitingForApproval && input.pendingConfirmationCount === 0)

@@ -130,6 +130,79 @@ test("terminal attach fallback keeps stale run recovery silent", () => {
   assert.deepEqual(events, [{ type: "finish" }]);
 });
 
+test("snapshot metadata replaces render blocks with snapshot blocks", () => {
+  const metadata = testExports.buildAssistantMessageSnapshotMetadata({
+    currentMetadata: {
+      renderBlocks: [
+        { id: "reasoning-1", type: "reasoning", text: "Search pages." },
+        { id: "tool-1", type: "tool", toolCallId: "search-page" },
+        { id: "text-1", type: "text", text: "Found pages." },
+      ],
+      toolCalls: [],
+    },
+    run: createRun({ status: "completed" }),
+    snapshot: {
+      renderBlocks: [
+        { id: "text-1", type: "text", text: "Rejected. Present summary." },
+      ],
+      toolCalls: [],
+    },
+  });
+
+  assert.deepEqual(metadata.renderBlocks, [
+    {
+      id: "text-1",
+      type: "text",
+      text: "Rejected. Present summary.",
+    },
+  ]);
+});
+
+test("stale active run recovery preserves terminal assistant metadata", async () => {
+  const run = createRun({
+    snapshotJson: {
+      assistantMessage: {
+        id: "assistant-message-1",
+        metadata: {
+          threadRun: {
+            id: "run-1",
+            status: "running",
+          },
+        },
+      },
+    },
+  });
+  let snapshotJson: Record<string, unknown> | undefined;
+  let assistantMetadataRun: ChatThreadRunRecord | undefined;
+
+  await testExports.failStaleActiveRunWithDependencies(run, {
+    appendEvent: async () => 1,
+    finishRun: async (input) => {
+      snapshotJson = input.snapshotJson as Record<string, unknown>;
+      return {
+        ...run,
+        status: "failed",
+        errorCode: input.errorCode ?? null,
+        errorMessage: input.errorMessage ?? null,
+      };
+    },
+    updateAssistantMetadata: async (input) => {
+      assistantMetadataRun = input.run;
+      return null;
+    },
+  });
+
+  assert.equal(snapshotJson?.errorCode, "CHAT_RUN_STALE");
+  assert.equal(
+    (
+      (snapshotJson?.assistantMessage as { metadata?: Record<string, unknown> })
+        ?.metadata?.threadRun as { status?: string } | undefined
+    )?.status,
+    "failed",
+  );
+  assert.equal(assistantMetadataRun?.status, "failed");
+});
+
 test("forced stop terminalizes cancel_requested run and emits terminal events", async () => {
   const runningRun = createRun({
     status: "cancel_requested",
@@ -187,6 +260,139 @@ test("forced stop terminalizes cancel_requested run and emits terminal events", 
   assert.equal(finishInput?.errorCode, "CLIENT_CANCELLED");
   assert.equal(finishInput?.errorMessage, "Chat run was cancelled");
   assert.equal(assistantMetadataUpdated, true);
+});
+
+test("forced stop preserves partial artifact snapshot metadata", async () => {
+  const runningRun = createRun({
+    status: "cancel_requested",
+    snapshotJson: {
+      assistantContent: "Partial answer",
+      renderBlocks: [
+        {
+          id: "generated-presentation-pptx-tool",
+          type: "generated_presentation",
+          toolCallId: "pptx-tool",
+        },
+      ],
+      toolCalls: [
+        {
+          id: "pptx-tool",
+          tool: "generate_pptx",
+          input: {},
+          output: {
+            type: "generate_pptx_progress",
+            stage: "planning",
+            toolCallId: "pptx-tool",
+            title: "ASR",
+          },
+          status: "running",
+          latencyMs: null,
+          error: null,
+        },
+      ],
+      thinkingSteps: [
+        {
+          id: "draft-presentation",
+          title: "Generating presentation",
+          status: "in_progress",
+          items: [],
+        },
+      ],
+      traceParts: [
+        {
+          id: "pptx-tool",
+          kind: "tool",
+          order: 0,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          toolCallId: "pptx-tool",
+          tool: "generate_pptx",
+          status: "running",
+          input: {},
+          output: null,
+          error: null,
+          latencyMs: null,
+        },
+      ],
+    },
+  });
+  let snapshotJson: Record<string, unknown> | undefined;
+  let assistantMetadata: Record<string, unknown> | undefined;
+  let assistantSnapshot: Record<string, unknown> | undefined;
+
+  await testExports.forceCancelStoppedRun(runningRun, {
+    appendEvent: async () => 1,
+    finishRun: async (input) => {
+      snapshotJson = input.snapshotJson as Record<string, unknown>;
+      return {
+        ...runningRun,
+        status: "cancelled",
+        snapshotJson: input.snapshotJson ?? {},
+        errorCode: input.errorCode ?? null,
+        errorMessage: input.errorMessage ?? null,
+      };
+    },
+    findRunById: async () =>
+      createRun({
+        ...runningRun,
+        status: snapshotJson ? "cancelled" : "cancel_requested",
+        snapshotJson: snapshotJson ?? runningRun.snapshotJson,
+      }),
+    updateAssistantMetadata: async (input: {
+      metadata?: Record<string, unknown>;
+      snapshot?: Record<string, unknown>;
+    }) => {
+      assistantMetadata = input.metadata;
+      assistantSnapshot = input.snapshot;
+      return null;
+    },
+  });
+
+  assert.deepEqual(snapshotJson?.renderBlocks, [
+    {
+      id: "generated-presentation-pptx-tool",
+      type: "generated_presentation",
+      toolCallId: "pptx-tool",
+    },
+  ]);
+  assert.deepEqual(snapshotJson?.toolCalls, [
+    {
+      id: "pptx-tool",
+      tool: "generate_pptx",
+      input: {},
+      output: {
+        type: "generate_pptx_progress",
+        stage: "planning",
+        toolCallId: "pptx-tool",
+        title: "ASR",
+      },
+      status: "running",
+      latencyMs: null,
+      error: null,
+    },
+  ]);
+  assert.equal(
+    (snapshotJson?.thinkingSteps as Array<{ status?: string }> | undefined)?.[0]
+      ?.status,
+    "completed",
+  );
+  assert.equal(
+    (snapshotJson?.traceParts as Array<{ status?: string }> | undefined)?.[0]
+      ?.status,
+    "error",
+  );
+  assert.deepEqual(assistantSnapshot?.renderBlocks, snapshotJson?.renderBlocks);
+  assert.deepEqual(assistantSnapshot?.toolCalls, snapshotJson?.toolCalls);
+  assert.equal(
+    (assistantSnapshot?.thinkingSteps as Array<{ status?: string }> | undefined)
+      ?.[0]?.status,
+    "completed",
+  );
+  assert.deepEqual(assistantMetadata, {
+    isCancelled: true,
+    error: "Chat run was cancelled",
+    errorCode: "CLIENT_CANCELLED",
+  });
 });
 
 test("approval waiting runs with no pending confirmations can be completed", () => {
@@ -542,6 +748,154 @@ test("waiting approval runs are not heartbeat-stale", () => {
     ),
     false,
   );
+});
+
+test("finished active snapshots can be terminalized without waiting for heartbeat staleness", () => {
+  assert.equal(
+    testExports.resolveTerminalStatusFromFinishedSnapshot({
+      assistantMessage: {
+        id: "assistant-message-1",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        threadId: "thread-1",
+        parentMessageId: null,
+        role: "assistant",
+        content:
+          "Command failed because generate_pptx did not create a slides artifact.",
+        createdBy: null,
+        model: null,
+        creditsConsumed: null,
+        contentJson: {},
+        metadata: {
+          finishReason: "command_success_criteria_failed",
+        },
+        createdAt: new Date(0).toISOString(),
+      },
+    }),
+    "failed",
+  );
+
+  assert.equal(
+    testExports.resolveTerminalStatusFromFinishedSnapshot({
+      finishReason: "stop",
+    }),
+    "completed",
+  );
+  assert.equal(
+    testExports.resolveTerminalStatusFromFinishedSnapshot({
+      finishReason: "tool_confirmation_requested",
+    }),
+    null,
+  );
+});
+
+test("terminal snapshots close active thinking steps and trace parts", () => {
+  const snapshot = testExports.finalizeTerminalSnapshotTrace({
+    thinkingSteps: [
+      {
+        id: "command-success",
+        kind: "verification",
+        title: "Checking command outcome",
+        status: "in_progress",
+        items: [],
+        sequence: 1,
+      },
+    ],
+    traceParts: [
+      {
+        id: "command-success",
+        kind: "step",
+        order: 0,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        title: "Checking command outcome",
+        status: "in_progress",
+        items: [],
+      },
+    ],
+  });
+
+  assert.equal(
+    (snapshot.thinkingSteps?.[0] as { status?: unknown } | undefined)?.status,
+    "completed",
+  );
+  assert.equal(
+    (snapshot.traceParts?.[0] as { status?: unknown } | undefined)?.status,
+    "completed",
+  );
+});
+
+test("finished active run is marked terminal from snapshot", async () => {
+  const activeRun = createRun({
+    status: "running",
+    snapshotJson: {
+      assistantMessage: {
+        id: "assistant-message-1",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        threadId: "thread-1",
+        parentMessageId: null,
+        role: "assistant",
+        content:
+          "Command failed because generate_pptx did not create a slides artifact.",
+        createdBy: null,
+        model: null,
+        creditsConsumed: null,
+        contentJson: {},
+        metadata: {
+          finishReason: "command_success_criteria_failed",
+        },
+        createdAt: new Date(0).toISOString(),
+      },
+    },
+  });
+  let finishInput:
+    | {
+        status: string;
+        errorCode?: string | null;
+        snapshotJson?: {
+          assistantMessage?: {
+            metadata?: {
+              threadRun?: {
+                status?: string;
+              };
+            };
+          };
+        };
+      }
+    | undefined;
+  let updatedRunStatus: string | undefined;
+
+  const result =
+    await testExports.finishRunIfSnapshotIsTerminalWithDependencies(activeRun, {
+      findRunById: async () => ({
+        ...activeRun,
+        status: "failed",
+        errorCode: "CHAT_RUN_FAILED",
+      }),
+      finishRun: async (input) => {
+        finishInput = input;
+        return {
+          ...activeRun,
+          status: input.status,
+          errorCode: input.errorCode ?? null,
+          errorMessage: input.errorMessage ?? null,
+        };
+      },
+      updateAssistantMetadata: async (input) => {
+        updatedRunStatus = input.run.status;
+        return null;
+      },
+    });
+
+  assert.equal(finishInput?.status, "failed");
+  assert.equal(finishInput?.errorCode, "CHAT_RUN_FAILED");
+  assert.equal(
+    finishInput?.snapshotJson?.assistantMessage?.metadata?.threadRun?.status,
+    "failed",
+  );
+  assert.equal(updatedRunStatus, "failed");
+  assert.equal(result.status, "failed");
 });
 
 test("attach state fails stale running run and synthesizes terminal events", async () => {

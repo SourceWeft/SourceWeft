@@ -373,9 +373,12 @@ const prepared: PreparedThreadTurn = {
   notionTools: {},
   mcpTools: {},
   command: null,
+  invocation: null,
   commandSuccessCriteria: { kind: "none" },
   toolPermissions: {},
   generateImageTool: undefined,
+  generatePptxTool: undefined,
+  generateVideoPresentationTool: undefined,
   artifactIntent: {
     kind: null,
     shouldInjectTool: false,
@@ -695,6 +698,34 @@ test("streamThreadEvents includes finish reason in finish events", async () => {
   assert.deepEqual(finish?.agentCheckpoint, outcome.agentCheckpoint);
 });
 
+test("streamThreadEvents defaults successful finish events to stop", async () => {
+  const turnService = createTurnService();
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "done", outcome: { ...outcome, finishReason: undefined } };
+    },
+    async () => null,
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  const finish = events.find((event) => event.type === "finish");
+
+  assert.equal(finish?.finishReason, "stop");
+});
+
 test("streamThreadEvents skips title after a cancelled assistant attempt", async () => {
   const continuedAfterCancelPrepared = createPrepared({
     messageContent: "继续",
@@ -939,6 +970,294 @@ test("streamThreadEvents generates title when retrying after first failed assist
   assert.equal(
     events[assistantMessageIndex]?.parentMessageId,
     "assistant-error-1",
+  );
+});
+
+test("streamThreadEvents persists terminal command verification thinking steps", async () => {
+  let finalizedThinkingSteps: unknown;
+  let finalizedTraceParts: unknown;
+  const commandStep = {
+    id: "command-success",
+    kind: "verification" as const,
+    title: "Checking command outcome",
+    status: "completed" as const,
+    items: [],
+    sequence: 1,
+    description:
+      "Command failed because generate_pptx did not create a slides artifact.",
+  };
+  const turnService = createTurnService({
+    finalize: async (input) => {
+      finalizedThinkingSteps = (
+        input as {
+          thinkingSteps?: unknown;
+          traceParts?: unknown;
+        }
+      ).thinkingSteps;
+      finalizedTraceParts = (
+        input as {
+          thinkingSteps?: unknown;
+          traceParts?: unknown;
+        }
+      ).traceParts;
+      return {
+        assistantMessage: {
+          id: "assistant-message-1",
+          parentMessageId: null,
+        },
+      };
+    },
+  });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "thinking-step",
+        step: {
+          ...commandStep,
+          status: "in_progress",
+        },
+      };
+      yield {
+        type: "thinking-step",
+        step: commandStep,
+      };
+      yield {
+        type: "done",
+        outcome: {
+          ...outcome,
+          assistantContent:
+            "Command failed because generate_pptx did not create a slides artifact.",
+          finishReason: "command_success_criteria_failed",
+          thinkingSteps: [commandStep],
+        },
+      };
+    },
+    async () => createTitleJob({}),
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "Generate PPTX",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  const commandEvents = events.filter(
+    (event) =>
+      event.type === "thinking-step" &&
+      (event.step as { id?: string } | undefined)?.id === "command-success",
+  );
+  assert.deepEqual(
+    commandEvents.map(
+      (event) => (event.step as { status?: string } | undefined)?.status,
+    ),
+    ["in_progress", "completed"],
+  );
+  assert.equal(
+    (finalizedThinkingSteps as Array<{ id: string; status: string }>).find(
+      (step) => step.id === "command-success",
+    )?.status,
+    "completed",
+  );
+  assert.equal(
+    (finalizedTraceParts as Array<{ id: string; status?: string }>).find(
+      (part) => part.id === "command-success",
+    )?.status,
+    "completed",
+  );
+});
+
+test("streamThreadEvents finalizes successful traces as terminal completed state", async () => {
+  let finalizedFinishReason: unknown;
+  let finalizedThinkingSteps: unknown;
+  let finalizedTraceParts: unknown;
+  const runningStep = {
+    id: "draft-presentation",
+    kind: "state" as const,
+    title: "Generating presentation",
+    status: "in_progress" as const,
+    items: [],
+    sequence: 1,
+  };
+  const turnService = createTurnService({
+    finalize: async (input) => {
+      finalizedFinishReason = (input as { finishReason?: unknown })
+        .finishReason;
+      finalizedThinkingSteps = (
+        input as {
+          thinkingSteps?: unknown;
+          traceParts?: unknown;
+        }
+      ).thinkingSteps;
+      finalizedTraceParts = (
+        input as {
+          thinkingSteps?: unknown;
+          traceParts?: unknown;
+        }
+      ).traceParts;
+      return {
+        assistantMessage: {
+          id: "assistant-message-1",
+          parentMessageId: null,
+        },
+      };
+    },
+  });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "thinking-step",
+        step: runningStep,
+      };
+      yield {
+        type: "done",
+        outcome: {
+          ...outcome,
+          finishReason: undefined,
+          thinkingSteps: [runningStep],
+        },
+      };
+    },
+    async () => createTitleJob({}),
+  );
+
+  for await (const _event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "Generate PPTX",
+  })) {
+    // Drain the stream so finalizeThreadTurn runs.
+  }
+
+  assert.equal(finalizedFinishReason, "stop");
+  assert.equal(
+    (finalizedThinkingSteps as Array<{ id: string; status: string }>).find(
+      (step) => step.id === "draft-presentation",
+    )?.status,
+    "completed",
+  );
+  assert.equal(
+    (finalizedTraceParts as Array<{ id: string; status?: string }>).find(
+      (part) => part.id === "draft-presentation",
+    )?.status,
+    "completed",
+  );
+});
+
+test("streamThreadEvents persists DeepAgents todos as a visible step without generic tool trace", async () => {
+  let finalizedToolCalls: unknown;
+  let finalizedTraceParts: unknown;
+  const todoStep = {
+    id: "deepagents:todos",
+    kind: "state" as const,
+    title: "Task plan",
+    status: "in_progress" as const,
+    items: ["In progress: Surface todos in trace"],
+    sequence: 1,
+    metadata: {
+      source: "deepagents",
+      tool: "write_todos",
+      toolCallId: "call-todos",
+      todos: [
+        {
+          content: "Surface todos in trace",
+          status: "in_progress",
+        },
+      ],
+    },
+  };
+  const writeTodosToolCall = {
+    id: "call-todos",
+    tool: "write_todos",
+    input: {
+      todos: [
+        {
+          content: "Surface todos in trace",
+          status: "in_progress",
+        },
+      ],
+    },
+    output: {
+      content:
+        'Updated todo list to [{"content":"Surface todos in trace","status":"in_progress"}]',
+    },
+    status: "completed" as const,
+    latencyMs: 8,
+    error: null,
+    sequence: 2,
+  };
+  const turnService = createTurnService({
+    finalize: async (input) => {
+      finalizedToolCalls = (input as { toolCalls?: unknown }).toolCalls;
+      finalizedTraceParts = (input as { traceParts?: unknown }).traceParts;
+      return {
+        assistantMessage: {
+          id: "assistant-message-1",
+          parentMessageId: null,
+        },
+      };
+    },
+  });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "thinking-step",
+        step: todoStep,
+      };
+      yield {
+        type: "done",
+        outcome: {
+          ...outcome,
+          toolCalls: [writeTodosToolCall],
+          thinkingSteps: [todoStep],
+        },
+      };
+    },
+    async () => createTitleJob({}),
+  );
+
+  for await (const _event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "Implement the plan",
+  })) {
+    // Drain the stream so finalizeThreadTurn runs.
+  }
+
+  assert.equal(
+    (finalizedToolCalls as Array<{ tool: string }>).some(
+      (toolCall) => toolCall.tool === "write_todos",
+    ),
+    true,
+  );
+  assert.deepEqual(
+    (finalizedTraceParts as Array<{ id: string; kind: string; tool?: string }>)
+      .filter((part) => part.id === "deepagents:todos")
+      .map((part) => part.kind),
+    ["step"],
+  );
+  assert.equal(
+    (finalizedTraceParts as Array<{ kind: string; tool?: string }>).some(
+      (part) => part.kind === "tool" && part.tool === "write_todos",
+    ),
+    false,
   );
 });
 

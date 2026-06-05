@@ -14,7 +14,7 @@ export type CommandSuccessCriteria =
     }
   | {
       kind: "artifact";
-      artifactType: "image";
+      artifactType: "image" | "slides" | "video_presentation";
       toolName: string;
     };
 
@@ -98,6 +98,10 @@ type ToolCommandDefinition = {
   promptIntro: string;
   successCriteria: CommandSuccessCriteria;
   permission?: ToolPermission;
+  requiredArguments?: {
+    description: string;
+    clarificationPrompt: string;
+  };
 };
 
 const TOOL_COMMANDS: Record<string, ToolCommandDefinition> = {
@@ -112,15 +116,42 @@ const TOOL_COMMANDS: Record<string, ToolCommandDefinition> = {
     },
     permission: "allow",
   },
+  [AGENT_TOOL_NAMES.generatePptx]: {
+    execution: "agent",
+    promptIntro:
+      "Create a presentation artifact from the user's request. First plan the deck content: audience goal, narrative arc, claim spine, slide mix, each slide's role, content density, visible content slots, proof objects, and a fitting resolved design system. Custom style is allowed, but it must map to safe registered slide structures rather than arbitrary geometry. For education, teaching, study, classroom, course, training, or Feynman-style decks, use education/instructional layouts by default and do not set styleFamily=editorial or magazine unless the user explicitly asks for that treatment. For generated PPTX decks, avoid blank cards, empty bodies, unused placeholders, unrequested decorative cover shapes, language-polluted visible copy, cards mapped into longform, and repeated empty layout geometry. Then call generate_pptx with explicit content and design settings. Do not answer with a normal prose-only response before the tool call. The command is complete only when a slides artifact is created.",
+    successCriteria: {
+      kind: "artifact",
+      artifactType: "slides",
+      toolName: AGENT_TOOL_NAMES.generatePptx,
+    },
+    permission: "allow",
+  },
+  [AGENT_TOOL_NAMES.generateVideoPresentation]: {
+    execution: "agent",
+    promptIntro:
+      "Create a narrated video presentation artifact from the user's request. Gather the factual source material, choose a concise video title, and pass audience, tone, pacing, or visual style as natural-language user_prompt. Then call generate_video_presentation with source_content. Do not write the internal video schema, schemaVersion JSON, slides array, scenes array, or narrationEnabled object in the chat response; those are produced inside the tool only. The command is complete once the video_presentation artifact has been created and background project preparation has been queued; do not describe it as server-side MP4 rendering or a completed MP4.",
+    successCriteria: {
+      kind: "artifact",
+      artifactType: "video_presentation",
+      toolName: AGENT_TOOL_NAMES.generateVideoPresentation,
+    },
+    permission: "allow",
+  },
   [AGENT_TOOL_NAMES.searchNotionPages]: {
     execution: "agent",
     promptIntro:
-      "Find Notion pages for the user's request and return the relevant page IDs, titles, and URLs. Search is for discovery only; use page IDs for reading, updating, or deleting.",
+      "Find Notion pages for the user's request and return the relevant page IDs, titles, and URLs. Call search_notion_pages with query set exactly to the Notion page title, keywords, or topic from <user_request>. Do not call search_notion_pages with empty input. Search is for discovery only; use page IDs for reading, updating, or deleting.",
     successCriteria: {
       kind: "tool_call",
       toolName: AGENT_TOOL_NAMES.searchNotionPages,
     },
     permission: "allow",
+    requiredArguments: {
+      description: "a Notion page title, keyword, or topic",
+      clarificationPrompt:
+        "Ask the user which Notion page title, keyword, or topic they want to search for. Do not call search_notion_pages until the user provides searchable text.",
+    },
   },
   [AGENT_TOOL_NAMES.readNotionPage]: {
     execution: "agent",
@@ -213,17 +244,48 @@ export function renderToolCommandWorkflow(input: {
     return null;
   }
   const args = input.arguments.trim();
+  if (!args && definition.requiredArguments) {
+    const renderedPrompt = [
+      `<sourceweft_command name="${input.canonicalName}" kind="workflow" tool="${input.toolName}">`,
+      definition.requiredArguments.clarificationPrompt,
+      `Required input: ${definition.requiredArguments.description}.`,
+      "This command is incomplete until the user provides the required input.",
+      "</sourceweft_command>",
+      "",
+      "<user_request>",
+      args,
+      "</user_request>",
+    ].join("\n");
+
+    return {
+      name: input.canonicalName,
+      arguments: args,
+      kind: "workflow",
+      renderedPrompt,
+      defaultTools: [],
+      permissionOverrides: {},
+      successCriteria: { kind: "none" },
+      execution: definition.execution,
+    };
+  }
+
   const renderedPrompt = [
     `<sourceweft_command name="${input.canonicalName}" kind="tool_workflow" tool="${input.toolName}">`,
     definition.promptIntro,
     "This slash command is a task request, not a passive tool toggle. Use any relevant enabled support tools first if needed, but the command's success criteria must be satisfied.",
+    definition.execution === "agent" &&
+    input.toolName === AGENT_TOOL_NAMES.generatePptx
+      ? `For this explicit command, you may think and plan first, but the final successful action must be a ${input.toolName} tool call that satisfies the success criteria.`
+      : null,
     `Success criteria: ${describeSuccessCriteria(definition.successCriteria)}.`,
     "</sourceweft_command>",
     "",
     "<user_request>",
     args,
     "</user_request>",
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 
   return {
     name: input.canonicalName,

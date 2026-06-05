@@ -6,8 +6,94 @@ import { compactText } from "./message-assets";
 
 type ToolConfirmationDisplayInput = Pick<
   ToolConfirmationRequest,
-  "action" | "preview"
+  "action" | "preview" | "editableArgs"
 >;
+
+function formatBytes(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "size not provided";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function titleCase(value: string) {
+  return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function record(value: unknown) {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function arrayRecord(value: unknown) {
+  return Array.isArray(value) ? value.map(record) : [];
+}
+
+function sandboxRiskLine(confirmation: ToolConfirmationDisplayInput) {
+  return `Risk: ${titleCase(confirmation.action.riskLevel ?? "unknown")}`;
+}
+
+function sandboxPrepareDetailLines(confirmation: ToolConfirmationDisplayInput) {
+  const request = record(confirmation.preview.requestJson);
+  const files = arrayRecord(request.files);
+  const lines = [sandboxRiskLine(confirmation), `Prepare ${files.length || 0} file${files.length === 1 ? "" : "s"}`];
+  for (const file of files) {
+    const sourcePath = typeof file.sourcePath === "string" ? file.sourcePath : "unknown source";
+    const sandboxPath = typeof file.sandboxPath === "string" ? file.sandboxPath : "unknown sandbox path";
+    lines.push(`${sourcePath} -> ${sandboxPath} · ${formatBytes(file.sizeBytes)}`);
+  }
+  lines.push("Selected /work files will be copied into the isolated sandbox environment.");
+  return lines;
+}
+
+function sandboxExecuteDetailLines(confirmation: ToolConfirmationDisplayInput) {
+  const request = {
+    ...record(confirmation.preview.requestJson),
+    ...record(confirmation.editableArgs?.value),
+  };
+  const command = typeof request.command === "string" ? request.command : "command not provided";
+  const cwd = typeof request.cwd === "string" && request.cwd ? request.cwd : "/workspace";
+  return [
+    sandboxRiskLine(confirmation),
+    `Command: ${command}`,
+    `CWD: ${cwd}`,
+    "Review network, dependency, and secret-access risk before approving.",
+    confirmation.editableArgs ? "Editable before approval" : null,
+  ].filter((line): line is string => Boolean(line));
+}
+
+function sandboxCollectDetailLines(confirmation: ToolConfirmationDisplayInput) {
+  const request = record(confirmation.preview.requestJson);
+  const outputs = arrayRecord(request.outputs);
+  const lines = [sandboxRiskLine(confirmation), `Collect ${outputs.length || 0} output${outputs.length === 1 ? "" : "s"}`];
+  for (const output of outputs) {
+    const target = record(output.target);
+    const sandboxPath = typeof output.sandboxPath === "string" ? output.sandboxPath : "unknown sandbox path";
+    const targetPath = typeof target.path === "string" ? target.path : "unknown target";
+    const overwrite = target.overwrite === true ? "yes" : "no";
+    lines.push(`${sandboxPath} -> ${targetPath} · overwrite: ${overwrite} · ${formatBytes(output.sizeBytes)}`);
+  }
+  lines.push("Outputs become durable only after collection into /work or a supported artifact path.");
+  return lines;
+}
+
+function sandboxRequestDetailLines(confirmation: ToolConfirmationDisplayInput) {
+  switch (confirmation.action.toolName) {
+    case "prepare_sandbox_workspace":
+      return sandboxPrepareDetailLines(confirmation);
+    case "execute":
+      return sandboxExecuteDetailLines(confirmation);
+    case "collect_sandbox_outputs":
+      return sandboxCollectDetailLines(confirmation);
+    default:
+      return null;
+  }
+}
 
 function formatActionTypeLabel(actionType: string) {
   return (
@@ -61,6 +147,10 @@ export function requestSummary(confirmation: ToolConfirmationDisplayInput) {
 }
 
 export function requestDetailLines(confirmation: ToolConfirmationDisplayInput) {
+  const sandboxLines = sandboxRequestDetailLines(confirmation);
+  if (sandboxLines) {
+    return sandboxLines.map((line) => compactText(line, 160));
+  }
   const toolMetadata = confirmationToolMetadata(confirmation);
   const lines = [
     requestSummary(confirmation),

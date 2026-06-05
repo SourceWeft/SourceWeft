@@ -44,6 +44,67 @@ export function registerArtifactRoutes(app: Hono) {
       `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
     c.header("Cache-Control", "private, max-age=60");
+    if (result.renderer) {
+      c.header("X-SourceWeft-Artifact-Renderer", result.renderer);
+    }
+    return c.body(result.body);
+  });
+
+  app.get("/artifacts/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.getArtifact({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/artifacts/:id/source.json", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.getArtifactSourceJson({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    c.header("Content-Type", result.contentType);
+    c.header(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
+    );
+    c.header("Cache-Control", "private, max-age=60");
+    return c.body(result.body);
+  });
+
+  app.get("/artifacts/:id/assets/:fileName", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentService.getArtifactAsset({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      fileName: requireRouteParam(c, "fileName"),
+      userId: getSessionUserId(session),
+    });
+
+    c.header("Content-Type", result.contentType);
+    c.header(
+      "Content-Disposition",
+      `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
+    );
+    c.header("Cache-Control", "private, max-age=60");
     return c.body(result.body);
   });
 

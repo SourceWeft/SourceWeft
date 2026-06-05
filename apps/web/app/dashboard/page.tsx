@@ -678,8 +678,13 @@ export default function DashboardPage() {
       toast.success(`Created "${workspace.name}"`);
       setStoredDashboardWorkspaceId(resolvedOrganizationId, workspace.id);
       setActiveWorkspaceId(workspace.id);
-      await dashboardState.switchWorkspace(workspace.id, workspace.name);
-      router.push("/dashboard/chat");
+      const switched = await dashboardState.switchWorkspace(
+        workspace.id,
+        workspace.name,
+      );
+      if (switched) {
+        router.push("/dashboard/chat");
+      }
     } catch {
       toast.error("Failed to create workspace.");
     } finally {
@@ -693,9 +698,13 @@ export default function DashboardPage() {
     setStoredDashboardWorkspaceId(resolvedOrganizationId, workspaceId);
     setActiveWorkspaceId(workspaceId);
 
-    await dashboardState.switchWorkspace(workspaceId, workspace?.name);
-
-    router.push("/dashboard/chat");
+    const switched = await dashboardState.switchWorkspace(
+      workspaceId,
+      workspace?.name,
+    );
+    if (switched) {
+      router.push("/dashboard/chat");
+    }
   }
 
   return (

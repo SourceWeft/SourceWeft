@@ -2,9 +2,15 @@ import type {
   ThreadChatRunJobPayload,
   ThreadChatRunJobResult,
 } from "../../queue";
-import type { MeterConsumeResponse } from "@sourceweft/contracts";
+import {
+  isGeneratedImageArtifactToolName,
+  isPresentationArtifactToolName,
+  isVideoPresentationArtifactToolName,
+  type MeterConsumeResponse,
+} from "@sourceweft/contracts";
 import { ContentError } from "../../errors";
-import type { PreparedThreadTurn } from "../turn/types";
+import { sanitizeClientErrorMessage } from "../../model-gateway-error";
+import type { MessageRenderBlock, PreparedThreadTurn } from "../turn/types";
 import { createThreadStreamErrorMessage } from "../stream/error";
 import { toSseData } from "../stream/helpers";
 import { ContentThreadStreamService } from "../stream/service";
@@ -19,6 +25,7 @@ import {
   tracePartFromToolCall,
   upsertTracePart,
 } from "../turn/trace-parts";
+import type { ToolCallTrace } from "../turn/types";
 import {
   createMessageRecord,
   findMessageRecord,
@@ -144,6 +151,182 @@ function mergeToolCall(existing: unknown[], next: unknown) {
   ];
 }
 
+function mergeToolCallFromPayload(input: {
+  existing: unknown[];
+  payload: Record<string, unknown>;
+}) {
+  const toolCall = getObjectRecord(input.payload.toolCall);
+  const fallbackId =
+    typeof input.payload.id === "string" && input.payload.id.length > 0
+      ? input.payload.id
+      : null;
+  const id =
+    typeof toolCall?.id === "string" && toolCall.id.length > 0
+      ? toolCall.id
+      : fallbackId;
+  if (!id) {
+    return input.existing;
+  }
+
+  const existingRecord = input.existing
+    .map(getObjectRecord)
+    .find((record) => record?.id === id);
+  const tool =
+    typeof toolCall?.tool === "string" && toolCall.tool.length > 0
+      ? toolCall.tool
+      : typeof input.payload.tool === "string" && input.payload.tool.length > 0
+        ? input.payload.tool
+        : typeof existingRecord?.tool === "string"
+          ? existingRecord.tool
+          : "tool";
+  const existingOutput = getObjectRecord(existingRecord?.output);
+  const eventOutput =
+    input.payload.type === "tool-call-event"
+      ? input.payload.data
+      : input.payload.type === "tool-call-result"
+        ? input.payload.output
+        : null;
+  const eventOutputRecord = getObjectRecord(eventOutput);
+  const toolCallOutput = toolCall ? toolCall.output : undefined;
+  const toolCallOutputRecord = getObjectRecord(toolCallOutput);
+  const output =
+    existingOutput || eventOutputRecord || toolCallOutputRecord
+      ? {
+          ...(existingOutput ?? {}),
+          ...(eventOutputRecord ?? {}),
+          ...(toolCallOutputRecord ?? {}),
+        }
+      : (toolCallOutput ?? eventOutput ?? existingRecord?.output ?? null);
+  const status =
+    input.payload.type === "tool-call-error"
+      ? "error"
+      : input.payload.type === "tool-call-result" ||
+          input.payload.type === "tool-call-end"
+        ? typeof input.payload.status === "string"
+          ? input.payload.status
+          : (toolCall?.status ?? "completed")
+        : (toolCall?.status ?? existingRecord?.status ?? "running");
+  const sequence = getTraceSequence(toolCall) ?? getTraceSequence(existingRecord);
+
+  return mergeToolCall(input.existing, {
+    ...(existingRecord ?? {}),
+    ...(toolCall ?? {}),
+    id,
+    tool,
+    input: {
+      ...(getObjectRecord(existingRecord?.input) ?? {}),
+      ...(getObjectRecord(input.payload.input) ?? {}),
+      ...(getObjectRecord(toolCall?.input) ?? {}),
+    },
+    output,
+    status,
+    ...(sequence !== null ? { sequence } : {}),
+    latencyMs:
+      typeof input.payload.latencyMs === "number"
+        ? input.payload.latencyMs
+        : (toolCall?.latencyMs ?? existingRecord?.latencyMs ?? null),
+    error:
+      input.payload.type === "tool-call-error"
+        ? input.payload.error
+        : (toolCall?.error ?? existingRecord?.error ?? null),
+  });
+}
+
+function getToolCallIdFromPayload(payload: Record<string, unknown>) {
+  const toolCall = getObjectRecord(payload.toolCall);
+  return typeof payload.id === "string" && payload.id.length > 0
+    ? payload.id
+    : typeof toolCall?.id === "string" && toolCall.id.length > 0
+      ? toolCall.id
+      : null;
+}
+
+function getToolNameFromPayload(payload: Record<string, unknown>) {
+  const toolCall = getObjectRecord(payload.toolCall);
+  return typeof payload.tool === "string" && payload.tool.length > 0
+    ? payload.tool
+    : typeof toolCall?.tool === "string" && toolCall.tool.length > 0
+      ? toolCall.tool
+      : null;
+}
+
+function normalizeToolStatus(value: unknown): ToolCallTrace["status"] {
+  return value === "approval_requested" ||
+    value === "completed" ||
+    value === "error" ||
+    value === "running"
+    ? value
+    : "running";
+}
+
+function findToolCallSnapshotById(toolCalls: unknown[] | undefined, id: string) {
+  return (toolCalls ?? [])
+    .map(getObjectRecord)
+    .find((record) => record?.id === id);
+}
+
+function toolCallTraceFromPayload(input: {
+  payload: Record<string, unknown>;
+  snapshot: ChatRunSnapshot;
+}): ToolCallTrace | null {
+  const payloadToolCall = getObjectRecord(input.payload.toolCall);
+  const id = getToolCallIdFromPayload(input.payload);
+  const tool = getToolNameFromPayload(input.payload);
+  if (!id || !tool) {
+    return null;
+  }
+
+  const snapshotToolCall = findToolCallSnapshotById(input.snapshot.toolCalls, id);
+  const output =
+    input.payload.type === "tool-call-event"
+      ? input.payload.data
+      : input.payload.type === "tool-call-result"
+        ? input.payload.output
+        : input.payload.type === "tool-call-error"
+          ? null
+          : payloadToolCall?.output ?? snapshotToolCall?.output ?? null;
+  return {
+    id,
+    tool,
+    input: {
+      ...(getObjectRecord(snapshotToolCall?.input) ?? {}),
+      ...(getObjectRecord(input.payload.input) ?? {}),
+      ...(getObjectRecord(payloadToolCall?.input) ?? {}),
+    },
+    output,
+    status:
+      input.payload.type === "tool-call-error"
+        ? "error"
+        : input.payload.type === "tool-call-result" ||
+            input.payload.type === "tool-call-end"
+          ? normalizeToolStatus(input.payload.status ?? payloadToolCall?.status)
+          : normalizeToolStatus(payloadToolCall?.status ?? snapshotToolCall?.status),
+    latencyMs:
+      typeof input.payload.latencyMs === "number"
+        ? input.payload.latencyMs
+        : typeof payloadToolCall?.latencyMs === "number" ||
+            payloadToolCall?.latencyMs === null
+          ? payloadToolCall.latencyMs
+          : typeof snapshotToolCall?.latencyMs === "number" ||
+              snapshotToolCall?.latencyMs === null
+            ? snapshotToolCall.latencyMs
+            : null,
+    error:
+      input.payload.type === "tool-call-error"
+        ? typeof input.payload.error === "string"
+          ? input.payload.error
+          : null
+        : typeof payloadToolCall?.error === "string" || payloadToolCall?.error === null
+          ? payloadToolCall.error
+          : typeof snapshotToolCall?.error === "string" ||
+              snapshotToolCall?.error === null
+            ? snapshotToolCall.error
+            : null,
+    sequence:
+      getTraceSequence(payloadToolCall) ?? getTraceSequence(snapshotToolCall) ?? 0,
+  };
+}
+
 function mergeThinkingStep(existing: unknown[], next: unknown) {
   const record =
     next && typeof next === "object" && !Array.isArray(next)
@@ -224,6 +407,274 @@ function mergeReasoningSegment(existing: unknown[], next: unknown) {
   return [...existing, record];
 }
 
+function normalizeRenderBlock(value: unknown): MessageRenderBlock | null {
+  const record = getObjectRecord(value);
+  const id = typeof record?.id === "string" ? record.id : null;
+  if (!record || !id) {
+    return null;
+  }
+
+  if (record.type === "text" && typeof record.text === "string") {
+    return {
+      id,
+      type: "text",
+      text: record.text,
+    };
+  }
+
+  if (record.type === "reasoning" && typeof record.text === "string") {
+    const durationMs =
+      typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
+        ? record.durationMs
+        : undefined;
+    return {
+      id,
+      type: "reasoning",
+      text: record.text,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    };
+  }
+
+  if (
+    (record.type === "tool" ||
+      record.type === "generated_image" ||
+      record.type === "generated_presentation") &&
+    typeof record.toolCallId === "string"
+  ) {
+    return {
+      id,
+      type: record.type,
+      toolCallId: record.toolCallId,
+    };
+  }
+
+  return null;
+}
+
+function normalizeRenderBlocks(blocks: unknown[] | undefined) {
+  return (blocks ?? [])
+    .map(normalizeRenderBlock)
+    .filter((block): block is MessageRenderBlock => block !== null);
+}
+
+function appendTextRenderBlock(input: {
+  blocks: unknown[] | undefined;
+  text: string;
+}) {
+  if (!input.text) {
+    return normalizeRenderBlocks(input.blocks);
+  }
+
+  const blocks = normalizeRenderBlocks(input.blocks);
+  const last = blocks[blocks.length - 1];
+  if (last?.type === "text") {
+    return blocks.map((block, index) =>
+      index === blocks.length - 1
+        ? {
+            ...last,
+            text: `${last.text}${input.text}`,
+          }
+        : block,
+    );
+  }
+
+  return [
+    ...blocks,
+    {
+      id: `text-${blocks.length + 1}`,
+      type: "text" as const,
+      text: input.text,
+    },
+  ];
+}
+
+function replaceTextRenderBlock(input: {
+  blocks: unknown[] | undefined;
+  text: string;
+}) {
+  const blocks = normalizeRenderBlocks(input.blocks);
+  if (!input.text) {
+    return blocks.filter((block) => block.type !== "text");
+  }
+
+  let lastTextIndex = -1;
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    if (blocks[index]?.type === "text") {
+      lastTextIndex = index;
+      break;
+    }
+  }
+
+  if (lastTextIndex >= 0) {
+    const prefix = blocks
+      .slice(0, lastTextIndex)
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("");
+    const lastText = blocks[lastTextIndex];
+    if (lastText?.type === "text" && input.text.startsWith(prefix)) {
+      return blocks.map((block, index) =>
+        index === lastTextIndex
+          ? {
+              ...lastText,
+              text: input.text.slice(prefix.length),
+            }
+          : block,
+      );
+    }
+  }
+
+  const nonTextBlocks = blocks.filter((block) => block.type !== "text");
+  return [
+    ...nonTextBlocks,
+    {
+      id: `text-${nonTextBlocks.length + 1}`,
+      type: "text" as const,
+      text: input.text,
+    },
+  ];
+}
+
+function appendReasoningRenderBlock(input: {
+  blocks: unknown[] | undefined;
+  durationMs?: number;
+  id: string;
+  text: string;
+}) {
+  if (!input.text) {
+    return normalizeRenderBlocks(input.blocks);
+  }
+
+  const blocks = normalizeRenderBlocks(input.blocks);
+  const existing = blocks.find(
+    (block) => block.type === "reasoning" && block.id === input.id,
+  );
+  if (existing?.type === "reasoning") {
+    return blocks.map((block) =>
+      block.type === "reasoning" && block.id === input.id
+        ? {
+            ...block,
+            text: `${block.text}${input.text}`,
+            ...(typeof input.durationMs === "number"
+              ? { durationMs: input.durationMs }
+              : {}),
+          }
+        : block,
+    );
+  }
+
+  return [
+    ...blocks,
+    {
+      id: input.id,
+      type: "reasoning" as const,
+      text: input.text,
+      ...(typeof input.durationMs === "number"
+        ? { durationMs: input.durationMs }
+        : {}),
+    },
+  ];
+}
+
+function getRenderBlockTypeForArtifactTool(toolName: string) {
+  if (isGeneratedImageArtifactToolName(toolName)) {
+    return "generated_image" as const;
+  }
+  if (
+    isPresentationArtifactToolName(toolName) ||
+    isVideoPresentationArtifactToolName(toolName)
+  ) {
+    return "generated_presentation" as const;
+  }
+  return null;
+}
+
+function getArtifactRenderBlockId(input: {
+  toolCallId: string;
+  type: Extract<MessageRenderBlock["type"], "generated_image" | "generated_presentation">;
+}) {
+  return input.type === "generated_image"
+    ? `generated-image-${input.toolCallId}`
+    : `generated-presentation-${input.toolCallId}`;
+}
+
+function appendToolRenderBlock(input: {
+  blocks: unknown[] | undefined;
+  toolCallId: string;
+}) {
+  const blocks = normalizeRenderBlocks(input.blocks);
+  if (
+    blocks.some(
+      (block) => block.type === "tool" && block.toolCallId === input.toolCallId,
+    )
+  ) {
+    return blocks;
+  }
+
+  return [
+    ...blocks,
+    {
+      id: `tool-${input.toolCallId}`,
+      type: "tool" as const,
+      toolCallId: input.toolCallId,
+    },
+  ];
+}
+
+function appendArtifactRenderBlock(input: {
+  blocks: unknown[] | undefined;
+  toolCallId: string;
+  toolName: string | null;
+}) {
+  if (!input.toolName) {
+    return normalizeRenderBlocks(input.blocks);
+  }
+
+  const type = getRenderBlockTypeForArtifactTool(input.toolName);
+  if (!type) {
+    return normalizeRenderBlocks(input.blocks);
+  }
+
+  const blocks = normalizeRenderBlocks(input.blocks);
+  if (
+    blocks.some(
+      (block) => block.type === type && block.toolCallId === input.toolCallId,
+    )
+  ) {
+    return blocks;
+  }
+
+  return [
+    ...blocks,
+    {
+      id: getArtifactRenderBlockId({
+        toolCallId: input.toolCallId,
+        type,
+      }),
+      type,
+      toolCallId: input.toolCallId,
+    },
+  ];
+}
+
+function appendArtifactBlocksFromToolCalls(snapshot: ChatRunSnapshot) {
+  const toolCalls = Array.isArray(snapshot.toolCalls) ? snapshot.toolCalls : [];
+  return toolCalls.reduce<MessageRenderBlock[]>(
+    (blocks, toolCall) => {
+      const record = getObjectRecord(toolCall);
+      const toolCallId = typeof record?.id === "string" ? record.id : null;
+      const toolName = typeof record?.tool === "string" ? record.tool : null;
+      return toolCallId
+        ? appendArtifactRenderBlock({
+            blocks,
+            toolCallId,
+            toolName,
+          })
+        : normalizeRenderBlocks(blocks);
+    },
+    normalizeRenderBlocks(snapshot.renderBlocks),
+  );
+}
+
 function updateSnapshotFromPayload(
   snapshot: ChatRunSnapshot,
   payload: Record<string, unknown> | null,
@@ -238,9 +689,17 @@ function updateSnapshotFromPayload(
   };
   if (payload.type === "text-delta" && typeof payload.delta === "string") {
     next.assistantContent = `${next.assistantContent ?? ""}${payload.delta}`;
+    next.renderBlocks = appendTextRenderBlock({
+      blocks: next.renderBlocks,
+      text: payload.delta,
+    });
   }
   if (payload.type === "text-replace" && typeof payload.text === "string") {
     next.assistantContent = payload.text;
+    next.renderBlocks = replaceTextRenderBlock({
+      blocks: next.renderBlocks,
+      text: payload.text,
+    });
   }
   if (payload.type === "reasoning" && typeof payload.reasoning === "string") {
     next.reasoning = `${next.reasoning ?? ""}${payload.reasoning}`;
@@ -258,6 +717,13 @@ function updateSnapshotFromPayload(
             >[0])
           : null;
       if (segment) {
+        next.renderBlocks = appendReasoningRenderBlock({
+          blocks: next.renderBlocks,
+          durationMs:
+            typeof segment.durationMs === "number" ? segment.durationMs : undefined,
+          id: `reasoning-${segment.id}`,
+          text: payload.reasoning,
+        });
         next.traceParts = upsertTracePart(
           next.traceParts,
           tracePartFromReasoningSegment(segment),
@@ -283,20 +749,45 @@ function updateSnapshotFromPayload(
       );
     }
   }
-  if (String(payload.type).startsWith("tool-call-") && payload.toolCall) {
-    next.toolCalls = mergeToolCall(next.toolCalls ?? [], payload.toolCall);
-    const toolCall =
-      payload.toolCall &&
-      typeof payload.toolCall === "object" &&
-      !Array.isArray(payload.toolCall)
-        ? (payload.toolCall as Parameters<typeof tracePartFromToolCall>[0])
-        : null;
+  if (String(payload.type).startsWith("tool-call-")) {
+    next.toolCalls = mergeToolCallFromPayload({
+      existing: next.toolCalls ?? [],
+      payload,
+    });
+    const toolCall = toolCallTraceFromPayload({ payload, snapshot: next });
     if (toolCall) {
       next.traceParts = upsertTracePart(
         next.traceParts,
         tracePartFromToolCall(toolCall),
       );
     }
+  }
+  if (
+    payload.type === "tool-call-start" ||
+    payload.type === "tool-call-event"
+  ) {
+    const toolCallId = getToolCallIdFromPayload(payload);
+    const toolName = getToolNameFromPayload(payload);
+    if (toolCallId) {
+      next.renderBlocks = appendArtifactRenderBlock({
+        blocks: next.renderBlocks,
+        toolCallId,
+        toolName,
+      });
+    }
+  }
+  if (payload.type === "tool-call-start") {
+    const toolCallId = getToolCallIdFromPayload(payload);
+    const toolName = getToolNameFromPayload(payload);
+    if (toolCallId && toolName && !getRenderBlockTypeForArtifactTool(toolName)) {
+      next.renderBlocks = appendToolRenderBlock({
+        blocks: next.renderBlocks,
+        toolCallId,
+      });
+    }
+  }
+  if (payload.type === "finish") {
+    next.renderBlocks = appendArtifactBlocksFromToolCalls(next);
   }
   if (payload.type === "finish") {
     next.finishReason =
@@ -322,7 +813,10 @@ function updateSnapshotFromPayload(
   }
   next.traceEvents = appendTraceEvent(
     next.traceEvents,
-    traceEventFromPayload(payload),
+    traceEventFromPayload({
+      payload,
+      eventIndex: next.traceEvents?.length ?? 0,
+    }),
   );
   return next;
 }
@@ -335,6 +829,12 @@ function buildThreadRunMetadata(run: ChatThreadRunRecord) {
       status: run.status,
       mode: run.mode,
       streamKey: run.streamKey,
+      ...(run.startedAt && run.finishedAt
+        ? {
+            startedAt: run.startedAt,
+            completedAt: run.finishedAt,
+          }
+        : {}),
     },
   };
 }
@@ -364,11 +864,18 @@ function getTraceEventKey(value: unknown) {
 
 function buildTraceEventId(input: {
   baseId: string;
+  eventIndex?: number;
+  eventType?: string;
+  phase?: string | null;
   sequence: number | null;
 }) {
-  return input.sequence === null
+  const suffix = [input.phase, input.eventType, input.eventIndex]
+    .filter((item) => item !== undefined && item !== null && item !== "")
+    .join(":");
+  const id = input.sequence === null
     ? input.baseId
     : `${input.baseId}:${input.sequence}`;
+  return suffix ? `${id}:${suffix}` : id;
 }
 
 function appendTraceEvent(
@@ -412,7 +919,11 @@ function appendTraceEvent(
   );
 }
 
-function traceEventFromPayload(payload: Record<string, unknown> | null) {
+function traceEventFromPayload(input: {
+  eventIndex: number;
+  payload: Record<string, unknown> | null;
+}) {
+  const { eventIndex, payload } = input;
   if (!payload || typeof payload.type !== "string") {
     return null;
   }
@@ -428,6 +939,9 @@ function traceEventFromPayload(payload: Record<string, unknown> | null) {
       type: "reasoning",
       id: buildTraceEventId({
         baseId: segmentId,
+        eventIndex,
+        eventType: payload.type,
+        phase: typeof segment.phase === "string" ? segment.phase : null,
         sequence,
       }),
       itemId: segmentId,
@@ -449,6 +963,8 @@ function traceEventFromPayload(payload: Record<string, unknown> | null) {
       type: "thinking-step",
       id: buildTraceEventId({
         baseId: stepId,
+        eventIndex,
+        eventType: payload.type,
         sequence,
       }),
       itemId: stepId,
@@ -473,6 +989,14 @@ function traceEventFromPayload(payload: Record<string, unknown> | null) {
       type: "tool-call",
       id: buildTraceEventId({
         baseId: eventId,
+        eventIndex,
+        eventType: payload.type,
+        phase:
+          typeof payload.event === "string"
+            ? payload.event
+            : typeof getObjectRecord(payload.data)?.type === "string"
+              ? (getObjectRecord(payload.data)?.type as string)
+              : null,
         sequence,
       }),
       itemId: eventId,
@@ -727,10 +1251,13 @@ export async function persistTerminalFailure(input: {
         },
       }
     : input.snapshot;
+  const clientErrorMessage = sanitizeClientErrorMessage(
+    input.contentError.message,
+  );
   const errorPayload = toSseData({
     type: "error",
     code: input.contentError.code,
-    error: input.contentError.message,
+    error: clientErrorMessage,
     ...(input.run.userMessageId ? { userMessageId: input.run.userMessageId } : {}),
     ...(input.assistantMessageId ? { messageId: input.assistantMessageId } : {}),
   });
@@ -889,11 +1416,17 @@ export async function processThreadChatRunJob(
             prepared,
           });
           assistantMessageId = placeholder.id;
+          const existingRenderBlocks = Array.isArray(
+            placeholder.metadata?.renderBlocks,
+          )
+            ? (placeholder.metadata.renderBlocks as unknown[])
+            : [];
           snapshot = {
             ...snapshot,
             thread: prepared.thread,
             userMessage: prepared.userMessage,
             assistantMessage: placeholder,
+            renderBlocks: existingRenderBlocks,
           };
           run =
             (await updateChatThreadRunProgress({
@@ -1093,6 +1626,25 @@ export async function processThreadChatRunJob(
                 snapshot.assistantMessage?.metadata ??
                 {}),
               ...buildThreadRunMetadata(finalRun),
+              threadRun: {
+                ...buildThreadRunMetadata(finalRun).threadRun,
+                ...(finalMessage?.metadata &&
+                typeof finalMessage.metadata === "object" &&
+                !Array.isArray(finalMessage.metadata) &&
+                finalMessage.metadata.threadRun &&
+                typeof finalMessage.metadata.threadRun === "object" &&
+                !Array.isArray(finalMessage.metadata.threadRun) &&
+                "durationMs" in finalMessage.metadata.threadRun
+                  ? {
+                      durationMs: (
+                        finalMessage.metadata.threadRun as Record<
+                          string,
+                          unknown
+                        >
+                      ).durationMs,
+                    }
+                  : {}),
+              },
             },
       });
     }

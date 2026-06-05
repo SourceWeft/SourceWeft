@@ -9,6 +9,7 @@ import {
 } from "./tool-confirmation-controller";
 import {
   combineToolApprovalResumes,
+  getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
   getVisibleToolConfirmationItems,
@@ -290,6 +291,65 @@ test("run-scoped confirmations use the active run assistant message", () => {
   assert.equal(lookup.items[0]?.assistantMessageId, "assistant-old-edit");
 });
 
+test("live stream confirmations are available before persisted message lookup", () => {
+  const item = createConfirmationItem("action-live", {
+    threadRunId: "run-live",
+  });
+  const lookup = getLiveToolConfirmationItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-live",
+      id: "run-live",
+      idempotencyKey: "run-key-live",
+      status: "waiting_for_approval",
+    },
+    signal: {
+      id: "signal-live",
+      assistantMessageId: "assistant-live",
+      liveConfirmations: [
+        {
+          confirmation: item.confirmation,
+          toolCall: item.toolCall,
+        },
+      ],
+      runKey: "run-key-live",
+      threadRunId: "run-live",
+    },
+  });
+
+  assert.deepEqual(
+    lookup.map((pending) => pending.confirmation.id),
+    ["action-live"],
+  );
+  assert.equal(lookup[0]?.assistantMessageId, "assistant-live");
+  assert.equal(lookup[0]?.threadRunId, "run-live");
+});
+
+test("live stream confirmations are scoped to the active run", () => {
+  const item = createConfirmationItem("action-live");
+  const lookup = getLiveToolConfirmationItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-current",
+      id: "run-current",
+      idempotencyKey: "run-key-current",
+      status: "waiting_for_approval",
+    },
+    signal: {
+      id: "signal-old",
+      assistantMessageId: "assistant-old",
+      liveConfirmations: [
+        {
+          confirmation: item.confirmation,
+          toolCall: item.toolCall,
+        },
+      ],
+      runKey: "run-key-old",
+      threadRunId: "run-old",
+    },
+  });
+
+  assert.deepEqual(lookup, []);
+});
+
 test("run-scoped confirmations return empty when waiting run lacks assistant message", () => {
   const lookup = getToolConfirmationItemsForRun({
     activeThreadRun: {
@@ -397,6 +457,45 @@ test("composer stays available for stale waiting runs without pending confirmati
       isStreaming: true,
       isWaitingForApproval: true,
       pendingConfirmationCount: 1,
+    }),
+    true,
+  );
+});
+
+test("composer lock follows explicit chat execution state when provided", () => {
+  assert.equal(
+    shouldLockComposerForRun({
+      chatExecutionState: "idle",
+      isStreaming: true,
+      isWaitingForApproval: false,
+      pendingConfirmationCount: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldLockComposerForRun({
+      chatExecutionState: "executing",
+      isStreaming: false,
+      isWaitingForApproval: false,
+      pendingConfirmationCount: 0,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldLockComposerForRun({
+      chatExecutionState: "waiting_for_approval",
+      isStreaming: false,
+      isWaitingForApproval: false,
+      pendingConfirmationCount: 0,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldLockComposerForRun({
+      chatExecutionState: "stopping",
+      isStreaming: false,
+      isWaitingForApproval: false,
+      pendingConfirmationCount: 0,
     }),
     true,
   );

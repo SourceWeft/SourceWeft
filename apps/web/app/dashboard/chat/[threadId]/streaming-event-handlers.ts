@@ -27,11 +27,16 @@ export type StreamingEventHandlerContext<
     toolCall: ToolCallRecord,
     event: TToolEvent,
   ) => boolean;
+  isCompletedPresentationArtifactToolCall: (
+    toolCall: ToolCallRecord,
+    event: TToolEvent,
+  ) => boolean;
   isCompletedWorkfileWriteToolCall: (
     toolCall: ToolCallRecord,
     event: TToolEvent,
   ) => boolean;
   isGeneratedImageArtifactToolName: (toolName: string) => boolean;
+  isPresentationArtifactToolName: (toolName: string) => boolean;
   mergeThinkingStepRecords: (
     stepsById: Map<string, ThinkingStepRecord>,
     nextStep: ThinkingStepRecord,
@@ -279,14 +284,21 @@ export function handleStreamingTextReplace<
   setAssistantText(text);
   setLatestAssistantMessageContent(text);
   setHasRenderedDelta(text.length > 0);
-  context.streamRenderBuffer.replaceRenderBlocks([]);
+  context.streamRenderBuffer.replaceText(text);
   context.updateStreamingAssistantMessage((message) => ({
     ...message,
     content: text,
     metadata: {
       ...message.metadata,
       [STREAM_TEXT_PAUSED_KEY]: false,
-      renderBlocks: [],
+      [STREAM_TEXT_INTERRUPTED_KEY]: false,
+      renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
+      threadRun: {
+        ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
+        idempotencyKey: context.durableRunKey,
+        status: "running",
+        mode: context.mode,
+      },
     },
   }));
 }
@@ -336,6 +348,23 @@ export function handleStreamingToolCallEvent<
     drainQueuedDeltasNow();
     context.streamRenderBuffer.appendGeneratedImageBlock(nextToolCall.id);
   }
+  const shouldAppendPresentationBlock =
+    context.isPresentationArtifactToolName(nextToolCall.tool) &&
+    (event.type === "tool-call-start" ||
+      ((event.type === "tool-call-result" || event.type === "tool-call-end") &&
+        context.isCompletedPresentationArtifactToolCall(nextToolCall, event)));
+  if (shouldAppendPresentationBlock) {
+    drainQueuedDeltasNow();
+    context.streamRenderBuffer.appendGeneratedPresentationBlock(nextToolCall.id);
+  }
+  if (
+    event.type === "tool-call-start" &&
+    !context.isGeneratedImageArtifactToolName(nextToolCall.tool) &&
+    !context.isPresentationArtifactToolName(nextToolCall.tool)
+  ) {
+    drainQueuedDeltasNow();
+    context.streamRenderBuffer.appendToolBlock(nextToolCall.id);
+  }
   const traceEvent = context.resolveTraceEventFromStreamEvent({
     event,
     toolCall: nextToolCall,
@@ -366,6 +395,13 @@ export function handleStreamingToolCallEvent<
   }
   if (
     context.isCompletedImageArtifactToolCall(nextToolCall, event) &&
+    !refreshedArtifactToolIds.has(nextToolCall.id)
+  ) {
+    refreshedArtifactToolIds.add(nextToolCall.id);
+    setArtifactsRefreshKey((value) => value + 1);
+  }
+  if (
+    context.isCompletedPresentationArtifactToolCall(nextToolCall, event) &&
     !refreshedArtifactToolIds.has(nextToolCall.id)
   ) {
     refreshedArtifactToolIds.add(nextToolCall.id);
@@ -608,6 +644,38 @@ function buildStepTracePart(
   };
 }
 
+function normalizeTerminalTracePart(part: TracePartRecord): TracePartRecord {
+  if (part.kind === "step" && part.status === "in_progress") {
+    return {
+      ...part,
+      status: "completed",
+    };
+  }
+  if (part.kind === "tool" && part.status === "running") {
+    return {
+      ...part,
+      status: "completed",
+    };
+  }
+  return part;
+}
+
+function buildTerminalTraceParts(input: {
+  metadata: Record<string, unknown>;
+  steps: ThinkingStepRecord[];
+  toolCalls: ToolCallRecord[];
+}) {
+  const withTools = input.toolCalls.reduce(
+    (parts, toolCall) => upsertTracePart(parts, buildToolTracePart(toolCall)),
+    getTraceParts(input.metadata),
+  );
+  const withSteps = input.steps.reduce(
+    (parts, step) => upsertTracePart(parts, buildStepTracePart(step)),
+    withTools,
+  );
+  return withSteps.map(normalizeTerminalTracePart);
+}
+
 function buildReasoningTraceEvent(input: {
   reasoning: string;
   segment: ModelReasoningSegmentRecord;
@@ -676,6 +744,13 @@ export function handleStreamingReasoning<
           buildReasoningTracePart(nextSegment),
         )
       : getTraceParts(message.metadata);
+    if (nextSegment) {
+      context.streamRenderBuffer.appendReasoningBlock({
+        id: `stream-reasoning-${nextSegment.id}`,
+        text: reasoning,
+        durationMs: nextSegment.durationMs,
+      });
+    }
 
     return {
       ...message,
@@ -685,6 +760,7 @@ export function handleStreamingReasoning<
         reasoningSegments,
         traceEvents: getReasoningTraceEvents(message.metadata),
         traceParts,
+        renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
         threadRun: {
           ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
           idempotencyKey: context.durableRunKey,
@@ -765,18 +841,31 @@ export function handleStreamingFinish<
     context.syncStreamingThinkingSteps();
   }
   context.updateStreamingAssistantMessage((message) => {
+    const terminalThinkingSteps = [
+      ...context.streamThinkingStepsById.values(),
+    ];
+    const terminalToolCalls = [...context.streamToolCallsById.values()];
     const existingRun = context.toObjectRecord(message.metadata.threadRun);
     const existingStatus = context.toNullableString(existingRun?.status);
     const nextStatus = resolveFinishedThreadRunStatus({
       existingStatus,
       finishReason,
     });
+    const terminalFinishReason =
+      finishReason ?? (nextStatus === "completed" ? "stop" : null);
     return {
       ...message,
       metadata: {
         ...message.metadata,
-        ...(finishReason ? { finishReason } : {}),
+        ...(terminalFinishReason ? { finishReason: terminalFinishReason } : {}),
         [STREAM_TEXT_PAUSED_KEY]: false,
+        thinkingSteps: terminalThinkingSteps,
+        toolCalls: terminalToolCalls,
+        traceParts: buildTerminalTraceParts({
+          metadata: message.metadata,
+          steps: terminalThinkingSteps,
+          toolCalls: terminalToolCalls,
+        }),
         renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
         threadRun: {
           ...(existingRun ?? {}),
@@ -798,6 +887,7 @@ export const testExports = {
   buildReasoningTraceEvent,
   buildThinkingStepTraceEvent,
   handleStreamingAssistantMessage,
+  handleStreamingError,
   handleStreamingFinish,
   handleStreamingReasoning,
   handleStreamingThinkingStep,
@@ -861,8 +951,9 @@ export function handleStreamingAssistantMessage<
       renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
       threadRun: {
         ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
+        assistantMessageId: messageId,
         idempotencyKey: context.durableRunKey,
-        status: "completed",
+        status: "running",
         mode: context.mode,
       },
     },
@@ -876,7 +967,7 @@ export function handleStreamingError({
   setStreamError,
   setSuppressErrorToast,
 }: HandleStreamingErrorInput) {
-  const errorMessage = event.error ?? "Model error";
+  const errorMessage = sanitizeClientErrorMessage(event.error) ?? "Model error";
   setSuppressErrorToast(event.code === "CLIENT_CANCELLED");
   markStreamingAssistantAsError({
     code: event.code ?? null,
@@ -889,6 +980,27 @@ export function handleStreamingError({
     userMessageId: event.userMessageId ?? persistedUserMessageId,
   });
   setStreamError(new Error(errorMessage));
+}
+
+function sanitizeClientErrorMessage(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) {
+    return null;
+  }
+  if (
+    /Error invoking tool/i.test(text) ||
+    /Received tool input did not match expected schema/i.test(text) ||
+    /\bkwargs\b/i.test(text) ||
+    /Invalid input: expected .*received/i.test(text)
+  ) {
+    const toolName =
+      text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
+      text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
+    return toolName
+      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
+      : "The generated tool arguments were invalid. Please retry.";
+  }
+  return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
 }
 
 export function handleStreamingStart<

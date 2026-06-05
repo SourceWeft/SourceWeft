@@ -3,9 +3,15 @@ import { test } from "vitest";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import { buildVersionedMessageGroups } from "./message-groups";
 import {
+  dropStaleActiveThreadRunMessages,
+  findActiveThreadRunMessage,
   findLatestActiveThreadRunMessage,
+  hasRenderBlocksMetadata,
   normalizeToolCallRecord,
+  resolveRenderBlocksFromMetadata,
   resolveToolCallFromStreamEvent,
+  sanitizeClientErrorMessage,
+  STREAM_TEXT_INTERRUPTED_KEY,
 } from "./message-normalizers";
 
 function createMessage(
@@ -77,6 +83,167 @@ test("waiting confirmation runs restored from messages carry assistant message i
   assert.equal(restored?.message.id, "assistant-waiting");
   assert.equal(restored?.run.assistantMessageId, "assistant-waiting");
   assert.equal(restored?.run.status, "waiting_for_approval");
+});
+
+test("messages with stale running metadata do not restore without server active run", () => {
+  const stalePlaceholder = createMessage({
+    id: "assistant-placeholder",
+    role: "assistant",
+    metadata: {
+      threadRun: {
+        id: "run-1",
+        idempotencyKey: "sourceweft-web-run:run-1",
+        status: "running",
+        mode: "edit",
+      },
+    },
+  });
+
+  assert.equal(findActiveThreadRunMessage([stalePlaceholder], null), null);
+});
+
+test("stale running assistant placeholder is hidden after terminal run message", () => {
+  const stalePlaceholder = createMessage({
+    id: "assistant-placeholder",
+    role: "assistant",
+    createdAt: "2026-05-29T15:37:36.434Z",
+    metadata: {
+      threadRun: {
+        id: "run-1",
+        idempotencyKey: "sourceweft-web-run:run-1",
+        status: "running",
+        mode: "send",
+      },
+    },
+  });
+  const completedAssistant = createMessage({
+    id: "assistant-final",
+    role: "assistant",
+    content: "Video project created.",
+    createdAt: "2026-05-29T15:38:53.195Z",
+    metadata: {
+      finishReason: "stop",
+      threadRun: {
+        id: "run-1",
+        idempotencyKey: "sourceweft-web-run:run-1",
+        status: "completed",
+        mode: "send",
+      },
+    },
+  });
+
+  const filtered = dropStaleActiveThreadRunMessages([
+    stalePlaceholder,
+    completedAssistant,
+  ]);
+
+  assert.deepEqual(
+    filtered.map((message) => message.id),
+    ["assistant-final"],
+  );
+});
+
+test("server active run restores the matching assistant message", () => {
+  const assistant = createMessage({
+    id: "assistant-running",
+    role: "assistant",
+    metadata: {
+      threadRun: {
+        id: "run-1",
+        idempotencyKey: "sourceweft-web-run:run-1",
+        status: "running",
+        mode: "edit",
+      },
+    },
+  });
+
+  const restored = findActiveThreadRunMessage([assistant], {
+    id: "run-1",
+    idempotencyKey: "sourceweft-web-run:run-1",
+    status: "running",
+    mode: "edit",
+    userMessageId: "user-1",
+    assistantMessageId: null,
+  });
+
+  assert.equal(restored?.message.id, "assistant-running");
+  assert.equal(restored?.run.assistantMessageId, "assistant-running");
+  assert.equal(restored?.run.userMessageId, "user-1");
+});
+
+test("error messages are terminal even if thread run metadata is stale", () => {
+  const assistant = createMessage({
+    id: "assistant-error",
+    role: "assistant",
+    metadata: {
+      isError: true,
+      errorCode: "MODEL_UPSTREAM_ERROR",
+      threadRun: {
+        id: "run-1",
+        idempotencyKey: "sourceweft-web-run:run-1",
+        status: "running",
+        mode: "edit",
+      },
+    },
+  });
+
+  assert.equal(findLatestActiveThreadRunMessage([assistant]), null);
+});
+
+test("raw tool schema failures are sanitized for persisted error versions", () => {
+  const rawError =
+    'Error invoking tool \'generate_pptx\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
+  const userMessage = createMessage({
+    id: "user-1",
+    role: "user",
+    content: "Generate PPTX 生成费曼学习法的讲解PPT",
+  });
+  const assistant = createMessage({
+    id: "assistant-error",
+    role: "assistant",
+    content: rawError,
+    metadata: {
+      isError: true,
+      error: rawError,
+      errorCode: "MODEL_UPSTREAM_ERROR",
+      userMessageId: "user-1",
+      sourceUserMessageId: "user-1",
+    },
+  });
+
+  const assistantGroup = buildVersionedMessageGroups([
+    userMessage,
+    assistant,
+  ]).find((group) => group.role === "assistant");
+  const error = assistantGroup?.versions[0]?.error;
+
+  assert.equal(
+    sanitizeClientErrorMessage(rawError),
+    "generate_pptx failed because the generated tool arguments were invalid. Please retry.",
+  );
+  assert.equal(
+    error,
+    "generate_pptx failed because the generated tool arguments were invalid. Please retry.",
+  );
+  assert.doesNotMatch(error ?? "", /kwargs|schema|brief|slides|expected string/i);
+});
+
+test("terminal failed messages do not restore stale active thread runs", () => {
+  const assistant = createMessage({
+    id: "assistant-failed",
+    role: "assistant",
+    metadata: {
+      finishReason: "command_success_criteria_failed",
+      threadRun: {
+        id: "run-1",
+        idempotencyKey: "sourceweft-web-run:run-1",
+        status: "running",
+        mode: "send",
+      },
+    },
+  });
+
+  assert.equal(findLatestActiveThreadRunMessage([assistant]), null);
 });
 
 test("notion tool calls hide request params and raw connector payload", () => {
@@ -494,4 +661,76 @@ test("assistant versions are indexable by persisted message id after edits", () 
   assert.equal(entry?.version.id, "assistant-2");
   assert.equal(entry?.version.threadRun?.id, "run-edit");
   assert.equal(entry?.branchIndex, 1);
+});
+
+test("old assistant messages without renderBlocks metadata preserve content and tool traces", () => {
+  const assistant = createMessage({
+    id: "assistant-old",
+    role: "assistant",
+    content: "Old answer body remains visible.",
+    metadata: {
+      toolCalls: [
+        {
+          id: "tool-1",
+          tool: "search_web",
+          input: { query: "sourceweft" },
+          output: { resultCount: 1 },
+          status: "completed",
+        },
+      ],
+      traceParts: [
+        {
+          createdAt: new Date(0).toISOString(),
+          id: "trace-tool-1",
+          input: { query: "sourceweft" },
+          kind: "tool",
+          order: 1,
+          status: "completed",
+          tool: "search_web",
+          toolCallId: "tool-1",
+          updatedAt: new Date(0).toISOString(),
+        },
+      ],
+    },
+  });
+
+  const version = buildVersionedMessageGroups([assistant])[0]?.versions[0];
+
+  assert.equal(version?.content, "Old answer body remains visible.");
+  assert.equal(version?.renderBlocks, undefined);
+  assert.equal(version?.toolCalls?.[0]?.id, "tool-1");
+  const tracePart = version?.traceParts?.[0];
+  assert.equal(tracePart?.kind, "tool");
+  assert.equal(tracePart?.kind === "tool" ? tracePart.toolCallId : undefined, "tool-1");
+});
+
+test("renderBlocks metadata presence is explicit", () => {
+  assert.equal(hasRenderBlocksMetadata({}), false);
+  assert.equal(hasRenderBlocksMetadata({ renderBlocks: "bad" }), false);
+  assert.equal(hasRenderBlocksMetadata({ renderBlocks: [] }), true);
+  assert.deepEqual(resolveRenderBlocksFromMetadata({ renderBlocks: [] }), []);
+  assert.deepEqual(
+    resolveRenderBlocksFromMetadata({
+      renderBlocks: [{ id: "text-1", text: "Partial answer", type: "text" }],
+    }),
+    [{ id: "text-1", text: "Partial answer", type: "text" }],
+  );
+});
+
+test("empty renderBlocks metadata does not remove interrupted assistant content", () => {
+  const assistant = createMessage({
+    id: "assistant-interrupted",
+    role: "assistant",
+    content: "Partial answer before interruption.",
+    metadata: {
+      renderBlocks: [],
+      [STREAM_TEXT_INTERRUPTED_KEY]: true,
+    },
+  });
+
+  const version = buildVersionedMessageGroups([assistant])[0]?.versions[0];
+
+  assert.equal(version?.content, "Partial answer before interruption.");
+  assert.deepEqual(version?.renderBlocks, []);
+  assert.equal(version?.isTextInterrupted, true);
 });

@@ -181,6 +181,23 @@ test("notion create action describes workspace-default target overrides", () => 
   assert.match(schema.properties?.dataSourceId?.description ?? "", /Omit by default/);
 });
 
+test("notion find action describes required search query", () => {
+  const findAction = notionAdapter
+    .getManifest()
+    .actions.find((action) => action.type === "notion.page.find");
+  assert.ok(findAction);
+
+  assert.match(findAction.description ?? "", /Always pass query as non-empty/);
+  assert.match(findAction.description ?? "", /ask the user what page to find/);
+  const schema = findAction.inputSchema as {
+    properties?: Record<string, { description?: string }>;
+    required?: string[];
+  };
+  assert.deepEqual(schema.required, ["query"]);
+  assert.match(schema.properties?.query?.description ?? "", /Required non-empty/);
+  assert.match(schema.properties?.query?.description ?? "", /user's request/);
+});
+
 test("notion readiness checks only page access with page_size 1", async () => {
   assert.ok(notionAdapter.checkSyncReadiness);
 

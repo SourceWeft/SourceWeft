@@ -141,7 +141,33 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   const totalCreditsConsumed =
     billing.consumedCredits + preflightCreditsConsumed;
 
+  const existingAssistantMessage = input.assistantMessageId
+    ? await findMessageRecord({
+        teamId: prepared.workspace.organizationId,
+        workspaceId: prepared.workspace.id,
+        messageId: input.assistantMessageId,
+      })
+    : null;
+  const existingThreadRun =
+    existingAssistantMessage?.metadata?.threadRun &&
+    typeof existingAssistantMessage.metadata.threadRun === "object" &&
+    !Array.isArray(existingAssistantMessage.metadata.threadRun)
+      ? (existingAssistantMessage.metadata.threadRun as Record<string, unknown>)
+      : {};
+  const existingDurationMs =
+    typeof existingThreadRun.durationMs === "number" &&
+    Number.isFinite(existingThreadRun.durationMs)
+      ? existingThreadRun.durationMs
+      : 0;
+  const accumulatedDurationMs = existingDurationMs + input.latencyMs;
+
   const nextAssistantMetadata = {
+    ...(input.assistantMetadata ?? {}),
+    threadRun: {
+      ...existingThreadRun,
+      completedAt: new Date().toISOString(),
+      durationMs: accumulatedDurationMs,
+    },
     userMessageId: prepared.userMessage.id,
     sourceUserMessageId: prepared.userMessage.id,
     traceId: prepared.traceContext?.traceId ?? prepared.userMessage.id,
@@ -202,15 +228,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       citations: input.citations,
       availableCitations: input.availableCitations ?? input.citations,
     },
-    ...(input.assistantMetadata ?? {}),
   };
-  const existingAssistantMessage = input.assistantMessageId
-    ? await findMessageRecord({
-        teamId: prepared.workspace.organizationId,
-        workspaceId: prepared.workspace.id,
-        messageId: input.assistantMessageId,
-      })
-    : null;
   const assistantContent = input.assistantMessageId
     ? appendAssistantContinuationContent({
         existingContent: existingAssistantMessage?.content,

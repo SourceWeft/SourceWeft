@@ -9,6 +9,7 @@ import {
 import { closeQueue } from "../shared/queue";
 import { createApp } from "./app";
 import { contentSkillsService } from "../modules/content/skills";
+import { logSandboxStartupWarning } from "../modules/content/agent/sandbox/startup-log";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 await ensureModelConfigAvailable();
@@ -27,6 +28,7 @@ serve(
       host: config.apiHost,
       port: config.apiPort,
     });
+    logSandboxStartupWarning("api");
   },
 );
 

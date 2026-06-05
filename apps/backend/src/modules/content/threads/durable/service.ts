@@ -1,4 +1,5 @@
 import { ContentError } from "../../errors";
+import { sanitizeClientErrorMessage } from "../../model-gateway-error";
 import { requireContentWorkspace } from "../../content-support";
 import {
   enqueueThreadChatRunJob,
@@ -60,6 +61,7 @@ import type {
 import { preserveTraceMetadata } from "../turn/trace-metadata";
 import {
   normalizeTraceParts,
+  tracePartFromThinkingStep,
   tracePartFromToolCall,
   upsertTracePart,
   type TracePart,
@@ -95,6 +97,15 @@ function isTerminalRunStatus(status: ChatThreadRunRecord["status"]) {
   return (
     status === "completed" || status === "failed" || status === "cancelled"
   );
+}
+
+function getSnapshotAssistantMetadata(
+  snapshot: ChatRunSnapshot,
+): Record<string, unknown> {
+  const metadata = snapshot.assistantMessage?.metadata;
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? metadata
+    : {};
 }
 
 function getSnapshotRecord(run: RunSnapshotSource): ChatRunSnapshot {
@@ -260,6 +271,93 @@ function updateExistingTracePartsFromToolCalls(
   );
 }
 
+function normalizeTerminalThinkingStep(value: unknown) {
+  const record = getObjectRecord(value);
+  if (!record) {
+    return value;
+  }
+  return record.status === "in_progress"
+    ? {
+        ...record,
+        status: "completed",
+      }
+    : record;
+}
+
+function normalizeTerminalTracePart(part: TracePart): TracePart {
+  if (part.kind === "step" && part.status === "in_progress") {
+    return {
+      ...part,
+      status: "completed",
+    };
+  }
+  if (part.kind === "tool" && part.status === "running") {
+    return {
+      ...part,
+      status: "error",
+      error: part.error ?? "Tool execution failed.",
+    };
+  }
+  return part;
+}
+
+function finalizeTerminalSnapshotTrace(snapshot: ChatRunSnapshot): ChatRunSnapshot {
+  const thinkingSteps = Array.isArray(snapshot.thinkingSteps)
+    ? snapshot.thinkingSteps.map(normalizeTerminalThinkingStep)
+    : undefined;
+  const tracePartsWithSteps = thinkingSteps
+    ? thinkingSteps.reduce<TracePart[]>((parts, step) => {
+        const record = getObjectRecord(step);
+        if (
+          typeof record?.id !== "string" ||
+          typeof record.title !== "string" ||
+          !Array.isArray(record.items)
+        ) {
+          return parts;
+        }
+        return upsertTracePart(
+          parts,
+          tracePartFromThinkingStep({
+            id: record.id,
+            title: record.title,
+            status:
+              record.status === "pending" ||
+              record.status === "in_progress" ||
+              record.status === "completed"
+                ? record.status
+                : "completed",
+            items: record.items.filter(
+              (item): item is string => typeof item === "string",
+            ),
+            sequence:
+              typeof record.sequence === "number" ? record.sequence : parts.length,
+            ...(record.kind === "log" ||
+            record.kind === "state" ||
+            record.kind === "verification" ||
+            record.kind === "reasoning_summary"
+              ? { kind: record.kind }
+              : {}),
+            ...(typeof record.description === "string" ||
+            record.description === null
+              ? { description: record.description }
+              : {}),
+            ...(typeof record.detail === "string" || record.detail === null
+              ? { detail: record.detail }
+              : {}),
+            ...(getObjectRecord(record.metadata)
+              ? { metadata: getObjectRecord(record.metadata)! }
+              : {}),
+          }),
+        );
+      }, normalizeTraceParts(snapshot.traceParts))
+    : normalizeTraceParts(snapshot.traceParts);
+  return {
+    ...snapshot,
+    ...(thinkingSteps ? { thinkingSteps } : {}),
+    traceParts: tracePartsWithSteps.map(normalizeTerminalTracePart),
+  };
+}
+
 function hasPendingConfirmations(toolCalls: unknown[] | undefined) {
   return (toolCalls ?? []).some((toolCall) => {
     const record = getObjectRecord(toolCall);
@@ -278,6 +376,41 @@ function shouldCompleteApprovalRunWithoutPendingConfirmations(
     run.status === "waiting_for_approval" &&
     !hasPendingConfirmations(getSnapshotRecord(run).toolCalls)
   );
+}
+
+function resolveTerminalStatusFromFinishedSnapshot(
+  snapshot: ChatRunSnapshot,
+): Extract<ChatThreadRunStatus, "completed" | "failed" | "cancelled"> | null {
+  const metadata = getSnapshotAssistantMetadata(snapshot);
+  const finishReason =
+    typeof snapshot.finishReason === "string"
+      ? snapshot.finishReason
+      : typeof metadata.finishReason === "string"
+        ? metadata.finishReason
+        : null;
+  const errorCode =
+    typeof snapshot.errorCode === "string"
+      ? snapshot.errorCode
+      : typeof metadata.errorCode === "string"
+        ? metadata.errorCode
+        : null;
+  const errorMessage =
+    typeof snapshot.errorMessage === "string"
+      ? snapshot.errorMessage
+      : typeof metadata.error === "string"
+        ? metadata.error
+        : null;
+
+  if (errorCode === CLIENT_CANCELLED_CODE) {
+    return "cancelled";
+  }
+  if (errorCode || errorMessage || finishReason === "command_success_criteria_failed") {
+    return "failed";
+  }
+  if (finishReason && finishReason !== "tool_confirmation_requested") {
+    return "completed";
+  }
+  return null;
 }
 
 export function getRunApprovalPauseState(run: RunSnapshotSource) {
@@ -373,12 +506,13 @@ async function failRunBeforeMessages(
   run: ChatThreadRunRecord,
   error: { code: string; message: string },
 ) {
+  const clientErrorMessage = sanitizeClientErrorMessage(error.message);
   await chatRunStreamManager.appendEvent(
     run.streamKey,
     `data: ${JSON.stringify({
       type: "error",
       code: error.code,
-      error: error.message,
+      error: clientErrorMessage,
     })}\n\n`,
   );
   await chatRunStreamManager.appendEvent(
@@ -486,11 +620,11 @@ async function forceCancelStoppedRun(
     errorMessage: CLIENT_CANCELLED_MESSAGE,
   };
   const snapshot = withAssistantThreadRunMetadata(
-    {
+    finalizeTerminalSnapshotTrace({
       ...getSnapshotRecord(activeRun),
       errorCode: CLIENT_CANCELLED_CODE,
       errorMessage: CLIENT_CANCELLED_MESSAGE,
-    },
+    }),
     cancelledRun,
   );
 
@@ -531,6 +665,7 @@ async function forceCancelStoppedRun(
   if (latestAfterCancel.status === "cancelled") {
     await updateAssistantMetadata({
       run: latestAfterCancel,
+      snapshot,
       metadata: {
         isCancelled: true,
         error: CLIENT_CANCELLED_MESSAGE,
@@ -542,23 +677,56 @@ async function forceCancelStoppedRun(
 }
 
 async function failStaleActiveRun(run: ChatThreadRunRecord) {
-  await chatRunStreamManager.appendEvent(
+  return failStaleActiveRunWithDependencies(run);
+}
+
+async function failStaleActiveRunWithDependencies(
+  run: ChatThreadRunRecord,
+  dependencies: {
+    appendEvent?: typeof chatRunStreamManager.appendEvent;
+    finishRun?: typeof finishChatThreadRun;
+    updateAssistantMetadata?: typeof updateAssistantMessageThreadRunMetadata;
+  } = {},
+) {
+  const appendEvent =
+    dependencies.appendEvent ?? chatRunStreamManager.appendEvent.bind(chatRunStreamManager);
+  const finishRun = dependencies.finishRun ?? finishChatThreadRun;
+  const updateAssistantMetadata =
+    dependencies.updateAssistantMetadata ?? updateAssistantMessageThreadRunMetadata;
+  const snapshot = getSnapshotRecord(run);
+  const terminalRun = {
+    ...run,
+    status: "failed" as const,
+    errorCode: STALE_CHAT_RUN_CODE,
+    errorMessage: null,
+  };
+  const terminalSnapshot = withAssistantThreadRunMetadata(
+    {
+      ...snapshot,
+      errorCode: STALE_CHAT_RUN_CODE,
+    },
+    terminalRun,
+  );
+  await appendEvent(
     run.streamKey,
     `data: ${JSON.stringify({ type: "finish" })}\n\n`,
   );
-  return finishChatThreadRun({
+  const failedRun = await finishRun({
     runId: run.id,
     teamId: run.teamId,
     workspaceId: run.workspaceId,
     status: "failed",
     assistantMessageId: run.assistantMessageId,
-    snapshotJson: {
-      ...(run.snapshotJson as ChatRunSnapshot),
-      errorCode: STALE_CHAT_RUN_CODE,
-    },
+    snapshotJson: terminalSnapshot,
     errorCode: STALE_CHAT_RUN_CODE,
     errorMessage: null,
   });
+  if (run.assistantMessageId) {
+    await updateAssistantMetadata({
+      run: failedRun ?? terminalRun,
+    });
+  }
+  return failedRun;
 }
 
 async function cancelProposedConfirmationActions(
@@ -627,11 +795,11 @@ export async function expireApprovalWaitingRun(run: ChatThreadRunRecord) {
     errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
   };
   const snapshot = withAssistantThreadRunMetadata(
-    {
+    finalizeTerminalSnapshotTrace({
       ...getSnapshotRecord(run),
       errorCode: TOOL_APPROVAL_EXPIRED_CODE,
       errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
-    },
+    }),
     expiredRun,
   );
   await cancelProposedConfirmationActions(run, {
@@ -665,6 +833,7 @@ export async function expireApprovalWaitingRun(run: ChatThreadRunRecord) {
     })) ?? expiredRun;
   await updateAssistantMessageThreadRunMetadata({
     run: finished,
+    snapshot,
     metadata: {
       isCancelled: true,
       error: TOOL_APPROVAL_EXPIRED_MESSAGE,
@@ -719,9 +888,88 @@ async function completeApprovalRunIfNoPendingConfirmations(
   );
 }
 
+async function finishRunIfSnapshotIsTerminal(run: ChatThreadRunRecord) {
+  return finishRunIfSnapshotIsTerminalWithDependencies(run);
+}
+
+async function finishRunIfSnapshotIsTerminalWithDependencies(
+  run: ChatThreadRunRecord,
+  dependencies: {
+    findRunById?: typeof findChatThreadRunById;
+    finishRun?: typeof finishChatThreadRun;
+    updateAssistantMetadata?: typeof updateAssistantMessageThreadRunMetadata;
+  } = {},
+) {
+  if (!isActiveChatRunStatus(run.status) || run.status === "waiting_for_approval") {
+    return run;
+  }
+  const snapshot = getSnapshotRecord(run);
+  const terminalStatus = resolveTerminalStatusFromFinishedSnapshot(snapshot);
+  if (!terminalStatus) {
+    return run;
+  }
+
+  const terminalRun = {
+    ...run,
+    status: terminalStatus,
+    errorCode:
+      terminalStatus === "failed"
+        ? (run.errorCode ?? "CHAT_RUN_FAILED")
+        : terminalStatus === "cancelled"
+          ? (run.errorCode ?? CLIENT_CANCELLED_CODE)
+          : run.errorCode,
+    errorMessage:
+      terminalStatus === "cancelled"
+        ? (run.errorMessage ?? CLIENT_CANCELLED_MESSAGE)
+        : run.errorMessage,
+  };
+  const finishRun = dependencies.finishRun ?? finishChatThreadRun;
+  const findRunById = dependencies.findRunById ?? findChatThreadRunById;
+  const updateAssistantMetadata =
+    dependencies.updateAssistantMetadata ??
+    updateAssistantMessageThreadRunMetadata;
+  const finished =
+    (await finishRun({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      status: terminalStatus,
+      assistantMessageId: run.assistantMessageId,
+      snapshotJson: withAssistantThreadRunMetadata(
+        finalizeTerminalSnapshotTrace(snapshot),
+        terminalRun,
+      ),
+      errorCode: terminalRun.errorCode,
+      errorMessage: terminalRun.errorMessage,
+    })) ?? terminalRun;
+  await updateAssistantMetadata({
+    run: finished,
+    snapshot: withAssistantThreadRunMetadata(
+      finalizeTerminalSnapshotTrace(snapshot),
+      terminalRun,
+    ),
+    metadata:
+      terminalStatus === "cancelled"
+        ? {
+            isCancelled: true,
+            error: terminalRun.errorMessage ?? CLIENT_CANCELLED_MESSAGE,
+            errorCode: terminalRun.errorCode ?? CLIENT_CANCELLED_CODE,
+          }
+        : undefined,
+  });
+  return (
+    (await findRunById({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+    })) ?? finished
+  );
+}
+
 async function failRunIfStale(run: ChatThreadRunRecord) {
   run = await expireRunIfApprovalExpired(run);
   run = await completeApprovalRunIfNoPendingConfirmations(run);
+  run = await finishRunIfSnapshotIsTerminal(run);
   if (!isStaleActiveRun(run)) {
     return run;
   }
@@ -780,6 +1028,12 @@ function buildThreadRunMetadata(run: ChatThreadRunRecord) {
       status: run.status,
       mode: run.mode,
       streamKey: run.streamKey,
+      ...(run.startedAt && run.finishedAt
+        ? {
+            startedAt: run.startedAt,
+            completedAt: run.finishedAt,
+          }
+        : {}),
     },
   };
 }
@@ -806,6 +1060,7 @@ function withAssistantThreadRunMetadata(
 async function updateAssistantMessageThreadRunMetadata(input: {
   run: ChatThreadRunRecord;
   metadata?: Record<string, unknown>;
+  snapshot?: ChatRunSnapshot;
 }) {
   if (!input.run.assistantMessageId) {
     return null;
@@ -819,6 +1074,14 @@ async function updateAssistantMessageThreadRunMetadata(input: {
     return null;
   }
   const extraThreadRun = getObjectRecord(input.metadata?.threadRun);
+  const snapshotMetadata =
+    input.snapshot && current
+      ? buildAssistantMessageSnapshotMetadata({
+          currentMetadata: current.metadata,
+          run: input.run,
+          snapshot: input.snapshot,
+        })
+      : {};
   return updateMessageRecord({
     teamId: input.run.teamId,
     workspaceId: input.run.workspaceId,
@@ -826,6 +1089,7 @@ async function updateAssistantMessageThreadRunMetadata(input: {
     messageId: input.run.assistantMessageId,
     metadata: {
       ...current.metadata,
+      ...snapshotMetadata,
       ...(input.metadata ?? {}),
       threadRun: {
         ...buildThreadRunMetadata(input.run).threadRun,
@@ -860,6 +1124,52 @@ async function updateAssistantMessageConfirmationMetadata(input: {
       run: input.run,
       snapshot: input.snapshot,
     }),
+  });
+}
+
+function buildAssistantMessageSnapshotMetadata(input: {
+  currentMetadata: Record<string, unknown>;
+  run: ChatThreadRunRecord;
+  snapshot: ChatRunSnapshot;
+}) {
+  const nextMetadata = {
+    ...(input.snapshot.reasoning !== undefined
+      ? { reasoning: input.snapshot.reasoning }
+      : {}),
+    ...(input.snapshot.reasoningSegments !== undefined
+      ? { reasoningSegments: input.snapshot.reasoningSegments }
+      : {}),
+    ...(input.snapshot.thinkingSteps !== undefined
+      ? { thinkingSteps: input.snapshot.thinkingSteps }
+      : {}),
+    ...(input.snapshot.traceEvents !== undefined
+      ? { traceEvents: input.snapshot.traceEvents }
+      : {}),
+    ...(input.snapshot.traceParts !== undefined
+      ? { traceParts: input.snapshot.traceParts }
+      : {}),
+    ...(input.snapshot.renderBlocks !== undefined
+      ? { renderBlocks: input.snapshot.renderBlocks }
+      : {}),
+    ...(input.snapshot.agentCheckpoint !== undefined
+      ? { agentCheckpoint: input.snapshot.agentCheckpoint }
+      : {}),
+    ...(input.snapshot.retrieval !== undefined
+      ? { retrieval: input.snapshot.retrieval }
+      : {}),
+    ...(input.snapshot.finishReason !== undefined
+      ? { finishReason: input.snapshot.finishReason }
+      : {}),
+    toolCalls:
+      input.snapshot.toolCalls ??
+      (Array.isArray(input.currentMetadata.toolCalls)
+        ? input.currentMetadata.toolCalls
+        : []),
+    threadRun: buildThreadRunMetadata(input.run).threadRun,
+  };
+  return preserveTraceMetadata({
+    existingMetadata: input.currentMetadata,
+    nextMetadata,
   });
 }
 
@@ -1853,10 +2163,16 @@ export class DurableChatRunService {
 export const durableChatRunService = new DurableChatRunService();
 
 export const testExports = {
+  buildAssistantMessageSnapshotMetadata,
   buildAssistantMessageConfirmationMetadata,
   completeApprovalRunIfNoPendingConfirmations,
   failRunIfStale,
+  failStaleActiveRunWithDependencies,
+  finalizeTerminalSnapshotTrace,
+  finishRunIfSnapshotIsTerminal,
+  finishRunIfSnapshotIsTerminalWithDependencies,
   forceCancelStoppedRun,
+  resolveTerminalStatusFromFinishedSnapshot,
   resolveAttachRunState,
   shouldCompleteApprovalRunWithoutPendingConfirmations,
   waitForRunResult,

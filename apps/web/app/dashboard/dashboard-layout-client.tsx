@@ -59,6 +59,7 @@ export function DashboardLayoutClient({
   const sessionConfirmingRef = useRef(false);
   const [sessionConfirming, setSessionConfirming] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+  const [hasConfirmedSession, setHasConfirmedSession] = useState(false);
   const { data, isPending, refetch } = authClient.useSession();
   const hasSession = hasActiveSession(data as SessionData | undefined);
   const routePathname = pathname || "/dashboard";
@@ -77,6 +78,12 @@ export function DashboardLayoutClient({
   useEffect(() => {
     redirectToRef.current = redirectTo;
   }, [redirectTo]);
+
+  useEffect(() => {
+    if (hasSession) {
+      setHasConfirmedSession(true);
+    }
+  }, [hasSession]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -161,7 +168,11 @@ export function DashboardLayoutClient({
     router,
   ]);
 
-  if (isPending || sessionConfirming || redirecting || !hasSession) {
+  if (
+    sessionConfirming ||
+    redirecting ||
+    (!hasSession && (!isPending || !hasConfirmedSession))
+  ) {
     return <DashboardShellRouteSkeleton pathname={routePathname} />;
   }
 

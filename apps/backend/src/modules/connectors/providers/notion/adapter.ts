@@ -281,7 +281,11 @@ const actionInputSchemas: Record<string, Record<string, unknown>> = {
     required: ["query"],
     additionalProperties: false,
     properties: {
-      query: { type: "string" },
+      query: {
+        type: "string",
+        description:
+          "Required non-empty Notion page search text from the user's request, usually a title, keyword, or topic.",
+      },
     },
   },
   "notion.page.read": {
@@ -462,7 +466,7 @@ const notionManifest: ConnectorManifest = {
       displayName: "Find Notion page",
       agentToolName: "search_notion_pages",
       description:
-        "Search Notion pages and return page IDs. Use this for discovery before reading, updating, or deleting when the user did not provide a page ID.",
+        "Search Notion pages and return page IDs. Always pass query as non-empty page search text from the user's request, such as a title, keyword, or topic. Use this for discovery before reading, updating, or deleting when the user did not provide a page ID. If there is no searchable text, ask the user what page to find instead of calling this action with empty input.",
       visibility: "agent",
       capabilities: ["connector_read"],
       riskLevel: "low",
@@ -2417,7 +2421,19 @@ async function findPageAction(
   client: NotionApiClient,
   request: Record<string, unknown>,
 ): Promise<ConnectorActionResult> {
-  const query = getRequestString(request, "query");
+  const query = getRequestString(request, "query", false);
+  if (!query) {
+    throw new ConnectorError(
+      400,
+      "CONNECTOR_TOOL_INPUT_INVALID",
+      "search_notion_pages requires a non-empty page title, keyword, or topic. Ask the user what Notion page to find.",
+      {
+        details: { field: "query", toolName: "search_notion_pages" },
+        recoverable: true,
+        sourceRef: undefined,
+      },
+    );
+  }
   const pages: Array<Record<string, unknown>> = [];
   for await (const value of client.search({
     query,

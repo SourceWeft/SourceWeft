@@ -18,6 +18,7 @@ import type {
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RequestOptions,
+  ToolBindingOptions,
   ToolCall,
 } from "../types";
 import { resolveModelGatewayConfig, resolveRequestTarget } from "../config";
@@ -96,16 +97,89 @@ export function createChatModel(input: {
   const boundModel = !input.payload.tools?.length || !model.bindTools
     ? model
     : model.bindTools(
-    input.payload.tools,
-    input.payload.toolChoice
-      ? { tool_choice: input.payload.toolChoice }
-      : undefined,
-  ) as LangChainChatModelLike;
+        input.payload.tools,
+        resolveBindToolsKwargs({
+          toolBindingOptions: input.payload.toolBindingOptions,
+          toolChoice: input.payload.toolChoice,
+        }),
+      ) as LangChainChatModelLike;
+
+  const modelWithDefaultToolBindingOptions =
+    createDefaultToolBindingOptionsLangChainChatModel({
+      model: boundModel,
+      toolBindingOptions: input.payload.toolBindingOptions,
+      toolChoice: input.payload.toolChoice,
+    });
 
   return createObservedLangChainChatModel({
     ...input,
-    model: boundModel,
+    model: modelWithDefaultToolBindingOptions,
   });
+}
+
+function toolBindingOptionsToBindToolsKwargs(
+  options?: ToolBindingOptions,
+): Record<string, unknown> | undefined {
+  if (!options) {
+    return undefined;
+  }
+  const { toolChoice, parallelToolCalls, ...rest } = options;
+  const kwargs = {
+    ...rest,
+    ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+    ...(parallelToolCalls !== undefined
+      ? { parallel_tool_calls: parallelToolCalls }
+      : {}),
+  };
+  return Object.keys(kwargs).length > 0 ? kwargs : undefined;
+}
+
+function resolveBindToolsKwargs(input: {
+  kwargs?: Record<string, unknown>;
+  toolBindingOptions?: ToolBindingOptions;
+  toolChoice?: ChatCompleteInput["toolChoice"];
+}) {
+  const defaults = toolBindingOptionsToBindToolsKwargs({
+    ...(input.toolBindingOptions ?? {}),
+    ...(input.toolChoice !== undefined ? { toolChoice: input.toolChoice } : {}),
+  });
+  const merged = {
+    ...(defaults ?? {}),
+    ...(input.kwargs ?? {}),
+  };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function createDefaultToolBindingOptionsLangChainChatModel(input: {
+  model: LangChainChatModelLike;
+  toolBindingOptions?: ToolBindingOptions;
+  toolChoice?: ChatCompleteInput["toolChoice"];
+}) {
+  const defaultKwargs = resolveBindToolsKwargs({
+    toolBindingOptions: input.toolBindingOptions,
+    toolChoice: input.toolChoice,
+  });
+  if (!defaultKwargs) {
+    return input.model;
+  }
+
+  const wrapped = Object.create(input.model) as LangChainChatModelLike;
+  wrapped.bindTools = (tools, kwargs) =>
+    createDefaultToolBindingOptionsLangChainChatModel({
+      model: input.model.bindTools
+        ? input.model.bindTools(
+            tools,
+            resolveBindToolsKwargs({
+              kwargs,
+              toolBindingOptions: input.toolBindingOptions,
+              toolChoice: input.toolChoice,
+            }),
+          )
+        : input.model,
+      toolBindingOptions: input.toolBindingOptions,
+      toolChoice: input.toolChoice,
+    });
+  return wrapped;
 }
 
 function createObservedLangChainChatModel(input: {
@@ -122,12 +196,26 @@ function createObservedLangChainChatModel(input: {
   const observed = Object.create(input.model) as LangChainChatModelLike;
 
   observed.getName = () => input.model.getName?.() ?? input.target.providerModel;
-  observed.bindTools = (tools, kwargs) => createObservedLangChainChatModel({
+  observed.bindTools = (tools, kwargs) => {
+    const resolvedKwargs = resolveBindToolsKwargs({
+      kwargs,
+      toolBindingOptions: input.payload.toolBindingOptions,
+      toolChoice: input.payload.toolChoice,
+    });
+    return createObservedLangChainChatModel({
       ...input,
+      payload: {
+        ...input.payload,
+        tools: normalizeBoundToolsForObservation(tools),
+        ...(resolvedKwargs && "tool_choice" in resolvedKwargs
+          ? { toolChoice: resolvedKwargs.tool_choice as ChatCompleteInput["toolChoice"] }
+          : {}),
+      },
       model: input.model.bindTools
-        ? input.model.bindTools(tools, kwargs)
+        ? input.model.bindTools(tools, resolvedKwargs)
         : input.model,
     });
+  };
   observed.invoke = async (messages) => {
       const generation = createGenerationObservation({
         operation: "chat.complete",
@@ -316,6 +404,16 @@ function toRecord(value: unknown) {
     : null;
 }
 
+function normalizeBoundToolsForObservation(tools: unknown[]) {
+  return tools.flatMap((tool) => {
+    const record = toRecord(tool);
+    if (!record) {
+      return [];
+    }
+    return [{ ...record }];
+  });
+}
+
 function firstArray(...values: unknown[]) {
   return values.find(Array.isArray) as unknown[] | undefined;
 }
@@ -421,6 +519,8 @@ export type LangChainModelExecutionConfig = Pick<
   | "byok"
   | "metadata"
   | "thinking"
+  | "toolChoice"
+  | "toolBindingOptions"
 >;
 
 /**
@@ -447,6 +547,8 @@ export async function createLangChainChatModel(input: {
     byok: input.execution?.byok,
     metadata: input.execution?.metadata,
     thinking: input.execution?.thinking,
+    toolChoice: input.execution?.toolChoice,
+    toolBindingOptions: input.execution?.toolBindingOptions,
   };
 
   const target = await resolveRequestTarget(resolvedConfig, payload);

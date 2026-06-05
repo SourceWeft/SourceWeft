@@ -449,6 +449,7 @@ function ChatListRow({
   onArchive,
   onDelete,
   onOpen,
+  onPrefetch,
 }: {
   active: boolean;
   canArchive?: boolean;
@@ -456,6 +457,7 @@ function ChatListRow({
   onArchive: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
   onOpen: (id: string, title: string) => void;
+  onPrefetch?: (id: string) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const status = item.status || "ready";
@@ -472,6 +474,8 @@ function ChatListRow({
             : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
         )}
         onClick={() => onOpen(item.id, item.title)}
+        onFocus={() => onPrefetch?.(item.id)}
+        onMouseEnter={() => onPrefetch?.(item.id)}
         type="button"
       >
         <StatusDot status={item.status} />
@@ -556,6 +560,7 @@ function ChatSection({
   onClear,
   onDelete,
   onOpen,
+  onPrefetch,
   title,
 }: {
   activeId?: string;
@@ -568,6 +573,7 @@ function ChatSection({
   onClear?: () => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onOpen: (id: string, title: string) => void;
+  onPrefetch?: (id: string) => void;
   title: string;
 }) {
   const [isClearing, setIsClearing] = useState(false);
@@ -642,6 +648,7 @@ function ChatSection({
               onArchive={onArchive}
               onDelete={onDelete}
               onOpen={onOpen}
+              onPrefetch={onPrefetch}
             />
           ))}
         </SidebarMenu>
@@ -675,6 +682,7 @@ export function DashboardSidebarChatPanel({
   onLoadMoreChats,
   onOpenUsage,
   onOpenChat,
+  onPrefetchChat,
   onCreateWorkspace,
   onRenameWorkspace,
   hasMorePrivateChats,
@@ -697,6 +705,7 @@ export function DashboardSidebarChatPanel({
   onLoadMoreChats: () => void;
   onOpenUsage?: () => void;
   onOpenChat: (id: string, title: string) => void;
+  onPrefetchChat?: (id: string) => void;
   onCreateWorkspace: (name: string) => Promise<void>;
   onRenameWorkspace: (workspaceId: string, name: string) => Promise<void>;
   hasMorePrivateChats: boolean;
@@ -769,6 +778,7 @@ export function DashboardSidebarChatPanel({
           onArchive={onArchiveChat}
           onDelete={onDeleteChat}
           onOpen={onOpenChat}
+          onPrefetch={onPrefetchChat}
           title="Shared chats"
         />
         <ChatSection
@@ -781,6 +791,7 @@ export function DashboardSidebarChatPanel({
           onClear={onClearPrivateChats}
           onDelete={onDeleteChat}
           onOpen={onOpenChat}
+          onPrefetch={onPrefetchChat}
           title="Private chats"
         />
         <ChatSection
@@ -791,6 +802,7 @@ export function DashboardSidebarChatPanel({
           onClear={onClearArchivedChats}
           onDelete={onDeleteChat}
           onOpen={onOpenChat}
+          onPrefetch={onPrefetchChat}
           title="Archived"
         />
       </SidebarContent>

@@ -1,0 +1,461 @@
+export type SandboxToolResultDisplay = {
+  ok: boolean | null;
+  output: string | null;
+  totalBytes: number | null;
+  filePaths: string[];
+  outputPaths: string[];
+  truncated: boolean | null;
+  exitCode: number | null;
+};
+
+export type SandboxToolResultDetail = {
+  label: string;
+  value: string;
+};
+
+export type SandboxToolOperationTimelineItem = {
+  key: string;
+  label: string;
+  status: string | null;
+  detail: string | null;
+  duration: string | null;
+  timestamp: string | null;
+};
+
+const SANDBOX_TOOL_NAMES = new Set([
+  "prepare_sandbox_workspace",
+  "execute",
+  "collect_sandbox_outputs",
+]);
+
+function record(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function arrayRecord(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map(record)
+        .filter((item): item is Record<string, unknown> => Boolean(item))
+    : [];
+}
+
+function booleanValue(value: unknown) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value ? value : null;
+}
+
+function trimmedStringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function parseResult(value: unknown) {
+  if (typeof value !== "string") {
+    const wrapper = record(value);
+    const wrappedContent =
+      stringValue(wrapper?.displayContent) ?? stringValue(wrapper?.content);
+    if (wrappedContent) {
+      try {
+        return JSON.parse(wrappedContent);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function targetPath(value: Record<string, unknown>) {
+  const target = record(value.target);
+  return (
+    stringValue(target?.path) ??
+    stringValue(value.targetPath) ??
+    stringValue(value.sandboxPath) ??
+    stringValue(value.path)
+  );
+}
+
+export function parseSandboxToolResultDisplay(
+  resultValue: unknown,
+): SandboxToolResultDisplay | null {
+  const parsed = parseResult(resultValue);
+  const result = record(parsed);
+  if (!result) {
+    return null;
+  }
+
+  return {
+    ok: booleanValue(result.ok),
+    output: stringValue(result.output),
+    totalBytes: finiteNumber(result.totalBytes),
+    filePaths: arrayRecord(result.files)
+      .map(targetPath)
+      .filter((path): path is string => Boolean(path)),
+    outputPaths: arrayRecord(result.outputs)
+      .map(targetPath)
+      .filter((path): path is string => Boolean(path)),
+    truncated: booleanValue(result.truncated),
+    exitCode: finiteNumber(result.exitCode),
+  };
+}
+
+function formatByteCount(value: number | null) {
+  if (value === null) {
+    return null;
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kib = value / 1024;
+  if (kib < 1024) {
+    return `${Number.isInteger(kib) ? kib : kib.toFixed(1)} KiB`;
+  }
+  const mib = kib / 1024;
+  return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
+}
+
+function formatPathList(paths: string[]) {
+  if (paths.length === 0) {
+    return null;
+  }
+  const visible = paths.slice(0, 3).join(", ");
+  const remaining = paths.length - 3;
+  return remaining > 0 ? `${visible}, +${remaining} more` : visible;
+}
+
+function formatDurationMs(value: number | null) {
+  if (value === null) {
+    return null;
+  }
+  if (value < 1000) {
+    return `${Math.max(1, Math.round(value))}ms`;
+  }
+  const seconds = value / 1000;
+  return `${seconds >= 10 ? Math.round(seconds) : seconds.toFixed(1)}s`;
+}
+
+function formatOperationLabel(value: string | null) {
+  switch (value) {
+    case "prepare":
+    case "prepare_sandbox_workspace":
+      return "Prepared workspace";
+    case "execute":
+      return "Executed command";
+    case "collect":
+    case "collect_sandbox_outputs":
+      return "Collected outputs";
+    case "create":
+      return "Created sandbox";
+    case "cleanup":
+    case "delete":
+      return "Cleaned up sandbox";
+    default:
+      return value
+        ? value
+            .replace(/[_-]+/g, " ")
+            .replace(/\b\w/g, (match) => match.toUpperCase())
+        : "Sandbox operation";
+  }
+}
+
+function operationType(value: Record<string, unknown>) {
+  return (
+    trimmedStringValue(value.operationType) ??
+    trimmedStringValue(value.type) ??
+    trimmedStringValue(value.toolName)
+  );
+}
+
+function operationTimestamp(value: Record<string, unknown>) {
+  return (
+    trimmedStringValue(value.createdAt) ??
+    trimmedStringValue(value.startedAt) ??
+    trimmedStringValue(value.completedAt)
+  );
+}
+
+function operationDuration(value: Record<string, unknown>) {
+  return finiteNumber(value.durationMs) ?? finiteNumber(value.latencyMs);
+}
+
+function plural(count: number, singular: string, pluralValue = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : pluralValue}`;
+}
+
+function resultDetailFromOperation(
+  operation: Record<string, unknown>,
+  type: string | null,
+) {
+  const explicitDetail =
+    trimmedStringValue(operation.summary) ??
+    trimmedStringValue(operation.detail) ??
+    trimmedStringValue(operation.message) ??
+    trimmedStringValue(operation.error);
+  if (explicitDetail) {
+    return explicitDetail;
+  }
+
+  const result = record(operation.result) ?? operation;
+  const details: string[] = [];
+  const byteCount = formatByteCount(finiteNumber(result.totalBytes));
+
+  if (type === "prepare" || type === "prepare_sandbox_workspace") {
+    const fileCount = arrayRecord(result.files).length;
+    if (fileCount > 0) {
+      details.push(plural(fileCount, "file"));
+    }
+  } else if (type === "collect" || type === "collect_sandbox_outputs") {
+    const outputCount = arrayRecord(result.outputs).length;
+    if (outputCount > 0) {
+      details.push(plural(outputCount, "output"));
+    }
+  } else if (type === "execute") {
+    const exitCode = finiteNumber(result.exitCode);
+    const outputChars = finiteNumber(result.outputChars);
+    if (exitCode !== null) {
+      details.push(`Exit code ${exitCode}`);
+    }
+    if (outputChars !== null) {
+      details.push(plural(outputChars, "output char"));
+    }
+    if (booleanValue(result.truncated)) {
+      details.push("Output truncated");
+    }
+  }
+
+  if (byteCount) {
+    details.push(byteCount);
+  }
+
+  return details.length > 0 ? details.join(" · ") : null;
+}
+
+export function getSandboxToolResultSummary(input: {
+  output: unknown;
+  toolName: string;
+}) {
+  if (!SANDBOX_TOOL_NAMES.has(input.toolName)) {
+    return null;
+  }
+
+  const result = parseSandboxToolResultDisplay(input.output);
+  if (!result) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  const byteCount = formatByteCount(result.totalBytes);
+
+  if (input.toolName === "prepare_sandbox_workspace") {
+    parts.push(
+      `Prepared ${result.filePaths.length} file${result.filePaths.length === 1 ? "" : "s"}`,
+    );
+    if (byteCount) {
+      parts.push(byteCount);
+    }
+    const paths = formatPathList(result.filePaths);
+    if (paths) {
+      parts.push(paths);
+    }
+  } else if (input.toolName === "collect_sandbox_outputs") {
+    parts.push(
+      `Collected ${result.outputPaths.length} output${result.outputPaths.length === 1 ? "" : "s"}`,
+    );
+    if (byteCount) {
+      parts.push(byteCount);
+    }
+    const paths = formatPathList(result.outputPaths);
+    if (paths) {
+      parts.push(paths);
+    }
+  } else {
+    if (result.exitCode !== null) {
+      parts.push(`Exit code ${result.exitCode}`);
+    }
+    if (result.truncated) {
+      parts.push("Output truncated");
+    }
+    if (result.output) {
+      parts.push(result.output);
+    }
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+export function getSandboxToolResultDetails(input: {
+  output: unknown;
+  toolName: string;
+}): SandboxToolResultDetail[] {
+  if (!SANDBOX_TOOL_NAMES.has(input.toolName)) {
+    return [];
+  }
+
+  const result = parseSandboxToolResultDisplay(input.output);
+  if (!result) {
+    return [];
+  }
+
+  const details: SandboxToolResultDetail[] = [];
+  const byteCount = formatByteCount(result.totalBytes);
+
+  if (input.toolName === "prepare_sandbox_workspace") {
+    details.push({ label: "Operation", value: "Prepared sandbox workspace" });
+    details.push({
+      label: "Inputs",
+      value: `${result.filePaths.length} file${result.filePaths.length === 1 ? "" : "s"}`,
+    });
+    if (byteCount) {
+      details.push({ label: "Size", value: byteCount });
+    }
+    const paths = formatPathList(result.filePaths);
+    if (paths) {
+      details.push({ label: "Input paths", value: paths });
+    }
+  } else if (input.toolName === "collect_sandbox_outputs") {
+    details.push({ label: "Operation", value: "Collected sandbox outputs" });
+    details.push({
+      label: "Outputs",
+      value: `${result.outputPaths.length} file${result.outputPaths.length === 1 ? "" : "s"}`,
+    });
+    if (byteCount) {
+      details.push({ label: "Size", value: byteCount });
+    }
+    const paths = formatPathList(result.outputPaths);
+    if (paths) {
+      details.push({ label: "Output paths", value: paths });
+    }
+  } else {
+    details.push({ label: "Operation", value: "Executed sandbox command" });
+    if (result.exitCode !== null) {
+      details.push({ label: "Exit code", value: String(result.exitCode) });
+    }
+    if (result.truncated !== null) {
+      details.push({
+        label: "Output",
+        value: result.truncated ? "Truncated" : "Complete",
+      });
+    }
+  }
+
+  return details;
+}
+
+export function getSandboxCollectedWorkfilePaths(input: {
+  output: unknown;
+  toolName: string;
+}) {
+  if (input.toolName !== "collect_sandbox_outputs") {
+    return [];
+  }
+
+  const result = parseSandboxToolResultDisplay(input.output);
+  if (!result) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(result.outputPaths.filter((path) => path.startsWith("/work/"))),
+  );
+}
+
+export function getSandboxToolOperationTimeline(input: {
+  output: unknown;
+  toolName: string;
+}): SandboxToolOperationTimelineItem[] {
+  if (!SANDBOX_TOOL_NAMES.has(input.toolName)) {
+    return [];
+  }
+
+  const parsed = parseResult(input.output);
+  const result = record(parsed);
+  if (!result) {
+    return [];
+  }
+
+  const operations = arrayRecord(result.timeline);
+  const fallbackOperations =
+    operations.length > 0 ? operations : arrayRecord(result.operations);
+
+  return fallbackOperations.map((operation, index) => {
+    const type = operationType(operation);
+    return {
+      key: `${index}-${type ?? "operation"}`,
+      label: formatOperationLabel(type),
+      status: trimmedStringValue(operation.status),
+      detail: resultDetailFromOperation(operation, type),
+      duration: formatDurationMs(operationDuration(operation)),
+      timestamp: operationTimestamp(operation),
+    };
+  });
+}
+
+function extractSandboxErrorCode(error: string) {
+  const match = error.match(/\b(SANDBOX_[A-Z_]+)\b/);
+  return match?.[1] ?? null;
+}
+
+const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
+  SANDBOX_BINARY_OUTPUT_UNSUPPORTED:
+    "This sandbox output appears to be binary. Binary output collection is not supported here yet; use a supported artifact flow when available.",
+  SANDBOX_COLLECT_CONFLICT:
+    "A target /work file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
+  SANDBOX_COLLECT_PATH_DENIED:
+    "The requested sandbox output path is outside the allowed collection area. Collect from /workspace/output or /workspace/work.",
+  SANDBOX_COMMAND_TIMEOUT:
+    "The sandbox command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
+  SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT:
+    "The sandbox returned an unsupported download result. Try collecting a plain text output file instead.",
+  SANDBOX_EXECUTE_CWD_DENIED:
+    "The command working directory must stay inside sandbox /workspace.",
+  SANDBOX_FILE_NOT_FOUND:
+    "The requested sandbox file was not found. Re-run the command or check the output path before collecting.",
+  SANDBOX_FILE_TOO_LARGE:
+    "The selected file exceeds the sandbox transfer limit. Reduce the file size or collect a smaller output.",
+  SANDBOX_NOT_CONFIGURED:
+    "Sandbox execution is not fully configured. Ask an operator to check the backend sandbox settings.",
+  SANDBOX_NOT_FOUND_OR_EXPIRED:
+    "The sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
+  SANDBOX_PREPARE_PATH_DENIED:
+    "The requested prepare path is outside the allowed /work to /workspace/input or /workspace/work boundary.",
+  SANDBOX_PROVIDER_AUTH_FAILED:
+    "Sandbox credentials were rejected. Ask an operator to check the backend sandbox credentials.",
+  SANDBOX_PROVIDER_ERROR:
+    "The sandbox operation failed. Try again, or ask an operator to check backend sandbox logs.",
+  SANDBOX_TOTAL_SIZE_EXCEEDED:
+    "The selected files exceed the total sandbox transfer limit. Reduce the number or size of files and try again.",
+};
+
+export function getSandboxToolSafeErrorMessage(input: {
+  error: string | null | undefined;
+  toolName: string;
+}) {
+  if (!input.error || !SANDBOX_TOOL_NAMES.has(input.toolName)) {
+    return input.error ?? null;
+  }
+
+  const code = extractSandboxErrorCode(input.error);
+  if (!code) {
+    return "Sandbox operation failed. Review the operation details and try again.";
+  }
+
+  return (
+    SANDBOX_SAFE_ERROR_MESSAGES[code] ??
+    "Sandbox operation failed. Review the operation details and try again."
+  );
+}

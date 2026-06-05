@@ -64,6 +64,34 @@
       "when": 1779284169000,
       "tag": "0008_chat_thread_run_resume_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779284170000,
+      "tag": "0009_video_presentation_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1780364789920,
+      "tag": "0010_agent_sandboxes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780364791000,
+      "tag": "0011_sandbox_operation_replay_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1780454400000,
+      "tag": "0012_sandbox_multi_worker_guards",
+      "breakpoints": true
     }
   ]
 }

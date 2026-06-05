@@ -61,8 +61,9 @@ function contentErrorFromGatewayCode(input: {
   code: string;
   message: string;
 }) {
+  const message = sanitizeClientErrorMessage(input.message);
   if (input.code === "BAD_REQUEST") {
-    return new ContentError(400, "MODEL_REQUEST_INVALID", input.message);
+    return new ContentError(400, "MODEL_REQUEST_INVALID", message);
   }
 
   if (input.code === "RATE_LIMIT") {
@@ -85,7 +86,26 @@ function contentErrorFromGatewayCode(input: {
     );
   }
 
-  return new ContentError(502, "MODEL_UPSTREAM_ERROR", input.message);
+  return new ContentError(502, "MODEL_UPSTREAM_ERROR", message);
+}
+
+export function sanitizeClientErrorMessage(value: string) {
+  const text = value.trim();
+  if (
+    /Error invoking tool/i.test(text) ||
+    /Received tool input did not match expected schema/i.test(text) ||
+    /\bkwargs\b/i.test(text) ||
+    /Invalid input: expected .*received/i.test(text)
+  ) {
+    const toolName =
+      text.match(/tool ['"]([^'"]+)['"]/i)?.[1] ??
+      text.match(/\btool[=:]\s*([A-Za-z0-9_-]+)/i)?.[1];
+    return toolName
+      ? `${toolName} failed because the generated tool arguments were invalid. Please retry.`
+      : "The generated tool arguments were invalid. Please retry.";
+  }
+
+  return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
 }
 
 export function toContentServiceError(error: unknown): ContentError {
@@ -106,8 +126,9 @@ export function toContentServiceError(error: unknown): ContentError {
   }
 
   const record = toRecord(error);
-  const message = typeof record?.message === "string" && record.message.trim().length > 0
-    ? record.message
-    : "LLM request failed";
+  const message =
+    typeof record?.message === "string" && record.message.trim().length > 0
+      ? sanitizeClientErrorMessage(record.message)
+      : "LLM request failed";
   return new ContentError(502, "MODEL_UPSTREAM_ERROR", message);
 }

@@ -2,6 +2,7 @@ import type { LlmExecutionConfig } from "../../model-gateway-audit";
 import type { ToolApprovalResume } from "@sourceweft/contracts";
 import type {
   ChatInputImage,
+  ThreadInvocationSelection,
   ThreadCommandSelection,
   ThreadToolsSelection,
 } from "../turn/types";
@@ -14,6 +15,7 @@ export type RefreshThreadInput = {
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
   command?: ThreadCommandSelection;
+  invocation?: ThreadInvocationSelection;
   timezone?: string;
   userMessageId?: string;
   assistantMessageId?: string;

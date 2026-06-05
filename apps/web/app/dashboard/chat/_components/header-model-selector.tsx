@@ -55,7 +55,12 @@ import {
 export type ModelType = "llm" | "image" | "vision";
 
 function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(false);
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.matchMedia(query).matches;
+  });
 
   useEffect(() => {
     const media = window.matchMedia(query);
@@ -1205,6 +1210,7 @@ export function HeaderModelSelector({
   byokModels = [],
   byokProviders = [],
   byokSelections = {},
+  isLoading = false,
   onAddByokModel,
   onByokSelect,
   onModelSelect,
@@ -1216,6 +1222,7 @@ export function HeaderModelSelector({
   byokModels?: ByokSavedModelItem[];
   byokProviders?: ByokProviderOption[];
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
+  isLoading?: boolean;
   onAddByokModel?: (input: {
     credentialId?: string;
     providerKind?: string;
@@ -1261,6 +1268,7 @@ export function HeaderModelSelector({
                 selectedModels[type] ??
                 availableModels[type]?.[0] ??
                 null;
+              const isCatalogLoading = isLoading && !model;
               const showByokBadge = byokSelection?.mode === "byok";
 
               return (
@@ -1268,8 +1276,14 @@ export function HeaderModelSelector({
                   <TooltipTrigger asChild>
                     <ModelSelectorTrigger asChild>
                       <button
-                        aria-label={`${modelTypeLabels[type]} model: ${model?.name ?? "None"}`}
+                        aria-busy={isCatalogLoading || undefined}
+                        aria-label={
+                          isCatalogLoading
+                            ? `${modelTypeLabels[type]} models loading`
+                            : `${modelTypeLabels[type]} model: ${model?.name ?? "None"}`
+                        }
                         className="flex h-6 min-w-0 flex-1 items-center gap-1 rounded-sm border border-transparent px-1.5 text-left text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:bg-background/70 focus-visible:text-foreground aria-expanded:bg-background/70 aria-expanded:text-foreground"
+                        disabled={isCatalogLoading}
                         onClick={() => setActiveTab(type)}
                         type="button"
                       >
@@ -1283,7 +1297,11 @@ export function HeaderModelSelector({
                               : "min-w-0 flex-1 truncate text-[10px] leading-3.5 font-medium text-muted-foreground"
                           }
                         >
-                          {model?.name ?? `No ${modelTypeLabels[type]}`}
+                          {isCatalogLoading ? (
+                            <span className="block h-2 w-10 animate-pulse rounded-full bg-muted-foreground/25" />
+                          ) : (
+                            (model?.name ?? `No ${modelTypeLabels[type]}`)
+                          )}
                         </span>
                         {showByokBadge ? (
                           <KeyRound className="size-2.5 shrink-0 text-muted-foreground" />
@@ -1292,11 +1310,13 @@ export function HeaderModelSelector({
                     </ModelSelectorTrigger>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={6}>
-                    {byokSelection?.mode === "byok"
-                      ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
-                      : model
-                        ? `${modelTypeLabels[type]}: ${model.name}`
-                        : `No ${modelTypeLabels[type]} model available`}
+                    {isCatalogLoading
+                      ? `${modelTypeLabels[type]} models loading`
+                      : byokSelection?.mode === "byok"
+                        ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
+                        : model
+                          ? `${modelTypeLabels[type]}: ${model.name}`
+                          : `No ${modelTypeLabels[type]} model available`}
                   </TooltipContent>
                 </Tooltip>
               );
@@ -1319,6 +1339,7 @@ export function HeaderModelSelector({
                 selectedModels[type] ??
                 availableModels[type]?.[0] ??
                 null;
+              const isCatalogLoading = isLoading && !model;
               const showByokBadge = byokSelection?.mode === "byok";
 
               return (
@@ -1326,7 +1347,14 @@ export function HeaderModelSelector({
                   <TooltipTrigger asChild>
                     <ModelSelectorTrigger asChild>
                       <button
+                        aria-busy={isCatalogLoading || undefined}
+                        aria-label={
+                          isCatalogLoading
+                            ? `${modelTypeLabels[type]} models loading`
+                            : `${modelTypeLabels[type]} model: ${model?.name ?? "None"}`
+                        }
                         className="flex min-w-0 max-w-[152px] items-center gap-2 rounded-md border border-transparent px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 aria-expanded:bg-muted/50"
+                        disabled={isCatalogLoading}
                         onClick={() => setActiveTab(type)}
                         type="button"
                       >
@@ -1341,7 +1369,11 @@ export function HeaderModelSelector({
                                 : "truncate text-[11px] leading-4 font-medium text-muted-foreground"
                             }
                           >
-                            {model?.name ?? `No ${modelTypeLabels[type]}`}
+                            {isCatalogLoading ? (
+                              <span className="block h-2.5 w-16 animate-pulse rounded-full bg-muted-foreground/25" />
+                            ) : (
+                              (model?.name ?? `No ${modelTypeLabels[type]}`)
+                            )}
                           </div>
                           {showByokBadge ? (
                             <div className="mt-0.5 flex items-center gap-1 text-[9px] leading-3 text-muted-foreground">
@@ -1355,11 +1387,13 @@ export function HeaderModelSelector({
                     </ModelSelectorTrigger>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={6}>
-                    {byokSelection?.mode === "byok"
-                      ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
-                      : model
-                        ? `${modelTypeLabels[type]}: ${model.name}`
-                        : `No ${modelTypeLabels[type]} model available`}
+                    {isCatalogLoading
+                      ? `${modelTypeLabels[type]} models loading`
+                      : byokSelection?.mode === "byok"
+                        ? `${modelTypeLabels[type]}: ${model?.name ?? "BYOK"} via ${byokSelection.providerName ?? "BYOK"}`
+                        : model
+                          ? `${modelTypeLabels[type]}: ${model.name}`
+                          : `No ${modelTypeLabels[type]} model available`}
                   </TooltipContent>
                 </Tooltip>
               );

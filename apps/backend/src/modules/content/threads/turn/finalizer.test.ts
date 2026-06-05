@@ -316,6 +316,31 @@ test("continuation metadata preserves append-only trace events", () => {
   );
 });
 
+test("continuation metadata replaces render blocks from resumed runs", () => {
+  const metadata = testExports.preserveAssistantMetadataForContinuation({
+    existingMetadata: {
+      renderBlocks: [
+        { id: "reasoning-1", type: "reasoning", text: "Search pages." },
+        { id: "tool-1", type: "tool", toolCallId: "search-page" },
+        { id: "text-1", type: "text", text: "Found pages." },
+      ],
+    },
+    nextMetadata: {
+      renderBlocks: [
+        { id: "text-1", type: "text", text: "Rejected. Present summary." },
+      ],
+    },
+  });
+
+  assert.deepEqual(metadata.renderBlocks, [
+    {
+      id: "text-1",
+      type: "text",
+      text: "Rejected. Present summary.",
+    },
+  ]);
+});
+
 test("continuation metadata does not rewrite duplicate reasoning ids with new sequences", () => {
   const metadata = testExports.preserveAssistantMetadataForContinuation({
     existingMetadata: {

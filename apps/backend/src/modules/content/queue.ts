@@ -6,6 +6,7 @@ export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
 export const CONNECTOR_SYNC_JOB = "connector-sync";
 export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
 export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
+export const VIDEO_PRESENTATION_RENDER_JOB = "video-presentation-render";
 export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
 const SOURCE_PARSE_JOB_BACKOFF_MS = 5_000;
 
@@ -83,6 +84,39 @@ export type ConnectorSyncJobPayload = {
   userId: string;
   targetExternalIds?: string[];
 };
+
+export type VideoPresentationRenderJobPayload = {
+  artifactId: string;
+  jobId?: string;
+  requestKey?: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  userMessageId: string;
+  title: string;
+  sourceContent: string;
+  userPrompt?: string;
+  narrationEnabled: boolean;
+  traceId?: string;
+  parentSpanId?: string;
+  toolCallId?: string;
+};
+
+export type VideoPresentationRenderJobResult =
+  | {
+      status: "ready";
+      artifactId: string;
+      versionId: string;
+      fileName: string;
+      durationSeconds: number;
+    }
+  | {
+      status: "failed";
+      artifactId: string;
+      errorCode: string;
+      errorMessage: string;
+    };
 
 export type ThreadChatRunJobResult =
   | {
@@ -180,6 +214,31 @@ export async function enqueueConnectorSyncJob(payload: ConnectorSyncJobPayload) 
 
   try {
     return await jobsQueue.add(CONNECTOR_SYNC_JOB, payload, {
+      jobId,
+      attempts: 1,
+      removeOnComplete: 100,
+      removeOnFail: 100,
+    });
+  } catch (error) {
+    const duplicate = await jobsQueue.getJob(jobId);
+    if (duplicate) {
+      return duplicate;
+    }
+    throw error;
+  }
+}
+
+export async function enqueueVideoPresentationRenderJob(
+  payload: VideoPresentationRenderJobPayload,
+) {
+  const jobId = `${VIDEO_PRESENTATION_RENDER_JOB}_${payload.artifactId}`;
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    return await jobsQueue.add(VIDEO_PRESENTATION_RENDER_JOB, payload, {
       jobId,
       attempts: 1,
       removeOnComplete: 100,

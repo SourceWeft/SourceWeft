@@ -8,6 +8,7 @@ import {
   type ThreadCommandRequest,
   type McpToolSelection,
 } from "@sourceweft/sdk";
+import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 
 export type { ChatMessageImagePart };
 
@@ -22,6 +23,15 @@ export type ChatSendInput = {
 
 export type ToolConfirmationInterventionSignal = {
   id: string;
+  assistantMessageId?: string | null;
+  liveConfirmations?: LiveToolConfirmation[];
+  runKey?: string;
+  threadRunId?: string | null;
+};
+
+export type LiveToolConfirmation = {
+  confirmation: ToolConfirmationRequest;
+  toolCall: ToolCallRecord;
 };
 
 export type ToolConfirmationResolution = {
@@ -36,6 +46,7 @@ export type ToolConfirmationResolution = {
 export type MessageVersion = {
   id: string;
   renderKey?: string;
+  createdAt?: string;
   content: string;
   contentJson?: Record<string, unknown>;
   command?: ThreadCommandRequest;
@@ -68,6 +79,9 @@ export type MessageVersion = {
     mode?: "send" | "refresh" | "edit" | "resume";
     approvalRequestedAt?: string | null;
     approvalExpiresAt?: string | null;
+    startedAt?: string | null;
+    completedAt?: string | null;
+    durationMs?: number | null;
   };
 };
 
@@ -145,6 +159,80 @@ export type ChatGenerateImageToolSelection = {
   config?: ChatImageArtifactConfig;
 };
 
+export type ChatGeneratePptxToolSelection = {
+  enabled?: boolean;
+  generationMode?: PptxGenerationMode;
+  design?: ChatPptxArtifactDesign;
+  output?: ChatPptxArtifactOutput;
+  rendering?: ChatPptxArtifactRendering;
+};
+
+export type ChatGenerateVideoPresentationToolSelection = {
+  enabled?: boolean;
+  narration?: {
+    enabled?: boolean;
+  };
+};
+
+export type PptxGenerationMode = "visual_html" | "editable_native";
+export type PptxAspectRatio = "16:9" | "16:10" | "4:3";
+export type PptxLanguage = "auto" | "zh" | "en";
+export type PptxStylePreset =
+  | "executive"
+  | "technical"
+  | "editorial"
+  | "data-heavy"
+  | "custom";
+
+export type ChatPptxArtifactDesign = {
+  aspectRatio: PptxAspectRatio;
+  customBrief?: string;
+  language: PptxLanguage;
+  stylePreset: PptxStylePreset;
+  visualSystem?: {
+    backgroundTreatment?: "auto" | "plain" | "grid" | "paper" | "image" | "gradient" | "diagram";
+    chrome?: "minimal" | "magazine" | "lecture" | "report";
+    compositionStyle?: "auto" | "axis" | "poster" | "split" | "notebook" | "schematic" | "report";
+    coverTreatment?: string;
+    density?: "airy" | "balanced" | "dense";
+    geometry?: "sharp" | "soft" | "editorial" | "technical";
+    illustration?: "none" | "icons" | "diagrams" | "image-led" | "handdrawn";
+    palette?: string[];
+    typography?: string[];
+    layoutPrinciples?: string[];
+    motifs?: string[];
+    layoutPolicy?: {
+      strict?: boolean;
+      diversity?: "normal" | "high";
+    };
+    styleFamily?:
+      | "auto"
+      | "swiss"
+      | "magazine"
+      | "education"
+      | "blueprint"
+      | "data-report"
+      | "editorial";
+    imageDirection?: string;
+    motion?: string;
+  };
+};
+
+export type ChatPptxArtifactOutput = {
+  includeSourceJson: boolean;
+};
+
+export type ChatPptxArtifactRendering = {
+  preferHtmlTables: boolean;
+};
+
+export type ChatPptxArtifactConfig = {
+  generationMode: PptxGenerationMode;
+  design: ChatPptxArtifactDesign;
+  output: ChatPptxArtifactOutput;
+  rendering: ChatPptxArtifactRendering;
+};
+
 export type ChatConnectorToolSelection = {
   enabled?: boolean;
   connectorId?: string;
@@ -154,6 +242,8 @@ export type ChatToolName = AgentToolName;
 
 export type ChatToolsSelection = {
   [AGENT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
+  [AGENT_TOOL_NAMES.generatePptx]?: ChatGeneratePptxToolSelection;
+  [AGENT_TOOL_NAMES.generateVideoPresentation]?: ChatGenerateVideoPresentationToolSelection;
   [AGENT_TOOL_NAMES.searchNotionPages]?: ChatConnectorToolSelection;
   [AGENT_TOOL_NAMES.readNotionPage]?: ChatConnectorToolSelection;
   [AGENT_TOOL_NAMES.createNotionPage]?: ChatConnectorToolSelection;
@@ -219,6 +309,7 @@ export type ArtifactPreviewRecord = {
     | "podcast"
     | "audio_overview"
     | "video_overview"
+    | "video_presentation"
     | "flashcards"
     | "quiz"
     | "table"
@@ -237,6 +328,34 @@ export type ArtifactPreviewRecord = {
   createdAt: string;
   updatedAt: string;
   previewUrl: string | null;
+  capabilities: {
+    canOpenFile: boolean;
+    canDownloadFile: boolean;
+    canPreviewInline: boolean;
+    canRenderClientVideo: boolean;
+  };
+};
+
+export type ArtifactStatusSnapshot = {
+  artifactType: ArtifactPreviewRecord["artifactType"];
+  capabilities: ArtifactPreviewRecord["capabilities"];
+  completedAt: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  id: string;
+  payloadJson: Record<string, unknown>;
+  previewUrl: string | null;
+  promptText: string | null;
+  storageBucket: string | null;
+  storageKey: string | null;
+  status: ArtifactPreviewRecord["status"];
+  teamId: string;
+  threadId: string | null;
+  title: string | null;
+  updatedAt: string;
+  workspaceId: string;
 };
 
 export type ToolCallRecord = {
@@ -259,8 +378,24 @@ export type MessageRenderBlock =
       text: string;
     }
   | {
+      durationMs?: number;
+      id: string;
+      text: string;
+      type: "reasoning";
+    }
+  | {
+      id: string;
+      type: "tool";
+      toolCallId: string;
+    }
+  | {
       id: string;
       type: "generated_image";
+      toolCallId: string;
+    }
+  | {
+      id: string;
+      type: "generated_presentation";
       toolCallId: string;
     };
 

@@ -226,6 +226,21 @@ function summarizeToolCalls(
   );
 }
 
+function readToolName(tool: Record<string, unknown>) {
+  if (typeof tool.name === "string" && tool.name.length > 0) {
+    return tool.name;
+  }
+  const functionRecord = toRecord(tool.function);
+  return typeof functionRecord?.name === "string" && functionRecord.name.length > 0
+    ? functionRecord.name
+    : undefined;
+}
+
+function summarizeToolNames(tools: ChatCompleteInput["tools"]) {
+  const names = tools?.map(readToolName).filter((name): name is string => Boolean(name));
+  return names?.length ? names : undefined;
+}
+
 function resolveModelParameters(
   payload: ChatCompleteInput | EmbedInput | EmbedBatchInput | RerankInput | AsrTranscribeInput | TtsSpeechInput | ImageGenerateInput,
 ) {
@@ -323,6 +338,7 @@ function buildInput(
         }),
       ),
       toolCount: chat.tools?.length ?? 0,
+      tools: summarizeToolNames(chat.tools),
       toolChoice: chat.toolChoice,
       stream: operation === "chat.stream" ? true : chat.stream,
     }) ?? {};

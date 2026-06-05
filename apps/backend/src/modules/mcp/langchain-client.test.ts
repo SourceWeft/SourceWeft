@@ -95,6 +95,25 @@ test("createLangChainMcpClient enables SSE fallback for http_sse_compat manifest
   assert.equal(server.automaticSSEFallback, true);
 });
 
+test("createLangChainMcpClient does not enable SSE fallback for streamable_http", () => {
+  mocks.constructorSpy.mockClear();
+
+  createLangChainMcpClient({
+    install: install({
+      marketIdentifier: "streamable",
+      transport: "streamable_http",
+    }),
+  });
+
+  const config = mocks.constructorSpy.mock.calls[0]?.[0] as {
+    mcpServers: Record<string, Record<string, unknown>>;
+  };
+  const server = config.mcpServers.streamable;
+  assert.ok(server);
+  assert.equal(server.transport, "http");
+  assert.equal(server.automaticSSEFallback, false);
+});
+
 test("createLangChainMcpClient configures SSE MCP servers and falls back to install id", () => {
   mocks.constructorSpy.mockClear();
 
@@ -114,4 +133,35 @@ test("createLangChainMcpClient configures SSE MCP servers and falls back to inst
   assert.ok(server);
   assert.equal(server.transport, "sse");
   assert.equal(server.url, "https://mcp.example.com/sse");
+});
+
+test("createLangChainMcpClient rejects missing endpointUrl before construction", () => {
+  mocks.constructorSpy.mockClear();
+
+  assert.throws(
+    () =>
+      createLangChainMcpClient({
+        install: install({ endpointUrl: null }),
+      }),
+    /MCP endpoint is required/,
+  );
+  assert.equal(mocks.constructorSpy.mock.calls.length, 0);
+});
+
+test("createLangChainMcpClient rejects hosted stdio before construction", () => {
+  mocks.constructorSpy.mockClear();
+
+  assert.throws(
+    () =>
+      createLangChainMcpClient({
+        install: install({
+          transport: "stdio",
+          endpointUrl: null,
+          desktopOnly: true,
+          webExecutable: false,
+        }),
+      }),
+    /Hosted backend does not support stdio MCP transport/,
+  );
+  assert.equal(mocks.constructorSpy.mock.calls.length, 0);
 });

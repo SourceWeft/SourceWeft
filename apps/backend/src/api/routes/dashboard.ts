@@ -9,6 +9,18 @@ import {
 import { ApiError, ApiResponse } from "../response/api-response";
 
 const THREADS_PAGE_SIZE = 20;
+const DASHBOARD_WORKSPACE_CACHE_TTL_MS = 30 * 60 * 1000;
+const DASHBOARD_CACHE_HINTS = Object.freeze({
+  workspaceSources: {
+    version: "v1",
+    ttlMs: DASHBOARD_WORKSPACE_CACHE_TTL_MS,
+  },
+  workspaceHub: {
+    version: "v1",
+    ttlMs: DASHBOARD_WORKSPACE_CACHE_TTL_MS,
+    buckets: ["artifacts", "connectors", "mcp"],
+  },
+});
 
 type BootstrapWarning = {
   field: string;
@@ -163,6 +175,7 @@ export function registerDashboardRoutes(app: Hono) {
       privateChats: privateChatsResult.value,
       modelCatalog,
       modelCatalogDeferred: !includeModelCatalog,
+      cacheHints: DASHBOARD_CACHE_HINTS,
       warnings,
     });
   });

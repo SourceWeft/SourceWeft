@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { MeterConsumeRequest } from "@sourceweft/contracts";
+import {
+  streamThreadRequestSchema,
+  type MeterConsumeRequest,
+} from "@sourceweft/contracts";
 import type { ContentBillingPort } from "../../billing-port";
 import type { MessageRecord } from "../../types";
 import { filterMessagesBeforeEditAnchor } from "./context";
 import { testExports } from "./preparer";
 import { testExports as inputTestExports } from "../stream/input";
+import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
+import {
+  createWorkspaceMcpInstall,
+  createWorkspaceMcpManifestSnapshot,
+  type WorkspaceMcpInstall,
+} from "../../../invocations/mcp-install";
 
 function billingSummary() {
   return {
@@ -67,6 +76,75 @@ function message(
   };
 }
 
+function mcpInstall(
+  overrides: Partial<WorkspaceMcpInstall> = {},
+): WorkspaceMcpInstall {
+  return {
+    ...createWorkspaceMcpInstall({
+      id: "mcp-install-1",
+      workspaceId: "workspace-1",
+      source: "marketplace",
+      marketIdentifier: "github",
+      transport: "streamable_http",
+      endpointUrl: "https://mcp.example.com/mcp",
+      enabled: true,
+      manifest: createWorkspaceMcpManifestSnapshot({
+        serverInstallId: "mcp-install-1",
+        discoveredAt: "2026-01-01T00:00:00.000Z",
+        schemaHash: "manifest-hash",
+        tools: [
+          {
+            id: "tool-1",
+            serverInstallId: "mcp-install-1",
+            serverToolName: "create_issue",
+            normalizedToolName: "github_create_issue",
+            title: "Create issue",
+            description: "Create an issue",
+            inputSchema: { type: "object" },
+            outputSchema: null,
+            risk: "low",
+            enabled: true,
+            schemaHash: "tool-hash",
+          },
+          {
+            id: "tool-2",
+            serverInstallId: "mcp-install-1",
+            serverToolName: "list_issues",
+            normalizedToolName: "github_list_issues",
+            title: "List issues",
+            description: "List issues",
+            inputSchema: { type: "object" },
+            outputSchema: null,
+            risk: "low",
+            enabled: true,
+            schemaHash: "tool-2-hash",
+          },
+        ],
+        prompts: [],
+        resources: [],
+      }),
+    }),
+    ...overrides,
+  };
+}
+
+function resolveMcpInvocation(install: WorkspaceMcpInstall) {
+  const registry = testExports.buildTurnInvocationRegistry({
+    enabledSkills: [],
+    workspaceMcpInstalls: [install],
+  });
+  return testExports.resolveThreadInvocation({
+    envelope: {
+      selectableId: "mcp_tool.mcp-install-1.github_create_issue",
+      userInput: "Create an issue",
+      structuredArgs: { title: "Bug" },
+    },
+    registry,
+    workspaceId: "workspace-1",
+    userId: "user-1",
+  });
+}
+
 test("buildVisionFallbackGatewayMetadata marks system vision fallback operation", () => {
   const metadata = testExports.buildVisionFallbackGatewayMetadata({
     workspace: {
@@ -98,6 +176,31 @@ test("buildVisionFallbackGatewayMetadata marks system vision fallback operation"
     profileAlias: "vision-profile",
     traceId: "trace-1",
   });
+});
+
+test("video presentation command enables only the video presentation artifact tool", () => {
+  const command = testExports.resolveThreadCommand({
+    command: {
+      arguments: "生成费曼学习法介绍视频",
+      kind: "tool",
+      name: "/generate_video_presentation",
+    },
+    enabledSkills: [],
+  });
+  const tools = testExports.mergeCommandTools(undefined, command);
+
+  assert.equal(
+    tools?.[AGENT_TOOL_NAMES.generateVideoPresentation]?.enabled,
+    true,
+  );
+  assert.equal(tools?.[AGENT_TOOL_NAMES.generatePptx], undefined);
+  assert.equal(command?.workflow?.successCriteria.kind, "artifact");
+  assert.equal(
+    command?.workflow?.successCriteria.kind === "artifact"
+      ? command.workflow.successCriteria.artifactType
+      : null,
+    "video_presentation",
+  );
 });
 
 test("meterVisionFallbackBilling records traceable vision fallback credit usage", async () => {
@@ -875,7 +978,8 @@ test("resolveThreadCommand resolves Notion tool slash command", () => {
   assert.deepEqual(command, {
     arguments: "TEST",
     canonicalName: "/search_notion_pages",
-    description: "Find Notion pages and return page IDs",
+    description:
+      "Find Notion pages with a non-empty search query and return page IDs",
     displayName: "Find Notion pages",
     kind: "tool",
     name: "/search_notion_pages",
@@ -891,7 +995,7 @@ test("resolveThreadCommand resolves Notion tool slash command", () => {
         search_notion_pages: "allow",
       },
       renderedPrompt:
-        '<sourceweft_command name="/search_notion_pages" kind="tool_workflow" tool="search_notion_pages">\nFind Notion pages for the user\'s request and return the relevant page IDs, titles, and URLs. Search is for discovery only; use page IDs for reading, updating, or deleting.\nThis slash command is a task request, not a passive tool toggle. Use any relevant enabled support tools first if needed, but the command\'s success criteria must be satisfied.\nSuccess criteria: call search_notion_pages.\n</sourceweft_command>\n\n<user_request>\nTEST\n</user_request>',
+        '<sourceweft_command name="/search_notion_pages" kind="tool_workflow" tool="search_notion_pages">\nFind Notion pages for the user\'s request and return the relevant page IDs, titles, and URLs. Call search_notion_pages with query set exactly to the Notion page title, keywords, or topic from <user_request>. Do not call search_notion_pages with empty input. Search is for discovery only; use page IDs for reading, updating, or deleting.\nThis slash command is a task request, not a passive tool toggle. Use any relevant enabled support tools first if needed, but the command\'s success criteria must be satisfied.\nSuccess criteria: call search_notion_pages.\n</sourceweft_command>\n\n<user_request>\nTEST\n</user_request>',
       successCriteria: {
         kind: "tool_call",
         toolName: "search_notion_pages",
@@ -918,7 +1022,36 @@ test("buildCommandAugmentedText uses normalized tool workflow prompt", () => {
   });
 
   assert.match(text, /kind="tool_workflow"/);
+  assert.match(text, /query set exactly to the Notion page title/);
+  assert.match(text, /Do not call search_notion_pages with empty input/);
   assert.match(text, /Success criteria: call search_notion_pages/);
+});
+
+test("search Notion tool workflow asks for required query when arguments are empty", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      command: {
+        arguments: "   ",
+        kind: "tool",
+        name: "/search_notion_pages",
+      },
+    }),
+    enabledSkills: [],
+  });
+
+  assert.equal(command?.workflow?.kind, "workflow");
+  assert.deepEqual(command?.workflow?.defaultTools, []);
+  assert.deepEqual(command?.workflow?.permissionOverrides, {});
+  assert.deepEqual(command?.workflow?.successCriteria, { kind: "none" });
+  const prompt = command?.workflow?.renderedPrompt ?? "";
+  assert.match(prompt, /kind="workflow" tool="search_notion_pages"/);
+  assert.match(prompt, /which Notion page title, keyword, or topic/);
+  assert.match(
+    prompt,
+    /Required input: a Notion page title, keyword, or topic/,
+  );
+  assert.doesNotMatch(prompt, /Success criteria: call search_notion_pages/);
+  assert.doesNotMatch(prompt, /kind="tool_workflow"/);
 });
 
 test("create Notion tool workflow defaults to authorized workspace", () => {
@@ -981,6 +1114,75 @@ test("resolveToolPermissions includes skill-activated tools as capabilities", ()
     }).search_notion_pages,
     "allow",
   );
+});
+
+test("resolveToolPermissions includes skill-activated generate_pptx with ask permission", () => {
+  assert.equal(
+    testExports.resolveToolPermissions({
+      command: null,
+      enabledSkills: [
+        {
+          workspaceSkillId: "skill-1",
+          sourceType: "workspace_custom",
+          name: "ppt-deck",
+          version: "1.0.0",
+          description: "Use PPT",
+          tools: ["generate_pptx"],
+          files: [],
+        },
+      ],
+      tools: undefined,
+    }).generate_pptx,
+    "ask",
+  );
+});
+
+test("resolveThreadCommand supports agent generate_pptx slash command", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      command: {
+        arguments: "AI 产品路演",
+        kind: "tool",
+        name: "/generate_pptx",
+      },
+    }),
+    enabledSkills: [],
+  });
+
+  assert.equal(command?.toolName, "generate_pptx");
+  assert.equal(command?.workflow?.execution, "agent");
+  assert.equal(command?.workflow?.successCriteria.kind, "artifact");
+  assert.equal(
+    command?.workflow?.successCriteria.kind === "artifact"
+      ? command.workflow.successCriteria.artifactType
+      : null,
+    "slides",
+  );
+  assert.match(command?.workflow?.renderedPrompt ?? "", /tool="generate_pptx"/);
+  assert.match(
+    command?.workflow?.renderedPrompt ?? "",
+    /plan first, but the final successful action must be a generate_pptx tool call/,
+  );
+});
+
+test("agent generate_pptx slash command defaults to editable native PPTX", () => {
+  const command = testExports.resolveThreadCommand({
+    command: testExports.parseRequestedCommand({
+      command: {
+        arguments: "AI 产品路演",
+        kind: "tool",
+        name: "/generate_pptx",
+      },
+    }),
+    enabledSkills: [],
+  });
+
+  assert.deepEqual(testExports.mergeCommandTools(undefined, command), {
+    generate_pptx: {
+      enabled: true,
+      generationMode: "editable_native",
+    },
+  });
 });
 
 test("buildCommandAugmentedText instructs explicit tool command usage", () => {
@@ -1103,4 +1305,333 @@ test("buildThreadCommandMetadata preserves display labels and routing fields", (
       skillSlug: "pm-data-analytics",
     },
   );
+});
+
+test("stream thread request carries selectable invocation identity only", () => {
+  const parsed = streamThreadRequestSchema.parse({
+    content: "Create an issue for the failed build",
+    invocation: {
+      selectableId: "mcp_tool.github.github_create_issue",
+      userInput: "Create an issue for the failed build",
+      structuredArgs: { title: "Failed build" },
+    },
+  });
+
+  assert.deepEqual(parsed.invocation, {
+    selectableId: "mcp_tool.github.github_create_issue",
+    userInput: "Create an issue for the failed build",
+    structuredArgs: { title: "Failed build" },
+  });
+  assert.equal(
+    streamThreadRequestSchema.safeParse({
+      content: "Create an issue",
+      invocation: {
+        selectableId: "mcp_tool.github.github_create_issue",
+        userInput: "Create an issue",
+        runtimeKind: "mcp_tool",
+      },
+    }).success,
+    false,
+  );
+});
+
+test("resolveThreadInvocation binds built-in selectable id to fixed tool choice", () => {
+  const registry = testExports.buildTurnInvocationRegistry({ enabledSkills: [] });
+  const invocation = testExports.resolveThreadInvocation({
+    envelope: {
+      selectableId: `builtin_tool.${AGENT_TOOL_NAMES.generateImage}`,
+      userInput: "make a neon dashboard",
+    },
+    registry,
+    workspaceId: "workspace-1",
+    userId: "user-1",
+  });
+
+  assert.equal(invocation?.kind, "fixed_tool_choice");
+  assert.equal(
+    invocation?.kind === "fixed_tool_choice" ? invocation.toolName : null,
+    AGENT_TOOL_NAMES.generateImage,
+  );
+  assert.deepEqual(testExports.mergeInvocationTools(undefined, invocation), {
+    [AGENT_TOOL_NAMES.generateImage]: {
+      enabled: true,
+      mode: "generate",
+    },
+  });
+});
+
+test("resolveThreadInvocation injects skill workflow context without tool choice", () => {
+  const registry = testExports.buildTurnInvocationRegistry({
+    enabledSkills: [
+      {
+        workspaceSkillId: "skill-1",
+        sourceType: "builtin",
+        name: "research",
+        displayName: "Research",
+        version: "1.0.0",
+        description: "Research skill",
+        files: [],
+        commands: [
+          {
+            id: "command-1",
+            name: "summarize",
+            canonicalName: "/research:summarize",
+            displayName: "Summarize",
+            description: "Summarize sources",
+            path: "commands/summarize.md",
+            instruction: "Summarize $ARGUMENTS with citations",
+          },
+        ],
+      },
+    ],
+  });
+  const invocation = testExports.resolveThreadInvocation({
+    envelope: {
+      selectableId: "skill_command.research.summarize",
+      userInput: "Q2 notes",
+    },
+    registry,
+    workspaceId: "workspace-1",
+    userId: "user-1",
+  });
+
+  assert.equal(invocation?.kind, "context_injection");
+  assert.match(
+    invocation?.kind === "context_injection" ? invocation.instruction : "",
+    /Q2 notes/,
+  );
+  assert.equal(testExports.mergeInvocationTools(undefined, invocation), undefined);
+  assert.doesNotMatch(
+    testExports.buildInvocationAugmentedText({
+      invocation,
+      text: "Q2 notes",
+    }),
+    /fixed_tool_choice/,
+  );
+});
+
+test("resolveThreadInvocation binds MCP selectable id to fixed MCP tool choice", () => {
+  const registry = testExports.buildTurnInvocationRegistry({
+    enabledSkills: [],
+    providers: [
+      {
+        id: "test_mcp",
+        list: () => [
+          {
+            id: "mcp_tool.mcp-install-1.github_create_issue",
+            label: "Create issue",
+            enabled: true,
+            sourceRef: {
+              kind: "mcp_tool" as const,
+              serverInstallId: "mcp-install-1",
+              serverToolName: "create_issue",
+              normalizedToolName: "github_create_issue",
+              toolId: "tool-1",
+            },
+            semantics: {
+              kind: "fixed_tool_choice" as const,
+              target: "mcp_tool" as const,
+              toolName: "mcp__mcp-install-1__github_create_issue",
+            },
+            metadata: {
+              mcpClientPath: "apps/backend/src/modules/mcp/langchain-client.ts",
+              mcpStatus: "active",
+              manifestFresh: true,
+              schemaMatches: true,
+            },
+          },
+        ],
+      },
+    ],
+  });
+  const invocation = testExports.resolveThreadInvocation({
+    envelope: {
+      selectableId: "mcp_tool.mcp-install-1.github_create_issue",
+      userInput: "Create an issue",
+    },
+    registry,
+    workspaceId: "workspace-1",
+    userId: "user-1",
+  });
+
+  assert.equal(invocation?.kind, "fixed_tool_choice");
+  assert.equal(
+    invocation?.kind === "fixed_tool_choice" ? invocation.target : null,
+    "mcp_tool",
+  );
+  assert.deepEqual(testExports.mergeInvocationTools(undefined, invocation), {
+    mcp: {
+      enabled: true,
+      installIds: ["mcp-install-1"],
+      toolIds: ["tool-1"],
+    },
+  });
+});
+
+test("resolveThreadInvocation denies unavailable MCP main-path states", () => {
+  const cases: Array<{
+    name: string;
+    install: WorkspaceMcpInstall;
+    code: string;
+  }> = [
+    {
+      name: "disabled",
+      install: mcpInstall({ enabled: false, status: "disabled" }),
+      code: "INVOCATION_UNAVAILABLE",
+    },
+    {
+      name: "needs_auth",
+      install: mcpInstall({ credentialStatus: "required" }),
+      code: "INVOCATION_UNAVAILABLE",
+    },
+    {
+      name: "unreachable",
+      install: mcpInstall({ endpointUrl: null, status: "unreachable" }),
+      code: "INVOCATION_UNAVAILABLE",
+    },
+    {
+      name: "stale manifest",
+      install: mcpInstall({
+        manifest: createWorkspaceMcpManifestSnapshot({
+          serverInstallId: "mcp-install-1",
+          discoveredAt: "2026-01-01T00:00:00.000Z",
+          schemaHash: "",
+          tools: mcpInstall().manifest.tools,
+          prompts: [],
+          resources: [],
+        }),
+      }),
+      code: "MCP_MANIFEST_STALE",
+    },
+    {
+      name: "schema mismatch",
+      install: mcpInstall({
+        manifest: createWorkspaceMcpManifestSnapshot({
+          serverInstallId: "mcp-install-1",
+          discoveredAt: "2026-01-01T00:00:00.000Z",
+          schemaHash: "manifest-hash",
+          tools: mcpInstall().manifest.tools.map((tool, index) =>
+            index === 0 ? { ...tool, schemaHash: "" } : tool,
+          ),
+          prompts: [],
+          resources: [],
+        }),
+      }),
+      code: "SCHEMA_MISMATCH",
+    },
+  ];
+
+  for (const item of cases) {
+    assert.throws(
+      () => resolveMcpInvocation(item.install),
+      (error) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === item.code,
+      item.name,
+    );
+  }
+});
+
+test("resolveThreadInvocation requires approval for high-risk MCP tools", () => {
+  assert.throws(
+    () =>
+      resolveMcpInvocation(
+        mcpInstall({
+          manifest: createWorkspaceMcpManifestSnapshot({
+            serverInstallId: "mcp-install-1",
+            discoveredAt: "2026-01-01T00:00:00.000Z",
+            schemaHash: "manifest-hash",
+            tools: mcpInstall().manifest.tools.map((tool, index) =>
+              index === 0 ? { ...tool, risk: "high" } : tool,
+            ),
+            prompts: [],
+            resources: [],
+          }),
+        }),
+      ),
+    (error) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "INVOCATION_APPROVAL_REQUIRED",
+  );
+});
+
+test("resolveThreadInvocation keeps MCP structured args on handoff path, not direct execute", () => {
+  const invocation = resolveMcpInvocation(mcpInstall());
+
+  assert.equal(invocation?.kind, "fixed_tool_choice");
+  assert.deepEqual(
+    invocation?.events.map((event) => event.type),
+    ["resolve", "policy", "tool_choice_bound", "deepagents_handoff"],
+  );
+  assert.doesNotMatch(
+    testExports.buildInvocationAugmentedText({ invocation, text: "Create an issue" }),
+    /direct_execute/,
+  );
+});
+
+test("resolveThreadInvocation rejects injected direct execute plans in thread turns", () => {
+  const registry = testExports.buildTurnInvocationRegistry({
+    enabledSkills: [],
+    providers: [
+      {
+        id: "direct_execute",
+        list: () => [
+          {
+            id: "direct_execute.mcp-install-1.github_create_issue",
+            label: "Create issue",
+            enabled: true,
+            sourceRef: {
+              kind: "mcp_tool" as const,
+              serverInstallId: "mcp-install-1",
+              serverToolName: "create_issue",
+              normalizedToolName: "github_create_issue",
+              toolId: "tool-1",
+            },
+            semantics: {
+              kind: "direct_execute" as const,
+              requiresCompleteStructuredArgs: true,
+              inputSchema: {},
+            },
+            metadata: {
+              mcpStatus: "active",
+              manifestFresh: true,
+              schemaMatches: true,
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.throws(
+    () =>
+      testExports.resolveThreadInvocation({
+        envelope: {
+          selectableId: "direct_execute.mcp-install-1.github_create_issue",
+          userInput: "Create an issue",
+          structuredArgs: { title: "Bug" },
+        },
+        registry,
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      }),
+    (error) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "INVOCATION_UNAVAILABLE",
+  );
+});
+
+test("mergeInvocationTools exposes only the explicitly selected MCP manifest tool id", () => {
+  const invocation = resolveMcpInvocation(mcpInstall());
+
+  assert.deepEqual(testExports.mergeInvocationTools(undefined, invocation), {
+    mcp: {
+      enabled: true,
+      installIds: ["mcp-install-1"],
+      toolIds: ["tool-1"],
+    },
+  });
 });

@@ -242,14 +242,30 @@ export function DashboardSidebar() {
 
   const handleOpenChat = (id: string) => {
     setOpenMobile(false);
+    router.prefetch(`/dashboard/chat/${id}`);
     router.push(`/dashboard/chat/${id}`);
   };
 
+  const handlePrefetchChat = React.useCallback(
+    (id: string) => {
+      router.prefetch(`/dashboard/chat/${id}`);
+    },
+    [router],
+  );
+
+  React.useEffect(() => {
+    for (const chat of privateChats.slice(0, 5)) {
+      router.prefetch(`/dashboard/chat/${chat.id}`);
+    }
+  }, [privateChats, router]);
+
   const handleMobileWorkspaceChange = (nextId: string) => {
     setOpenMobile(false);
-    startNewChat();
-    void switchWorkspace(nextId);
-    router.push("/dashboard/chat");
+    void switchWorkspace(nextId).then((switched) => {
+      if (switched) {
+        router.push("/dashboard/chat");
+      }
+    });
   };
 
   const renderRail = () => (
@@ -339,6 +355,7 @@ export function DashboardSidebar() {
             setSettingsRequest({ id: Date.now(), tab: "usage" })
           }
           onOpenChat={onOpenChat}
+          onPrefetchChat={handlePrefetchChat}
           onRenameWorkspace={handleRenameWorkspace}
           hasMorePrivateChats={hasMorePrivateChats}
           isLoadingPrivateChats={isLoadingPrivateChats}
@@ -354,11 +371,16 @@ export function DashboardSidebar() {
     ) : null;
 
   const desktopChatPanel = renderChatPanel({
-    onOpenChat: (id) => router.push(`/dashboard/chat/${id}`),
+    onOpenChat: (id) => {
+      router.prefetch(`/dashboard/chat/${id}`);
+      router.push(`/dashboard/chat/${id}`);
+    },
     onWorkspaceChange: (nextId) => {
-      startNewChat();
-      void switchWorkspace(nextId);
-      router.push("/dashboard/chat");
+      void switchWorkspace(nextId).then((switched) => {
+        if (switched) {
+          router.push("/dashboard/chat");
+        }
+      });
     },
   });
 

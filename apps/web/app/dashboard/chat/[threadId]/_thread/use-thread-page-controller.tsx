@@ -20,6 +20,7 @@ import {
   type DashboardShortcutDefinition,
 } from "../../../_components/dashboard-shortcuts";
 import type {
+  ArtifactStatusSnapshot,
   ChatSendInput,
   ToolConfirmationInterventionSignal,
 } from "../../_components/chat-canvas";
@@ -32,7 +33,7 @@ import {
   desktopBridge,
   handleDesktopAuthDeepLink,
 } from "../../../../../lib/desktop-bridge";
-import { connectorsClient } from "../../../../../lib/sdk";
+import { contentClient, connectorsClient } from "../../../../../lib/sdk";
 import type { SourceConnector } from "@sourceweft/sdk";
 import { useChatStreamRunnerControl } from "../chat-stream-runner-control";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
@@ -50,6 +51,10 @@ import {
   throwStreamRequestError,
 } from "./message-normalizers";
 import {
+  collectPendingVideoPresentationArtifactIds,
+  mapArtifactStatusSnapshot,
+} from "./video-presentation-artifacts";
+import {
   buildToolConfirmationResumeStreamInput,
   flushPendingToolConfirmationResume,
   resolveToolConfirmationResumeRequest,
@@ -61,11 +66,13 @@ import {
   resolveRefreshSourceIds,
 } from "./message-groups";
 import { mergeSourceIds } from "./thread-utils";
+import { resolveChatUiState } from "../../_components/chat-ui-state";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
+const VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES = 3;
 
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(false);
@@ -92,8 +99,13 @@ export function useThreadPageController({
 }) {
   const {
     privateChats,
+    hasMorePrivateChats,
+    hasWorkspaceHydrated,
+    isWorkspaceHydrating,
+    isLoadingPrivateChats,
+    pendingWorkspaceId,
+    sharedChats,
     sourcesVisible,
-    startNewChat,
     switchWorkspace,
     toggleSourcesVisible,
     updateChatTitle,
@@ -103,7 +115,9 @@ export function useThreadPageController({
     workspaces,
   } = dashboardState;
 
-  const chatItem = privateChats.find((c) => c.id === threadId);
+  const chatItem = [...privateChats, ...sharedChats].find(
+    (chat) => chat.id === threadId,
+  );
   const threadTitle = chatItem?.title ?? "Chat";
 
   const isPersistentLayout = useMediaQuery("(min-width: 768px)");
@@ -111,6 +125,10 @@ export function useThreadPageController({
   const handledConnectorOAuthHubRef = useRef(false);
   const [workfilesRefreshKey, setWorkfilesRefreshKey] = useState(0);
   const [artifactsRefreshKey, setArtifactsRefreshKey] = useState(0);
+  const [artifactStatuses, setArtifactStatuses] = useState<
+    ReadonlyMap<string, ArtifactStatusSnapshot>
+  >(new Map());
+  const videoPresentationPollFailuresRef = useRef(new Map<string, number>());
   const [composerInitialInput, setComposerInitialInput] = useState("");
   const [composerInitialCommand, setComposerInitialCommand] = useState<
     ChatSendInput["command"] | null
@@ -118,6 +136,9 @@ export function useThreadPageController({
   const [composerResetKey, setComposerResetKey] = useState(0);
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [loadedThreadMessagesKey, setLoadedThreadMessagesKey] = useState<
+    string | null
+  >(null);
   const [activeConnectorTools, setActiveConnectorTools] =
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
   const [toolConfirmationInterventionSignal, setToolConfirmationInterventionSignal] =
@@ -226,8 +247,10 @@ export function useThreadPageController({
   const {
     attachedRunKeyRef,
     activeThreadRun,
+    chatExecutionState,
     clearAttachedRunKeyIfCurrent,
     clearRunIfCurrent,
+    clearTerminalLocalRunState,
     isStopping,
     isStreaming,
     markRunStarted,
@@ -256,6 +279,7 @@ export function useThreadPageController({
     setStreamingAssistantSnapshot,
   } = useThreadMessages({
     attachedRunKeyRef,
+    clearTerminalLocalRunState,
     setActiveThreadRun,
     streamThreadActionRef,
     threadId,
@@ -278,6 +302,80 @@ export function useThreadPageController({
     mergeStreamingAssistantIntoMessages,
     messages,
   });
+  const pendingVideoPresentationArtifactIds = useMemo(
+    () => collectPendingVideoPresentationArtifactIds(messages),
+    [messages],
+  );
+
+  const refreshVideoPresentationArtifactStatuses = useCallback(async () => {
+    if (!workspaceId || pendingVideoPresentationArtifactIds.length === 0) {
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    const results = await Promise.allSettled(
+      pendingVideoPresentationArtifactIds.map(async (artifactId) => {
+        const result = await contentClient.getArtifact(
+          activeWorkspaceId,
+          artifactId,
+        );
+        return {
+          artifactId,
+          snapshot: mapArtifactStatusSnapshot(result.artifact),
+        };
+      }),
+    );
+
+    setArtifactStatuses((current) => {
+      const next = new Map(current);
+      results.forEach((result, index) => {
+        const artifactId = pendingVideoPresentationArtifactIds[index];
+        if (!artifactId) {
+          return;
+        }
+        if (result.status === "fulfilled") {
+          videoPresentationPollFailuresRef.current.delete(artifactId);
+          next.set(result.value.snapshot.id, result.value.snapshot);
+          return;
+        }
+
+        const failureCount =
+          (videoPresentationPollFailuresRef.current.get(artifactId) ?? 0) + 1;
+        videoPresentationPollFailuresRef.current.set(artifactId, failureCount);
+        if (
+          failureCount < VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES
+        ) {
+          return;
+        }
+
+        const currentSnapshot = next.get(artifactId);
+        if (!currentSnapshot) {
+          return;
+        }
+        next.set(artifactId, {
+          ...currentSnapshot,
+          errorMessage:
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Could not refresh this video presentation status.",
+          status: "failed",
+          updatedAt: new Date().toISOString(),
+        });
+      });
+      return next;
+    });
+
+    if (
+      results.some(
+        (result) =>
+          result.status === "fulfilled" &&
+          (result.value.snapshot.status === "ready" ||
+            result.value.snapshot.status === "failed"),
+      )
+    ) {
+      setArtifactsRefreshKey((value) => value + 1);
+    }
+  }, [pendingVideoPresentationArtifactIds, workspaceId]);
 
   const clearEditingState = useCallback(() => {
     setEditingMessageId(null);
@@ -384,9 +482,18 @@ export function useThreadPageController({
     markRunStarted,
     markRunTerminal,
     messages,
-    onToolConfirmationRequested: () => {
+    onToolConfirmationRequested: ({
+      assistantMessageId,
+      liveConfirmations,
+      runKey,
+      threadRunId,
+    }) => {
       setToolConfirmationInterventionSignal({
         id: `${Date.now()}:${Math.random().toString(36).slice(2)}`,
+        assistantMessageId,
+        liveConfirmations,
+        runKey,
+        threadRunId,
       });
     },
     searchEnabled,
@@ -409,21 +516,33 @@ export function useThreadPageController({
 
   const loadThreadMessagesRef = useRef(loadThreadMessages);
   const bootstrappedThreadKeyRef = useRef<string | null>(null);
+  const targetThreadMessagesKey = workspaceId
+    ? `${workspaceId}:${threadId}`
+    : null;
+  const loadThreadMessagesWithStatus = useCallback(async () => {
+    const targetKey = targetThreadMessagesKey;
+    await loadThreadMessages();
+    setLoadedThreadMessagesKey((current) => targetKey ?? current);
+  }, [loadThreadMessages, targetThreadMessagesKey]);
 
   useBrowserLayoutEffect(() => {
     streamThreadActionRef.current = streamThreadAction;
   }, [streamThreadAction]);
 
   useBrowserLayoutEffect(() => {
-    loadThreadMessagesRef.current = loadThreadMessages;
-  }, [loadThreadMessages]);
+    loadThreadMessagesRef.current = loadThreadMessagesWithStatus;
+  }, [loadThreadMessagesWithStatus]);
 
   useEffect(() => {
     clearEditingState();
     resetVersioningState();
     setStreamingAssistantSnapshot(null);
+    setArtifactStatuses(new Map());
+    setToolConfirmationInterventionSignal(null);
+    clearTerminalLocalRunState();
   }, [
     clearEditingState,
+    clearTerminalLocalRunState,
     resetVersioningState,
     setStreamingAssistantSnapshot,
     threadId,
@@ -450,6 +569,130 @@ export function useThreadPageController({
     workspaceId,
   });
 
+  const threadStatus = useMemo(() => {
+    if (
+      !workspaceId ||
+      isWorkspaceHydrating ||
+      !hasWorkspaceHydrated ||
+      pendingWorkspaceId
+    ) {
+      return "loading";
+    }
+    if (
+      !chatItem &&
+      (modelCatalogStatus === "error" ||
+        (!isLoadingPrivateChats && !hasMorePrivateChats))
+    ) {
+      return "error";
+    }
+    if (
+      targetThreadMessagesKey &&
+      loadedThreadMessagesKey !== targetThreadMessagesKey
+    ) {
+      return isStreaming ? "ready" : "loading";
+    }
+    return "ready";
+  }, [
+    chatItem,
+    hasMorePrivateChats,
+    hasWorkspaceHydrated,
+    isLoadingPrivateChats,
+    isStreaming,
+    isWorkspaceHydrating,
+    loadedThreadMessagesKey,
+    modelCatalogStatus,
+    pendingWorkspaceId,
+    targetThreadMessagesKey,
+    workspaceId,
+  ]);
+  const isThreadSwitching = Boolean(
+    targetThreadMessagesKey &&
+      loadedThreadMessagesKey &&
+      loadedThreadMessagesKey !== targetThreadMessagesKey,
+  );
+  const resolvedModelCatalogStatus =
+    threadStatus === "error" ||
+    (isThreadSwitching && modelCatalogStatus === "loading")
+      ? "ready"
+      : modelCatalogStatus;
+
+  const chatUiState = useMemo(
+    () =>
+      resolveChatUiState({
+        routeKind: "thread",
+        shellStatus: "ready",
+        workspaceStatus:
+          isWorkspaceHydrating || !hasWorkspaceHydrated || pendingWorkspaceId
+            ? "loading"
+            : "ready",
+        modelCatalogStatus: resolvedModelCatalogStatus,
+        threadStatus,
+        requestedThreadId: threadId,
+        activeThreadId: chatItem?.id ?? null,
+        hasWorkspace: Boolean(workspaceId),
+        hasThread: Boolean(chatItem),
+        hasMessages: messageGroups.length > 0,
+        streamingStatus: isStreaming ? "loading" : "ready",
+        isWorkspaceShortcutPending:
+          dashboardState.workspaceSwitchStatus === "loading",
+        isThreadSwitching,
+        errorKind: threadStatus === "error" ? "thread" : null,
+      }),
+    [
+      chatItem,
+      hasWorkspaceHydrated,
+      isStreaming,
+      isWorkspaceHydrating,
+      isThreadSwitching,
+      messageGroups.length,
+      pendingWorkspaceId,
+      resolvedModelCatalogStatus,
+      threadId,
+      threadStatus,
+      dashboardState.workspaceSwitchStatus,
+      workspaceId,
+    ],
+  );
+
+  useEffect(() => {
+    if (!workspaceId || pendingVideoPresentationArtifactIds.length === 0) {
+      return;
+    }
+
+    void refreshVideoPresentationArtifactStatuses();
+  }, [
+    pendingVideoPresentationArtifactIds,
+    refreshVideoPresentationArtifactStatuses,
+    workspaceId,
+  ]);
+
+  useEffect(() => {
+    if (!workspaceId || pendingVideoPresentationArtifactIds.length === 0) {
+      return;
+    }
+
+    const hasPendingVideoPresentation = pendingVideoPresentationArtifactIds.some(
+      (artifactId) => {
+        const status = artifactStatuses.get(artifactId)?.status ?? "pending";
+        return status === "pending" || status === "running";
+      },
+    );
+    if (!hasPendingVideoPresentation) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshVideoPresentationArtifactStatuses();
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [
+    artifactStatuses,
+    pendingVideoPresentationArtifactIds,
+    refreshVideoPresentationArtifactStatuses,
+    workspaceId,
+  ]);
+
   const handleSendMessage = useCallback(
     async (
       input: ChatSendInput,
@@ -459,7 +702,7 @@ export function useThreadPageController({
       const images = input.images ?? [];
       if (
         (!text && images.length === 0) ||
-        (isStreaming && !options?.allowWhileStreaming)
+        (chatExecutionState !== "idle" && !options?.allowWhileStreaming)
       ) {
         return;
       }
@@ -582,7 +825,7 @@ export function useThreadPageController({
       editingBranchIndex,
       editingGroupId,
       editingMessageId,
-      isStreaming,
+      chatExecutionState,
       modelCatalogStatus,
       messageGroups,
       messages,
@@ -717,11 +960,13 @@ export function useThreadPageController({
         return;
       }
 
-      startNewChat();
-      void switchWorkspace(targetWorkspaceId);
-      router.push("/dashboard/chat");
+      void switchWorkspace(targetWorkspaceId).then((switched) => {
+        if (switched) {
+          router.push("/dashboard/chat");
+        }
+      });
     },
-    [router, startNewChat, switchWorkspace, workspaceId],
+    [router, switchWorkspace, workspaceId],
   );
 
   const shortcutPlatform = useDashboardShortcutPlatform();
@@ -745,6 +990,8 @@ export function useThreadPageController({
     activeAssistantVersion,
     assistantVersionById,
     activeThreadRun,
+    chatExecutionState,
+    chatUiState,
     activeCitationIndex,
     activeMcpInstallIds,
     activeMcpToolIds,
@@ -752,6 +999,7 @@ export function useThreadPageController({
     activeConnectorTools,
     activeSourceIds,
     activeVersionByGroup,
+    artifactStatuses,
     artifactsRefreshKey,
     availableModels,
     availableSkills,
@@ -797,7 +1045,7 @@ export function useThreadPageController({
     librarySources,
     loadAvailableSkills,
     loadOlderThreadMessages,
-    loadThreadMessages,
+    loadThreadMessages: loadThreadMessagesWithStatus,
     loadSourceMentions,
     messageGroups,
     olderMessagesCursor,

@@ -9,6 +9,11 @@ const notionActivation = {
   },
 } as const;
 
+const notionSlashIcon = {
+  iconName: "notion",
+  iconTone: "brand",
+} as const;
+
 export const searchNotionPagesTool = defineAgentTool({
   id: "searchNotionPages",
   name: "search_notion_pages",
@@ -22,8 +27,10 @@ export const searchNotionPagesTool = defineAgentTool({
   defaultPermission: "allow",
   riskLevel: "low",
   slash: {
-    description: "Find Notion pages and return page IDs",
+    description:
+      "Find Notion pages with a non-empty search query and return page IDs",
     displayName: "Find Notion pages",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });
@@ -43,6 +50,7 @@ export const readNotionPageTool = defineAgentTool({
   slash: {
     description: "Read Notion page content by page ID",
     displayName: "Read Notion page",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });
@@ -63,6 +71,7 @@ export const createNotionPageTool = defineAgentTool({
     description:
       "Create a Notion page in the authorized workspace unless an explicit parent page or data source ID is provided",
     displayName: "Create Notion page",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });
@@ -82,6 +91,7 @@ export const appendNotionPageTool = defineAgentTool({
   slash: {
     description: "Propose appending content to a Notion page",
     displayName: "Append Notion page",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });
@@ -101,6 +111,7 @@ export const updateNotionPageTool = defineAgentTool({
   slash: {
     description: "Propose updating a Notion page by page ID",
     displayName: "Update Notion page",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });
@@ -120,6 +131,7 @@ export const deleteNotionPageTool = defineAgentTool({
   slash: {
     description: "Move Notion pages to trash by page ID",
     displayName: "Delete Notion page",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });
@@ -139,6 +151,7 @@ export const saveArtifactToNotionTool = defineAgentTool({
   slash: {
     description: "Propose saving an artifact reference to Notion",
     displayName: "Save artifact to Notion",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });
@@ -158,6 +171,7 @@ export const saveFinalAnswerToNotionTool = defineAgentTool({
   slash: {
     description: "Propose saving the final answer to Notion",
     displayName: "Save answer to Notion",
+    ...notionSlashIcon,
     supportsCommand: true,
   },
 });

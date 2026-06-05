@@ -1,5 +1,9 @@
 import type { LucideIcon } from "lucide-react";
 import type { SourceConnector } from "@sourceweft/sdk";
+import type {
+  GlobalIconName,
+  GlobalIconTone,
+} from "@sourceweft/ui-web/components/ui/global-icon";
 
 export type ConnectorIcon = LucideIcon;
 
@@ -35,6 +39,8 @@ export type ConnectorCatalogItem = {
   supportsWebhook: boolean;
   statusKind: "available" | "coming_soon" | "non_indexable" | "indexable";
   icon: ConnectorIcon;
+  logoIconName?: GlobalIconName;
+  logoIconTone?: GlobalIconTone;
   logoSrc?: string;
   webhookSupportNote?: string;
 };

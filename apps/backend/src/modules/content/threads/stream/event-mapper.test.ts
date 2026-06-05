@@ -133,7 +133,7 @@ test("mapDeepAgentEventToSse sends displayable tool result output", () => {
   });
 });
 
-test("mapDeepAgentEventToSse sends slim tool progress events", () => {
+test("mapDeepAgentEventToSse sends stable tool progress payloads", () => {
   const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
     type: "tool-call-event",
     id: "image-1",
@@ -161,7 +161,7 @@ test("mapDeepAgentEventToSse sends slim tool progress events", () => {
   assert.equal(data.type, "tool-call-event");
   assert.equal(data.id, "image-1");
   assert.deepEqual(data.data, event.data);
-  assert.equal("toolCall" in data, false);
+  assert.deepEqual(data.toolCall, event.toolCall);
 });
 
 test("mapDeepAgentEventToSse sends slim tool end events", () => {

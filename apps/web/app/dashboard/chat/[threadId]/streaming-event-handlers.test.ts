@@ -3,7 +3,55 @@ import { test } from "vitest";
 import type { ModelReasoningSegmentRecord } from "../_components/chat-canvas";
 import type { ChatMessageItem } from "./streaming-assistant-state";
 import { createStreamingRenderBuffer } from "./streaming-render-buffer";
-import { testExports } from "./streaming-event-handlers";
+import {
+  testExports,
+  type StreamingEventHandlerContext,
+  type ToolCallEventPayload,
+} from "./streaming-event-handlers";
+
+function createBaseStreamingContext(
+  overrides: Partial<StreamingEventHandlerContext<ToolCallEventPayload>> = {},
+): StreamingEventHandlerContext<ToolCallEventPayload> {
+  return {
+    appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
+    durableRunKey: "sourceweft-web-run:run-1",
+    isCompletedImageArtifactToolCall: () => false,
+    isCompletedPresentationArtifactToolCall: () => false,
+    isCompletedWorkfileWriteToolCall: () => false,
+    isGeneratedImageArtifactToolName: () => false,
+    isPresentationArtifactToolName: () => false,
+    mergeThinkingStepRecords: () => undefined,
+    mode: "send",
+    normalizeCitationRecords: () => [],
+    normalizeModelReasoningSegmentRecord: () => null,
+    normalizeThinkingStepRecord: () => null,
+    normalizeThreadCommandRequest: () => undefined,
+    resolveToolCallFromStreamEvent: () => {
+      throw new Error("not used");
+    },
+    resolveTraceEventFromStreamEvent: () => null,
+    streamRenderBuffer: createStreamingRenderBuffer({
+      maxDeltaBatchChars: 800,
+    }),
+    streamThinkingStepsById: new Map(),
+    streamToolCallsById: new Map(),
+    syncStreamingCitations: () => undefined,
+    syncStreamingThinkingSteps: () => undefined,
+    syncStreamingToolCalls: () => undefined,
+    toNullableString: (value) => (typeof value === "string" ? value : null),
+    toObjectRecord: (value) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null,
+    updateChatTitle: () => undefined,
+    updateStreamingAssistantMessage: () => undefined,
+    ...overrides,
+  };
+}
+
+function getToolEventData(event: ToolCallEventPayload) {
+  return "data" in event ? event.data : undefined;
+}
 
 test("finish event stores finish reason on the streaming assistant message", () => {
   let message: ChatMessageItem = {
@@ -27,8 +75,10 @@ test("finish event stores finish reason on the streaming assistant message", () 
       appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
       durableRunKey: "sourceweft-web-run:run-1",
       isCompletedImageArtifactToolCall: () => false,
+      isCompletedPresentationArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
       isGeneratedImageArtifactToolName: () => false,
+      isPresentationArtifactToolName: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "send",
       normalizeCitationRecords: () => [],
@@ -68,6 +118,166 @@ test("finish event stores finish reason on the streaming assistant message", () 
   });
 });
 
+test("finish event completes stale thinking steps and defaults completed finish reason", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {
+      threadRun: {
+        idempotencyKey: "sourceweft-web-run:run-1",
+        mode: "send",
+        status: "running",
+      },
+    },
+    createdAt: new Date(0).toISOString(),
+  };
+  const context = createBaseStreamingContext({
+    streamThinkingStepsById: new Map([
+      [
+        "step-1",
+        {
+          id: "step-1",
+          kind: "reasoning_summary",
+          title: "Thinking",
+          status: "in_progress",
+          items: [],
+          sequence: 0,
+        },
+      ],
+    ]),
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+
+  testExports.handleStreamingFinish({
+    context,
+    finishReason: undefined,
+  });
+
+  assert.equal(message.metadata.finishReason, "stop");
+  assert.deepEqual(message.metadata.threadRun, {
+    idempotencyKey: "sourceweft-web-run:run-1",
+    mode: "send",
+    status: "completed",
+  });
+  assert.equal(
+    (
+      message.metadata.thinkingSteps as Array<{ id: string; status: string }>
+    ).find((step) => step.id === "step-1")?.status,
+    "completed",
+  );
+  assert.equal(
+    (message.metadata.traceParts as Array<{ id: string; status: string }>).find(
+      (part) => part.id === "step-1",
+    )?.status,
+    "completed",
+  );
+});
+
+test("streaming DeepAgents todo step updates trace parts without tool trace", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamThinkingStepsById = new Map();
+  const context = createBaseStreamingContext({
+    mergeThinkingStepRecords: (stepsById, nextStep) => {
+      stepsById.set(nextStep.id, nextStep);
+    },
+    normalizeThinkingStepRecord: (value) => {
+      const record =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : null;
+      if (
+        typeof record?.id !== "string" ||
+        typeof record.title !== "string" ||
+        (record.status !== "pending" &&
+          record.status !== "in_progress" &&
+          record.status !== "completed")
+      ) {
+        return null;
+      }
+      return {
+        id: record.id,
+        kind: record.kind === "state" ? "state" : undefined,
+        title: record.title,
+        status: record.status,
+        items: Array.isArray(record.items)
+          ? record.items.filter(
+              (item): item is string => typeof item === "string",
+            )
+          : [],
+        sequence:
+          typeof record.sequence === "number" ? record.sequence : undefined,
+        metadata:
+          record.metadata &&
+          typeof record.metadata === "object" &&
+          !Array.isArray(record.metadata)
+            ? (record.metadata as Record<string, unknown>)
+            : undefined,
+      };
+    },
+    streamThinkingStepsById,
+    syncStreamingThinkingSteps: () => undefined,
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+
+  testExports.handleStreamingThinkingStep({
+    context,
+    step: {
+      id: "deepagents:todos",
+      kind: "state",
+      title: "Task plan",
+      status: "in_progress",
+      items: ["In progress: Surface todos in trace"],
+      sequence: 1,
+      metadata: {
+        source: "deepagents",
+        tool: "write_todos",
+        toolCallId: "call-todos",
+        todos: [
+          {
+            content: "Surface todos in trace",
+            status: "in_progress",
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(streamThinkingStepsById.has("deepagents:todos"), true);
+  assert.deepEqual(
+    (
+      message.metadata.traceParts as Array<{
+        id: string;
+        kind: string;
+        tool?: string;
+      }>
+    )
+      .filter((part) => part.id === "deepagents:todos")
+      .map((part) => part.kind),
+    ["step"],
+  );
+  assert.equal(
+    (message.metadata.traceParts as Array<{ kind: string; tool?: string }>).some(
+      (part) => part.kind === "tool" && part.tool === "write_todos",
+    ),
+    false,
+  );
+});
+
 test("finish status marks tool confirmation pauses as waiting for approval", () => {
   assert.equal(
     testExports.resolveFinishedThreadRunStatus({
@@ -89,6 +299,49 @@ test("finish status marks tool confirmation pauses as waiting for approval", () 
       finishReason: "tool_confirmation_requested",
     }),
     "failed",
+  );
+});
+
+test("streaming errors hide raw tool kwargs and schema details", () => {
+  const rawError =
+    'Error invoking tool \'generate_pptx\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
+  const captured: {
+    markedError?: {
+      code?: string | null;
+      error: string;
+      messageId?: string | null;
+      userMessageId?: string | null;
+    };
+    streamError?: Error;
+    suppressErrorToast?: boolean;
+  } = {};
+
+  testExports.handleStreamingError({
+    event: {
+      code: "MODEL_UPSTREAM_ERROR",
+      error: rawError,
+      messageId: "assistant-error",
+    },
+    markStreamingAssistantAsError: (errorInput) => {
+      captured.markedError = errorInput;
+    },
+    persistedUserMessageId: "user-1",
+    setStreamError: (error) => {
+      captured.streamError = error;
+    },
+    setSuppressErrorToast: (value) => {
+      captured.suppressErrorToast = value;
+    },
+  });
+
+  const expected =
+    "generate_pptx failed because the generated tool arguments were invalid. Please retry.";
+  assert.equal(captured.markedError?.error, expected);
+  assert.equal(captured.streamError?.message, expected);
+  assert.equal(captured.suppressErrorToast, false);
+  assert.doesNotMatch(
+    captured.markedError?.error ?? "",
+    /kwargs|schema|brief|slides/i,
   );
 });
 
@@ -158,8 +411,10 @@ test("finish event preserves approval requested tool calls", () => {
       appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
       durableRunKey: "sourceweft-web-run:run-1",
       isCompletedImageArtifactToolCall: () => false,
+      isCompletedPresentationArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
       isGeneratedImageArtifactToolName: () => false,
+      isPresentationArtifactToolName: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "send",
       normalizeCitationRecords: () => [],
@@ -201,6 +456,72 @@ test("finish event preserves approval requested tool calls", () => {
   assert.equal(message.metadata.finishReason, "tool_confirmation_requested");
 });
 
+test("finish event normalizes stale running tool trace parts", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {
+      traceParts: [
+        {
+          id: "tool-1",
+          kind: "tool",
+          order: 0,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          toolCallId: "tool-1",
+          tool: "generate_pptx",
+          status: "running",
+          input: {},
+          output: null,
+          error: null,
+          latencyMs: null,
+        },
+      ],
+      threadRun: {
+        idempotencyKey: "sourceweft-web-run:run-1",
+        mode: "send",
+        status: "running",
+      },
+    },
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map([
+    [
+      "tool-1",
+      {
+        id: "tool-1",
+        tool: "generate_pptx",
+        input: {},
+        output: null,
+        status: "running" as const,
+        latencyMs: null,
+        error: null,
+      },
+    ],
+  ]);
+
+  testExports.handleStreamingFinish({
+    context: createBaseStreamingContext({
+      streamToolCallsById,
+      updateStreamingAssistantMessage: (updater) => {
+        message = updater(message);
+      },
+    }),
+    finishReason: undefined,
+  });
+
+  assert.equal(streamToolCallsById.get("tool-1")?.status, "completed");
+  assert.equal(
+    (message.metadata.traceParts as Array<{ id: string; status: string }>).find(
+      (part) => part.id === "tool-1",
+    )?.status,
+    "completed",
+  );
+});
+
 test("approval refresh assistant message keeps the original assistant root", () => {
   let message: ChatMessageItem = {
     id: "assistant-interrupted",
@@ -224,8 +545,10 @@ test("approval refresh assistant message keeps the original assistant root", () 
       appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
       durableRunKey: "sourceweft-web-run:approval",
       isCompletedImageArtifactToolCall: () => false,
+      isCompletedPresentationArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
       isGeneratedImageArtifactToolName: () => false,
+      isPresentationArtifactToolName: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "refresh",
       normalizeCitationRecords: () => [],
@@ -278,6 +601,18 @@ test("approval refresh assistant message keeps the original assistant root", () 
   assert.equal(
     message.metadata.sourceAssistantMessageId,
     "assistant-interrupted",
+  );
+  assert.equal(
+    (message.metadata.threadRun as { status?: string } | undefined)?.status,
+    "running",
+  );
+  assert.equal(
+    (
+      message.metadata.threadRun as
+        | { assistantMessageId?: string }
+        | undefined
+    )?.assistantMessageId,
+    "assistant-resumed",
   );
   assert.deepEqual([...streamingAssistantMessageIds], [
     "assistant-interrupted",
@@ -334,8 +669,10 @@ test("streaming reasoning keeps interrupted model reasoning in separate segments
       `${current ?? ""}${next}`,
     durableRunKey: "sourceweft-web-run:run-1",
     isCompletedImageArtifactToolCall: () => false,
+    isCompletedPresentationArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
     isGeneratedImageArtifactToolName: () => false,
+    isPresentationArtifactToolName: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
     normalizeCitationRecords: () => [],
@@ -429,8 +766,10 @@ test("streaming reasoning deltas update one stable trace part", () => {
       current ? `${current}${next}` : next,
     durableRunKey: "sourceweft-web-run:run-1",
     isCompletedImageArtifactToolCall: () => false,
+    isCompletedPresentationArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
     isGeneratedImageArtifactToolName: () => false,
+    isPresentationArtifactToolName: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
     normalizeCitationRecords: () => [],
@@ -538,8 +877,10 @@ test("streaming trace events preserve live display order across tools and reason
       `${current ?? ""}${next}`,
     durableRunKey: "sourceweft-web-run:run-1",
     isCompletedImageArtifactToolCall: () => false,
+    isCompletedPresentationArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
     isGeneratedImageArtifactToolName: () => false,
+    isPresentationArtifactToolName: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
     normalizeCitationRecords: () => [],
@@ -705,4 +1046,446 @@ test("streaming trace events preserve live display order across tools and reason
       "3:reasoning:search-tool::after search",
     ],
   );
+});
+
+test("presentation artifact tool calls render a card and refresh artifacts", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map<string, {
+    id: string;
+    tool: string;
+    input: Record<string, unknown>;
+    output: unknown;
+    latencyMs: number | null;
+    status: "running" | "approval_requested" | "completed" | "error";
+    error: string | null;
+  }>();
+  const streamRenderBuffer = createStreamingRenderBuffer({
+    maxDeltaBatchChars: 800,
+  });
+  let refreshCount = 0;
+  let drainCount = 0;
+  const context = createBaseStreamingContext({
+    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+      toolCall.tool === "generate_pptx" &&
+      toolCall.status === "completed" &&
+      event.type === "tool-call-result",
+    isPresentationArtifactToolName: (toolName) => toolName === "generate_pptx",
+    resolveToolCallFromStreamEvent: ({ event, streamToolCallsById }) => {
+      const existing = streamToolCallsById.get(event.id ?? "pptx-tool");
+      const eventData = getToolEventData(event);
+      return {
+        id: event.id ?? "pptx-tool",
+        tool: "generate_pptx",
+        input: { title: "费曼学习法" },
+        output:
+          event.type === "tool-call-result"
+            ? {
+                ...(existing?.output &&
+                typeof existing.output === "object" &&
+                !Array.isArray(existing.output)
+                  ? existing.output
+                  : {}),
+                artifact_id: "artifact-1",
+                artifact_url:
+                  "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+                title: "费曼学习法",
+              }
+            : event.type === "tool-call-event"
+              ? {
+                  ...(existing?.output &&
+                  typeof existing.output === "object" &&
+                  !Array.isArray(existing.output)
+                    ? existing.output
+                    : {}),
+                  ...(eventData &&
+                  typeof eventData === "object" &&
+                  !Array.isArray(eventData)
+                    ? eventData
+                    : {}),
+                }
+              : (existing?.output ?? null),
+        latencyMs: event.type === "tool-call-result" ? 10 : null,
+        status: event.type === "tool-call-result" ? "completed" : "running",
+        error: null,
+      };
+    },
+    streamRenderBuffer,
+    streamToolCallsById,
+    syncStreamingToolCalls: () => {
+      message = {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
+          toolCalls: [...streamToolCallsById.values()],
+        },
+      };
+    },
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  const refreshedArtifactToolIds = new Set<string>();
+
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
+    event: {
+      type: "tool-call-event",
+      id: "pptx-tool",
+      data: {
+        type: "generate_pptx_progress",
+        toolCallId: "pptx-tool",
+        stage: "planning",
+        title: "费曼学习法",
+      },
+    },
+    refreshedArtifactToolIds,
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  assert.equal(drainCount, 0);
+  assert.equal(refreshCount, 0);
+  assert.deepEqual(message.metadata.renderBlocks, []);
+  assert.deepEqual(streamToolCallsById.get("pptx-tool")?.output, {
+    type: "generate_pptx_progress",
+    toolCallId: "pptx-tool",
+    stage: "planning",
+    title: "费曼学习法",
+  });
+
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
+    event: {
+      type: "tool-call-start",
+      id: "pptx-tool",
+    },
+    refreshedArtifactToolIds,
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  assert.equal(drainCount, 1);
+  assert.deepEqual(message.metadata.renderBlocks, [
+    {
+      id: "stream-generated-presentation-pptx-tool",
+      type: "generated_presentation",
+      toolCallId: "pptx-tool",
+    },
+  ]);
+
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => undefined,
+    event: {
+      type: "tool-call-result",
+      id: "pptx-tool",
+    },
+    refreshedArtifactToolIds,
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  assert.equal(drainCount, 1);
+  assert.equal(refreshCount, 1);
+  assert.deepEqual(message.metadata.renderBlocks, [
+    {
+      id: "stream-generated-presentation-pptx-tool",
+      type: "generated_presentation",
+      toolCallId: "pptx-tool",
+    },
+  ]);
+  assert.deepEqual(streamToolCallsById.get("pptx-tool")?.output, {
+    type: "generate_pptx_progress",
+    toolCallId: "pptx-tool",
+    stage: "planning",
+    artifact_id: "artifact-1",
+    artifact_url:
+      "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    title: "费曼学习法",
+  });
+});
+
+test("presentation artifact result appends after earlier progress without reordering", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map<string, {
+    id: string;
+    tool: string;
+    input: Record<string, unknown>;
+    output: unknown;
+    latencyMs: number | null;
+    status: "running" | "approval_requested" | "completed" | "error";
+    error: string | null;
+  }>();
+  const streamRenderBuffer = createStreamingRenderBuffer({
+    maxDeltaBatchChars: 800,
+  });
+  let refreshCount = 0;
+  streamRenderBuffer.appendText("Before presentation. ");
+  let drainCount = 0;
+  const context = createBaseStreamingContext({
+    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+      toolCall.tool === "generate_pptx" &&
+      toolCall.status === "completed" &&
+      event.type === "tool-call-result",
+    isPresentationArtifactToolName: (toolName) => toolName === "generate_pptx",
+    resolveToolCallFromStreamEvent: ({ event }) => {
+      const eventData = getToolEventData(event);
+      return {
+        id: event.id ?? "pptx-tool",
+        tool: "generate_pptx",
+        input: { title: "费曼学习法" },
+        output:
+          event.type === "tool-call-result"
+            ? {
+                artifact_id: "artifact-1",
+                artifact_url:
+                  "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+                title: "费曼学习法",
+              }
+            : event.type === "tool-call-event"
+              ? eventData
+              : null,
+        latencyMs: event.type === "tool-call-result" ? 12 : null,
+        status: event.type === "tool-call-result" ? "completed" : "running",
+        error: null,
+      };
+    },
+    streamRenderBuffer,
+    streamToolCallsById,
+    syncStreamingToolCalls: () => {
+      message = {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
+          toolCalls: [...streamToolCallsById.values()],
+        },
+      };
+    },
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  const refreshedArtifactToolIds = new Set<string>();
+
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
+    event: {
+      type: "tool-call-event",
+      id: "pptx-tool",
+      data: {
+        type: "generate_pptx_progress",
+        toolCallId: "pptx-tool",
+        stage: "planning",
+        title: "费曼学习法",
+      },
+    },
+    refreshedArtifactToolIds,
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => undefined,
+    event: {
+      type: "tool-call-result",
+      id: "pptx-tool",
+    },
+    refreshedArtifactToolIds,
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  assert.equal(drainCount, 0);
+  assert.equal(refreshCount, 1);
+  assert.deepEqual(message.metadata.renderBlocks, [
+    {
+      id: "stream-text-1",
+      type: "text",
+      text: "Before presentation. ",
+    },
+    {
+      id: "stream-generated-presentation-pptx-tool",
+      type: "generated_presentation",
+      toolCallId: "pptx-tool",
+    },
+  ]);
+  assert.equal(streamToolCallsById.get("pptx-tool")?.status, "completed");
+});
+
+test("video presentation artifact end appends shared presentation card after progress", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map<string, {
+    id: string;
+    tool: string;
+    input: Record<string, unknown>;
+    output: unknown;
+    latencyMs: number | null;
+    status: "running" | "approval_requested" | "completed" | "error";
+    error: string | null;
+  }>();
+  const streamRenderBuffer = createStreamingRenderBuffer({
+    maxDeltaBatchChars: 800,
+  });
+  let drainCount = 0;
+  let refreshCount = 0;
+  const context = createBaseStreamingContext({
+    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+      toolCall.tool === "generate_video_presentation" &&
+      toolCall.status === "completed" &&
+      event.type === "tool-call-end",
+    isPresentationArtifactToolName: (toolName) =>
+      toolName === "generate_video_presentation",
+    resolveToolCallFromStreamEvent: ({ event }) => ({
+      id: event.id ?? "video-tool",
+      tool: "generate_video_presentation",
+      input: { title: "ASR video" },
+      output:
+        event.type === "tool-call-end"
+          ? {
+              artifact_id: "video-artifact-1",
+              artifact_url:
+                "/artifact-preview?artifactId=video-artifact-1&workspaceId=workspace-1",
+              status: "ready",
+              title: "ASR video",
+            }
+          : event.type === "tool-call-event"
+            ? getToolEventData(event)
+            : null,
+      latencyMs: event.type === "tool-call-end" ? 20 : null,
+      status: event.type === "tool-call-end" ? "completed" : "running",
+      error: null,
+    }),
+    streamRenderBuffer,
+    streamToolCallsById,
+    syncStreamingToolCalls: () => {
+      message = {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
+          toolCalls: [...streamToolCallsById.values()],
+        },
+      };
+    },
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
+    event: {
+      type: "tool-call-event",
+      id: "video-tool",
+      data: {
+        type: "generate_video_presentation_progress",
+        toolCallId: "video-tool",
+        stage: "planning",
+        title: "ASR video",
+      },
+    },
+    refreshedArtifactToolIds: new Set(),
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  assert.equal(drainCount, 0);
+  assert.equal(refreshCount, 0);
+  assert.deepEqual(message.metadata.renderBlocks, []);
+  assert.deepEqual(streamToolCallsById.get("video-tool")?.output, {
+    type: "generate_video_presentation_progress",
+    toolCallId: "video-tool",
+    stage: "planning",
+    title: "ASR video",
+  });
+
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
+    event: {
+      type: "tool-call-end",
+      id: "video-tool",
+    },
+    refreshedArtifactToolIds: new Set(),
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  assert.equal(drainCount, 1);
+  assert.equal(refreshCount, 1);
+  assert.deepEqual(message.metadata.renderBlocks, [
+    {
+      id: "stream-generated-presentation-video-tool",
+      type: "generated_presentation",
+      toolCallId: "video-tool",
+    },
+  ]);
+  assert.deepEqual(streamToolCallsById.get("video-tool")?.output, {
+    artifact_id: "video-artifact-1",
+    artifact_url:
+      "/artifact-preview?artifactId=video-artifact-1&workspaceId=workspace-1",
+    status: "ready",
+    title: "ASR video",
+  });
 });

@@ -44,6 +44,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  createGlobalIconElement,
+  DEFAULT_GLOBAL_SKILL_ICON_NAME,
+  DEFAULT_GLOBAL_TOOL_ICON_NAME,
+  GlobalIcon,
+  isGlobalIconTone,
+  type GlobalIconName,
+  type GlobalIconTone,
+} from "@/components/ui/global-icon";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
@@ -53,11 +62,9 @@ import {
   FileTextIcon,
   FolderIcon,
   ImageIcon,
-  BookOpenIcon,
   Monitor,
   PlusIcon,
   SquareIcon,
-  WrenchIcon,
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
@@ -553,6 +560,10 @@ const removeSlashCommands = (
   }
 };
 
+export type PromptInputCommandKind = "skill" | "skill-command" | "tool";
+export type PromptInputCommandIconTone = GlobalIconTone;
+export type PromptInputCommandIconName = GlobalIconName;
+
 export type PromptInputSegment =
   | {
       text: string;
@@ -560,7 +571,10 @@ export type PromptInputSegment =
     }
   | {
       command: {
-        kind: "skill" | "skill-command" | "tool";
+        iconName?: PromptInputCommandIconName;
+        iconSrc?: string;
+        iconTone?: PromptInputCommandIconTone;
+        kind: PromptInputCommandKind;
         label?: string;
         marker: string;
         value: string;
@@ -598,7 +612,11 @@ export type PromptInputSlashCommand = {
   disabled?: boolean;
   group?: string;
   id: string;
-  kind?: "skill" | "skill-command" | "tool";
+  icon?: ReactNode;
+  iconName?: PromptInputCommandIconName;
+  iconSrc?: string;
+  iconTone?: PromptInputCommandIconTone;
+  kind?: PromptInputCommandKind;
   label?: string;
   meta?: unknown;
   value: string;
@@ -641,8 +659,6 @@ const filterSlashCommands = (
 const normalizeCommandValue = (value: string) =>
   value.startsWith("/") ? value : `/${value}`;
 
-type PromptInputCommandKind = "skill" | "skill-command" | "tool";
-
 const commandMarkerPrefix = (kind: PromptInputCommandKind) =>
   kind === "tool"
     ? "tool"
@@ -651,7 +667,7 @@ const commandMarkerPrefix = (kind: PromptInputCommandKind) =>
       : "skills";
 
 const createCommandMarker = (input: {
-  kind: "skill" | "skill-command" | "tool";
+  kind: PromptInputCommandKind;
   label?: string;
   value: string;
 }) => {
@@ -703,8 +719,16 @@ const readSegmentsFromNode = (node: Node, segments: PromptInputSegment[]) => {
 
   const command = node.dataset.slashCommandValue;
   if (command) {
+    const iconName =
+      node.dataset.iconName ?? node.dataset.slashCommandIconName;
+    const iconTone =
+      node.dataset.iconTone ?? node.dataset.slashCommandIconTone;
+    const iconSrc = node.dataset.iconSrc ?? node.dataset.slashCommandIconSrc;
     segments.push({
       command: {
+        ...(iconName ? { iconName } : {}),
+        ...(iconSrc ? { iconSrc } : {}),
+        ...(isGlobalIconTone(iconTone) ? { iconTone } : {}),
         kind:
           node.dataset.slashCommandKind === "tool" ||
           node.dataset.slashCommandKind === "skill" ||
@@ -834,12 +858,32 @@ const createSourceMentionElement = (source: PromptInputMentionSource) => {
   return element;
 };
 
-const SLASH_TOKEN_ICON_SVG: Record<"skill" | "tool", string> = {
-  skill:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>',
-  tool:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>',
-};
+export function PromptCommandIcon({
+  className,
+  fallbackIconName,
+  icon,
+  iconName,
+  iconSrc,
+  iconTone = "mono",
+}: {
+  className: string;
+  fallbackIconName?: string;
+  icon?: ReactNode;
+  iconName?: string;
+  iconSrc?: string;
+  iconTone?: PromptInputCommandIconTone;
+}) {
+  return (
+    <GlobalIcon
+      className={className}
+      fallbackIconName={fallbackIconName}
+      icon={icon}
+      iconName={iconName}
+      iconSrc={iconSrc}
+      iconTone={iconTone}
+    />
+  );
+}
 
 const createSlashCommandElement = (command: PromptInputSlashCommand) => {
   const element = document.createElement("span");
@@ -854,17 +898,35 @@ const createSlashCommandElement = (command: PromptInputSlashCommand) => {
   element.dataset.slashCommandKind = kind;
   element.dataset.slashCommandMarker = marker;
   element.dataset.slashCommandValue = value;
+  if (command.iconName) {
+    element.dataset.iconName = command.iconName;
+    element.dataset.slashCommandIconName = command.iconName;
+  }
+  if (command.iconTone) {
+    element.dataset.iconTone = command.iconTone;
+    element.dataset.slashCommandIconTone = command.iconTone;
+  }
+  if (command.iconSrc) {
+    element.dataset.iconSrc = command.iconSrc;
+    element.dataset.slashCommandIconSrc = command.iconSrc;
+  }
   if (command.label) {
     element.dataset.slashCommandLabel = command.label;
   }
   element.className =
     "mx-0.5 inline-flex h-5 max-w-[240px] select-none items-center gap-1 overflow-hidden truncate whitespace-nowrap align-middle text-sm font-semibold leading-5 text-blue-600 dark:text-blue-400";
   element.title = value;
-  const icon = document.createElement("span");
-  icon.className =
-    "inline-flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5";
-  const iconKind = kind === "tool" ? "tool" : "skill";
-  icon.innerHTML = SLASH_TOKEN_ICON_SVG[iconKind];
+  const icon = createGlobalIconElement({
+    className:
+      "inline-flex size-3.5 shrink-0 items-center justify-center overflow-hidden text-muted-foreground",
+    fallbackIconName:
+      kind === "tool"
+        ? DEFAULT_GLOBAL_TOOL_ICON_NAME
+        : DEFAULT_GLOBAL_SKILL_ICON_NAME,
+    iconName: command.iconName,
+    iconSrc: command.iconSrc,
+    iconTone: command.iconTone,
+  });
   const label = document.createElement("span");
   label.className = "truncate";
   label.textContent = command.label ?? command.value;
@@ -876,6 +938,9 @@ const createSlashCommandElementFromSegment = (
   segment: Extract<PromptInputSegment, { type: "command" }>,
 ) =>
   createSlashCommandElement({
+    iconName: segment.command.iconName,
+    iconSrc: segment.command.iconSrc,
+    iconTone: segment.command.iconTone,
     id: `initial:${segment.command.value}`,
     kind: segment.command.kind,
     label: segment.command.label,
@@ -913,11 +978,25 @@ function SourceMentionIcon({ source }: { source: PromptInputMentionSource }) {
 }
 
 function SlashCommandIcon({ command }: { command: PromptInputSlashCommand }) {
-  const className = "size-4 shrink-0 text-blue-600 dark:text-blue-400";
-  if (command.kind === "tool") {
-    return <WrenchIcon className={className} />;
-  }
-  return <BookOpenIcon className={className} />;
+  const toolIconClassName = "size-4 shrink-0 text-blue-600 dark:text-blue-400";
+  return (
+    <PromptCommandIcon
+      className={
+        command.iconName || command.iconSrc || command.icon
+          ? "size-4 shrink-0 text-muted-foreground"
+          : toolIconClassName
+      }
+      fallbackIconName={
+        command.kind === "tool"
+          ? DEFAULT_GLOBAL_TOOL_ICON_NAME
+          : DEFAULT_GLOBAL_SKILL_ICON_NAME
+      }
+      icon={command.icon}
+      iconName={command.iconName}
+      iconSrc={command.iconSrc}
+      iconTone={command.iconTone}
+    />
+  );
 }
 
 function SlashCommandText({ command }: { command: PromptInputSlashCommand }) {

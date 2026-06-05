@@ -75,6 +75,37 @@ export function toObjectRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function normalizeMessageKind(value: unknown) {
+  return typeof value === "string" ? value.toLowerCase() : "";
+}
+
+export function isAssistantMessageLike(message: unknown): boolean {
+  const record = toObjectRecord(message);
+  if (!record) {
+    return false;
+  }
+
+  const role = normalizeMessageKind(record.role);
+  const type = normalizeMessageKind(record.type);
+  const getTypeValue =
+    typeof record._getType === "function"
+      ? normalizeMessageKind(record._getType())
+      : typeof record.getType === "function"
+        ? normalizeMessageKind(record.getType())
+        : "";
+  const constructorName = normalizeMessageKind(
+    typeof record.constructor === "function" ? record.constructor.name : "",
+  );
+
+  return [role, type, getTypeValue, constructorName].some(
+    (kind) =>
+      kind === "assistant" ||
+      kind === "ai" ||
+      kind === "aimessage" ||
+      kind === "aimessagechunk",
+  );
+}
+
 export function extractUsageFromMessageChunk(chunk: unknown): UsageInfo | undefined {
   const providerUsage = normalizeProviderUsage(chunk);
   if (providerUsage) {
@@ -302,31 +333,7 @@ export function extractTextDeltasFromMessageChunk(chunk: unknown): string[] {
     return extractTextDeltas(chunk);
   }
 
-  const role = typeof record.role === "string" ? record.role : "";
-  const type = typeof record.type === "string" ? record.type : "";
-  const messageType =
-    typeof record._getType === "function"
-      ? String(record._getType())
-      : typeof record.getType === "function"
-        ? String(record.getType())
-        : "";
-  const constructorName =
-    typeof record.constructor === "function" &&
-    typeof record.constructor.name === "string"
-      ? record.constructor.name
-      : "";
-  const isAssistant =
-    role === "assistant" ||
-    role === "ai" ||
-    type === "assistant" ||
-    type === "ai" ||
-    type === "AIMessageChunk" ||
-    messageType === "assistant" ||
-    messageType === "ai" ||
-    constructorName === "AIMessageChunk" ||
-    constructorName === "AIMessage";
-
-  if (!isAssistant) {
+  if (!isAssistantMessageLike(record)) {
     return [];
   }
 
@@ -384,17 +391,10 @@ export function resolveAssistantContentFromUpdatesChunk(
       if (!message || typeof message !== "object") {
         continue;
       }
-      const record = message as Record<string, unknown>;
-      const role = typeof record.role === "string" ? record.role : "";
-      const type = typeof record.type === "string" ? record.type : "";
-      const isAssistant =
-        role === "assistant" ||
-        role === "ai" ||
-        type === "assistant" ||
-        type === "ai";
-      if (!isAssistant) {
+      if (!isAssistantMessageLike(message)) {
         continue;
       }
+      const record = message as Record<string, unknown>;
       const content = stringifyAgentMessageContent(record.content);
       if (content.trim().length > 0) {
         return content.trim();

@@ -1,12 +1,38 @@
 import { MultiServerMCPClient, type ClientConfig } from "@langchain/mcp-adapters";
+import { McpError } from "./errors";
 import type { WorkspaceMcpInstallRecord } from "./types";
+
+function langChainTransportFor(transport: WorkspaceMcpInstallRecord["transport"]) {
+  if (transport === "stdio") {
+    throw new McpError(
+      400,
+      "MCP_TRANSPORT_UNSUPPORTED",
+      "Hosted backend does not support stdio MCP transport",
+    );
+  }
+  return transport === "sse" ? "sse" : "http";
+}
+
+function automaticSSEFallbackFor(
+  transport: WorkspaceMcpInstallRecord["transport"],
+) {
+  if (transport === "http_sse_compat") {
+    return true;
+  }
+  if (transport === "streamable_http") {
+    return false;
+  }
+  return false;
+}
 
 export function createLangChainMcpClient(input: {
   install: WorkspaceMcpInstallRecord;
   headers?: Record<string, string>;
 }) {
-  const transport =
-    input.install.transport === "sse" ? "sse" : "http";
+  const transport = langChainTransportFor(input.install.transport);
+  if (!input.install.endpointUrl) {
+    throw new McpError(400, "MCP_ENDPOINT_REQUIRED", "MCP endpoint is required");
+  }
   const config: ClientConfig = {
     throwOnLoadError: true,
     prefixToolNameWithServerName: true,
@@ -16,9 +42,9 @@ export function createLangChainMcpClient(input: {
     mcpServers: {
       [input.install.marketIdentifier ?? input.install.id]: {
         transport,
-        url: input.install.endpointUrl ?? "",
+        url: input.install.endpointUrl,
         headers: input.headers,
-        automaticSSEFallback: input.install.transport === "http_sse_compat",
+        automaticSSEFallback: automaticSSEFallbackFor(input.install.transport),
       },
     },
   };

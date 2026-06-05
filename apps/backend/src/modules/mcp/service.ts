@@ -123,6 +123,16 @@ function mcpRiskLabel(risk: McpRiskLevel) {
   return "Unknown";
 }
 
+export function stripLangChainMcpToolPrefix(input: {
+  serverKey: string;
+  toolName: string;
+}) {
+  const prefix = `mcp__${input.serverKey}__`;
+  return input.toolName.startsWith(prefix)
+    ? input.toolName.slice(prefix.length)
+    : input.toolName;
+}
+
 function buildMcpRequestPreview(input: {
   install: WorkspaceMcpInstallRecord;
   tool: WorkspaceMcpToolRecord;
@@ -138,6 +148,7 @@ function mcpConfirmationPayload(input: {
   action: McpActionRunRecord;
   install: WorkspaceMcpInstallRecord;
   tool: WorkspaceMcpToolRecord;
+  toolCallId?: string;
 }): ToolConfirmationRequest {
   const providerStatus =
     input.action.status === "running"
@@ -202,6 +213,9 @@ function mcpConfirmationPayload(input: {
       executor: {
         kind: "mcp_action_run",
         actionRunId: input.action.id,
+      },
+      sourceweft: {
+        toolCallId: input.toolCallId ?? input.action.idempotencyKey,
       },
     },
     status: input.action.status,
@@ -582,7 +596,10 @@ export class McpService {
         installId: install.id,
         serverSlug: install.marketIdentifier ?? install.id,
         tools: tools.map((tool) => ({
-          name: tool.name.replace(/^mcp__[^_]+__/, ""),
+          name: stripLangChainMcpToolPrefix({
+            serverKey: install.marketIdentifier ?? install.id,
+            toolName: tool.name,
+          }),
           title: tool.name,
           description: tool.description,
           inputSchema: {},
@@ -612,7 +629,13 @@ export class McpService {
         lastTestedAt: new Date(),
         lastError: message,
       });
-      throw new McpError(502, "MCP_CONNECTION_FAILED", message);
+      throw new McpError(502, "MCP_CONNECTION_FAILED", message, {
+        sourceRef: {
+          kind: "mcp_tool",
+          serverInstallId: install.id,
+        },
+        recoverable: true,
+      });
     } finally {
       await client.close().catch(() => undefined);
     }
@@ -755,6 +778,16 @@ export class McpService {
             409,
             "MCP_APPROVAL_REQUIRED",
             "This MCP tool call requires approval before execution.",
+            {
+              sourceRef: {
+                kind: "mcp_tool",
+                serverInstallId: input.install.id,
+                serverToolName: toolRecord.serverToolName,
+                normalizedToolName: toolRecord.normalizedToolName,
+                toolId: input.tool?.id ?? null,
+              },
+              recoverable: true,
+            },
           );
         }
         const toolRun = await createMcpToolRun({
@@ -875,7 +908,7 @@ export class McpService {
       requestPreview: buildMcpRequestPreview({ install, tool, args: requestJson }),
       idempotencyKey: input.toolCallId,
     });
-    return mcpConfirmationPayload({ action, install, tool });
+    return mcpConfirmationPayload({ action, install, tool, toolCallId: input.toolCallId });
   }
 
   async respondToApproval(input: {

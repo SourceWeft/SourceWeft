@@ -371,11 +371,386 @@ test("run snapshots keep append-only trace events by sequence", () => {
       }>
     ).map((event) => `${event.sequence}:${event.type}:${event.id}`),
     [
-      "1:reasoning:model-reasoning-1:1",
-      "2:tool-call:search-page:2",
-      "3:reasoning:model-reasoning-1:3",
+      "1:reasoning:model-reasoning-1:1:initial:reasoning:0",
+      "2:tool-call:search-page:2:tool-call-result:1",
+      "3:reasoning:model-reasoning-1:3:after_tool:reasoning:2",
     ],
   );
+});
+
+test("run snapshots create tool trace parts from stable event payloads without toolCall", () => {
+  const snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "tool-call-event",
+      id: "pptx-tool",
+      tool: "generate_pptx",
+      data: {
+        type: "generate_pptx_progress",
+        stage: "planning",
+        title: "Quarterly review",
+      },
+    },
+  );
+
+  assert.deepEqual(snapshot.toolCalls, [
+    {
+      id: "pptx-tool",
+      tool: "generate_pptx",
+      input: {},
+      output: {
+        type: "generate_pptx_progress",
+        stage: "planning",
+        title: "Quarterly review",
+      },
+      status: "running",
+      latencyMs: null,
+      error: null,
+    },
+  ]);
+  assert.deepEqual(
+    (
+      snapshot.traceParts as Array<{
+        kind: string;
+        toolCallId?: string;
+        status?: string;
+        output?: unknown;
+      }>
+    ).map((part) => ({
+      kind: part.kind,
+      toolCallId: part.toolCallId,
+      status: part.status,
+      output: part.output,
+    })),
+    [
+      {
+        kind: "tool",
+        toolCallId: "pptx-tool",
+        status: "running",
+        output: {
+          type: "generate_pptx_progress",
+          stage: "planning",
+          title: "Quarterly review",
+        },
+      },
+    ],
+  );
+});
+
+test("run snapshots keep separate tool trace events for start event result and end", () => {
+  let snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "tool-call-start",
+      id: "search-page",
+      tool: "search_sources",
+      input: { query: "Q1" },
+      toolCall: {
+        id: "search-page",
+        tool: "search_sources",
+        input: { query: "Q1" },
+        output: null,
+        status: "running",
+        latencyMs: null,
+        error: null,
+        sequence: 2,
+      },
+    },
+  );
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "tool-call-event",
+    id: "search-page",
+    tool: "search_sources",
+    data: { type: "search_progress", count: 3 },
+  });
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "tool-call-result",
+    id: "search-page",
+    tool: "search_sources",
+    output: { query: "Q1", hitCount: 3 },
+    latencyMs: 42,
+    toolCall: {
+      id: "search-page",
+      tool: "search_sources",
+      input: { query: "Q1" },
+      output: { query: "Q1", hitCount: 3 },
+      status: "completed",
+      latencyMs: 42,
+      error: null,
+      sequence: 2,
+    },
+  });
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "tool-call-end",
+    id: "search-page",
+    tool: "search_sources",
+    status: "completed",
+    latencyMs: 42,
+    toolCall: {
+      id: "search-page",
+      tool: "search_sources",
+      input: { query: "Q1" },
+      output: { query: "Q1", hitCount: 3 },
+      status: "completed",
+      latencyMs: 42,
+      error: null,
+      sequence: 2,
+    },
+  });
+
+  assert.deepEqual(
+    (
+      snapshot.traceEvents as Array<{
+        eventType: string;
+        id: string;
+        itemId: string;
+      }>
+    ).map((event) => `${event.eventType}:${event.id}:${event.itemId}`),
+    [
+      "tool-call-start:search-page:2:tool-call-start:0:search-page",
+      "tool-call-event:search-page:search_progress:tool-call-event:1:search-page",
+      "tool-call-result:search-page:2:tool-call-result:2:search-page",
+      "tool-call-end:search-page:2:tool-call-end:3:search-page",
+    ],
+  );
+  assert.deepEqual(
+    (
+      snapshot.traceParts as Array<{
+        kind: string;
+        status?: string;
+        toolCallId?: string;
+      }>
+    ).map((part) => `${part.kind}:${part.toolCallId}:${part.status}`),
+    ["tool:search-page:completed"],
+  );
+});
+
+test("run snapshots preserve streamed text render blocks", () => {
+  const deltaSnapshot = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "text-delta",
+      delta: "First",
+    },
+  );
+  const appendedSnapshot = testExports.updateSnapshotFromPayload(deltaSnapshot, {
+    type: "text-delta",
+    delta: " second",
+  });
+  const replacedSnapshot = testExports.updateSnapshotFromPayload(
+    appendedSnapshot,
+    {
+      type: "text-replace",
+      text: "Replacement",
+    },
+  );
+
+  assert.equal(appendedSnapshot.assistantContent, "First second");
+  assert.deepEqual(appendedSnapshot.renderBlocks, [
+    {
+      id: "text-1",
+      type: "text",
+      text: "First second",
+    },
+  ]);
+  assert.deepEqual(replacedSnapshot.renderBlocks, [
+    {
+      id: "text-1",
+      type: "text",
+      text: "Replacement",
+    },
+  ]);
+});
+
+test("run snapshots preserve text segmentation on text replace", () => {
+  const firstTextSnapshot = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "text-delta",
+      delta: "Found pages.",
+    },
+  );
+  const toolSnapshot = testExports.updateSnapshotFromPayload(firstTextSnapshot, {
+    type: "tool-call-start",
+    id: "create-page",
+    tool: "create_notion_page",
+  });
+  const secondTextSnapshot = testExports.updateSnapshotFromPayload(toolSnapshot, {
+    type: "text-delta",
+    delta: "Creation rejected.",
+  });
+  const replacedSnapshot = testExports.updateSnapshotFromPayload(
+    secondTextSnapshot,
+    {
+      type: "text-replace",
+      text: "Found pages.Creation rejected. Final summary.",
+    },
+  );
+
+  assert.deepEqual(replacedSnapshot.renderBlocks, [
+    {
+      id: "text-1",
+      type: "text",
+      text: "Found pages.",
+    },
+    {
+      id: "tool-create-page",
+      type: "tool",
+      toolCallId: "create-page",
+    },
+    {
+      id: "text-3",
+      type: "text",
+      text: "Creation rejected. Final summary.",
+    },
+  ]);
+});
+
+test("run snapshots preserve generated artifact render blocks generically", () => {
+  const textSnapshot = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "text-delta",
+      delta: "Here is the artifact:",
+    },
+  );
+  const imageSnapshot = testExports.updateSnapshotFromPayload(textSnapshot, {
+    type: "tool-call-start",
+    id: "image-tool",
+    tool: "generate_image",
+    input: { prompt: "diagram" },
+    toolCall: {
+      id: "image-tool",
+      tool: "generate_image",
+      input: { prompt: "diagram" },
+      output: null,
+      status: "running",
+      latencyMs: null,
+      error: null,
+      sequence: 1,
+    },
+  });
+  const presentationSnapshot = testExports.updateSnapshotFromPayload(
+    imageSnapshot,
+    {
+      type: "tool-call-event",
+      id: "pptx-tool",
+      tool: "generate_pptx",
+      data: {
+        type: "generate_pptx_progress",
+        stage: "planning",
+        toolCallId: "pptx-tool",
+        title: "ASR",
+      },
+    },
+  );
+  const duplicatePresentationSnapshot = testExports.updateSnapshotFromPayload(
+    presentationSnapshot,
+    {
+      type: "tool-call-start",
+      id: "pptx-tool",
+      tool: "generate_pptx",
+    },
+  );
+  const videoPresentationSnapshot = testExports.updateSnapshotFromPayload(
+    duplicatePresentationSnapshot,
+    {
+      type: "tool-call-event",
+      id: "video-tool",
+      tool: "generate_video_presentation",
+      data: {
+        type: "generate_video_presentation_progress",
+        stage: "planning",
+        toolCallId: "video-tool",
+        title: "ASR video",
+      },
+    },
+  );
+  const searchSnapshot = testExports.updateSnapshotFromPayload(
+    videoPresentationSnapshot,
+    {
+      type: "tool-call-start",
+      id: "search-tool",
+      tool: "search_sources",
+    },
+  );
+
+  assert.deepEqual(searchSnapshot.renderBlocks, [
+    {
+      id: "text-1",
+      type: "text",
+      text: "Here is the artifact:",
+    },
+    {
+      id: "generated-image-image-tool",
+      type: "generated_image",
+      toolCallId: "image-tool",
+    },
+    {
+      id: "generated-presentation-pptx-tool",
+      type: "generated_presentation",
+      toolCallId: "pptx-tool",
+    },
+    {
+      id: "generated-presentation-video-tool",
+      type: "generated_presentation",
+      toolCallId: "video-tool",
+    },
+    {
+      id: "tool-search-tool",
+      type: "tool",
+      toolCallId: "search-tool",
+    },
+  ]);
+  assert.deepEqual(searchSnapshot.toolCalls, [
+    {
+      id: "image-tool",
+      tool: "generate_image",
+      input: { prompt: "diagram" },
+      output: null,
+      status: "running",
+      latencyMs: null,
+      error: null,
+      sequence: 1,
+    },
+    {
+      id: "pptx-tool",
+      tool: "generate_pptx",
+      input: {},
+      output: {
+        type: "generate_pptx_progress",
+        stage: "planning",
+        toolCallId: "pptx-tool",
+        title: "ASR",
+      },
+      status: "running",
+      latencyMs: null,
+      error: null,
+    },
+    {
+      id: "video-tool",
+      tool: "generate_video_presentation",
+      input: {},
+      output: {
+        type: "generate_video_presentation_progress",
+        stage: "planning",
+        toolCallId: "video-tool",
+        title: "ASR video",
+      },
+      status: "running",
+      latencyMs: null,
+      error: null,
+    },
+    {
+      id: "search-tool",
+      tool: "search_sources",
+      input: {},
+      output: null,
+      status: "running",
+      latencyMs: null,
+      error: null,
+    },
+  ]);
 });
 
 test("final run resolution preserves externally terminalized cancellation", () => {

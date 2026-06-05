@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { FileText, Folder, Globe, Music2 } from "lucide-react";
+import { GlobalIcon } from "@sourceweft/ui-web/components/ui/global-icon";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { SourceItem } from "../source-types";
 
@@ -18,6 +19,21 @@ function uniqueSourceIds(sourceIds: string[]) {
   return [...new Set(sourceIds.filter((sourceId) => sourceId.length > 0))];
 }
 
+function getRecordValue(
+  record: Record<string, unknown> | undefined,
+  key: string,
+) {
+  return record && typeof record[key] === "string" ? record[key] : null;
+}
+
+function sourceConnectorIconName(source: SourceItem) {
+  if (source.sourceType !== "connector") return null;
+  return (
+    getRecordValue(source.metadata, "connectorType") ??
+    getRecordValue(source.metadata, "provider")
+  );
+}
+
 export function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
   return uniqueSourceIds(
     sourceIdGroups.flatMap((sourceIds) => sourceIds ?? []),
@@ -31,6 +47,17 @@ export function SourceIcon({
   className?: string;
   source: SourceItem;
 }) {
+  const connectorIconName = sourceConnectorIconName(source);
+  if (connectorIconName) {
+    return (
+      <GlobalIcon
+        className={cn(className, "shrink-0")}
+        fallbackIconName="tool"
+        iconName={connectorIconName}
+        iconTone="brand"
+      />
+    );
+  }
   if (source.sourceType === "directory" || source.type === "DIR") {
     return <Folder className={cn(className, "text-primary")} />;
   }

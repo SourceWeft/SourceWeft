@@ -58,6 +58,25 @@ test("streaming model reasoning remains in the active thinking state", () => {
   );
 });
 
+test("active presentation generation step keeps trace in thinking state", () => {
+  assert.equal(
+    getReasoningTraceTitle({
+      activeStep: {
+        id: "presentation-generation",
+        title: "Generating presentation",
+        status: "in_progress",
+        items: ["Planning deck content and visual structure"],
+        sequence: 1,
+      },
+      hasModelReasoning: true,
+      hasTraceItems: true,
+      isStreaming: false,
+      reasoningDurationMs: 42_000,
+    }),
+    "Thinking · Generating presentation",
+  );
+});
+
 test("completed model reasoning shows elapsed thought duration", () => {
   assert.equal(
     getReasoningTraceTitle({
@@ -78,6 +97,26 @@ test("completed model reasoning shows elapsed thought duration", () => {
       waitingForConfirmation: false,
     }),
     false,
+  );
+});
+
+test("completed steps remain thinking while the message version is streaming", () => {
+  assert.equal(
+    getReasoningTraceTitle({
+      latestDisplayStep: {
+        id: "search",
+        title: "Searching the web",
+        status: "completed",
+        items: [],
+        sequence: 1,
+      },
+      hasModelReasoning: true,
+      hasRunningToolCall: false,
+      hasTraceItems: true,
+      isStreaming: true,
+      reasoningDurationMs: 12_000,
+    }),
+    "Thinking...",
   );
 });
 

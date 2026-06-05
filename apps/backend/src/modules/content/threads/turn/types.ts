@@ -1,5 +1,6 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { ToolApprovalResume } from "@sourceweft/contracts";
+import type { InvocationEvent, InvocationPlan } from "../../../invocations/types";
 import { AGENT_TOOL_NAMES } from "../../agent/tool-names";
 import type { AgentCitation } from "../../agent/citation-registry";
 import type { ContentBillingPort } from "../../billing-port";
@@ -8,6 +9,8 @@ import type { EnabledSkillDescriptor } from "../../skills/types";
 import type {
   ArtifactIntentDecision,
   GenerateImageToolSelection,
+  GeneratePptxToolSelection,
+  GenerateVideoPresentationToolSelection,
   ImageModelCapabilities,
 } from "../../artifacts/types";
 import type { RuntimeModelGatewayProfile } from "../../../../shared/model-gateway/types";
@@ -59,12 +62,23 @@ export type MessageContentJson = {
   parts: Array<ChatMessageTextPart | ChatMessageImagePart>;
 };
 
+/**
+ * Per-turn tool settings input.
+ *
+ * This is the source used by the turn preparer to resolve runtime tool options.
+ * It is not the final LangChain/DeepAgent bound tool list.
+ *
+ * Any tool configured as enabled for the turn should be represented with an
+ * explicit `{ enabled: true }` switch, even when it has no extra config.
+ */
 export type ThreadToolsSelection = {
   skillIds?: string[];
   invokedSkillIds?: string[];
   webSearchEnabled?: boolean;
   artifact?: unknown;
   [AGENT_TOOL_NAMES.generateImage]?: GenerateImageToolSelection;
+  [AGENT_TOOL_NAMES.generatePptx]?: GeneratePptxToolSelection;
+  [AGENT_TOOL_NAMES.generateVideoPresentation]?: GenerateVideoPresentationToolSelection;
   [AGENT_TOOL_NAMES.webSearch]?: {
     enabled?: boolean;
   };
@@ -99,6 +113,38 @@ export type ThreadCommandSelection = {
   path?: string;
 };
 
+export type ThreadInvocationSelection = {
+  selectableId: string;
+  userInput: string;
+  structuredArgs?: Record<string, unknown>;
+};
+
+export type ResolvedThreadInvocation =
+  | {
+      kind: "fixed_tool_choice";
+      selectableId: string;
+      target: "builtin_tool" | "mcp_tool";
+      toolName: string;
+      sourceRef: InvocationPlan["sourceRef"];
+      userInput: string;
+      events: InvocationEvent[];
+    }
+  | {
+      kind: "context_injection";
+      selectableId: string;
+      sourceRef: InvocationPlan["sourceRef"];
+      instruction: string;
+      userInput: string;
+      events: InvocationEvent[];
+    }
+  | {
+      kind: "direct_execute";
+      selectableId: string;
+      sourceRef: InvocationPlan["sourceRef"];
+      structuredArgs: Record<string, unknown> | undefined;
+      events: InvocationEvent[];
+    };
+
 export type ResolvedThreadCommand = {
   name: string;
   canonicalName: string;
@@ -128,6 +174,7 @@ export type StreamThreadEventInput = {
   sourceIds?: string[];
   tools?: ThreadToolsSelection;
   command?: ThreadCommandSelection;
+  invocation?: ThreadInvocationSelection;
   timezone?: string;
   idempotencyKey?: string;
   llm?: LlmExecutionConfig;
@@ -164,6 +211,7 @@ export type TraceContinuationMetadata = {
   maxSequence: number;
   toolSequenceById: Record<string, number>;
   traceParts?: TracePart[];
+  snapshotToolCalls?: ReadonlyArray<{ id: string; sequence?: number | null }>;
 };
 
 export type PreparedThreadTurn = {
@@ -197,9 +245,14 @@ export type PreparedThreadTurn = {
     toolIds?: string[];
   };
   command: ResolvedThreadCommand | null;
+  invocation: ResolvedThreadInvocation | null;
   commandSuccessCriteria: CommandSuccessCriteria;
   toolPermissions: Record<string, ToolPermission>;
   generateImageTool: GenerateImageToolSelection | undefined;
+  generatePptxTool: GeneratePptxToolSelection | undefined;
+  generateVideoPresentationTool:
+    | GenerateVideoPresentationToolSelection
+    | undefined;
   artifactIntent: ArtifactIntentDecision;
   imageProfile:
     | {
@@ -291,8 +344,24 @@ export type MessageRenderBlock =
       text: string;
     }
   | {
+      durationMs?: number;
+      id: string;
+      text: string;
+      type: "reasoning";
+    }
+  | {
+      id: string;
+      type: "tool";
+      toolCallId: string;
+    }
+  | {
       id: string;
       type: "generated_image";
+      toolCallId: string;
+    }
+  | {
+      id: string;
+      type: "generated_presentation";
       toolCallId: string;
     };
 

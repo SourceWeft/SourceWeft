@@ -31,6 +31,121 @@ import { getChatCheckpointer } from "../../../shared/chat-checkpointer";
 import { createAgentChatModel } from "../../../shared/model-gateway/index";
 import type { TraceContext } from "../../../shared/llm-observability";
 
+export type CommandExecutionPolicy = {
+  targetToolName: string;
+  mode?: "auto_then_force" | "force_target";
+};
+
+type LangChainToolChoice =
+  | "none"
+  | "auto"
+  | "required"
+  | { type: "function"; function: { name: string } };
+
+function isToolChoiceTargetCall(value: unknown, targetToolName: string) {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { name?: unknown }).name === targetToolName
+  );
+}
+
+function messageToolCalls(message: unknown) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return [];
+  }
+  const record = message as {
+    additional_kwargs?: { tool_calls?: unknown };
+    toolCalls?: unknown;
+    tool_calls?: unknown;
+  };
+  const directCalls = Array.isArray(record.tool_calls)
+    ? record.tool_calls
+    : Array.isArray(record.toolCalls)
+      ? record.toolCalls
+      : [];
+  const additionalCalls = Array.isArray(record.additional_kwargs?.tool_calls)
+    ? record.additional_kwargs.tool_calls
+    : [];
+  return [...directCalls, ...additionalCalls];
+}
+
+function hasToolCallNamed(messages: unknown[], toolName: string) {
+  return messages.some((message) =>
+    messageToolCalls(message).some((call) => {
+      if (isToolChoiceTargetCall(call, toolName)) {
+        return true;
+      }
+      const fn =
+        call && typeof call === "object" && !Array.isArray(call)
+          ? (call as { function?: { name?: unknown } }).function
+          : null;
+      return fn?.name === toolName;
+    }),
+  );
+}
+
+function hasAnyToolCall(messages: unknown[]) {
+  return messages.some((message) => messageToolCalls(message).length > 0);
+}
+
+function forcedToolChoice(toolName: string): LangChainToolChoice {
+  return {
+    type: "function",
+    function: { name: toolName },
+  };
+}
+
+function createCommandToolChoiceMiddleware(policy: CommandExecutionPolicy) {
+  return createMiddleware({
+    name: "SourceWeftCommandToolChoice",
+    wrapModelCall: async (request, handler) => {
+      const targetTool = request.tools.find(
+        (tool) => tool.name === policy.targetToolName,
+      );
+      if (!targetTool) {
+        throw new Error(
+          `Command target tool '${policy.targetToolName}' is not bound to the model request.`,
+        );
+      }
+
+      const priorTargetCalled = hasToolCallNamed(
+        request.state.messages,
+        policy.targetToolName,
+      );
+      const priorToolCalled = hasAnyToolCall(request.state.messages);
+      if (priorTargetCalled) {
+        return handler(request);
+      }
+
+      const mode = policy.mode ?? "auto_then_force";
+      const shouldForceTarget = mode === "force_target" || priorToolCalled;
+      const requestWithChoice = shouldForceTarget
+        ? {
+            ...request,
+            tools: [targetTool],
+            toolChoice: forcedToolChoice(policy.targetToolName),
+          }
+        : {
+            ...request,
+            toolChoice: "auto" as const,
+          };
+      const response = await handler(requestWithChoice);
+      const responseCalls = messageToolCalls(response);
+      if (responseCalls.length > 0) {
+        return response;
+      }
+
+      return handler({
+        ...request,
+        tools: [targetTool],
+        toolChoice: forcedToolChoice(policy.targetToolName),
+      });
+    },
+  });
+}
+
 function createKnowledgeFilesystemToolDescriptionMiddleware(input: {
   mounts: AgentFilesystemMountCapability[];
 }) {
@@ -159,6 +274,7 @@ export interface CreateThreadAgentParams {
   runtimePrompt?: string;
   chatProfileConfig?: unknown;
   contextCompressionReportKey?: string;
+  commandExecutionPolicy?: CommandExecutionPolicy;
   traceContext?: TraceContext;
   interruptOn?: Record<string, boolean | InterruptOnConfig>;
 }
@@ -212,6 +328,9 @@ export async function createThreadAgent(params: CreateThreadAgentParams = {}): P
       createKnowledgeFilesystemToolDescriptionMiddleware({
         mounts: filesystemMounts,
       }),
+      ...(params.commandExecutionPolicy
+        ? [createCommandToolChoiceMiddleware(params.commandExecutionPolicy)]
+        : []),
       ...contextCompressionMiddleware,
     ],
     checkpointer,
@@ -237,5 +356,9 @@ export function buildAgentConfig(threadId: string, extra: Record<string, unknown
 }
 
 export const testExports = {
+  createCommandToolChoiceMiddleware,
+  forcedToolChoice,
+  hasToolCallNamed,
+  messageToolCalls,
   sanitizeMessagesForHistory,
 };
