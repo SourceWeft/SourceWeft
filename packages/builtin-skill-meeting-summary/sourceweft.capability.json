@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/meeting-summary",
+  "kind": "skill",
+  "name": "Meeting Summary",
+  "description": "Use this skill when summarizing meeting notes, extracting decisions, and preparing action items.",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "skills": [
+    {
+      "id": "meeting-summary",
+      "visibility": "public",
+      "categories": ["operate"],
+      "command": {
+        "title": "Summarize Meeting",
+        "aliases": ["meeting"],
+        "category": "Skills"
+      }
+    }
+  ]
+}

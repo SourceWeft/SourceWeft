@@ -13,6 +13,7 @@ import {
 import type {
   DashboardChatBootstrapCacheHints,
   ListThreadModelCatalogResponse,
+  ThreadChatPreferences,
 } from "@sourceweft/contracts";
 import { authClient } from "../../../lib/auth-client";
 import { ensureDashboardWorkspace } from "../../../lib/dashboard-workspace-bootstrap";
@@ -38,6 +39,11 @@ type ThreadModelSettingsInput = {
 
 type ViewMode = "thread" | "new";
 const THREADS_PAGE_SIZE = 20;
+const DEFAULT_THREAD_CHAT_PREFERENCES: ThreadChatPreferences = {
+  thinking: { mode: "auto", effort: "medium" },
+  webAccess: true,
+  composerOptions: {},
+};
 
 type DashboardChatState = {
   mode: ViewMode;
@@ -61,6 +67,8 @@ type DashboardChatState = {
   lastChatTransitionError: string | null;
   bootstrapModelCatalog: ListThreadModelCatalogResponse | null;
   bootstrapCacheHints: DashboardChatBootstrapCacheHints | null;
+  initialChatPreferences: ThreadChatPreferences;
+  rememberChatPreferences: (preferences: ThreadChatPreferences) => void;
   consumeBootstrapModelCatalog: (
     workspaceId: string,
   ) => ListThreadModelCatalogResponse | null;
@@ -82,10 +90,12 @@ type DashboardChatState = {
   createChat: (input?: {
     title?: string;
     modelSettings?: ThreadModelSettingsInput;
+    chatPreferences?: ThreadChatPreferences;
   }) => Promise<{ id: string; title: string } | null>;
   adoptChat: (thread: {
     id: string;
     title: string;
+    chatPreferences?: ThreadChatPreferences;
     sourceCount?: number | null;
     updatedAt?: string | null;
   }) => void;
@@ -197,7 +207,16 @@ export function DashboardChatStateProvider({
     useState<ListThreadModelCatalogResponse | null>(null);
   const [bootstrapCacheHints, setBootstrapCacheHints] =
     useState<DashboardChatBootstrapCacheHints | null>(null);
+  const [initialChatPreferences, setInitialChatPreferences] =
+    useState<ThreadChatPreferences>(DEFAULT_THREAD_CHAT_PREFERENCES);
   const bootstrapModelCatalogWorkspaceRef = useRef<string | null>(null);
+
+  const rememberChatPreferences = useCallback(
+    (preferences: ThreadChatPreferences) => {
+      setInitialChatPreferences(preferences);
+    },
+    [],
+  );
 
   const [activeChatId, setActiveChatId] = useState("");
   const [threadTitle, setThreadTitle] = useState("New chat");
@@ -316,6 +335,7 @@ export function DashboardChatStateProvider({
         setLastChatTransitionError(null);
         setBootstrapModelCatalog(null);
         setBootstrapCacheHints(null);
+        setInitialChatPreferences(DEFAULT_THREAD_CHAT_PREFERENCES);
         bootstrapModelCatalogWorkspaceRef.current = null;
         setIsLoadingPrivateChats(true);
         setHasWorkspaceHydrated(false);
@@ -350,6 +370,7 @@ export function DashboardChatStateProvider({
         setHasMorePrivateChats(Boolean(result.privateChats.nextCursor));
         setBootstrapModelCatalog(result.modelCatalog);
         setBootstrapCacheHints(result.cacheHints);
+        setInitialChatPreferences(result.initialChatPreferences);
         bootstrapModelCatalogWorkspaceRef.current = result.modelCatalog
           ? result.activeWorkspace.id
           : null;
@@ -449,9 +470,9 @@ export function DashboardChatStateProvider({
       setWorkspaceId(nextWorkspace.id);
       setWorkspaceName(nextWorkspace.name);
       setStoredDashboardWorkspaceId(organizationId, nextWorkspace.id);
-        setBootstrapModelCatalog(null);
-        setBootstrapCacheHints(null);
-        bootstrapModelCatalogWorkspaceRef.current = null;
+      setBootstrapModelCatalog(null);
+      setBootstrapCacheHints(null);
+      bootstrapModelCatalogWorkspaceRef.current = null;
       setPendingWorkspaceId(null);
       setWorkspaceSwitchStatus("idle");
       setLastChatTransitionError(null);
@@ -461,6 +482,7 @@ export function DashboardChatStateProvider({
       setMode("new");
       setActiveChatId("");
       setThreadTitle("New chat");
+      setInitialChatPreferences(DEFAULT_THREAD_CHAT_PREFERENCES);
 
       try {
         await workspaceClient.setWorkspaceContext(nextWorkspace.id);
@@ -556,7 +578,10 @@ export function DashboardChatStateProvider({
       }
 
       try {
-        const threads = await fetchPrivateChatsPage(target.id);
+        const [threads, preferences] = await Promise.all([
+          fetchPrivateChatsPage(target.id),
+          contentClient.getInitialChatPreferences(target.id),
+        ]);
         if (!isCurrent()) {
           return false;
         }
@@ -567,6 +592,7 @@ export function DashboardChatStateProvider({
         setPrivateChats(threads.items);
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
+        setInitialChatPreferences(preferences.initialChatPreferences);
         applyTransition(
           resolveWorkspaceSwitchTransition(currentTransition, {
             type: "success",
@@ -706,6 +732,7 @@ export function DashboardChatStateProvider({
     async (input?: {
       title?: string;
       modelSettings?: ThreadModelSettingsInput;
+      chatPreferences?: ThreadChatPreferences;
     }): Promise<{ id: string; title: string } | null> => {
       if (!workspaceId) return null;
 
@@ -715,9 +742,11 @@ export function DashboardChatStateProvider({
         const result = await contentClient.createThread(workspaceId, {
           title: safeTitle,
           modelSettings: input?.modelSettings,
+          chatPreferences: input?.chatPreferences ?? initialChatPreferences,
         });
         const { id, title: newTitle } = result.thread;
 
+        rememberChatPreferences(result.thread.chatPreferences);
         setPrivateChats((value) => [
           {
             id,
@@ -737,17 +766,21 @@ export function DashboardChatStateProvider({
         return null;
       }
     },
-    [workspaceId],
+    [initialChatPreferences, rememberChatPreferences, workspaceId],
   );
 
   const adoptChat = useCallback(
     (thread: {
       id: string;
       title: string;
+      chatPreferences?: ThreadChatPreferences;
       sourceCount?: number | null;
       updatedAt?: string | null;
     }) => {
       const item = mapThreadToChatItem(thread);
+      if (thread.chatPreferences) {
+        rememberChatPreferences(thread.chatPreferences);
+      }
       setPrivateChats((value) => {
         const withoutExisting = value.filter((chat) => chat.id !== item.id);
         return [item, ...withoutExisting];
@@ -758,7 +791,7 @@ export function DashboardChatStateProvider({
       setActiveChatId(item.id);
       setThreadTitle(item.title);
     },
-    [],
+    [rememberChatPreferences],
   );
 
   const archiveChat = useCallback(
@@ -904,6 +937,8 @@ export function DashboardChatStateProvider({
       lastChatTransitionError,
       bootstrapModelCatalog,
       bootstrapCacheHints,
+      initialChatPreferences,
+      rememberChatPreferences,
       consumeBootstrapModelCatalog,
       toggleSourcesVisible,
       setWorkspaceName,
@@ -945,6 +980,8 @@ export function DashboardChatStateProvider({
       lastChatTransitionError,
       bootstrapModelCatalog,
       bootstrapCacheHints,
+      initialChatPreferences,
+      rememberChatPreferences,
       consumeBootstrapModelCatalog,
       toggleSourcesVisible,
       createWorkspace,

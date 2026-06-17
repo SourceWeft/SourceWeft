@@ -1,0 +1,315 @@
+import {
+  AGENT_TOOL_NAMES,
+  agentToolNamesByCapability,
+  hasAgentToolCapability,
+  isAgentToolEnabledByDefault,
+  isSkillActivatedAgentTool,
+} from "@sourceweft/agent-tool-registry";
+import {
+  normalizeArtifactToolSelection,
+  normalizeGenerateImageToolSelection,
+  type GenerateImageToolSelection,
+} from "@sourceweft/builtin-tool-generate-image";
+import type { EnabledSkillDescriptor } from "../../skills/types";
+import type {
+  ConnectorToolSelection,
+  PreparedRuntimeTool,
+  ThreadToolsSelection,
+  TurnOptionsSnapshot,
+} from "./types";
+import type { ToolPermission } from "./command-registry";
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+const RESERVED_TOOL_SELECTION_KEYS = new Set([
+  "artifact",
+  "invokedSkillIds",
+  "skillRuntimeConfig",
+  "skillIds",
+  "webSearchEnabled",
+]);
+
+function cloneToolSelection(
+  tools: ThreadToolsSelection | undefined,
+): ThreadToolsSelection {
+  if (!tools) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(tools).map(([key, value]) => {
+      const record = toRecord(value);
+      return [key, record ? { ...record } : value];
+    }),
+  ) as ThreadToolsSelection;
+}
+
+function normalizeSelectedToolRecord(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  const record = toRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  return {
+    ...record,
+    enabled: typeof record.enabled === "boolean" ? record.enabled : true,
+  };
+}
+
+function optionsFromSelection(
+  selection: Record<string, unknown>,
+): Record<string, unknown> {
+  const { enabled: _enabled, ...options } = selection;
+  return options;
+}
+
+function skillActivatesTool(
+  skill: EnabledSkillDescriptor,
+  predicate: (toolName: string) => boolean,
+) {
+  return (
+    skill.tools?.some(
+      (toolName) => isSkillActivatedAgentTool(toolName) && predicate(toolName),
+    ) === true
+  );
+}
+
+export function resolveWebSearchEnabled(input: {
+  tools?: ThreadToolsSelection;
+  enabledSkills: readonly EnabledSkillDescriptor[];
+}) {
+  const explicitEnabled = readWebAccessOverride(input.tools);
+  if (typeof explicitEnabled === "boolean") {
+    return explicitEnabled;
+  }
+
+  return (
+    isAgentToolEnabledByDefault(AGENT_TOOL_NAMES.webSearch) ||
+    input.enabledSkills.some((skill) =>
+      skillActivatesTool(skill, (name) =>
+        hasAgentToolCapability(name, "web_query"),
+      ),
+    )
+  );
+}
+
+export function readWebAccessOverride(
+  tools?: ThreadToolsSelection,
+): boolean | undefined {
+  const webSearch = toRecord(tools?.[AGENT_TOOL_NAMES.webSearch]);
+  if (typeof webSearch?.enabled === "boolean") {
+    return webSearch.enabled;
+  }
+  if (typeof tools?.webSearchEnabled === "boolean") {
+    return tools.webSearchEnabled;
+  }
+  const webFetch = toRecord(tools?.[AGENT_TOOL_NAMES.webFetch]);
+  return typeof webFetch?.enabled === "boolean" ? webFetch.enabled : undefined;
+}
+
+export function readSkillRuntimeConfig(
+  tools?: ThreadToolsSelection,
+): Record<string, Record<string, unknown>> {
+  const config = toRecord(tools?.skillRuntimeConfig);
+  if (!config) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(config).flatMap(([skillId, value]) => {
+      const record = toRecord(value);
+      return record ? [[skillId, record]] : [];
+    }),
+  );
+}
+
+export function resolveGenerateImageToolSelection(
+  tools?: ThreadToolsSelection,
+): GenerateImageToolSelection | undefined {
+  const selection = normalizeGenerateImageToolSelection(
+    tools?.[AGENT_TOOL_NAMES.generateImage],
+  );
+  const legacySelection = normalizeArtifactToolSelection(tools?.artifact);
+  if (!legacySelection) {
+    return selection;
+  }
+
+  return {
+    ...(selection ?? {}),
+    ...(legacySelection.modelAlias && !selection?.modelAlias
+      ? { modelAlias: legacySelection.modelAlias }
+      : {}),
+    ...(selection?.execution ? { execution: selection.execution } : {}),
+    ...(legacySelection.image && !selection?.config
+      ? { config: legacySelection.image }
+      : {}),
+  };
+}
+
+export function buildEffectiveToolsSelection(input: {
+  baseTools?: ThreadToolsSelection;
+  invokedSkillIds?: string[];
+  skillIds: string[];
+  toolOverrides?: Record<string, unknown>;
+  webAccessEnabled: boolean;
+}): ThreadToolsSelection {
+  const tools = cloneToolSelection(input.baseTools);
+  delete tools.webSearchEnabled;
+
+  for (const [toolName, value] of Object.entries(tools)) {
+    if (RESERVED_TOOL_SELECTION_KEYS.has(toolName)) {
+      continue;
+    }
+    const normalized = normalizeSelectedToolRecord(value);
+    if (normalized) {
+      tools[toolName] = normalized;
+    }
+  }
+
+  for (const [toolName, value] of Object.entries(input.toolOverrides ?? {})) {
+    const normalized = normalizeSelectedToolRecord(value);
+    if (normalized) {
+      tools[toolName] = normalized;
+    } else {
+      delete tools[toolName];
+    }
+  }
+
+  return {
+    ...tools,
+    skillIds: input.skillIds,
+    ...(input.invokedSkillIds?.length
+      ? { invokedSkillIds: input.invokedSkillIds }
+      : {}),
+    [AGENT_TOOL_NAMES.webSearch]: { enabled: input.webAccessEnabled },
+    [AGENT_TOOL_NAMES.webFetch]: { enabled: input.webAccessEnabled },
+  };
+}
+
+export function buildTurnOptionsSnapshot(input: {
+  tools: ThreadToolsSelection;
+}): TurnOptionsSnapshot {
+  return {
+    version: 1,
+    tools: input.tools,
+  };
+}
+
+export function readTurnOptionsSnapshotTools(
+  value: unknown,
+): ThreadToolsSelection | undefined {
+  const options = toRecord(value);
+  const tools = toRecord(options?.tools);
+  if (options?.version === 1 && tools) {
+    return tools as ThreadToolsSelection;
+  }
+  return undefined;
+}
+
+export function buildRuntimeTools(input: {
+  tools: ThreadToolsSelection;
+  toolPermissions: Record<string, ToolPermission>;
+}): Record<string, PreparedRuntimeTool> {
+  const runtimeTools: Record<string, PreparedRuntimeTool> = {};
+  for (const [toolName, value] of Object.entries(input.tools)) {
+    if (RESERVED_TOOL_SELECTION_KEYS.has(toolName)) {
+      continue;
+    }
+    const selection = toRecord(value);
+    if (!selection) {
+      continue;
+    }
+    const enabled = selection.enabled !== false;
+    const permission = input.toolPermissions[toolName] ?? "allow";
+    runtimeTools[toolName] = {
+      toolName,
+      enabled,
+      permission,
+      shouldBind: enabled && permission !== "deny",
+      selection,
+      options: optionsFromSelection(selection),
+    };
+  }
+  return runtimeTools;
+}
+
+function normalizeConnectorToolSelection(
+  value: unknown,
+): ConnectorToolSelection | undefined {
+  const record = toRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const enabled =
+    typeof record.enabled === "boolean" ? record.enabled : undefined;
+  const connectorId =
+    typeof record.connectorId === "string" && record.connectorId.trim()
+      ? record.connectorId.trim()
+      : undefined;
+  if (enabled === undefined && connectorId === undefined) {
+    return undefined;
+  }
+  return {
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(connectorId ? { connectorId } : {}),
+  };
+}
+
+export function resolveConnectorToolSelections(
+  tools: ThreadToolsSelection | undefined,
+  connectorType: string,
+): Record<string, ConnectorToolSelection> {
+  const selections: Record<string, ConnectorToolSelection> = {};
+  if (!tools) {
+    return selections;
+  }
+  const rawTools = tools as Record<string, unknown>;
+  for (const toolName of agentToolNamesByCapability(connectorType)) {
+    const selection = normalizeConnectorToolSelection(rawTools[toolName]);
+    if (selection) {
+      selections[toolName] = selection;
+    }
+  }
+  return selections;
+}
+
+export function resolveConnectorToolSelectionsFromToolsMetadata(
+  value: unknown,
+  connectorType: string,
+): Record<string, ConnectorToolSelection> {
+  const tools = toRecord(value);
+  const selections: Record<string, ConnectorToolSelection> = {};
+  if (!tools) {
+    return selections;
+  }
+  for (const toolName of agentToolNamesByCapability(connectorType)) {
+    const selection = normalizeConnectorToolSelection(tools[toolName]);
+    if (selection) {
+      selections[toolName] = selection;
+    }
+  }
+  return selections;
+}
+
+export function enableConnectorToolSelection(
+  tools: ThreadToolsSelection | undefined,
+  toolName: string,
+  connectorType: string,
+) {
+  if (!hasAgentToolCapability(toolName, connectorType)) {
+    return tools;
+  }
+  const rawTools = (tools ?? {}) as Record<string, unknown>;
+  return {
+    ...(tools ?? {}),
+    [toolName]: {
+      ...normalizeConnectorToolSelection(rawTools[toolName]),
+      enabled: true,
+    },
+  };
+}
+
+export const testExports = {};

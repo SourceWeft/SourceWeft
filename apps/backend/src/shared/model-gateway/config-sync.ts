@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { config } from "../config";
-import { db } from "../database";
 import {
-  modelGatewayConfigVersions,
+  db,
   modelGatewayConfigs,
+  modelGatewayConfigVersions,
+  modelGatewayProfiles,
   modelGatewayProviderConfigs,
   modelGatewayRoutes,
-  modelGatewayProfiles,
-} from "../db/schema";
+} from "@sourceweft/db";
 import { logger } from "../logger";
 import {
   type GlobalGatewayEntry,
@@ -503,7 +503,7 @@ async function loadDynamicCatalogProfiles(input: {
     }
 
     if (gateway.providerKind !== "openrouter" && !litellmData) {
-      litellmData = await fetchLiteLLMPricing();
+      litellmData = await fetchLiteLLMPricing(config.litellmPricingUrl);
     }
 
     try {

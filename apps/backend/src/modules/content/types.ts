@@ -1,3 +1,46 @@
+import {
+  sourceSchema,
+  sourceStatusResponseSchema,
+  type ThreadChatPreferences,
+} from "@sourceweft/contracts";
+import type { z } from "zod";
+
+// ---------------------------------------------------------------------------
+// Re-exports from shared packages (canonical definitions)
+// ---------------------------------------------------------------------------
+
+import type {
+  ChunkSpec,
+  DocumentParseMode,
+  DocumentParseProviderId,
+  DocumentParseStrategy,
+  ParsingConfig,
+  SourceMetadata,
+} from "@sourceweft/builtin-document-parsers";
+
+export type {
+  ChunkSpec,
+  DocumentParseMode,
+  DocumentParseProviderId,
+  DocumentParseStrategy,
+  ParsingConfig,
+  SourceMetadata,
+};
+
+// ---------------------------------------------------------------------------
+// Derived from @sourceweft/contracts Zod schemas
+// ---------------------------------------------------------------------------
+
+export type SourceStatus = z.infer<typeof sourceSchema.shape.status>;
+export type SourceType = z.infer<typeof sourceSchema.shape.sourceType>;
+export type SourceStatusStep = z.infer<
+  typeof sourceStatusResponseSchema.shape.currentStep
+>;
+
+// ---------------------------------------------------------------------------
+// Backend-specific types (not present in shared packages)
+// ---------------------------------------------------------------------------
+
 export type EmbeddingVectorStrategy = "ann_hnsw" | "exact_vector" | "bm25_only";
 
 export type EmbeddingProfileRecord = {
@@ -30,97 +73,6 @@ export type ChunkRecord = {
   chunkMetadata: Record<string, unknown>;
   createdAt: string;
 };
-
-export type SourceStatus =
-  | "created"
-  | "queued"
-  | "processing"
-  | "indexed"
-  | "failed"
-  | "archived";
-
-export type SourceType =
-  | "manual_upload"
-  | "file_upload"
-  | "web_url"
-  | "youtube"
-  | "note"
-  | "artifact"
-  | "connector"
-  | "directory";
-
-export type ParsingConfig = {
-  chunkSize: number;
-  parserVersion: string;
-};
-
-export type DocumentParseProviderId =
-  | "langchain"
-  | "pdf2markdown"
-  | "vision"
-  | "docling"
-  | "llamaparse"
-  | "unstructured";
-
-export type DocumentParseStrategy =
-  | "explicit"
-  | "balanced"
-  | "cost"
-  | "quality";
-
-export type DocumentParseMode =
-  | "pure_text_pdf"
-  | "ocr_pdf"
-  | "image_ocr"
-  | "image_vision"
-  | "generic";
-
-export type ChunkSpec = {
-  text: string;
-  startIndex: number;
-  endIndex: number;
-  tokenCount: number;
-  embedding?: number[];
-};
-
-export type SourceMetadata = {
-  fileName?: string;
-  fileSize?: number;
-  mimeType?: string;
-  pageCount?: number;
-  wordCount?: number;
-  charCount?: number;
-  extractedAt?: string;
-  uploadMethod?: "manual" | "api";
-  documentParseStrategy?: DocumentParseStrategy;
-  documentParseProvider?: DocumentParseProviderId;
-  documentParseBackend?: DocumentParseProviderId;
-  documentParseProviderRequested?: DocumentParseProviderId;
-  documentParseProviderResolved?: DocumentParseProviderId;
-  documentParseMode?: DocumentParseMode;
-  providerTaskId?: string;
-  providerStatus?: string;
-  providerAttempts?: number;
-  providerUpdatedAt?: string;
-  pdfClassification?: "pure_text" | "non_pure_text";
-  pdfClassificationConfidence?: number;
-  pdfBitmapCoverageSummary?: {
-    min: number;
-    max: number;
-    avg: number;
-  };
-  [key: string]: unknown;
-};
-
-export type SourceStatusStep =
-  | "created"
-  | "uploading"
-  | "queued"
-  | "parsing"
-  | "chunking"
-  | "embedding"
-  | "completed"
-  | "failed";
 
 export type SourceStatusDetail = {
   status: SourceStatus;
@@ -238,6 +190,7 @@ export type ThreadRecord = {
     imageModelAlias: string | null;
     visionModelAlias: string | null;
   };
+  chatPreferences: ThreadChatPreferences;
   sourceCount: number;
   createdBy: string | null;
   createdAt: string;
@@ -278,3 +231,17 @@ export type WorkingFileRecord = {
   createdAt: string;
   updatedAt: string;
 };
+
+// ---------------------------------------------------------------------------
+// Model gateway profile kind — used by content and threads for billing & catalog
+// ---------------------------------------------------------------------------
+
+export type ModelProfileKind =
+  | "chat"
+  | "image"
+  | "vision"
+  | "video"
+  | "asr"
+  | "tts"
+  | "embedding"
+  | "rerank";

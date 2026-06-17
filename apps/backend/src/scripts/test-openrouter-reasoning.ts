@@ -1,6 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import "dotenv/config";
-import { extractReasoningFromMessageChunk } from "../modules/content/agent/turn/content";
+import { extractReasoningFromMessageChunk } from "../modules/threads";
 
 type JsonRecord = Record<string, unknown>;
 type TestMode =
@@ -167,6 +167,7 @@ async function testOpenRouterFetch(modeValue: TestMode): Promise<ReasoningRunRes
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": "https://sourceweft.com",
+      "X-OpenRouter-Title": "SourceWeft Reasoning Test",
       "X-Title": "SourceWeft Reasoning Test",
     },
     body: JSON.stringify({
@@ -264,6 +265,7 @@ async function testLangChainStream(modeValue: TestMode): Promise<ReasoningRunRes
       baseURL: "https://openrouter.ai/api/v1",
       defaultHeaders: {
         "HTTP-Referer": "https://sourceweft.com",
+        "X-OpenRouter-Title": "SourceWeft Reasoning Test",
         "X-Title": "SourceWeft Reasoning Test",
       },
     },

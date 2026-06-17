@@ -3,7 +3,8 @@
 import { useEffect, useLayoutEffect, type RefObject } from "react";
 import type { PromptThinkingSettings } from "../../_components/chat-canvas";
 import {
-  consumePendingThreadTurn,
+  clearPendingThreadTurn,
+  readPendingThreadTurn,
   type PendingThreadTurn,
 } from "../../_components/pending-thread-turn";
 import type {
@@ -37,9 +38,7 @@ type UseThreadBootstrapInput = {
   setSelectedModels: (models: SelectedModels) => void;
   setStreamWithSelectedLlm: (streamWithSelectedLlm: boolean) => void;
   setThinkingSettings: (settings: PromptThinkingSettings) => void;
-  streamThreadActionRef: RefObject<
-    ((input: ThreadStreamActionInput) => Promise<void>) | null
-  >;
+  streamThreadAction: (input: ThreadStreamActionInput) => Promise<void>;
   threadId: string;
   workspaceId: string | null;
 };
@@ -59,7 +58,7 @@ export function useThreadBootstrap({
   setSelectedModels,
   setStreamWithSelectedLlm,
   setThinkingSettings,
-  streamThreadActionRef,
+  streamThreadAction,
   threadId,
   workspaceId,
 }: UseThreadBootstrapInput) {
@@ -75,26 +74,7 @@ export function useThreadBootstrap({
 
     bootstrappedThreadKeyRef.current = bootstrapKey;
 
-    const pendingKey = `chat:pending:${threadId}`;
-    const pendingMemoryTurn = consumePendingThreadTurn(threadId);
-    const pendingTurn =
-      pendingMemoryTurn ??
-      (() => {
-        const raw = window.sessionStorage.getItem(pendingKey);
-        if (!raw) {
-          return null;
-        }
-        window.sessionStorage.removeItem(pendingKey);
-        try {
-          return JSON.parse(raw) as PendingThreadTurn;
-        } catch {
-          return null;
-        }
-      })();
-
-    if (pendingMemoryTurn) {
-      window.sessionStorage.removeItem(pendingKey);
-    }
+    const pendingTurn = readPendingThreadTurn(threadId);
 
     if (pendingTurn) {
       try {
@@ -106,6 +86,7 @@ export function useThreadBootstrap({
           skillIds,
           tools,
           command,
+          invocation,
           thinking,
           thinkingSettings: pendingThinkingSettings,
           searchEnabled: pendingSearchEnabled,
@@ -137,7 +118,10 @@ export function useThreadBootstrap({
         if (typeof pendingSearchEnabled === "boolean") {
           setSearchEnabled(pendingSearchEnabled);
         }
-        if (pendingModelState?.catalogReady && pendingModelState.availableModels) {
+        if (
+          pendingModelState?.catalogReady &&
+          pendingModelState.availableModels
+        ) {
           setAvailableModels(pendingModelState.availableModels);
         }
         if (
@@ -147,7 +131,10 @@ export function useThreadBootstrap({
           setCatalogKindEnabled(pendingModelState.catalogKindEnabled);
           setStreamWithSelectedLlm(pendingModelState.catalogKindEnabled.llm);
         }
-        if (pendingModelState?.catalogReady && pendingModelState.selectedModels) {
+        if (
+          pendingModelState?.catalogReady &&
+          pendingModelState.selectedModels
+        ) {
           setSelectedModels(pendingModelState.selectedModels);
           setBaseSelectedModels(pendingModelState.selectedModels);
           setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
@@ -157,7 +144,8 @@ export function useThreadBootstrap({
         } else if (pendingModelState?.byokSelection) {
           setSelectedByokModels({ llm: pendingModelState.byokSelection });
         }
-        void streamThreadActionRef.current?.({
+        clearPendingThreadTurn(threadId);
+        void streamThreadAction({
           mode: "send",
           content,
           images: Array.isArray(images) ? images : undefined,
@@ -166,15 +154,20 @@ export function useThreadBootstrap({
           skillIds: pendingSkillIds,
           tools,
           command,
+          invocation,
           thinking,
           byokSelections:
             pendingModelState?.byokSelections ??
             (pendingModelState?.byokSelection
               ? { llm: pendingModelState.byokSelection }
               : undefined),
-          searchEnabled: pendingSearchEnabled === true,
+          searchEnabled:
+            typeof pendingSearchEnabled === "boolean"
+              ? pendingSearchEnabled
+              : undefined,
         });
       } catch {
+        clearPendingThreadTurn(threadId);
         void loadThreadMessagesRef.current?.();
       }
       return;
@@ -196,7 +189,7 @@ export function useThreadBootstrap({
     setSelectedModels,
     setStreamWithSelectedLlm,
     setThinkingSettings,
-    streamThreadActionRef,
+    streamThreadAction,
     threadId,
     workspaceId,
   ]);

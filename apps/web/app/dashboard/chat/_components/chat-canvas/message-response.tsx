@@ -15,7 +15,7 @@ import type { CitationRecord } from "./types";
 
 const CITATION_PATTERN =
   /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
-const WORKFILE_PATH_PATTERN = /\/work\/[^\s`"'<>()[\]{}，。！？；：、]+/g;
+const WORKFILE_PATH_PATTERN = /\/workfiles\/[^\s`"'<>()[\]{}，。！？；：、]+/g;
 const WORKFILE_TRAILING_PUNCTUATION_PATTERN = /[.,!?;:]+$/;
 
 function splitCitationIds(value: string) {
@@ -175,7 +175,7 @@ function parseWorkfilePaths(input: {
     while ((match = WORKFILE_PATH_PATTERN.exec(child)) !== null) {
       const rawPath = match[0];
       const path = rawPath.replace(WORKFILE_TRAILING_PUNCTUATION_PATTERN, "");
-      if (!path || path === "/work/") {
+      if (!path || path === "/workfiles/") {
         continue;
       }
 
@@ -256,6 +256,7 @@ function processMessageChildren(input: {
 export function CitationAwareMessageResponse({
   availableCitations,
   citations,
+  className,
   children,
   onCitationClick,
   onWorkfileClick,
@@ -263,6 +264,7 @@ export function CitationAwareMessageResponse({
 }: {
   availableCitations?: CitationRecord[];
   citations: CitationRecord[] | undefined;
+  className?: string;
   children: string;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
@@ -391,7 +393,7 @@ export function CitationAwareMessageResponse({
   };
 
   return (
-    <div>
+    <div className={className}>
       <MessageResponse
         components={{
           a: ({ children: nodeChildren, href, ...props }) => (

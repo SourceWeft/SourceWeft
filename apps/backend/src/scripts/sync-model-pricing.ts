@@ -1,7 +1,7 @@
 import { basename } from "node:path";
-import { closeDatabase } from "../shared/database";
+import { closeDatabase } from "@sourceweft/db";
 import { logger } from "../shared/logger";
-import { syncModelPricing } from "../shared/scripts/sync-model-pricing";
+import { syncModelPricing } from "../shared/model-gateway/sync-pricing";
 
 async function main() {
   try {

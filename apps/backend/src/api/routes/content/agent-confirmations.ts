@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import { respondAgentConfirmationRequestSchema } from "@sourceweft/contracts";
 import { toolConfirmationRunner } from "../../../modules/agent-confirmations/runner";
-import { durableChatRunService } from "../../../modules/content/threads/durable/service";
+import { durableChatRunService } from "../../../modules/threads";
 import {
   getSessionUserId,
   requireSession,

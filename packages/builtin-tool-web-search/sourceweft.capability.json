@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/web-search",
+  "kind": "tool",
+  "name": "Web Search",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "tools": [
+    {
+      "id": "web_search",
+      "title": "Search Web",
+      "description": "Search the web and return cited results.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "read",
+      "options": [],
+      "command": {
+        "title": "Search Web",
+        "aliases": [
+          "web"
+        ],
+        "category": "Research",
+        "visibleWhen": "enabled"
+      }
+    },
+    {
+      "id": "web_fetch",
+      "title": "Fetch Web Page",
+      "description": "Fetch full web page content from explicit URLs.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "read",
+      "options": []
+    }
+  ]
+}

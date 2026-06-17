@@ -118,7 +118,7 @@ test("finish event stores finish reason on the streaming assistant message", () 
   });
 });
 
-test("finish event completes stale thinking steps and defaults completed finish reason", () => {
+test("finish event completes canonical thinking steps without rewriting trace metadata", () => {
   let message: ChatMessageItem = {
     id: "assistant-1",
     role: "assistant",
@@ -126,6 +126,21 @@ test("finish event completes stale thinking steps and defaults completed finish 
     contentJson: {},
     parentMessageId: null,
     metadata: {
+      traceEvents: [
+        {
+          type: "thinking-step",
+          id: "step-1",
+          itemId: "step-1",
+          step: {
+            id: "step-1",
+            kind: "reasoning_summary",
+            title: "Thinking",
+            status: "in_progress",
+            items: [],
+            sequence: 0,
+          },
+        },
+      ],
       threadRun: {
         idempotencyKey: "sourceweft-web-run:run-1",
         mode: "send",
@@ -171,11 +186,15 @@ test("finish event completes stale thinking steps and defaults completed finish 
     "completed",
   );
   assert.equal(
-    (message.metadata.traceParts as Array<{ id: string; status: string }>).find(
-      (part) => part.id === "step-1",
-    )?.status,
-    "completed",
+    (
+      message.metadata.traceEvents as Array<{
+        type: string;
+        step?: { id: string; status: string };
+      }>
+    ).find((event) => event.step?.id === "step-1")?.step?.status,
+    "in_progress",
   );
+  assert.equal(message.metadata.traceParts, undefined);
 });
 
 test("streaming DeepAgents todo step updates trace parts without tool trace", () => {
@@ -271,9 +290,9 @@ test("streaming DeepAgents todo step updates trace parts without tool trace", ()
     ["step"],
   );
   assert.equal(
-    (message.metadata.traceParts as Array<{ kind: string; tool?: string }>).some(
-      (part) => part.kind === "tool" && part.tool === "write_todos",
-    ),
+    (
+      message.metadata.traceParts as Array<{ kind: string; tool?: string }>
+    ).some((part) => part.kind === "tool" && part.tool === "write_todos"),
     false,
   );
 });
@@ -304,7 +323,7 @@ test("finish status marks tool confirmation pauses as waiting for approval", () 
 
 test("streaming errors hide raw tool kwargs and schema details", () => {
   const rawError =
-    'Error invoking tool \'generate_pptx\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
+    'Error invoking tool \'publish_sandbox_artifact\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
   const captured: {
     markedError?: {
       code?: string | null;
@@ -335,7 +354,7 @@ test("streaming errors hide raw tool kwargs and schema details", () => {
   });
 
   const expected =
-    "generate_pptx failed because the generated tool arguments were invalid. Please retry.";
+    "publish_sandbox_artifact failed because the generated tool arguments were invalid. Please retry.";
   assert.equal(captured.markedError?.error, expected);
   assert.equal(captured.streamError?.message, expected);
   assert.equal(captured.suppressErrorToast, false);
@@ -456,7 +475,7 @@ test("finish event preserves approval requested tool calls", () => {
   assert.equal(message.metadata.finishReason, "tool_confirmation_requested");
 });
 
-test("finish event normalizes stale running tool trace parts", () => {
+test("finish event completes canonical tool calls without rewriting trace parts", () => {
   let message: ChatMessageItem = {
     id: "assistant-1",
     role: "assistant",
@@ -472,7 +491,7 @@ test("finish event normalizes stale running tool trace parts", () => {
           createdAt: new Date(0).toISOString(),
           updatedAt: new Date(0).toISOString(),
           toolCallId: "tool-1",
-          tool: "generate_pptx",
+          tool: "publish_sandbox_artifact",
           status: "running",
           input: {},
           output: null,
@@ -493,7 +512,7 @@ test("finish event normalizes stale running tool trace parts", () => {
       "tool-1",
       {
         id: "tool-1",
-        tool: "generate_pptx",
+        tool: "publish_sandbox_artifact",
         input: {},
         output: null,
         status: "running" as const,
@@ -515,10 +534,16 @@ test("finish event normalizes stale running tool trace parts", () => {
 
   assert.equal(streamToolCallsById.get("tool-1")?.status, "completed");
   assert.equal(
+    (message.metadata.toolCalls as Array<{ id: string; status: string }>).find(
+      (toolCall) => toolCall.id === "tool-1",
+    )?.status,
+    "completed",
+  );
+  assert.equal(
     (message.metadata.traceParts as Array<{ id: string; status: string }>).find(
       (part) => part.id === "tool-1",
     )?.status,
-    "completed",
+    "running",
   );
 });
 
@@ -607,17 +632,14 @@ test("approval refresh assistant message keeps the original assistant root", () 
     "running",
   );
   assert.equal(
-    (
-      message.metadata.threadRun as
-        | { assistantMessageId?: string }
-        | undefined
-    )?.assistantMessageId,
+    (message.metadata.threadRun as { assistantMessageId?: string } | undefined)
+      ?.assistantMessageId,
     "assistant-resumed",
   );
-  assert.deepEqual([...streamingAssistantMessageIds], [
-    "assistant-interrupted",
-    "assistant-resumed",
-  ]);
+  assert.deepEqual(
+    [...streamingAssistantMessageIds],
+    ["assistant-interrupted", "assistant-resumed"],
+  );
 });
 
 test("streaming reasoning keeps interrupted model reasoning in separate segments", () => {
@@ -818,13 +840,12 @@ test("streaming reasoning deltas update one stable trace part", () => {
     },
   };
 
-  for (const text of ["用户想要", "用户想要创建", "用户想要创建页面"]) {
+  for (const text of ["用户", "想要", "创建页面"]) {
     testExports.handleStreamingReasoning({
       context,
       reasoning: text,
       segment: {
         id: "reasoning-1",
-        text,
         sequence: 1,
         phase: "initial",
       },
@@ -850,6 +871,123 @@ test("streaming reasoning deltas update one stable trace part", () => {
     ).map((segment) => `${segment.id}:${segment.text}`),
     ["reasoning-1:用户想要创建页面"],
   );
+  assert.deepEqual(
+    (
+      message.metadata.renderBlocks as Array<{
+        id: string;
+        text: string;
+        type: string;
+      }>
+    ).map((block) => `${block.id}:${block.type}:${block.text}`),
+    ["stream-reasoning-reasoning-1:reasoning:用户想要创建页面"],
+  );
+});
+
+test("streaming delta-only reasoning starts a new segment when context changes", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const context = createBaseStreamingContext({
+    appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
+    normalizeModelReasoningSegmentRecord: (value: unknown) => {
+      const record =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : null;
+      const text = typeof record?.text === "string" ? record.text.trim() : "";
+      if (!record || !text) {
+        return null;
+      }
+      return {
+        id: typeof record.id === "string" ? record.id : "reasoning-1",
+        text,
+        sequence:
+          typeof record.sequence === "number" ? record.sequence : undefined,
+        phase:
+          record.phase === "initial" || record.phase === "after_tool"
+            ? record.phase
+            : undefined,
+        toolCallId:
+          typeof record.toolCallId === "string" ? record.toolCallId : undefined,
+        tool: typeof record.tool === "string" ? record.tool : undefined,
+      } satisfies ModelReasoningSegmentRecord;
+    },
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+
+  testExports.handleStreamingReasoning({
+    context,
+    reasoning: "before",
+    segment: {
+      id: "reasoning-1",
+      sequence: 1,
+      phase: "initial",
+    },
+  });
+  testExports.handleStreamingReasoning({
+    context,
+    reasoning: " tool",
+    segment: {
+      id: "reasoning-1",
+      sequence: 1,
+      phase: "initial",
+    },
+  });
+  testExports.handleStreamingReasoning({
+    context,
+    reasoning: " after",
+    segment: {
+      id: "reasoning-1",
+      sequence: 3,
+      phase: "after_tool",
+      toolCallId: "tool-1",
+      tool: "search_sources",
+    },
+  });
+
+  assert.equal(message.metadata.reasoning, "before tool after");
+  assert.deepEqual(
+    (
+      message.metadata.reasoningSegments as Array<{
+        id: string;
+        text: string;
+        toolCallId?: string;
+      }>
+    ).map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+      toolCallId: segment.toolCallId,
+    })),
+    [
+      {
+        id: "reasoning-1",
+        text: "after",
+        toolCallId: "tool-1",
+      },
+    ],
+  );
+  assert.deepEqual(
+    (
+      message.metadata.traceParts as Array<{
+        kind: string;
+        order: number;
+        text?: string;
+        toolCallId?: string;
+      }>
+    ).map(
+      (part) =>
+        `${part.order}:${part.kind}:${part.toolCallId ?? ""}:${part.text ?? ""}`,
+    ),
+    ["0:reasoning:tool-1:after"],
+  );
 });
 
 test("streaming trace events preserve live display order across tools and reasoning", () => {
@@ -862,16 +1000,19 @@ test("streaming trace events preserve live display order across tools and reason
     metadata: {},
     createdAt: new Date(0).toISOString(),
   };
-  const streamToolCallsById = new Map<string, {
-    id: string;
-    tool: string;
-    input: Record<string, unknown>;
-    output: unknown;
-    latencyMs: number | null;
-    status: "running" | "approval_requested" | "completed" | "error";
-    error: string | null;
-    sequence?: number;
-  }>();
+  const streamToolCallsById = new Map<
+    string,
+    {
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      output: unknown;
+      latencyMs: number | null;
+      status: "running" | "approval_requested" | "completed" | "error";
+      error: string | null;
+      sequence?: number;
+    }
+  >();
   const context = {
     appendReasoningChunk: (current: string | undefined, next: string) =>
       `${current ?? ""}${next}`,
@@ -919,7 +1060,8 @@ test("streaming trace events preserve live display order across tools and reason
       const sequence = id === "search-tool" ? 2 : 4;
       return {
         id,
-        tool: id === "search-tool" ? "search_notion_pages" : "create_notion_page",
+        tool:
+          id === "search-tool" ? "search_notion_pages" : "create_notion_page",
         input: {},
         output: null,
         latencyMs: 10,
@@ -1058,15 +1200,18 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
     metadata: {},
     createdAt: new Date(0).toISOString(),
   };
-  const streamToolCallsById = new Map<string, {
-    id: string;
-    tool: string;
-    input: Record<string, unknown>;
-    output: unknown;
-    latencyMs: number | null;
-    status: "running" | "approval_requested" | "completed" | "error";
-    error: string | null;
-  }>();
+  const streamToolCallsById = new Map<
+    string,
+    {
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      output: unknown;
+      latencyMs: number | null;
+      status: "running" | "approval_requested" | "completed" | "error";
+      error: string | null;
+    }
+  >();
   const streamRenderBuffer = createStreamingRenderBuffer({
     maxDeltaBatchChars: 800,
   });
@@ -1074,16 +1219,17 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
   let drainCount = 0;
   const context = createBaseStreamingContext({
     isCompletedPresentationArtifactToolCall: (toolCall, event) =>
-      toolCall.tool === "generate_pptx" &&
+      toolCall.tool === "publish_sandbox_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
-    isPresentationArtifactToolName: (toolName) => toolName === "generate_pptx",
+    isPresentationArtifactToolName: (toolName) =>
+      toolName === "publish_sandbox_artifact",
     resolveToolCallFromStreamEvent: ({ event, streamToolCallsById }) => {
       const existing = streamToolCallsById.get(event.id ?? "pptx-tool");
       const eventData = getToolEventData(event);
       return {
         id: event.id ?? "pptx-tool",
-        tool: "generate_pptx",
+        tool: "publish_sandbox_artifact",
         input: { title: "费曼学习法" },
         output:
           event.type === "tool-call-result"
@@ -1144,7 +1290,7 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
       type: "tool-call-event",
       id: "pptx-tool",
       data: {
-        type: "generate_pptx_progress",
+        type: "publish_sandbox_artifact_progress",
         toolCallId: "pptx-tool",
         stage: "planning",
         title: "费曼学习法",
@@ -1162,7 +1308,7 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
   assert.equal(refreshCount, 0);
   assert.deepEqual(message.metadata.renderBlocks, []);
   assert.deepEqual(streamToolCallsById.get("pptx-tool")?.output, {
-    type: "generate_pptx_progress",
+    type: "publish_sandbox_artifact_progress",
     toolCallId: "pptx-tool",
     stage: "planning",
     title: "费曼学习法",
@@ -1185,18 +1331,14 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  assert.equal(drainCount, 1);
-  assert.deepEqual(message.metadata.renderBlocks, [
-    {
-      id: "stream-generated-presentation-pptx-tool",
-      type: "generated_presentation",
-      toolCallId: "pptx-tool",
-    },
-  ]);
+  assert.equal(drainCount, 0);
+  assert.deepEqual(message.metadata.renderBlocks, []);
 
   testExports.handleStreamingToolCallEvent({
     context,
-    drainQueuedDeltasNow: () => undefined,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
     event: {
       type: "tool-call-result",
       id: "pptx-tool",
@@ -1214,12 +1356,13 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
   assert.deepEqual(message.metadata.renderBlocks, [
     {
       id: "stream-generated-presentation-pptx-tool",
+      placement: "terminal",
       type: "generated_presentation",
       toolCallId: "pptx-tool",
     },
   ]);
   assert.deepEqual(streamToolCallsById.get("pptx-tool")?.output, {
-    type: "generate_pptx_progress",
+    type: "publish_sandbox_artifact_progress",
     toolCallId: "pptx-tool",
     stage: "planning",
     artifact_id: "artifact-1",
@@ -1239,15 +1382,18 @@ test("presentation artifact result appends after earlier progress without reorde
     metadata: {},
     createdAt: new Date(0).toISOString(),
   };
-  const streamToolCallsById = new Map<string, {
-    id: string;
-    tool: string;
-    input: Record<string, unknown>;
-    output: unknown;
-    latencyMs: number | null;
-    status: "running" | "approval_requested" | "completed" | "error";
-    error: string | null;
-  }>();
+  const streamToolCallsById = new Map<
+    string,
+    {
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      output: unknown;
+      latencyMs: number | null;
+      status: "running" | "approval_requested" | "completed" | "error";
+      error: string | null;
+    }
+  >();
   const streamRenderBuffer = createStreamingRenderBuffer({
     maxDeltaBatchChars: 800,
   });
@@ -1256,15 +1402,16 @@ test("presentation artifact result appends after earlier progress without reorde
   let drainCount = 0;
   const context = createBaseStreamingContext({
     isCompletedPresentationArtifactToolCall: (toolCall, event) =>
-      toolCall.tool === "generate_pptx" &&
+      toolCall.tool === "publish_sandbox_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
-    isPresentationArtifactToolName: (toolName) => toolName === "generate_pptx",
+    isPresentationArtifactToolName: (toolName) =>
+      toolName === "publish_sandbox_artifact",
     resolveToolCallFromStreamEvent: ({ event }) => {
       const eventData = getToolEventData(event);
       return {
         id: event.id ?? "pptx-tool",
-        tool: "generate_pptx",
+        tool: "publish_sandbox_artifact",
         input: { title: "费曼学习法" },
         output:
           event.type === "tool-call-result"
@@ -1309,7 +1456,7 @@ test("presentation artifact result appends after earlier progress without reorde
       type: "tool-call-event",
       id: "pptx-tool",
       data: {
-        type: "generate_pptx_progress",
+        type: "publish_sandbox_artifact_progress",
         toolCallId: "pptx-tool",
         stage: "planning",
         title: "费曼学习法",
@@ -1347,11 +1494,97 @@ test("presentation artifact result appends after earlier progress without reorde
     },
     {
       id: "stream-generated-presentation-pptx-tool",
+      placement: "terminal",
       type: "generated_presentation",
       toolCallId: "pptx-tool",
     },
   ]);
   assert.equal(streamToolCallsById.get("pptx-tool")?.status, "completed");
+});
+
+test("presentation artifact result without a published URL does not append card", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map<
+    string,
+    {
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      output: unknown;
+      latencyMs: number | null;
+      status: "running" | "approval_requested" | "completed" | "error";
+      error: string | null;
+    }
+  >();
+  const streamRenderBuffer = createStreamingRenderBuffer({
+    maxDeltaBatchChars: 800,
+  });
+  let refreshCount = 0;
+  const context = createBaseStreamingContext({
+    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+      toolCall.tool === "publish_sandbox_artifact" &&
+      toolCall.status === "completed" &&
+      event.type === "tool-call-result" &&
+      Boolean((toolCall.output as Record<string, unknown>).artifact_url),
+    isPresentationArtifactToolName: (toolName) =>
+      toolName === "publish_sandbox_artifact",
+    resolveToolCallFromStreamEvent: ({ event }) => ({
+      id: event.id ?? "pptx-tool",
+      tool: "publish_sandbox_artifact",
+      input: { title: "费曼学习法" },
+      output:
+        event.type === "tool-call-result"
+          ? {
+              status: "ready",
+              title: "费曼学习法",
+            }
+          : null,
+      latencyMs: event.type === "tool-call-result" ? 12 : null,
+      status: event.type === "tool-call-result" ? "completed" : "running",
+      error: null,
+    }),
+    streamRenderBuffer,
+    streamToolCallsById,
+    syncStreamingToolCalls: () => {
+      message = {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
+          toolCalls: [...streamToolCallsById.values()],
+        },
+      };
+    },
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => undefined,
+    event: {
+      type: "tool-call-result",
+      id: "pptx-tool",
+    },
+    refreshedArtifactToolIds: new Set(),
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  assert.equal(refreshCount, 0);
+  assert.deepEqual(message.metadata.renderBlocks, []);
 });
 
 test("video presentation artifact end appends shared presentation card after progress", () => {
@@ -1364,15 +1597,18 @@ test("video presentation artifact end appends shared presentation card after pro
     metadata: {},
     createdAt: new Date(0).toISOString(),
   };
-  const streamToolCallsById = new Map<string, {
-    id: string;
-    tool: string;
-    input: Record<string, unknown>;
-    output: unknown;
-    latencyMs: number | null;
-    status: "running" | "approval_requested" | "completed" | "error";
-    error: string | null;
-  }>();
+  const streamToolCallsById = new Map<
+    string,
+    {
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      output: unknown;
+      latencyMs: number | null;
+      status: "running" | "approval_requested" | "completed" | "error";
+      error: string | null;
+    }
+  >();
   const streamRenderBuffer = createStreamingRenderBuffer({
     maxDeltaBatchChars: 800,
   });
@@ -1477,6 +1713,7 @@ test("video presentation artifact end appends shared presentation card after pro
   assert.deepEqual(message.metadata.renderBlocks, [
     {
       id: "stream-generated-presentation-video-tool",
+      placement: "terminal",
       type: "generated_presentation",
       toolCallId: "video-tool",
     },

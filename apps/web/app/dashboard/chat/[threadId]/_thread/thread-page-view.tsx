@@ -70,6 +70,8 @@ export function DashboardChatThreadPageView({
   artifactsRefreshKey,
   availableModels,
   availableSkills,
+  hubSkills,
+  capabilityCatalog,
   byokCredentials,
   byokModelConfig,
   byokModels,
@@ -164,6 +166,8 @@ export function DashboardChatThreadPageView({
       activeSourceIds,
       artifactsRefreshKey,
       availableSkills,
+      hubSkills,
+      capabilityCatalog,
       disabledToolNames,
       displayedCitations,
       initialSources: initialSourcesForWorkspace,
@@ -196,6 +200,8 @@ export function DashboardChatThreadPageView({
       activeSourceIds,
       artifactsRefreshKey,
       availableSkills,
+      hubSkills,
+      capabilityCatalog,
       disabledToolNames,
       displayedCitations,
       handleConnectorsChange,
@@ -265,6 +271,7 @@ export function DashboardChatThreadPageView({
             chatExecutionState={chatExecutionState}
             allSources={librarySources}
             availableSkills={availableSkills}
+            capabilityCatalog={capabilityCatalog}
             composerInitialCommand={composerInitialCommand}
             composerInitialInput={composerInitialInput}
             composerResetKey={composerResetKey}
@@ -311,6 +318,7 @@ export function DashboardChatThreadPageView({
             imageModelAvailable={Boolean(selectedModels.image)}
             imageModelAlias={selectedModels.image?.modelAlias ?? null}
             notionConnectorId={activeConnectorTools.notionConnectorId}
+            activeConnectorIds={activeConnectorTools.activeConnectorIds}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={setDisabledToolNames}
             onLoadOlderMessages={() => void loadOlderThreadMessages()}
@@ -332,6 +340,8 @@ export function DashboardChatThreadPageView({
         activeSourceIds={activeSourceIds}
         artifactsRefreshKey={artifactsRefreshKey}
         availableSkills={availableSkills}
+        hubSkills={hubSkills}
+        capabilityCatalog={capabilityCatalog}
         disabledToolNames={disabledToolNames}
         displayedCitations={displayedCitations}
         hubDrawerOpen={hubDrawerOpen}

@@ -1,5 +1,6 @@
 import { Queue, QueueEvents } from "bullmq";
 import { config } from "./config";
+import { buildAuditInputFromJob, recordJobAudit } from "./jobs-audit";
 import { connectionOptions } from "./redis-connection";
 
 export type QueueJobPayload = Record<string, unknown>;
@@ -35,6 +36,25 @@ export function getJobsQueueEvents() {
     connection: connectionOptions,
   });
   return jobsQueueEvents;
+}
+
+export async function enqueueWithAudit(
+  type: string,
+  payload: Record<string, unknown>,
+  opts?: Parameters<Queue<QueueJobPayload>["add"]>[2],
+) {
+  const job = await jobsQueue.add(type, payload, opts);
+
+  void recordJobAudit(
+    buildAuditInputFromJob({
+      jobId: String(job.id),
+      jobType: type,
+      data: payload,
+      status: "queued",
+    }),
+  );
+
+  return job;
 }
 
 export async function closeQueue() {

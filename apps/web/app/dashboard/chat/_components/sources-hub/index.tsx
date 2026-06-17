@@ -49,6 +49,8 @@ import {
 import { toast } from "sonner";
 import {
   HttpClientError,
+  type CapabilityCatalogCommand,
+  type ListCapabilityCatalogResponse,
   type ConnectorWebhookEvent,
   type ConnectorActivityItem,
   type ConnectorWebhookConfigResponse,
@@ -514,6 +516,7 @@ const searchScopeLabels: Record<HubTab, string> = {
 
 export type HubSkillItem = {
   id: string;
+  workspaceSkillId?: string;
   catalogId: string;
   slug: string;
   name: string;
@@ -521,6 +524,7 @@ export type HubSkillItem = {
   description: string;
   sourceType: "builtin" | "workspace_custom" | "team_custom";
   version: string;
+  enabled?: boolean;
   hasReadme: boolean;
   tools?: string[];
 };
@@ -3112,16 +3116,20 @@ function useAddSourceDialogState() {
 }
 
 function SkillRow({
+  icon,
   skill,
   selected,
   disabled,
+  busy,
   onToggle,
   onOpenSkill,
 }: {
+  icon?: SkillIconSpec;
   skill: HubSkillItem;
   selected: boolean;
   disabled?: boolean;
-  onToggle: (id: string) => void;
+  busy?: boolean;
+  onToggle: (id: string) => void | Promise<void>;
   onOpenSkill: (catalogId: string) => void;
 }) {
   function handleRowClick(event: MouseEvent<HTMLElement>) {
@@ -3133,7 +3141,7 @@ function SkillRow({
       return;
     }
 
-    onToggle(skill.id);
+    void onToggle(skill.id);
   }
 
   return (
@@ -3142,24 +3150,20 @@ function SkillRow({
         "group flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 transition-colors",
         selected ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-accent/60",
         disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
+        busy && "cursor-wait opacity-70",
       )}
       onClick={handleRowClick}
     >
       <Checkbox
         checked={selected}
         className="mt-0.5"
-        disabled={disabled}
-        onCheckedChange={() => onToggle(skill.id)}
+        disabled={disabled || busy}
+        onCheckedChange={() => void onToggle(skill.id)}
       />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <SkillIcon
-            className={cn(
-              "size-3 shrink-0",
-              selected ? "text-primary" : "text-muted-foreground",
-            )}
-          />
+          <SkillRowIcon icon={icon} selected={selected} />
           <button
             className="cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             onClick={() => onOpenSkill(skill.catalogId)}
@@ -3175,27 +3179,65 @@ function SkillRow({
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           <TypeBadge label={skillSourceLabel(skill.sourceType)} />
           {disabled ? <TypeBadge label="Tool off" /> : null}
+          {skill.sourceType !== "builtin" ? (
+            <TypeBadge label={selected ? "Hub on" : "Hub off"} />
+          ) : null}
         </div>
       </div>
     </article>
   );
 }
 
+type SkillIconSpec = Pick<CapabilityCatalogCommand, "iconName" | "iconTone">;
+
+function SkillRowIcon({
+  icon,
+  selected,
+}: {
+  icon?: SkillIconSpec;
+  selected: boolean;
+}) {
+  const className = cn(
+    "size-3 shrink-0",
+    selected ? "text-primary" : "text-muted-foreground",
+  );
+  if (icon?.iconName) {
+    return (
+      <GlobalIcon
+        className={className}
+        fallbackIconName="skill"
+        iconName={icon.iconName}
+        iconTone={icon.iconTone ?? "mono"}
+      />
+    );
+  }
+
+  return <SkillIcon className={className} />;
+}
+
 function SkillsTab({
   skills,
+  skillIconsById,
   searchQuery,
   selectedSkillIds,
   onSkillSelectionChange,
+  onWorkspaceSkillEnabledChange,
   onOpenSkill,
   disabledToolNames = [],
 }: {
   skills: HubSkillItem[];
+  skillIconsById?: ReadonlyMap<string, SkillIconSpec>;
   searchQuery: string;
   selectedSkillIds: string[];
   onSkillSelectionChange: (ids: string[]) => void;
+  onWorkspaceSkillEnabledChange?: (
+    skill: HubSkillItem,
+    enabled: boolean,
+  ) => void | Promise<void>;
   onOpenSkill: (catalogId: string) => void;
   disabledToolNames?: string[];
 }) {
+  const [busySkillIds, setBusySkillIds] = useState<Set<string>>(new Set());
   const q = searchQuery.trim().toLowerCase();
   const selectedSet = useMemo(
     () => new Set(selectedSkillIds),
@@ -3218,9 +3260,32 @@ function SkillsTab({
     [q, skills],
   );
 
-  function toggleSkill(skillId: string) {
+  async function toggleSkill(skillId: string) {
     const skill = skills.find((item) => item.id === skillId);
-    if (skill?.tools?.some((toolName) => disabledToolSet.has(toolName))) {
+    if (!skill || busySkillIds.has(skillId)) {
+      return;
+    }
+    if (
+      skill.sourceType === "builtin" &&
+      skill.tools?.some((toolName) => disabledToolSet.has(toolName))
+    ) {
+      return;
+    }
+    if (skill.sourceType !== "builtin" && skill.workspaceSkillId) {
+      if (!onWorkspaceSkillEnabledChange) {
+        return;
+      }
+      const nextEnabled = !skill.enabled;
+      setBusySkillIds((current) => new Set(current).add(skillId));
+      try {
+        await onWorkspaceSkillEnabledChange(skill, nextEnabled);
+      } finally {
+        setBusySkillIds((current) => {
+          const next = new Set(current);
+          next.delete(skillId);
+          return next;
+        });
+      }
       return;
     }
     if (selectedSet.has(skillId)) {
@@ -3250,18 +3315,27 @@ function SkillsTab({
 
   return (
     <div className="space-y-0.5">
-      {filtered.map((skill) => (
-        <SkillRow
-          disabled={skill.tools?.some((toolName) =>
-            disabledToolSet.has(toolName),
-          )}
-          key={skill.id}
-          onOpenSkill={onOpenSkill}
-          onToggle={toggleSkill}
-          selected={selectedSet.has(skill.id)}
-          skill={skill}
-        />
-      ))}
+      {filtered.map((skill) => {
+        const hasDisabledTool =
+          skill.tools?.some((toolName) => disabledToolSet.has(toolName)) ??
+          false;
+        return (
+          <SkillRow
+            busy={busySkillIds.has(skill.id)}
+            disabled={skill.sourceType === "builtin" && hasDisabledTool}
+            icon={skillIconsById?.get(skill.id)}
+            key={skill.id}
+            onOpenSkill={onOpenSkill}
+            onToggle={toggleSkill}
+            selected={
+              skill.sourceType !== "builtin" && skill.workspaceSkillId
+                ? skill.enabled === true
+                : selectedSet.has(skill.id)
+            }
+            skill={skill}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -5782,6 +5856,41 @@ function countFilteredSkills(items: HubSkillItem[], searchQuery: string) {
   ).length;
 }
 
+function buildHubSkillIconsById(
+  skills: readonly HubSkillItem[],
+  capabilityCatalog: ListCapabilityCatalogResponse | null | undefined,
+) {
+  const commands = capabilityCatalog?.commands ?? [];
+  if (commands.length === 0) {
+    return new Map<string, SkillIconSpec>();
+  }
+
+  const skillByTargetId = new Map<string, HubSkillItem>();
+  for (const skill of skills) {
+    skillByTargetId.set(skill.name.toLowerCase(), skill);
+    skillByTargetId.set(skill.slug.toLowerCase(), skill);
+  }
+
+  const iconsById = new Map<string, SkillIconSpec>();
+  for (const command of commands) {
+    if (command.action.kind !== "skill" || !command.iconName) {
+      continue;
+    }
+
+    const skill = skillByTargetId.get(command.action.targetId.toLowerCase());
+    if (!skill || iconsById.has(skill.id)) {
+      continue;
+    }
+
+    iconsById.set(skill.id, {
+      iconName: command.iconName,
+      ...(command.iconTone ? { iconTone: command.iconTone } : {}),
+    });
+  }
+
+  return iconsById;
+}
+
 function mapConnectorToUi(connector: SourceConnector): ConnectorItem {
   const lastSync = connector.lastIndexedAt
     ? `Last sync ${new Date(connector.lastIndexedAt).toLocaleString()}`
@@ -5819,6 +5928,8 @@ export function SourcesHub({
   onArtifactOpen,
   onSkillsCatalogChange,
   installedSkills = [],
+  hubSkills,
+  capabilityCatalog,
   selectedSkillIds = [],
   onSkillSelectionChange = () => {},
   selectedMcpInstallIds = [],
@@ -5853,6 +5964,8 @@ export function SourcesHub({
   onArtifactOpen?: (artifact: ArtifactListItem) => void;
   onSkillsCatalogChange?: () => void | Promise<void>;
   installedSkills?: HubSkillItem[];
+  hubSkills?: HubSkillItem[];
+  capabilityCatalog?: ListCapabilityCatalogResponse | null;
   selectedSkillIds?: string[];
   onSkillSelectionChange?: (ids: string[]) => void;
   selectedMcpInstallIds?: string[];
@@ -5877,6 +5990,7 @@ export function SourcesHub({
   const deferredSearchQueries = useDeferredValue(searchQueries);
   const deferredSearchQuery = deferredSearchQueries[activeTab];
   const [sources, setSources] = useState<SourceItem[]>(initialSources);
+  const skillsForHub = hubSkills ?? installedSkills;
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
@@ -5964,8 +6078,12 @@ export function SourcesHub({
     [deferredSearchQueries.Sources, sources],
   );
   const filteredSkillCount = useMemo(
-    () => countFilteredSkills(installedSkills, deferredSearchQueries.Skills),
-    [deferredSearchQueries.Skills, installedSkills],
+    () => countFilteredSkills(skillsForHub, deferredSearchQueries.Skills),
+    [deferredSearchQueries.Skills, skillsForHub],
+  );
+  const skillIconsById = useMemo(
+    () => buildHubSkillIconsById(skillsForHub, capabilityCatalog),
+    [capabilityCatalog, skillsForHub],
   );
   const filteredWorkfileCount = useMemo(() => {
     const q = deferredSearchQueries.Workfiles.trim().toLowerCase();
@@ -6119,6 +6237,32 @@ export function SourcesHub({
       ...current,
       [activeTab]: value,
     }));
+  }
+
+  async function handleWorkspaceSkillEnabledChange(
+    skill: HubSkillItem,
+    enabled: boolean,
+  ) {
+    if (!workspaceId || !skill.workspaceSkillId) {
+      return;
+    }
+
+    try {
+      await contentClient.updateWorkspaceSkill(workspaceId, skill.workspaceSkillId, {
+        enabled,
+      });
+      if (!enabled && selectedSkillIds.includes(skill.id)) {
+        onSkillSelectionChange(selectedSkillIds.filter((id) => id !== skill.id));
+      }
+      await onSkillsCatalogChange?.();
+    } catch (error) {
+      toast.error(
+        getErrorMessage(
+          error,
+          enabled ? "Failed to enable skill." : "Failed to disable skill.",
+        ),
+      );
+    }
   }
 
   selectedIdsRef.current = selectedIds;
@@ -6771,7 +6915,8 @@ export function SourcesHub({
     setIsLoadingMcp(true);
     setMcpLoadingError(null);
     try {
-      const result = await contentClient.listWorkspaceMcpInstalls(activeWorkspaceId);
+      const result =
+        await contentClient.listWorkspaceMcpInstalls(activeWorkspaceId);
       if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
         return;
       }
@@ -6857,7 +7002,8 @@ export function SourcesHub({
 
     if (sourceHydration.kind === "clear") {
       loadedSourcesWorkspaceIdRef.current = null;
-      initializedSourcesWorkspaceIdRef.current = sourceHydration.initializedWorkspaceId;
+      initializedSourcesWorkspaceIdRef.current =
+        sourceHydration.initializedWorkspaceId;
       expansionWorkspaceIdRef.current = workspaceId;
       expandedDirectoryIdsRef.current = new Set();
       userCollapsedDirectoryIdsRef.current = new Set();
@@ -6873,7 +7019,8 @@ export function SourcesHub({
     if (sourceHydration.kind === "skip") {
       return;
     }
-    initializedSourcesWorkspaceIdRef.current = sourceHydration.initializedWorkspaceId;
+    initializedSourcesWorkspaceIdRef.current =
+      sourceHydration.initializedWorkspaceId;
     const storedExpansion = readStoredSourceTreeExpansion(workspaceId);
     expansionWorkspaceIdRef.current = workspaceId;
     expandedDirectoryIdsRef.current = storedExpansion.expandedDirectoryIds;
@@ -6949,7 +7096,10 @@ export function SourcesHub({
         workspaceId,
       );
     if (cached) {
-      workspaceArtifactsCache.set(workspaceId, cloneArtifactItems(cached.items));
+      workspaceArtifactsCache.set(
+        workspaceId,
+        cloneArtifactItems(cached.items),
+      );
       workspaceArtifactsCursorCache.set(workspaceId, cached.nextCursor);
       setArtifacts(cloneArtifactItems(cached.items));
       setArtifactsNextCursor(cached.nextCursor);
@@ -8973,7 +9123,7 @@ export function SourcesHub({
                     Skills
                   </h3>
                   <span className="text-[10px] text-muted-foreground">
-                    {installedSkills.length} installed
+                    {skillsForHub.length} available
                   </span>
                   {deferredSearchQueries.Skills ? (
                     <span className="text-[10px] text-primary">
@@ -9001,9 +9151,13 @@ export function SourcesHub({
                 disabledToolNames={disabledToolNames}
                 onOpenSkill={setPreviewSkillCatalogId}
                 onSkillSelectionChange={onSkillSelectionChange}
+                onWorkspaceSkillEnabledChange={
+                  handleWorkspaceSkillEnabledChange
+                }
                 searchQuery={deferredSearchQuery}
                 selectedSkillIds={selectedSkillIds}
-                skills={installedSkills}
+                skillIconsById={skillIconsById}
+                skills={skillsForHub}
               />
             </section>
           )}

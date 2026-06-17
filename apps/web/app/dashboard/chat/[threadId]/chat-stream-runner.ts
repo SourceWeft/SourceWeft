@@ -8,8 +8,6 @@ import type {
   ThinkingStepRecord,
   ToolCallRecord,
 } from "../_components/chat-canvas";
-import { getToolConfirmationOutput } from "../_components/chat-canvas/tool-confirmation-state";
-import { isPendingToolConfirmation } from "@sourceweft/contracts";
 import type { ToolApprovalResume } from "@sourceweft/sdk";
 import type {
   ModelType,
@@ -36,6 +34,7 @@ import {
   buildStreamingThreadRequestBody,
   type RequestThinkingConfig,
 } from "./streaming-request-body";
+import { parseFinishLiveConfirmations } from "./chat-stream-confirmations";
 import { createStreamingEventParser } from "./streaming-event-parser";
 import {
   createStreamingRenderBuffer,
@@ -69,6 +68,7 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
   input?: unknown;
   jobId?: string;
   latencyMs?: number;
+  liveConfirmations?: unknown;
   mentionedSourceIds?: unknown;
   messageId?: string;
   output?: unknown;
@@ -107,6 +107,7 @@ type RunChatStreamInput = {
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   catalogKindEnabled: Partial<Record<ModelType, boolean>>;
   command?: ChatSendInput["command"];
+  invocation?: ChatSendInput["invocation"];
   content?: string;
   durableRunKey: string;
   getAssistantText: () => string;
@@ -154,7 +155,10 @@ type RunChatStreamInput = {
   normalizeThreadCommandRequest: (value: unknown) => unknown;
   onCreatedUserMessageId: (messageId: string) => void;
   onToolConfirmationRequested?: (input: {
+    assistantMessageId?: string | null;
     liveConfirmations: LiveToolConfirmation[];
+    parentMessageId?: string | null;
+    userMessageId?: string | null;
   }) => void;
   onPersistedAssistantMessageId: (messageId: string) => void;
   onPersistedUserMessageId: (messageId: string) => void;
@@ -266,6 +270,7 @@ export async function runChatStream(
     timezone: input.timezone,
     durableRunKey: input.durableRunKey,
     command: input.command,
+    invocation: input.invocation,
     skillIds: input.skillIds,
     searchEnabled: input.searchEnabled,
     tools: input.tools,
@@ -319,29 +324,6 @@ export async function runChatStream(
   let sawStreamError = false;
   let shouldPollThreadTitle = false;
   let titlePollScheduled = false;
-  const liveConfirmationsById = new Map<string, LiveToolConfirmation>();
-
-  function collectLiveToolConfirmation(event: ChatStreamEventPayload) {
-    const eventToolCall = input.toObjectRecord(event.toolCall);
-    const toolCallId =
-      typeof eventToolCall?.id === "string"
-        ? eventToolCall.id
-        : typeof event.id === "string"
-          ? event.id
-          : null;
-    if (!toolCallId) {
-      return;
-    }
-    const toolCall = input.streamToolCallsById.get(toolCallId);
-    if (!toolCall) {
-      return;
-    }
-    const confirmation = getToolConfirmationOutput(toolCall.output);
-    if (!confirmation || !isPendingToolConfirmation(confirmation)) {
-      return;
-    }
-    liveConfirmationsById.set(confirmation.id, { confirmation, toolCall });
-  }
 
   const pollThreadTitleJob = async (jobId: string) => {
     const startedAt = Date.now();
@@ -429,7 +411,8 @@ export async function runChatStream(
   const drainQueuedDeltasNow = () => {
     if (!streamRenderBuffer.hasQueuedDeltas()) {
       const latestContent =
-        input.getStreamingAssistantMessage()?.content ?? input.getAssistantText();
+        input.getStreamingAssistantMessage()?.content ??
+        input.getAssistantText();
       input.setLatestAssistantMessageContent(latestContent);
       return;
     }
@@ -644,7 +627,8 @@ export async function runChatStream(
           context: streamingEventHandlerContext,
           text: data.text,
           setAssistantText: input.setAssistantText,
-          setLatestAssistantMessageContent: input.setLatestAssistantMessageContent,
+          setLatestAssistantMessageContent:
+            input.setLatestAssistantMessageContent,
           setHasRenderedDelta: input.setHasRenderedDelta,
         });
       } else if (data.type === "text-interrupted") {
@@ -661,7 +645,6 @@ export async function runChatStream(
           setArtifactsRefreshKey: input.setArtifactsRefreshKey,
           setWorkfilesRefreshKey: input.setWorkfilesRefreshKey,
         });
-        collectLiveToolConfirmation(data);
       } else if (data.type === "thinking-step") {
         handleStreamingThinkingStep({
           context: streamingEventHandlerContext,
@@ -739,6 +722,7 @@ export async function runChatStream(
         });
       } else if (data.type === "finish") {
         finishReason = data.finishReason ?? null;
+        drainQueuedDeltasNow();
         const finishState = handleStreamingFinish({
           context: streamingEventHandlerContext,
           finishReason,
@@ -746,8 +730,22 @@ export async function runChatStream(
         receivedFinishEvent = finishState.receivedFinishEvent;
         streamEnded = finishState.streamEnded;
         if (data.finishReason === "tool_confirmation_requested") {
+          const liveConfirmations = parseFinishLiveConfirmations(
+            data.liveConfirmations,
+          );
           input.onToolConfirmationRequested?.({
-            liveConfirmations: [...liveConfirmationsById.values()],
+            assistantMessageId:
+              typeof data.messageId === "string" ? data.messageId : null,
+            liveConfirmations,
+            parentMessageId:
+              typeof data.parentMessageId === "string" ||
+              data.parentMessageId === null
+                ? data.parentMessageId
+                : null,
+            userMessageId:
+              typeof data.userMessageId === "string"
+                ? data.userMessageId
+                : null,
           });
         }
         break readLoop;

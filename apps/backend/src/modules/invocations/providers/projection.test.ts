@@ -1,26 +1,105 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "vitest";
-import { createBuiltinToolInvocationProvider } from "./builtin-tools";
+import { createSelectableInvocationRegistry } from "../registry";
+import {
+  createCapabilityToolInvocationProvider,
+  legacyCapabilityToolSelectableId,
+} from "./capability-tools";
+import { capabilityCommand } from "./capability-tool-fixtures";
 import { createSkillCommandInvocationProvider } from "./skills";
 import { createWorkspaceMcpInvocationProvider } from "./workspace-mcp";
 import { createWorkspaceMcpManifestSnapshot, createWorkspaceMcpInstall } from "../mcp-install";
 
-test("built-in tool provider projects selected tools as fixed tool choice", () => {
-  const provider = createBuiltinToolInvocationProvider({
-    tools: [
-      { name: "generate_image", label: "Generate image", description: "Create images" },
-      { name: "generate_pptx", label: "Generate presentation", description: "Create decks" },
+test("obsolete builtin tool compatibility provider is deleted", async () => {
+  await assert.rejects(
+    readFile(
+      join(
+        process.cwd(),
+        "src/modules/invocations/providers/builtin-tools.ts",
+      ),
+      "utf8",
+    ),
+  );
+});
+
+test("obsolete builtin tool terminology is restricted to documented compatibility", async () => {
+  const repositoryRoot = join(process.cwd(), "../..");
+  const searchedFiles = [
+    "apps/backend/src/modules/invocations/providers/capability-tools.ts",
+    "apps/backend/src/modules/invocations/providers/projection.test.ts",
+    "docs/architecture/backend-module-ownership.md",
+  ] as const;
+  const files = await Promise.all(
+    searchedFiles.map(async (path) => ({
+      path,
+      source: await readFile(join(repositoryRoot, path), "utf8"),
+    })),
+  );
+  const occurrences = files.flatMap((file) =>
+    [...file.source.matchAll(/builtin_tool/gu)].map(() => ({
+      path: file.path,
+    })),
+  );
+
+  assert.equal(
+    occurrences.every((occurrence) => searchedFiles.includes(occurrence.path)),
+    true,
+  );
+  assert.equal(
+    occurrences.some(
+      (occurrence) =>
+        occurrence.path ===
+        "apps/backend/src/modules/invocations/providers/capability-tools.ts",
+    ),
+    true,
+  );
+  assert.equal(
+    occurrences.some(
+      (occurrence) =>
+        occurrence.path === "docs/architecture/backend-module-ownership.md",
+    ),
+    true,
+  );
+  assert.match(
+    files.find(
+      (file) => file.path === "docs/architecture/backend-module-ownership.md",
+    )?.source ?? "",
+    /delete the `legacyIds` mapping for `builtin_tool\.\*` only\s+after web request payload tests cover the capability ID migration/u,
+  );
+});
+
+test("documented legacy tool ids resolve to capability-owned invocation definitions", () => {
+  const registry = createSelectableInvocationRegistry({
+    providers: [
+      createCapabilityToolInvocationProvider({
+        commands: [
+          capabilityCommand({
+            action: { kind: "tool", targetId: "generate_image" },
+            capabilityId: "sourceweft/generate-image",
+            contributionId: "generate_image",
+            id: "cap:sourceweft/generate-image:generate_image",
+            title: "Generate Image",
+          }),
+        ],
+      }),
     ],
   });
 
-  const definitions = provider.list();
-  assert.deepEqual(
-    definitions.map((definition) => definition.id),
-    ["builtin_tool.generate_image", "builtin_tool.generate_pptx"],
+  const definition = registry.resolve(
+    legacyCapabilityToolSelectableId("generate_image"),
   );
-  assert.equal(definitions[0]?.sourceRef.kind, "builtin_tool");
-  assert.equal(definitions[0]?.semantics.kind, "fixed_tool_choice");
-  assert.equal(definitions[0]?.semantics.kind === "fixed_tool_choice" ? definitions[0].semantics.target : null, "builtin_tool");
+
+  assert.ok(definition);
+  assert.equal(definition.sourceRef.kind, "capability_tool");
+  assert.equal(
+    definition.semantics.kind === "fixed_tool_choice"
+      ? definition.semantics.target
+      : null,
+    "capability_tool",
+  );
+  assert.equal(definition.id, "cap:sourceweft/generate-image:generate_image");
 });
 
 test("skill command provider projects commands as workflow context injection only", () => {

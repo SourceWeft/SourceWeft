@@ -1,8 +1,8 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { ContentBillingPort } from "./billing-port";
 import type { LlmExecutionConfig } from "./model-gateway-audit";
-import { computeProviderCost, type ProviderCostResult } from "./threads/turn/cost";
-import type { ModelProfileKind } from "./threads/model-settings";
+import { computeProviderCost, type ProviderCostResult } from "./provider-cost";
+import type { ModelProfileKind } from "./types";
 
 const MIN_BILLABLE_MODEL_CREDITS = 1;
 const NON_USER_BILLED_MODEL_KINDS = new Set<ModelProfileKind>([

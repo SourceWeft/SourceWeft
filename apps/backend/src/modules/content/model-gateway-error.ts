@@ -108,7 +108,7 @@ export function sanitizeClientErrorMessage(value: string) {
   return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
 }
 
-export function toContentServiceError(error: unknown): ContentError {
+export function toContentError(error: unknown): ContentError {
   const gatewayError = findGatewayError(error);
   if (gatewayError) {
     return contentErrorFromGatewayCode({

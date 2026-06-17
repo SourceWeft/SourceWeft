@@ -15,6 +15,7 @@ import type {
   ChatSendInput,
   ChatSkillItem,
   ChatToolName,
+  CapabilityCatalog,
   ImageModelCapabilities,
   PromptThinkingCapabilities,
   PromptThinkingSettings,
@@ -56,11 +57,13 @@ export function EmptyState({
   sourceMentionLoader,
   selectedSources,
   availableSkills,
+  capabilityCatalog,
   selectedSkillIds,
   selectedMcpInstallIds,
   selectedMcpToolIds,
   onRemoveSource,
   onSkillSelectionChange,
+  submitDisabled = false,
   searchEnabled,
   onSearchEnabledChange,
   thinkingCapabilities,
@@ -70,8 +73,11 @@ export function EmptyState({
   imageModelAvailable,
   imageModelAlias,
   notionConnectorId = null,
+  activeConnectorIds,
   disabledToolNames = [],
   onDisabledToolNamesChange,
+  onStopStreaming,
+  isStopping = false,
 }: {
   onSendMessage: (input: ChatSendInput) => void;
   composerInitialInput?: string;
@@ -80,11 +86,13 @@ export function EmptyState({
   sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources: SourceItem[];
   availableSkills?: ChatSkillItem[];
+  capabilityCatalog?: CapabilityCatalog | null;
   selectedSkillIds?: string[];
   selectedMcpInstallIds?: string[];
   selectedMcpToolIds?: string[];
   onRemoveSource: (id: string) => void;
   onSkillSelectionChange?: (skillIds: string[]) => void;
+  submitDisabled?: boolean;
   searchEnabled?: boolean;
   onSearchEnabledChange?: (enabled: boolean) => void;
   thinkingCapabilities?: PromptThinkingCapabilities;
@@ -94,8 +102,11 @@ export function EmptyState({
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
   notionConnectorId?: string | null;
+  activeConnectorIds?: Record<string, string | null>;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
+  onStopStreaming?: () => void;
+  isStopping?: boolean;
 }) {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -139,6 +150,8 @@ export function EmptyState({
             className="w-full"
             allSources={allSources}
             sourceMentionLoader={sourceMentionLoader}
+            submitDisabled={submitDisabled}
+            isStopping={isStopping}
             initialInput={composerInitialInput}
             inputKey={composerResetKey}
             onRemoveSource={onRemoveSource}
@@ -149,6 +162,7 @@ export function EmptyState({
               command,
               skillIds,
               content,
+              invocation,
             ) =>
               onSendMessage({
                 content: content ?? message.text.trim(),
@@ -157,13 +171,16 @@ export function EmptyState({
                 skillIds,
                 tools,
                 command,
+                invocation,
               })
             }
+            onStopStreaming={onStopStreaming}
             onSearchEnabledChange={onSearchEnabledChange}
             onThinkingSettingsChange={onThinkingSettingsChange}
             placeholder="Message your documents, links, or connected tools..."
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}
+            capabilityCatalog={capabilityCatalog}
             selectedSkillIds={selectedSkillIds}
             selectedMcpInstallIds={selectedMcpInstallIds}
             selectedMcpToolIds={selectedMcpToolIds}
@@ -174,6 +191,7 @@ export function EmptyState({
             imageModelAvailable={imageModelAvailable}
             imageModelAlias={imageModelAlias}
             notionConnectorId={notionConnectorId}
+            activeConnectorIds={activeConnectorIds}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={onDisabledToolNamesChange}
           />

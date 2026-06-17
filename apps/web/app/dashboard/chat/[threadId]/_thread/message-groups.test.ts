@@ -7,6 +7,7 @@ import {
   findActiveThreadRunMessage,
   findLatestActiveThreadRunMessage,
   hasRenderBlocksMetadata,
+  isCompletedPresentationArtifactToolCall,
   normalizeToolCallRecord,
   resolveRenderBlocksFromMetadata,
   resolveToolCallFromStreamEvent,
@@ -192,11 +193,11 @@ test("error messages are terminal even if thread run metadata is stale", () => {
 
 test("raw tool schema failures are sanitized for persisted error versions", () => {
   const rawError =
-    'Error invoking tool \'generate_pptx\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
+    'Error invoking tool \'publish_sandbox_artifact\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
   const userMessage = createMessage({
     id: "user-1",
     role: "user",
-    content: "Generate PPTX 生成费曼学习法的讲解PPT",
+    content: "PPT Deck 生成费曼学习法的讲解PPT",
   });
   const assistant = createMessage({
     id: "assistant-error",
@@ -219,13 +220,38 @@ test("raw tool schema failures are sanitized for persisted error versions", () =
 
   assert.equal(
     sanitizeClientErrorMessage(rawError),
-    "generate_pptx failed because the generated tool arguments were invalid. Please retry.",
+    "publish_sandbox_artifact failed because the generated tool arguments were invalid. Please retry.",
   );
   assert.equal(
     error,
-    "generate_pptx failed because the generated tool arguments were invalid. Please retry.",
+    "publish_sandbox_artifact failed because the generated tool arguments were invalid. Please retry.",
   );
-  assert.doesNotMatch(error ?? "", /kwargs|schema|brief|slides|expected string/i);
+  assert.doesNotMatch(
+    error ?? "",
+    /kwargs|schema|brief|slides|expected string/i,
+  );
+});
+
+test("completed presentation publisher with error is not treated as artifact card ready", () => {
+  assert.equal(
+    isCompletedPresentationArtifactToolCall(
+      {
+        id: "tool-1",
+        tool: "publish_sandbox_artifact",
+        input: {},
+        output: {
+          artifact_url:
+            "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+          status: "ready",
+        },
+        latencyMs: 10,
+        status: "completed",
+        error: "publish failed",
+      },
+      { type: "tool-call-result", id: "tool-1" },
+    ),
+    false,
+  );
 });
 
 test("terminal failed messages do not restore stale active thread runs", () => {
@@ -388,15 +414,19 @@ test("notion confirmation tool calls keep confirmation UI data but hide request 
   );
   assert.equal(
     (
-      (toolCall?.output as Record<string, unknown> | null)
-        ?.preview as Record<string, unknown>
+      (toolCall?.output as Record<string, unknown> | null)?.preview as Record<
+        string,
+        unknown
+      >
     )?.title,
     "Create Notion page: 服务器配置查询总结",
   );
   assert.equal(
     "requestJson" in
-      ((toolCall?.output as Record<string, unknown> | null)
-        ?.preview as Record<string, unknown>),
+      ((toolCall?.output as Record<string, unknown> | null)?.preview as Record<
+        string,
+        unknown
+      >),
     false,
   );
   assert.equal(
@@ -646,14 +676,17 @@ test("assistant versions are indexable by persisted message id after edits", () 
     ])
       .filter((group) => group.role === "assistant")
       .flatMap((group) =>
-        group.versions.map((version, branchIndex) => [
-          version.id,
-          {
-            branchIndex,
-            groupId: group.groupId,
-            version,
-          },
-        ] as const),
+        group.versions.map(
+          (version, branchIndex) =>
+            [
+              version.id,
+              {
+                branchIndex,
+                groupId: group.groupId,
+                version,
+              },
+            ] as const,
+        ),
       ),
   );
 
@@ -663,7 +696,7 @@ test("assistant versions are indexable by persisted message id after edits", () 
   assert.equal(entry?.branchIndex, 1);
 });
 
-test("old assistant messages without renderBlocks metadata preserve content and tool traces", () => {
+test("old assistant messages without renderBlocks metadata do not synthesize render blocks", () => {
   const assistant = createMessage({
     id: "assistant-old",
     role: "assistant",
@@ -690,6 +723,16 @@ test("old assistant messages without renderBlocks metadata preserve content and 
           toolCallId: "tool-1",
           updatedAt: new Date(0).toISOString(),
         },
+        {
+          createdAt: new Date(1).toISOString(),
+          id: "trace-step-1",
+          items: ["checked selected sources"],
+          kind: "step",
+          order: 2,
+          status: "completed",
+          title: "Checked sources",
+          updatedAt: new Date(1).toISOString(),
+        },
       ],
     },
   });
@@ -697,11 +740,14 @@ test("old assistant messages without renderBlocks metadata preserve content and 
   const version = buildVersionedMessageGroups([assistant])[0]?.versions[0];
 
   assert.equal(version?.content, "Old answer body remains visible.");
-  assert.equal(version?.renderBlocks, undefined);
+  assert.deepEqual(version?.renderBlocks, []);
   assert.equal(version?.toolCalls?.[0]?.id, "tool-1");
   const tracePart = version?.traceParts?.[0];
   assert.equal(tracePart?.kind, "tool");
-  assert.equal(tracePart?.kind === "tool" ? tracePart.toolCallId : undefined, "tool-1");
+  assert.equal(
+    tracePart?.kind === "tool" ? tracePart.toolCallId : undefined,
+    "tool-1",
+  );
 });
 
 test("renderBlocks metadata presence is explicit", () => {
@@ -711,13 +757,82 @@ test("renderBlocks metadata presence is explicit", () => {
   assert.deepEqual(resolveRenderBlocksFromMetadata({ renderBlocks: [] }), []);
   assert.deepEqual(
     resolveRenderBlocksFromMetadata({
-      renderBlocks: [{ id: "text-1", text: "Partial answer", type: "text" }],
+      renderBlocks: [
+        {
+          id: "artifact-1",
+          placement: "terminal",
+          toolCallId: "tool-1",
+          type: "generated_presentation",
+        },
+        { id: "text-1", text: "Partial answer", type: "text" },
+      ],
     }),
-    [{ id: "text-1", text: "Partial answer", type: "text" }],
+    [
+      {
+        id: "artifact-1",
+        placement: "terminal",
+        toolCallId: "tool-1",
+        type: "generated_presentation",
+      },
+      { id: "text-1", text: "Partial answer", type: "text" },
+    ],
   );
 });
 
-test("empty renderBlocks metadata does not remove interrupted assistant content", () => {
+test("resolveRenderBlocksFromMetadata ignores legacy trace parts and content", () => {
+  assert.deepEqual(
+    resolveRenderBlocksFromMetadata(
+      {
+        traceParts: [
+          {
+            createdAt: new Date(0).toISOString(),
+            durationMs: 2400,
+            id: "reasoning-1",
+            kind: "reasoning",
+            order: 0,
+            text: "I should search first.",
+            updatedAt: new Date(0).toISOString(),
+          },
+          {
+            createdAt: new Date(1).toISOString(),
+            id: "tool-1",
+            input: {},
+            kind: "tool",
+            order: 1,
+            status: "completed",
+            tool: "web_search",
+            toolCallId: "call-1",
+            updatedAt: new Date(1).toISOString(),
+          },
+        ],
+      },
+      { content: "Final answer." },
+    ),
+    [],
+  );
+});
+
+test("resolveRenderBlocksFromMetadata ignores legacy tool calls without render blocks", () => {
+  assert.deepEqual(
+    resolveRenderBlocksFromMetadata(
+      {
+        toolCalls: [
+          {
+            id: "call-1",
+            input: {},
+            output: null,
+            status: "completed",
+            tool: "web_search",
+          },
+        ],
+      },
+      { content: "Final answer." },
+    ),
+    [],
+  );
+});
+
+test("empty renderBlocks metadata stays empty for interrupted assistant content", () => {
   const assistant = createMessage({
     id: "assistant-interrupted",
     role: "assistant",

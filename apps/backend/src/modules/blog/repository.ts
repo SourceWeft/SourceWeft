@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, notInArray } from "drizzle-orm";
-import { db } from "../../shared/database";
-import { blogAssets, blogPosts } from "../../shared/db/schema";
+import { blogAssets, blogPosts, db } from "@sourceweft/db";
 import type { BlogLocale } from "./locales";
 import type { UploadedBlogAsset } from "./public-storage";
 
@@ -290,3 +289,4 @@ export async function pruneBlogAssets(input: {
       ),
     );
 }
+

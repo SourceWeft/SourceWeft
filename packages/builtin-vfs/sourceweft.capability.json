@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/vfs",
+  "kind": "vfs",
+  "name": "SourceWeft VFS",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "vfs": [
+    {
+      "id": "workspace",
+      "title": "Workspace VFS",
+      "mounts": [
+        "/kb",
+        "/workfiles",
+        "/skills"
+      ],
+      "operations": [
+        "read",
+        "write",
+        "search"
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { ModelPricing } from "../db/schema-types";
+import type { ModelPricing } from "@sourceweft/db";
 
 export type LiteLLMEntry = {
   input_cost_per_token?: number | null;
@@ -80,11 +80,13 @@ function normalizeModelPart(alias: string): string {
   return (parts.at(-1) ?? trimmed).toLowerCase();
 }
 
-const LITELLM_PRICING_URL =
+const DEFAULT_LITELLM_PRICING_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
-export async function fetchLiteLLMPricing(): Promise<LiteLLMData> {
-  const response = await fetch(LITELLM_PRICING_URL);
+export async function fetchLiteLLMPricing(
+  pricingUrl: string = DEFAULT_LITELLM_PRICING_URL,
+): Promise<LiteLLMData> {
+  const response = await fetch(pricingUrl);
   if (!response.ok) {
     throw new Error(`Failed to fetch LiteLLM pricing: ${response.statusText}`);
   }
@@ -119,6 +121,16 @@ export function resolveLiteLLMProviderForGateway(input: {
   if (providerKind === "gemini") return "gemini";
   if (providerKind === "anthropic") return "anthropic";
 
+  // Fallback: attempt to identify provider from the configured base URL.
+  // This heuristic is fragile — gateway configs should set a known providerKind.
+  return resolveLiteLLMProviderFromBaseUrl(baseUrl, providerName, providerKind);
+}
+
+function resolveLiteLLMProviderFromBaseUrl(
+  baseUrl: string,
+  providerName: string | null,
+  _providerKind: string | null,
+): string | null {
   if (baseUrl.includes("api.together.ai")) return "together_ai";
   if (baseUrl.includes("api.deepinfra.com")) return "deepinfra";
   if (baseUrl.includes("api.siliconflow.cn")) return "siliconflow";

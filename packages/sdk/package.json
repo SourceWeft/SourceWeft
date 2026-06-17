@@ -10,6 +10,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@sourceweft/agent-tool-registry": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/market-contracts": "workspace:*"
   },

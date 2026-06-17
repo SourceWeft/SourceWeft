@@ -64,15 +64,16 @@ function DashboardSkeletonContentForPath({
 }: {
   pathname?: string | null;
 }) {
+  if (!pathname) {
+    // Pathname not yet resolved — show a neutral chat-like skeleton
+    // since chat is the primary dashboard surface.
+    return <ChatSkeletonContent variant="new" />;
+  }
   if (isChatIndexRoute(pathname)) {
     return <ChatSkeletonContent variant="new" />;
   }
   if (isChatRoute(pathname)) {
-    return (
-      <ChatSkeletonContent
-        variant={isChatIndexRoute(pathname) ? "new" : "thread"}
-      />
-    );
+    return <ChatSkeletonContent variant="thread" />;
   }
   if (pathname?.startsWith("/dashboard/observability")) {
     return <ObservabilitySkeletonContent />;
@@ -90,7 +91,9 @@ function DashboardSkeletonContentForPath({
 }
 
 function DashboardSidebarSkeleton({ pathname }: { pathname?: string | null }) {
-  const hasChatPanel = isChatRoute(pathname);
+  // When pathname is unknown (null/empty), default to showing the chat panel
+  // since chat is the primary dashboard surface.
+  const hasChatPanel = pathname ? isChatRoute(pathname) : true;
 
   return (
     <aside
@@ -523,10 +526,10 @@ function SourcesHubSkeletonContent({
   return (
     <aside
       className={cx(
-        "flex h-full shrink-0 flex-col overflow-x-hidden bg-background",
+        "h-full shrink-0 flex-col overflow-x-hidden bg-background",
         className ??
           (variant === "drawer"
-            ? "w-full min-w-0"
+            ? "flex w-full min-w-0"
             : "hidden w-[410px] border-l md:flex"),
       )}
     >
@@ -610,8 +613,10 @@ export function SourcesHubPanelSkeleton({
 
 function ChatSkeletonContent({
   variant = "thread",
+  showHub = true,
 }: {
   variant?: "new" | "thread";
+  showHub?: boolean;
 }) {
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -619,7 +624,7 @@ function ChatSkeletonContent({
         <ChatHeaderSkeleton />
         <ChatCanvasSkeletonContent variant={variant} />
       </div>
-      <SourcesHubSkeletonContent />
+      {showHub ? <SourcesHubSkeletonContent /> : null}
     </div>
   );
 }
@@ -631,7 +636,7 @@ export function ChatRouteSkeleton({
 }) {
   return (
     <DashboardFrame>
-      <ChatSkeletonContent variant={variant} />
+      <ChatSkeletonContent showHub={false} variant={variant} />
     </DashboardFrame>
   );
 }

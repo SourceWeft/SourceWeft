@@ -1,211 +1,74 @@
-export type ConnectorType = string;
+// ---------------------------------------------------------------------------
+// Re-exports from @sourceweft/contracts (canonical type definitions)
+// ---------------------------------------------------------------------------
 
-export type ConnectorActionRiskLevel = "low" | "medium" | "high";
-export type ConnectorActionVisibility = "agent" | "internal";
-export type ConnectorActionCapability =
-  | "connector_read"
-  | "connector_write"
-  | "connector_create"
-  | "connector_update"
-  | "connector_delete"
-  | "connector_append"
-  | "connector_upload"
-  | "connector_move"
-  | "connector_archive"
-  | "connector_comment"
-  | "artifact";
-export type ConnectorActionRunStatus =
-  | "proposed"
-  | "approved"
-  | "rejected"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "canceled";
-export type ConnectorOAuthAccountStatus =
-  | "active"
-  | "reauth_required"
-  | "revoked"
-  | "disabled";
-export type ConnectorStatus = "active" | "paused" | "error" | "disabled";
-export type ConnectorSyncRunTriggerType =
-  | "manual"
-  | "scheduled"
-  | "webhook"
-  | "backfill";
-export type ConnectorSyncRunStatus =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "canceled"
-  | "skipped";
-export type ConnectorWebhookEventStatus =
-  | "received"
-  | "queued"
-  | "processed"
-  | "ignored"
-  | "failed";
+import type {
+  ConnectorActionCapability,
+  ConnectorActionInput,
+  ConnectorActionRiskLevel,
+  ConnectorActionResult,
+  ConnectorActionRunStatus,
+  ConnectorActionSpec,
+  ConnectorActionVisibility,
+  ConnectorAdapter,
+  ConnectorDirectoryNode,
+  ConnectorDiscoverInput,
+  ConnectorExtractInput,
+  ConnectorExtractedContent,
+  ConnectorItem,
+  ConnectorManifest,
+  ConnectorOAuthAccountStatus,
+  ConnectorResourceSpec,
+  ConnectorStatus,
+  ConnectorSyncReadinessResult,
+  ConnectorSyncRunStatus,
+  ConnectorSyncRunTriggerType,
+  ConnectorType,
+  ConnectorWebhookPayload,
+  ConnectorWebhookTarget,
+  ConnectorWebhookTargetAction,
+  ConnectorWebhookVerifyInput,
+  ConnectorWebhookEventStatus,
+  OAuthCodeExchangeInput,
+  OAuthRefreshInput,
+  OAuthTokenSet,
+} from "@sourceweft/contracts";
 
-export type ConnectorManifest = {
-  type: ConnectorType;
-  displayName: string;
-  auth: {
-    kind: "oauth2";
-    authorizationUrl: string;
-    tokenUrl: string;
-    scopes: string[];
-    redirectUri?: string;
-    authorizationParams?: Record<string, string>;
-    sendScope?: boolean;
-  };
-  sync: {
-    supportsIncremental: boolean;
-    defaultFrequencyMinutes: number;
-    resources: ConnectorResourceSpec[];
-  };
-  actions: ConnectorActionSpec[];
-  configSchema: Record<string, unknown>;
+export type {
+  ConnectorActionCapability,
+  ConnectorActionInput,
+  ConnectorActionRiskLevel,
+  ConnectorActionResult,
+  ConnectorActionRunStatus,
+  ConnectorActionSpec,
+  ConnectorActionVisibility,
+  ConnectorAdapter,
+  ConnectorDirectoryNode,
+  ConnectorDiscoverInput,
+  ConnectorExtractInput,
+  ConnectorExtractedContent,
+  ConnectorItem,
+  ConnectorManifest,
+  ConnectorOAuthAccountStatus,
+  ConnectorResourceSpec,
+  ConnectorStatus,
+  ConnectorSyncReadinessResult,
+  ConnectorSyncRunStatus,
+  ConnectorSyncRunTriggerType,
+  ConnectorType,
+  ConnectorWebhookPayload,
+  ConnectorWebhookTarget,
+  ConnectorWebhookTargetAction,
+  ConnectorWebhookVerifyInput,
+  ConnectorWebhookEventStatus,
+  OAuthCodeExchangeInput,
+  OAuthRefreshInput,
+  OAuthTokenSet,
 };
 
-export type ConnectorResourceSpec = {
-  type: string;
-  displayName: string;
-  supportsDeleteDetection: boolean;
-};
-
-export type ConnectorActionSpec = {
-  type: string;
-  displayName: string;
-  riskLevel: ConnectorActionRiskLevel;
-  requiresApproval: boolean;
-  inputSchema: Record<string, unknown>;
-  agentToolName?: string;
-  description?: string;
-  visibility?: ConnectorActionVisibility;
-  capabilities?: ConnectorActionCapability[];
-  resultSchema?: Record<string, unknown>;
-};
-
-export type OAuthCodeExchangeInput = {
-  code: string;
-  redirectUri: string;
-  scopes: string[];
-};
-
-export type OAuthRefreshInput = {
-  refreshToken: string;
-  scopes: string[];
-};
-
-export type OAuthTokenSet = {
-  accessToken: string;
-  refreshToken?: string | null;
-  expiresAt?: Date | null;
-  scopes?: string[];
-  providerAccountId?: string | null;
-  providerAccountEmail?: string | null;
-  displayName?: string | null;
-};
-
-export type ConnectorItem = {
-  externalId: string;
-  externalUri: string | null;
-  title: string;
-  mimeType: string | null;
-  sizeBytes: number | null;
-  externalUpdatedAt: Date | null;
-  contentHash: string | null;
-  metadata: Record<string, unknown>;
-};
-
-export type ConnectorWebhookVerifyInput = {
-  headers: Record<string, string>;
-  rawBody: string;
-  query: Record<string, string | undefined>;
-};
-
-export type ConnectorWebhookEvent = {
-  providerEventId: string;
-  eventType: string;
-  objectId: string | null;
-  objectType: string | null;
-  workspaceHint?: string | null;
-  connectorId?: string | null;
-  metadata: Record<string, unknown>;
-  rawPayload: Record<string, unknown>;
-};
-
-export type ConnectorWebhookTargetAction =
-  | "sync"
-  | "archive_source"
-  | "record_only";
-
-export type ConnectorWebhookTarget = {
-  action: ConnectorWebhookTargetAction;
-  externalId?: string | null;
-  objectId?: string | null;
-  objectType?: string | null;
-  reason?: string | null;
-  metadata?: Record<string, unknown>;
-};
-
-export type ConnectorExtractedContent = {
-  item: ConnectorItem;
-  contentText: string;
-  markdown?: string;
-  parentExternalId?: string | null;
-  directoryPath?: ConnectorDirectoryNode[];
-};
-
-export type ConnectorDirectoryNode = {
-  externalId: string;
-  title: string;
-  externalUri?: string | null;
-  metadata?: Record<string, unknown>;
-};
-
-export type ConnectorDiscoverInput = {
-  teamId: string;
-  workspaceId: string;
-  connectorId: string;
-  connectorType: ConnectorType;
-  connectorName?: string;
-  config: Record<string, unknown>;
-  accessToken: string;
-  cursor?: Record<string, unknown> | null;
-};
-
-export type ConnectorSyncReadinessResult = {
-  ready: boolean;
-  reason?: string;
-  message?: string;
-  metadata?: Record<string, unknown>;
-};
-
-export type ConnectorExtractInput = ConnectorDiscoverInput & {
-  item: ConnectorItem;
-};
-
-export type ConnectorActionInput = {
-  teamId: string;
-  workspaceId: string;
-  connectorId: string;
-  connectorType: ConnectorType;
-  actionType: string;
-  request: Record<string, unknown>;
-  config: Record<string, unknown>;
-  accessToken: string;
-  idempotencyKey: string;
-};
-
-export type ConnectorActionResult = {
-  externalId?: string | null;
-  rawResponseJson?: unknown;
-  result: Record<string, unknown>;
-  shouldResync?: boolean;
-  resyncExternalIds?: string[];
-};
+// ---------------------------------------------------------------------------
+// Backend-specific record / mapped types
+// ---------------------------------------------------------------------------
 
 export type ConnectorActivityKind = "sync" | "action" | "webhook";
 
@@ -248,25 +111,6 @@ export type ConnectorWebhookEventRecord = {
   createdAt: string;
   updatedAt: string;
 };
-
-export interface ConnectorAdapter {
-  getManifest(): ConnectorManifest;
-  exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
-  refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
-  checkSyncReadiness?(
-    input: ConnectorDiscoverInput,
-  ): Promise<ConnectorSyncReadinessResult>;
-  discover(input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem>;
-  extract(input: ConnectorExtractInput): Promise<ConnectorExtractedContent>;
-  executeAction(input: ConnectorActionInput): Promise<ConnectorActionResult>;
-  verifyWebhook?(input: ConnectorWebhookVerifyInput): Promise<void>;
-  parseWebhookEvent?(
-    input: ConnectorWebhookVerifyInput,
-  ): Promise<ConnectorWebhookEvent>;
-  mapWebhookEventToSyncTargets?(
-    event: ConnectorWebhookEvent,
-  ): Promise<ConnectorWebhookTarget[]>;
-}
 
 export type ConnectorOAuthAccountRecord = {
   id: string;

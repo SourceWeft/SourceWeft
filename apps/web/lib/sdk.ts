@@ -6,6 +6,7 @@ import {
   HttpClient,
   JobsClient,
   LlmObservabilityClient,
+  UserSettingsClient,
   WorkspaceClient,
 } from "@sourceweft/sdk";
 import { apiBaseUrl } from "./api-base-url";
@@ -22,5 +23,6 @@ export const billingClient = new BillingClient(httpClient);
 export const connectorsClient = new ConnectorsClient(httpClient);
 export const contentClient = new ContentClient(httpClient);
 export const dashboardClient = new DashboardClient(httpClient);
+export const userSettingsClient = new UserSettingsClient(httpClient);
 export const workspaceClient = new WorkspaceClient(httpClient);
 export const llmObservabilityClient = new LlmObservabilityClient(httpClient);

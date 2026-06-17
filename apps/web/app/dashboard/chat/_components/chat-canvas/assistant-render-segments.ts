@@ -1,6 +1,8 @@
-import type { MessageRenderBlock, MessageVersion } from "./types";
+import type { MessageRenderBlock, ToolCallRecord } from "./types";
 
 export type AssistantAnswerBlock = Extract<MessageRenderBlock, { type: "text" }>;
+
+export type AssistantTerminalBlock = MessageRenderBlock;
 
 export type AssistantWorkflowBlock = MessageRenderBlock;
 
@@ -14,52 +16,83 @@ export type AssistantRenderSegment =
       blocks: AssistantWorkflowBlock[];
       id: string;
       type: "workflow";
+    }
+  | {
+      blocks: AssistantTerminalBlock[];
+      id: string;
+      type: "terminal";
     };
+
+function appendAnswerSegment(
+  segments: AssistantRenderSegment[],
+  block: AssistantAnswerBlock,
+) {
+  const last = segments.at(-1);
+  if (last?.type === "answer") {
+    last.blocks.push(block);
+    return;
+  }
+  segments.push({
+    blocks: [block],
+    id: `answer-${segments.length + 1}`,
+    type: "answer",
+  });
+}
+
+function appendWorkflowSegment(
+  segments: AssistantRenderSegment[],
+  block: AssistantWorkflowBlock,
+) {
+  const last = segments.at(-1);
+  if (last?.type === "workflow") {
+    last.blocks.push(block);
+    return;
+  }
+  segments.push({
+    blocks: [block],
+    id: `workflow-${segments.length + 1}`,
+    type: "workflow",
+  });
+}
 
 export function buildAssistantRenderSegments(
   blocks: MessageRenderBlock[],
-  options: { includeTrailingTextInWorkflow?: boolean } = {},
 ): AssistantRenderSegment[] {
   const segments: AssistantRenderSegment[] = [];
-  let lastWorkflowBlockIndex = options.includeTrailingTextInWorkflow
-    ? blocks.length - 1
-    : -1;
+  const inlineBlocks: MessageRenderBlock[] = [];
+  const terminalBlocks: MessageRenderBlock[] = [];
 
-  if (!options.includeTrailingTextInWorkflow) {
-    for (let index = blocks.length - 1; index >= 0; index -= 1) {
-      if (blocks[index]?.type !== "text") {
-        lastWorkflowBlockIndex = index;
-        break;
-      }
+  for (const block of blocks) {
+    if (block.placement === "terminal") {
+      terminalBlocks.push(block);
+      continue;
+    }
+    inlineBlocks.push(block);
+  }
+
+  let lastWorkflowBlockIndex = -1;
+
+  for (let index = inlineBlocks.length - 1; index >= 0; index -= 1) {
+    if (inlineBlocks[index]?.type !== "text") {
+      lastWorkflowBlockIndex = index;
+      break;
     }
   }
 
-  for (const [index, block] of blocks.entries()) {
+  for (const [index, block] of inlineBlocks.entries()) {
     if (block.type === "text" && index > lastWorkflowBlockIndex) {
-      const type = "answer";
-      const last = segments.at(-1);
-      if (last?.type === "answer") {
-        last.blocks.push(block);
-        continue;
-      }
-      segments.push({
-        blocks: [block],
-        id: `${type}-${segments.length + 1}`,
-        type,
-      });
+      appendAnswerSegment(segments, block);
       continue;
     }
 
-    const type = "workflow";
-    const last = segments.at(-1);
-    if (last?.type === "workflow") {
-      last.blocks.push(block);
-      continue;
-    }
+    appendWorkflowSegment(segments, block);
+  }
+
+  if (terminalBlocks.length > 0) {
     segments.push({
-      blocks: [block],
-      id: `${type}-${segments.length + 1}`,
-      type,
+      blocks: terminalBlocks,
+      id: `terminal-${segments.length + 1}`,
+      type: "terminal",
     });
   }
 
@@ -81,7 +114,7 @@ export function formatWorkedDuration(durationMs: number) {
 
 export function inferWorkflowDurationMs(input: {
   blocks: AssistantWorkflowBlock[];
-  version: MessageVersion;
+  toolCalls?: ToolCallRecord[];
 }) {
   const reasoningDurationMs = input.blocks.reduce((sum, block) => {
     if (block.type !== "reasoning") {
@@ -95,7 +128,7 @@ export function inferWorkflowDurationMs(input: {
     if (block.type !== "tool") {
       return sum;
     }
-    const latencyMs = input.version.toolCalls?.find(
+    const latencyMs = input.toolCalls?.find(
       (toolCall) => toolCall.id === block.toolCallId,
     )?.latencyMs;
     return typeof latencyMs === "number" && Number.isFinite(latencyMs)
@@ -111,7 +144,7 @@ export function getWorkflowHeaderLabel(input: {
   isRunning: boolean;
 }) {
   if (input.isRunning) {
-    return "Thinking...";
+    return "Working";
   }
 
   if (

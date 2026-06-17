@@ -129,7 +129,19 @@ function sandboxConfirmation(
     execution: {
       providerStatus: "not_executed",
       executor: { kind: "sandbox_tool_call" },
-      sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+      sourceweft: {
+        hitlInterruptId: "sandbox-interrupt-1",
+        actionIndex: 0,
+        toolName: "execute",
+        requestJson: { command: "npm test" },
+        hitlActionIndex: 0,
+        hitlActionToolName: "execute",
+        hitlActionRequestJson: { command: "npm test" },
+        toolCallId: "sandbox_call_1",
+        sandboxExecuteToolCallId: "sandbox_call_1",
+        sourceUserMessageId: "user-message-1",
+        sourceAssistantMessageId: "assistant-message-1",
+      },
     },
     status: "proposed",
     userMessage: "Waiting for sandbox action confirmation.",
@@ -138,7 +150,19 @@ function sandboxConfirmation(
 }
 
 test("ToolConfirmationRunner forwards edited args to MCP approvals", async () => {
-  const confirmation = mcpConfirmation();
+  const confirmation = {
+    ...mcpConfirmation(),
+    execution: {
+      ...mcpConfirmation().execution,
+      sourceweft: {
+        hitlInterruptId: "interrupt-1",
+        actionIndex: 0,
+        toolName: "mcp__github__create_issue",
+        requestJson: { title: "Create issue" },
+        toolCallId: "call-mcp-1",
+      },
+    },
+  };
   mocks.mcpRespondToApproval.mockResolvedValue({
     confirmation,
     resume: { decisions: [{ type: "approve" }] },
@@ -163,7 +187,10 @@ test("ToolConfirmationRunner forwards edited args to MCP approvals", async () =>
     editedArgs: { title: "Edited" },
     note: "Looks good",
   });
-  assert.deepEqual(result.resume, { decisions: [{ type: "approve" }] });
+  assert.deepEqual(result.resume, {
+    decisions: [{ type: "approve" }],
+    sourceweft: { hitlInterruptId: "interrupt-1" },
+  });
 });
 
 test("ToolConfirmationRunner resumes approved sandbox HITL edits locally", async () => {
@@ -175,7 +202,7 @@ test("ToolConfirmationRunner resumes approved sandbox HITL edits locally", async
     confirmationId: "sandbox_call_1",
     confirmation,
     decision: "approve",
-    editedArgs: { command: "pnpm test", workingDir: "/workspace/work" },
+    editedArgs: { command: "pnpm test", workingDir: "/workspace/ppt-deck" },
   });
 
   assert.equal(result.confirmation.status, "approved");
@@ -185,11 +212,28 @@ test("ToolConfirmationRunner resumes approved sandbox HITL edits locally", async
         type: "edit",
         editedAction: {
           name: "execute",
-          args: { command: "pnpm test", workingDir: "/workspace/work" },
+          args: { command: "pnpm test", workingDir: "/workspace/ppt-deck" },
         },
       },
     ],
-    sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+    sourceweft: {
+      confirmationId: "sandbox_call_1",
+      hitlInterruptId: "sandbox-interrupt-1",
+      sandboxExecuteToolCallId: "sandbox_call_1",
+      sourceUserMessageId: "user-message-1",
+      sourceAssistantMessageId: "assistant-message-1",
+      sandboxActions: [
+        {
+          toolName: "execute",
+          toolCallId: "sandbox_call_1",
+          requestJson: { command: "pnpm test", workingDir: "/workspace/ppt-deck" },
+          confirmationId: "sandbox_call_1",
+          hitlInterruptId: "sandbox-interrupt-1",
+          sourceUserMessageId: "user-message-1",
+          sourceAssistantMessageId: "assistant-message-1",
+        },
+      ],
+    },
   });
   assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
 });
@@ -209,7 +253,24 @@ test("ToolConfirmationRunner resumes approved sandbox HITL without edits locally
   assert.equal(result.confirmation.action.status, "approved");
   assert.deepEqual(result.resume, {
     decisions: [{ type: "approve" }],
-    sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+    sourceweft: {
+      confirmationId: "sandbox_call_1",
+      hitlInterruptId: "sandbox-interrupt-1",
+      sandboxExecuteToolCallId: "sandbox_call_1",
+      sourceUserMessageId: "user-message-1",
+      sourceAssistantMessageId: "assistant-message-1",
+      sandboxActions: [
+        {
+          toolName: "execute",
+          toolCallId: "sandbox_call_1",
+          requestJson: { command: "npm test" },
+          confirmationId: "sandbox_call_1",
+          hitlInterruptId: "sandbox-interrupt-1",
+          sourceUserMessageId: "user-message-1",
+          sourceAssistantMessageId: "assistant-message-1",
+        },
+      ],
+    },
   });
   assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
 });
@@ -234,7 +295,12 @@ test("ToolConfirmationRunner uses default sandbox rejection note locally", async
         message: "User rejected the sandbox action in SourceWeft.",
       },
     ],
-    sourceweft: { hitlInterruptId: "sandbox-interrupt-1" },
+    sourceweft: {
+      confirmationId: "sandbox_call_2",
+      hitlInterruptId: "sandbox-interrupt-1",
+      sourceUserMessageId: "user-message-1",
+      sourceAssistantMessageId: "assistant-message-1",
+    },
   });
   assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
 });
@@ -353,7 +419,7 @@ test("ToolConfirmationRunner resumes rejected sandbox HITL locally", async () =>
         outputs: [
           {
             sandboxPath: "/workspace/output/report.md",
-            target: { kind: "workfile", path: "/work/report.md" },
+            target: { kind: "workfile", path: "/workfiles/report.md" },
           },
         ],
       },
@@ -381,9 +447,7 @@ test("ToolConfirmationRunner resumes rejected sandbox HITL locally", async () =>
 
   assert.equal(result.confirmation.status, "rejected");
   assert.deepEqual(result.resume, {
-    decisions: [
-      { type: "reject", message: "Do not persist this output." },
-    ],
+    decisions: [{ type: "reject", message: "Do not persist this output." }],
   });
   assert.equal(mocks.mcpRespondToApproval.mock.calls.length, 0);
 });

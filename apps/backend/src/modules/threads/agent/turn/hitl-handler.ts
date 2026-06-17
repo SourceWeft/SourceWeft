@@ -1,0 +1,637 @@
+import type {
+  ToolApprovalResume,
+  ToolApprovalResumeDecision,
+  ToolConfirmationRequest,
+} from "@sourceweft/contracts";
+import type {
+  ConnectorActionApprovalCursor,
+  ConnectorActionExecutionCursor,
+} from "../../../connectors/agent-tool-idempotency";
+import { peekConnectorActionExecutionRef } from "../../../connectors/agent-tool-idempotency";
+import { createConnectorActionApprovalRequest } from "../../../connectors/agent-tools";
+import { mcpService } from "../../../mcp";
+import { ContentError } from "../../../content/errors";
+import {
+  getAgentToolDefinition,
+  isAgentToolDomain,
+} from "@sourceweft/agent-tool-registry";
+import { toObjectRecord } from "./content";
+import { parseToolArgs, sameToolArgs } from "./output-normalizer";
+import type { ObservedAgentToolCall } from "./tool-tracker";
+
+export type HitlActionRequest = {
+  args: Record<string, unknown>;
+  description?: string;
+  name: string;
+};
+
+export type HitlReviewConfig = {
+  actionName: string;
+  allowedDecisions: Array<"approve" | "edit" | "reject">;
+  argsSchema?: Record<string, unknown>;
+};
+
+export type HitlInterruptRequest = {
+  id?: string;
+  actionRequests: HitlActionRequest[];
+  reviewConfigs: HitlReviewConfig[];
+};
+
+export type HitlActionBinding = {
+  actionIndex: number;
+  hitlInterruptId?: string;
+  requestJson: Record<string, unknown>;
+  sourceUserMessageId?: string;
+  sourceAssistantMessageId?: string;
+  toolCallId: string;
+  toolName: string;
+};
+
+type SandboxActionExecutionRef = NonNullable<
+  NonNullable<ToolApprovalResume["sourceweft"]>["sandboxActions"]
+>[number];
+
+export type SandboxActionExecutionCursor = {
+  consumedActionKeys?: Set<string>;
+  consumedToolCallIds?: Set<string>;
+  refs: SandboxActionExecutionRef[];
+  value: number;
+};
+
+function sandboxActionExecutionRefKey(ref: SandboxActionExecutionRef) {
+  return `${ref.toolName}:${ref.toolCallId}`;
+}
+
+function preferObservedToolCall(
+  existing: ObservedAgentToolCall,
+  candidate: ObservedAgentToolCall,
+) {
+  const existingArgCount = Object.keys(existing.args).length;
+  const candidateArgCount = Object.keys(candidate.args).length;
+  if (candidateArgCount !== existingArgCount) {
+    return candidateArgCount > existingArgCount ? candidate : existing;
+  }
+  const existingArgsLength = JSON.stringify(existing.args).length;
+  const candidateArgsLength = JSON.stringify(candidate.args).length;
+  if (candidateArgsLength !== existingArgsLength) {
+    return candidateArgsLength > existingArgsLength ? candidate : existing;
+  }
+  if (existing.index === undefined && candidate.index !== undefined) {
+    return candidate;
+  }
+  return existing;
+}
+
+function dedupeObservedToolCalls(candidates: ObservedAgentToolCall[]) {
+  const byId = new Map<string, ObservedAgentToolCall>();
+  for (const candidate of candidates) {
+    const existing = byId.get(candidate.id);
+    byId.set(
+      candidate.id,
+      existing ? preferObservedToolCall(existing, candidate) : candidate,
+    );
+  }
+  return [...byId.values()];
+}
+
+export function extractHitlInterrupts(payload: unknown) {
+  const record = toObjectRecord(payload);
+  const interrupts = record?.__interrupt__;
+  if (!Array.isArray(interrupts)) {
+    return [] as HitlInterruptRequest[];
+  }
+  return interrupts
+    .map((interruptValue): HitlInterruptRequest | null => {
+      const interruptRecord = toObjectRecord(interruptValue);
+      const value = toObjectRecord(interruptRecord?.value);
+      const id =
+        typeof interruptRecord?.id === "string" &&
+        interruptRecord.id.trim().length > 0
+          ? interruptRecord.id.trim()
+          : undefined;
+      const actionRequestsValue = value?.actionRequests;
+      const reviewConfigsValue = value?.reviewConfigs;
+      if (
+        !Array.isArray(actionRequestsValue) ||
+        !Array.isArray(reviewConfigsValue)
+      ) {
+        return null;
+      }
+      const actionRequests = actionRequestsValue.map((candidate) => {
+        const action = toObjectRecord(candidate);
+        return {
+          name: typeof action?.name === "string" ? action.name : "",
+          args: parseToolArgs(action?.args),
+          ...(typeof action?.description === "string"
+            ? { description: action.description }
+            : {}),
+        };
+      });
+      const reviewConfigs = reviewConfigsValue.map((candidate) => {
+        const config = toObjectRecord(candidate);
+        const argsSchema = toObjectRecord(config?.argsSchema);
+        const allowed = Array.isArray(config?.allowedDecisions)
+          ? config.allowedDecisions.filter(
+              (decision): decision is "approve" | "edit" | "reject" =>
+                decision === "approve" ||
+                decision === "edit" ||
+                decision === "reject",
+            )
+          : [];
+        return {
+          actionName:
+            typeof config?.actionName === "string" ? config.actionName : "",
+          allowedDecisions: allowed,
+          ...(argsSchema ? { argsSchema } : {}),
+        };
+      });
+      if (
+        actionRequests.some((request) => request.name.length === 0) ||
+        reviewConfigs.some((config) => config.actionName.length === 0)
+      ) {
+        return null;
+      }
+      return { ...(id ? { id } : {}), actionRequests, reviewConfigs };
+    })
+    .filter(
+      (interrupt): interrupt is HitlInterruptRequest => interrupt !== null,
+    );
+}
+
+export function matchInterruptedToolCall(input: {
+  action: HitlActionRequest;
+  index: number;
+  toolCalls: ObservedAgentToolCall[];
+  usedToolCallIds: Set<string>;
+}) {
+  const notFoundMessage = `DeepAgents HITL interrupted ${input.action.name}, but the current checkpoint did not include one exact matching tool call.`;
+  const ambiguousMessage = `DeepAgents HITL interrupted ${input.action.name}, but the current checkpoint included multiple identical tool calls.`;
+  const matches = dedupeObservedToolCalls(input.toolCalls).filter(
+    (call) =>
+      call.name === input.action.name && !input.usedToolCallIds.has(call.id),
+  );
+  const indexedMatches = matches.filter((call) => call.index === input.index);
+  const exactMatches = (
+    indexedMatches.length > 0 ? indexedMatches : matches
+  ).filter((call) => sameToolArgs(call.args, input.action.args));
+  if (exactMatches.length !== 1) {
+    throw new ContentError(
+      500,
+      exactMatches.length > 1
+        ? "AGENT_HITL_TOOL_CALL_AMBIGUOUS"
+        : "AGENT_HITL_TOOL_CALL_NOT_FOUND",
+      exactMatches.length > 1 ? ambiguousMessage : notFoundMessage,
+    );
+  }
+  const match = exactMatches[0]!;
+  input.usedToolCallIds.add(match.id);
+  return match;
+}
+
+function withHitlEditableArgs(
+  confirmation: ToolConfirmationRequest,
+  reviewConfig: HitlReviewConfig | undefined,
+) {
+  if (
+    confirmation.domain === "connector" ||
+    !reviewConfig ||
+    !reviewConfig.allowedDecisions.includes("edit")
+  ) {
+    return confirmation;
+  }
+  return {
+    ...confirmation,
+    editableArgs: {
+      value:
+        confirmation.editableArgs?.value ??
+        confirmation.preview.requestJson ??
+        {},
+      ...(reviewConfig.argsSchema
+        ? { schema: reviewConfig.argsSchema }
+        : confirmation.editableArgs?.schema
+          ? { schema: confirmation.editableArgs.schema }
+          : {}),
+    },
+  };
+}
+
+function connectorHitlActionResumeInput(action: HitlActionRequest) {
+  const { connectorId: rawConnectorId, ...requestJson } = action.args;
+  return {
+    connectorId:
+      typeof rawConnectorId === "string" && rawConnectorId.trim().length > 0
+        ? rawConnectorId.trim()
+        : undefined,
+    requestJson,
+    toolName: action.name,
+  };
+}
+
+function sourceweftMetadataFromHitlBinding(binding: HitlActionBinding) {
+  return {
+    ...(binding.hitlInterruptId
+      ? { hitlInterruptId: binding.hitlInterruptId }
+      : {}),
+    actionIndex: binding.actionIndex,
+    ...(binding.sourceUserMessageId
+      ? { sourceUserMessageId: binding.sourceUserMessageId }
+      : {}),
+    ...(binding.sourceAssistantMessageId
+      ? { sourceAssistantMessageId: binding.sourceAssistantMessageId }
+      : {}),
+    toolName: binding.toolName,
+    requestJson: binding.requestJson,
+    hitlActionIndex: binding.actionIndex,
+    hitlActionToolName: binding.toolName,
+    hitlActionRequestJson: binding.requestJson,
+    toolCallId: binding.toolCallId,
+    ...(binding.toolName === "execute"
+      ? { sandboxExecuteToolCallId: binding.toolCallId }
+      : {}),
+  };
+}
+
+function createSandboxToolConfirmation(input: {
+  action: HitlActionRequest;
+  binding: HitlActionBinding;
+  reviewConfig?: HitlReviewConfig;
+}): ToolConfirmationRequest | null {
+  if (!isAgentToolDomain(input.action.name, "sandbox")) {
+    return null;
+  }
+  const definition = getAgentToolDefinition(input.action.name);
+  const label = definition?.id ?? input.action.name;
+  return withHitlEditableArgs(
+    {
+      type: "tool_confirmation_request",
+      schemaVersion: 1,
+      id: input.binding.toolCallId,
+      domain: "sandbox",
+      subject: {
+        label: "Sandbox runtime",
+        provider: "sandbox",
+      },
+      action: {
+        type: input.action.name,
+        toolName: input.action.name,
+        label,
+        ...(input.action.description
+          ? { description: input.action.description }
+          : {}),
+        riskLevel: definition?.riskLevel ?? "high",
+        status: "proposed",
+        requiresApproval: true,
+      },
+      preview: {
+        title: `Review sandbox action: ${input.action.name}`,
+        summary:
+          input.action.description ??
+          "Review this sandbox action before it runs in the isolated runtime.",
+        requestJson: input.action.args,
+      },
+      decisionOptions: [
+        { decision: "reject", label: "Reject" },
+        { decision: "approve", label: "Approve" },
+      ],
+      execution: {
+        providerStatus: "not_executed",
+        executor: {
+          kind: "sandbox_tool_call",
+        },
+        sourceweft: sourceweftMetadataFromHitlBinding(input.binding),
+      },
+      status: "proposed",
+      userMessage: "Waiting for sandbox action confirmation.",
+    },
+    input.reviewConfig,
+  );
+}
+
+function isConnectorHitlActionAlreadyApproved(input: {
+  action: HitlActionRequest;
+  connectorContext: {
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+  };
+}) {
+  return Boolean(
+    peekConnectorActionExecutionRef(
+      input.connectorContext,
+      connectorHitlActionResumeInput(input.action),
+    ),
+  );
+}
+
+function consumeSandboxActionExecutionRef(
+  cursor: SandboxActionExecutionCursor | undefined,
+  ref: SandboxActionExecutionRef,
+) {
+  if (!cursor) {
+    return;
+  }
+  cursor.consumedActionKeys ??= new Set<string>();
+  cursor.consumedActionKeys.add(sandboxActionExecutionRefKey(ref));
+  cursor.consumedToolCallIds ??= new Set<string>();
+  cursor.consumedToolCallIds.add(ref.toolCallId);
+  cursor.value = Math.max(
+    cursor.value,
+    cursor.refs.findIndex(
+      (candidate) =>
+        candidate.toolCallId === ref.toolCallId &&
+        candidate.toolName === ref.toolName,
+    ) + 1,
+  );
+}
+
+function findMatchingSandboxActionExecutionRef(input: {
+  action: HitlActionRequest;
+  approvedSandboxToolCallId?: string;
+  hitlInterruptId?: string;
+  sourceUserMessageId?: string;
+  sourceAssistantMessageId?: string;
+  sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
+}) {
+  const refs = input.sandboxActionExecutionCursor?.refs ?? [];
+  return (
+    refs.find((candidate) => {
+      if (
+        input.sandboxActionExecutionCursor?.consumedActionKeys?.has(
+          sandboxActionExecutionRefKey(candidate),
+        )
+      ) {
+        return false;
+      }
+      if (
+        input.approvedSandboxToolCallId &&
+        candidate.toolCallId !== input.approvedSandboxToolCallId
+      ) {
+        return false;
+      }
+      if (
+        input.hitlInterruptId &&
+        candidate.hitlInterruptId &&
+        candidate.hitlInterruptId !== input.hitlInterruptId
+      ) {
+        return false;
+      }
+      if (
+        input.sourceUserMessageId &&
+        candidate.sourceUserMessageId &&
+        candidate.sourceUserMessageId !== input.sourceUserMessageId
+      ) {
+        return false;
+      }
+      if (
+        input.sourceAssistantMessageId &&
+        candidate.sourceAssistantMessageId &&
+        candidate.sourceAssistantMessageId !== input.sourceAssistantMessageId
+      ) {
+        return false;
+      }
+      return (
+        candidate.toolName === input.action.name &&
+        sameToolArgs(candidate.requestJson, input.action.args)
+      );
+    }) ?? null
+  );
+}
+
+function matchesApprovedSandboxToolCallId(input: {
+  action: HitlActionRequest;
+  approvedSandboxToolCallId?: string;
+  hitlInterruptId?: string;
+  sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
+  toolCalls?: ObservedAgentToolCall[];
+  usedToolCallIds: Set<string>;
+}) {
+  if (
+    !input.approvedSandboxToolCallId ||
+    !input.toolCalls ||
+    input.sandboxActionExecutionCursor?.refs.length
+  ) {
+    return false;
+  }
+  if (input.usedToolCallIds.has(input.approvedSandboxToolCallId)) {
+    return false;
+  }
+  if (
+    input.sandboxActionExecutionCursor?.consumedToolCallIds?.has(
+      input.approvedSandboxToolCallId,
+    )
+  ) {
+    return false;
+  }
+  return dedupeObservedToolCalls(input.toolCalls).some(
+    (call) =>
+      call.id === input.approvedSandboxToolCallId &&
+      call.name === input.action.name &&
+      sameToolArgs(call.args, input.action.args),
+  );
+}
+
+function isSandboxHitlActionAlreadyApproved(input: {
+  action: HitlActionRequest;
+  approvedSandboxToolCallId?: string;
+  hitlInterruptId?: string;
+  sourceUserMessageId?: string;
+  sourceAssistantMessageId?: string;
+  toolCalls?: ObservedAgentToolCall[];
+  sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
+  usedToolCallIds: Set<string>;
+}) {
+  if (!isAgentToolDomain(input.action.name, "sandbox")) {
+    return false;
+  }
+
+  const ref = findMatchingSandboxActionExecutionRef({
+    action: input.action,
+    approvedSandboxToolCallId: input.approvedSandboxToolCallId,
+    hitlInterruptId: input.hitlInterruptId,
+    sourceUserMessageId: input.sourceUserMessageId,
+    sourceAssistantMessageId: input.sourceAssistantMessageId,
+    sandboxActionExecutionCursor: input.sandboxActionExecutionCursor,
+  });
+  if (!ref) {
+    const matchedLegacyApprovedToolCall = matchesApprovedSandboxToolCallId({
+      action: input.action,
+      approvedSandboxToolCallId: input.approvedSandboxToolCallId,
+      hitlInterruptId: input.hitlInterruptId,
+      sandboxActionExecutionCursor: input.sandboxActionExecutionCursor,
+      toolCalls: input.toolCalls,
+      usedToolCallIds: input.usedToolCallIds,
+    });
+    if (matchedLegacyApprovedToolCall && input.approvedSandboxToolCallId) {
+      input.usedToolCallIds.add(input.approvedSandboxToolCallId);
+      if (input.sandboxActionExecutionCursor) {
+        input.sandboxActionExecutionCursor.consumedToolCallIds ??=
+          new Set<string>();
+        input.sandboxActionExecutionCursor.consumedToolCallIds.add(
+          input.approvedSandboxToolCallId,
+        );
+      }
+    }
+    return matchedLegacyApprovedToolCall;
+  }
+  consumeSandboxActionExecutionRef(input.sandboxActionExecutionCursor, ref);
+  return true;
+}
+
+export function buildAutoApprovedHitlResume(input: {
+  connectorContext: {
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+    approvedSandboxToolCallId?: string;
+    sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
+    sourceUserMessageId?: string;
+    sourceAssistantMessageId?: string;
+  };
+  hitlInterrupts: HitlInterruptRequest[];
+  toolCalls?: ObservedAgentToolCall[];
+}): {
+  decisions: ToolApprovalResumeDecision[];
+} | null {
+  const decisions: ToolApprovalResumeDecision[] = [];
+  const usedToolCallIds = new Set<string>();
+
+  for (const interruptRequest of input.hitlInterrupts) {
+    for (const action of interruptRequest.actionRequests) {
+      if (
+        isConnectorHitlActionAlreadyApproved({
+          action,
+          connectorContext: input.connectorContext,
+        })
+      ) {
+        decisions.push({ type: "approve" });
+        continue;
+      }
+
+      if (
+        isSandboxHitlActionAlreadyApproved({
+          action,
+          approvedSandboxToolCallId:
+            input.connectorContext.approvedSandboxToolCallId,
+          hitlInterruptId: interruptRequest.id,
+          sourceUserMessageId: input.connectorContext.sourceUserMessageId,
+          sourceAssistantMessageId:
+            input.connectorContext.sourceAssistantMessageId,
+          toolCalls: input.toolCalls,
+          sandboxActionExecutionCursor:
+            input.connectorContext.sandboxActionExecutionCursor,
+          usedToolCallIds,
+        })
+      ) {
+        decisions.push({ type: "approve" });
+        continue;
+      }
+
+      return null;
+    }
+  }
+
+  return decisions.length > 0 ? { decisions } : null;
+}
+
+export function buildAutoApprovedHitlResumeDecisions(input: {
+  connectorContext: {
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+    approvedSandboxToolCallId?: string;
+    sandboxActionExecutionCursor?: SandboxActionExecutionCursor;
+    sourceUserMessageId?: string;
+    sourceAssistantMessageId?: string;
+  };
+  hitlInterrupts: HitlInterruptRequest[];
+  toolCalls?: ObservedAgentToolCall[];
+}): ToolApprovalResumeDecision[] | null {
+  return buildAutoApprovedHitlResume(input)?.decisions ?? null;
+}
+
+export async function createHitlConfirmation(input: {
+  action: HitlActionRequest;
+  connectorContext: {
+    actionApprovalCursor?: ConnectorActionApprovalCursor;
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+    actionApprovalScope?: string;
+    enabledToolNames?: ReadonlySet<string>;
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+  };
+  reviewConfig?: HitlReviewConfig;
+  binding: HitlActionBinding;
+}) {
+  const sandboxConfirmation = createSandboxToolConfirmation({
+    action: input.action,
+    binding: input.binding,
+    reviewConfig: input.reviewConfig,
+  });
+  if (sandboxConfirmation) {
+    return sandboxConfirmation;
+  }
+
+  const confirmation = input.action.name.startsWith("mcp__")
+    ? await mcpService.createApprovalForInterruptedTool({
+        workspaceId: input.connectorContext.workspaceId,
+        userId: input.connectorContext.userId,
+        toolName: input.action.name,
+        args: input.action.args,
+        toolCallId: input.binding.toolCallId,
+      })
+    : await createConnectorActionApprovalRequest(input.connectorContext, {
+        args: input.action.args,
+        toolCallId: input.binding.toolCallId,
+        toolName: input.action.name,
+      });
+  if (!confirmation) {
+    throw new ContentError(
+      500,
+      "AGENT_HITL_CONFIRMATION_UNSUPPORTED",
+      `DeepAgents HITL interrupted unsupported tool ${input.action.name}.`,
+    );
+  }
+  const nextConfirmation = withHitlEditableArgs(
+    confirmation,
+    input.reviewConfig,
+  );
+  return {
+    ...nextConfirmation,
+    execution: {
+      ...nextConfirmation.execution,
+      sourceweft: {
+        ...(nextConfirmation.execution.sourceweft ?? {}),
+        ...sourceweftMetadataFromHitlBinding(input.binding),
+      },
+    },
+  };
+}
+
+export function commandResumeFromToolApprovalResume(
+  resume: ToolApprovalResume,
+): ToolApprovalResume | Record<string, ToolApprovalResume> {
+  const interruptId = resume.sourceweft?.hitlInterruptId;
+  const commandResume = { decisions: resume.decisions };
+  return interruptId ? { [interruptId]: commandResume } : commandResume;
+}
+
+export function commandResumeFromHitlDecisions(input: {
+  decisions: ToolApprovalResumeDecision[];
+  hitlInterruptId?: string;
+}): ToolApprovalResume | Record<string, ToolApprovalResume> {
+  const commandResume = { decisions: input.decisions };
+  return input.hitlInterruptId
+    ? { [input.hitlInterruptId]: commandResume }
+    : commandResume;
+}
+
+export function shouldSilenceEmptyApprovalResume(input: {
+  assistantMessageId: string | null;
+  hasCompletedToolOutput: boolean;
+  toolApprovalResume: ToolApprovalResume | null;
+}) {
+  if (!input.assistantMessageId || input.hasCompletedToolOutput) {
+    return false;
+  }
+
+  return (
+    input.toolApprovalResume?.decisions.some(
+      (decision) => decision.type === "reject",
+    ) ?? false
+  );
+}

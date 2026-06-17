@@ -48,7 +48,7 @@ import type {
 } from "./types";
 
 function isDevelopment() {
-  return process.env.NODE_ENV !== "production";
+  return process.env.NODE_ENV === "development";
 }
 
 function encryptionSecret() {

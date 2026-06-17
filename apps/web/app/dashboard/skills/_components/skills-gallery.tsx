@@ -523,6 +523,7 @@ function SkillCard({
 }) {
   const href = skillHref(item);
   const compact = variant === "modal";
+  const canManageInstall = item.installable !== false;
 
   return (
     <article
@@ -537,7 +538,7 @@ function SkillCard({
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-6 text-foreground">
             {item.displayName}
           </h3>
-          {item.enabled ? (
+          {item.enabled && canManageInstall ? (
             <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
               <Check className="h-3 w-3" />
               Installed
@@ -572,25 +573,38 @@ function SkillCard({
             <span className="min-w-0 truncate">Details</span>
           </Link>
         </Button>
-        <Button
-          className="min-w-0 rounded-full px-2"
-          disabled={pending}
-          onClick={() => (item.enabled ? onUninstall(item) : onInstall(item))}
-          size="xs"
-          type="button"
-          variant={item.enabled ? "secondary" : "default"}
-        >
-          {pending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : item.enabled ? (
-            <Trash2 className="h-3.5 w-3.5" />
-          ) : (
-            <SkillIcon className="h-3.5 w-3.5" />
-          )}
-          <span className="min-w-0 truncate">
-            {item.enabled ? "Uninstall" : "Install"}
-          </span>
-        </Button>
+        {canManageInstall ? (
+          <Button
+            className="min-w-0 rounded-full px-2"
+            disabled={pending}
+            onClick={() => (item.enabled ? onUninstall(item) : onInstall(item))}
+            size="xs"
+            type="button"
+            variant={item.enabled ? "secondary" : "default"}
+          >
+            {pending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : item.enabled ? (
+              <Trash2 className="h-3.5 w-3.5" />
+            ) : (
+              <SkillIcon className="h-3.5 w-3.5" />
+            )}
+            <span className="min-w-0 truncate">
+              {item.enabled ? "Uninstall" : "Install"}
+            </span>
+          </Button>
+        ) : (
+          <Button
+            className="min-w-0 rounded-full px-2"
+            disabled
+            size="xs"
+            type="button"
+            variant="secondary"
+          >
+            <Check className="h-3.5 w-3.5" />
+            <span className="min-w-0 truncate">Options</span>
+          </Button>
+        )}
       </div>
     </article>
   );
@@ -742,9 +756,14 @@ export function SkillsGallery({
     void loadCatalog();
   }, [loadCatalog]);
 
-  const installedCount = React.useMemo(
-    () => items.filter((item) => item.enabled).length,
+  const galleryItems = React.useMemo(
+    () => items.filter((item) => item.installable !== false),
     [items],
+  );
+
+  const installedCount = React.useMemo(
+    () => galleryItems.filter((item) => item.enabled).length,
+    [galleryItems],
   );
 
   const categoryCounts = React.useMemo(() => {
@@ -752,16 +771,16 @@ export function SkillsGallery({
       (record, item) => ({ ...record, [item.key]: 0 }),
       {} as Record<CategoryKey, number>,
     );
-    counts.all = items.length;
-    for (const item of items) {
+    counts.all = galleryItems.length;
+    for (const item of galleryItems) {
       counts[categoryForSkill(item)] += 1;
     }
     return counts;
-  }, [items]);
+  }, [galleryItems]);
 
   const filteredItems = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = items.filter((item) => {
+    const filtered = galleryItems.filter((item) => {
       if (category !== "all" && categoryForSkill(item) !== category) return false;
       if (statusFilter === "installed" && !item.enabled) return false;
       if (statusFilter === "not_installed" && item.enabled) return false;
@@ -781,7 +800,7 @@ export function SkillsGallery({
       if (sort === "official_first") return Number(b.sourceType === "builtin") - Number(a.sourceType === "builtin");
       return 0;
     });
-  }, [category, items, publisherFilter, query, sort, statusFilter]);
+  }, [category, galleryItems, publisherFilter, query, sort, statusFilter]);
 
   const clearFilters = React.useCallback(() => {
     setQuery("");
@@ -885,7 +904,6 @@ export function SkillsGallery({
               ? {
                   ...candidate,
                   enabled: false,
-                  enabledWorkspaceSkillId: null,
                 }
               : candidate,
           ),
@@ -920,7 +938,7 @@ export function SkillsGallery({
       query={query}
       publisherFilter={publisherFilter}
       statusFilter={statusFilter}
-      totalCount={items.length}
+      totalCount={galleryItems.length}
     />
   );
   const drawerFiltersPanel = (
@@ -937,7 +955,7 @@ export function SkillsGallery({
       query={query}
       publisherFilter={publisherFilter}
       statusFilter={statusFilter}
-      totalCount={items.length}
+      totalCount={galleryItems.length}
     />
   );
 
@@ -996,7 +1014,7 @@ export function SkillsGallery({
                 catalogReadyForWorkspace &&
                 filteredItems.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-                  {items.length === 0
+                  {galleryItems.length === 0
                     ? "No skills are available for this workspace."
                     : "No skills match the current filters."}
                 </div>

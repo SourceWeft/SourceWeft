@@ -1,4 +1,4 @@
-import { mailService } from "../../shared/mail";
+import { mailService } from "../mail";
 import { logger } from "../../shared/logger";
 import type {
   OpsAlertLevel,

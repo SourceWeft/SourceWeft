@@ -6,7 +6,7 @@ import {
   listLlmGenerations,
   listLlmTraces,
   recordAuditAccess,
-} from "../../shared/llm-observability";
+} from "../../modules/llm-observability";
 import {
   presentGeneration,
   presentGenerationSummary,

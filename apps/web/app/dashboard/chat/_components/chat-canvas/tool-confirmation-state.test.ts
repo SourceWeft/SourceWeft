@@ -9,13 +9,16 @@ import {
 } from "./tool-confirmation-controller";
 import {
   combineToolApprovalResumes,
+  deriveTerminalToolConfirmationResolutions,
   getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
   getVisibleToolConfirmationItems,
+  hasLiveToolConfirmationSignalForRun,
   isExpiredToolConfirmationResponse,
   isStaleToolConfirmationResponse,
   isToolCallActivelyRunning,
+  mergeToolConfirmationResolutions,
   orderToolConfirmationResolutions,
   shouldLockComposerForApproval,
   shouldLockComposerForRun,
@@ -25,8 +28,10 @@ import {
 import type {
   AssistantVersionIndexEntry,
   MessageVersion,
+  ToolConfirmationInterventionSignal,
   ToolCallRecord,
   ToolConfirmationResolution,
+  VersionedMessageGroup,
 } from "./types";
 
 function createConfirmationItem(
@@ -188,6 +193,45 @@ test("confirmation controller clears stale resolutions when the active run chang
   );
 });
 
+test("confirmation controller keeps resolutions when backend run id arrives", () => {
+  const item = createConfirmationItem("action-1");
+  const optimisticRunKey = getToolConfirmationRunKey({
+    idempotencyKey: "key-1",
+    status: "waiting_for_approval",
+  });
+  const synced = syncToolConfirmationRun({
+    items: [item],
+    runKey: optimisticRunKey,
+    state: initialToolConfirmationControllerState,
+  });
+  const settled = settleToolConfirmationDecision({
+    decision: "approve",
+    item,
+    items: [item],
+    resume: {
+      decisions: [{ type: "approve" }],
+    },
+    state: synced,
+  }).state;
+  const persistedRunKey = getToolConfirmationRunKey({
+    id: "run-1",
+    idempotencyKey: "key-1",
+    status: "waiting_for_approval",
+  });
+  const resynced = syncToolConfirmationRun({
+    items: [item],
+    runKey: persistedRunKey,
+    state: settled,
+  });
+
+  assert.equal(optimisticRunKey, "key-1");
+  assert.equal(persistedRunKey, "key-1");
+  assert.deepEqual(
+    getPendingToolConfirmationItems([item], resynced.resolutions),
+    [],
+  );
+});
+
 test("confirmation controller resumes only after all active confirmations settle", () => {
   const firstItem = createConfirmationItem("action-1");
   const secondItem = createConfirmationItem("action-2");
@@ -234,6 +278,7 @@ test("confirmation controller resumes only after all active confirmations settle
 
   assert.equal(second.missingResume, false);
   assert.deepEqual(second.resumeEffect, {
+    approvalThreadRunId: "run-1",
     assistantMessageId: "assistant-1",
     resolvedConfirmationIds: ["action-1", "action-2"],
     toolApprovalResume: {
@@ -350,6 +395,127 @@ test("live stream confirmations are scoped to the active run", () => {
   assert.deepEqual(lookup, []);
 });
 
+test("live stream confirmations require explicit run identity", () => {
+  const item = createConfirmationItem("action-live");
+  const signalWithoutRunIdentity = {
+    id: "signal-live",
+    assistantMessageId: "assistant-current",
+    liveConfirmations: [
+      {
+        confirmation: item.confirmation,
+        toolCall: item.toolCall,
+      },
+    ],
+  } as unknown as ToolConfirmationInterventionSignal;
+
+  const lookup = getLiveToolConfirmationItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-current",
+      id: "run-current",
+      idempotencyKey: "run-key-current",
+      status: "waiting_for_approval",
+    },
+    signal: signalWithoutRunIdentity,
+  });
+
+  assert.deepEqual(lookup, []);
+  assert.equal(
+    hasLiveToolConfirmationSignalForRun({
+      activeThreadRun: {
+        assistantMessageId: "assistant-current",
+        id: "run-current",
+        idempotencyKey: "run-key-current",
+        status: "waiting_for_approval",
+      },
+      signal: signalWithoutRunIdentity,
+    }),
+    false,
+  );
+});
+
+test("live stream confirmations can match by durable run key before thread run id is available", () => {
+  const item = createConfirmationItem("action-live");
+  const lookup = getLiveToolConfirmationItemsForRun({
+    activeThreadRun: {
+      assistantMessageId: "assistant-current",
+      idempotencyKey: "run-key-current",
+      status: "waiting_for_approval",
+    },
+    signal: {
+      id: "signal-live",
+      assistantMessageId: "assistant-current",
+      liveConfirmations: [
+        {
+          confirmation: item.confirmation,
+          toolCall: item.toolCall,
+        },
+      ],
+      runKey: "run-key-current",
+      threadRunId: null,
+    },
+  });
+
+  assert.deepEqual(
+    lookup.map((pending) => pending.confirmation.id),
+    ["action-live"],
+  );
+  assert.equal(
+    hasLiveToolConfirmationSignalForRun({
+      activeThreadRun: {
+        assistantMessageId: "assistant-current",
+        idempotencyKey: "run-key-current",
+        status: "waiting_for_approval",
+      },
+      signal: {
+        id: "signal-live",
+        assistantMessageId: "assistant-current",
+        liveConfirmations: [
+          {
+            confirmation: item.confirmation,
+            toolCall: item.toolCall,
+          },
+        ],
+        runKey: "run-key-current",
+        threadRunId: null,
+      },
+    }),
+    true,
+  );
+});
+
+test("empty live stream confirmation signals are ignored", () => {
+  const signal = {
+    id: "signal-live-empty",
+    assistantMessageId: "assistant-current",
+    liveConfirmations: [],
+    runKey: "run-key-current",
+    threadRunId: null,
+  };
+
+  assert.equal(
+    hasLiveToolConfirmationSignalForRun({
+      activeThreadRun: {
+        assistantMessageId: "assistant-current",
+        idempotencyKey: "run-key-current",
+        status: "waiting_for_approval",
+      },
+      signal,
+    }),
+    false,
+  );
+  assert.deepEqual(
+    getLiveToolConfirmationItemsForRun({
+      activeThreadRun: {
+        assistantMessageId: "assistant-current",
+        idempotencyKey: "run-key-current",
+        status: "waiting_for_approval",
+      },
+      signal,
+    }),
+    [],
+  );
+});
+
 test("run-scoped confirmations return empty when waiting run lacks assistant message", () => {
   const lookup = getToolConfirmationItemsForRun({
     activeThreadRun: {
@@ -462,7 +628,7 @@ test("composer stays available for stale waiting runs without pending confirmati
   );
 });
 
-test("composer lock follows explicit chat execution state when provided", () => {
+test("composer lock keeps streaming fallback when execution state is idle", () => {
   assert.equal(
     shouldLockComposerForRun({
       chatExecutionState: "idle",
@@ -470,8 +636,11 @@ test("composer lock follows explicit chat execution state when provided", () => 
       isWaitingForApproval: false,
       pendingConfirmationCount: 0,
     }),
-    false,
+    true,
   );
+});
+
+test("composer lock follows active execution states when provided", () => {
   assert.equal(
     shouldLockComposerForRun({
       chatExecutionState: "executing",
@@ -639,6 +808,64 @@ test("tool approval resume keeps earlier decisions after resolved cards leave th
   });
 });
 
+test("tool approval resumes merge sandbox action refs from every decision", () => {
+  assert.deepEqual(
+    combineToolApprovalResumes([
+      {
+        confirmationId: "sandbox-1",
+        decision: "approve",
+        resume: {
+          decisions: [{ type: "approve" }],
+          sourceweft: {
+            sandboxActions: [
+              {
+                requestJson: { command: "npm test" },
+                toolCallId: "call-sandbox-1",
+                toolName: "execute",
+              },
+            ],
+            sandboxExecuteToolCallId: "call-sandbox-1",
+          },
+        },
+      },
+      {
+        confirmationId: "sandbox-2",
+        decision: "approve",
+        resume: {
+          decisions: [{ type: "approve" }],
+          sourceweft: {
+            sandboxActions: [
+              {
+                requestJson: { command: "npm run build" },
+                toolCallId: "call-sandbox-2",
+                toolName: "execute",
+              },
+            ],
+          },
+        },
+      },
+    ]),
+    {
+      decisions: [{ type: "approve" }, { type: "approve" }],
+      sourceweft: {
+        sandboxActions: [
+          {
+            requestJson: { command: "npm test" },
+            toolCallId: "call-sandbox-1",
+            toolName: "execute",
+          },
+          {
+            requestJson: { command: "npm run build" },
+            toolCallId: "call-sandbox-2",
+            toolName: "execute",
+          },
+        ],
+        sandboxExecuteToolCallId: "call-sandbox-1",
+      },
+    },
+  );
+});
+
 test("tool approval resume stays blocked when any decided confirmation lacks resume data", () => {
   assert.equal(
     combineToolApprovalResumes([
@@ -703,6 +930,31 @@ test("tool approval resume preserves HITL interrupt id without connector actions
   );
 });
 
+test("tool approval resume preserves sourceweft metadata without interpreting it", () => {
+  assert.deepEqual(
+    combineToolApprovalResumes([
+      {
+        confirmationId: "action-1",
+        decision: "approve",
+        resume: {
+          decisions: [{ type: "approve" }],
+          sourceweft: {
+            hitlInterruptId: "0123456789abcdef0123456789abcdef",
+            sandboxExecuteToolCallId: "call-sandbox-execute",
+          },
+        },
+      },
+    ]),
+    {
+      decisions: [{ type: "approve" }],
+      sourceweft: {
+        hitlInterruptId: "0123456789abcdef0123456789abcdef",
+        sandboxExecuteToolCallId: "call-sandbox-execute",
+      },
+    },
+  );
+});
+
 test("stopped confirmation markers hide pending confirmations and do not resume", () => {
   const stoppedResolution: ToolConfirmationResolution = {
     confirmationId: "action-1",
@@ -719,6 +971,147 @@ test("stopped confirmation markers hide pending confirmations and do not resume"
     [],
   );
   assert.equal(combineToolApprovalResumes([stoppedResolution]), null);
+});
+
+test("expired approval metadata derives terminal confirmation resolutions", () => {
+  const version = createVersion("assistant-1", {
+    confirmationId: "action-1",
+    threadRunStatus: "cancelled",
+  });
+  const messageGroups: VersionedMessageGroup[] = [
+    {
+      groupId: "assistant-group",
+      latestVersionId: "assistant-1",
+      role: "assistant",
+      versions: [
+        {
+          ...version,
+          errorCode: "TOOL_APPROVAL_EXPIRED",
+        },
+      ],
+    },
+  ];
+
+  const resolutions = deriveTerminalToolConfirmationResolutions({
+    messageGroups,
+  });
+
+  assert.deepEqual(resolutions, [
+    {
+      confirmationId: "action-1",
+      decision: "reject",
+      expired: true,
+      resume: null,
+    },
+  ]);
+  assert.deepEqual(
+    getVisibleToolConfirmationItems(
+      [createConfirmationItem("action-1")],
+      resolutions,
+    ),
+    [],
+  );
+});
+
+test("cancelled approval metadata derives stopped confirmations, not expired", () => {
+  const version = createVersion("assistant-1", {
+    confirmationId: "action-1",
+    threadRunStatus: "cancelled",
+  });
+  const messageGroups: VersionedMessageGroup[] = [
+    {
+      groupId: "assistant-group",
+      latestVersionId: "assistant-1",
+      role: "assistant",
+      versions: [
+        {
+          ...version,
+          errorCode: "CLIENT_CANCELLED",
+          isCancelled: true,
+        },
+      ],
+    },
+  ];
+
+  assert.deepEqual(
+    deriveTerminalToolConfirmationResolutions({ messageGroups }),
+    [
+      {
+        confirmationId: "action-1",
+        decision: "reject",
+        resume: null,
+        stopped: true,
+      },
+    ],
+  );
+});
+
+test("terminal approval derivation follows the active visible assistant version", () => {
+  const messageGroups: VersionedMessageGroup[] = [
+    {
+      groupId: "assistant-group",
+      latestVersionId: "assistant-2",
+      role: "assistant",
+      versions: [
+        {
+          ...createVersion("assistant-1", {
+            confirmationId: "action-1",
+            threadRunStatus: "cancelled",
+          }),
+          errorCode: "TOOL_APPROVAL_EXPIRED",
+        },
+        createVersion("assistant-2", {
+          confirmationId: "action-2",
+          threadRunStatus: "waiting_for_approval",
+        }),
+      ],
+    },
+  ];
+
+  assert.deepEqual(
+    deriveTerminalToolConfirmationResolutions({
+      activeVersionByGroup: { "assistant-group": 1 },
+      messageGroups,
+    }),
+    [],
+  );
+  assert.deepEqual(
+    deriveTerminalToolConfirmationResolutions({
+      activeVersionByGroup: { "assistant-group": 0 },
+      messageGroups,
+    }).map((resolution) => resolution.confirmationId),
+    ["action-1"],
+  );
+});
+
+test("local confirmation resolutions take precedence over derived terminal metadata", () => {
+  const local: ToolConfirmationResolution[] = [
+    {
+      confirmationId: "action-1",
+      decision: "reject",
+      resume: null,
+      stopped: true,
+    },
+  ];
+  const derived: ToolConfirmationResolution[] = [
+    {
+      confirmationId: "action-1",
+      decision: "reject",
+      expired: true,
+      resume: null,
+    },
+    {
+      confirmationId: "action-2",
+      decision: "reject",
+      expired: true,
+      resume: null,
+    },
+  ];
+
+  assert.deepEqual(mergeToolConfirmationResolutions({ derived, local }), [
+    local[0],
+    derived[1],
+  ]);
 });
 
 test("stale confirmation response errors are identified by backend error code", () => {

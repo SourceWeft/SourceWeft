@@ -6,10 +6,7 @@ import {
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
-export const toolConfirmationDecisionSchema = z.enum([
-  "approve",
-  "reject",
-]);
+export const toolConfirmationDecisionSchema = z.enum(["approve", "reject"]);
 
 export const toolApprovalResumeDecisionSchema = z.discriminatedUnion("type", [
   z.object({
@@ -42,8 +39,24 @@ export const toolApprovalResumeSchema = z.object({
           }),
         )
         .optional(),
+      sandboxActions: z
+        .array(
+          z.object({
+            toolName: z.string().min(1),
+            toolCallId: z.string().min(1),
+            requestJson: jsonObjectSchema,
+            confirmationId: z.string().min(1).optional(),
+            hitlInterruptId: z.string().min(1).optional(),
+            sourceUserMessageId: z.string().min(1).optional(),
+            sourceAssistantMessageId: z.string().min(1).optional(),
+          }),
+        )
+        .optional(),
       hitlInterruptId: z.string().min(1).optional(),
       sandboxExecuteToolCallId: z.string().min(1).optional(),
+      confirmationId: z.string().min(1).optional(),
+      sourceUserMessageId: z.string().min(1).optional(),
+      sourceAssistantMessageId: z.string().min(1).optional(),
     })
     .optional(),
 });
@@ -141,7 +154,16 @@ export const toolConfirmationRequestSchema = z.object({
       .object({
         toolCallId: z.string().min(1).optional(),
         hitlInterruptId: z.string().min(1).optional(),
+        actionIndex: z.number().int().nonnegative().optional(),
+        toolName: z.string().min(1).optional(),
+        requestJson: jsonObjectSchema.optional(),
+        hitlActionIndex: z.number().int().nonnegative().optional(),
+        hitlActionToolName: z.string().min(1).optional(),
+        hitlActionRequestJson: jsonObjectSchema.optional(),
         sandboxExecuteToolCallId: z.string().min(1).optional(),
+        confirmationId: z.string().min(1).optional(),
+        sourceUserMessageId: z.string().min(1).optional(),
+        sourceAssistantMessageId: z.string().min(1).optional(),
       })
       .optional(),
   }),
@@ -182,9 +204,7 @@ export const respondAgentConfirmationResponseSchema = z.object({
   resume: toolApprovalResumeSchema.optional(),
 });
 
-export function isPendingToolConfirmation(
-  confirmation: unknown,
-) {
+export function isPendingToolConfirmation(confirmation: unknown) {
   if (
     !confirmation ||
     typeof confirmation !== "object" ||

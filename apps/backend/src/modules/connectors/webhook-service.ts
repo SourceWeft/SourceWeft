@@ -17,10 +17,10 @@ import { enqueueConnectorSyncJob } from "../content/queue";
 import {
   findSourceRecordByConnectorExternalId,
   updateSourceRecord,
-} from "../content/sources/repository";
+} from "../sources";
 import { logger } from "../../shared/logger";
 import type {
-  ConnectorWebhookEvent,
+  ConnectorWebhookPayload,
   ConnectorWebhookTarget,
   SourceConnectorRecord,
 } from "./types";
@@ -102,7 +102,7 @@ export class ConnectorWebhookService {
     }
 
     const parsed = await adapter.parseWebhookEvent(verifyInput);
-    const event: ConnectorWebhookEvent = {
+    const event: ConnectorWebhookPayload = {
       ...parsed,
       providerEventId:
         parsed.providerEventId ||
@@ -194,7 +194,7 @@ export class ConnectorWebhookService {
               eventId: webhookEvent.id,
               providerEventId: event.providerEventId,
               eventType: event.eventType,
-              notionObjectId: event.objectId,
+              providerObjectId: event.objectId,
               targetExternalIds: syncExternalIds,
               targeted: syncExternalIds.length > 0,
               fullResync: shouldFullResync,
@@ -277,7 +277,7 @@ export class ConnectorWebhookService {
 
   private async resolveConnectors(input: {
     connectorType: string;
-    event: ConnectorWebhookEvent;
+    event: ConnectorWebhookPayload;
     connectorId?: string | null;
   }) {
     if (input.connectorId) {
@@ -313,7 +313,7 @@ export class ConnectorWebhookService {
   private async archiveConnectorSource(input: {
     connector: SourceConnectorRecord;
     externalId: string;
-    event: ConnectorWebhookEvent;
+    event: ConnectorWebhookPayload;
   }) {
     const source = await findSourceRecordByConnectorExternalId({
       teamId: input.connector.teamId,

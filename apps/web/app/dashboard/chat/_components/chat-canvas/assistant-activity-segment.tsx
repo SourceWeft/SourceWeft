@@ -1,19 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CheckCircle2,
   ChevronRight,
   Circle,
+  Lightbulb,
   Loader2,
 } from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import {
+  ASSISTANT_ACTIVITY_DETAIL_CLASS,
+  ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS,
+  ASSISTANT_ACTIVITY_ICON_CLASS,
+  ASSISTANT_ACTIVITY_LABEL_CLASS,
+  ASSISTANT_ACTIVITY_ROW_CLASS,
+} from "./assistant-activity-layout";
 import type { AssistantActivityItem } from "./assistant-activity-items";
 import { AssistantToolCard } from "./assistant-tool-card";
-import type { ToolConfirmationResolution } from "./types";
+import { WebToolResults } from "../web-tool-results";
+import type {
+  CitationRecord,
+  ToolConfirmationResolution,
+} from "./types";
+import { formatThoughtDuration } from "./duration-format";
 
 function ActivityStatusCell({ children }: { children: ReactNode }) {
   return (
-    <span className="grid size-6 shrink-0 place-items-center text-muted-foreground/80">
+    <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
       {children}
     </span>
   );
@@ -64,7 +77,7 @@ function AssistantStepRow({ item }: { item: Extract<AssistantActivityItem, { typ
     <div className="group text-muted-foreground transition-colors hover:text-foreground">
       <button
         aria-expanded={hasDetails ? isOpen : undefined}
-        className="flex min-h-8 w-full items-center gap-1 rounded-md px-1 py-1 text-left hover:bg-muted/30"
+        className={ASSISTANT_ACTIVITY_ROW_CLASS}
         disabled={!hasDetails}
         onClick={() => setIsOpen((value) => !value)}
         type="button"
@@ -72,7 +85,7 @@ function AssistantStepRow({ item }: { item: Extract<AssistantActivityItem, { typ
         <ActivityStatusCell>
           <StepStatusIcon status={item.status} />
         </ActivityStatusCell>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span className="truncate text-[13px] text-foreground/80">
             {item.title}
           </span>
@@ -83,7 +96,7 @@ function AssistantStepRow({ item }: { item: Extract<AssistantActivityItem, { typ
         {hasDetails ? <ActivityDisclosureIcon isOpen={isOpen} /> : null}
       </button>
       {isOpen && hasDetails ? (
-        <div className="ml-7 space-y-1 rounded-md px-2 py-1 text-[13px] text-muted-foreground/75 leading-5">
+        <div className={ASSISTANT_ACTIVITY_DETAIL_CLASS}>
           {metadataLabels.length > 0 ? (
             <p className="break-words">{metadataLabels.join(" · ")}</p>
           ) : null}
@@ -107,49 +120,69 @@ function AssistantStepRow({ item }: { item: Extract<AssistantActivityItem, { typ
 }
 
 function AssistantReasoningRow({
+  isStreaming = false,
   item,
 }: {
+  isStreaming?: boolean;
   item: Extract<AssistantActivityItem, { type: "reasoning" }>;
 }) {
-  const duration =
-    typeof item.durationMs === "number" && Number.isFinite(item.durationMs)
-      ? item.durationMs < 1000
-        ? `${Math.max(1, Math.round(item.durationMs))}ms`
-        : `${Math.round(item.durationMs / 100) / 10}s`
-      : null;
+  const title = isStreaming
+    ? "Thinking..."
+    : formatThoughtDuration(item.durationMs);
+  const [isOpen, setIsOpen] = useState(isStreaming);
+
+  useEffect(() => {
+    setIsOpen(isStreaming);
+  }, [isStreaming]);
 
   return (
     <div className="group text-muted-foreground transition-colors hover:text-foreground">
-      <div className="flex min-h-8 w-full items-center gap-1 rounded-md px-1 py-1">
+      <button
+        aria-expanded={isOpen}
+        className={ASSISTANT_ACTIVITY_ROW_CLASS}
+        onClick={() => setIsOpen((value) => !value)}
+        type="button"
+      >
         <ActivityStatusCell>
-          <Circle className="size-3.5 text-muted-foreground/70" />
+          {isStreaming ? (
+            <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
+          ) : (
+            <Lightbulb className="size-3.5 text-muted-foreground/70" />
+          )}
         </ActivityStatusCell>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span className="truncate text-[13px] text-foreground/80">
-            {item.text}
+            {title}
           </span>
-          {duration ? (
-            <span className="shrink-0 text-muted-foreground/60 text-xs">
-              {duration}
-            </span>
-          ) : null}
         </span>
-      </div>
+        <ActivityDisclosureIcon isOpen={isOpen} />
+      </button>
+      {isOpen ? (
+        <div className={ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS}>
+          {item.text}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export function AssistantActivitySegment({
+  availableCitations,
+  isStreaming = false,
   item,
+  onCitationClick,
   onWorkfileClick,
   resolvedConfirmations,
 }: {
+  availableCitations?: CitationRecord[];
+  isStreaming?: boolean;
   item: AssistantActivityItem;
+  onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
   resolvedConfirmations?: ToolConfirmationResolution[];
 }) {
   if (item.type === "reasoning") {
-    return <AssistantReasoningRow item={item} />;
+    return <AssistantReasoningRow isStreaming={isStreaming} item={item} />;
   }
 
   if (item.type === "step") {
@@ -157,11 +190,19 @@ export function AssistantActivitySegment({
   }
 
   return (
-    <AssistantToolCard
-      onWorkfileClick={onWorkfileClick}
-      resolvedConfirmations={resolvedConfirmations}
-      toolCall={item.toolCall}
-      toolStep={item.toolStep}
-    />
+    <>
+      <AssistantToolCard
+        onWorkfileClick={onWorkfileClick}
+        resolvedConfirmations={resolvedConfirmations}
+        toolCall={item.toolCall}
+        toolStep={item.toolStep}
+      />
+      <WebToolResults
+        availableCitations={availableCitations}
+        onCitationClick={onCitationClick}
+        toolCall={item.toolCall}
+        variant="activity-row"
+      />
+    </>
   );
 }

@@ -1,4 +1,5 @@
 import { logger } from "../logger";
+import { config } from "../config";
 import type { ModelGatewayProfileKind } from "./types";
 import {
   fetchLiteLLMPricing,
@@ -41,9 +42,7 @@ export type CatalogDiscoveryGateway = {
   supports: string[];
 };
 
-const OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models";
 const OPENROUTER_APP_TITLE = "SourceWeft";
-const OPENROUTER_APP_REFERER = "https://sourceweft.com";
 
 const SUPPORTED_DYNAMIC_KINDS: Record<CatalogModelKind, string[]> = {
   chat: ["chat", "tool_calling"],
@@ -258,11 +257,12 @@ async function discoverOpenRouterCatalog(input: {
   kinds?: Set<CatalogModelKind>;
   litellmData?: LiteLLMData;
 }) {
-  const response = await fetch(OPENROUTER_MODELS_API_URL, {
+  const response = await fetch(config.openrouterModelsApiUrl, {
     headers: {
       "User-Agent": "sourceweft-model-gateway/1.0",
+      "HTTP-Referer": config.openrouterAppReferer,
+      "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
       "X-Title": OPENROUTER_APP_TITLE,
-      "HTTP-Referer": OPENROUTER_APP_REFERER,
     },
   });
   if (!response.ok) {
@@ -385,7 +385,7 @@ export async function discoverGatewayCatalog(input: {
     });
   }
 
-  const litellmData = input.litellmData ?? await fetchLiteLLMPricing();
+  const litellmData = input.litellmData ?? await fetchLiteLLMPricing(config.litellmPricingUrl);
   return discoverOpenAICompatibleCatalog({
     gateway: input.gateway,
     kinds,

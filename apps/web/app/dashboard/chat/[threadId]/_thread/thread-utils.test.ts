@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ChatMessageItem } from "../streaming-assistant-state";
-import { resolveAttachOnlyAssistantMessage } from "./thread-utils";
+import {
+  getThreadBootstrapKey,
+  resolveAttachOnlyAssistantMessage,
+  shouldResetThreadLocalState,
+} from "./thread-utils";
 
 function createAssistantMessage(
   id: string,
@@ -49,4 +53,50 @@ test("attach-only approval falls back to the latest assistant message", () => {
   });
 
   assert.equal(message?.id, "assistant-latest");
+});
+
+test("thread bootstrap key uses workspace and thread id", () => {
+  assert.equal(
+    getThreadBootstrapKey("workspace-1", "thread-1"),
+    "workspace-1:thread-1",
+  );
+  assert.equal(getThreadBootstrapKey(null, "thread-1"), null);
+});
+
+test("thread local reset is skipped after current thread bootstrap", () => {
+  assert.equal(
+    shouldResetThreadLocalState({
+      bootstrappedThreadKey: "workspace-1:thread-1",
+      threadId: "thread-1",
+      workspaceId: "workspace-1",
+    }),
+    false,
+  );
+});
+
+test("thread local reset runs before bootstrap or for a different target", () => {
+  assert.equal(
+    shouldResetThreadLocalState({
+      bootstrappedThreadKey: null,
+      threadId: "thread-1",
+      workspaceId: "workspace-1",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldResetThreadLocalState({
+      bootstrappedThreadKey: "workspace-1:thread-previous",
+      threadId: "thread-next",
+      workspaceId: "workspace-1",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldResetThreadLocalState({
+      bootstrappedThreadKey: "workspace-previous:thread-1",
+      threadId: "thread-1",
+      workspaceId: "workspace-next",
+    }),
+    true,
+  );
 });

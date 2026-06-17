@@ -15,6 +15,15 @@ function tool(id: string): MessageRenderBlock {
   return { id, toolCallId: id, type: "tool" };
 }
 
+function terminalArtifact(id: string): MessageRenderBlock {
+  return {
+    id,
+    placement: "terminal",
+    toolCallId: id,
+    type: "generated_presentation",
+  };
+}
+
 function text(id: string): MessageRenderBlock {
   return { id, text: `Answer ${id}`, type: "text" };
 }
@@ -39,19 +48,70 @@ test("buildAssistantRenderSegments keeps text before later work inside workflow"
   );
 });
 
-test("buildAssistantRenderSegments keeps trailing text in workflow while running", () => {
+test("buildAssistantRenderSegments keeps trailing text as final answer", () => {
   const segments = buildAssistantRenderSegments(
     [reasoning("reasoning-1"), tool("tool-1"), text("text-1")],
-    { includeTrailingTextInWorkflow: true },
   );
 
   assert.deepEqual(
     segments.map((segment) => segment.type),
-    ["workflow"],
+    ["workflow", "answer"],
   );
   assert.deepEqual(
     segments.map((segment) => segment.blocks.map((block) => block.id)),
-    [["reasoning-1", "tool-1", "text-1"]],
+    [["reasoning-1", "tool-1"], ["text-1"]],
+  );
+});
+
+test("buildAssistantRenderSegments places terminal blocks after trailing answer text", () => {
+  const segments = buildAssistantRenderSegments([
+    reasoning("reasoning-1"),
+    terminalArtifact("artifact-1"),
+    text("text-1"),
+  ]);
+
+  assert.deepEqual(
+    segments.map((segment) => segment.type),
+    ["workflow", "answer", "terminal"],
+  );
+  assert.deepEqual(
+    segments.map((segment) => segment.blocks.map((block) => block.id)),
+    [["reasoning-1"], ["text-1"], ["artifact-1"]],
+  );
+});
+
+test("buildAssistantRenderSegments preserves terminal block order at the end", () => {
+  const segments = buildAssistantRenderSegments([
+    terminalArtifact("artifact-1"),
+    text("text-1"),
+    terminalArtifact("artifact-2"),
+    text("text-2"),
+  ]);
+
+  assert.deepEqual(
+    segments.map((segment) => segment.type),
+    ["answer", "terminal"],
+  );
+  assert.deepEqual(
+    segments.map((segment) => segment.blocks.map((block) => block.id)),
+    [["text-1", "text-2"], ["artifact-1", "artifact-2"]],
+  );
+});
+
+test("buildAssistantRenderSegments leaves unplaced workflow blocks inline", () => {
+  const segments = buildAssistantRenderSegments([
+    text("text-1"),
+    tool("tool-1"),
+    text("text-2"),
+  ]);
+
+  assert.deepEqual(
+    segments.map((segment) => segment.type),
+    ["workflow", "answer"],
+  );
+  assert.deepEqual(
+    segments.map((segment) => segment.blocks.map((block) => block.id)),
+    [["text-1", "tool-1"], ["text-2"]],
   );
 });
 
@@ -64,10 +124,10 @@ test("formatWorkedDuration keeps minute durations precise to seconds", () => {
   assert.equal(formatWorkedDuration(151_000), "2m31s");
 });
 
-test("getWorkflowHeaderLabel uses Thinking while running", () => {
+test("getWorkflowHeaderLabel uses Working while running", () => {
   assert.equal(
     getWorkflowHeaderLabel({ durationMs: 92_000, isRunning: true }),
-    "Thinking...",
+    "Working",
   );
   assert.equal(
     getWorkflowHeaderLabel({ durationMs: 92_000, isRunning: false }),

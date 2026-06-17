@@ -42,6 +42,7 @@ import type {
   GetWorkspaceMarketMcpResponse,
   InstallMarketMcpRequest,
   InstallMarketMcpResponse,
+  ListCapabilityCatalogResponse,
   ListArtifactsResponse,
   ListThreadModelCatalogResponse,
   ListByokProvidersResponse,
@@ -82,6 +83,9 @@ import type {
   UploadSourceResponse,
   UpdateWorkspaceMcpInstallRequest,
   UpdateWorkspaceMcpInstallResponse,
+  ThreadChatPreferencesBootstrapResponse,
+  UpdateThreadChatPreferencesRequest,
+  UpdateThreadChatPreferencesResponse,
   UpdateThreadModelSettingsRequest,
   UpdateThreadModelSettingsResponse,
   UpdateCustomSkillVersionRequest,
@@ -118,10 +122,7 @@ export class ContentClient {
     );
   }
 
-  listSources(
-    workspaceId: string,
-    input: ListSourcesRequest = {},
-  ) {
+  listSources(workspaceId: string, input: ListSourcesRequest = {}) {
     const params = new URLSearchParams();
     if (input.view) {
       params.set("view", input.view);
@@ -234,10 +235,7 @@ export class ContentClient {
     );
   }
 
-  listSourceStatuses(
-    workspaceId: string,
-    input: ListSourceStatusesRequest,
-  ) {
+  listSourceStatuses(workspaceId: string, input: ListSourceStatusesRequest) {
     return this.http.post<ListSourceStatusesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/status`,
       input,
@@ -357,7 +355,11 @@ export class ContentClient {
       threadRun: {
         id: string;
         idempotencyKey: string;
-        status: "queued" | "running" | "cancel_requested" | "waiting_for_approval";
+        status:
+          | "queued"
+          | "running"
+          | "cancel_requested"
+          | "waiting_for_approval";
         mode: "send" | "refresh" | "edit" | "resume";
         userMessageId: string | null;
         assistantMessageId: string | null;
@@ -422,9 +424,32 @@ export class ContentClient {
     );
   }
 
+  updateThreadChatPreferences(
+    workspaceId: string,
+    threadId: string,
+    input: UpdateThreadChatPreferencesRequest,
+  ) {
+    return this.http.patch<UpdateThreadChatPreferencesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/chat-preferences`,
+      input,
+    );
+  }
+
+  getInitialChatPreferences(workspaceId: string) {
+    return this.http.get<ThreadChatPreferencesBootstrapResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/chat-preferences/bootstrap`,
+    );
+  }
+
   listThreadModelCatalog(workspaceId: string) {
     return this.http.get<ListThreadModelCatalogResponse>(
       `/v1/workspaces/${encode(workspaceId)}/model-gateway/models`,
+    );
+  }
+
+  listCapabilityCatalog(workspaceId: string) {
+    return this.http.get<ListCapabilityCatalogResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/capabilities/catalog`,
     );
   }
 
@@ -452,7 +477,10 @@ export class ContentClient {
     );
   }
 
-  enableWorkspaceSkill(workspaceId: string, input: EnableWorkspaceSkillRequest) {
+  enableWorkspaceSkill(
+    workspaceId: string,
+    input: EnableWorkspaceSkillRequest,
+  ) {
     return this.http.post<EnableWorkspaceSkillResponse>(
       `/v1/workspaces/${encode(workspaceId)}/skills`,
       input,

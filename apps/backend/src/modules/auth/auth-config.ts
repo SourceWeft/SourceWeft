@@ -17,7 +17,7 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import { APIError } from "better-auth/api";
 import { config } from "../../shared/config";
-import { database } from "../../shared/database";
+import { database } from "@sourceweft/db";
 import { logger } from "../../shared/logger";
 import {
   isPersonalOrganizationMetadata,
@@ -190,7 +190,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                 await assertUserHardDeleteAllowed(user.id);
               },
               async sendDeleteAccountVerification(data) {
-                const { mailService } = await import("../../shared/mail");
+                const { mailService } = await import("../mail");
                 await mailService.sendTemplate({
                   to: data.user.email,
                   templateId: "auth.delete-account",
@@ -210,7 +210,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       ...(isRuntimeMode
         ? {
             async sendResetPassword(data) {
-              const { mailService } = await import("../../shared/mail");
+              const { mailService } = await import("../mail");
               await mailService.sendTemplate({
                 to: data.user.email,
                 templateId: "auth.reset-password",
@@ -228,7 +228,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       ...(isRuntimeMode
         ? {
             async sendVerificationEmail(data) {
-              const { mailService } = await import("../../shared/mail");
+              const { mailService } = await import("../mail");
               await mailService.sendTemplate({
                 to: data.user.email,
                 templateId: "auth.verify-email",
@@ -270,7 +270,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         ...(isRuntimeMode
           ? {
               async sendInvitationEmail(data) {
-                const { mailService } = await import("../../shared/mail");
+                const { mailService } = await import("../mail");
                 await mailService.sendTemplate({
                   to: data.email,
                   templateId: "org.invitation",
@@ -434,7 +434,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
           ? {
               otpOptions: {
                 async sendOTP({ user, otp }) {
-                  const { mailService } = await import("../../shared/mail");
+                  const { mailService } = await import("../mail");
                   await mailService.sendTemplate({
                     to: user.email,
                     templateId: "auth.two-factor-otp",
@@ -587,7 +587,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         ...(isRuntimeMode
           ? {
               async sendVerificationOTP({ email, otp, type }) {
-                const { mailService } = await import("../../shared/mail");
+                const { mailService } = await import("../mail");
                 const templateType =
                   type === "email-verification" || type === "forget-password"
                     ? type
@@ -612,7 +612,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         isRuntimeMode
           ? {
               async sendMagicLink({ email, url }) {
-                const { mailService } = await import("../../shared/mail");
+                const { mailService } = await import("../mail");
                 await mailService.sendTemplate({
                   to: email,
                   templateId: "auth.magic-link",

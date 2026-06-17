@@ -218,6 +218,21 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function requireEnvInProduction(name: string, fallback: string): string {
+  const value = process.env[name]?.trim();
+  if (value) {
+    return value;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      `Missing required environment variable in production: ${name}`,
+    );
+  }
+
+  return fallback;
+}
+
 function stripTrailingSlash(value: string) {
   return value.replace(/\/$/, "");
 }
@@ -328,6 +343,22 @@ function resolvePasskeyOrigin() {
   return resolveWebBaseUrl();
 }
 
+function resolveFontAssetBaseUrl() {
+  const configured = process.env.VISUAL_DECK_FONT_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/g, "");
+  }
+
+  const publicS3BaseUrl = stripTrailingSlash(
+    process.env.PUBLIC_S3_BASE_URL || "",
+  );
+  if (publicS3BaseUrl) {
+    return publicS3BaseUrl;
+  }
+
+  return "https://assets.sourceweft.com";
+}
+
 const saasEnabled = parseBoolean(process.env.SOURCEWEFT_SAAS_ENABLED, false);
 const requestedBillingProvider = parseBillingProvider(
   process.env.BACKEND_BILLING_PROVIDER,
@@ -352,21 +383,45 @@ export const config = {
       1000,
     ),
   },
-  databaseUrl:
-    process.env.DATABASE_URL ||
+  databaseUrl: requireEnvInProduction(
+    "DATABASE_URL",
     "postgres://postgres:postgres@127.0.0.1:5432/sourceweft",
-  redisUrl: process.env.REDIS_URL || "redis://127.0.0.1:6379",
+  ),
+  redisUrl: requireEnvInProduction("REDIS_URL", "redis://127.0.0.1:6379"),
   queueName: process.env.JOB_QUEUE_NAME || "sourceweft-jobs",
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 2),
   schedulerIntervalMs: Number(process.env.SCHEDULER_INTERVAL_MS || 60000),
   chat: {
+    defaultModelAlias: process.env.CHAT_DEFAULT_MODEL_ALIAS?.trim() || "chat-default",
     toolApprovalTtlMs: parsePositiveNumber(
       process.env.CHAT_TOOL_APPROVAL_TTL_MS,
       30 * 60 * 1000,
     ),
+    agent: {
+      defaultContextLength: parsePositiveNumber(
+        process.env.AGENT_DEFAULT_CONTEXT_LENGTH,
+        32_768,
+      ),
+      maxReservedOutputTokens: parsePositiveNumber(
+        process.env.AGENT_MAX_RESERVED_OUTPUT_TOKENS,
+        8_192,
+      ),
+      maxGrepRecallTopK: parsePositiveNumber(
+        process.env.AGENT_MAX_GREP_RECALL_TOP_K,
+        300,
+      ),
+      maxReadOutputChars: parsePositiveNumber(
+        process.env.AGENT_MAX_READ_OUTPUT_CHARS,
+        80_000,
+      ),
+    },
   },
   sandbox: {
     enabled: parseBoolean(process.env.SOURCEWEFT_SANDBOX_ENABLED, false),
+    toolApprovalEnabled: parseBoolean(
+      process.env.SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED,
+      false,
+    ),
     provider: process.env.SOURCEWEFT_SANDBOX_PROVIDER || "daytona",
     ttlSeconds: parsePositiveInteger(
       process.env.SOURCEWEFT_SANDBOX_TTL_SECONDS,
@@ -399,8 +454,8 @@ export const config = {
     daytona: {
       apiUrl: stripTrailingSlash(process.env.DAYTONA_API_URL || ""),
       apiKey: process.env.DAYTONA_API_KEY?.trim() || "",
-      defaultSnapshot: process.env.DAYTONA_DEFAULT_SNAPSHOT?.trim() || "",
-      browserSnapshot: process.env.DAYTONA_BROWSER_SNAPSHOT?.trim() || "",
+      snapshot: process.env.DAYTONA_SANDBOX_SNAPSHOT?.trim() || "",
+      image: process.env.DAYTONA_SANDBOX_IMAGE?.trim() || "",
     },
   },
   s3: {
@@ -423,6 +478,9 @@ export const config = {
   },
   blog: {
     notionApiKey: process.env.NOTION_BLOG_API_KEY || "",
+    notionApiBaseUrl: stripTrailingSlash(
+      process.env.NOTION_API_BASE_URL || "https://api.notion.com",
+    ),
     notionDatabaseId: process.env.NOTION_BLOG_DATABASE_ID || "",
     notionDataSourceId: process.env.NOTION_BLOG_DATA_SOURCE_ID || "",
     notionVersion: process.env.NOTION_BLOG_VERSION || "2026-03-11",
@@ -478,7 +536,7 @@ export const config = {
     },
   },
   market: {
-    mode: parseMarketMode(process.env.MARKET_MODE, "official_api"),
+    mode: parseMarketMode(process.env.MARKET_MODE, "disabled"),
     baseUrl: stripTrailingSlash(
       process.env.MARKET_API_BASE_URL || "http://localhost:3011",
     ),
@@ -489,9 +547,22 @@ export const config = {
     process.env.BACKEND_SCHEDULER_EXAMPLE_JOB_ENABLED,
     false,
   ),
+  modelPricingSyncIntervalMs: parsePositiveNumber(
+    process.env.MODEL_PRICING_SYNC_INTERVAL_MS,
+    60 * 60 * 1000,
+  ),
   modelGatewayEncryptionSecret: requireEnv("MODEL_GATEWAY_ENCRYPTION_SECRET"),
+  openrouterModelsApiUrl:
+    process.env.OPENROUTER_MODELS_API_URL ||
+    "https://openrouter.ai/api/v1/models",
+  openrouterAppReferer: "https://sourceweft.com",
+  litellmPricingUrl:
+    process.env.LITELLM_PRICING_URL ||
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+  byokDefaultProviderKind:
+    process.env.BYOK_DEFAULT_PROVIDER_KIND?.trim() || "openai-compatible",
   auth: {
-    secret: process.env.BETTER_AUTH_SECRET || "replace_with_dev_secret_only",
+    secret: requireEnv("BETTER_AUTH_SECRET"),
     baseUrl: resolveApiBaseUrl(),
     webBaseUrl: resolveWebBaseUrl(),
     errorUrl: resolveAuthErrorUrl(),
@@ -612,6 +683,24 @@ export const config = {
         500,
       ),
     },
+  },
+  capability: {
+    builtinNamespace:
+      process.env.SOURCEWEFT_CAPABILITY_NAMESPACE?.trim() || "sourceweft",
+    storagePointerPrefix:
+      process.env.SOURCEWEFT_CAPABILITY_STORAGE_POINTER_PREFIX?.trim() ||
+      "capability-package:",
+  },
+  connectors: {
+    notion: {
+      redirectUri: process.env.NOTION_REDIRECT_URI?.trim() || undefined,
+      clientId: process.env.NOTION_CLIENT_ID?.trim() ?? "",
+      clientSecret: process.env.NOTION_CLIENT_SECRET?.trim() ?? "",
+      webhookSecret: process.env.NOTION_WEBHOOK_SECRET?.trim() ?? "",
+    },
+  },
+  visualDeck: {
+    fontAssetBaseUrl: resolveFontAssetBaseUrl(),
   },
   ops: {
     alertsEnabled: parseBoolean(process.env.BACKEND_ALERTS_ENABLED, true),

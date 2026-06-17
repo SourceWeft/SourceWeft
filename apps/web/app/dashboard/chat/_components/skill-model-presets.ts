@@ -30,10 +30,15 @@ export function resolveSkillModelAliasForType(input: {
   availableSkills: ChatSkillItem[];
   type: ModelType;
 }) {
-  const skillById = new Map(input.availableSkills.map((skill) => [skill.id, skill]));
+  const selectedIds = new Set(input.activeSkillIds);
+  const activeSkills = input.availableSkills.filter(
+    (skill) =>
+      (skill.sourceType === "builtin" && selectedIds.has(skill.id)) ||
+      (skill.sourceType !== "builtin" && skill.enabled !== false),
+  );
   const modelKey = SKILL_MODEL_KEY_BY_TYPE[input.type];
-  for (const skillId of input.activeSkillIds) {
-    const alias = skillById.get(skillId)?.models?.[modelKey];
+  for (const skill of activeSkills) {
+    const alias = skill.models?.[modelKey];
     if (typeof alias === "string" && alias.trim().length > 0) {
       return alias.trim();
     }

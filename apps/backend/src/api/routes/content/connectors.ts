@@ -44,15 +44,6 @@ function resolveConnectorWebhookBaseUrl() {
     return stripTrailingSlash(configured);
   }
 
-  const notionRedirectUri = process.env.NOTION_REDIRECT_URI?.trim();
-  if (notionRedirectUri) {
-    try {
-      return new URL(notionRedirectUri).origin;
-    } catch {
-      // Fall back to the API base URL; response validation will catch bad values.
-    }
-  }
-
   return config.auth.baseUrl;
 }
 

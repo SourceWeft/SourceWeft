@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
-import { providerSupportsKind } from "./catalog-discovery";
+import { test, vi } from "vitest";
+import { discoverGatewayCatalog, providerSupportsKind } from "./catalog-discovery";
 import {
   hasLiteLLMPricing,
   resolveLiteLLMModelMatch,
@@ -99,4 +99,31 @@ test("catalog kind support requires transport capabilities and tool calling for 
     ),
     true,
   );
+});
+
+test("OpenRouter catalog discovery sends attribution headers", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ data: [] }), {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    }),
+  );
+
+  await discoverGatewayCatalog({
+    gateway: {
+      slug: "openrouter-default",
+      providerName: "openrouter",
+      providerKind: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      supports: ["chat", "tool_calling"],
+    },
+  });
+
+  assert.equal(fetchMock.mock.calls.length, 1);
+  const init = fetchMock.mock.calls[0]?.[1];
+  const headers = init?.headers as Record<string, string>;
+
+  assert.equal(headers["X-OpenRouter-Title"], "SourceWeft");
+  assert.equal(headers["X-Title"], "SourceWeft");
+  assert.equal(headers["HTTP-Referer"], "https://sourceweft.com");
 });

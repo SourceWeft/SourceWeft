@@ -25,6 +25,7 @@ type BuildStreamingRequestBodyInput = {
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   catalogKindEnabled: Partial<Record<ModelType, boolean>>;
   command?: ChatSendInput["command"];
+  invocation?: ChatSendInput["invocation"];
   durableRunKey: string;
   images?: ChatSendInput["images"];
   mentionedSourceIds?: string[];
@@ -102,18 +103,15 @@ export function buildStreamingThreadRequestBody(
   if (input.command) {
     requestBody.command = input.command;
   }
+  if (input.invocation) {
+    requestBody.invocation = input.invocation;
+  }
 
   const selectedSkillIds = input.skillIds ?? [];
   const effectiveByokSelections =
     input.byokSelections ?? input.selectedByokModels;
 
   requestBody.tools = buildChatToolsRequest({
-    imageExecution:
-      effectiveByokSelections.image?.mode === "byok"
-        ? buildByokModelExecution({
-            selection: effectiveByokSelections.image,
-          })
-        : null,
     invokedSkillIds: input.tools?.invokedSkillIds,
     skillIds: selectedSkillIds,
     searchEnabled: input.searchEnabled,
@@ -122,7 +120,7 @@ export function buildStreamingThreadRequestBody(
 
   const selectedLlmProfileAlias =
     input.streamWithSelectedLlm && input.catalogKindEnabled.llm
-      ? input.selectedModels.llm?.profileAlias ?? input.selectedModels.llm?.id
+      ? (input.selectedModels.llm?.profileAlias ?? input.selectedModels.llm?.id)
       : undefined;
   const requestThinking =
     input.thinking ??
@@ -165,7 +163,8 @@ export function buildStreamingThreadRequestBody(
     requestBody.vision = byokVisionRequest;
   } else if (input.catalogKindEnabled.vision && input.selectedModels.vision) {
     modelSettings.visionProfileAlias =
-      input.selectedModels.vision.profileAlias ?? input.selectedModels.vision.id;
+      input.selectedModels.vision.profileAlias ??
+      input.selectedModels.vision.id;
   }
   if (effectiveByokSelections.image?.mode === "byok") {
     requestBody.image = buildByokModelExecution({

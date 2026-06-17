@@ -20,6 +20,7 @@ export type PendingThreadTurn = {
   skillIds?: string[];
   tools?: ChatSendInput["tools"];
   command?: ChatSendInput["command"];
+  invocation?: ChatSendInput["invocation"];
   thinking?: RequestThinkingConfig;
   thinkingSettings?: PromptThinkingSettings;
   searchEnabled?: boolean;
@@ -35,6 +36,10 @@ export type PendingThreadTurn = {
 
 const pendingThreadTurns = new Map<string, PendingThreadTurn>();
 
+function getPendingThreadTurnStorageKey(threadId: string) {
+  return `chat:pending:${threadId}`;
+}
+
 export function setPendingThreadTurn(
   threadId: string,
   pendingTurn: PendingThreadTurn,
@@ -42,10 +47,38 @@ export function setPendingThreadTurn(
   pendingThreadTurns.set(threadId, pendingTurn);
 }
 
-export function consumePendingThreadTurn(threadId: string) {
+export function readPendingThreadTurn(threadId: string) {
   const pendingTurn = pendingThreadTurns.get(threadId) ?? null;
+  if (pendingTurn || typeof window === "undefined") {
+    return pendingTurn;
+  }
+
+  const pendingKey = getPendingThreadTurnStorageKey(threadId);
+  const raw = window.sessionStorage.getItem(pendingKey);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as PendingThreadTurn;
+  } catch {
+    window.sessionStorage.removeItem(pendingKey);
+    return null;
+  }
+}
+
+export function clearPendingThreadTurn(threadId: string) {
+  pendingThreadTurns.delete(threadId);
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.sessionStorage.removeItem(getPendingThreadTurnStorageKey(threadId));
+}
+
+export function consumePendingThreadTurn(threadId: string) {
+  const pendingTurn = readPendingThreadTurn(threadId);
   if (pendingTurn) {
-    pendingThreadTurns.delete(threadId);
+    clearPendingThreadTurn(threadId);
   }
   return pendingTurn;
 }
@@ -60,7 +93,7 @@ export function writePendingThreadTurnFallback(
 
   try {
     window.sessionStorage.setItem(
-      `chat:pending:${threadId}`,
+      getPendingThreadTurnStorageKey(threadId),
       JSON.stringify(pendingTurn),
     );
   } catch {

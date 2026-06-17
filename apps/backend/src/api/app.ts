@@ -21,6 +21,7 @@ import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerTeamLlmObservabilityRoutes } from "./routes/llm-observability";
+import { registerUserSettingsRoutes } from "./routes/user-settings";
 import { registerWorkspaceRoutes } from "./routes/workspace";
 import { withBetterAuthClientIp } from "./better-auth-request";
 
@@ -96,6 +97,7 @@ export function createApp() {
   registerConnectorWebhookRoutes(app);
   registerWorkspaceRoutes(app);
   registerDashboardRoutes(app);
+  registerUserSettingsRoutes(app);
   registerBillingRoutes(app);
   registerContentRoutes(app);
   registerJobRoutes(app);

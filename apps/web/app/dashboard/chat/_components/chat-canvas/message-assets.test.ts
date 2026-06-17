@@ -10,7 +10,7 @@ import type { ToolCallRecord } from "./types";
 test("resolves presentation artifacts from JSON tool message content", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "generate_pptx",
+    tool: "publish_sandbox_artifact",
     input: {},
     output: {
       content: JSON.stringify({
@@ -58,7 +58,7 @@ test("resolves presentation artifacts from JSON tool message content", () => {
 test("does not resolve presentation artifact from needs_content tool output", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "generate_pptx",
+    tool: "publish_sandbox_artifact",
     input: {},
     output: {
       content: JSON.stringify({
@@ -73,6 +73,124 @@ test("does not resolve presentation artifact from needs_content tool output", ()
   };
 
   assert.equal(resolveGeneratedPresentationArtifact(toolCall), null);
+});
+
+test("does not resolve published sandbox presentation artifact without URL", () => {
+  const toolCall: ToolCallRecord = {
+    id: "tool-1",
+    tool: "publish_sandbox_artifact",
+    input: {},
+    output: {
+      ok: true,
+      type: "presentation_artifact_result",
+      status: "ready",
+      artifactType: "slides",
+      title: "费曼学习法介绍",
+      fileName: "费曼学习法介绍.pptx",
+      file_name: "费曼学习法介绍.pptx",
+      generation_mode: "editable_native",
+    },
+    latencyMs: 10,
+    status: "completed",
+    error: null,
+  };
+
+  assert.equal(resolveGeneratedPresentationArtifact(toolCall), null);
+});
+
+test("does not resolve errored sandbox presentation artifact with only artifact id", () => {
+  const toolCall: ToolCallRecord = {
+    id: "tool-1",
+    tool: "publish_sandbox_artifact",
+    input: {},
+    output: {
+      ok: false,
+      type: "presentation_artifact_error",
+      status: "failed",
+      artifact_id: "artifact-1",
+      title: "费曼学习法介绍",
+    },
+    latencyMs: 10,
+    status: "completed",
+    error: "publish failed",
+  };
+
+  assert.equal(resolveGeneratedPresentationArtifact(toolCall), null);
+});
+
+test("does not resolve errored sandbox presentation artifact even with URL", () => {
+  const toolCall: ToolCallRecord = {
+    id: "tool-1",
+    tool: "publish_sandbox_artifact",
+    input: {},
+    output: {
+      ok: true,
+      type: "presentation_artifact_result",
+      status: "ready",
+      artifact_id: "artifact-1",
+      artifact_url:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      pptx_url:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      title: "费曼学习法介绍",
+    },
+    latencyMs: 10,
+    status: "completed",
+    error: "publish failed",
+  };
+
+  assert.equal(resolveGeneratedPresentationArtifact(toolCall), null);
+});
+
+test("resolves published sandbox presentation artifact output", () => {
+  const toolCall: ToolCallRecord = {
+    id: "tool-1",
+    tool: "publish_sandbox_artifact",
+    input: {},
+    output: {
+      ok: true,
+      type: "presentation_artifact_result",
+      status: "ready",
+      artifactId: "artifact-1",
+      artifact_id: "artifact-1",
+      artifactType: "slides",
+      title: "费曼学习法介绍",
+      artifactUrl:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      artifact_url:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      pptx_url:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      byteLength: 42,
+      byte_length: 42,
+      editable: true,
+      fileName: "费曼学习法介绍.pptx",
+      file_name: "费曼学习法介绍.pptx",
+      generation_mode: "editable_native",
+      qaWarnings: [],
+    },
+    latencyMs: 10,
+    status: "completed",
+    error: null,
+  };
+
+  assert.deepEqual(resolveGeneratedPresentationArtifact(toolCall), {
+    artifactId: "artifact-1",
+    artifactUrl:
+      "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    editable: true,
+    fileName: "费曼学习法介绍.pptx",
+    generationMode: "editable_native",
+    htmlUrl: null,
+    pptxUrl:
+      "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    previewRenderer: null,
+    renderStrategy: null,
+    slideCount: null,
+    sourceJsonUrl: null,
+    status: "ready",
+    title: "费曼学习法介绍",
+  });
 });
 
 test("resolves video presentation artifacts from tool output", () => {

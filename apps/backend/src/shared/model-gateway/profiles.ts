@@ -1,4 +1,4 @@
-import type { ModelPricing } from "../db/schema-types";
+import type { ModelPricing } from "@sourceweft/db";
 import type { GlobalProfilePricingEntry } from "./global-config";
 import type { RuntimeModelGatewayProfile } from "./types";
 

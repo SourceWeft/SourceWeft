@@ -120,9 +120,30 @@ function connectorMigrationError(error: unknown) {
   return null;
 }
 
+function isPackageConnectorError(
+  error: unknown,
+): error is { statusCode: number; code: string; message: string; details?: Record<string, unknown> } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as Record<string, unknown>).statusCode === "number" &&
+    typeof (error as Record<string, unknown>).code === "string" &&
+    typeof (error as Record<string, unknown>).message === "string"
+  );
+}
+
 export function toConnectorError(error: unknown): ConnectorError {
   if (isConnectorError(error)) {
     return error;
+  }
+
+  if (isPackageConnectorError(error)) {
+    return new ConnectorError(
+      error.statusCode,
+      error.code,
+      error.message,
+      error.details,
+    );
   }
 
   const migrationError = connectorMigrationError(error);

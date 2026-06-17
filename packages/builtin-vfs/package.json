@@ -1,0 +1,22 @@
+{
+  "name": "@sourceweft/builtin-vfs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@sourceweft/contracts": "workspace:*",
+    "deepagents": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.2"
+  }
+}

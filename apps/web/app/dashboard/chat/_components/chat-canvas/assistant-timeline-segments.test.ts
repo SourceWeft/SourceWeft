@@ -38,7 +38,7 @@ function tool(input: {
   };
 }
 
-test("buildAssistantTimelineSegments interleaves assistant prose and workflow items", () => {
+test("buildAssistantTimelineSegments keeps reasoning in workflow activity", () => {
   const segments = buildAssistantTimelineSegments({
     assistantText: "Final answer.",
     items: [
@@ -51,12 +51,11 @@ test("buildAssistantTimelineSegments interleaves assistant prose and workflow it
 
   assert.deepEqual(
     segments.map((segment) => segment.type),
-    ["assistant_text", "workflow", "assistant_text", "workflow", "assistant_text"],
+    ["workflow", "assistant_text"],
   );
-  assert.equal(segments[0]?.type === "assistant_text" ? segments[0].text : "", "The skill is installed.");
   assert.deepEqual(
-    segments[1]?.type === "workflow" ? segments[1].items.map((item) => item.id) : [],
-    ["tool-1"],
+    segments[0]?.type === "workflow" ? segments[0].items.map((item) => item.id) : [],
+    ["reasoning-1", "tool-1", "reasoning-2", "tool-2"],
   );
   const finalSegment = segments.at(-1);
   assert.equal(finalSegment?.type === "assistant_text" ? finalSegment.text : "", "Final answer.");
@@ -76,11 +75,11 @@ test("buildAssistantTimelineSegments groups consecutive workflow items", () => {
 
   assert.deepEqual(
     segments.map((segment) => segment.type),
-    ["assistant_text", "workflow", "assistant_text", "assistant_text"],
+    ["workflow", "assistant_text"],
   );
   assert.deepEqual(
-    segments[1]?.type === "workflow" ? segments[1].items.map((item) => item.id) : [],
-    ["tool-1", "tool-2", "tool-3"],
+    segments[0]?.type === "workflow" ? segments[0].items.map((item) => item.id) : [],
+    ["reasoning-1", "tool-1", "tool-2", "tool-3", "reasoning-2"],
   );
 });
 
@@ -122,14 +121,18 @@ test("buildAssistantTimelineSegments places interrupted assistant text before tr
 
   assert.deepEqual(
     segments.map((segment) => segment.type),
-    ["assistant_text", "workflow", "assistant_text", "workflow"],
+    ["workflow", "assistant_text", "workflow"],
+  );
+  assert.deepEqual(
+    segments[0]?.type === "workflow" ? segments[0].items.map((item) => item.id) : [],
+    ["reasoning-1", "search-tool"],
   );
   assert.equal(
-    segments[2]?.type === "assistant_text" ? segments[2].text : "",
+    segments[1]?.type === "assistant_text" ? segments[1].text : "",
     "Here is the summary.\n\nNow I will create the page.",
   );
   assert.deepEqual(
-    segments[3]?.type === "workflow" ? segments[3].items.map((item) => item.id) : [],
+    segments[2]?.type === "workflow" ? segments[2].items.map((item) => item.id) : [],
     ["create-tool"],
   );
 });

@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/generate-image",
+  "kind": "tool",
+  "name": "Generate Image",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "tools": [
+    {
+      "id": "generate_image",
+      "title": "Generate Image",
+      "description": "Generate a persisted SourceWeft image artifact.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "write",
+      "options": [
+        {
+          "id": "aspectRatio",
+          "title": "Aspect Ratio",
+          "description": "Default aspect ratio for generated images.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": {
+            "path": "config.aspectRatio"
+          },
+          "values": [
+            {
+              "value": "auto",
+              "label": "auto"
+            },
+            {
+              "value": "1:1",
+              "label": "1:1"
+            },
+            {
+              "value": "2:3",
+              "label": "2:3"
+            },
+            {
+              "value": "3:2",
+              "label": "3:2"
+            },
+            {
+              "value": "3:4",
+              "label": "3:4"
+            },
+            {
+              "value": "4:3",
+              "label": "4:3"
+            },
+            {
+              "value": "4:5",
+              "label": "4:5"
+            },
+            {
+              "value": "5:4",
+              "label": "5:4"
+            },
+            {
+              "value": "9:16",
+              "label": "9:16"
+            },
+            {
+              "value": "16:9",
+              "label": "16:9"
+            },
+            {
+              "value": "21:9",
+              "label": "21:9"
+            },
+            {
+              "value": "1:4",
+              "label": "1:4"
+            },
+            {
+              "value": "4:1",
+              "label": "4:1"
+            },
+            {
+              "value": "1:8",
+              "label": "1:8"
+            },
+            {
+              "value": "8:1",
+              "label": "8:1"
+            }
+          ]
+        },
+        {
+          "id": "quality",
+          "title": "Quality",
+          "description": "Default quality level for generated images.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": {
+            "path": "config.quality"
+          },
+          "values": [
+            {
+              "value": "auto",
+              "label": "auto"
+            },
+            {
+              "value": "low",
+              "label": "low"
+            },
+            {
+              "value": "standard",
+              "label": "standard"
+            },
+            {
+              "value": "higher",
+              "label": "higher"
+            },
+            {
+              "value": "highest",
+              "label": "highest"
+            }
+          ]
+        },
+        {
+          "id": "style",
+          "title": "Style",
+          "description": "Default visual style for generated images.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": {
+            "path": "config.style"
+          },
+          "values": [
+            {
+              "value": "auto",
+              "label": "auto"
+            },
+            {
+              "value": "ghibli",
+              "label": "ghibli"
+            },
+            {
+              "value": "pixar",
+              "label": "pixar"
+            },
+            {
+              "value": "cartoon",
+              "label": "cartoon"
+            },
+            {
+              "value": "pixel",
+              "label": "pixel"
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "execution": "direct",
+        "promptIntro": "Create an image artifact from the user's request. The command is complete only when an image artifact is created.",
+        "tools": ["generate_image"],
+        "permissionOverrides": { "generate_image": "allow" },
+        "output": {
+          "kind": "artifact",
+          "artifactType": "image",
+          "publisherTool": "generate_image"
+        }
+      },
+      "command": {
+        "aliases": ["image"],
+        "category": "Artifacts"
+      }
+    }
+  ]
+}

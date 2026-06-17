@@ -1,22 +1,39 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
-  CheckCircle2,
   ChevronRight,
   Clock3,
+  FileCode2,
+  FilePenLine,
+  FileSearch,
+  FolderOpen,
+  Globe,
+  ImageIcon,
   Loader2,
+  ScrollText,
+  Search,
+  TerminalSquare,
+  Wrench,
 } from "lucide-react";
-import { getAgentToolSlashCommand } from "@sourceweft/sdk";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import {
+  ASSISTANT_ACTIVITY_DETAIL_CLASS,
+  ASSISTANT_ACTIVITY_ICON_CLASS,
+  ASSISTANT_ACTIVITY_LABEL_CLASS,
+  ASSISTANT_ACTIVITY_ROW_CLASS,
+} from "./assistant-activity-layout";
 import { compactText, getToolOutputContent } from "./message-assets";
 import {
-  getConnectorToolDisplayLabel,
   getResolvedToolConfirmationMessage,
-  getToolApprovalDisplayLabel,
   getToolCallDetailParts,
   isToolConfirmationResolved,
 } from "./reasoning-trace-state";
+import {
+  getAssistantToolTitle,
+  getSkillInstructionReadFileLabel,
+  isRedactedSkillInstructionRead,
+} from "./assistant-tool-display";
 import {
   getSandboxCollectedWorkfilePaths,
   getSandboxToolOperationTimeline,
@@ -31,32 +48,6 @@ import type {
   ToolCallRecord,
   ToolConfirmationResolution,
 } from "./types";
-
-function formatToolName(toolName: string) {
-  return toolName
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (match) => match.toUpperCase());
-}
-
-function getToolDisplayName(toolName: string) {
-  return (
-    getAgentToolSlashCommand(toolName)?.displayName ?? formatToolName(toolName)
-  );
-}
-
-function getToolTitle(
-  toolCall: ToolCallRecord,
-  confirmationResolution?: ToolConfirmationResolution | null,
-) {
-  const title =
-    getToolApprovalDisplayLabel(toolCall, confirmationResolution) ??
-    getConnectorToolDisplayLabel(toolCall) ??
-    getToolDisplayName(toolCall.tool);
-
-  return title
-    .replace(/\s+(completed|done|running|failed|errored)$/i, "")
-    .trim();
-}
 
 function getStatusLabel(input: {
   confirmationResolution?: ToolConfirmationResolution | null;
@@ -87,7 +78,47 @@ function getStatusLabel(input: {
   return "Done";
 }
 
-function StatusIcon({ label }: { label: string }) {
+function shouldAutoOpenToolStatus(label: string) {
+  return (
+    label === "Running" ||
+    label === "Needs approval" ||
+    label === "Failed" ||
+    label === "Rejected"
+  );
+}
+
+function ToolTypeIcon({ toolName }: { toolName: string }) {
+  switch (toolName) {
+    case "ls":
+      return <FolderOpen className="size-3.5 text-muted-foreground/75" />;
+    case "read_file":
+      return <ScrollText className="size-3.5 text-muted-foreground/75" />;
+    case "glob":
+      return <FileSearch className="size-3.5 text-muted-foreground/75" />;
+    case "grep":
+      return <Search className="size-3.5 text-muted-foreground/75" />;
+    case "write_file":
+      return <FilePenLine className="size-3.5 text-muted-foreground/75" />;
+    case "edit_file":
+      return <FileCode2 className="size-3.5 text-muted-foreground/75" />;
+    case "execute":
+      return <TerminalSquare className="size-3.5 text-muted-foreground/75" />;
+    case "web_fetch":
+    case "web_search":
+      return <Globe className="size-3.5 text-muted-foreground/75" />;
+    case "generate_image":
+      return <ImageIcon className="size-3.5 text-muted-foreground/75" />;
+    default:
+      if (toolName.startsWith("search_notion") || toolName.startsWith("read_notion") ||
+          toolName.startsWith("create_notion") || toolName.startsWith("append_notion") ||
+          toolName.startsWith("update_notion") || toolName.startsWith("delete_notion")) {
+        return <FileSearch className="size-3.5 text-muted-foreground/75" />;
+      }
+      return <Wrench className="size-3.5 text-muted-foreground/75" />;
+  }
+}
+
+function StatusIcon({ label, toolName }: { label: string; toolName: string }) {
   if (label === "Running") {
     return (
       <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
@@ -102,9 +133,7 @@ function StatusIcon({ label }: { label: string }) {
   if (label === "Needs approval") {
     return <Clock3 className="size-3.5 text-amber-700 dark:text-amber-300" />;
   }
-  return (
-    <CheckCircle2 className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-  );
+  return <ToolTypeIcon toolName={toolName} />;
 }
 
 function formatToolDuration(latencyMs: number | null | undefined) {
@@ -119,6 +148,9 @@ function formatToolDuration(latencyMs: number | null | undefined) {
 }
 
 function getOutputSummary(toolCall: ToolCallRecord) {
+  if (isRedactedSkillInstructionRead(toolCall)) {
+    return null;
+  }
   const confirmation = getToolConfirmationOutput(toolCall.output);
   if (confirmation) {
     return null;
@@ -195,25 +227,42 @@ export function AssistantToolCard({
       )
     : null;
   const statusLabel = getStatusLabel({ confirmationResolution, toolCall });
-  const title = getToolTitle(toolCall, confirmationResolution);
-  const detailParts = getToolCallDetailParts(
+  const title = getAssistantToolTitle(
     toolCall,
     toolStep,
     confirmationResolution,
   );
+  const isRedactedSkillRead = isRedactedSkillInstructionRead(toolCall);
+  const skillReadFileLabel = isRedactedSkillRead
+    ? getSkillInstructionReadFileLabel(toolCall)
+    : null;
+  const detailParts = isRedactedSkillRead
+    ? []
+    : getToolCallDetailParts(
+        toolCall,
+        toolStep,
+        confirmationResolution,
+      );
   const outputSummary = getOutputSummary(toolCall);
-  const collectedWorkfilePaths = getSandboxCollectedWorkfilePaths({
-    output: toolCall.output,
-    toolName: toolCall.tool,
-  });
-  const sandboxDetails = getSandboxToolResultDetails({
-    output: toolCall.output,
-    toolName: toolCall.tool,
-  });
-  const sandboxTimeline = getSandboxToolOperationTimeline({
-    output: toolCall.output,
-    toolName: toolCall.tool,
-  });
+  const collectedWorkfilePaths = isRedactedSkillRead
+    ? []
+    : getSandboxCollectedWorkfilePaths({
+        output: toolCall.output,
+        toolName: toolCall.tool,
+      });
+  const sandboxDetails = isRedactedSkillRead
+    ? []
+    : getSandboxToolResultDetails({
+        input: toolCall.input,
+        output: toolCall.output,
+        toolName: toolCall.tool,
+      });
+  const sandboxTimeline = isRedactedSkillRead
+    ? []
+    : getSandboxToolOperationTimeline({
+        output: toolCall.output,
+        toolName: toolCall.tool,
+      });
   const toolError = getSandboxToolSafeErrorMessage({
     error: toolCall.error,
     toolName: toolCall.tool,
@@ -226,34 +275,37 @@ export function AssistantToolCard({
   });
   const [isOpen, setIsOpen] = useState(
     defaultOpen ??
-      (toolCall.status === "error" ||
-        statusLabel === "Needs approval" ||
-        statusLabel === "Rejected"),
+      shouldAutoOpenToolStatus(statusLabel),
   );
   const hasDetails =
     detailParts.length > 0 ||
+    Boolean(skillReadFileLabel) ||
     Boolean(outputSummary) ||
     sandboxDetails.length > 0 ||
     sandboxTimeline.length > 0 ||
     collectedWorkfilePaths.length > 0 ||
-    Boolean(toolStep?.detail) ||
+    (!isRedactedSkillRead && Boolean(toolStep?.detail)) ||
     Boolean(toolError) ||
     Boolean(resolvedConfirmationMessage);
   const hasExpandableContent = hasDetails || Boolean(children);
+
+  useEffect(() => {
+    setIsOpen(defaultOpen ?? shouldAutoOpenToolStatus(statusLabel));
+  }, [defaultOpen, statusLabel]);
 
   return (
     <div className="group text-muted-foreground transition-colors hover:text-foreground">
       <button
         aria-expanded={hasExpandableContent ? isOpen : undefined}
-        className="flex min-h-8 w-full items-center gap-1 rounded-md px-1 py-1 text-left hover:bg-muted/30"
+        className={ASSISTANT_ACTIVITY_ROW_CLASS}
         disabled={!hasExpandableContent}
         onClick={() => setIsOpen((value) => !value)}
         type="button"
       >
-        <span className="grid size-6 shrink-0 place-items-center">
-          <StatusIcon label={statusLabel} />
+        <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
+          <StatusIcon label={statusLabel} toolName={toolCall.tool} />
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span
             className="truncate text-[13px] text-foreground/80"
             title={title}
@@ -285,12 +337,15 @@ export function AssistantToolCard({
       {isOpen && hasExpandableContent ? (
         <div
           className={cn(
-            "ml-7 space-y-1.5 rounded-md px-2 py-1 text-[13px] text-muted-foreground/75 leading-5",
+            ASSISTANT_ACTIVITY_DETAIL_CLASS,
             contentClassName,
           )}
         >
           {hasDetails && detailParts.length > 0 ? (
             <p className="break-words">{detailParts.join(" · ")}</p>
+          ) : null}
+          {hasDetails && skillReadFileLabel ? (
+            <p className="break-words">Read file: {skillReadFileLabel}</p>
           ) : null}
           {hasDetails && toolStep?.detail ? (
             <p className="break-words">{toolStep.detail}</p>

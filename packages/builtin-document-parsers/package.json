@@ -1,0 +1,27 @@
+{
+  "name": "@sourceweft/builtin-document-parsers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./providers": "./src/providers/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@langchain/classic": "^1.0.30",
+    "@langchain/community": "^1.1.27",
+    "@langchain/core": "^1.1.39",
+    "@langchain/textsplitters": "^1.0.1",
+    "@sourceweft/capability-contracts": "workspace:*",
+    "pdfjs-dist": "^5.6.205"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.2"
+  }
+}

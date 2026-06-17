@@ -8,6 +8,7 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "apiKeyEnv": "OPENROUTER_API_KEY",
       "defaultHeaders": {
+        "X-OpenRouter-Title": "SourceWeft",
         "X-Title": "SourceWeft",
         "HTTP-Referer": "https://sourceweft.com"
       },

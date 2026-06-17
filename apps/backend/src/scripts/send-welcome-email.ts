@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { renderMailTemplate } from "../shared/mail/templates";
+import { renderMailTemplate } from "../modules/mail/templates";
 
 type Args = {
   dryRun: boolean;
@@ -64,7 +64,7 @@ async function main() {
     throw new Error(`Invalid --email value: ${args.email}`);
   }
 
-  const mailProvider = process.env.MAIL_PROVIDER || "plunk";
+  const mailProvider = process.env.MAIL_PROVIDER || "console";
   if (!args.dryRun && mailProvider.toLowerCase() === "plunk") {
     if (!process.env.PLUNK_API_KEY?.trim()) {
       throw new Error("PLUNK_API_KEY is required to send welcome email.");
@@ -104,7 +104,7 @@ async function main() {
     return;
   }
 
-  const { mailService } = await import("../shared/mail");
+  const { mailService } = await import("../modules/mail");
   const result = await mailService.send({
     to: args.email,
     subject: rendered.subject,

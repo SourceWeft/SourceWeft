@@ -109,9 +109,10 @@ test("resolves waiting active runs", () => {
   );
 });
 
-test("treats active transient message metadata as live", () => {
+test("treats active transient message metadata as live while streaming", () => {
   assert.equal(
     resolveMessageVersionRunLifecycle({
+      isStreaming: true,
       version: version({
         renderKey: "temp-assistant-1",
         threadRun: {
@@ -124,9 +125,25 @@ test("treats active transient message metadata as live", () => {
   );
 });
 
+test("does not treat stale transient active metadata as live after streaming stops", () => {
+  assert.equal(
+    resolveMessageVersionRunLifecycle({
+      version: version({
+        renderKey: "temp-assistant-1",
+        threadRun: {
+          idempotencyKey: "sw-run-1",
+          status: "running",
+        },
+      }),
+    }),
+    "idle",
+  );
+});
+
 test("does not treat persisted active metadata as live", () => {
   assert.equal(
     resolveMessageVersionRunLifecycle({
+      isStreaming: true,
       version: version({
         threadRun: {
           idempotencyKey: "sw-run-1",

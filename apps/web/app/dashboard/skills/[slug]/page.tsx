@@ -213,7 +213,6 @@ export default function SkillDetailPage() {
               skill: {
                 ...currentDetail.skill,
                 enabled: false,
-                enabledWorkspaceSkillId: null,
               },
             }
           : currentDetail,
@@ -231,6 +230,7 @@ export default function SkillDetailPage() {
     ? detail.readmeContent ?? readmeFallback(detail.skill)
     : "";
   const skillContent = detail?.skillContent ?? "";
+  const canManageInstall = detail?.skill.installable !== false;
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -254,7 +254,7 @@ export default function SkillDetailPage() {
                       <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
                         {publisherLabel(detail.skill.sourceType)}
                       </Badge>
-                      {detail.skill.enabled ? (
+                      {detail.skill.enabled && canManageInstall ? (
                         <Badge className="h-5 px-1.5 text-[10px]" variant="secondary">
                           Installed
                         </Badge>
@@ -270,7 +270,7 @@ export default function SkillDetailPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {detail ? (
+              {detail && canManageInstall ? (
                 <Button
                   className="h-8 px-3 text-xs"
                   disabled={isInstalling || isUninstalling}

@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { contentService } from "../../../modules/content";
+import { contentArtifactsService } from "../../../modules/artifacts";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { requireRouteParam } from "./helpers";
@@ -16,7 +16,7 @@ export function registerArtifactRoutes(app: Hono) {
       ? Math.min(Math.max(Number.parseInt(limitParam, 10) || 100, 1), 200)
       : undefined;
 
-    const result = await contentService.listArtifacts({
+    const result = await contentArtifactsService.listArtifacts({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       limit,
@@ -32,7 +32,7 @@ export function registerArtifactRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getArtifactFile({
+    const result = await contentArtifactsService.getArtifactFile({
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -56,7 +56,7 @@ export function registerArtifactRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getArtifact({
+    const result = await contentArtifactsService.getArtifact({
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -71,7 +71,7 @@ export function registerArtifactRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getArtifactSourceJson({
+    const result = await contentArtifactsService.getArtifactSourceJson({
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -92,7 +92,7 @@ export function registerArtifactRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getArtifactAsset({
+    const result = await contentArtifactsService.getArtifactAsset({
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       fileName: requireRouteParam(c, "fileName"),
@@ -114,7 +114,7 @@ export function registerArtifactRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getArtifactFile({
+    const result = await contentArtifactsService.getArtifactFile({
       workspaceId: requireRouteParam(c, "workspaceId"),
       artifactId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),

@@ -27,7 +27,10 @@ export type AgentToolCapability =
   | "web_query"
   | "sandbox"
   | "sandbox_execute"
-  | "sandbox_file_transfer";
+  | "sandbox_file_transfer"
+  // Allow any string for dynamically registered connector types (e.g. "slack").
+  // TypeScript preserves autocomplete for the known literals listed above.
+  | string;
 
 export type AgentToolRequirements = {
   provider?: "web";

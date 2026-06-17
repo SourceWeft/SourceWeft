@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { HttpClientError } from "@sourceweft/sdk";
 import {
@@ -29,22 +29,23 @@ import {
   DEFAULT_MODEL_SELECTION_SOURCES,
   type ModelSelectionSources,
 } from "../../_components/skill-model-presets";
-import {
-  DEFAULT_PROMPT_THINKING_SETTINGS,
-  type ChatSkillItem,
-  type PromptThinkingSettings,
+import type {
+  ChatSkillItem,
+  PromptThinkingSettings,
 } from "../../_components/chat-canvas";
 import { contentClient } from "../../../../../lib/sdk";
+import type { ThreadChatPreferences } from "@sourceweft/contracts";
 import {
+  DEFAULT_THINKING_SETTINGS,
   EMPTY_MODEL_KIND_FLAGS,
-  getSearchPreferenceStorageKey,
+  mapChatPreferencesToThinkingSettings,
   normalizeThinkingSettingsForModel,
-  parseStoredThinkingSettings,
 } from "./thread-storage";
 
 type UseThreadModelsInput = {
   availableSkills: ChatSkillItem[];
   effectiveActiveSkillIds: string[];
+  onChatPreferencesChange?: (preferences: ThreadChatPreferences) => void;
   threadId: string;
   workspaceId: string | null;
 };
@@ -54,6 +55,7 @@ export type ModelCatalogStatus = "loading" | "ready" | "error";
 export function useThreadModels({
   availableSkills,
   effectiveActiveSkillIds,
+  onChatPreferencesChange,
   threadId,
   workspaceId,
 }: UseThreadModelsInput) {
@@ -70,7 +72,9 @@ export function useThreadModels({
   const [modelCatalogStatus, setModelCatalogStatus] =
     useState<ModelCatalogStatus>("loading");
   const [byokProviders, setByokProviders] = useState<ByokProviderOption[]>([]);
-  const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>([]);
+  const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>(
+    [],
+  );
   const [byokModels, setByokModels] = useState<ByokSavedModelItem[]>([]);
   const [selectedByokModels, setSelectedByokModels] = useState<
     Partial<Record<ModelType, ByokModelSelection | null>>
@@ -85,13 +89,10 @@ export function useThreadModels({
   >(EMPTY_MODEL_KIND_FLAGS);
   const [streamWithSelectedLlm, setStreamWithSelectedLlm] = useState(false);
   const [thinkingSettings, setThinkingSettings] =
-    useState<PromptThinkingSettings>(DEFAULT_PROMPT_THINKING_SETTINGS);
+    useState<PromptThinkingSettings>(DEFAULT_THINKING_SETTINGS);
   const [hasSavedThinkingPreference, setHasSavedThinkingPreference] =
     useState(false);
   const [searchEnabled, setSearchEnabled] = useState(true);
-  const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
-    string | null
-  >(null);
   const modelLoadGenerationRef = useRef(0);
 
   useEffect(() => {
@@ -157,7 +158,9 @@ export function useThreadModels({
       llmProfileAlias:
         selectedByokModels.llm?.mode === "byok"
           ? null
-          : (selectedModels.llm?.profileAlias ?? selectedModels.llm?.id ?? null),
+          : (selectedModels.llm?.profileAlias ??
+            selectedModels.llm?.id ??
+            null),
       imageProfileAlias:
         selectedByokModels.image?.mode === "byok"
           ? null
@@ -211,69 +214,45 @@ export function useThreadModels({
     selectedModels,
   ]);
 
-  const currentThinkingStorageKey = useMemo(
-    () => (workspaceId ? `chat:thinking:${workspaceId}:current` : null),
-    [workspaceId],
-  );
-  const currentSearchStorageKey = useMemo(
-    () => (workspaceId ? getSearchPreferenceStorageKey(workspaceId) : null),
-    [workspaceId],
-  );
-
-  useEffect(() => {
-    if (!currentThinkingStorageKey) {
-      setThinkingSettings(DEFAULT_PROMPT_THINKING_SETTINGS);
-      return;
-    }
-
-    const storedThinking = parseStoredThinkingSettings(
-      window.sessionStorage.getItem(currentThinkingStorageKey),
-    );
-    setHasSavedThinkingPreference(Boolean(storedThinking));
-    setThinkingSettings(storedThinking ?? DEFAULT_PROMPT_THINKING_SETTINGS);
-  }, [currentThinkingStorageKey]);
-
-  useEffect(() => {
-    if (!currentSearchStorageKey) {
-      setSearchEnabled(true);
-      setLoadedSearchPreferenceKey(null);
-      return;
-    }
-
-    const stored = window.sessionStorage.getItem(currentSearchStorageKey);
-    setSearchEnabled(stored === null ? true : stored === "true");
-    setLoadedSearchPreferenceKey(currentSearchStorageKey);
-  }, [currentSearchStorageKey]);
-
-  useEffect(() => {
-    if (!currentThinkingStorageKey) {
-      return;
-    }
-    window.sessionStorage.setItem(
-      currentThinkingStorageKey,
-      JSON.stringify(thinkingSettings),
-    );
-  }, [currentThinkingStorageKey, thinkingSettings]);
-
-  useEffect(() => {
-    if (
-      !currentSearchStorageKey ||
-      loadedSearchPreferenceKey !== currentSearchStorageKey
-    ) {
-      return;
-    }
-    window.sessionStorage.setItem(
-      currentSearchStorageKey,
-      searchEnabled ? "true" : "false",
-    );
-  }, [currentSearchStorageKey, loadedSearchPreferenceKey, searchEnabled]);
-
   const handleThinkingSettingsChange = useCallback(
     (settings: PromptThinkingSettings) => {
       setHasSavedThinkingPreference(true);
       setThinkingSettings(settings);
+      if (!workspaceId) {
+        return;
+      }
+      void contentClient
+        .updateThreadChatPreferences(workspaceId, threadId, {
+          thinking: settings,
+        })
+        .then((result) => {
+          onChatPreferencesChange?.(result.thread.chatPreferences);
+        })
+        .catch(() => {
+          toast.error("Failed to save Thinking preference for this chat.");
+        });
     },
-    [],
+    [onChatPreferencesChange, threadId, workspaceId],
+  );
+
+  const handleSearchEnabledChange = useCallback(
+    (enabled: boolean) => {
+      setSearchEnabled(enabled);
+      if (!workspaceId) {
+        return;
+      }
+      void contentClient
+        .updateThreadChatPreferences(workspaceId, threadId, {
+          webAccess: enabled,
+        })
+        .then((result) => {
+          onChatPreferencesChange?.(result.thread.chatPreferences);
+        })
+        .catch(() => {
+          toast.error("Failed to save web access preference for this chat.");
+        });
+    },
+    [onChatPreferencesChange, threadId, workspaceId],
   );
 
   const loadThreadModelState = useCallback(async () => {
@@ -360,6 +339,17 @@ export function useThreadModels({
       setByokProviders(
         normalizeByokProviderOptions(providerResult, credentialResult.items),
       );
+      setHasSavedThinkingPreference(
+        threadResponse.thread.chatPreferences.thinking.mode === "off" ||
+          threadResponse.thread.chatPreferences.thinking.mode === "effort",
+      );
+      setThinkingSettings(
+        mapChatPreferencesToThinkingSettings(
+          threadResponse.thread.chatPreferences,
+        ),
+      );
+      setSearchEnabled(threadResponse.thread.chatPreferences.webAccess);
+      onChatPreferencesChange?.(threadResponse.thread.chatPreferences);
       setStreamWithSelectedLlm(kindEnabled.llm);
       setModelCatalogStatus("ready");
     } catch {
@@ -382,7 +372,7 @@ export function useThreadModels({
       setSelectedByokModels({});
       setStreamWithSelectedLlm(false);
     }
-  }, [threadId, workspaceId]);
+  }, [onChatPreferencesChange, threadId, workspaceId]);
 
   useEffect(() => {
     void loadThreadModelState();
@@ -407,7 +397,9 @@ export function useThreadModels({
           ? { llmProfileAlias: input.model.profileAlias ?? input.model.id }
           : input.type === "image"
             ? { imageProfileAlias: input.model.profileAlias ?? input.model.id }
-            : { visionProfileAlias: input.model.profileAlias ?? input.model.id };
+            : {
+                visionProfileAlias: input.model.profileAlias ?? input.model.id,
+              };
 
       try {
         await contentClient.updateThreadModelSettings(
@@ -449,7 +441,11 @@ export function useThreadModels({
   );
 
   const handleThreadByokSelect = useCallback(
-    ({ model, selection, type }: {
+    ({
+      model,
+      selection,
+      type,
+    }: {
       model: ModelItem;
       selection: ByokModelSelection;
       type: ModelType;
@@ -490,6 +486,7 @@ export function useThreadModels({
     catalogKindEnabled,
     handleModelSelect,
     handleThreadByokSelect,
+    handleSearchEnabledChange,
     handleThinkingSettingsChange,
     hasSavedThinkingPreference,
     modelCatalogStatus,
@@ -506,7 +503,7 @@ export function useThreadModels({
     setCatalogKindEnabled,
     setHasSavedThinkingPreference,
     setModelSelectionSources,
-    setSearchEnabled,
+    setSearchEnabled: handleSearchEnabledChange,
     setSelectedByokModels,
     setSelectedModels,
     setStreamWithSelectedLlm,

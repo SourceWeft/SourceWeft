@@ -30,6 +30,7 @@ import { compactText } from "./message-assets";
 import {
   confirmationTitle,
   requestDetailLines,
+  sandboxExecuteCommandText,
 } from "./tool-confirmation-display";
 import {
   getVisibleToolConfirmationItems,
@@ -150,7 +151,9 @@ function ToolConfirmationPanel({
   }, [confirmation.id]);
 
   const title = confirmationTitle(confirmation);
-  const requestLines = requestDetailLines(confirmation);
+  const toolCallInput = item.toolCall.input as Record<string, unknown> | undefined;
+  const requestLines = requestDetailLines(confirmation, toolCallInput);
+  const commandText = sandboxExecuteCommandText({ confirmation, toolCallInput });
   const threadRunId = item.threadRunId ?? activeThreadRun?.id ?? null;
   const respondable = canDecide(
     confirmation,
@@ -266,6 +269,16 @@ function ToolConfirmationPanel({
                     </span>
                   ))}
                 </span>
+              ) : null}
+              {commandText ? (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                    查看命令 ({commandText.split("\n").length} 行, {commandText.length} 字符)
+                  </summary>
+                  <pre className="mt-1 max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs leading-5">
+                    {commandText}
+                  </pre>
+                </details>
               ) : null}
             </span>
           </span>

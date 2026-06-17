@@ -16,6 +16,7 @@
     "./mcp": "./src/mcp.ts",
     "./agent-tools": "./src/agent-tools.ts",
     "./workspace": "./src/workspace.ts",
+    "./user-settings": "./src/user-settings.ts",
     "./api-response": "./src/api-response.ts"
   },
   "scripts": {

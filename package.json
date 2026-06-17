@@ -21,6 +21,31 @@
     "turbo": "^2.8.20"
   },
   "packageManager": "pnpm@10.19.0",
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@better-auth/core>better-call": "2",
+        "@better-auth/passkey>better-call": "2",
+        "@better-auth/oauth-provider>better-call": "2",
+        "@browserbasehq/stagehand>dotenv": "17",
+        "@browserbasehq/stagehand>openai": "6",
+        "@browserbasehq/stagehand>zod": "4"
+      }
+    },
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "@prisma/client",
+      "better-sqlite3",
+      "core-js",
+      "esbuild",
+      "msgpackr-extract",
+      "msw",
+      "protobufjs",
+      "sharp",
+      "spawn-sync",
+      "tesseract.js"
+    ]
+  },
   "engines": {
     "node": ">=18"
   }

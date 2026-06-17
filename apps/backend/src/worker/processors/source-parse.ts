@@ -1,5 +1,5 @@
 import type { Job } from "bullmq";
-import { contentService } from "../../modules/content";
+import { sourceParsingService } from "../../modules/sources";
 import type {
   SourceParseJobPayload,
   SourceParsePollJobPayload,
@@ -11,14 +11,14 @@ function isFinalAttempt(job: Job<Record<string, unknown>>) {
 }
 
 export async function processSourceParseJob(job: Job<Record<string, unknown>>) {
-  await contentService.processSourceParseJob({
+  await sourceParsingService.processSourceParseJob({
     ...(job.data as SourceParseJobPayload),
     isFinalAttempt: isFinalAttempt(job),
   });
 }
 
 export async function processSourceParsePollJob(job: Job<Record<string, unknown>>) {
-  await contentService.processSourceParsePollJob({
+  await sourceParsingService.processSourceParsePollJob({
     ...(job.data as SourceParsePollJobPayload),
     isFinalAttempt: isFinalAttempt(job),
   });

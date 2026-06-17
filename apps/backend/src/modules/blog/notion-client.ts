@@ -99,7 +99,7 @@ async function notionRequest<T>(
 ): Promise<T> {
   requireNotionConfig();
 
-  const response = await fetch(`https://api.notion.com${path}`, {
+  const response = await fetch(`${config.blog.notionApiBaseUrl}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${config.blog.notionApiKey}`,

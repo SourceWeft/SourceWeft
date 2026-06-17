@@ -1,0 +1,26 @@
+{
+  "name": "@sourceweft/agent-tool-registry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sourceweft/builtin-connector-notion": "workspace:*",
+    "@sourceweft/builtin-retrieval": "workspace:*",
+    "@sourceweft/builtin-tool-generate-image": "workspace:*",
+    "@sourceweft/builtin-tool-generate-video-presentation": "workspace:*",
+    "@sourceweft/builtin-tool-publish-sandbox-artifact": "workspace:*",
+    "@sourceweft/builtin-tool-sandbox": "workspace:*",
+    "@sourceweft/builtin-tool-web-search": "workspace:*",
+    "@sourceweft/builtin-vfs": "workspace:*",
+    "@sourceweft/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2"
+  }
+}

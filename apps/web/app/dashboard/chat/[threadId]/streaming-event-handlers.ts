@@ -8,6 +8,10 @@ import type {
 } from "../_components/chat-canvas";
 import type { ChatMessageItem } from "./streaming-assistant-state";
 import type { StreamingRenderBuffer } from "./streaming-render-buffer";
+import {
+  finishStreamingAssistantRun,
+  resolveFinishedThreadRunStatus,
+} from "./streaming-assistant-state-reducer";
 
 type UpdateStreamingAssistantMessage = (
   updater: (message: ChatMessageItem) => ChatMessageItem,
@@ -72,19 +76,6 @@ export type StreamingEventHandlerContext<
   updateStreamingAssistantMessage: UpdateStreamingAssistantMessage;
 };
 
-function resolveFinishedThreadRunStatus(input: {
-  existingStatus: string | null;
-  finishReason?: string | null;
-}) {
-  if (input.existingStatus === "failed" || input.existingStatus === "cancelled") {
-    return input.existingStatus;
-  }
-  if (input.finishReason === "tool_confirmation_requested") {
-    return "waiting_for_approval";
-  }
-  return "completed";
-}
-
 type ContextInput<TToolEvent extends ToolCallEventPayload> = {
   context: StreamingEventHandlerContext<TToolEvent>;
 };
@@ -109,22 +100,20 @@ type HandleStreamingTextInterruptedInput<
   TToolEvent extends ToolCallEventPayload,
 > = ContextInput<TToolEvent>;
 
-type HandleStreamingToolCallEventInput<
-  TEvent extends ToolCallEventPayload,
-> = ContextInput<TEvent> & {
-  drainQueuedDeltasNow: () => void;
-  event: TEvent;
-  refreshedArtifactToolIds: Set<string>;
-  refreshedWorkfileToolIds: Set<string>;
-  setArtifactsRefreshKey: (updater: (value: number) => number) => void;
-  setWorkfilesRefreshKey: (updater: (value: number) => number) => void;
-};
+type HandleStreamingToolCallEventInput<TEvent extends ToolCallEventPayload> =
+  ContextInput<TEvent> & {
+    drainQueuedDeltasNow: () => void;
+    event: TEvent;
+    refreshedArtifactToolIds: Set<string>;
+    refreshedWorkfileToolIds: Set<string>;
+    setArtifactsRefreshKey: (updater: (value: number) => number) => void;
+    setWorkfilesRefreshKey: (updater: (value: number) => number) => void;
+  };
 
-type HandleStreamingThinkingStepInput<
-  TToolEvent extends ToolCallEventPayload,
-> = ContextInput<TToolEvent> & {
-  step: unknown;
-};
+type HandleStreamingThinkingStepInput<TToolEvent extends ToolCallEventPayload> =
+  ContextInput<TToolEvent> & {
+    step: unknown;
+  };
 
 type HandleStreamingReasoningInput<TToolEvent extends ToolCallEventPayload> =
   ContextInput<TToolEvent> & {
@@ -350,12 +339,13 @@ export function handleStreamingToolCallEvent<
   }
   const shouldAppendPresentationBlock =
     context.isPresentationArtifactToolName(nextToolCall.tool) &&
-    (event.type === "tool-call-start" ||
-      ((event.type === "tool-call-result" || event.type === "tool-call-end") &&
-        context.isCompletedPresentationArtifactToolCall(nextToolCall, event)));
+    (event.type === "tool-call-result" || event.type === "tool-call-end") &&
+    context.isCompletedPresentationArtifactToolCall(nextToolCall, event);
   if (shouldAppendPresentationBlock) {
     drainQueuedDeltasNow();
-    context.streamRenderBuffer.appendGeneratedPresentationBlock(nextToolCall.id);
+    context.streamRenderBuffer.appendGeneratedPresentationBlock(
+      nextToolCall.id,
+    );
   }
   if (
     event.type === "tool-call-start" &&
@@ -463,6 +453,19 @@ function appendUniqueModelReasoningSegment(
   ];
 }
 
+function hasSameModelReasoningSegmentContext(
+  existing: ModelReasoningSegmentRecord,
+  next: ModelReasoningSegmentRecord,
+) {
+  return (
+    existing.id === next.id &&
+    existing.sequence === next.sequence &&
+    existing.phase === next.phase &&
+    existing.toolCallId === next.toolCallId &&
+    existing.tool === next.tool
+  );
+}
+
 function upsertModelReasoningSegment(
   segments: ModelReasoningSegmentRecord[],
   next: ModelReasoningSegmentRecord,
@@ -488,6 +491,56 @@ function upsertModelReasoningSegment(
   }
 
   return appendUniqueModelReasoningSegment(segments, next);
+}
+
+function buildDeltaOnlyModelReasoningSegment(input: {
+  currentSegments: ModelReasoningSegmentRecord[];
+  reasoning: string;
+  segment: ModelReasoningSegmentRecord;
+}) {
+  const existing = input.currentSegments.find((segment) =>
+    hasSameModelReasoningSegmentContext(segment, input.segment),
+  );
+
+  return {
+    ...input.segment,
+    text: existing ? `${existing.text}${input.reasoning}` : input.segment.text,
+  };
+}
+
+function normalizeStreamingModelReasoningSegment<
+  TToolEvent extends ToolCallEventPayload,
+>(input: {
+  context: StreamingEventHandlerContext<TToolEvent>;
+  currentSegments: ModelReasoningSegmentRecord[];
+  reasoning: string;
+  segment: unknown;
+}) {
+  const directSegment = input.context.normalizeModelReasoningSegmentRecord(
+    input.segment,
+  );
+  if (directSegment) {
+    return directSegment;
+  }
+
+  const segmentRecord = input.context.toObjectRecord(input.segment);
+  if (!segmentRecord) {
+    return null;
+  }
+
+  const fallbackSegment = input.context.normalizeModelReasoningSegmentRecord({
+    ...segmentRecord,
+    text: input.reasoning,
+  });
+  if (!fallbackSegment) {
+    return null;
+  }
+
+  return buildDeltaOnlyModelReasoningSegment({
+    currentSegments: input.currentSegments,
+    reasoning: input.reasoning,
+    segment: fallbackSegment,
+  });
 }
 
 function nextTraceDisplayOrder(events: ReasoningTraceEventRecord[]) {
@@ -519,7 +572,8 @@ function upsertReasoningTraceEvent(
   }
 
   const existing = events[existingIndex];
-  const displayOrder = existing?.displayOrder ?? next.displayOrder ?? existingIndex;
+  const displayOrder =
+    existing?.displayOrder ?? next.displayOrder ?? existingIndex;
   return events.map((event, index) =>
     index === existingIndex
       ? {
@@ -559,10 +613,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function upsertTracePart(
-  parts: TracePartRecord[],
-  next: TracePartDraft,
-) {
+function upsertTracePart(parts: TracePartRecord[], next: TracePartDraft) {
   const existingIndex = parts.findIndex(
     (part) => tracePartKey(part) === tracePartKey(next),
   );
@@ -613,9 +664,7 @@ function buildReasoningTracePart(
   };
 }
 
-function buildToolTracePart(
-  toolCall: ToolCallRecord,
-): TracePartDraft {
+function buildToolTracePart(toolCall: ToolCallRecord): TracePartDraft {
   return {
     id: toolCall.id,
     kind: "tool",
@@ -631,9 +680,7 @@ function buildToolTracePart(
   };
 }
 
-function buildStepTracePart(
-  step: ThinkingStepRecord,
-): TracePartDraft {
+function buildStepTracePart(step: ThinkingStepRecord): TracePartDraft {
   return {
     id: step.id,
     kind: "step",
@@ -642,38 +689,6 @@ function buildStepTracePart(
     items: step.items,
     metadata: step.metadata,
   };
-}
-
-function normalizeTerminalTracePart(part: TracePartRecord): TracePartRecord {
-  if (part.kind === "step" && part.status === "in_progress") {
-    return {
-      ...part,
-      status: "completed",
-    };
-  }
-  if (part.kind === "tool" && part.status === "running") {
-    return {
-      ...part,
-      status: "completed",
-    };
-  }
-  return part;
-}
-
-function buildTerminalTraceParts(input: {
-  metadata: Record<string, unknown>;
-  steps: ThinkingStepRecord[];
-  toolCalls: ToolCallRecord[];
-}) {
-  const withTools = input.toolCalls.reduce(
-    (parts, toolCall) => upsertTracePart(parts, buildToolTracePart(toolCall)),
-    getTraceParts(input.metadata),
-  );
-  const withSteps = input.steps.reduce(
-    (parts, step) => upsertTracePart(parts, buildStepTracePart(step)),
-    withTools,
-  );
-  return withSteps.map(normalizeTerminalTracePart);
 }
 
 function buildReasoningTraceEvent(input: {
@@ -698,7 +713,10 @@ function buildThinkingStepTraceEvent(
 ): ReasoningTraceEventRecord {
   return {
     type: "thinking-step",
-    id: typeof step.sequence === "number" ? `${step.id}:${step.sequence}` : step.id,
+    id:
+      typeof step.sequence === "number"
+        ? `${step.id}:${step.sequence}`
+        : step.id,
     itemId: step.id,
     sequence: step.sequence,
     step,
@@ -707,16 +725,11 @@ function buildThinkingStepTraceEvent(
 
 export function handleStreamingReasoning<
   TToolEvent extends ToolCallEventPayload,
->({
-  context,
-  reasoning,
-  segment,
-}: HandleStreamingReasoningInput<TToolEvent>) {
+>({ context, reasoning, segment }: HandleStreamingReasoningInput<TToolEvent>) {
   if (reasoning.length === 0) {
     return;
   }
 
-  const nextSegment = context.normalizeModelReasoningSegmentRecord(segment);
   context.updateStreamingAssistantMessage((message) => {
     const currentReasoning = context.appendReasoningChunk(
       context.toNullableString(message.metadata.reasoning) ?? undefined,
@@ -727,10 +740,14 @@ export function handleStreamingReasoning<
           .map((item, index) =>
             context.normalizeModelReasoningSegmentRecord(item, index),
           )
-          .filter(
-            (item): item is ModelReasoningSegmentRecord => item !== null,
-          )
+          .filter((item): item is ModelReasoningSegmentRecord => item !== null)
       : [];
+    const nextSegment = normalizeStreamingModelReasoningSegment({
+      context,
+      currentSegments,
+      reasoning,
+      segment,
+    });
     const reasoningSegments = nextSegment
       ? upsertModelReasoningSegment(currentSegments, nextSegment).sort(
           (left, right) =>
@@ -812,67 +829,56 @@ export function handleStreamingThreadTitlePending({
   setPendingTitleJobId(typeof jobId === "string" ? jobId : null);
 }
 
-export function handleStreamingFinish<
-  TToolEvent extends ToolCallEventPayload,
->({
+export function handleStreamingFinish<TToolEvent extends ToolCallEventPayload>({
   context,
   finishReason,
 }: HandleStreamingFinishInput<TToolEvent>) {
-  if (context.streamToolCallsById.size > 0) {
-    for (const [toolId, toolCall] of context.streamToolCallsById.entries()) {
-      if (toolCall.status === "running") {
-        context.streamToolCallsById.set(toolId, {
-          ...toolCall,
-          status: "completed",
-        });
-      }
-    }
+  const renderBlocks = context.streamRenderBuffer.snapshotRenderBlocks();
+  const terminalRecords = finishStreamingAssistantRun({
+    durableRunKey: context.durableRunKey,
+    existingRun: null,
+    existingStatus: null,
+    finishReason,
+    mode: context.mode,
+    renderBlocks,
+    thinkingSteps: [...context.streamThinkingStepsById.values()],
+    toolCalls: [...context.streamToolCallsById.values()],
+  });
+  context.streamThinkingStepsById.clear();
+  for (const step of terminalRecords.metadata.thinkingSteps) {
+    context.streamThinkingStepsById.set(step.id, step);
+  }
+  context.streamToolCallsById.clear();
+  for (const toolCall of terminalRecords.metadata.toolCalls) {
+    context.streamToolCallsById.set(toolCall.id, toolCall);
+  }
+  if (terminalRecords.metadata.toolCalls.length > 0) {
     context.syncStreamingToolCalls();
   }
-  if (context.streamThinkingStepsById.size > 0) {
-    for (const [stepId, step] of context.streamThinkingStepsById.entries()) {
-      if (step.status === "in_progress") {
-        context.streamThinkingStepsById.set(stepId, {
-          ...step,
-          status: "completed",
-        });
-      }
-    }
+  if (terminalRecords.metadata.thinkingSteps.length > 0) {
     context.syncStreamingThinkingSteps();
   }
+
   context.updateStreamingAssistantMessage((message) => {
-    const terminalThinkingSteps = [
-      ...context.streamThinkingStepsById.values(),
-    ];
-    const terminalToolCalls = [...context.streamToolCallsById.values()];
     const existingRun = context.toObjectRecord(message.metadata.threadRun);
     const existingStatus = context.toNullableString(existingRun?.status);
-    const nextStatus = resolveFinishedThreadRunStatus({
+    const terminalState = finishStreamingAssistantRun({
+      durableRunKey: context.durableRunKey,
+      existingRun,
       existingStatus,
       finishReason,
+      mode: context.mode,
+      renderBlocks,
+      thinkingSteps: terminalRecords.metadata.thinkingSteps,
+      toolCalls: terminalRecords.metadata.toolCalls,
     });
-    const terminalFinishReason =
-      finishReason ?? (nextStatus === "completed" ? "stop" : null);
+
     return {
       ...message,
       metadata: {
         ...message.metadata,
-        ...(terminalFinishReason ? { finishReason: terminalFinishReason } : {}),
+        ...terminalState.metadata,
         [STREAM_TEXT_PAUSED_KEY]: false,
-        thinkingSteps: terminalThinkingSteps,
-        toolCalls: terminalToolCalls,
-        traceParts: buildTerminalTraceParts({
-          metadata: message.metadata,
-          steps: terminalThinkingSteps,
-          toolCalls: terminalToolCalls,
-        }),
-        renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
-        threadRun: {
-          ...(existingRun ?? {}),
-          idempotencyKey: context.durableRunKey,
-          status: nextStatus,
-          mode: context.mode,
-        },
       },
     };
   });
@@ -1003,9 +1009,7 @@ function sanitizeClientErrorMessage(value: string | null | undefined) {
   return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
 }
 
-export function handleStreamingStart<
-  TToolEvent extends ToolCallEventPayload,
->({
+export function handleStreamingStart<TToolEvent extends ToolCallEventPayload>({
   context,
   event,
   setCreatedUserMessageId,
@@ -1017,11 +1021,15 @@ export function handleStreamingStart<
   const previousUserMessageId = tempUserId;
   const serverUserMessageId = event.messageId;
   const serverSourceIds = normalizeStringArray(event.sourceIds);
-  const serverMentionedSourceIds = normalizeStringArray(event.mentionedSourceIds);
+  const serverMentionedSourceIds = normalizeStringArray(
+    event.mentionedSourceIds,
+  );
   const serverEffectiveMentionedSourceIds = normalizeStringArray(
     event.effectiveMentionedSourceIds,
   );
-  const serverEffectiveSourceIds = normalizeStringArray(event.effectiveSourceIds);
+  const serverEffectiveSourceIds = normalizeStringArray(
+    event.effectiveSourceIds,
+  );
   const serverContentJson = context.toObjectRecord(event.contentJson);
   const serverCommand = context.normalizeThreadCommandRequest(event.command);
   const serverThreadRun = context.toObjectRecord(event.threadRun);

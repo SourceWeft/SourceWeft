@@ -4,8 +4,7 @@ import {
   type LangChainModelExecutionConfig,
 } from "@sourceweft/model-gateway";
 import { and, eq } from "drizzle-orm";
-import { db } from "../database";
-import { modelGatewayProfiles } from "../db/schema";
+import { db, modelGatewayProfiles } from "@sourceweft/db";
 import { mapModelGatewayProfile } from "./profiles";
 import {
   assertGatewayConfigAvailable,
@@ -160,3 +159,4 @@ export async function resolveModelGatewayProfile(input: {
 
   return row ? mapModelGatewayProfile(row) : null;
 }
+

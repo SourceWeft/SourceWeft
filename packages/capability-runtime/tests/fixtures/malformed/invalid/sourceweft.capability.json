@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "invalid",
+  "kind": "unknown",
+  "name": "Invalid Manifest",
+  "version": "0.0.0",
+  "entry": "./index.js",
+  "contributes": {}
+}

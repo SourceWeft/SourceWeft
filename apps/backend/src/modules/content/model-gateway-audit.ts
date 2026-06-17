@@ -1,5 +1,4 @@
 import type { UsageInfo } from "@sourceweft/model-gateway";
-import { createModelGatewayEvent } from "../../shared/model-gateway/llm-observability-sink";
 import { logger } from "../../shared/logger";
 
 export type LlmThinkingConfig = {
@@ -167,8 +166,16 @@ export async function recordGatewayOperationEvent(input: {
   });
 
   try {
-    await createModelGatewayEvent({
-      traceId: input.traceId,
+    const { recordCompletedGeneration } = await import(
+      "../llm-observability/writer"
+    );
+
+    const now = new Date();
+    const latencyMs = input.latencyMs ?? 0;
+    const startedAt = new Date(now.getTime() - latencyMs);
+
+    await recordCompletedGeneration({
+      traceId: input.traceId ?? null,
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -176,23 +183,27 @@ export async function recordGatewayOperationEvent(input: {
       messageId: input.messageId,
       feature: input.feature,
       operation: input.operation,
+      modelAlias: observedIdentity.modelAlias,
+      provider:
+        typeof gateway.provider === "string" ? gateway.provider : null,
+      providerModel: input.llm?.providerModel ?? null,
       executionMode:
         typeof gateway.executionMode === "string"
           ? gateway.executionMode
           : null,
       keySource:
         typeof gateway.keySource === "string" ? gateway.keySource : null,
-      provider: typeof gateway.provider === "string" ? gateway.provider : null,
-      providerModel: input.llm?.providerModel ?? null,
-      modelAlias: observedIdentity.modelAlias,
       routeStrategy: gateway.routeStrategy,
       success: input.success,
       errorCode: input.errorCode ?? null,
       errorMessage: input.errorMessage ?? null,
-      latencyMs: input.latencyMs ?? null,
-      usage: input.usage,
+      inputTokens: input.usage?.inputTokens ?? null,
+      outputTokens: input.usage?.outputTokens ?? null,
+      totalTokens: input.usage?.totalTokens ?? null,
       providerCostUsd: input.providerCostUsd ?? null,
-      attributes: {
+      startedAt,
+      endedAt: now,
+      metadata: {
         thinkingEnabled: gateway.thinkingEnabled,
         thinkingEffort: gateway.thinkingEffort,
         ...(observedIdentity.catalogModelAlias
@@ -210,7 +221,7 @@ export async function recordGatewayOperationEvent(input: {
       },
     });
   } catch (error) {
-    logger.warn("Failed to record model gateway event", {
+    logger.warn("Failed to record gateway operation event", {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       traceId: input.traceId,

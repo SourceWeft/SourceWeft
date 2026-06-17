@@ -401,6 +401,19 @@ export type ConnectorActionCapability = z.infer<
 >;
 export type ConnectorWebhookEvent = z.infer<typeof connectorWebhookEventSchema>;
 export type ConnectorActivityItem = z.infer<typeof connectorActivityItemSchema>;
+export type ConnectorActionRiskLevel = z.infer<typeof connectorActionRiskLevelSchema>;
+export type ConnectorActionRunStatus = z.infer<typeof connectorActionRunStatusSchema>;
+export type ConnectorOAuthAccountStatus = z.infer<
+  typeof connectorOAuthAccountStatusSchema
+>;
+export type ConnectorStatus = z.infer<typeof connectorStatusSchema>;
+export type ConnectorSyncRunTriggerType = z.infer<
+  typeof connectorSyncRunTriggerTypeSchema
+>;
+export type ConnectorSyncRunStatus = z.infer<typeof connectorSyncRunStatusSchema>;
+export type ConnectorWebhookEventStatus = z.infer<
+  typeof connectorWebhookEventStatusSchema
+>;
 export type StartConnectorOAuthRequest = z.infer<
   typeof startConnectorOAuthRequestSchema
 >;
@@ -489,3 +502,153 @@ export type ListConnectorWebhookEventsResponse = z.infer<
 export type ConnectorWebhookConfigResponse = z.infer<
   typeof connectorWebhookConfigResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Runtime adapter interface — implemented by connector packages
+// ---------------------------------------------------------------------------
+
+export type ConnectorType = string;
+
+export type ConnectorItem = {
+  externalId: string;
+  externalUri: string | null;
+  title: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  externalUpdatedAt: Date | null;
+  contentHash: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type ConnectorDirectoryNode = {
+  externalId: string;
+  title: string;
+  externalUri?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type ConnectorDiscoverInput = {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+  connectorType: ConnectorType;
+  connectorName?: string;
+  config: Record<string, unknown>;
+  accessToken: string;
+  cursor?: Record<string, unknown> | null;
+};
+
+export type ConnectorExtractInput = ConnectorDiscoverInput & {
+  item: ConnectorItem;
+};
+
+export type ConnectorActionInput = {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+  connectorType: ConnectorType;
+  actionType: string;
+  request: Record<string, unknown>;
+  config: Record<string, unknown>;
+  accessToken: string;
+  idempotencyKey: string;
+};
+
+export type ConnectorActionResult = {
+  externalId?: string | null;
+  rawResponseJson?: unknown;
+  result: Record<string, unknown>;
+  shouldResync?: boolean;
+  resyncExternalIds?: string[];
+};
+
+export type ConnectorExtractedContent = {
+  item: ConnectorItem;
+  contentText: string;
+  markdown?: string;
+  parentExternalId?: string | null;
+  directoryPath?: ConnectorDirectoryNode[];
+};
+
+export type OAuthCodeExchangeInput = {
+  code: string;
+  redirectUri: string;
+  scopes: string[];
+};
+
+export type OAuthRefreshInput = {
+  refreshToken: string;
+  scopes: string[];
+};
+
+export type OAuthTokenSet = {
+  accessToken: string;
+  refreshToken?: string | null;
+  expiresAt?: Date | null;
+  scopes?: string[];
+  providerAccountId?: string | null;
+  providerAccountEmail?: string | null;
+  displayName?: string | null;
+};
+
+export type ConnectorWebhookVerifyInput = {
+  headers: Record<string, string>;
+  rawBody: string;
+  query: Record<string, string | undefined>;
+};
+
+/** Parsed webhook event from a connector adapter (distinct from ConnectorWebhookEvent DB record). */
+export type ConnectorWebhookPayload = {
+  providerEventId: string;
+  eventType: string;
+  objectId: string | null;
+  objectType: string | null;
+  workspaceHint?: string | null;
+  connectorId?: string | null;
+  metadata: Record<string, unknown>;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ConnectorWebhookTargetAction =
+  | "sync"
+  | "archive_source"
+  | "record_only";
+
+export type ConnectorWebhookTarget = {
+  action: ConnectorWebhookTargetAction;
+  externalId?: string | null;
+  objectId?: string | null;
+  objectType?: string | null;
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type ConnectorSyncReadinessResult = {
+  ready: boolean;
+  reason?: string;
+  message?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ConnectorActionSpec = z.infer<typeof connectorActionSpecSchema>;
+export type ConnectorResourceSpec = z.infer<typeof connectorResourceSpecSchema>;
+
+export interface ConnectorAdapter {
+  capabilityId?: string;
+  getManifest(): ConnectorManifest;
+  exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
+  refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
+  checkSyncReadiness?(
+    input: ConnectorDiscoverInput,
+  ): Promise<ConnectorSyncReadinessResult>;
+  discover(input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem>;
+  extract(input: ConnectorExtractInput): Promise<ConnectorExtractedContent>;
+  executeAction(input: ConnectorActionInput): Promise<ConnectorActionResult>;
+  verifyWebhook?(input: ConnectorWebhookVerifyInput): Promise<void>;
+  parseWebhookEvent?(
+    input: ConnectorWebhookVerifyInput,
+  ): Promise<ConnectorWebhookPayload>;
+  mapWebhookEventToSyncTargets?(
+    event: ConnectorWebhookPayload,
+  ): Promise<ConnectorWebhookTarget[]>;
+}

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db } from "../../shared/database";
-import { opsAlerts } from "../../shared/db/schema";
+import { db, opsAlerts } from "@sourceweft/db";
 import type { OpsAlertState } from "./types";
 
 type OpsAlertRow = typeof opsAlerts.$inferSelect;
@@ -178,3 +177,4 @@ export class OpsAlertStore {
 }
 
 export const opsAlertStore = new OpsAlertStore();
+

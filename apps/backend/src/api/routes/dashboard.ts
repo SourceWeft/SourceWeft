@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { contentService } from "../../modules/content";
+import { contentThreadService } from "../../modules/threads";
 import { workspaceService } from "../../modules/workspace";
 import {
   getActiveOrganizationId,
@@ -51,7 +51,11 @@ function parseBooleanQuery(value: string | undefined, fallback: boolean) {
   if (normalized === "false" || normalized === "0") {
     return false;
   }
-  throw new ApiError(400, "INVALID_BOOLEAN", "boolean query parameter must be true or false");
+  throw new ApiError(
+    400,
+    "INVALID_BOOLEAN",
+    "boolean query parameter must be true or false",
+  );
 }
 
 export function registerDashboardRoutes(app: Hono) {
@@ -70,10 +74,9 @@ export function registerDashboardRoutes(app: Hono) {
     );
     const requestedWorkspaceId = c.req.query("workspaceId")?.trim() || null;
     const sessionOrganizationId = getActiveOrganizationId(session);
-    const personalMembership =
-      sessionOrganizationId
-        ? null
-        : await workspaceService.findPersonalOrganizationMembershipByUser(userId);
+    const personalMembership = sessionOrganizationId
+      ? null
+      : await workspaceService.findPersonalOrganizationMembershipByUser(userId);
     const activeOrganizationId =
       sessionOrganizationId ?? personalMembership?.organizationId ?? null;
 
@@ -98,17 +101,19 @@ export function registerDashboardRoutes(app: Hono) {
       userId,
     });
     if (workspaces.length === 0) {
-      const workspace = await workspaceService.ensureUserWorkspaceInOrganization({
-        organizationId: activeOrganizationId,
-        userId,
-      });
+      const workspace =
+        await workspaceService.ensureUserWorkspaceInOrganization({
+          organizationId: activeOrganizationId,
+          userId,
+        });
       workspaces = [workspace];
     }
 
     let activeWorkspace = requestedWorkspaceId
-      ? workspaces.find((workspace) => workspace.id === requestedWorkspaceId) ??
-        null
-      : workspaces[0] ?? null;
+      ? (workspaces.find(
+          (workspace) => workspace.id === requestedWorkspaceId,
+        ) ?? null)
+      : (workspaces[0] ?? null);
 
     if (requestedWorkspaceId && !activeWorkspace) {
       const resolved = await workspaceService.resolveWorkspace({
@@ -116,11 +121,7 @@ export function registerDashboardRoutes(app: Hono) {
         userId,
       });
       if (!resolved) {
-        throw new ApiError(
-          404,
-          "WORKSPACE_NOT_FOUND",
-          "Workspace not found",
-        );
+        throw new ApiError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
       }
       if (resolved.organizationId !== activeOrganizationId) {
         throw ApiError.forbidden();
@@ -130,25 +131,35 @@ export function registerDashboardRoutes(app: Hono) {
     }
 
     if (!activeWorkspace) {
-      activeWorkspace = await workspaceService.ensureUserWorkspaceInOrganization({
-        organizationId: activeOrganizationId,
-        userId,
-      });
+      activeWorkspace =
+        await workspaceService.ensureUserWorkspaceInOrganization({
+          organizationId: activeOrganizationId,
+          userId,
+        });
       workspaces = [activeWorkspace];
     }
 
-    const organization = await workspaceService.getOrganization(activeOrganizationId);
+    const organization =
+      await workspaceService.getOrganization(activeOrganizationId);
     const activeOrganizationName = organization?.name ?? "SourceWeft";
     const warnings: BootstrapWarning[] = [];
 
-    const [privateChatsResult, modelCatalogResult] = await Promise.allSettled([
-      contentService.listThreads({
+    const [
+      privateChatsResult,
+      initialChatPreferencesResult,
+      modelCatalogResult,
+    ] = await Promise.allSettled([
+      contentThreadService.listThreads({
         workspaceId: activeWorkspace.id,
         userId,
         limit: THREADS_PAGE_SIZE,
       }),
+      contentThreadService.getInitialChatPreferences({
+        workspaceId: activeWorkspace.id,
+        userId,
+      }),
       includeModelCatalog
-        ? contentService.listThreadModelCatalog({
+        ? contentThreadService.listThreadModelCatalog({
             workspaceId: activeWorkspace.id,
             userId,
           })
@@ -158,11 +169,18 @@ export function registerDashboardRoutes(app: Hono) {
     if (privateChatsResult.status === "rejected") {
       throw privateChatsResult.reason;
     }
+    if (initialChatPreferencesResult.status === "rejected") {
+      throw initialChatPreferencesResult.reason;
+    }
 
     let modelCatalog =
-      modelCatalogResult.status === "fulfilled" ? modelCatalogResult.value : null;
+      modelCatalogResult.status === "fulfilled"
+        ? modelCatalogResult.value
+        : null;
     if (modelCatalogResult.status === "rejected") {
-      warnings.push(warningFromError("modelCatalog", modelCatalogResult.reason));
+      warnings.push(
+        warningFromError("modelCatalog", modelCatalogResult.reason),
+      );
     }
 
     return ApiResponse.success(c, {
@@ -173,6 +191,8 @@ export function registerDashboardRoutes(app: Hono) {
       activeWorkspace,
       workspaces,
       privateChats: privateChatsResult.value,
+      initialChatPreferences:
+        initialChatPreferencesResult.value.initialChatPreferences,
       modelCatalog,
       modelCatalogDeferred: !includeModelCatalog,
       cacheHints: DASHBOARD_CACHE_HINTS,

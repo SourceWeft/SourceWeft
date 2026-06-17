@@ -4,10 +4,11 @@ import { AuthUIProvider } from "@daveyplate/better-auth-ui";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import type { SocialProvider } from "better-auth/social-providers";
 import Link from "next/link";
-import { ThemeProvider } from "next-themes";
+import { ThemeProvider, useTheme } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect } from "react";
 import { Toaster, toast as sonnerToast } from "sonner";
+import { DEFAULT_USER_THEME } from "@sourceweft/contracts";
 import { GoogleOneTap } from "./google-one-tap";
 import { MobileRouteSheetProvider } from "./mobile-route-sheet-provider";
 import { authClient } from "../lib/auth-client";
@@ -17,6 +18,7 @@ import {
   customAuthViewPaths,
   customOrganizationViewPaths,
 } from "../lib/auth-ui-config";
+import { userSettingsClient } from "../lib/sdk";
 
 function resolveWebBaseUrl() {
   const configuredBaseUrl = process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim();
@@ -60,6 +62,36 @@ function isCancelledPasskeyRejection(reason: unknown) {
   return false;
 }
 
+function ThemeSettingsSync() {
+  const { data: session } = authClient.useSession();
+  const { setTheme } = useTheme();
+  const userId = session?.user?.id;
+
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    let cancelled = false;
+    void userSettingsClient
+      .getSettings()
+      .then((result) => {
+        if (!cancelled) {
+          setTheme(result.settings.appearance.theme);
+        }
+      })
+      .catch(() => {
+        // Keep next-themes local cache as the first-paint fallback.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setTheme, userId]);
+
+  return null;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -93,7 +125,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="system"
+      defaultTheme={DEFAULT_USER_THEME}
       enableSystem
       disableTransitionOnChange
     >
@@ -158,6 +190,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         twoFactor={["otp", "totp"]}
         viewPaths={customAuthViewPaths}
       >
+        <ThemeSettingsSync />
         <GoogleOneTap />
         <TooltipProvider>
           <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>

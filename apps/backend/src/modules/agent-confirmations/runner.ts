@@ -108,6 +108,79 @@ function sandboxExecuteToolCallIdFromConfirmation(
   return confirmation?.execution.sourceweft?.sandboxExecuteToolCallId;
 }
 
+function sandboxActionRequestJsonFromConfirmation(
+  confirmation?: ToolConfirmationRequest,
+) {
+  return (
+    confirmation?.execution.sourceweft?.requestJson ??
+    confirmation?.execution.sourceweft?.hitlActionRequestJson ??
+    confirmation?.preview.requestJson
+  );
+}
+
+function sandboxActionRefFromConfirmation(input: {
+  confirmationId: string;
+  confirmation?: ToolConfirmationRequest;
+  requestJson?: Record<string, unknown>;
+}):
+  | NonNullable<
+      NonNullable<ToolApprovalResume["sourceweft"]>["sandboxActions"]
+    >[number]
+  | null {
+  const { confirmation } = input;
+  const toolName =
+    confirmation?.execution.sourceweft?.toolName ??
+    confirmation?.execution.sourceweft?.hitlActionToolName ??
+    confirmation?.action.toolName;
+  const toolCallId =
+    confirmation?.execution.sourceweft?.sandboxExecuteToolCallId ??
+    confirmation?.execution.sourceweft?.toolCallId ??
+    confirmation?.id;
+  const requestJson =
+    input.requestJson ?? sandboxActionRequestJsonFromConfirmation(confirmation);
+  if (!toolName || !toolCallId || !requestJson) {
+    return null;
+  }
+  return {
+    toolName,
+    toolCallId,
+    requestJson,
+    confirmationId: input.confirmationId,
+    ...(confirmation?.execution.sourceweft?.hitlInterruptId
+      ? { hitlInterruptId: confirmation.execution.sourceweft.hitlInterruptId }
+      : {}),
+    ...(confirmation?.execution.sourceweft?.sourceUserMessageId
+      ? {
+          sourceUserMessageId:
+            confirmation.execution.sourceweft.sourceUserMessageId,
+        }
+      : {}),
+    ...(confirmation?.execution.sourceweft?.sourceAssistantMessageId
+      ? {
+          sourceAssistantMessageId:
+            confirmation.execution.sourceweft.sourceAssistantMessageId,
+        }
+      : {}),
+  };
+}
+
+function withHitlInterruptResumeMetadata(input: {
+  confirmation?: ToolConfirmationRequest;
+  resume: ToolApprovalResume;
+}): ToolApprovalResume {
+  const hitlInterruptId = hitlInterruptIdFromConfirmation(input.confirmation);
+  if (!hitlInterruptId || input.resume.sourceweft?.hitlInterruptId) {
+    return input.resume;
+  }
+  return {
+    ...input.resume,
+    sourceweft: {
+      ...(input.resume.sourceweft ?? {}),
+      hitlInterruptId,
+    },
+  };
+}
+
 function connectorActionMetadata(action: ConnectorActionRunRecord) {
   const manifest = connectorRegistry
     .listManifests()
@@ -132,6 +205,18 @@ export class ToolConfirmationRunner {
     note?: string;
   }) {
     if (input.confirmation?.domain === "sandbox") {
+      const sandboxExecuteToolCallId =
+        input.decision === "approve"
+          ? sandboxExecuteToolCallIdFromConfirmation(input.confirmation)
+          : undefined;
+      const sandboxAction =
+        input.decision === "approve"
+          ? sandboxActionRefFromConfirmation({
+              confirmationId: input.confirmationId,
+              confirmation: input.confirmation,
+              requestJson: input.editedArgs,
+            })
+          : null;
       const resume: ToolApprovalResume = {
         decisions: [
           resumeDecisionFromSandboxInput({
@@ -142,9 +227,26 @@ export class ToolConfirmationRunner {
           }),
         ],
         ...(hitlInterruptIdFromConfirmation(input.confirmation) ||
-        sandboxExecuteToolCallIdFromConfirmation(input.confirmation)
+        sandboxExecuteToolCallId ||
+        sandboxAction
           ? {
               sourceweft: {
+                confirmationId: input.confirmationId,
+                ...(input.confirmation.execution.sourceweft?.sourceUserMessageId
+                  ? {
+                      sourceUserMessageId:
+                        input.confirmation.execution.sourceweft
+                          .sourceUserMessageId,
+                    }
+                  : {}),
+                ...(input.confirmation.execution.sourceweft
+                  ?.sourceAssistantMessageId
+                  ? {
+                      sourceAssistantMessageId:
+                        input.confirmation.execution.sourceweft
+                          .sourceAssistantMessageId,
+                    }
+                  : {}),
                 ...(hitlInterruptIdFromConfirmation(input.confirmation)
                   ? {
                       hitlInterruptId: hitlInterruptIdFromConfirmation(
@@ -152,14 +254,12 @@ export class ToolConfirmationRunner {
                       ),
                     }
                   : {}),
-                ...(sandboxExecuteToolCallIdFromConfirmation(input.confirmation)
+                ...(sandboxExecuteToolCallId
                   ? {
-                      sandboxExecuteToolCallId:
-                        sandboxExecuteToolCallIdFromConfirmation(
-                          input.confirmation,
-                        ),
+                      sandboxExecuteToolCallId,
                     }
                   : {}),
+                ...(sandboxAction ? { sandboxActions: [sandboxAction] } : {}),
               },
             }
           : {}),
@@ -182,7 +282,7 @@ export class ToolConfirmationRunner {
       input.confirmation?.domain === "mcp" ||
       input.confirmation?.execution.executor.kind === "mcp_action_run"
     ) {
-      return mcpService.respondToApproval({
+      const result = await mcpService.respondToApproval({
         workspaceId: input.workspaceId,
         userId: input.userId,
         confirmationId: input.confirmationId,
@@ -191,6 +291,13 @@ export class ToolConfirmationRunner {
         editedArgs: input.editedArgs,
         note: input.note,
       });
+      return {
+        ...result,
+        resume: withHitlInterruptResumeMetadata({
+          confirmation: input.confirmation,
+          resume: result.resume,
+        }),
+      };
     }
 
     const { workspace } = await requireConnectorWorkspace({
@@ -230,7 +337,11 @@ export class ToolConfirmationRunner {
       connectorId: action.action.connectorId,
     });
     if (!connector) {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
 
     if (input.decision === "reject") {

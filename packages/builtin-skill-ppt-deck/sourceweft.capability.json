@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/ppt-deck",
+  "kind": "skill",
+  "name": "PPT Deck",
+  "description": "Generate, edit, and read PowerPoint presentations. Create from scratch with PptxGenJS, edit existing PPTX via XML workflows, or extract text with markitdown.",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "skills": [
+    {
+      "id": "ppt-deck",
+      "visibility": "restricted",
+      "categories": ["create", "present"],
+      "options": [
+        {
+          "id": "stylePreset",
+          "title": "Style",
+          "description": "Visual style direction for the deck.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": { "path": "runtime.config.stylePreset" },
+          "values": [
+            { "value": "auto", "label": "Auto" },
+            { "value": "executive", "label": "Executive" },
+            { "value": "product", "label": "Product" },
+            { "value": "academic", "label": "Academic" },
+            { "value": "training", "label": "Training" },
+            { "value": "minimal", "label": "Minimal" },
+            { "value": "editorial", "label": "Editorial" }
+          ]
+        },
+        {
+          "id": "visualDensity",
+          "title": "Density",
+          "description": "How much information to place on each slide.",
+          "valueType": "string",
+          "defaultValue": "balanced",
+          "target": { "path": "runtime.config.visualDensity" },
+          "values": [
+            { "value": "light", "label": "Light" },
+            { "value": "balanced", "label": "Balanced" },
+            { "value": "dense", "label": "Dense" }
+          ]
+        },
+        {
+          "id": "slideCount",
+          "title": "Slides",
+          "description": "Target number of slides.",
+          "valueType": "number",
+          "target": { "path": "runtime.config.slideCount" },
+          "values": [
+            { "value": 6, "label": "6" },
+            { "value": 10, "label": "10" },
+            { "value": 15, "label": "15" },
+            { "value": 20, "label": "20" }
+          ]
+        },
+        {
+          "id": "language",
+          "title": "Language",
+          "description": "Deck language.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": { "path": "runtime.config.language" },
+          "values": [
+            { "value": "auto", "label": "Auto" },
+            { "value": "zh-CN", "label": "Chinese" },
+            { "value": "en-US", "label": "English" }
+          ]
+        }
+      ],
+      "runtime": {
+        "tools": [
+          "prepare_sandbox_workspace",
+          "execute",
+          "publish_sandbox_artifact"
+        ],
+        "output": {
+          "kind": "artifact",
+          "artifactType": "slides",
+          "publisherTool": "publish_sandbox_artifact"
+        }
+      },
+      "command": {
+        "aliases": ["ppt", "slides", "deck", "presentation"],
+        "category": "Artifacts",
+        "iconName": "presentation"
+      }
+    }
+  ]
+}

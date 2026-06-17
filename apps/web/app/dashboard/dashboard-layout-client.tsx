@@ -173,7 +173,7 @@ export function DashboardLayoutClient({
     redirecting ||
     (!hasSession && (!isPending || !hasConfirmedSession))
   ) {
-    return <DashboardShellRouteSkeleton pathname={routePathname} />;
+    return <DashboardShellRouteSkeleton pathname={pathname} />;
   }
 
   return (

@@ -19,9 +19,12 @@ import type {
   ChatExecutionState,
 } from "../../[threadId]/chat-stream-runner-control";
 import {
+  deriveTerminalToolConfirmationResolutions,
   getLiveToolConfirmationItemsForRun,
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
+  hasLiveToolConfirmationSignalForRun,
+  mergeToolConfirmationResolutions,
   shouldLockComposerForRun,
 } from "./tool-confirmation-state";
 import {
@@ -42,6 +45,7 @@ import type {
   ChatMessageImagePart,
   ChatSkillItem,
   ChatToolName,
+  CapabilityCatalog,
   CitationRecord,
   ImageModelCapabilities,
   PromptThinkingCapabilities,
@@ -151,6 +155,7 @@ export function ChatCanvas({
   sourceMentionLoader,
   selectedSources = [],
   availableSkills = [],
+  capabilityCatalog,
   selectedSkillIds = [],
   selectedMcpInstallIds = [],
   selectedMcpToolIds = [],
@@ -167,6 +172,7 @@ export function ChatCanvas({
   imageModelAvailable,
   imageModelAlias,
   notionConnectorId = null,
+  activeConnectorIds,
   disabledToolNames = [],
   onDisabledToolNamesChange,
 }: {
@@ -213,6 +219,7 @@ export function ChatCanvas({
     branchIndex: number;
   }) => void;
   onResumeToolConfirmation?: (input: {
+    approvalThreadRunId: string | null;
     assistantMessageId: string;
     resolvedConfirmationIds: string[];
     toolApprovalResume: ToolApprovalResume;
@@ -226,6 +233,7 @@ export function ChatCanvas({
   sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources?: SourceItem[];
   availableSkills?: ChatSkillItem[];
+  capabilityCatalog?: CapabilityCatalog | null;
   selectedSkillIds?: string[];
   selectedMcpInstallIds?: string[];
   selectedMcpToolIds?: string[];
@@ -242,6 +250,7 @@ export function ChatCanvas({
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
   notionConnectorId?: string | null;
+  activeConnectorIds?: Record<string, string | null>;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
 }) {
@@ -299,12 +308,30 @@ export function ChatCanvas({
       }),
     [activeThreadRun, toolConfirmationInterventionSignal],
   );
-  const activeConfirmationItems =
-    liveConfirmationItems.length > 0
-      ? liveConfirmationItems
-      : toolConfirmationLookup.items;
+  const hasLiveConfirmationSignal = hasLiveToolConfirmationSignalForRun({
+    activeThreadRun,
+    signal: toolConfirmationInterventionSignal,
+  });
+  const activeConfirmationItems = hasLiveConfirmationSignal
+    ? liveConfirmationItems
+    : toolConfirmationLookup.items;
   const toolConfirmationRunKey = getToolConfirmationRunKey(activeThreadRun);
-  const confirmationResolutions = toolConfirmationState.resolutions;
+  const derivedConfirmationResolutions = useMemo(
+    () =>
+      deriveTerminalToolConfirmationResolutions({
+        activeVersionByGroup,
+        messageGroups,
+      }),
+    [activeVersionByGroup, messageGroups],
+  );
+  const confirmationResolutions = useMemo(
+    () =>
+      mergeToolConfirmationResolutions({
+        derived: derivedConfirmationResolutions,
+        local: toolConfirmationState.resolutions,
+      }),
+    [derivedConfirmationResolutions, toolConfirmationState.resolutions],
+  );
   const activeIntervention = toolConfirmationState.activeIntervention;
   const pendingConfirmationItems = useMemo(
     () =>
@@ -323,6 +350,11 @@ export function ChatCanvas({
     isWaitingForApproval,
     pendingConfirmationCount: pendingConfirmationItems.length,
   });
+  const composerStopStreaming =
+    chatExecutionState === "executing" || chatExecutionState === "stopping"
+      ? onStopStreaming
+      : undefined;
+  const isComposerStopping = chatExecutionState === "stopping";
 
   const applyToolConfirmationState = useCallback(
     function applyToolConfirmationState(
@@ -363,7 +395,7 @@ export function ChatCanvas({
   ]);
 
   useEffect(() => {
-    if (liveConfirmationItems.length > 0) {
+    if (hasLiveConfirmationSignal) {
       return;
     }
     if (toolConfirmationLookup.reason === "missing_assistant_message") {
@@ -431,7 +463,7 @@ export function ChatCanvas({
     });
   }, [
     activeThreadRun,
-    liveConfirmationItems.length,
+    hasLiveConfirmationSignal,
     onReloadMessages,
     toolConfirmationLookup,
   ]);
@@ -439,9 +471,22 @@ export function ChatCanvas({
   useEffect(() => {
     if (
       !toolConfirmationInterventionSignal ||
-      handledInterventionSignalIdRef.current ===
-        toolConfirmationInterventionSignal.id ||
       pendingConfirmationItems.length === 0
+    ) {
+      return;
+    }
+    if (
+      toolConfirmationState.activeIntervention &&
+      pendingConfirmationItems.some(
+        (item) =>
+          item.confirmation.id === toolConfirmationState.activeIntervention?.id,
+      )
+    ) {
+      return;
+    }
+    if (
+      handledInterventionSignalIdRef.current ===
+      toolConfirmationInterventionSignal.id
     ) {
       return;
     }
@@ -461,6 +506,7 @@ export function ChatCanvas({
     activeConfirmationItems,
     pendingConfirmationItems,
     toolConfirmationInterventionSignal,
+    toolConfirmationState.activeIntervention,
     updateToolConfirmationState,
   ]);
 
@@ -483,7 +529,7 @@ export function ChatCanvas({
       input.mentionedSourceIds?.length ?? selectedSources.length;
     const skillCount = input.skillIds?.length ?? selectedSkillIds.length;
     trackChatMessageSent({
-      commandUsed: Boolean(input.command),
+      commandUsed: Boolean(input.command || input.invocation),
       hasImages: Boolean(input.images?.length),
       hasSources: sourceCount > 0,
       skillCount,
@@ -526,9 +572,13 @@ export function ChatCanvas({
         onSkillSelectionChange={handleSkillSelectionChange}
         onSearchEnabledChange={onSearchEnabledChange}
         onSendMessage={handleSendMessage}
+        onStopStreaming={composerStopStreaming}
         onThinkingSettingsChange={onThinkingSettingsChange}
+        submitDisabled={isSubmitDisabledForRun}
+        isStopping={isComposerStopping}
         searchEnabled={searchEnabled}
         availableSkills={availableSkills}
+        capabilityCatalog={capabilityCatalog}
         selectedSkillIds={selectedSkillIds}
         selectedMcpInstallIds={selectedMcpInstallIds}
         selectedMcpToolIds={selectedMcpToolIds}
@@ -539,6 +589,7 @@ export function ChatCanvas({
         imageModelAvailable={imageModelAvailable}
         imageModelAlias={imageModelAlias}
         notionConnectorId={notionConnectorId}
+        activeConnectorIds={activeConnectorIds}
         disabledToolNames={disabledToolNames}
         onDisabledToolNamesChange={onDisabledToolNamesChange}
       />
@@ -663,7 +714,7 @@ export function ChatCanvas({
       />
 
       <div className="border-t border-border/60 bg-background/95 px-6 py-5 backdrop-blur">
-          <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           <Composer
             className="w-full"
             allSources={allSources}
@@ -679,7 +730,14 @@ export function ChatCanvas({
             onRemoveSource={handleRemoveSource}
             onSkillSelectionChange={handleSkillSelectionChange}
             onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(message, tools, command, skillIds, content) =>
+            onSubmit={(
+              message,
+              tools,
+              command,
+              skillIds,
+              content,
+              invocation,
+            ) =>
               handleSendMessage({
                 content: content ?? message.text.trim(),
                 images: promptFilesToImages(message.files),
@@ -687,12 +745,14 @@ export function ChatCanvas({
                 skillIds,
                 tools,
                 command,
+                invocation,
               })
             }
-            onStopStreaming={onStopStreaming}
+            onStopStreaming={composerStopStreaming}
             onThinkingSettingsChange={onThinkingSettingsChange}
             searchEnabled={searchEnabled}
             availableSkills={availableSkills}
+            capabilityCatalog={capabilityCatalog}
             selectedSkillIds={selectedSkillIds}
             selectedMcpInstallIds={selectedMcpInstallIds}
             selectedMcpToolIds={selectedMcpToolIds}

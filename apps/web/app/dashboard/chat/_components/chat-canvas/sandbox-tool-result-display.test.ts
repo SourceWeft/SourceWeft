@@ -17,11 +17,11 @@ test("parses sandbox prepare result JSON", () => {
         totalBytes: 3072,
         files: [
           {
-            sourcePath: "/work/input.md",
+            sourcePath: "/workfiles/input.md",
             sandboxPath: "/workspace/input/input.md",
           },
           {
-            sourcePath: "/work/data.csv",
+            sourcePath: "/workfiles/data.csv",
             sandboxPath: "/workspace/input/data.csv",
           },
         ],
@@ -48,11 +48,11 @@ test("parses sandbox collect result JSON", () => {
         outputs: [
           {
             sandboxPath: "/workspace/output/report.md",
-            target: { path: "/work/report.md" },
+            target: { path: "/workfiles/report.md" },
           },
           {
             sandboxPath: "/workspace/output/chart.png",
-            targetPath: "/work/chart.png",
+            targetPath: "/workfiles/chart.png",
           },
         ],
       }),
@@ -62,7 +62,7 @@ test("parses sandbox collect result JSON", () => {
       output: null,
       totalBytes: 4096,
       filePaths: [],
-      outputPaths: ["/work/report.md", "/work/chart.png"],
+      outputPaths: ["/workfiles/report.md", "/workfiles/chart.png"],
       truncated: null,
       exitCode: null,
     },
@@ -118,6 +118,18 @@ test("formats sandbox prepare operation details for tool cards", () => {
   assert.deepEqual(
     getSandboxToolResultDetails({
       toolName: "prepare_sandbox_workspace",
+      input: {
+        files: [
+          {
+            sourcePath: "/workfiles/a.md",
+            sandboxPath: "/workspace/input/a.md",
+          },
+          {
+            sourcePath: "/workfiles/b.md",
+            sandboxPath: "/workspace/input/b.md",
+          },
+        ],
+      },
       output: {
         ok: true,
         totalBytes: 2048,
@@ -135,6 +147,36 @@ test("formats sandbox prepare operation details for tool cards", () => {
         label: "Input paths",
         value: "/workspace/input/a.md, /workspace/input/b.md",
       },
+      {
+        label: "Requested transfer",
+        value:
+          "/workfiles/a.md -> /workspace/input/a.md, /workfiles/b.md -> /workspace/input/b.md",
+      },
+    ],
+  );
+});
+
+test("formats sandbox prepare request details when execution fails before result files exist", () => {
+  assert.deepEqual(
+    getSandboxToolResultDetails({
+      toolName: "prepare_sandbox_workspace",
+      input: {
+        files: [
+          {
+            sourcePath: "/workspace/input/wrong.md",
+            sandboxPath: "/workspace/input/wrong.md",
+          },
+        ],
+      },
+      output: {},
+    }),
+    [
+      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Inputs", value: "1 file" },
+      {
+        label: "Requested transfer",
+        value: "/workspace/input/wrong.md -> /workspace/input/wrong.md",
+      },
     ],
   );
 });
@@ -147,12 +189,12 @@ test("summarizes sandbox collect results for tool cards", () => {
         ok: true,
         totalBytes: 512,
         outputs: [
-          { target: { path: "/work/report.md" } },
-          { targetPath: "/work/chart.csv" },
+          { target: { path: "/workfiles/report.md" } },
+          { targetPath: "/workfiles/chart.csv" },
         ],
       },
     }),
-    "Collected 2 outputs · 512 B · /work/report.md, /work/chart.csv",
+    "Collected 2 outputs · 512 B · /workfiles/report.md, /workfiles/chart.csv",
   );
 });
 
@@ -164,8 +206,8 @@ test("formats sandbox collect operation details for tool cards", () => {
         ok: true,
         totalBytes: 512,
         outputs: [
-          { target: { path: "/work/report.md" } },
-          { targetPath: "/work/chart.csv" },
+          { target: { path: "/workfiles/report.md" } },
+          { targetPath: "/workfiles/chart.csv" },
         ],
       },
     }),
@@ -173,26 +215,29 @@ test("formats sandbox collect operation details for tool cards", () => {
       { label: "Operation", value: "Collected sandbox outputs" },
       { label: "Outputs", value: "2 files" },
       { label: "Size", value: "512 B" },
-      { label: "Output paths", value: "/work/report.md, /work/chart.csv" },
+      {
+        label: "Output paths",
+        value: "/workfiles/report.md, /workfiles/chart.csv",
+      },
     ],
   );
 });
 
-test("extracts unique collected /work paths for clickable tool-card links", () => {
+test("extracts unique collected /workfiles paths for clickable tool-card links", () => {
   assert.deepEqual(
     getSandboxCollectedWorkfilePaths({
       toolName: "collect_sandbox_outputs",
       output: {
         ok: true,
         outputs: [
-          { target: { path: "/work/report.md" } },
-          { targetPath: "/work/report.md" },
+          { target: { path: "/workfiles/report.md" } },
+          { targetPath: "/workfiles/report.md" },
           { targetPath: "/workspace/output/internal.txt" },
-          { targetPath: "/work/charts/summary.csv" },
+          { targetPath: "/workfiles/charts/summary.csv" },
         ],
       },
     }),
-    ["/work/report.md", "/work/charts/summary.csv"],
+    ["/workfiles/report.md", "/workfiles/charts/summary.csv"],
   );
 });
 
@@ -202,7 +247,7 @@ test("does not extract collected workfile links for non-collect tools", () => {
       toolName: "execute",
       output: {
         ok: true,
-        outputs: [{ targetPath: "/work/report.md" }],
+        outputs: [{ targetPath: "/workfiles/report.md" }],
       },
     }),
     [],
@@ -312,7 +357,7 @@ test("formats sandbox operations array as operation timeline", () => {
             type: "collect",
             status: "succeeded",
             result: {
-              outputs: [{ targetPath: "/work/report.md" }],
+              outputs: [{ targetPath: "/workfiles/report.md" }],
               totalBytes: 512,
             },
           },
@@ -361,9 +406,9 @@ test("maps sandbox transfer errors to user-safe messages", () => {
     getSandboxToolSafeErrorMessage({
       toolName: "collect_sandbox_outputs",
       error:
-        "SANDBOX_COLLECT_CONFLICT: /work/report.md already exists. Set overwrite=true or choose a new path.",
+        "SANDBOX_COLLECT_CONFLICT: /workfiles/report.md already exists. Set overwrite=true or choose a new path.",
     }),
-    "A target /work file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
+    "A target /workfiles file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
   );
   assert.equal(
     getSandboxToolSafeErrorMessage({
@@ -371,6 +416,14 @@ test("maps sandbox transfer errors to user-safe messages", () => {
       error: "SANDBOX_TOTAL_SIZE_EXCEEDED: prepared files exceed total limit.",
     }),
     "The selected files exceed the total sandbox transfer limit. Reduce the number or size of files and try again.",
+  );
+  assert.equal(
+    getSandboxToolSafeErrorMessage({
+      toolName: "prepare_sandbox_workspace",
+      error:
+        "SANDBOX_PREPARE_PATH_DENIED: sourcePath must be under /workfiles/.",
+    }),
+    "Prepare requires sourcePath under SourceWeft DB-backed /workfiles and sandboxPath under a provider-allowed prepare target root.",
   );
 });
 

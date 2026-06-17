@@ -10,7 +10,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { McpToolSelection, SourceConnector } from "@sourceweft/sdk";
+import type {
+  ListCapabilityCatalogResponse,
+  McpToolSelection,
+  SourceConnector,
+} from "@sourceweft/sdk";
 import type {
   ChatSkillItem,
   ChatToolName,
@@ -39,6 +43,8 @@ export type ChatHubRegistration = {
   activeMcpInstallIds: string[];
   activeMcpToolIds: string[];
   availableSkills: ChatSkillItem[];
+  hubSkills: ChatSkillItem[];
+  capabilityCatalog: ListCapabilityCatalogResponse | null;
   disabledToolNames: ChatToolName[];
   onSelectionChange: (sourceIds: string[]) => void;
   onSkillSelectionChange: (skillIds: string[]) => void;
@@ -99,6 +105,8 @@ function buildDefaultRegistration(): ChatHubRegistration {
     activeMcpInstallIds: [],
     activeMcpToolIds: [],
     availableSkills: [],
+    hubSkills: [],
+    capabilityCatalog: null,
     disabledToolNames: [],
     onSelectionChange: NOOP_ON_SELECTION_CHANGE,
     onSkillSelectionChange: NOOP_ON_SKILL_SELECTION_CHANGE,

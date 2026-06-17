@@ -25,6 +25,7 @@ export type ToolConfirmationControllerState = {
 };
 
 export type ToolConfirmationResumeEffect = {
+  approvalThreadRunId: string | null;
   assistantMessageId: string;
   resolvedConfirmationIds: string[];
   toolApprovalResume: ToolApprovalResume;
@@ -44,7 +45,7 @@ export function getToolConfirmationRunKey(
   if (activeThreadRun?.status !== "waiting_for_approval") {
     return null;
   }
-  return activeThreadRun.id ?? activeThreadRun.idempotencyKey ?? null;
+  return activeThreadRun.idempotencyKey ?? activeThreadRun.id ?? null;
 }
 
 export function toolConfirmationInterventionFromItem(
@@ -192,6 +193,7 @@ export function settleToolConfirmationDecision(input: {
   return {
     missingResume: false,
     resumeEffect: {
+      approvalThreadRunId: input.item.threadRunId,
       assistantMessageId: input.item.assistantMessageId,
       resolvedConfirmationIds: orderedResolutions.map(
         (resolution) => resolution.confirmationId,

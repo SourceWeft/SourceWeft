@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { config } from "../shared/config";
-import { closeDatabase } from "../shared/database";
+import { closeDatabase } from "@sourceweft/db";
 import { logger } from "../shared/logger";
 import {
   ensureModelConfigAvailable,
@@ -8,8 +8,8 @@ import {
 } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { createApp } from "./app";
-import { contentSkillsService } from "../modules/content/skills";
-import { logSandboxStartupWarning } from "../modules/content/agent/sandbox/startup-log";
+import { contentSkillsService } from "../modules/skills";
+import { agentSandboxService } from "../modules/threads";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 await ensureModelConfigAvailable();
@@ -28,7 +28,7 @@ serve(
       host: config.apiHost,
       port: config.apiPort,
     });
-    logSandboxStartupWarning("api");
+    agentSandboxService.logStartupWarning("api");
   },
 );
 

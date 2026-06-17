@@ -11,20 +11,21 @@ import {
   sql,
 } from "drizzle-orm";
 import { logger } from "../../shared/logger";
-import { db } from "../../shared/database";
 import {
   agentToolTrustRules,
   citations,
   chunks,
-  documents,
   connectorActionRuns,
   connectorOAuthAccounts,
   connectorOAuthStates,
   connectorSyncRuns,
   connectorWebhookEvents,
+  db,
+  documents,
   sourceConnectors,
   sources,
-} from "../../shared/db/schema";
+} from "@sourceweft/db";
+import { ConnectorError } from "./errors";
 import {
   mapAgentToolTrustRule,
   mapActionRun,
@@ -71,7 +72,7 @@ export async function createOAuthStateRecord(input: {
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create connector OAuth state");
+    throw new ConnectorError(500, "CONNECTOR_OAUTH_STATE_CREATE_FAILED", "Failed to create connector OAuth state", { teamId: input.teamId });
   }
 
   return row;
@@ -171,7 +172,7 @@ export async function createOAuthAccountRecord(input: {
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create connector OAuth account");
+    throw new ConnectorError(500, "CONNECTOR_OAUTH_ACCOUNT_CREATE_FAILED", "Failed to create connector OAuth account", { teamId: input.teamId, workspaceId: input.workspaceId });
   }
 
   return mapOAuthAccount(row);
@@ -355,7 +356,7 @@ export async function createSourceConnectorRecord(input: {
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create connector");
+    throw new ConnectorError(500, "CONNECTOR_CREATE_FAILED", "Failed to create connector", { teamId: input.teamId, workspaceId: input.workspaceId });
   }
 
   return mapSourceConnector(row);
@@ -770,7 +771,7 @@ export async function createSyncRunRecord(input: {
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create connector sync run");
+    throw new ConnectorError(500, "CONNECTOR_SYNC_RUN_CREATE_FAILED", "Failed to create connector sync run", { teamId: input.teamId, workspaceId: input.workspaceId, connectorId: input.connectorId });
   }
 
   return mapSyncRun(row);
@@ -839,7 +840,7 @@ export async function createSyncRunRecordIfNoActiveRun(input: {
       .returning();
 
     if (!created) {
-      throw new Error("Failed to create connector sync run");
+      throw new ConnectorError(500, "CONNECTOR_SYNC_RUN_CREATE_FAILED", "Failed to create connector sync run", { teamId: input.teamId, workspaceId: input.workspaceId, connectorId: input.connectorId });
     }
 
     return { run: mapSyncRun(created), existing: false };
@@ -906,7 +907,7 @@ export async function insertWebhookEventRecord(input: {
     .returning();
 
   if (!row) {
-    throw new Error("Failed to insert connector webhook event");
+    throw new ConnectorError(500, "CONNECTOR_WEBHOOK_EVENT_INSERT_FAILED", "Failed to insert connector webhook event", { teamId: input.teamId, workspaceId: input.workspaceId, connectorId: input.connectorId });
   }
 
   return mapWebhookEvent(row);
@@ -1476,7 +1477,7 @@ export async function createActionRunRecord(input: {
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create connector action run");
+    throw new ConnectorError(500, "CONNECTOR_ACTION_RUN_CREATE_FAILED", "Failed to create connector action run", { teamId: input.teamId, workspaceId: input.workspaceId, connectorId: input.connectorId, actionType: input.actionType });
   }
 
   return mapActionRun(row);
@@ -1685,7 +1686,7 @@ export async function createAgentToolTrustRuleRecord(input: {
     .returning();
 
   if (!row) {
-    throw new Error("Failed to create agent tool trust rule");
+    throw new ConnectorError(500, "AGENT_TOOL_TRUST_RULE_CREATE_FAILED", "Failed to create agent tool trust rule", { teamId: input.teamId });
   }
 
   return mapAgentToolTrustRule(row);

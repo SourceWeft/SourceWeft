@@ -7,58 +7,49 @@ import {
   updateCustomSkillVersionRequestSchema,
   updateWorkspaceSkillRequestSchema,
 } from "@sourceweft/contracts";
-import { contentService } from "../../../modules/content";
+import { contentSkillsService } from "../../../modules/skills";
+import { requireContentWorkspace } from "../../../modules/workspace";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
+async function resolveSkillContext(c: import("hono").Context) {
+  const session = await requireSession(c);
+  if (!session) {
+    throw ApiError.unauthorized();
+  }
+  const workspace = await requireContentWorkspace({
+    workspaceId: requireRouteParam(c, "workspaceId"),
+    userId: getSessionUserId(session),
+  });
+  return { session, teamId: workspace.organizationId, workspaceId: workspace.id };
+}
+
 export function registerSkillRoutes(app: Hono) {
   app.get("/skills/catalog", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const result = await contentService.listSkillsCatalog({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
-    });
+    const { teamId, workspaceId } = await resolveSkillContext(c);
+    const result = await contentSkillsService.listCatalog({ teamId, workspaceId });
     return ApiResponse.success(c, result);
   });
 
   app.get("/skills", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const result = await contentService.listWorkspaceSkills({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
-    });
+    const { teamId, workspaceId } = await resolveSkillContext(c);
+    const result = await contentSkillsService.listWorkspaceSkills({ teamId, workspaceId });
     return ApiResponse.success(c, result);
   });
 
   app.get("/skills/catalog/:catalogId", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const result = await contentService.getSkillCatalogDetail({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
+    const { teamId, workspaceId } = await resolveSkillContext(c);
+    const result = await contentSkillsService.getCatalogSkillDetail({
+      teamId,
+      workspaceId,
       catalogId: decodeURIComponent(requireRouteParam(c, "catalogId")),
     });
     return ApiResponse.success(c, result);
   });
 
   app.post("/skills", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
     const body = ensureObjectBody(await c.req.json().catch(() => ({})));
     const parsed = enableWorkspaceSkillRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -67,8 +58,9 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.enableWorkspaceSkill({
-      workspaceId: requireRouteParam(c, "workspaceId"),
+    const result = await contentSkillsService.enableSkill({
+      teamId,
+      workspaceId,
       userId: getSessionUserId(session),
       skillId: parsed.data.skillId,
       skillVersionId: parsed.data.skillVersionId,
@@ -78,11 +70,7 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.post("/skills/custom", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
     const body = ensureObjectBody(await c.req.json().catch(() => ({})));
     const parsed = createCustomSkillRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -91,8 +79,9 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.createWorkspaceCustomSkill({
-      workspaceId: requireRouteParam(c, "workspaceId"),
+    const result = await contentSkillsService.createWorkspaceCustomSkill({
+      teamId,
+      workspaceId,
       userId: getSessionUserId(session),
       name: parsed.data.name,
       displayName: parsed.data.displayName,
@@ -103,11 +92,7 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.post("/skills/custom/:skillId/versions", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
     const body = ensureObjectBody(await c.req.json().catch(() => ({})));
     const parsed = createCustomSkillVersionRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -116,8 +101,9 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.createWorkspaceCustomSkillVersion({
-      workspaceId: requireRouteParam(c, "workspaceId"),
+    const result = await contentSkillsService.createWorkspaceCustomSkillVersion({
+      teamId,
+      workspaceId,
       userId: getSessionUserId(session),
       skillId: requireRouteParam(c, "skillId"),
       version: parsed.data.version,
@@ -126,11 +112,7 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.patch("/skills/custom/:skillId/versions/:versionId", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
+    const { teamId, workspaceId } = await resolveSkillContext(c);
     const body = ensureObjectBody(await c.req.json().catch(() => ({})));
     const parsed = updateCustomSkillVersionRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -139,9 +121,9 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.updateWorkspaceCustomSkillVersion({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
+    const result = await contentSkillsService.updateWorkspaceCustomSkillVersion({
+      teamId,
+      workspaceId,
       skillId: requireRouteParam(c, "skillId"),
       skillVersionId: requireRouteParam(c, "versionId"),
       displayName: parsed.data.displayName,
@@ -151,11 +133,7 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.put("/skills/custom/:skillId/versions/:versionId/files/:path{.+}", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
+    const { teamId, workspaceId } = await resolveSkillContext(c);
     const body = ensureObjectBody(await c.req.json().catch(() => ({})));
     const parsed = putCustomSkillVersionFileRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -164,9 +142,9 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.putWorkspaceCustomSkillVersionFile({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
+    const result = await contentSkillsService.putWorkspaceCustomSkillVersionFile({
+      teamId,
+      workspaceId,
       skillId: requireRouteParam(c, "skillId"),
       skillVersionId: requireRouteParam(c, "versionId"),
       path: requireRouteParam(c, "path"),
@@ -177,14 +155,10 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.delete("/skills/custom/:skillId/versions/:versionId/files/:path{.+}", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const result = await contentService.deleteWorkspaceCustomSkillVersionFile({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
+    const { teamId, workspaceId } = await resolveSkillContext(c);
+    const result = await contentSkillsService.deleteWorkspaceCustomSkillVersionFile({
+      teamId,
+      workspaceId,
       skillId: requireRouteParam(c, "skillId"),
       skillVersionId: requireRouteParam(c, "versionId"),
       path: requireRouteParam(c, "path"),
@@ -193,14 +167,10 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.post("/skills/custom/:skillId/versions/:versionId/publish", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const result = await contentService.publishWorkspaceCustomSkillVersion({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
+    const { teamId, workspaceId } = await resolveSkillContext(c);
+    const result = await contentSkillsService.publishWorkspaceCustomSkillVersion({
+      teamId,
+      workspaceId,
       skillId: requireRouteParam(c, "skillId"),
       skillVersionId: requireRouteParam(c, "versionId"),
     });
@@ -208,11 +178,7 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.patch("/skills/:workspaceSkillId", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
     const body = ensureObjectBody(await c.req.json().catch(() => ({})));
     const parsed = updateWorkspaceSkillRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -221,8 +187,9 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.updateWorkspaceSkill({
-      workspaceId: requireRouteParam(c, "workspaceId"),
+    const result = await contentSkillsService.updateWorkspaceSkill({
+      teamId,
+      workspaceId,
       userId: getSessionUserId(session),
       workspaceSkillId: requireRouteParam(c, "workspaceSkillId"),
       enabled: parsed.data.enabled,
@@ -232,14 +199,10 @@ export function registerSkillRoutes(app: Hono) {
   });
 
   app.delete("/skills/:workspaceSkillId", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-
-    const result = await contentService.deleteWorkspaceSkill({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId: getSessionUserId(session),
+    const { teamId, workspaceId } = await resolveSkillContext(c);
+    const result = await contentSkillsService.deleteWorkspaceSkill({
+      teamId,
+      workspaceId,
       workspaceSkillId: requireRouteParam(c, "workspaceSkillId"),
     });
     return ApiResponse.success(c, result);

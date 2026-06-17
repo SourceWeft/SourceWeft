@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/feynman",
+  "kind": "skill",
+  "name": "Feynman",
+  "description": "Use the Feynman technique to deeply learn a concept by explaining it simply, identifying gaps, filling them, and refining the explanation.",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "skills": [
+    {
+      "id": "feynman",
+      "visibility": "public",
+      "categories": ["learn"],
+      "slash": true,
+      "command": {
+        "aliases": ["feynman"],
+        "category": "Skills"
+      }
+    }
+  ]
+}

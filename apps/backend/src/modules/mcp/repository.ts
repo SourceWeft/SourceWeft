@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
-import { db } from "../../shared/database";
 import {
+  db,
+  mcpActionRuns,
+  mcpToolRuns,
   workspaceMcpCredentials,
   workspaceMcpInstalls,
   workspaceMcpTools,
-  mcpActionRuns,
-  mcpToolRuns,
-} from "../../shared/db/schema";
+} from "@sourceweft/db";
 import type {
   McpActionRunRecord,
   McpActionRunStatus,

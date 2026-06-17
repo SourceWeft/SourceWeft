@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1780851645912,
+      "tag": "0000_talented_phalanx",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780851645912,
+      "tag": "0001_custom_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781541390000,
+      "tag": "0002_rename_workfiles_root",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781542680000,
+      "tag": "0003_scope_sandbox_operations_by_message",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781544200000,
+      "tag": "0004_user_settings_thread_chat_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781712000000,
+      "tag": "0005_workspace_skill_version_integrity",
+      "breakpoints": true
+    }
+  ]
+}

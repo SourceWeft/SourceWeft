@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { listThreadModelCatalogResponseSchema, listThreadsResponseSchema } from "./content";
+import {
+  listThreadModelCatalogResponseSchema,
+  listThreadsResponseSchema,
+  threadChatPreferencesSchema,
+} from "./content";
 import { workspaceSchema } from "./workspace";
 
 export const dashboardChatBootstrapWarningSchema = z.object({
@@ -28,6 +32,7 @@ export const dashboardChatBootstrapResponseSchema = z.object({
   activeWorkspace: workspaceSchema,
   workspaces: z.array(workspaceSchema),
   privateChats: listThreadsResponseSchema,
+  initialChatPreferences: threadChatPreferencesSchema,
   modelCatalog: listThreadModelCatalogResponseSchema.nullable(),
   modelCatalogDeferred: z.boolean().optional(),
   cacheHints: dashboardChatBootstrapCacheHintsSchema,

@@ -7,9 +7,22 @@ import {
   streamThreadRequestSchema,
   type StreamThreadRequest,
   type ThreadRunSummary,
+  updateThreadChatPreferencesRequestSchema,
   updateThreadModelSettingsRequestSchema,
 } from "@sourceweft/contracts";
-import { contentService } from "../../../modules/content";
+import {
+  contentThreadService,
+  durableChatRunService,
+  contentThreadStreamService,
+  parseDurableChatRunKey,
+  getRunApprovalPauseState,
+} from "../../../modules/threads";
+import type {
+  EditThreadInput,
+  RefreshThreadInput,
+  ResumeThreadInput,
+  StreamThreadEventInput,
+} from "../../../modules/threads";
 import { THREAD_TITLE_GENERATE_JOB } from "../../../modules/content/queue";
 import { presentJobState } from "../../../shared/job-status";
 import { jobsQueue } from "../../../shared/queue";
@@ -23,14 +36,6 @@ import {
   ensureObjectBody,
   requireRouteParam,
 } from "./helpers";
-import { parseDurableChatRunKey } from "../../../modules/content/threads/durable/constants";
-import { getRunApprovalPauseState } from "../../../modules/content/threads/durable/service";
-import type {
-  EditThreadInput,
-  RefreshThreadInput,
-  ResumeThreadInput,
-  StreamThreadEventInput,
-} from "../../../modules/content/threads";
 
 type DurableThreadRequestInput =
   | StreamThreadEventInput
@@ -79,8 +84,10 @@ function buildResumeThreadInput(input: {
     llm: input.data.llm,
     image: input.data.image,
     vision: input.data.vision,
-    visionProfileAlias: input.data.modelSettings?.visionProfileAlias ?? undefined,
+    visionProfileAlias:
+      input.data.modelSettings?.visionProfileAlias ?? undefined,
     toolApprovalResume: input.data.toolApprovalResume,
+    mcpInstallIds: input.data.mcpInstallIds,
   };
 }
 
@@ -147,7 +154,7 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.listThreads({
+    const result = await contentThreadService.listThreads({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       limit: parsedQuery.data.limit,
@@ -171,11 +178,12 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.createThread({
+    const result = await contentThreadService.createThread({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       title: parsed.data.title,
       modelSettings: parsed.data.modelSettings,
+      chatPreferences: parsed.data.chatPreferences,
     });
 
     return ApiResponse.success(c, result, 201);
@@ -214,11 +222,12 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.startThreadTurn({
+    const result = await contentThreadService.startThreadTurn({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       title: parsed.data.title,
       modelSettings: parsed.data.modelSettings,
+      chatPreferences: parsed.data.chatPreferences,
       content,
       images,
       mentionedSourceIds: parsed.data.mentionedSourceIds,
@@ -242,13 +251,27 @@ export function registerThreadRoutes(app: Hono) {
     );
   });
 
+  app.get("/threads/chat-preferences/bootstrap", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentThreadService.getInitialChatPreferences({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/threads/:id", async (c) => {
     const session = await requireSession(c);
     if (!session) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getThread({
+    const result = await contentThreadService.getThread({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -263,7 +286,7 @@ export function registerThreadRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.deleteThread({
+    const result = await contentThreadService.deleteThread({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -286,13 +309,37 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.updateThreadModelSettings({
+    const result = await contentThreadService.updateThreadModelSettings({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
       llmProfileAlias: parsed.data.llmProfileAlias,
       imageProfileAlias: parsed.data.imageProfileAlias,
       visionProfileAlias: parsed.data.visionProfileAlias,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.patch("/threads/:id/chat-preferences", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = updateThreadChatPreferencesRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentThreadService.updateThreadChatPreferences({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      chatPreferences: parsed.data,
     });
 
     return ApiResponse.success(c, result);
@@ -313,7 +360,7 @@ export function registerThreadRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.getCitationDetail({
+    const result = await contentThreadService.getCitationDetail({
       workspaceId: requireRouteParam(c, "workspaceId"),
       messageId: requireRouteParam(c, "messageId"),
       rank,
@@ -329,7 +376,7 @@ export function registerThreadRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getMessageImageFile({
+    const result = await contentThreadService.getMessageImageFile({
       workspaceId: requireRouteParam(c, "workspaceId"),
       messageId: requireRouteParam(c, "messageId"),
       imageId: requireRouteParam(c, "imageId"),
@@ -351,7 +398,7 @@ export function registerThreadRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.listThreadMessages({
+    const result = await contentThreadService.listThreadMessages({
       ...(() => {
         const parsed = listThreadMessagesRequestSchema.safeParse({
           cursor: c.req.query("cursor"),
@@ -379,7 +426,7 @@ export function registerThreadRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const run = await contentService.findActiveDurableThreadRun({
+    const run = await durableChatRunService.findActiveRun({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -441,7 +488,7 @@ export function registerThreadRoutes(app: Hono) {
         : "";
     const durableKey = parseDurableChatRunKey(rawIdempotencyKey);
     if (durableKey?.kind === "stop") {
-      const result = await contentService.stopDurableThreadRun({
+      const result = await durableChatRunService.stopRunAndReturn({
         workspaceId,
         threadId,
         userId,
@@ -453,7 +500,7 @@ export function registerThreadRoutes(app: Hono) {
 
     const existingDurableRun =
       durableKey?.kind === "run"
-        ? await contentService.findDurableThreadRun({
+        ? await durableChatRunService.findRun({
             workspaceId,
             threadId,
             userId,
@@ -496,7 +543,7 @@ export function registerThreadRoutes(app: Hono) {
     if (durableKey?.kind === "run") {
       if (existingDurableRun) {
         if (parsed.data.stream === false) {
-          const result = await contentService.getDurableThreadRunResult({
+          const result = await durableChatRunService.getRunResult({
             workspaceId,
             threadId,
             userId,
@@ -505,7 +552,7 @@ export function registerThreadRoutes(app: Hono) {
           return ApiResponse.success(c, result);
         }
 
-        const stream = contentService.attachDurableThreadRunEvents({
+        const stream = durableChatRunService.attachRunEvents({
           workspaceId,
           threadId,
           userId,
@@ -528,34 +575,11 @@ export function registerThreadRoutes(app: Hono) {
               data: parsed.data,
             })
           : mode === "refresh"
-          ? {
-              workspaceId,
-              threadId,
-              userId,
-              content: "",
-              mentionedSourceIds: parsed.data.mentionedSourceIds,
-              sourceIds: parsed.data.sourceIds,
-              tools: parsed.data.tools,
-              command: parsed.data.command,
-              invocation: parsed.data.invocation,
-              timezone: parsed.data.timezone,
-              userMessageId: parsed.data.userMessageId,
-              assistantMessageId: parsed.data.assistantMessageId,
-              idempotencyKey: durableKey.idempotencyKey,
-              llm: parsed.data.llm,
-              image: parsed.data.image,
-              vision: parsed.data.vision,
-              visionProfileAlias:
-                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-            }
-          : mode === "edit"
             ? {
                 workspaceId,
                 threadId,
                 userId,
-                content: parsed.data.content ?? "",
-                imagesProvided,
-                images,
+                content: "",
                 mentionedSourceIds: parsed.data.mentionedSourceIds,
                 sourceIds: parsed.data.sourceIds,
                 tools: parsed.data.tools,
@@ -571,26 +595,49 @@ export function registerThreadRoutes(app: Hono) {
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
               }
-            : {
-                workspaceId,
-                threadId,
-                userId,
-                content: parsed.data.content ?? "",
-                images,
-                mentionedSourceIds: parsed.data.mentionedSourceIds,
-                sourceIds: parsed.data.sourceIds,
-                tools: parsed.data.tools,
-                command: parsed.data.command,
-                invocation: parsed.data.invocation,
-                timezone: parsed.data.timezone,
-                idempotencyKey: durableKey.idempotencyKey,
-                llm: parsed.data.llm,
-                image: parsed.data.image,
-                vision: parsed.data.vision,
-                visionProfileAlias:
-                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-              };
-      await contentService.getOrCreateDurableThreadRun({
+            : mode === "edit"
+              ? {
+                  workspaceId,
+                  threadId,
+                  userId,
+                  content: parsed.data.content ?? "",
+                  imagesProvided,
+                  images,
+                  mentionedSourceIds: parsed.data.mentionedSourceIds,
+                  sourceIds: parsed.data.sourceIds,
+                  tools: parsed.data.tools,
+                  command: parsed.data.command,
+                  invocation: parsed.data.invocation,
+                  timezone: parsed.data.timezone,
+                  userMessageId: parsed.data.userMessageId,
+                  assistantMessageId: parsed.data.assistantMessageId,
+                  idempotencyKey: durableKey.idempotencyKey,
+                  llm: parsed.data.llm,
+                  image: parsed.data.image,
+                  vision: parsed.data.vision,
+                  visionProfileAlias:
+                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                }
+              : {
+                  workspaceId,
+                  threadId,
+                  userId,
+                  content: parsed.data.content ?? "",
+                  images,
+                  mentionedSourceIds: parsed.data.mentionedSourceIds,
+                  sourceIds: parsed.data.sourceIds,
+                  tools: parsed.data.tools,
+                  command: parsed.data.command,
+                  invocation: parsed.data.invocation,
+                  timezone: parsed.data.timezone,
+                  idempotencyKey: durableKey.idempotencyKey,
+                  llm: parsed.data.llm,
+                  image: parsed.data.image,
+                  vision: parsed.data.vision,
+                  visionProfileAlias:
+                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                };
+      await durableChatRunService.getOrCreateRun({
         workspaceId,
         threadId,
         userId,
@@ -600,7 +647,7 @@ export function registerThreadRoutes(app: Hono) {
       });
 
       if (parsed.data.stream === false) {
-        const result = await contentService.getDurableThreadRunResult({
+        const result = await durableChatRunService.getRunResult({
           workspaceId,
           threadId,
           userId,
@@ -609,7 +656,7 @@ export function registerThreadRoutes(app: Hono) {
         return ApiResponse.success(c, result);
       }
 
-      const stream = contentService.attachDurableThreadRunEvents({
+      const stream = durableChatRunService.attachRunEvents({
         workspaceId,
         threadId,
         userId,
@@ -625,7 +672,7 @@ export function registerThreadRoutes(app: Hono) {
     if (parsed.data.stream === false) {
       const result =
         mode === "resume"
-          ? await contentService.resumeThread(
+          ? await contentThreadStreamService.resumeThread(
               buildResumeThreadInput({
                 workspaceId,
                 threadId,
@@ -634,7 +681,85 @@ export function registerThreadRoutes(app: Hono) {
               }),
             )
           : mode === "refresh"
-          ? await contentService.refreshThread({
+            ? await contentThreadStreamService.refreshThread({
+                workspaceId,
+                threadId,
+                userId,
+                mentionedSourceIds: parsed.data.mentionedSourceIds,
+                sourceIds: parsed.data.sourceIds,
+                tools: parsed.data.tools,
+                command: parsed.data.command,
+                invocation: parsed.data.invocation,
+                timezone: parsed.data.timezone,
+                userMessageId: parsed.data.userMessageId,
+                assistantMessageId: parsed.data.assistantMessageId,
+                idempotencyKey: parsed.data.idempotencyKey,
+                llm: parsed.data.llm,
+                image: parsed.data.image,
+                vision: parsed.data.vision,
+                visionProfileAlias:
+                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+              } satisfies RefreshThreadInput)
+            : mode === "edit"
+              ? await contentThreadStreamService.editThread({
+                  workspaceId,
+                  threadId,
+                  userId,
+                  content: parsed.data.content ?? "",
+                  imagesProvided,
+                  images,
+                  mentionedSourceIds: parsed.data.mentionedSourceIds,
+                  sourceIds: parsed.data.sourceIds,
+                  tools: parsed.data.tools,
+                  command: parsed.data.command,
+                  invocation: parsed.data.invocation,
+                  timezone: parsed.data.timezone,
+                  userMessageId: parsed.data.userMessageId,
+                  assistantMessageId: parsed.data.assistantMessageId,
+                  idempotencyKey: parsed.data.idempotencyKey,
+                  llm: parsed.data.llm,
+                  image: parsed.data.image,
+                  vision: parsed.data.vision,
+                  visionProfileAlias:
+                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                  mcpInstallIds: parsed.data.mcpInstallIds,
+                } satisfies EditThreadInput)
+              : await contentThreadStreamService.streamThread({
+                  workspaceId,
+                  threadId,
+                  userId,
+                  content: parsed.data.content ?? "",
+                  images,
+                  mentionedSourceIds: parsed.data.mentionedSourceIds,
+                  sourceIds: parsed.data.sourceIds,
+                  tools: parsed.data.tools,
+                  command: parsed.data.command,
+                  invocation: parsed.data.invocation,
+                  timezone: parsed.data.timezone,
+                  idempotencyKey: parsed.data.idempotencyKey,
+                  llm: parsed.data.llm,
+                  image: parsed.data.image,
+                  vision: parsed.data.vision,
+                  visionProfileAlias:
+                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                  mcpInstallIds: parsed.data.mcpInstallIds,
+                });
+
+      return ApiResponse.success(c, result);
+    }
+
+    const stream =
+      mode === "resume"
+        ? contentThreadStreamService.resumeThreadEvents(
+            buildResumeThreadInput({
+              workspaceId,
+              threadId,
+              userId,
+              data: parsed.data,
+            }),
+          )
+        : mode === "refresh"
+          ? contentThreadStreamService.refreshThreadEvents({
               workspaceId,
               threadId,
               userId,
@@ -652,9 +777,10 @@ export function registerThreadRoutes(app: Hono) {
               vision: parsed.data.vision,
               visionProfileAlias:
                 parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+              mcpInstallIds: parsed.data.mcpInstallIds,
             } satisfies RefreshThreadInput)
           : mode === "edit"
-            ? await contentService.editThread({
+            ? contentThreadStreamService.editThreadEvents({
                 workspaceId,
                 threadId,
                 userId,
@@ -675,8 +801,9 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                mcpInstallIds: parsed.data.mcpInstallIds,
               } satisfies EditThreadInput)
-            : await contentService.streamThread({
+            : contentThreadStreamService.streamThreadEvents({
                 workspaceId,
                 threadId,
                 userId,
@@ -694,83 +821,8 @@ export function registerThreadRoutes(app: Hono) {
                 vision: parsed.data.vision,
                 visionProfileAlias:
                   parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                mcpInstallIds: parsed.data.mcpInstallIds,
               });
-
-      return ApiResponse.success(c, result);
-    }
-
-    const stream =
-      mode === "resume"
-        ? contentService.resumeThreadEvents(
-            buildResumeThreadInput({
-              workspaceId,
-              threadId,
-              userId,
-              data: parsed.data,
-            }),
-          )
-        : mode === "refresh"
-        ? contentService.refreshThreadEvents({
-            workspaceId,
-            threadId,
-            userId,
-            mentionedSourceIds: parsed.data.mentionedSourceIds,
-            sourceIds: parsed.data.sourceIds,
-            tools: parsed.data.tools,
-            command: parsed.data.command,
-            invocation: parsed.data.invocation,
-            timezone: parsed.data.timezone,
-            userMessageId: parsed.data.userMessageId,
-            assistantMessageId: parsed.data.assistantMessageId,
-            idempotencyKey: parsed.data.idempotencyKey,
-            llm: parsed.data.llm,
-            image: parsed.data.image,
-            vision: parsed.data.vision,
-            visionProfileAlias:
-              parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-          } satisfies RefreshThreadInput)
-        : mode === "edit"
-          ? contentService.editThreadEvents({
-              workspaceId,
-              threadId,
-              userId,
-              content: parsed.data.content ?? "",
-              imagesProvided,
-              images,
-              mentionedSourceIds: parsed.data.mentionedSourceIds,
-              sourceIds: parsed.data.sourceIds,
-              tools: parsed.data.tools,
-              command: parsed.data.command,
-              invocation: parsed.data.invocation,
-              timezone: parsed.data.timezone,
-              userMessageId: parsed.data.userMessageId,
-              assistantMessageId: parsed.data.assistantMessageId,
-              idempotencyKey: parsed.data.idempotencyKey,
-              llm: parsed.data.llm,
-              image: parsed.data.image,
-              vision: parsed.data.vision,
-              visionProfileAlias:
-                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-            } satisfies EditThreadInput)
-          : contentService.streamThreadEvents({
-              workspaceId,
-              threadId,
-              userId,
-              content: parsed.data.content ?? "",
-              images,
-              mentionedSourceIds: parsed.data.mentionedSourceIds,
-              sourceIds: parsed.data.sourceIds,
-              tools: parsed.data.tools,
-              command: parsed.data.command,
-              invocation: parsed.data.invocation,
-              timezone: parsed.data.timezone,
-              idempotencyKey: parsed.data.idempotencyKey,
-              llm: parsed.data.llm,
-              image: parsed.data.image,
-              vision: parsed.data.vision,
-              visionProfileAlias:
-                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
-            });
 
     c.header("Content-Type", "text/event-stream");
     c.header("Cache-Control", "no-cache, no-transform");

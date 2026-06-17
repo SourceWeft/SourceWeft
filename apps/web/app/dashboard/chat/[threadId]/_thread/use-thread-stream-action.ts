@@ -2,16 +2,9 @@
 
 import { useCallback } from "react";
 import { toast } from "sonner";
-import {
-  isGeneratedImageArtifactToolName,
-  isPresentationArtifactToolName,
-  isVideoPresentationArtifactToolName,
-  type ToolApprovalResume,
-} from "@sourceweft/sdk";
-import {
-  buildByokModelExecution,
-  type ByokModelSelection,
-} from "../../_components/byok-state";
+import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
+import { type ToolApprovalResume } from "@sourceweft/sdk";
+import type { ByokModelSelection } from "../../_components/byok-state";
 import {
   buildChatToolsRequest,
   type ChatSendInput,
@@ -20,17 +13,27 @@ import {
   type ThinkingStepRecord,
   type ToolCallRecord,
 } from "../../_components/chat-canvas";
-import type { ModelType, SelectedModels } from "../../_components/model-catalog-utils";
-import { expandSelectedSources, type SourceItem } from "../../_components/source-types";
+import type {
+  ModelType,
+  SelectedModels,
+} from "../../_components/model-catalog-utils";
+import {
+  expandSelectedSources,
+  type SourceItem,
+} from "../../_components/source-types";
 import { contentClient } from "../../../../../lib/sdk";
 import { runChatStream } from "../chat-stream-runner";
 import type { RequestThinkingConfig } from "../streaming-request-body";
-import type { ChatMessageItem, StreamingAssistantSnapshot } from "../streaming-assistant-state";
+import type {
+  ChatMessageItem,
+  StreamingAssistantSnapshot,
+} from "../streaming-assistant-state";
 import { createStreamingRenderBuffer } from "../streaming-render-buffer";
 import {
   appendReasoningChunk,
   createDurableRunKey,
   getDisplayErrorMessage,
+  hasRenderBlocksMetadata,
   isCompletedImageArtifactToolCall,
   isCompletedPresentationArtifactToolCall,
   isCompletedWorkfileWriteToolCall,
@@ -73,6 +76,7 @@ export type ThreadStreamActionInput = {
   tools?: ChatSendInput["tools"];
   images?: ChatSendInput["images"];
   command?: ChatSendInput["command"];
+  invocation?: ChatSendInput["invocation"];
   userMessageId?: string | null;
   assistantMessageId?: string | null;
   thinking?: RequestThinkingConfig;
@@ -92,7 +96,11 @@ type UseThreadStreamActionInput = {
   clearRunIfCurrent: (durableRunKey: string) => void;
   librarySources: SourceItem[];
   loadThreadMessages: () => Promise<void>;
-  markRunStarted: (input: { idempotencyKey: string; status: "running"; mode?: "send" | "refresh" | "edit" | "resume" }) => void;
+  markRunStarted: (input: {
+    idempotencyKey: string;
+    status: "running";
+    mode?: "send" | "refresh" | "edit" | "resume";
+  }) => void;
   markRunTerminal: (input: {
     detachedWithoutFinish: boolean;
     durableRunKey: string;
@@ -102,6 +110,7 @@ type UseThreadStreamActionInput = {
   onToolConfirmationRequested?: (input: {
     assistantMessageId: string | null;
     liveConfirmations: LiveToolConfirmation[];
+    mode: "send" | "refresh" | "edit" | "resume";
     runKey: string;
     threadRunId: string | null;
   }) => void;
@@ -111,8 +120,17 @@ type UseThreadStreamActionInput = {
   setArtifactsRefreshKey: (updater: (value: number) => number) => void;
   setComposerInitialInput: (value: string) => void;
   setComposerResetKey: (updater: (value: number) => number) => void;
-  setMessages: (updater: (messages: ChatMessageItem[]) => ChatMessageItem[]) => void;
-  setStreamingAssistantSnapshot: (snapshot: StreamingAssistantSnapshot | ((current: StreamingAssistantSnapshot | null) => StreamingAssistantSnapshot | null) | null) => void;
+  setMessages: (
+    updater: (messages: ChatMessageItem[]) => ChatMessageItem[],
+  ) => void;
+  setStreamingAssistantSnapshot: (
+    snapshot:
+      | StreamingAssistantSnapshot
+      | ((
+          current: StreamingAssistantSnapshot | null,
+        ) => StreamingAssistantSnapshot | null)
+      | null,
+  ) => void;
   setWorkfilesRefreshKey: (updater: (value: number) => number) => void;
   streamWithSelectedLlm: boolean;
   thinkingSettings: PromptThinkingSettings;
@@ -169,26 +187,7 @@ export function useThreadStreamAction({
   workspaceId,
 }: UseThreadStreamActionInput) {
   const streamThreadAction = useCallback(
-    async (input: {
-      mode: "send" | "refresh" | "edit" | "resume";
-      content?: string;
-      mentionedSourceIds?: string[];
-      sourceIds?: string[];
-      skillIds?: string[];
-      tools?: ChatSendInput["tools"];
-      images?: ChatSendInput["images"];
-      command?: ChatSendInput["command"];
-      userMessageId?: string | null;
-      assistantMessageId?: string | null;
-      thinking?: RequestThinkingConfig;
-      searchEnabled?: boolean;
-      byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
-      durableRunKey?: string;
-      attachOnly?: boolean;
-      baseMessages?: ChatMessageItem[];
-      toolApprovalResume?: ToolApprovalResume | null;
-      resolvedConfirmationIds?: string[];
-    }) => {
+    async (input: ThreadStreamActionInput) => {
       if (!workspaceId) {
         return;
       }
@@ -269,18 +268,13 @@ export function useThreadStreamAction({
               : {}),
             skillIds: input.skillIds ?? [],
             tools: buildChatToolsRequest({
-              imageExecution:
-                selectedByokModels.image?.mode === "byok"
-                  ? buildByokModelExecution({
-                      selection: selectedByokModels.image,
-                    })
-                  : null,
               invokedSkillIds: input.tools?.invokedSkillIds,
               skillIds: input.skillIds ?? [],
               searchEnabled: input.searchEnabled ?? searchEnabled,
               tools: input.tools,
             }),
             ...(input.command ? { command: input.command } : {}),
+            ...(input.invocation ? { invocation: input.invocation } : {}),
             versionOf:
               input.mode === "edit"
                 ? (input.userMessageId ?? latestUserMessage?.id ?? null)
@@ -380,11 +374,11 @@ export function useThreadStreamAction({
       if (input.attachOnly && attachOnlyAssistantMessage) {
         const shouldSeedAttachContent = input.mode === "resume";
         const seededAttachContent = shouldSeedAttachContent
-          ? appendResumeContinuationSeparator(attachOnlyAssistantMessage.content)
+          ? appendResumeContinuationSeparator(
+              attachOnlyAssistantMessage.content,
+            )
           : "";
-        assistantText = shouldSeedAttachContent
-          ? seededAttachContent
-          : "";
+        assistantText = shouldSeedAttachContent ? seededAttachContent : "";
         latestAssistantMessageContent = shouldSeedAttachContent
           ? seededAttachContent
           : attachOnlyAssistantMessage.content;
@@ -393,8 +387,8 @@ export function useThreadStreamAction({
           input.resolvedConfirmationIds,
           input.toolApprovalResume,
         ).forEach((toolCall) => {
-            streamToolCallsById.set(toolCall.id, toolCall);
-          });
+          streamToolCallsById.set(toolCall.id, toolCall);
+        });
         const traceParts = resolveTracePartToolConfirmations(
           resolveTracePartsFromMetadata(attachOnlyAssistantMessage.metadata),
           input.resolvedConfirmationIds,
@@ -405,14 +399,20 @@ export function useThreadStreamAction({
         ).forEach((step) => {
           streamThinkingStepsById.set(step.id, step);
         });
+        const hasExplicitRenderBlocks = hasRenderBlocksMetadata(
+          attachOnlyAssistantMessage.metadata,
+        );
+        const explicitRenderBlocks = hasExplicitRenderBlocks
+          ? resolveRenderBlocksFromMetadata(attachOnlyAssistantMessage.metadata)
+          : [];
         const existingRenderBlocks = resolveRenderBlocksFromMetadata(
           attachOnlyAssistantMessage.metadata,
+          { content: latestAssistantMessageContent },
         );
         streamRenderBuffer.replaceRenderBlocks(
           existingRenderBlocks.length > 0
             ? existingRenderBlocks
-            : shouldSeedAttachContent &&
-                seededAttachContent.length > 0
+            : shouldSeedAttachContent && seededAttachContent.length > 0
               ? [
                   {
                     id: `stream-text-${attachOnlyAssistantMessage.id}`,
@@ -423,17 +423,20 @@ export function useThreadStreamAction({
               : [],
         );
         if (
-          existingRenderBlocks.length > 0 &&
+          explicitRenderBlocks.length > 0 &&
           seededAttachContent.length > attachOnlyAssistantMessage.content.length
         ) {
           streamRenderBuffer.appendText(
-            seededAttachContent.slice(attachOnlyAssistantMessage.content.length),
+            seededAttachContent.slice(
+              attachOnlyAssistantMessage.content.length,
+            ),
           );
         }
         if (shouldSeedAttachContent || traceParts.length > 0) {
           const nextMetadata = { ...attachOnlyAssistantMessage.metadata };
           if (shouldSeedAttachContent) {
-            nextMetadata.renderBlocks = streamRenderBuffer.snapshotRenderBlocks();
+            nextMetadata.renderBlocks =
+              streamRenderBuffer.snapshotRenderBlocks();
           }
           if (traceParts.length > 0) {
             nextMetadata.traceParts = traceParts;
@@ -632,6 +635,7 @@ export function useThreadStreamAction({
           byokSelections: input.byokSelections,
           catalogKindEnabled,
           command: input.command,
+          invocation: input.invocation,
           content: input.content,
           durableRunKey,
           getAssistantText: () => assistantText,
@@ -643,10 +647,11 @@ export function useThreadStreamAction({
           isCompletedImageArtifactToolCall,
           isCompletedPresentationArtifactToolCall,
           isCompletedWorkfileWriteToolCall,
-          isGeneratedImageArtifactToolName,
+          isGeneratedImageArtifactToolName: (toolName) =>
+            hasAgentToolCapability(toolName, "generated_image_artifact"),
           isPresentationArtifactToolName: (toolName) =>
-            isPresentationArtifactToolName(toolName) ||
-            isVideoPresentationArtifactToolName(toolName),
+            hasAgentToolCapability(toolName, "presentation_artifact") ||
+            hasAgentToolCapability(toolName, "video_presentation_artifact"),
           markStreamingAssistantAsError,
           mergeThinkingStepRecords,
           mode: input.mode,
@@ -660,11 +665,18 @@ export function useThreadStreamAction({
               createdUserMessageId = messageId;
             }
           },
-          onToolConfirmationRequested: ({ liveConfirmations }) => {
+          onToolConfirmationRequested: ({
+            assistantMessageId,
+            liveConfirmations,
+          }) => {
             onToolConfirmationRequested?.({
               assistantMessageId:
-                persistedAssistantMessageId ?? streamingAssistantMessageId ?? null,
+                assistantMessageId ??
+                persistedAssistantMessageId ??
+                streamingAssistantMessageId ??
+                null,
               liveConfirmations,
+              mode: input.mode,
               runKey: durableRunKey,
               threadRunId: preparedThreadRunId,
             });
@@ -691,6 +703,9 @@ export function useThreadStreamAction({
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
               ...run,
               id: toNullableString(threadRun.id) ?? run.id,
+              assistantMessageId:
+                toNullableString(threadRun.assistantMessageId) ??
+                run.assistantMessageId,
               mode:
                 threadRun.mode === "send" ||
                 threadRun.mode === "refresh" ||
@@ -772,6 +787,16 @@ export function useThreadStreamAction({
         }
 
         if (waitingForApproval) {
+          // Eagerly transition the local run status so the confirmation bar
+          // renders immediately, before the network call to getActiveThreadRun.
+          updateActiveRunIfCurrent(durableRunKey, (run) => ({
+            ...run,
+            assistantMessageId:
+              persistedAssistantMessageId ??
+              streamingAssistantMessageId ??
+              run.assistantMessageId,
+            status: "waiting_for_approval",
+          }));
           const activeRunResult = await contentClient
             .getActiveThreadRun(workspaceId, threadId)
             .catch(() => null);
@@ -779,44 +804,16 @@ export function useThreadStreamAction({
             activeRunResult?.threadRun?.idempotencyKey === durableRunKey
               ? normalizeActiveThreadRun(activeRunResult.threadRun)
               : null;
-          updateActiveRunIfCurrent(durableRunKey, (run) => ({
-            ...run,
-            ...(activeRun ?? {}),
-            assistantMessageId:
-              activeRun?.assistantMessageId ??
-              persistedAssistantMessageId ??
-              streamingAssistantMessageId ??
-              run.assistantMessageId,
-            status: "waiting_for_approval",
-          }));
+          if (activeRun) {
+            updateActiveRunIfCurrent(durableRunKey, (run) => ({
+              ...run,
+              ...activeRun,
+              assistantMessageId:
+                activeRun.assistantMessageId ?? run.assistantMessageId,
+              status: "waiting_for_approval",
+            }));
+          }
           clearAttachedRunKeyIfCurrent(durableRunKey);
-          return;
-        }
-
-        const activeRunResult = await contentClient
-          .getActiveThreadRun(workspaceId, threadId)
-          .catch(() => null);
-        const activeRun =
-          activeRunResult?.threadRun?.idempotencyKey === durableRunKey
-            ? normalizeActiveThreadRun(activeRunResult.threadRun)
-            : null;
-        if (activeRun) {
-          detachedWithoutFinish = true;
-          updateActiveRunIfCurrent(durableRunKey, (run) => ({
-            ...run,
-            ...activeRun,
-          }));
-          console.info(
-            "Chat stream emitted finish while durable run is still active; reloading thread state.",
-            {
-              durableRunKey,
-              status: activeRun.status,
-              threadId,
-            },
-          );
-          window.setTimeout(() => {
-            void loadThreadMessages();
-          }, 0);
           return;
         }
 
@@ -939,8 +936,6 @@ export function useThreadStreamAction({
       workspaceId,
     ],
   );
-
-
 
   return { streamThreadAction };
 }

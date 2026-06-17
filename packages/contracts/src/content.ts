@@ -5,7 +5,21 @@ import {
   meterIngestionResponseSchema,
 } from "./billing";
 import { toolApprovalResumeSchema } from "./agent-confirmations";
-import { AGENT_TOOL_NAMES } from "./agent-tools";
+import {
+  GENERATE_IMAGE_TOOL_NAME,
+  GENERATE_VIDEO_PRESENTATION_TOOL_NAME,
+  PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME,
+  WEB_FETCH_TOOL_NAME,
+  WEB_SEARCH_TOOL_NAME,
+  SEARCH_NOTION_PAGES_TOOL_NAME,
+  READ_NOTION_PAGE_TOOL_NAME,
+  CREATE_NOTION_PAGE_TOOL_NAME,
+  APPEND_NOTION_PAGE_TOOL_NAME,
+  UPDATE_NOTION_PAGE_TOOL_NAME,
+  DELETE_NOTION_PAGE_TOOL_NAME,
+  SAVE_ARTIFACT_TO_NOTION_TOOL_NAME,
+  SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME,
+} from "./agent-tools";
 
 export const SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX = "sourceweft-web-run:";
 export const SOURCEWEFT_WEB_RUN_STOP_SUFFIX = ":stop";
@@ -402,6 +416,59 @@ export const threadSchema = z.object({
   updatedAt: z.string(),
 });
 
+const threadThinkingEffortSchema = z.enum([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
+
+const threadThinkingPreferencesSchema = z
+  .object({
+    mode: z.enum(["off", "auto", "effort"]).default("auto"),
+    effort: threadThinkingEffortSchema.default("medium"),
+  })
+  .strip();
+
+const threadThinkingPreferencesPatchSchema = z
+  .object({
+    mode: z.enum(["off", "auto", "effort"]).optional(),
+    effort: threadThinkingEffortSchema.optional(),
+  })
+  .strip();
+
+export const threadChatPreferencesSchema = z
+  .object({
+    thinking: threadThinkingPreferencesSchema.default({
+      mode: "auto",
+      effort: "medium",
+    }),
+    webAccess: z.boolean().default(true),
+    composerOptions: z.record(z.string(), z.unknown()).default({}),
+  })
+  .strip();
+
+export const updateThreadChatPreferencesRequestSchema = z
+  .object({
+    thinking: threadThinkingPreferencesPatchSchema.optional(),
+    webAccess: z.boolean().optional(),
+    composerOptions: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strip()
+  .refine(
+    (value) =>
+      value.thinking?.mode !== undefined ||
+      value.thinking?.effort !== undefined ||
+      value.webAccess !== undefined ||
+      value.composerOptions !== undefined,
+    { message: "At least one chat preference must be provided" },
+  );
+
+export const threadWithChatPreferencesSchema = threadSchema.extend({
+  chatPreferences: threadChatPreferencesSchema,
+});
+
 export const threadModelSettingsInputSchema = z
   .object({
     llmProfileAlias: z.string().trim().min(1).max(512).nullable().optional(),
@@ -422,14 +489,15 @@ export const threadModelSettingsPatchSchema =
 export const createThreadRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   modelSettings: threadModelSettingsInputSchema.optional(),
+  chatPreferences: threadChatPreferencesSchema.optional(),
 });
 
 export const createThreadResponseSchema = z.object({
-  thread: threadSchema,
+  thread: threadWithChatPreferencesSchema,
 });
 
 export const getThreadResponseSchema = z.object({
-  thread: threadSchema,
+  thread: threadWithChatPreferencesSchema,
 });
 
 export const deleteThreadResponseSchema = z.object({
@@ -443,7 +511,7 @@ export const listThreadsRequestSchema = z.object({
 });
 
 export const listThreadsResponseSchema = z.object({
-  items: z.array(threadSchema),
+  items: z.array(threadWithChatPreferencesSchema),
   nextCursor: z.string().nullable(),
 });
 
@@ -613,101 +681,9 @@ const generateImageToolSelectionSchema = z
   })
   .strict();
 
-const generatePptxToolSelectionSchema = z
+const publishSandboxArtifactToolSelectionSchema = z
   .object({
     enabled: z.boolean().optional(),
-    generationMode: z.enum(["visual_html", "editable_native"]).optional(),
-    design: z
-      .object({
-        aspectRatio: z.enum(["16:9", "16:10", "4:3"]).optional(),
-        language: z.enum(["zh", "en", "auto"]).optional(),
-        stylePreset: z
-          .enum(["executive", "technical", "editorial", "data-heavy", "custom"])
-          .optional(),
-        customBrief: z.string().trim().max(2000).optional(),
-        visualSystem: z
-          .object({
-            palette: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
-            typography: z
-              .array(z.string().trim().min(1).max(120))
-              .max(8)
-              .optional(),
-            layoutPrinciples: z
-              .array(z.string().trim().min(1).max(200))
-              .max(12)
-              .optional(),
-            styleFamily: z
-              .enum([
-                "auto",
-                "swiss",
-                "magazine",
-                "education",
-                "blueprint",
-                "data-report",
-                "editorial",
-              ])
-              .optional(),
-            density: z.enum(["airy", "balanced", "dense"]).optional(),
-            geometry: z
-              .enum(["sharp", "soft", "editorial", "technical"])
-              .optional(),
-            chrome: z
-              .enum(["minimal", "magazine", "lecture", "report"])
-              .optional(),
-            illustration: z
-              .enum(["none", "icons", "diagrams", "image-led", "handdrawn"])
-              .optional(),
-            layoutPolicy: z
-              .object({
-                strict: z.boolean().optional(),
-                diversity: z.enum(["normal", "high"]).optional(),
-              })
-              .strict()
-              .optional(),
-            coverTreatment: z.string().trim().max(80).optional(),
-            compositionStyle: z
-              .enum([
-                "auto",
-                "axis",
-                "poster",
-                "split",
-                "notebook",
-                "schematic",
-                "report",
-              ])
-              .optional(),
-            backgroundTreatment: z
-              .enum([
-                "auto",
-                "plain",
-                "grid",
-                "paper",
-                "image",
-                "gradient",
-                "diagram",
-              ])
-              .optional(),
-            motifs: z.array(z.string().trim().min(1).max(80)).max(8).optional(),
-            imageDirection: z.string().trim().max(1000).optional(),
-            motion: z.string().trim().max(1000).optional(),
-          })
-          .strict()
-          .optional(),
-      })
-      .strict()
-      .optional(),
-    output: z
-      .object({
-        includeSourceJson: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
-    rendering: z
-      .object({
-        preferHtmlTables: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
   })
   .strict();
 
@@ -723,7 +699,7 @@ const generateVideoPresentationToolSelectionSchema = z
   })
   .strict();
 
-const webSearchToolSelectionSchema = z
+const webToolSelectionSchema = z
   .object({
     enabled: z.boolean().optional(),
   })
@@ -741,6 +717,11 @@ const skillSlashConfigSchema = z
     enabled: z.boolean().optional(),
   })
   .strict();
+
+const skillRuntimeConfigSelectionSchema = z.record(
+  z.string().trim().min(1).max(128),
+  z.record(z.string(), z.unknown()),
+);
 
 export const chatInputImageSchema = z
   .object({
@@ -785,7 +766,7 @@ export const threadCommandRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(160),
     arguments: z.string().max(20000).optional(),
-    kind: z.enum(["tool", "skill", "skill-command"]).optional(),
+    kind: z.enum(["tool", "skill"]).optional(),
     displayName: z.string().trim().min(1).max(256).optional(),
     skillSlug: z.string().trim().min(1).max(128).optional(),
     commandName: z.string().trim().min(1).max(128).optional(),
@@ -802,6 +783,120 @@ const invocationSelectionRequestSchema = z
   })
   .strict();
 
+const capabilityOptionValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+]);
+
+const capabilityToolOptionSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string().optional(),
+    valueType: z.enum(["string", "number", "boolean"]),
+    defaultValue: capabilityOptionValueSchema.optional(),
+    target: z
+      .object({
+        path: z.string(),
+      })
+      .optional(),
+    values: z.array(
+      z.object({
+        value: capabilityOptionValueSchema,
+        label: z.string().optional(),
+      }),
+    ),
+  })
+  .strict();
+
+const skillOptionSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string().optional(),
+    valueType: z.enum(["string", "number", "boolean"]),
+    defaultValue: capabilityOptionValueSchema.optional(),
+    target: z.object({
+      toolName: z.string().optional(),
+      path: z.string(),
+    }),
+    values: z.array(
+      z.object({
+        value: capabilityOptionValueSchema,
+        label: z.string().optional(),
+      }),
+    ),
+  })
+  .strict();
+
+const capabilityCatalogCommandSchema = z
+  .object({
+    id: z.string(),
+    capabilityId: z.string(),
+    contributionId: z.string(),
+    title: z.string(),
+    displayTitle: z.string(),
+    parentKind: z
+      .enum([
+        "command",
+        "skill",
+        "tool",
+        "vfs",
+        "artifact",
+        "retrieval",
+        "document_parser",
+        "mcp",
+        "connector",
+      ])
+      .nullable(),
+    parentTitle: z.string().nullable(),
+    aliases: z.array(z.string()),
+    category: z.string().nullable(),
+    iconName: z.string().optional(),
+    iconTone: z.enum(["brand", "mono"]).optional(),
+    visible: z.boolean(),
+    order: z.number(),
+    action: z.object({
+      kind: z.enum([
+        "command",
+        "skill",
+        "tool",
+        "vfs",
+        "artifact",
+        "retrieval",
+        "document_parser",
+        "mcp",
+        "connector",
+      ]),
+      targetId: z.string(),
+    }),
+    hasWorkflow: z.boolean(),
+    sourcePackageName: z.string().nullable(),
+  })
+  .strict();
+
+const capabilityCatalogToolSchema = z
+  .object({
+    id: z.string(),
+    capabilityId: z.string(),
+    contributionId: z.string(),
+    title: z.string(),
+    description: z.string(),
+    inputSchema: z.record(z.string(), z.unknown()),
+    outputSchema: z.record(z.string(), z.unknown()),
+    options: z.array(capabilityToolOptionSchema),
+    risk: z.enum(["read", "write", "destructive", "unknown"]),
+    sourcePackageName: z.string().nullable(),
+    toolName: z.string(),
+  })
+  .strict();
+
+export const listCapabilityCatalogResponseSchema = z.object({
+  commands: z.array(capabilityCatalogCommandSchema),
+  tools: z.array(capabilityCatalogToolSchema),
+});
+
 const threadToolsRequestSchema = z
   .object({
     skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
@@ -809,31 +904,28 @@ const threadToolsRequestSchema = z
       .array(z.string().trim().min(1).max(128))
       .max(5)
       .optional(),
+    skillRuntimeConfig: skillRuntimeConfigSelectionSchema.optional(),
     webSearchEnabled: z.boolean().optional(),
     artifact: artifactToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.generateImage]:
-      generateImageToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.generatePptx]: generatePptxToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.generateVideoPresentation]:
+    [GENERATE_IMAGE_TOOL_NAME]: generateImageToolSelectionSchema.optional(),
+    [PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME]:
+      publishSandboxArtifactToolSelectionSchema.optional(),
+    [GENERATE_VIDEO_PRESENTATION_TOOL_NAME]:
       generateVideoPresentationToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.webSearch]: webSearchToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.searchNotionPages]:
+    [WEB_SEARCH_TOOL_NAME]: webToolSelectionSchema.optional(),
+    [WEB_FETCH_TOOL_NAME]: webToolSelectionSchema.optional(),
+    [SEARCH_NOTION_PAGES_TOOL_NAME]: connectorToolSelectionSchema.optional(),
+    [READ_NOTION_PAGE_TOOL_NAME]: connectorToolSelectionSchema.optional(),
+    [CREATE_NOTION_PAGE_TOOL_NAME]: connectorToolSelectionSchema.optional(),
+    [APPEND_NOTION_PAGE_TOOL_NAME]: connectorToolSelectionSchema.optional(),
+    [UPDATE_NOTION_PAGE_TOOL_NAME]: connectorToolSelectionSchema.optional(),
+    [DELETE_NOTION_PAGE_TOOL_NAME]: connectorToolSelectionSchema.optional(),
+    [SAVE_ARTIFACT_TO_NOTION_TOOL_NAME]:
       connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.readNotionPage]: connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.createNotionPage]:
-      connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.appendNotionPage]:
-      connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.updateNotionPage]:
-      connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.deleteNotionPage]:
-      connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.saveArtifactToNotion]:
-      connectorToolSelectionSchema.optional(),
-    [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]:
+    [SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME]:
       connectorToolSelectionSchema.optional(),
   })
-  .strict();
+  .catchall(z.record(z.string(), z.unknown()));
 
 export const streamThreadRequestSchema = z.object({
   mode: streamThreadModeSchema.optional(),
@@ -854,6 +946,7 @@ export const streamThreadRequestSchema = z.object({
   vision: llmExecutionConfigSchema.optional(),
   modelSettings: threadModelSettingsInputSchema.optional(),
   toolApprovalResume: toolApprovalResumeSchema.optional(),
+  mcpInstallIds: z.array(z.string().trim().min(1).max(128)).max(10).optional(),
 });
 
 export const refreshThreadRequestSchema = streamThreadRequestSchema
@@ -901,12 +994,12 @@ export const startThreadTurnRequestSchema = createThreadRequestSchema.merge(
 );
 
 export const startThreadTurnResponseSchema = z.object({
-  thread: threadSchema,
+  thread: threadWithChatPreferencesSchema,
   run: threadRunSummarySchema,
 });
 
 export const streamThreadResponseSchema = z.object({
-  thread: threadSchema,
+  thread: threadWithChatPreferencesSchema,
   userMessage: messageSchema,
   assistantMessage: messageSchema,
   billing: meterConsumeResponseSchema,
@@ -992,8 +1085,50 @@ export const workspaceSkillSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const workspaceInstalledSkillSchema = z.object({
+  workspaceSkillId: z.string(),
+  selectionId: z.string(),
+  catalogId: z.string(),
+  sourceType: skillSourceTypeSchema,
+  skillId: z.string(),
+  skillVersionId: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  version: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+  visibility: z.enum(["public", "restricted", "workspace", "team"]),
+  categories: z.array(z.string()),
+  enabled: z.boolean(),
+  configJson: z.record(z.string(), z.unknown()),
+  enabledBy: z.string().nullable(),
+  enabledAt: z.string().nullable(),
+  capabilities: z
+    .object({
+      required: z.array(z.string()).optional(),
+      optional: z.array(z.string()).optional(),
+    })
+    .optional(),
+  models: z
+    .object({
+      chat: z.string().optional(),
+      image: z.string().optional(),
+      vision: z.string().optional(),
+    })
+    .optional(),
+  commands: z.array(skillCommandSchema).optional(),
+  tools: z.array(z.string()).optional(),
+  options: z.array(skillOptionSchema).optional(),
+  slash: z.boolean().optional(),
+  slashConfig: skillSlashConfigSchema.optional(),
+  defaultConfig: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 export const skillCatalogItemSchema = z.object({
   catalogId: z.string(),
+  selectionId: z.string().nullable(),
   sourceType: skillSourceTypeSchema,
   skillId: z.string(),
   skillVersionId: z.string(),
@@ -1006,6 +1141,8 @@ export const skillCatalogItemSchema = z.object({
   categories: z.array(z.string()),
   enabledWorkspaceSkillId: z.string().nullable(),
   enabled: z.boolean(),
+  installable: z.boolean(),
+  defaultEnabled: z.boolean().optional(),
   hasReadme: z.boolean(),
   capabilities: z
     .object({
@@ -1022,6 +1159,7 @@ export const skillCatalogItemSchema = z.object({
     .optional(),
   commands: z.array(skillCommandSchema).optional(),
   tools: z.array(z.string()).optional(),
+  options: z.array(skillOptionSchema).optional(),
   slash: z.boolean().optional(),
   slashConfig: skillSlashConfigSchema.optional(),
   defaultConfig: z.record(z.string(), z.unknown()).optional(),
@@ -1049,6 +1187,7 @@ export const skillManifestJsonSchema = z.object({
     .optional(),
   commands: z.array(skillCommandSchema).optional(),
   tools: z.array(z.string()).optional(),
+  options: z.array(skillOptionSchema).optional(),
   slash: z.boolean().optional(),
   slashConfig: skillSlashConfigSchema.optional(),
   defaultConfig: z.record(z.string(), z.unknown()).optional(),
@@ -1059,7 +1198,7 @@ export const listSkillsCatalogResponseSchema = z.object({
 });
 
 export const listWorkspaceSkillsResponseSchema = z.object({
-  items: z.array(workspaceSkillSchema),
+  items: z.array(workspaceInstalledSkillSchema),
 });
 
 export const getSkillCatalogDetailResponseSchema = z.object({
@@ -1194,7 +1333,15 @@ export const deleteCustomSkillVersionFileResponseSchema = z.object({
 });
 
 export const updateThreadModelSettingsResponseSchema = z.object({
-  thread: threadSchema,
+  thread: threadWithChatPreferencesSchema,
+});
+
+export const updateThreadChatPreferencesResponseSchema = z.object({
+  thread: threadWithChatPreferencesSchema,
+});
+
+export const threadChatPreferencesBootstrapResponseSchema = z.object({
+  initialChatPreferences: threadChatPreferencesSchema,
 });
 
 const modelCatalogKindSchema = z.enum(["llm", "image", "vision"]);
@@ -1445,7 +1592,15 @@ export type RetrySourceResponse = z.infer<typeof retrySourceResponseSchema>;
 export type SourceContentResponse = z.infer<typeof sourceContentResponseSchema>;
 export type IndexSourceRequest = z.infer<typeof indexSourceRequestSchema>;
 export type IndexSourceResponse = z.infer<typeof indexSourceResponseSchema>;
-export type Thread = z.infer<typeof threadSchema>;
+export type BaseThread = z.infer<typeof threadSchema>;
+export type Thread = z.infer<typeof threadWithChatPreferencesSchema>;
+export type ThreadChatPreferences = z.infer<typeof threadChatPreferencesSchema>;
+export type UpdateThreadChatPreferencesRequest = z.infer<
+  typeof updateThreadChatPreferencesRequestSchema
+>;
+export type ThreadChatPreferencesBootstrapResponse = z.infer<
+  typeof threadChatPreferencesBootstrapResponseSchema
+>;
 export type ThreadModelSettingsPatch = z.infer<
   typeof threadModelSettingsPatchSchema
 >;
@@ -1477,17 +1632,28 @@ export type ArtifactToolSelection = z.infer<typeof artifactToolSelectionSchema>;
 export type GenerateImageToolSelection = z.infer<
   typeof generateImageToolSelectionSchema
 >;
-export type GeneratePptxToolSelection = z.infer<
-  typeof generatePptxToolSelectionSchema
+export type PublishSandboxArtifactToolSelection = z.infer<
+  typeof publishSandboxArtifactToolSelectionSchema
 >;
 export type GenerateVideoPresentationToolSelection = z.infer<
   typeof generateVideoPresentationToolSelectionSchema
 >;
-export type WebSearchToolSelection = z.infer<
-  typeof webSearchToolSelectionSchema
+export type WebSearchToolSelection = z.infer<typeof webToolSelectionSchema>;
+export type WebFetchToolSelection = z.infer<typeof webToolSelectionSchema>;
+export type CapabilityToolOption = z.infer<typeof capabilityToolOptionSchema>;
+export type SkillOption = z.infer<typeof skillOptionSchema>;
+export type CapabilityCatalogCommand = z.infer<
+  typeof capabilityCatalogCommandSchema
+>;
+export type CapabilityCatalogTool = z.infer<typeof capabilityCatalogToolSchema>;
+export type ListCapabilityCatalogResponse = z.infer<
+  typeof listCapabilityCatalogResponseSchema
 >;
 export type SkillCommand = z.infer<typeof skillCommandSchema>;
 export type ThreadCommandRequest = z.infer<typeof threadCommandRequestSchema>;
+export type ThreadInvocationRequest = z.infer<
+  typeof invocationSelectionRequestSchema
+>;
 export type StreamThreadRequest = z.infer<typeof streamThreadRequestSchema>;
 export type StreamThreadResponse = z.infer<typeof streamThreadResponseSchema>;
 export type RefreshThreadRequest = z.infer<typeof refreshThreadRequestSchema>;
@@ -1523,7 +1689,13 @@ export type UpdateThreadModelSettingsRequest = z.infer<
 export type UpdateThreadModelSettingsResponse = z.infer<
   typeof updateThreadModelSettingsResponseSchema
 >;
+export type UpdateThreadChatPreferencesResponse = z.infer<
+  typeof updateThreadChatPreferencesResponseSchema
+>;
 export type WorkspaceSkill = z.infer<typeof workspaceSkillSchema>;
+export type WorkspaceInstalledSkill = z.infer<
+  typeof workspaceInstalledSkillSchema
+>;
 export type SkillCatalogItem = z.infer<typeof skillCatalogItemSchema>;
 export type ListSkillsCatalogResponse = z.infer<
   typeof listSkillsCatalogResponseSchema

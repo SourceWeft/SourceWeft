@@ -1,6 +1,6 @@
 import type { Context, Hono } from "hono";
 import { putWorkingFileRequestSchema } from "@sourceweft/contracts";
-import { contentService } from "../../../modules/content";
+import { workingFilesService } from "../../../modules/working-files";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
@@ -20,7 +20,7 @@ export function registerWorkingFileRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.listWorkingFiles({
+    const result = await workingFilesService.listWorkingFiles({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -35,7 +35,7 @@ export function registerWorkingFileRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getWorkingFile({
+    const result = await workingFilesService.getWorkingFile({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -59,7 +59,7 @@ export function registerWorkingFileRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.putWorkingFile({
+    const result = await workingFilesService.putWorkingFile({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -78,7 +78,7 @@ export function registerWorkingFileRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.deleteWorkingFile({
+    const result = await workingFilesService.deleteWorkingFile({
       workspaceId: requireRouteParam(c, "workspaceId"),
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),

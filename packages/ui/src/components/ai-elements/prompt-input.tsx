@@ -387,7 +387,10 @@ const getCaretTextOffset = (root: HTMLElement) => {
 };
 
 const findTextPosition = (root: HTMLElement, offset: number) => {
-  const findInNode = (node: Node, remainingOffset: number): {
+  const findInNode = (
+    node: Node,
+    remainingOffset: number,
+  ): {
     node: Node;
     offset: number;
   } => {
@@ -499,8 +502,9 @@ const closestSourceMention = (node: Node | null) =>
 const closestSlashCommand = (node: Node | null) =>
   node instanceof HTMLElement
     ? node.closest<HTMLElement>("[data-slash-command-value]")
-    : (node?.parentElement?.closest<HTMLElement>("[data-slash-command-value]") ??
-      null);
+    : (node?.parentElement?.closest<HTMLElement>(
+        "[data-slash-command-value]",
+      ) ?? null);
 
 const findPreviousNode = (node: Node | null): Node | null => {
   if (!node) {
@@ -554,7 +558,10 @@ const removeSlashCommands = (
     }
     const next = command.nextSibling;
     command.remove();
-    if (next?.nodeType === Node.TEXT_NODE && next.textContent?.startsWith(" ")) {
+    if (
+      next?.nodeType === Node.TEXT_NODE &&
+      next.textContent?.startsWith(" ")
+    ) {
       next.textContent = next.textContent.slice(1);
     }
   }
@@ -616,10 +623,18 @@ export type PromptInputSlashCommand = {
   iconName?: PromptInputCommandIconName;
   iconSrc?: string;
   iconTone?: PromptInputCommandIconTone;
-  kind?: PromptInputCommandKind;
+  kind?: Exclude<PromptInputCommandKind, "skill-command">;
   label?: string;
   meta?: unknown;
   value: string;
+};
+
+type PromptInputRenderedCommand = Pick<
+  PromptInputSlashCommand,
+  "iconName" | "iconSrc" | "iconTone" | "label" | "value"
+> & {
+  id?: string;
+  kind?: PromptInputCommandKind;
 };
 
 const slashCommandHasChildren = (command: PromptInputSlashCommand): boolean =>
@@ -719,10 +734,8 @@ const readSegmentsFromNode = (node: Node, segments: PromptInputSegment[]) => {
 
   const command = node.dataset.slashCommandValue;
   if (command) {
-    const iconName =
-      node.dataset.iconName ?? node.dataset.slashCommandIconName;
-    const iconTone =
-      node.dataset.iconTone ?? node.dataset.slashCommandIconTone;
+    const iconName = node.dataset.iconName ?? node.dataset.slashCommandIconName;
+    const iconTone = node.dataset.iconTone ?? node.dataset.slashCommandIconTone;
     const iconSrc = node.dataset.iconSrc ?? node.dataset.slashCommandIconSrc;
     segments.push({
       command: {
@@ -829,7 +842,7 @@ const serializePromptSegments = (segments: PromptInputSegment[]) =>
         ? createSourceMarker({ id: segment.sourceId, title: segment.title })
         : segment.type === "command"
           ? segment.command.marker
-        : segment.text,
+          : segment.text,
     )
     .join("");
 
@@ -885,7 +898,7 @@ export function PromptCommandIcon({
   );
 }
 
-const createSlashCommandElement = (command: PromptInputSlashCommand) => {
+const createSlashCommandElement = (command: PromptInputRenderedCommand) => {
   const element = document.createElement("span");
   element.contentEditable = "false";
   const kind = command.kind ?? "skill";
@@ -3057,6 +3070,25 @@ export type PromptInputButtonProps = ComponentProps<typeof InputGroupButton> & {
   tooltip?: PromptInputButtonTooltip;
 };
 
+/**
+ * Resolves a PromptInputButtonTooltip value to a native title string.
+ * Returns null when the tooltip content is not a plain string (e.g. a ReactNode),
+ * in which case callers should fall back to the Tooltip component.
+ */
+function resolveTooltipTitle(
+  tooltip: PromptInputButtonTooltip | undefined,
+): string | null {
+  if (tooltip == null) {
+    return null;
+  }
+  const content = typeof tooltip === "string" ? tooltip : tooltip.content;
+  if (typeof content !== "string") {
+    return null;
+  }
+  const shortcut = typeof tooltip === "string" ? undefined : tooltip.shortcut;
+  return shortcut ? `${content} (${shortcut})` : content;
+}
+
 export const PromptInputButton = ({
   variant = "ghost",
   className,
@@ -3067,35 +3099,17 @@ export const PromptInputButton = ({
   const newSize =
     size ?? (Children.count(props.children) > 1 ? "sm" : "icon-sm");
 
-  const button = (
+  const tooltipTitle = resolveTooltipTitle(tooltip);
+
+  return (
     <InputGroupButton
       className={cn(className)}
       size={newSize}
       type="button"
       variant={variant}
+      title={tooltipTitle ?? undefined}
       {...props}
     />
-  );
-
-  if (!tooltip) {
-    return button;
-  }
-
-  const tooltipContent =
-    typeof tooltip === "string" ? tooltip : tooltip.content;
-  const shortcut = typeof tooltip === "string" ? undefined : tooltip.shortcut;
-  const side = typeof tooltip === "string" ? "top" : (tooltip.side ?? "top");
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side={side}>
-        {tooltipContent}
-        {shortcut && (
-          <span className="ml-2 text-muted-foreground">{shortcut}</span>
-        )}
-      </TooltipContent>
-    </Tooltip>
   );
 };
 

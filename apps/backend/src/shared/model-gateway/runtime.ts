@@ -5,15 +5,15 @@ import {
 } from "@sourceweft/model-gateway";
 import { and, eq } from "drizzle-orm";
 import { config } from "../config";
-import { db } from "../database";
 import {
+  db,
   modelGatewayByokCredentials,
-  modelGatewayConfigVersions,
   modelGatewayConfigs,
+  modelGatewayConfigVersions,
   modelGatewayProviderConfigs,
   modelGatewayRoutes,
-} from "../db/schema";
-import { createLlmObservabilitySink } from "./llm-observability-sink";
+} from "@sourceweft/db";
+import { createLlmObservabilitySink } from "../../modules/llm-observability/sink";
 import { decryptSecret } from "../secrets";
 import type { RoutedGatewayConfig } from "./types";
 import { resolveCustomByokProvider } from "./byok-provider-resolver";
@@ -21,7 +21,6 @@ import { resolveCustomByokProvider } from "./byok-provider-resolver";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
 const OPENROUTER_APP_TITLE = "SourceWeft";
-const OPENROUTER_APP_REFERER = "https://sourceweft.com";
 
 type ActiveConfigVersionRow = typeof modelGatewayConfigVersions.$inferSelect;
 
@@ -68,8 +67,9 @@ export function withOpenRouterAttributionHeaders(input: {
 
   return {
     ...headers,
+    "HTTP-Referer": config.openrouterAppReferer,
+    "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
     "X-Title": OPENROUTER_APP_TITLE,
-    "HTTP-Referer": OPENROUTER_APP_REFERER,
   };
 }
 

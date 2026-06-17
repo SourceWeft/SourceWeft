@@ -1,12 +1,16 @@
 import {
   AGENT_TOOL_NAMES,
   type AgentToolName,
+} from "@sourceweft/agent-tool-registry";
+import {
   type ChatInputImage,
   type ChatMessageImagePart,
+  type ListCapabilityCatalogResponse,
+  type SkillOption,
   type ToolApprovalResume,
   type SkillCommand,
   type ThreadCommandRequest,
-  type McpToolSelection,
+  type ThreadInvocationRequest,
 } from "@sourceweft/sdk";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 
@@ -19,13 +23,16 @@ export type ChatSendInput = {
   mentionedSourceIds?: string[];
   tools?: ChatToolsSelection;
   command?: ThreadCommandRequest;
+  invocation?: ThreadInvocationRequest;
 };
+
+export type CapabilityCatalog = ListCapabilityCatalogResponse;
 
 export type ToolConfirmationInterventionSignal = {
   id: string;
   assistantMessageId?: string | null;
   liveConfirmations?: LiveToolConfirmation[];
-  runKey?: string;
+  runKey: string;
   threadRunId?: string | null;
 };
 
@@ -50,6 +57,7 @@ export type MessageVersion = {
   content: string;
   contentJson?: Record<string, unknown>;
   command?: ThreadCommandRequest;
+  invocation?: ThreadInvocationRequest;
   citations?: CitationRecord[];
   availableCitations?: CitationRecord[];
   isError?: boolean;
@@ -74,6 +82,7 @@ export type MessageVersion = {
   traceParts?: TracePartRecord[];
   threadRun?: {
     id?: string;
+    assistantMessageId?: string | null;
     idempotencyKey?: string;
     status?: string;
     mode?: "send" | "refresh" | "edit" | "resume";
@@ -133,131 +142,35 @@ export type ImageModelCapabilities = {
   supported: boolean;
   provider?: string;
   controls?: {
-    aspectRatio?: {
-      values: ImageAspectRatio[];
-    };
-    quality?: {
-      values: ImageQuality[];
-    };
-    style?: {
-      values: ImageStyle[];
-    };
+    aspectRatio?: { values: ImageAspectRatio[] };
+    quality?: { values: ImageQuality[] };
+    style?: { values: ImageStyle[] };
   };
 };
 
-export type ChatImageArtifactConfig = {
-  aspectRatio: ImageAspectRatio;
-  quality: ImageQuality;
-  style: ImageStyle;
-};
-
-export type ChatGenerateImageToolSelection = {
-  enabled?: boolean;
-  mode?: "auto" | "generate";
-  modelAlias?: string;
-  execution?: Record<string, unknown>;
-  config?: ChatImageArtifactConfig;
-};
-
-export type ChatGeneratePptxToolSelection = {
-  enabled?: boolean;
-  generationMode?: PptxGenerationMode;
-  design?: ChatPptxArtifactDesign;
-  output?: ChatPptxArtifactOutput;
-  rendering?: ChatPptxArtifactRendering;
-};
-
-export type ChatGenerateVideoPresentationToolSelection = {
-  enabled?: boolean;
-  narration?: {
-    enabled?: boolean;
-  };
-};
-
-export type PptxGenerationMode = "visual_html" | "editable_native";
-export type PptxAspectRatio = "16:9" | "16:10" | "4:3";
-export type PptxLanguage = "auto" | "zh" | "en";
-export type PptxStylePreset =
-  | "executive"
-  | "technical"
-  | "editorial"
-  | "data-heavy"
-  | "custom";
-
-export type ChatPptxArtifactDesign = {
-  aspectRatio: PptxAspectRatio;
-  customBrief?: string;
-  language: PptxLanguage;
-  stylePreset: PptxStylePreset;
-  visualSystem?: {
-    backgroundTreatment?: "auto" | "plain" | "grid" | "paper" | "image" | "gradient" | "diagram";
-    chrome?: "minimal" | "magazine" | "lecture" | "report";
-    compositionStyle?: "auto" | "axis" | "poster" | "split" | "notebook" | "schematic" | "report";
-    coverTreatment?: string;
-    density?: "airy" | "balanced" | "dense";
-    geometry?: "sharp" | "soft" | "editorial" | "technical";
-    illustration?: "none" | "icons" | "diagrams" | "image-led" | "handdrawn";
-    palette?: string[];
-    typography?: string[];
-    layoutPrinciples?: string[];
-    motifs?: string[];
-    layoutPolicy?: {
-      strict?: boolean;
-      diversity?: "normal" | "high";
-    };
-    styleFamily?:
-      | "auto"
-      | "swiss"
-      | "magazine"
-      | "education"
-      | "blueprint"
-      | "data-report"
-      | "editorial";
-    imageDirection?: string;
-    motion?: string;
-  };
-};
-
-export type ChatPptxArtifactOutput = {
-  includeSourceJson: boolean;
-};
-
-export type ChatPptxArtifactRendering = {
-  preferHtmlTables: boolean;
-};
-
-export type ChatPptxArtifactConfig = {
-  generationMode: PptxGenerationMode;
-  design: ChatPptxArtifactDesign;
-  output: ChatPptxArtifactOutput;
-  rendering: ChatPptxArtifactRendering;
-};
-
-export type ChatConnectorToolSelection = {
+export type ChatToolSelection = {
   enabled?: boolean;
   connectorId?: string;
+  [key: string]: unknown;
 };
 
 export type ChatToolName = AgentToolName;
 
-export type ChatToolsSelection = {
-  [AGENT_TOOL_NAMES.generateImage]?: ChatGenerateImageToolSelection;
-  [AGENT_TOOL_NAMES.generatePptx]?: ChatGeneratePptxToolSelection;
-  [AGENT_TOOL_NAMES.generateVideoPresentation]?: ChatGenerateVideoPresentationToolSelection;
-  [AGENT_TOOL_NAMES.searchNotionPages]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.readNotionPage]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.createNotionPage]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.appendNotionPage]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.updateNotionPage]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.deleteNotionPage]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.saveArtifactToNotion]?: ChatConnectorToolSelection;
-  [AGENT_TOOL_NAMES.saveFinalAnswerToNotion]?: ChatConnectorToolSelection;
-  mcp?: McpToolSelection;
+export type ChatToolsSelection = Record<
+  string,
+  ChatToolSelection | string[] | undefined
+> & {
   invokedSkillIds?: string[];
+  skillRuntimeConfig?: Record<string, Record<string, unknown>>;
+  mcp?: ChatToolSelection & {
+    installIds?: string[];
+    toolIds?: string[];
+  };
 };
 
 export type ChatSkillItem = {
   id: string;
+  workspaceSkillId?: string;
   catalogId: string;
   slug: string;
   name: string;
@@ -265,23 +178,17 @@ export type ChatSkillItem = {
   description: string;
   sourceType: "builtin" | "workspace_custom" | "team_custom";
   version: string;
+  enabled?: boolean;
   hasReadme: boolean;
-  capabilities?: {
-    required?: string[];
-    optional?: string[];
-  };
-  models?: {
-    chat?: string;
-    image?: string;
-    vision?: string;
-  };
+  capabilities?: { required?: string[]; optional?: string[] };
+  models?: { chat?: string; image?: string; vision?: string };
   commands?: SkillCommand[];
   tools?: string[];
+  options?: SkillOption[];
   slash?: boolean;
-  slashConfig?: {
-    enabled?: boolean;
-  };
+  slashConfig?: { enabled?: boolean };
   defaultConfig?: Record<string, unknown>;
+  defaultEnabled?: boolean;
 };
 
 export type CitationRecord = {
@@ -374,27 +281,32 @@ export type ToolCallRecord = {
 export type MessageRenderBlock =
   | {
       id: string;
+      placement?: "inline" | "terminal";
       type: "text";
       text: string;
     }
   | {
       durationMs?: number;
       id: string;
+      placement?: "inline" | "terminal";
       text: string;
       type: "reasoning";
     }
   | {
       id: string;
+      placement?: "inline" | "terminal";
       type: "tool";
       toolCallId: string;
     }
   | {
       id: string;
+      placement?: "inline" | "terminal";
       type: "generated_image";
       toolCallId: string;
     }
   | {
       id: string;
+      placement?: "inline" | "terminal";
       type: "generated_presentation";
       toolCallId: string;
     };

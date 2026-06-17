@@ -2,15 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { and, desc, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { db, database } from "../../shared/database";
-import * as schema from "../../shared/db/schema";
+import * as schema from "@sourceweft/db";
 import {
+  billingAccounts,
   billingOrders,
   billingWebhookEvents,
-  billingAccounts,
+  database,
+  db,
   subscriptions,
   usageLedgers,
-} from "../../shared/db/schema";
+} from "@sourceweft/db";
 import type {
   BillingAccountState,
   BillingLedgerRow,
@@ -976,3 +977,5 @@ export class PostgresBillingStore implements BillingStore {
 }
 
 export const billingStore = new PostgresBillingStore();
+
+

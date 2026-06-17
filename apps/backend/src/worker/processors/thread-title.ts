@@ -8,9 +8,9 @@ import {
   applyGeneratedThreadTitle,
   buildFallbackThreadTitle,
   generateThreadTitle,
-} from "../../modules/content/threads/thread/title-generation";
-import { findThreadRecord } from "../../modules/content/threads/thread/repository";
-import { contentByokService } from "../../modules/content/byok";
+} from "../../modules/threads";
+import { findThreadRecord } from "../../modules/threads";
+import { contentByokService } from "../../modules/byok";
 import type { LlmExecutionConfig } from "../../modules/content/model-gateway-audit";
 
 async function resolveThreadTitleExecution(

@@ -9,10 +9,6 @@ const backendRoot = path.resolve(
 
 const assetPairs = [
   ["src/shared/mail/templates", "dist/shared/mail/templates"],
-  [
-    "src/modules/content/skills/builtin",
-    "dist/modules/content/skills/builtin",
-  ],
 ];
 
 for (const [source, destination] of assetPairs) {

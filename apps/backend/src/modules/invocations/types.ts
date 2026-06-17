@@ -1,5 +1,5 @@
 export const INVOCATION_SOURCE_KINDS = [
-  "builtin_tool",
+  "capability_tool",
   "skill_command",
   "mcp_tool",
   "mcp_prompt",
@@ -8,9 +8,13 @@ export const INVOCATION_SOURCE_KINDS = [
 
 export type InvocationSourceKind = (typeof INVOCATION_SOURCE_KINDS)[number];
 
-export type BuiltinToolSourceRef = {
-  kind: "builtin_tool";
-  toolName: string;
+export type CapabilityToolSourceRef = {
+  readonly kind: "capability_tool";
+  readonly capabilityId: string;
+  readonly contributionId: string;
+  readonly legacyToolName: string;
+  readonly sourcePackageName: string | null;
+  readonly toolName: string;
 };
 
 export type SkillCommandSourceRef = {
@@ -40,7 +44,7 @@ export type McpResourceSourceRef = {
 };
 
 export type InvocationSourceRef =
-  | BuiltinToolSourceRef
+  | CapabilityToolSourceRef
   | SkillCommandSourceRef
   | McpToolSourceRef
   | McpPromptSourceRef
@@ -49,7 +53,7 @@ export type InvocationSourceRef =
 export type InvocationSemantics =
   | {
       kind: "fixed_tool_choice";
-      target: "builtin_tool" | "mcp_tool";
+      target: "capability_tool" | "mcp_tool";
       toolName: string;
     }
   | {

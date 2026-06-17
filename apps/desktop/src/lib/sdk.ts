@@ -1,4 +1,4 @@
-import { HttpClient, JobsClient } from "@sourceweft/sdk";
+import { createSourceweftClient } from "@sourceweft/sdk";
 
 type DesktopEnv = {
   VITE_API_BASE_URL?: string;
@@ -8,8 +8,7 @@ const env = (import.meta as unknown as { env?: DesktopEnv }).env;
 
 const apiBaseUrl = env?.VITE_API_BASE_URL || "http://localhost:3001";
 
-const httpClient = new HttpClient({
-  baseUrl: apiBaseUrl,
-});
+export const client = createSourceweftClient(apiBaseUrl);
 
-export const jobsClient = new JobsClient(httpClient);
+// Backward-compatible named exports
+export const { jobs: jobsClient } = client;

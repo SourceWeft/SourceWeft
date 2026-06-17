@@ -1,6 +1,6 @@
 import { stripGeneratedImageMarkdown } from "./message-assets";
 import type { AssistantRenderSegment } from "./assistant-render-segments";
-import type { CitationRecord, MessageVersion } from "./types";
+import type { CitationRecord, ToolCallRecord } from "./types";
 
 export function shouldShowPossibleEvidence(input: {
   availableCitations?: CitationRecord[];
@@ -18,7 +18,7 @@ export function shouldShowPossibleEvidence(input: {
 
 export function findLastAnswerSegmentId(input: {
   segments: AssistantRenderSegment[];
-  version: MessageVersion;
+  toolCalls?: ToolCallRecord[];
   workspaceId?: string | null;
 }) {
   for (let index = input.segments.length - 1; index >= 0; index -= 1) {
@@ -28,7 +28,7 @@ export function findLastAnswerSegmentId(input: {
     }
     const blockText = stripGeneratedImageMarkdown({
       content: segment.blocks.map((block) => block.text).join(""),
-      toolCalls: input.version.toolCalls,
+      toolCalls: input.toolCalls,
       trim: false,
       workspaceId: input.workspaceId,
     });

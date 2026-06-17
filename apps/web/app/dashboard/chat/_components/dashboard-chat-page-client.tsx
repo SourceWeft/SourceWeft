@@ -55,9 +55,6 @@ import {
   type ModelSelectionSources,
 } from "./skill-model-presets";
 import {
-  DEFAULT_PROMPT_THINKING_SETTINGS,
-} from "./chat-canvas/tool-selection";
-import {
   EMPTY_ACTIVE_CONNECTOR_TOOLS,
   resolveActiveConnectorToolState,
   type ActiveConnectorToolState,
@@ -70,13 +67,15 @@ import type {
   ChatToolName,
   PromptThinkingSettings,
 } from "./chat-canvas/types";
-import type { ListThreadModelCatalogResponse } from "@sourceweft/contracts";
+import type {
+  ListSkillsCatalogResponse,
+  ListThreadModelCatalogResponse,
+  ListWorkspaceSkillsResponse,
+  ThreadChatPreferences,
+} from "@sourceweft/contracts";
 import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body";
 import type { ArtifactListItem } from "./sources-hub";
-import {
-  expandSelectedSources,
-  type SourceItem,
-} from "./source-types";
+import { expandSelectedSources, type SourceItem } from "./source-types";
 import {
   readStoredSourceSelection,
   writeStoredSourceSelection,
@@ -99,11 +98,11 @@ import {
   desktopBridge,
   handleDesktopAuthDeepLink,
 } from "../../../../lib/desktop-bridge";
-import {
-  connectorsClient,
-  contentClient,
-} from "../../../../lib/sdk";
-import type { SourceConnector } from "@sourceweft/sdk";
+import { connectorsClient, contentClient } from "../../../../lib/sdk";
+import type {
+  ListCapabilityCatalogResponse,
+  SourceConnector,
+} from "@sourceweft/sdk";
 import {
   ChatCanvasPanelSkeleton,
   SourcesHubPanelSkeleton,
@@ -115,14 +114,18 @@ import {
   type ChatHubRegistration,
 } from "./chat-hub-context";
 import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
+import { resolveDefaultActiveSkillIds } from "./chat-canvas/tool-selection";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
   image: false,
   vision: false,
 };
+const DEFAULT_THINKING_SETTINGS: PromptThinkingSettings = {
+  mode: "auto",
+  effort: "medium",
+};
 type ModelCatalogStatus = "loading" | "ready" | "error";
-const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
 type IdleSchedulerWindow = Window & {
@@ -134,10 +137,7 @@ type IdleSchedulerWindow = Window & {
 };
 
 const ChatCanvas = dynamic(
-  () =>
-    import("./chat-canvas/chat-canvas-root").then(
-      (mod) => mod.ChatCanvas,
-    ),
+  () => import("./chat-canvas/chat-canvas-root").then((mod) => mod.ChatCanvas),
   {
     loading: () => <ChatCanvasSkeleton />,
     ssr: false,
@@ -153,10 +153,7 @@ const SourcesHub = dynamic(
 );
 
 const ArtifactPreviewPanel = dynamic(
-  () =>
-    import("./sources-hub").then(
-      (mod) => mod.ArtifactPreviewPanel,
-    ),
+  () => import("./sources-hub").then((mod) => mod.ArtifactPreviewPanel),
   {
     loading: () => <SourcesHubSkeleton />,
     ssr: false,
@@ -173,9 +170,7 @@ const ByokModelConfigDialog = dynamic(
 
 const HeaderModelSelector = dynamic(
   () =>
-    import("./header-model-selector").then(
-      (mod) => mod.HeaderModelSelector,
-    ),
+    import("./header-model-selector").then((mod) => mod.HeaderModelSelector),
   {
     loading: () => (
       <div className="h-10 w-36 shrink-0 animate-pulse rounded-md bg-muted" />
@@ -204,7 +199,9 @@ function ModelCatalogErrorState() {
 }
 
 function SourcesHubSkeleton() {
-  return <SourcesHubPanelSkeleton className="hidden h-full w-[410px] shrink-0 border-l md:flex" />;
+  return (
+    <SourcesHubPanelSkeleton className="hidden h-full w-[410px] shrink-0 border-l md:flex" />
+  );
 }
 
 function useMediaQuery(query: string) {
@@ -229,10 +226,6 @@ function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
   ];
 }
 
-function getSearchPreferenceStorageKey(workspaceId: string) {
-  return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
-}
-
 function removeDisabledToolSkills(input: {
   skillIds: string[];
   availableSkills: ChatSkillItem[];
@@ -250,33 +243,62 @@ function removeDisabledToolSkills(input: {
   });
 }
 
-function parseStoredThinkingSettings(
-  value: string | null,
-): PromptThinkingSettings | null {
-  if (!value) {
+function catalogBuiltinSkillToChatSkill(
+  skill: ListSkillsCatalogResponse["items"][number],
+): ChatSkillItem | null {
+  if (
+    skill.sourceType !== "builtin" ||
+    skill.installable ||
+    !skill.selectionId
+  ) {
     return null;
   }
+  return {
+    id: skill.selectionId,
+    catalogId: skill.catalogId,
+    slug: skill.slug,
+    name: skill.name,
+    displayName: skill.displayName,
+    description: skill.description,
+    sourceType: skill.sourceType,
+    version: skill.version,
+    hasReadme: skill.hasReadme,
+    capabilities: skill.capabilities,
+    models: skill.models,
+    tools: skill.tools,
+    slash: skill.slash,
+    slashConfig: skill.slashConfig,
+    commands: skill.commands,
+    defaultConfig: skill.defaultConfig,
+    defaultEnabled: skill.defaultEnabled,
+    options: skill.options,
+  };
+}
 
-  try {
-    const parsed = JSON.parse(value) as Partial<PromptThinkingSettings>;
-    const mode = parsed.mode;
-    const effort = parsed.effort;
-    if (mode !== "auto" && mode !== "off" && mode !== "effort") {
-      return null;
-    }
-    if (
-      effort !== "minimal" &&
-      effort !== "low" &&
-      effort !== "medium" &&
-      effort !== "high" &&
-      effort !== "xhigh"
-    ) {
-      return null;
-    }
-    return { mode, effort };
-  } catch {
-    return null;
-  }
+function workspaceInstalledSkillToChatSkill(
+  skill: ListWorkspaceSkillsResponse["items"][number],
+): ChatSkillItem | null {
+  return {
+    id: skill.selectionId,
+    workspaceSkillId: skill.workspaceSkillId,
+    catalogId: skill.catalogId,
+    slug: skill.slug,
+    name: skill.name,
+    displayName: skill.displayName,
+    description: skill.description,
+    sourceType: skill.sourceType,
+    version: skill.version,
+    enabled: skill.enabled,
+    hasReadme: false,
+    capabilities: skill.capabilities,
+    models: skill.models,
+    tools: skill.tools,
+    slash: skill.slash,
+    slashConfig: skill.slashConfig,
+    commands: skill.commands,
+    defaultConfig: skill.defaultConfig,
+    options: skill.options,
+  };
 }
 
 function buildPendingThinking(input: {
@@ -316,6 +338,15 @@ function buildPendingThinking(input: {
 
   return {
     mode: "auto",
+  };
+}
+
+function mapChatPreferencesToThinkingSettings(
+  preferences: ThreadChatPreferences,
+): PromptThinkingSettings {
+  return {
+    mode: preferences.thinking.mode,
+    effort: preferences.thinking.effort,
   };
 }
 
@@ -359,6 +390,7 @@ export function DashboardChatPageClient() {
     adoptChat,
     bootstrapModelCatalog,
     consumeBootstrapModelCatalog,
+    initialChatPreferences,
     sourcesVisible,
     startNewChat,
     switchWorkspace,
@@ -376,10 +408,15 @@ export function DashboardChatPageClient() {
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
+  const [hubSkills, setHubSkills] = useState<ChatSkillItem[]>([]);
+  const [capabilityCatalog, setCapabilityCatalog] =
+    useState<ListCapabilityCatalogResponse | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
   const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
-  const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
+  const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>(
+    [],
+  );
   const [activeConnectorTools, setActiveConnectorTools] =
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
   const [isStartingChat, setIsStartingChat] = useState(false);
@@ -393,6 +430,7 @@ export function DashboardChatPageClient() {
   const appliedMcpRunRef = useRef<string | null>(null);
   const handledConnectorOAuthHubRef = useRef(false);
   const skillsLoadGenerationRef = useRef(0);
+  const capabilityCatalogLoadGenerationRef = useRef(0);
   const initialSourcesForWorkspace = useMemo(
     () => getCachedWorkspaceSources(workspaceId) ?? librarySources,
     [librarySources, workspaceId],
@@ -410,7 +448,9 @@ export function DashboardChatPageClient() {
   const [modelCatalogStatus, setModelCatalogStatus] =
     useState<ModelCatalogStatus>("loading");
   const [byokProviders, setByokProviders] = useState<ByokProviderOption[]>([]);
-  const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>([]);
+  const [byokCredentials, setByokCredentials] = useState<ByokCredentialItem[]>(
+    [],
+  );
   const [byokModels, setByokModels] = useState<ByokSavedModelItem[]>([]);
   const [selectedByokModels, setSelectedByokModels] = useState<
     Partial<Record<ModelType, ByokModelSelection | null>>
@@ -424,13 +464,10 @@ export function DashboardChatPageClient() {
     Record<ModelType, boolean>
   >(EMPTY_MODEL_KIND_FLAGS);
   const [thinkingSettings, setThinkingSettings] =
-    useState<PromptThinkingSettings>(DEFAULT_PROMPT_THINKING_SETTINGS);
+    useState<PromptThinkingSettings>(DEFAULT_THINKING_SETTINGS);
   const [hasSavedThinkingPreference, setHasSavedThinkingPreference] =
     useState(false);
   const [searchEnabled, setSearchEnabled] = useState(true);
-  const [loadedSearchPreferenceKey, setLoadedSearchPreferenceKey] = useState<
-    string | null
-  >(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
@@ -441,7 +478,7 @@ export function DashboardChatPageClient() {
     if (handledConnectorOAuthHubRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const oauthStatus = params.get("connector_oauth");
-      if (oauthStatus === "success" || oauthStatus === "error") {
+    if (oauthStatus === "success" || oauthStatus === "error") {
       handledConnectorOAuthHubRef.current = true;
       if (window.matchMedia("(min-width: 768px)").matches) {
         if (!sourcesVisible) {
@@ -466,9 +503,12 @@ export function DashboardChatPageClient() {
     },
     [sourcesVisible, toggleSourcesVisible],
   );
-  const handleConnectorsChange = useCallback((connectors: SourceConnector[]) => {
-    setActiveConnectorTools(resolveActiveConnectorToolState(connectors));
-  }, []);
+  const handleConnectorsChange = useCallback(
+    (connectors: SourceConnector[]) => {
+      setActiveConnectorTools(resolveActiveConnectorToolState(connectors));
+    },
+    [],
+  );
   const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
     async ({ cursor, limit, query }) => {
       if (!workspaceId) {
@@ -545,7 +585,9 @@ export function DashboardChatPageClient() {
       .list(workspaceId)
       .then((result) => {
         if (!cancelled) {
-          setActiveConnectorTools(resolveActiveConnectorToolState(result.items));
+          setActiveConnectorTools(
+            resolveActiveConnectorToolState(result.items),
+          );
         }
       })
       .catch(() => {
@@ -630,18 +672,19 @@ export function DashboardChatPageClient() {
           applyModelCatalog(initialCatalog);
         }
 
-        const [catalogResult, providerResult, credentialResult, modelResult] = await Promise.all([
-          initialCatalog
-            ? Promise.resolve<ListThreadModelCatalogResponse | null>(null)
-            : contentClient.listThreadModelCatalog(activeWorkspaceId),
-          contentClient.listByokProviders(activeWorkspaceId).catch(() => []),
-          contentClient.listByokCredentials(activeWorkspaceId).catch(() => ({
-            items: [],
-          })),
-          contentClient.listByokModels(activeWorkspaceId).catch(() => ({
-            items: [],
-          })),
-        ]);
+        const [catalogResult, providerResult, credentialResult, modelResult] =
+          await Promise.all([
+            initialCatalog
+              ? Promise.resolve<ListThreadModelCatalogResponse | null>(null)
+              : contentClient.listThreadModelCatalog(activeWorkspaceId),
+            contentClient.listByokProviders(activeWorkspaceId).catch(() => []),
+            contentClient.listByokCredentials(activeWorkspaceId).catch(() => ({
+              items: [],
+            })),
+            contentClient.listByokModels(activeWorkspaceId).catch(() => ({
+              items: [],
+            })),
+          ]);
         if (cancelled) {
           return;
         }
@@ -716,50 +759,51 @@ export function DashboardChatPageClient() {
     const loadGeneration = ++skillsLoadGenerationRef.current;
     if (!workspaceId) {
       setAvailableSkills([]);
+      setHubSkills([]);
       setActiveSkillIds([]);
       return;
     }
 
     const activeWorkspaceId = workspaceId;
     try {
-      const result = await contentClient.listSkillsCatalog(activeWorkspaceId);
+      const [installedResult, catalogResult] = await Promise.all([
+        contentClient.listWorkspaceSkills(activeWorkspaceId),
+        contentClient.listSkillsCatalog(activeWorkspaceId),
+      ]);
       if (
         skillsLoadGenerationRef.current !== loadGeneration ||
         activeWorkspaceId !== workspaceId
       ) {
         return;
       }
-      const enabledSkills = result.items
-        .filter((skill) => skill.enabled && skill.enabledWorkspaceSkillId)
-        .map((skill) => ({
-          id: skill.enabledWorkspaceSkillId as string,
-          catalogId: skill.catalogId,
-          slug: skill.slug,
-          name: skill.name,
-          displayName: skill.displayName,
-          description: skill.description,
-          sourceType: skill.sourceType,
-          version: skill.version,
-          hasReadme: skill.hasReadme,
-          capabilities: skill.capabilities,
-          models: skill.models,
-          tools: skill.tools,
-          slash: skill.slash,
-          slashConfig: skill.slashConfig,
-          commands: skill.commands,
-          defaultConfig: skill.defaultConfig,
-        }));
+      const builtinOptionSkills = catalogResult.items
+        .map(catalogBuiltinSkillToChatSkill)
+        .filter((skill): skill is ChatSkillItem => Boolean(skill));
+      const workspaceInstalledSkills = installedResult.items
+        .map(workspaceInstalledSkillToChatSkill)
+        .filter((skill): skill is ChatSkillItem => Boolean(skill));
+      const enabledWorkspaceSkills = workspaceInstalledSkills.filter(
+        (skill) => skill.enabled,
+      );
+      const enabledSkills = [...builtinOptionSkills, ...enabledWorkspaceSkills];
       setAvailableSkills(enabledSkills);
+      setHubSkills([...builtinOptionSkills, ...workspaceInstalledSkills]);
 
-      const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
+      const optionControlledIds = new Set(
+        builtinOptionSkills.map((skill) => skill.id),
+      );
       setActiveSkillIds((current) =>
-        current.filter((id) => enabledIds.has(id)).slice(0, 5),
+        resolveDefaultActiveSkillIds({
+          availableSkills: builtinOptionSkills,
+          currentSkillIds: current.filter((id) => optionControlledIds.has(id)),
+        }),
       );
     } catch {
       if (skillsLoadGenerationRef.current !== loadGeneration) {
         return;
       }
       setAvailableSkills([]);
+      setHubSkills([]);
       setActiveSkillIds([]);
     }
   }, [workspaceId]);
@@ -767,6 +811,33 @@ export function DashboardChatPageClient() {
   useEffect(() => {
     void loadAvailableSkills();
   }, [loadAvailableSkills]);
+
+  useEffect(() => {
+    const loadGeneration = ++capabilityCatalogLoadGenerationRef.current;
+    if (!workspaceId) {
+      setCapabilityCatalog(null);
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    void contentClient
+      .listCapabilityCatalog(activeWorkspaceId)
+      .then((result) => {
+        if (
+          capabilityCatalogLoadGenerationRef.current !== loadGeneration ||
+          activeWorkspaceId !== workspaceId
+        ) {
+          return;
+        }
+        setCapabilityCatalog(result);
+      })
+      .catch(() => {
+        if (capabilityCatalogLoadGenerationRef.current !== loadGeneration) {
+          return;
+        }
+        setCapabilityCatalog({ commands: [], tools: [] });
+      });
+  }, [workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -813,14 +884,11 @@ export function DashboardChatPageClient() {
     if (loadedByokStorageKey !== workspaceId) {
       return;
     }
-    writeStoredByokState(
-      workspaceId,
-      {
-        imageByok: selectedByokModels.image ?? null,
-        llmByok: selectedByokModels.llm ?? null,
-        visionByok: selectedByokModels.vision ?? null,
-      },
-    );
+    writeStoredByokState(workspaceId, {
+      imageByok: selectedByokModels.image ?? null,
+      llmByok: selectedByokModels.llm ?? null,
+      visionByok: selectedByokModels.vision ?? null,
+    });
   }, [loadedByokStorageKey, selectedByokModels, workspaceId]);
 
   useEffect(() => {
@@ -842,7 +910,9 @@ export function DashboardChatPageClient() {
       llmProfileAlias:
         selectedByokModels.llm?.mode === "byok"
           ? null
-          : (selectedModels.llm?.profileAlias ?? selectedModels.llm?.id ?? null),
+          : (selectedModels.llm?.profileAlias ??
+            selectedModels.llm?.id ??
+            null),
       imageProfileAlias:
         selectedByokModels.image?.mode === "byok"
           ? null
@@ -860,46 +930,20 @@ export function DashboardChatPageClient() {
 
   useEffect(() => {
     if (!workspaceId) {
-      setThinkingSettings(DEFAULT_PROMPT_THINKING_SETTINGS);
+      setThinkingSettings(DEFAULT_THINKING_SETTINGS);
       setSearchEnabled(true);
-      setLoadedSearchPreferenceKey(null);
       return;
     }
 
-    const searchPreferenceKey = getSearchPreferenceStorageKey(workspaceId);
-    const storedThinking = parseStoredThinkingSettings(
-      window.sessionStorage.getItem(`chat:thinking:${workspaceId}:current`),
+    setHasSavedThinkingPreference(
+      initialChatPreferences.thinking.mode === "off" ||
+        initialChatPreferences.thinking.mode === "effort",
     );
-    setHasSavedThinkingPreference(Boolean(storedThinking));
-    setThinkingSettings(storedThinking ?? DEFAULT_PROMPT_THINKING_SETTINGS);
-    const storedSearch = window.sessionStorage.getItem(searchPreferenceKey);
-    setSearchEnabled(storedSearch === null ? true : storedSearch === "true");
-    setLoadedSearchPreferenceKey(searchPreferenceKey);
-  }, [workspaceId]);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      return;
-    }
-    window.sessionStorage.setItem(
-      `chat:thinking:${workspaceId}:current`,
-      JSON.stringify(thinkingSettings),
+    setThinkingSettings(
+      mapChatPreferencesToThinkingSettings(initialChatPreferences),
     );
-  }, [thinkingSettings, workspaceId]);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      return;
-    }
-    const searchPreferenceKey = getSearchPreferenceStorageKey(workspaceId);
-    if (loadedSearchPreferenceKey !== searchPreferenceKey) {
-      return;
-    }
-    window.sessionStorage.setItem(
-      searchPreferenceKey,
-      searchEnabled ? "true" : "false",
-    );
-  }, [loadedSearchPreferenceKey, searchEnabled, workspaceId]);
+    setSearchEnabled(initialChatPreferences.webAccess);
+  }, [initialChatPreferences, workspaceId]);
 
   useEffect(() => {
     setThinkingSettings((current) =>
@@ -1040,6 +1084,8 @@ export function DashboardChatPageClient() {
       activeSourceIds,
       artifactsRefreshKey: 0,
       availableSkills,
+      hubSkills,
+      capabilityCatalog,
       disabledToolNames,
       displayedCitations: [],
       initialSources: initialSourcesForWorkspace,
@@ -1067,6 +1113,8 @@ export function DashboardChatPageClient() {
       activeSkillIds,
       activeSourceIds,
       availableSkills,
+      hubSkills,
+      capabilityCatalog,
       disabledToolNames,
       handleConnectorsChange,
       handleLibrarySourcesLoad,
@@ -1101,7 +1149,9 @@ export function DashboardChatPageClient() {
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.delete("mcp_install_id");
     const nextQuery = nextParams.toString();
-    router.replace(nextQuery ? `/dashboard/chat?${nextQuery}` : "/dashboard/chat");
+    router.replace(
+      nextQuery ? `/dashboard/chat?${nextQuery}` : "/dashboard/chat",
+    );
   }, [mcpInstallIdFromQuery, router, searchParams, workspaceId]);
 
   const handleSendMessage = useCallback(
@@ -1174,6 +1224,11 @@ export function DashboardChatPageClient() {
         const result = await contentClient.createThread(workspaceId, {
           title: "New chat",
           modelSettings: resolvedThreadModelSettings,
+          chatPreferences: {
+            thinking: thinkingSettings,
+            webAccess: searchEnabled,
+            composerOptions: {},
+          },
         });
         adoptChat(result.thread);
         writeStoredSourceSelection(workspaceId, result.thread.id, sourceIds);
@@ -1194,6 +1249,7 @@ export function DashboardChatPageClient() {
           skillIds: selectedSkillIds,
           tools,
           command: input.command,
+          invocation: input.invocation,
           thinking,
           thinkingSettings,
           searchEnabled,
@@ -1358,6 +1414,7 @@ export function DashboardChatPageClient() {
             isStreaming={isCreatingFirstThread}
             mode="new"
             availableSkills={availableSkills}
+            capabilityCatalog={capabilityCatalog}
             composerInitialInput={composerRecoveryInput}
             composerResetKey={composerRecoveryKey}
             onArtifactPreview={handleArtifactPreview}
@@ -1376,10 +1433,13 @@ export function DashboardChatPageClient() {
             selectedMcpToolIds={activeMcpToolIds}
             sourcesVisible={sourcesVisible}
             thinkingCapabilities={selectedModels.llm?.capabilities}
-            imageCapabilities={selectedModels.image?.capabilities?.imageGeneration}
+            imageCapabilities={
+              selectedModels.image?.capabilities?.imageGeneration
+            }
             imageModelAvailable={Boolean(selectedModels.image)}
             imageModelAlias={selectedModels.image?.modelAlias ?? null}
             notionConnectorId={activeConnectorTools.notionConnectorId}
+            activeConnectorIds={activeConnectorTools.activeConnectorIds}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={setDisabledToolNames}
             thinkingSettings={thinkingSettings}
@@ -1396,8 +1456,10 @@ export function DashboardChatPageClient() {
       !HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? (
         <SourcesHub
           mode="new"
+          capabilityCatalog={capabilityCatalog}
           disabledToolNames={disabledToolNames}
           installedSkills={availableSkills}
+          hubSkills={hubSkills}
           selectedMcpInstallIds={activeMcpInstallIds}
           selectedMcpToolIds={activeMcpToolIds}
           onMcpSelectionChange={handleMcpSelectionChange}
@@ -1506,9 +1568,7 @@ export function DashboardChatPageClient() {
       </Sheet>
 
       <Sheet
-        open={
-          HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? false : hubDrawerOpen
-        }
+        open={HUB_STABILITY_PERSISTENT_SHELL_ENABLED ? false : hubDrawerOpen}
         onOpenChange={setHubDrawerOpen}
       >
         <SheetContent
@@ -1518,9 +1578,11 @@ export function DashboardChatPageClient() {
           <SheetTitle className="sr-only">Hub</SheetTitle>
           <SourcesHub
             mode="new"
+            capabilityCatalog={capabilityCatalog}
             onClose={() => setHubDrawerOpen(false)}
             disabledToolNames={disabledToolNames}
             installedSkills={availableSkills}
+            hubSkills={hubSkills}
             selectedMcpInstallIds={activeMcpInstallIds}
             selectedMcpToolIds={activeMcpToolIds}
             onMcpSelectionChange={handleMcpSelectionChange}

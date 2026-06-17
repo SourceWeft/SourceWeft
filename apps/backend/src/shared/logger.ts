@@ -1,58 +1,69 @@
+import pino from "pino";
+
+const isProduction = process.env.NODE_ENV === "production";
+
+const base = pino({
+  level: process.env.LOG_LEVEL ?? (isProduction ? "info" : "debug"),
+  ...(isProduction
+    ? {}
+    : {
+        transport: {
+          target: "pino-pretty",
+          options: { colorize: true, translateTime: "SYS:HH:MM:ss.l" },
+        },
+      }),
+  redact: {
+    paths: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "meta.headers.authorization",
+      "meta.headers.cookie",
+    ],
+    censor: "[REDACTED]",
+  },
+});
+
 type Meta = Record<string, unknown> | undefined;
 
-function serializeMeta(meta: Meta) {
-  try {
-    const seen = new WeakSet<object>();
-    return JSON.stringify(meta, (_key, value: unknown) => {
-      if (typeof value === "bigint") {
-        return value.toString();
-      }
-
-      if (value instanceof Error) {
-        return {
-          name: value.name,
-          message: value.message,
-          stack: value.stack,
-        };
-      }
-
-      if (typeof value === "object" && value !== null) {
-        if (seen.has(value)) {
-          return "[Circular]";
-        }
-        seen.add(value);
-      }
-
-      return value;
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return JSON.stringify({ loggerMetaSerializationError: message });
-  }
-}
-
-function write(
-  level: "DEBUG" | "INFO" | "WARN" | "ERROR",
-  message: string,
-  meta?: Meta,
-) {
-  const ts = new Date().toISOString();
-  const prefix = `[${ts}] [${level}] ${message}`;
-  if (meta) {
-    if (process.env.NODE_ENV === "production") {
-      console.log(`${prefix} ${serializeMeta(meta)}`);
-      return;
-    }
-
-    console.log(prefix, meta);
-    return;
-  }
-  console.log(prefix);
-}
-
+/**
+ * Backward-compatible logger wrapping pino.
+ *
+ * Call signature: `logger.info("message")` or `logger.info("message", { key: val })`
+ *
+ * In production, emits structured JSON to stdout (compatible with
+ * CloudWatch, Loki, Datadog, etc.).  In development, uses pino-pretty
+ * for human-readable colourised output.
+ */
 export const logger = {
-  debug: (message: string, meta?: Meta) => write("DEBUG", message, meta),
-  info: (message: string, meta?: Meta) => write("INFO", message, meta),
-  warn: (message: string, meta?: Meta) => write("WARN", message, meta),
-  error: (message: string, meta?: Meta) => write("ERROR", message, meta),
+  debug: (message: string, meta?: Meta) => {
+    if (meta) {
+      base.debug(meta, message);
+    } else {
+      base.debug(message);
+    }
+  },
+
+  info: (message: string, meta?: Meta) => {
+    if (meta) {
+      base.info(meta, message);
+    } else {
+      base.info(message);
+    }
+  },
+
+  warn: (message: string, meta?: Meta) => {
+    if (meta) {
+      base.warn(meta, message);
+    } else {
+      base.warn(message);
+    }
+  },
+
+  error: (message: string, meta?: Meta) => {
+    if (meta) {
+      base.error(meta, message);
+    } else {
+      base.error(message);
+    }
+  },
 };

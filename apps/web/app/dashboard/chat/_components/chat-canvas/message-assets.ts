@@ -1,8 +1,6 @@
 import {
-  isGeneratedImageArtifactToolName,
-  isPresentationArtifactToolName,
-  isVideoPresentationArtifactToolName,
-} from "@sourceweft/sdk";
+  hasAgentToolCapability,
+} from "@sourceweft/agent-tool-registry";
 import {
   normalizeWebAssetUrl,
   resolveArtifactPageUrlFromArtifact,
@@ -16,6 +14,7 @@ import type {
 } from "./types";
 
 const TOOL_ONLY_EMPTY_RESPONSE_TEXT = "Model returned an empty response.";
+const PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME = "publish_sandbox_artifact";
 
 export type GeneratedImageArtifact = {
   artifactId: string | null;
@@ -59,7 +58,7 @@ function getGeneratedImageArtifactRefs(input: {
   const artifactUrls = new Set<string>();
 
   for (const toolCall of input.toolCalls ?? []) {
-    if (!isGeneratedImageArtifactToolName(toolCall.tool)) {
+    if (!hasAgentToolCapability(toolCall.tool, "generated_image_artifact")) {
       continue;
     }
 
@@ -246,7 +245,7 @@ export function resolveGeneratedImageArtifact(
   toolCall: ToolCallRecord,
   toolStep?: ThinkingStepRecord,
 ): GeneratedImageArtifact | null {
-  if (!isGeneratedImageArtifactToolName(toolCall.tool)) {
+  if (!hasAgentToolCapability(toolCall.tool, "generated_image_artifact")) {
     return null;
   }
 
@@ -325,8 +324,15 @@ export function resolveGeneratedPresentationArtifact(
   toolStep?: ThinkingStepRecord,
 ): GeneratedPresentationArtifact | null {
   if (
-    !isPresentationArtifactToolName(toolCall.tool) &&
-    !isVideoPresentationArtifactToolName(toolCall.tool)
+    !hasAgentToolCapability(toolCall.tool, "presentation_artifact") &&
+    !hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")
+  ) {
+    return null;
+  }
+
+  if (
+    toolCall.tool === PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME &&
+    toolCall.error
   ) {
     return null;
   }
@@ -335,23 +341,30 @@ export function resolveGeneratedPresentationArtifact(
   const artifactId =
     (typeof metadata?.artifactId === "string"
       ? metadata.artifactId.trim()
-      : "") || getToolOutputField(toolCall.output, "artifact_id");
+      : "") ||
+    getToolOutputField(toolCall.output, "artifact_id") ||
+    getToolOutputField(toolCall.output, "artifactId");
   const artifactUrl =
     (typeof metadata?.artifactUrl === "string"
       ? metadata.artifactUrl.trim()
       : "") ||
     getToolOutputField(toolCall.output, "artifact_url") ||
+    getToolOutputField(toolCall.output, "artifactUrl") ||
     getToolOutputField(toolCall.output, "pptx_url");
   const title =
     getToolOutputField(toolCall.output, "title") ||
     (typeof metadata?.title === "string" ? metadata.title.trim() : "");
-  const fileName = getToolOutputField(toolCall.output, "file_name");
-  const slideCount = getToolOutputNumberField(toolCall.output, "slide_count");
+  const fileName =
+    getToolOutputField(toolCall.output, "file_name") ||
+    getToolOutputField(toolCall.output, "fileName");
+  const slideCount =
+    getToolOutputNumberField(toolCall.output, "slide_count") ??
+    getToolOutputNumberField(toolCall.output, "slideCount");
   const sourceJsonUrl = getToolOutputField(toolCall.output, "source_json_url");
   const generationModeValue = getToolOutputField(
     toolCall.output,
     "generation_mode",
-  );
+  ) ?? getToolOutputField(toolCall.output, "generationMode");
   const generationMode =
     generationModeValue === "visual_html" ||
     generationModeValue === "editable_native"
@@ -373,12 +386,20 @@ export function resolveGeneratedPresentationArtifact(
       : generationMode
         ? generationMode === "editable_native"
         : null;
-  const htmlUrl = getToolOutputField(toolCall.output, "html_url");
-  const pptxUrl = getToolOutputField(toolCall.output, "pptx_url");
+  const htmlUrl =
+    getToolOutputField(toolCall.output, "html_url") ||
+    getToolOutputField(toolCall.output, "htmlUrl");
+  const pptxUrl =
+    getToolOutputField(toolCall.output, "pptx_url") ||
+    getToolOutputField(toolCall.output, "pptxUrl");
   const renderStrategy = getToolOutputField(toolCall.output, "render_strategy");
   const status = normalizeGeneratedPresentationArtifactStatus(
     getToolOutputField(toolCall.output, "status"),
   );
+
+  if (toolCall.tool === PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME && !artifactUrl) {
+    return null;
+  }
 
   if (!artifactId && !artifactUrl) {
     return null;

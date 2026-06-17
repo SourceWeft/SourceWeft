@@ -14,14 +14,14 @@ type ToolChoicePlan = Extract<InvocationPlan, { kind: "bind_tool_choice" }>;
 type ContextPlan = Extract<InvocationPlan, { kind: "inject_context" }>;
 type DirectExecutePlan = Extract<InvocationPlan, { kind: "direct_execute" }>;
 
-export function createBuiltinToolChoiceAdapter(input: {
+export function createCapabilityToolChoiceAdapter(input: {
   tools: DeepAgentsRuntimeTool[];
   model: string;
 }) {
   return {
     async prepare(plan: ToolChoicePlan): Promise<DeepAgentsHandoffAdapterOutput> {
-      if (plan.semantics.target !== "builtin_tool") {
-        throw new Error("Built-in adapter requires builtin_tool semantics");
+      if (plan.semantics.target !== "capability_tool") {
+        throw new Error("Capability adapter requires capability tool semantics");
       }
       const handoff = createDeepAgentsRuntimeHandoff({
         model: input.model,

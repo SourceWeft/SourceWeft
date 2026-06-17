@@ -27,13 +27,17 @@ import {
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 import { logger } from "../../shared/logger";
 
-type ConnectorActionToolContext = {
+export type ConnectorActionToolContext = {
   actionApprovalCursor?: ConnectorActionApprovalCursor;
   actionExecutionCursor?: ConnectorActionExecutionCursor;
   actionApprovalScope?: string;
   teamId: string;
   workspaceId: string;
   userId: string;
+};
+
+export type ConnectorActionToolsetOptions = {
+  excludeConnectorTypes?: readonly string[];
 };
 
 type JsonSchemaObject = {
@@ -96,7 +100,7 @@ function activeConnectorsByType(connectors: SourceConnectorRecord[]) {
   return byType;
 }
 
-function resolveToolCallId(runtime: ConnectorActionToolRuntime) {
+function langchainToolCallIdFromRuntime(runtime: ConnectorActionToolRuntime) {
   return runtime.toolCall?.id ?? null;
 }
 
@@ -171,11 +175,9 @@ function isDestructiveAction(action: ConnectorActionSpec) {
   }
   if (
     action.capabilities?.some((capability) =>
-      [
-        "connector_delete",
-        "connector_archive",
-        "connector_move",
-      ].includes(capability),
+      ["connector_delete", "connector_archive", "connector_move"].includes(
+        capability,
+      ),
     )
   ) {
     return true;
@@ -204,7 +206,7 @@ function directConnectorActionMeta(input: {
 }
 
 export function createConnectorActionInterruptConfigs(
-  options: { excludeConnectorTypes?: readonly string[] } = {},
+  options: ConnectorActionToolsetOptions = {},
 ) {
   const excluded = new Set(options.excludeConnectorTypes ?? []);
   const configs: Record<
@@ -301,7 +303,7 @@ export async function createConnectorActionApprovalRequest(
 
 export async function createConnectorActionTools(
   context: ConnectorActionToolContext,
-  options: { excludeConnectorTypes?: readonly string[] } = {},
+  options: ConnectorActionToolsetOptions = {},
 ) {
   const excluded = new Set(options.excludeConnectorTypes ?? []);
   const connectors = await listSourceConnectorRecords({
@@ -376,7 +378,7 @@ export async function createConnectorActionTools(
                     requestJson,
                     idempotencyKey: connectorActionIdempotencyKey({
                       context,
-                      fallback: resolveToolCallId(runtime),
+                      fallback: langchainToolCallIdFromRuntime(runtime),
                       toolName: agentToolName,
                     }),
                   });
@@ -386,7 +388,7 @@ export async function createConnectorActionTools(
                     `Connector action ${result.action.id} requires approval before execution.`,
                     {
                       sourceRef: {
-                        kind: "builtin_tool",
+                        kind: "connector_action",
                         toolName: agentToolName,
                         connectorId: connector.id,
                         actionRunId: result.action.id,
@@ -396,12 +398,14 @@ export async function createConnectorActionTools(
                   );
                 }
 
-                const accessToken = await connectorOAuthService.getRuntimeToken({
-                  teamId: context.teamId,
-                  workspaceId: context.workspaceId,
-                  accountId: connector.oauthAccountId,
-                  connectorType: connector.connectorType,
-                });
+                const accessToken = await connectorOAuthService.getRuntimeToken(
+                  {
+                    teamId: context.teamId,
+                    workspaceId: context.workspaceId,
+                    accountId: connector.oauthAccountId,
+                    connectorType: connector.connectorType,
+                  },
+                );
                 const adapter = connectorRegistry.getAdapter(
                   connector.connectorType,
                 );
@@ -417,7 +421,10 @@ export async function createConnectorActionTools(
                   connectorName: connector.name,
                   riskLevel: action.riskLevel,
                 });
-                logger.debug("Connector action direct adapter execution started", logMeta);
+                logger.debug(
+                  "Connector action direct adapter execution started",
+                  logMeta,
+                );
                 const startedAt = Date.now();
                 const result = await adapter
                   .executeAction({
@@ -433,23 +440,30 @@ export async function createConnectorActionTools(
                   })
                   .catch((error) => {
                     const connectorError = toConnectorError(error);
-                    logger.debug("Connector action direct adapter execution failed", {
-                      ...logMeta,
-                      errorCode: connectorError.code,
-                      errorMessage: connectorError.message,
-                      latencyMs: Date.now() - startedAt,
-                      rawResponseJson: connectorError.details?.rawResponseJson,
-                    });
+                    logger.debug(
+                      "Connector action direct adapter execution failed",
+                      {
+                        ...logMeta,
+                        errorCode: connectorError.code,
+                        errorMessage: connectorError.message,
+                        latencyMs: Date.now() - startedAt,
+                        rawResponseJson:
+                          connectorError.details?.rawResponseJson,
+                      },
+                    );
                     throw error;
                   });
-                logger.debug("Connector action direct adapter execution succeeded", {
-                  ...logMeta,
-                  externalId: result.externalId ?? null,
-                  latencyMs: Date.now() - startedAt,
-                  rawResponseJson: result.rawResponseJson,
-                  resultJson: result.result,
-                  shouldResync: Boolean(result.shouldResync),
-                });
+                logger.debug(
+                  "Connector action direct adapter execution succeeded",
+                  {
+                    ...logMeta,
+                    externalId: result.externalId ?? null,
+                    latencyMs: Date.now() - startedAt,
+                    rawResponseJson: result.rawResponseJson,
+                    resultJson: result.result,
+                    shouldResync: Boolean(result.shouldResync),
+                  },
+                );
                 return {
                   ...result.result,
                   actionType: action.type,
@@ -472,4 +486,15 @@ export async function createConnectorActionTools(
   }
 
   return tools;
+}
+
+export async function buildConnectorActionToolset(
+  context: ConnectorActionToolContext,
+  options: ConnectorActionToolsetOptions = {},
+) {
+  return {
+    context,
+    tools: await createConnectorActionTools(context, options),
+    interruptOn: createConnectorActionInterruptConfigs(options),
+  };
 }

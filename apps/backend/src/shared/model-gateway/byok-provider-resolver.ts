@@ -1,7 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { config } from "../config";
-import { db } from "../database";
-import { modelGatewayByokCredentials } from "../db/schema";
+import { db, modelGatewayByokCredentials } from "@sourceweft/db";
 import { decryptSecret } from "../secrets";
 import { normalizeDefaultHeaders } from "./runtime";
 
@@ -151,3 +150,4 @@ export async function resolveCustomByokProvider(input: {
     hasUserScopedKey: row.userId !== null,
   };
 }
+

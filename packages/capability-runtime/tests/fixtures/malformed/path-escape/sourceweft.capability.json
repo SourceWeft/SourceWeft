@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "local/path-escape",
+  "kind": "tool",
+  "name": "Path Escape",
+  "version": "0.0.0",
+  "entry": "../outside.js",
+  "contributes": {
+    "commands": [],
+    "skills": [],
+    "tools": [],
+    "vfs": [],
+    "artifacts": [],
+    "retrieval": [],
+    "mcp": []
+  }
+}

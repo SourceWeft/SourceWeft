@@ -10,6 +10,7 @@ import type {
   MessageVersion,
   ToolCallRecord,
   ToolConfirmationResolution,
+  VersionedMessageGroup,
 } from "./types";
 
 type ToolConfirmationItem = {
@@ -74,6 +75,12 @@ function isCancelledMessageVersion(version: {
     getStringRecordValue(getObjectRecord(version.threadRun), "status") ===
       "cancelled"
   );
+}
+
+function isExpiredApprovalMessageVersion(version: {
+  errorCode?: string | null;
+}) {
+  return version.errorCode === "TOOL_APPROVAL_EXPIRED";
 }
 
 function parseJsonOutput(output: unknown): unknown {
@@ -174,6 +181,27 @@ export function getToolConfirmationItemsForRun(input: {
   };
 }
 
+export function hasLiveToolConfirmationSignalForRun(input: {
+  activeThreadRun: ActiveToolConfirmationRun | null | undefined;
+  signal: ToolConfirmationInterventionSignal | null | undefined;
+}) {
+  if (input.activeThreadRun?.status !== "waiting_for_approval") {
+    return false;
+  }
+  const signal = input.signal;
+  if (!signal) {
+    return false;
+  }
+  if ((signal.liveConfirmations ?? []).length === 0) {
+    return false;
+  }
+  return (
+    signal.runKey === input.activeThreadRun.idempotencyKey ||
+    (Boolean(signal.threadRunId) &&
+      signal.threadRunId === input.activeThreadRun.id)
+  );
+}
+
 export function getLiveToolConfirmationItemsForRun(input: {
   activeThreadRun: ActiveToolConfirmationRun | null | undefined;
   signal: ToolConfirmationInterventionSignal | null | undefined;
@@ -181,19 +209,22 @@ export function getLiveToolConfirmationItemsForRun(input: {
   if (input.activeThreadRun?.status !== "waiting_for_approval") {
     return [];
   }
-  const liveConfirmations = input.signal?.liveConfirmations ?? [];
-  if (liveConfirmations.length === 0) {
+  const signal = input.signal;
+  if (!signal) {
     return [];
   }
-  const signalMatchesRun =
-    !input.signal?.runKey ||
-    input.signal.runKey === input.activeThreadRun.idempotencyKey ||
-    input.signal.threadRunId === input.activeThreadRun.id;
-  if (!signalMatchesRun) {
+  const liveConfirmations = signal.liveConfirmations ?? [];
+  if (
+    !hasLiveToolConfirmationSignalForRun({
+      activeThreadRun: input.activeThreadRun,
+      signal,
+    })
+  ) {
     return [];
   }
   const assistantMessageId =
-    input.signal?.assistantMessageId ?? input.activeThreadRun.assistantMessageId;
+    signal.assistantMessageId ??
+    input.activeThreadRun.assistantMessageId;
   if (!assistantMessageId) {
     return [];
   }
@@ -204,7 +235,8 @@ export function getLiveToolConfirmationItemsForRun(input: {
       assistantMessageId,
       confirmation: item.confirmation,
       messageId: assistantMessageId,
-      threadRunId: input.signal?.threadRunId ?? input.activeThreadRun?.id ?? null,
+      threadRunId:
+        signal.threadRunId ?? input.activeThreadRun?.id ?? null,
       toolCall: item.toolCall,
     }));
 }
@@ -221,6 +253,41 @@ function uniqueConnectorActions(
           candidate.toolName === action.toolName &&
           candidate.connectorId === action.connectorId &&
           candidate.actionRunId === action.actionRunId,
+      ) === index
+    );
+  });
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJsonStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries
+      .map(
+        ([key, item]) => `${JSON.stringify(key)}:${stableJsonStringify(item)}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function uniqueSandboxActions(
+  actions: NonNullable<
+    NonNullable<ToolApprovalResume["sourceweft"]>["sandboxActions"]
+  >,
+) {
+  return actions.filter((action, index) => {
+    return (
+      actions.findIndex(
+        (candidate) =>
+          candidate.toolName === action.toolName &&
+          candidate.toolCallId === action.toolCallId &&
+          stableJsonStringify(candidate.requestJson) ===
+            stableJsonStringify(action.requestJson),
       ) === index
     );
   });
@@ -251,20 +318,36 @@ export function combineToolApprovalResumes(
   const connectorActions = uniqueConnectorActions(
     resumes.flatMap((resume) => resume.sourceweft?.connectorActions ?? []),
   );
-  const hitlInterruptId = resumes.find(
-    (resume) => resume.sourceweft?.hitlInterruptId,
-  )?.sourceweft?.hitlInterruptId;
+  const sandboxActions = uniqueSandboxActions(
+    resumes.flatMap((resume) => resume.sourceweft?.sandboxActions ?? []),
+  );
+  const sourceweftMetadata = resumes.reduce<
+    NonNullable<ToolApprovalResume["sourceweft"]>
+  >((metadata, resume) => {
+    if (!resume.sourceweft) {
+      return metadata;
+    }
+    const {
+      connectorActions: _connectorActions,
+      sandboxActions: _sandboxActions,
+      ...rest
+    } = resume.sourceweft;
+    return { ...metadata, ...rest };
+  }, {});
+  const sourceweft =
+    Object.keys(sourceweftMetadata).length > 0 ||
+    connectorActions.length > 0 ||
+    sandboxActions.length > 0
+      ? {
+          ...sourceweftMetadata,
+          ...(connectorActions.length > 0 ? { connectorActions } : {}),
+          ...(sandboxActions.length > 0 ? { sandboxActions } : {}),
+        }
+      : undefined;
 
   return {
     decisions,
-    ...(connectorActions.length > 0 || hitlInterruptId
-      ? {
-          sourceweft: {
-            ...(hitlInterruptId ? { hitlInterruptId } : {}),
-            ...(connectorActions.length > 0 ? { connectorActions } : {}),
-          },
-        }
-      : {}),
+    ...(sourceweft ? { sourceweft } : {}),
   };
 }
 
@@ -328,6 +411,163 @@ export function getPendingToolConfirmationItems(
   );
 }
 
+function getPendingConfirmationIdsForVersion(version: MessageVersion) {
+  return (version.toolCalls ?? [])
+    .map((toolCall) => getToolConfirmationOutput(toolCall.output))
+    .filter(
+      (confirmation): confirmation is ToolConfirmationRequest =>
+        confirmation !== null && isPendingToolConfirmation(confirmation),
+    )
+    .map((confirmation) => confirmation.id);
+}
+
+function pushResolutionIfMissing(input: {
+  resolutions: ToolConfirmationResolution[];
+  seen: Set<string>;
+  resolution: ToolConfirmationResolution;
+}) {
+  if (input.seen.has(input.resolution.confirmationId)) {
+    return;
+  }
+  input.seen.add(input.resolution.confirmationId);
+  input.resolutions.push(input.resolution);
+}
+
+function getSelectedUserVersionIdForAssistant(input: {
+  activeVersionByGroup?: Record<string, number>;
+  group: VersionedMessageGroup;
+  messageGroups: VersionedMessageGroup[];
+}) {
+  if (input.group.role !== "assistant" || !input.group.turnId) {
+    return null;
+  }
+
+  const userGroup = input.messageGroups.find(
+    (candidate) =>
+      candidate.role === "user" && candidate.turnId === input.group.turnId,
+  );
+  if (!userGroup) {
+    return null;
+  }
+
+  const latestUserVersionIndex = Math.max(userGroup.versions.length - 1, 0);
+  const activeUserBranchIndex = Math.min(
+    Math.max(
+      input.activeVersionByGroup?.[userGroup.groupId] ??
+        latestUserVersionIndex,
+      0,
+    ),
+    latestUserVersionIndex,
+  );
+  return userGroup.versions[activeUserBranchIndex]?.id ?? null;
+}
+
+function getSelectedMessageVersion(input: {
+  activeVersionByGroup?: Record<string, number>;
+  group: VersionedMessageGroup;
+  messageGroups: VersionedMessageGroup[];
+}) {
+  const entries = input.group.versions.map((version, originalIndex) => ({
+    originalIndex,
+    version,
+  }));
+  const selectedUserVersionId = getSelectedUserVersionIdForAssistant(input);
+  const scopedEntries =
+    input.group.role === "assistant" && selectedUserVersionId
+      ? entries.filter(
+          (entry) => entry.version.sourceUserMessageId === selectedUserVersionId,
+        )
+      : entries;
+  const visibleEntries = scopedEntries.length > 0 ? scopedEntries : entries;
+  const latestVisibleIndex = Math.max(visibleEntries.length - 1, 0);
+  const desiredOriginalIndex =
+    input.activeVersionByGroup?.[input.group.groupId] ??
+    visibleEntries[latestVisibleIndex]?.originalIndex ??
+    0;
+  const matchedVisibleIndex = visibleEntries.findIndex(
+    (entry) => entry.originalIndex === desiredOriginalIndex,
+  );
+  const activeVisibleIndex =
+    matchedVisibleIndex >= 0 ? matchedVisibleIndex : latestVisibleIndex;
+  return visibleEntries[activeVisibleIndex]?.version ?? null;
+}
+
+export function deriveTerminalToolConfirmationResolutions(input: {
+  activeVersionByGroup?: Record<string, number>;
+  messageGroups: VersionedMessageGroup[];
+}) {
+  const resolutions: ToolConfirmationResolution[] = [];
+  const seen = new Set<string>();
+
+  for (const group of input.messageGroups) {
+    if (group.role !== "assistant" || group.versions.length === 0) {
+      continue;
+    }
+
+    const version = getSelectedMessageVersion({
+      activeVersionByGroup: input.activeVersionByGroup,
+      group,
+      messageGroups: input.messageGroups,
+    });
+    if (!version) {
+      continue;
+    }
+
+    const confirmationIds = getPendingConfirmationIdsForVersion(version);
+    if (confirmationIds.length === 0) {
+      continue;
+    }
+
+    if (isExpiredApprovalMessageVersion(version)) {
+      for (const confirmationId of confirmationIds) {
+        pushResolutionIfMissing({
+          resolutions,
+          seen,
+          resolution: {
+            confirmationId,
+            decision: "reject",
+            expired: true,
+            resume: null,
+          },
+        });
+      }
+      continue;
+    }
+
+    if (isCancelledMessageVersion(version)) {
+      for (const confirmationId of confirmationIds) {
+        pushResolutionIfMissing({
+          resolutions,
+          seen,
+          resolution: {
+            confirmationId,
+            decision: "reject",
+            resume: null,
+            stopped: true,
+          },
+        });
+      }
+    }
+  }
+
+  return resolutions;
+}
+
+export function mergeToolConfirmationResolutions(input: {
+  derived: ToolConfirmationResolution[];
+  local: ToolConfirmationResolution[];
+}) {
+  const localIds = new Set(
+    input.local.map((resolution) => resolution.confirmationId),
+  );
+  return [
+    ...input.local,
+    ...input.derived.filter(
+      (resolution) => !localIds.has(resolution.confirmationId),
+    ),
+  ];
+}
+
 export function getVisibleToolConfirmationItems(
   items: ToolConfirmationItem[],
   resolutions: ToolConfirmationResolution[],
@@ -343,13 +583,17 @@ export function shouldLockComposerForApproval(input: {
 }
 
 export function shouldLockComposerForRun(input: {
-  chatExecutionState?: "idle" | "executing" | "waiting_for_approval" | "stopping";
+  chatExecutionState?:
+    | "idle"
+    | "executing"
+    | "waiting_for_approval"
+    | "stopping";
   isStreaming: boolean;
   isWaitingForApproval: boolean;
   pendingConfirmationCount: number;
 }) {
-  if (input.chatExecutionState) {
-    return input.chatExecutionState !== "idle";
+  if (input.chatExecutionState && input.chatExecutionState !== "idle") {
+    return true;
   }
   if (
     input.isStreaming &&

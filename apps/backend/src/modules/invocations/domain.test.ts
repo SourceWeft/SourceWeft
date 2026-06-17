@@ -19,9 +19,9 @@ import {
   type SelectableInvocationDefinition,
 } from "./types";
 
-test("invocation source refs distinguish built-in, skill, and MCP capabilities", () => {
+test("invocation source refs distinguish capability, skill, and MCP capabilities", () => {
   assert.deepEqual(INVOCATION_SOURCE_KINDS, [
-    "builtin_tool",
+    "capability_tool",
     "skill_command",
     "mcp_tool",
     "mcp_prompt",
@@ -29,7 +29,14 @@ test("invocation source refs distinguish built-in, skill, and MCP capabilities",
   ]);
 
   const refs: InvocationSourceRef[] = [
-    { kind: "builtin_tool", toolName: "generate_image" },
+    {
+      kind: "capability_tool",
+      capabilityId: "sourceweft/generate-image",
+      contributionId: "generate_image",
+      legacyToolName: "generate_image",
+      sourcePackageName: null,
+      toolName: "generate_image",
+    },
     {
       kind: "skill_command",
       skillSlug: "research",
@@ -65,7 +72,7 @@ test("selectable definitions model supported invocation semantics without execut
   const semantics: InvocationSemantics[] = [
     {
       kind: "fixed_tool_choice",
-      target: "builtin_tool",
+      target: "capability_tool",
       toolName: "generate_image",
     },
     {
@@ -87,13 +94,20 @@ test("selectable definitions model supported invocation semantics without execut
   ];
 
   const definition: SelectableInvocationDefinition = {
-    id: "builtin.generate_image",
+    id: "cap:sourceweft/generate-image:generate_image",
     label: "Generate image",
     description: "Create an image artifact",
-    sourceRef: { kind: "builtin_tool", toolName: "generate_image" },
+    sourceRef: {
+      kind: "capability_tool",
+      capabilityId: "sourceweft/generate-image",
+      contributionId: "generate_image",
+      legacyToolName: "generate_image",
+      sourcePackageName: null,
+      toolName: "generate_image",
+    },
     semantics: semantics[0] ?? {
       kind: "fixed_tool_choice",
-      target: "builtin_tool",
+      target: "capability_tool",
       toolName: "generate_image",
     },
     enabled: true,
@@ -180,19 +194,23 @@ test("invocation events cover resolution, policy, approval, handoff, result, and
   ]);
 
   const sourceRef: InvocationSourceRef = {
-    kind: "builtin_tool",
+    kind: "capability_tool",
+    capabilityId: "sourceweft/generate-image",
+    contributionId: "generate_image",
+    legacyToolName: "generate_image",
+    sourcePackageName: null,
     toolName: "generate_image",
   };
   const events: InvocationEvent[] = [
-    createInvocationEvent({ type: "resolve", selectableId: "builtin.generate_image", sourceRef }),
-    createInvocationEvent({ type: "policy", selectableId: "builtin.generate_image", sourceRef, decision: "allow" }),
+    createInvocationEvent({ type: "resolve", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef }),
+    createInvocationEvent({ type: "policy", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, decision: "allow" }),
     createInvocationEvent({ type: "approval_required", selectableId: "mcp.tool", sourceRef, approvalRef: "approval_1", reason: "High risk MCP tool" }),
-    createInvocationEvent({ type: "tool_choice_bound", selectableId: "builtin.generate_image", sourceRef, toolName: "generate_image" }),
+    createInvocationEvent({ type: "tool_choice_bound", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, toolName: "generate_image" }),
     createInvocationEvent({ type: "context_injected", selectableId: "skill.research.summarize", sourceRef, instruction: "Follow the workflow." }),
     createInvocationEvent({ type: "direct_execute", selectableId: "mcp.tool", sourceRef }),
-    createInvocationEvent({ type: "deepagents_handoff", selectableId: "builtin.generate_image", sourceRef, boundary: "deepagents" }),
-    createInvocationEvent({ type: "result", selectableId: "builtin.generate_image", sourceRef, result: { ok: true } }),
-    createInvocationEvent({ type: "error", selectableId: "builtin.generate_image", sourceRef, error: createNormalizedInvocationError({ code: "RUNTIME_HANDOFF_UNAVAILABLE", message: "No runtime" }) }),
+    createInvocationEvent({ type: "deepagents_handoff", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, boundary: "deepagents" }),
+    createInvocationEvent({ type: "result", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, result: { ok: true } }),
+    createInvocationEvent({ type: "error", selectableId: "cap:sourceweft/generate-image:generate_image", sourceRef, error: createNormalizedInvocationError({ code: "RUNTIME_HANDOFF_UNAVAILABLE", message: "No runtime" }) }),
   ];
 
   assert.deepEqual(

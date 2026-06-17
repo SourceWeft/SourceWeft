@@ -5,19 +5,26 @@ import { runInvocationPipeline } from "./pipeline";
 import { allowInvocation, askInvocationApproval, denyInvocation } from "./policy";
 import type { SelectableInvocationDefinition } from "./types";
 
-const builtinDefinition: SelectableInvocationDefinition = {
-  id: "builtin_tool.generate_image",
+const capabilityDefinition: SelectableInvocationDefinition = {
+  id: "cap:sourceweft/generate-image:generate_image",
   label: "Generate image",
   enabled: true,
-  sourceRef: { kind: "builtin_tool", toolName: "generate_image" },
+  sourceRef: {
+    kind: "capability_tool",
+    capabilityId: "sourceweft/generate-image",
+    contributionId: "generate_image",
+    legacyToolName: "generate_image",
+    sourcePackageName: null,
+    toolName: "generate_image",
+  },
   semantics: {
     kind: "fixed_tool_choice",
-    target: "builtin_tool",
+    target: "capability_tool",
     toolName: "generate_image",
   },
 };
 
-function registry(definition: SelectableInvocationDefinition = builtinDefinition) {
+function registry(definition: SelectableInvocationDefinition = capabilityDefinition) {
   return createSelectableInvocationRegistry({
     providers: [{ id: "fake", list: () => [definition] }],
   });
@@ -26,7 +33,7 @@ function registry(definition: SelectableInvocationDefinition = builtinDefinition
 test("pipeline runs resolve, policy, tool choice, and DeepAgents handoff in order", () => {
   const output = runInvocationPipeline({
     registry: registry(),
-    envelope: { selectableId: builtinDefinition.id, userInput: "make image" },
+    envelope: { selectableId: capabilityDefinition.id, userInput: "make image" },
     policyEvaluator: () => allowInvocation({ reason: "Allowed" }),
   });
 
@@ -41,7 +48,7 @@ test("pipeline runs resolve, policy, tool choice, and DeepAgents handoff in orde
 test("ask policy short-circuits before DeepAgents handoff", () => {
   const output = runInvocationPipeline({
     registry: registry(),
-    envelope: { selectableId: builtinDefinition.id, userInput: "make image" },
+    envelope: { selectableId: capabilityDefinition.id, userInput: "make image" },
     policyEvaluator: ({ plan }) =>
       askInvocationApproval({
         reason: "Approval required",
@@ -60,7 +67,7 @@ test("ask policy short-circuits before DeepAgents handoff", () => {
 test("schema and manifest failures return normalized pipeline errors", () => {
   const output = runInvocationPipeline({
     registry: registry(),
-    envelope: { selectableId: builtinDefinition.id, userInput: "make image" },
+    envelope: { selectableId: capabilityDefinition.id, userInput: "make image" },
     policyEvaluator: ({ plan }) =>
       denyInvocation({
         reason: "Schema mismatch",

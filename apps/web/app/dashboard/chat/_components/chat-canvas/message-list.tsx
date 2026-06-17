@@ -32,41 +32,47 @@ import {
 import { PromptCommandIcon } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { getAgentToolSlashCommand } from "@sourceweft/sdk";
+import { LoadingDots } from "@sourceweft/ui-web/components/ui/loading-dots";
+import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
 import { RawImage } from "../../../../_components/raw-image";
 import { getActionIcon } from "../action-icons";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import { WebToolResults } from "../web-tool-results";
 import {
-  getMessageImageParts,
-  getMessageText,
-  normalizeAssetUrl,
-  stripGeneratedImageMarkdown,
-} from "./message-assets";
+  getAttachedWebToolCallIds,
+  shouldRenderWebToolResultsFallback,
+} from "../web-tool-results-state";
+import { normalizeAssetUrl } from "./message-assets";
 import { CitationAwareMessageResponse } from "./message-response";
 import {
+  AssistantActivityPlaceholder,
   AssistantActivityRenderItems,
-  AssistantActivityStack,
   type AssistantActivityPlaceholderPhase,
 } from "./assistant-activity-stack";
-import { buildAssistantActivityItems } from "./assistant-activity-items";
+import { AssistantToolCard } from "./assistant-tool-card";
 import {
   buildAssistantRenderSegments,
+  type AssistantTerminalBlock,
+  type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
 import { findLastAnswerSegmentId } from "./message-evidence";
 import { AssistantWorkflowAccordion } from "./assistant-workflow-accordion";
-import { buildAssistantTimelineSegments } from "./assistant-timeline-segments";
+import {
+  buildMessageRenderState,
+  getVisibleAssistantAnswerText,
+  type MessageRenderState,
+} from "./message-render-state";
 import {
   mergeSourceIds,
   SourceIcon,
   toAttachmentData,
   UserMessageText,
 } from "./source-rendering";
+import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
 import {
-  resolveMessageVersionRunLifecycle,
-  summarizeActiveThreadRun,
-  summarizeMessageVersionThreadRun,
-} from "./thread-run-state";
+  GeneratedImageArtifactBlock,
+  GeneratedPresentationArtifactBlock,
+} from "./reasoning-trace";
 import type {
   ArtifactStatusSnapshot,
   ArtifactPreviewRecord,
@@ -433,35 +439,27 @@ function UserMessageReferences({
 
 function AssistantMessageBody({
   artifactStatuses,
-  isStreaming,
   onArtifactPreview,
   onCitationClick,
   onWorkfileClick,
+  renderState,
   resolvedConfirmations,
-  version,
   workspaceId,
 }: {
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
-  isStreaming: boolean;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
+  renderState: MessageRenderState;
   resolvedConfirmations?: ToolConfirmationResolution[];
-  version: MessageVersion;
   workspaceId?: string | null;
 }) {
-  const renderBlocks = version.renderBlocks ?? [];
-  const cancelledNotice = version.isCancelled ? "已由用户停止生成。" : null;
-  const isWorkflowRunning =
-    isStreaming ||
-    version.threadRun?.status === "running" ||
-    version.threadRun?.status === "queued";
-  const segments = buildAssistantRenderSegments(renderBlocks, {
-    includeTrailingTextInWorkflow: isWorkflowRunning,
-  });
-  const workflowSegmentCount = segments.filter(
-    (segment) => segment.type === "workflow",
-  ).length;
+  const version = renderState.raw;
+  const renderBlocks = renderState.bodyBlocks;
+  const cancelledNotice =
+    renderState.status === "cancelled" ? "已由用户停止生成。" : null;
+  const isWorkflowRunning = renderState.status === "running";
+  const segments = buildAssistantRenderSegments(renderBlocks);
   let lastWorkflowSegmentId: string | null = null;
   for (let index = segments.length - 1; index >= 0; index -= 1) {
     const segment = segments[index];
@@ -472,64 +470,231 @@ function AssistantMessageBody({
   }
   const lastAnswerSegmentId = findLastAnswerSegmentId({
     segments,
-    version,
+    toolCalls: version.toolCalls,
     workspaceId,
   });
+  const attachedWebToolCallIds = getAttachedWebToolCallIds({
+    renderBlocks,
+    toolCalls: version.toolCalls,
+  });
+  const shouldRenderWebResultsFallback = shouldRenderWebToolResultsFallback({
+    attachedToolCallIds: attachedWebToolCallIds,
+    toolCalls: version.toolCalls,
+  });
+  const shouldShowBottomLoading = renderState.shouldShowBottomLoading;
+  let didRenderWebResultsFallback = false;
+
+  function renderWorkflowBlockAsActivity(input: {
+    block: AssistantWorkflowBlock;
+    isRunning: boolean;
+  }) {
+    const { block } = input;
+    if (block.type === "reasoning") {
+      return (
+        <AssistantActivityRenderItems
+          availableCitations={renderState.availableCitations}
+          isStreaming={input.isRunning}
+          items={[
+            {
+              durationMs: block.durationMs,
+              id: block.id,
+              key: `block:${block.id}`,
+              order: 0,
+              text: block.text,
+              type: "reasoning",
+            },
+          ]}
+          onCitationClick={onCitationClick}
+          onWorkfileClick={onWorkfileClick}
+          resolvedConfirmations={resolvedConfirmations}
+        />
+      );
+    }
+
+    if (block.type === "tool") {
+      const toolCall = version.toolCalls?.find(
+        (item) => item.id === block.toolCallId,
+      );
+      if (!toolCall) {
+        return null;
+      }
+
+      return (
+        <AssistantActivityRenderItems
+          availableCitations={renderState.availableCitations}
+          items={[
+            {
+              id: block.id,
+              key: `block:${block.id}`,
+              order: 0,
+              toolCall,
+              type: "tool",
+            },
+          ]}
+          onCitationClick={onCitationClick}
+          onWorkfileClick={onWorkfileClick}
+          resolvedConfirmations={resolvedConfirmations}
+        />
+      );
+    }
+
+    return (
+      <AssistantWorkflowAccordion
+        artifactStatuses={artifactStatuses}
+        blocks={[block]}
+        isRunning={input.isRunning}
+        onArtifactPreview={onArtifactPreview}
+        onCitationClick={onCitationClick}
+        onWorkfileClick={onWorkfileClick}
+        resolvedConfirmations={resolvedConfirmations}
+        availableCitations={renderState.availableCitations}
+        citations={renderState.citations}
+        toolCalls={version.toolCalls}
+        workspaceId={workspaceId}
+      />
+    );
+  }
+
+  function renderTerminalBlock(block: AssistantTerminalBlock) {
+    if (block.type === "reasoning" || block.type === "text") {
+      return (
+        <CitationAwareMessageResponse
+          availableCitations={renderState.availableCitations}
+          citations={renderState.citations}
+          onCitationClick={onCitationClick}
+          onWorkfileClick={onWorkfileClick}
+        >
+          {block.text}
+        </CitationAwareMessageResponse>
+      );
+    }
+
+    const toolCall = version.toolCalls?.find(
+      (item) => item.id === block.toolCallId,
+    );
+    if (!toolCall) {
+      return null;
+    }
+
+    if (block.type === "generated_image") {
+      return (
+        <GeneratedImageArtifactBlock
+          onArtifactPreview={onArtifactPreview}
+          toolCall={toolCall}
+          workspaceId={workspaceId}
+        />
+      );
+    }
+
+    if (block.type === "generated_presentation") {
+      return (
+        <GeneratedPresentationArtifactBlock
+          artifactStatuses={artifactStatuses}
+          onArtifactPreview={onArtifactPreview}
+          toolCall={toolCall}
+          workspaceId={workspaceId}
+        />
+      );
+    }
+
+    return (
+      <div>
+        <AssistantToolCard
+          onWorkfileClick={onWorkfileClick}
+          resolvedConfirmations={resolvedConfirmations}
+          toolCall={toolCall}
+        />
+        <WebToolResults
+          availableCitations={renderState.availableCitations}
+          onCitationClick={onCitationClick}
+          toolCall={toolCall}
+          variant="activity-row"
+        />
+      </div>
+    );
+  }
 
   return (
     <>
       {segments.map((segment) => {
-        if (segment.type === "workflow") {
+        if (segment.type === "terminal") {
           return (
-            <AssistantWorkflowAccordion
-              artifactStatuses={artifactStatuses}
-              blocks={segment.blocks}
-              durationMs={
-                workflowSegmentCount === 1 ? version.threadRun?.durationMs : null
-              }
-              isRunning={
-                segment.id === lastWorkflowSegmentId && isWorkflowRunning
-              }
-              key={segment.id}
-              onArtifactPreview={onArtifactPreview}
-              onCitationClick={onCitationClick}
-              onWorkfileClick={onWorkfileClick}
-              resolvedConfirmations={resolvedConfirmations}
-              version={version}
-              workspaceId={workspaceId}
-            />
+            <div className="mt-2 max-w-3xl space-y-3" key={segment.id}>
+              {segment.blocks.map((block) => (
+                <div key={block.id}>{renderTerminalBlock(block)}</div>
+              ))}
+            </div>
           );
         }
 
-        const blockText = stripGeneratedImageMarkdown({
+        if (segment.type === "workflow") {
+          return (
+            <div
+              className="my-1.5 max-w-2xl space-y-1 text-sm"
+              data-assistant-activity-stack="true"
+              key={segment.id}
+            >
+              {segment.blocks.map((block, blockIndex) => (
+                <div key={block.id}>
+                  {renderWorkflowBlockAsActivity({
+                    block,
+                    isRunning:
+                      segment.id === lastWorkflowSegmentId &&
+                      isWorkflowRunning &&
+                      blockIndex === segment.blocks.length - 1,
+                  })}
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        const blockText = getVisibleAssistantAnswerText({
           content: segment.blocks.map((block) => block.text).join(""),
           toolCalls: version.toolCalls,
-          trim: false,
           workspaceId,
         });
         if (blockText.length === 0) {
           return null;
         }
 
+        const shouldRenderFallbackBeforeSegment =
+          shouldRenderWebResultsFallback && !didRenderWebResultsFallback;
+        didRenderWebResultsFallback = true;
+
         return (
-          <CitationAwareMessageResponse
-            availableCitations={
-              segment.id === lastAnswerSegmentId ? version.availableCitations : []
-            }
-            citations={version.citations}
-            key={segment.id}
-            onCitationClick={onCitationClick}
-            onWorkfileClick={onWorkfileClick}
-            showLoading={
-              isStreaming &&
-              renderBlocks.at(-1)?.id === segment.blocks.at(-1)?.id &&
-              blockText.length > 0
-            }
-          >
-            {blockText}
-          </CitationAwareMessageResponse>
+          <div className="space-y-2" key={segment.id}>
+            {shouldRenderFallbackBeforeSegment ? (
+              <WebToolResults
+                availableCitations={renderState.availableCitations}
+                onCitationClick={onCitationClick}
+                toolCalls={version.toolCalls}
+              />
+            ) : null}
+            <CitationAwareMessageResponse
+              availableCitations={
+                segment.id === lastAnswerSegmentId
+                  ? renderState.availableCitations
+                  : []
+              }
+              citations={renderState.citations}
+              className="ml-1"
+              onCitationClick={onCitationClick}
+              onWorkfileClick={onWorkfileClick}
+            >
+              {blockText}
+            </CitationAwareMessageResponse>
+          </div>
         );
       })}
+      {shouldRenderWebResultsFallback && !didRenderWebResultsFallback ? (
+        <WebToolResults
+          availableCitations={renderState.availableCitations}
+          onCitationClick={onCitationClick}
+          toolCalls={version.toolCalls}
+        />
+      ) : null}
+      {shouldShowBottomLoading ? <LoadingDots className="ml-1" /> : null}
       {cancelledNotice ? (
         <p className="text-sm text-muted-foreground">{cancelledNotice}</p>
       ) : null}
@@ -540,141 +705,38 @@ function AssistantMessageBody({
 function AssistantTimeline({
   artifactStatuses,
   activityPlaceholderPhase,
-  isCancelled,
-  isStreaming,
-  messageText,
   onArtifactPreview,
   onCitationClick,
   onWorkfileClick,
+  renderState,
   resolvedConfirmations,
-  version,
   workspaceId,
 }: {
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   activityPlaceholderPhase?: AssistantActivityPlaceholderPhase | null;
-  isCancelled: boolean;
-  isStreaming: boolean;
-  messageText: string;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
+  renderState: MessageRenderState;
   resolvedConfirmations?: ToolConfirmationResolution[];
-  version: MessageVersion;
   workspaceId?: string | null;
 }) {
-  if ((version.renderBlocks?.length ?? 0) > 0) {
-    const activityItems = buildAssistantActivityItems({
-      assistantText: messageText,
-      steps: version.thinkingSteps,
-      toolCalls: version.toolCalls,
-      traceParts: version.traceParts,
-    }).filter((item) => item.type === "step" && !item.toolCallId);
-
-    return (
-      <>
-        {activityItems.length > 0 ? (
-          <div
-            className="my-1.5 max-w-2xl space-y-1 text-sm"
-            data-assistant-activity-stack="true"
-          >
-            <AssistantActivityRenderItems
-              items={activityItems}
-              onWorkfileClick={onWorkfileClick}
-              resolvedConfirmations={resolvedConfirmations}
-            />
-          </div>
-        ) : null}
-        <AssistantMessageBody
-          artifactStatuses={artifactStatuses}
-          isStreaming={isStreaming}
-          onArtifactPreview={onArtifactPreview}
-          onCitationClick={onCitationClick}
-          onWorkfileClick={onWorkfileClick}
-          resolvedConfirmations={resolvedConfirmations}
-          version={version}
-          workspaceId={workspaceId}
-        />
-      </>
-    );
-  }
-
-  const activityItems = buildAssistantActivityItems({
-    assistantText: "",
-    steps: version.thinkingSteps,
-    toolCalls: version.toolCalls,
-    traceParts: version.traceParts,
-  });
-  const segments = buildAssistantTimelineSegments({
-    assistantText: "",
-    isTextInterrupted: version.isTextInterrupted,
-    items: activityItems,
-  });
-
-  if (segments.length === 0) {
-    return (
-      <AssistantActivityStack
-        assistantText={messageText}
-        isCancelled={isCancelled}
-        isStreaming={isStreaming}
-        onWorkfileClick={onWorkfileClick}
-        placeholderPhase={activityPlaceholderPhase}
-        resolvedConfirmations={resolvedConfirmations}
-        version={version}
-      />
-    );
-  }
-
   return (
     <>
-      {segments.map((segment) => {
-        if (segment.type === "workflow") {
-          return (
-            <div
-              className="my-1.5 max-w-2xl space-y-1 text-sm"
-              data-assistant-activity-stack="true"
-              key={segment.key}
-            >
-              <AssistantActivityRenderItems
-                items={segment.items}
-                onWorkfileClick={onWorkfileClick}
-                resolvedConfirmations={resolvedConfirmations}
-              />
-            </div>
-          );
-        }
-
-        if (segment.text.trim().length === 0) {
-          return null;
-        }
-
-        if (segment.key === "assistant-final-text") {
-          return (
-            <CitationAwareMessageResponse
-              availableCitations={version.availableCitations}
-              citations={version.citations}
-              key={segment.key}
-              onCitationClick={onCitationClick}
-              onWorkfileClick={onWorkfileClick}
-              showLoading={isStreaming}
-            >
-              {segment.text}
-            </CitationAwareMessageResponse>
-          );
-        }
-
-        return (
-          <CitationAwareMessageResponse
-            availableCitations={[]}
-            citations={version.citations}
-            key={segment.key}
-            onCitationClick={onCitationClick}
-            onWorkfileClick={onWorkfileClick}
-            showLoading={false}
-          >
-            {segment.text}
-          </CitationAwareMessageResponse>
-        );
-      })}
+      {renderState.shouldShowLiveThinking && activityPlaceholderPhase ? (
+        <div className="my-1.5">
+          <AssistantActivityPlaceholder phase={activityPlaceholderPhase} />
+        </div>
+      ) : null}
+      <AssistantMessageBody
+        artifactStatuses={artifactStatuses}
+        onArtifactPreview={onArtifactPreview}
+        onCitationClick={onCitationClick}
+        onWorkfileClick={onWorkfileClick}
+        renderState={renderState}
+        resolvedConfirmations={resolvedConfirmations}
+        workspaceId={workspaceId}
+      />
     </>
   );
 }
@@ -860,127 +922,6 @@ async function copyMessageText(text: string) {
   }
 }
 
-function versionContainsHighlight(
-  group: VersionedMessageGroup,
-  highlightedMessageId: string | null | undefined,
-) {
-  return Boolean(
-    highlightedMessageId &&
-      group.versions.some((version) => version.id === highlightedMessageId),
-  );
-}
-
-function shallowArrayEqual(left?: string[], right?: string[]) {
-  if (left === right) {
-    return true;
-  }
-  if (!left || !right || left.length !== right.length) {
-    return false;
-  }
-  return left.every((item, index) => item === right[index]);
-}
-
-function summarizeToolCalls(toolCalls: MessageVersion["toolCalls"]) {
-  return (toolCalls ?? [])
-    .map(
-      (toolCall) =>
-        `${toolCall.id}:${toolCall.tool}:${toolCall.status}:${toolCall.error ?? ""}`,
-    )
-    .join("|");
-}
-
-function summarizeThinkingSteps(steps: MessageVersion["thinkingSteps"]) {
-  return (steps ?? [])
-    .map(
-      (step) =>
-        `${step.id}:${step.status}:${step.title}:${step.description ?? ""}:${step.detail ?? ""}:${step.items.length}`,
-    )
-    .join("|");
-}
-
-function summarizeRenderBlocks(blocks: MessageVersion["renderBlocks"]) {
-  return (blocks ?? [])
-    .map((block) => {
-      if (block.type === "text") {
-        return `${block.id}:text:${block.text}`;
-      }
-      if (block.type === "reasoning") {
-        return `${block.id}:reasoning:${block.durationMs ?? ""}:${block.text}`;
-      }
-      if (block.type === "tool") {
-        return `${block.id}:tool:${block.toolCallId}`;
-      }
-      if (block.type === "generated_image") {
-        return `${block.id}:generated_image:${block.toolCallId}`;
-      }
-      if (block.type === "generated_presentation") {
-        return `${block.id}:generated_presentation:${block.toolCallId}`;
-      }
-      return "";
-    })
-    .join("|");
-}
-
-function areMessageVersionsRenderEqual(
-  left: MessageVersion,
-  right: MessageVersion,
-) {
-  return (
-    left.id === right.id &&
-    left.renderKey === right.renderKey &&
-    left.content === right.content &&
-    left.error === right.error &&
-    left.errorCode === right.errorCode &&
-    left.isCancelled === right.isCancelled &&
-    left.isError === right.isError &&
-    left.isTextInterrupted === right.isTextInterrupted &&
-    left.isTextPaused === right.isTextPaused &&
-    left.modelReasoning === right.modelReasoning &&
-    left.sourceAssistantMessageId === right.sourceAssistantMessageId &&
-    left.sourceUserMessageId === right.sourceUserMessageId &&
-    shallowArrayEqual(left.sourceIds, right.sourceIds) &&
-    shallowArrayEqual(left.effectiveSourceIds, right.effectiveSourceIds) &&
-    shallowArrayEqual(left.mentionedSourceIds, right.mentionedSourceIds) &&
-    shallowArrayEqual(
-      left.effectiveMentionedSourceIds,
-      right.effectiveMentionedSourceIds,
-    ) &&
-    summarizeToolCalls(left.toolCalls) ===
-      summarizeToolCalls(right.toolCalls) &&
-    summarizeThinkingSteps(left.thinkingSteps) ===
-      summarizeThinkingSteps(right.thinkingSteps) &&
-    summarizeRenderBlocks(left.renderBlocks) ===
-      summarizeRenderBlocks(right.renderBlocks) &&
-    summarizeMessageVersionThreadRun(left.threadRun) ===
-      summarizeMessageVersionThreadRun(right.threadRun) &&
-    (left.citations?.length ?? 0) === (right.citations?.length ?? 0) &&
-    (left.availableCitations?.length ?? 0) ===
-      (right.availableCitations?.length ?? 0) &&
-    (left.modelReasoningSegments?.length ?? 0) ===
-      (right.modelReasoningSegments?.length ?? 0) &&
-    (left.traceEvents?.length ?? 0) === (right.traceEvents?.length ?? 0)
-  );
-}
-
-function areMessageGroupsRenderEqual(
-  left: VersionedMessageGroup,
-  right: VersionedMessageGroup,
-) {
-  return (
-    left.groupId === right.groupId &&
-    left.latestVersionId === right.latestVersionId &&
-    left.role === right.role &&
-    left.turnId === right.turnId &&
-    left.versions.length === right.versions.length &&
-    left.versions.every((version, index) =>
-      areMessageVersionsRenderEqual(
-        version,
-        right.versions[index] as MessageVersion,
-      ),
-    )
-  );
-}
-
 type MessageGroupItemProps = {
   activeOriginalBranchIndexRaw?: number;
   activeThreadRun?: ActiveThreadRun | null;
@@ -1059,17 +1000,6 @@ const MessageGroupItem = memo(function MessageGroupItem({
     >
       <MessageBranchContent>
         {versionEntries.map(({ version }, versionIndex) => {
-          const rawMessageText = getMessageText({
-            version,
-            workspaceId,
-          });
-          const messageText =
-            version.isError && !version.isCancelled
-              ? (sanitizeClientErrorMessage(rawMessageText) ?? rawMessageText)
-              : rawMessageText;
-          const userMessageImages = !isAssistant
-            ? getMessageImageParts(version)
-            : [];
           const versionRunLifecycle =
             isAssistant && versionIndex === activeVisibleBranchIndex
               ? resolveMessageVersionRunLifecycle({
@@ -1082,28 +1012,47 @@ const MessageGroupItem = memo(function MessageGroupItem({
           const isStreamingThisVersion =
             versionRunLifecycle === "live" ||
             versionRunLifecycle === "waiting_for_approval";
-          const referencedSources = !isAssistant
-            ? selectedSourceIdsByKey
-                .resolve(version)
-                .map((sourceId) => sourceById.get(sourceId))
-                .filter((source): source is SourceItem => Boolean(source))
+          const sourceIds = !isAssistant
+            ? selectedSourceIdsByKey.resolve(version)
             : [];
-          const mentionSources = !isAssistant
+          const mentionedSourceIds = !isAssistant
             ? mergeSourceIds(
                 version.mentionedSourceIds,
                 version.effectiveMentionedSourceIds,
               )
+            : [];
+          const messageTimestamp = formatMessageTimestamp(version.createdAt);
+          const renderState = buildMessageRenderState({
+            isAssistantStreaming: isStreamingThisVersion,
+            mentionedSourceIds,
+            role: group.role,
+            sourceIds,
+            timestamp: messageTimestamp ?? undefined,
+            version,
+            workspaceId,
+          });
+          const messageText =
+            renderState.error && !version.isCancelled
+              ? (sanitizeClientErrorMessage(renderState.error.message) ??
+                renderState.error.message)
+              : renderState.text;
+          const referencedSources = !isAssistant
+            ? renderState.sourceIds
+                .map((sourceId) => sourceById.get(sourceId))
+                .filter((source): source is SourceItem => Boolean(source))
+            : [];
+          const mentionSources = !isAssistant
+            ? renderState.mentionedSourceIds
                 .map((sourceId) => sourceById.get(sourceId))
                 .filter((source): source is SourceItem => Boolean(source))
             : [];
           const activityPlaceholderPhase: AssistantActivityPlaceholderPhase | null =
             isAssistant &&
             versionIndex === activeVisibleBranchIndex &&
-            !version.isCancelled &&
+            renderState.status !== "cancelled" &&
             isStreamingThisVersion
               ? "thinking"
               : null;
-          const messageTimestamp = formatMessageTimestamp(version.createdAt);
 
           return (
             <div
@@ -1117,7 +1066,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
             >
               {!isAssistant ? (
                 <UserMessageReferences
-                  images={userMessageImages}
+                  images={renderState.imageParts}
                   sources={referencedSources}
                 />
               ) : null}
@@ -1154,32 +1103,24 @@ const MessageGroupItem = memo(function MessageGroupItem({
                       <AssistantTimeline
                         artifactStatuses={artifactStatuses}
                         activityPlaceholderPhase={activityPlaceholderPhase}
-                        isCancelled={version.isCancelled === true}
-                        isStreaming={isStreamingThisVersion}
-                        messageText={messageText}
                         onArtifactPreview={onArtifactPreview}
                         onCitationClick={onCitationClick}
                         onWorkfileClick={onWorkfileClick}
+                        renderState={renderState}
                         resolvedConfirmations={resolvedConfirmations}
-                        version={version}
                         workspaceId={workspaceId}
                       />
-                      <WebToolResults
-                        availableCitations={version.availableCitations}
-                        onCitationClick={onCitationClick}
-                        toolCalls={version.toolCalls}
-                      />
-                      {version.isError && !version.isCancelled ? (
+                      {renderState.error ? (
                         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                           <p className="font-medium">Message failed</p>
                           <p className="mt-1 whitespace-pre-wrap break-words text-destructive/90">
                             {sanitizeClientErrorMessage(
-                              version.error ?? messageText,
+                              renderState.error.message,
                             ) ?? "Model error"}
                           </p>
-                          {version.errorCode ? (
+                          {renderState.error.code ? (
                             <p className="mt-1 text-xs text-destructive/70">
-                              {version.errorCode}
+                              {renderState.error.code}
                             </p>
                           ) : null}
                         </div>
@@ -1273,99 +1214,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
       </MessageBranchContent>
     </MessageBranch>
   );
-}, areMessageGroupItemPropsEqual);
-
-function areMessageGroupItemPropsEqual(
-  previous: MessageGroupItemProps,
-  next: MessageGroupItemProps,
-) {
-  if (!areMessageGroupsRenderEqual(previous.group, next.group)) {
-    return false;
-  }
-  if (
-    previous.activeOriginalBranchIndexRaw !==
-      next.activeOriginalBranchIndexRaw ||
-    summarizeActiveThreadRun(previous.activeThreadRun) !==
-      summarizeActiveThreadRun(next.activeThreadRun) ||
-    previous.isLatestAssistantGroup !== next.isLatestAssistantGroup ||
-    previous.isLatestUserGroup !== next.isLatestUserGroup ||
-    previous.selectedUserVersionIdForAssistant !==
-      next.selectedUserVersionIdForAssistant ||
-    previous.sourceById !== next.sourceById ||
-    previous.selectedSourceIdsByKey !== next.selectedSourceIdsByKey ||
-    previous.workspaceId !== next.workspaceId ||
-    previous.onActiveVersionChange !== next.onActiveVersionChange ||
-    previous.onArtifactPreview !== next.onArtifactPreview ||
-    previous.onCitationClick !== next.onCitationClick ||
-    previous.onRefreshLatest !== next.onRefreshLatest ||
-    previous.onRestartFromMessage !== next.onRestartFromMessage ||
-    previous.onSourcePreview !== next.onSourcePreview ||
-    previous.onWorkfileClick !== next.onWorkfileClick ||
-    !areConfirmationResolutionsEqual(
-      previous.resolvedConfirmations,
-      next.resolvedConfirmations,
-    )
-  ) {
-    return false;
-  }
-  if (
-    previous.isStreaming !== next.isStreaming &&
-    (previous.isLatestAssistantGroup ||
-      next.isLatestAssistantGroup ||
-      previous.isLatestUserGroup ||
-      next.isLatestUserGroup)
-  ) {
-    return false;
-  }
-  if (
-    !areNullableMessageVersionsRenderEqual(
-      previous.selectedAssistantVersionForUser,
-      next.selectedAssistantVersionForUser,
-    )
-  ) {
-    return false;
-  }
-  if (
-    previous.highlightedMessageId !== next.highlightedMessageId &&
-    (versionContainsHighlight(previous.group, previous.highlightedMessageId) ||
-      versionContainsHighlight(previous.group, next.highlightedMessageId))
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function areNullableMessageVersionsRenderEqual(
-  previous: MessageVersion | null,
-  next: MessageVersion | null,
-) {
-  if (previous === next) {
-    return true;
-  }
-  if (!previous || !next) {
-    return false;
-  }
-  return areMessageVersionsRenderEqual(previous, next);
-}
-
-function summarizeConfirmationResolutions(
-  resolutions: ToolConfirmationResolution[] | undefined,
-) {
-  return (resolutions ?? [])
-    .map((item) => `${item.confirmationId}:${item.decision}`)
-    .join("|");
-}
-
-function areConfirmationResolutionsEqual(
-  previous: ToolConfirmationResolution[] | undefined,
-  next: ToolConfirmationResolution[] | undefined,
-) {
-  return (
-    summarizeConfirmationResolutions(previous) ===
-    summarizeConfirmationResolutions(next)
-  );
-}
+});
 
 export function MessageList({
   activeThreadRun = null,

@@ -3,7 +3,7 @@ import { test, vi } from "vitest";
 import { createLangChainMcpClient } from "../../mcp/langchain-client";
 import { createDeepAgentsRuntimeHandoff } from "../deepagents-runtime";
 import {
-  createBuiltinToolChoiceAdapter,
+  createCapabilityToolChoiceAdapter,
   createDirectExecuteAdapter,
   createMcpToolChoiceAdapter,
   createSkillContextAdapter,
@@ -25,14 +25,21 @@ vi.mock("../deepagents-runtime", () => ({
   })),
 }));
 
-function builtInPlan(): Extract<InvocationPlan, { kind: "bind_tool_choice" }> {
+function capabilityToolPlan(): Extract<InvocationPlan, { kind: "bind_tool_choice" }> {
   return {
     kind: "bind_tool_choice",
-    selectableId: "builtin_tool.generate_image",
-    sourceRef: { kind: "builtin_tool", toolName: "generate_image" },
+    selectableId: "cap:sourceweft/generate-image:generate_image",
+    sourceRef: {
+      kind: "capability_tool",
+      capabilityId: "sourceweft/generate-image",
+      contributionId: "generate_image",
+      legacyToolName: "generate_image",
+      sourcePackageName: null,
+      toolName: "generate_image",
+    },
     semantics: {
       kind: "fixed_tool_choice",
-      target: "builtin_tool",
+      target: "capability_tool",
       toolName: "generate_image",
     },
     userInput: "make image",
@@ -57,16 +64,18 @@ function mcpPlan(): Extract<InvocationPlan, { kind: "bind_tool_choice" }> {
   };
 }
 
-test("built-in adapter produces DeepAgents handoff payload with fixed tool choice", async () => {
-  const adapter = createBuiltinToolChoiceAdapter({
+test("capability adapter produces DeepAgents handoff payload with fixed tool choice", async () => {
+  vi.mocked(createDeepAgentsRuntimeHandoff).mockClear();
+  const adapter = createCapabilityToolChoiceAdapter({
     tools: [{ name: "generate_image", description: "Generate image" }],
     model: "test-model",
   });
-  const output = await adapter.prepare(builtInPlan());
+  const output = await adapter.prepare(capabilityToolPlan());
 
   assert.equal(output.kind, "deepagents_handoff");
+  assert.equal(output.sourceRef.kind, "capability_tool");
   assert.equal(output.toolChoice, "generate_image");
-  assert.equal(vi.mocked(createDeepAgentsRuntimeHandoff).mock.calls.length > 0, true);
+  assert.equal(vi.mocked(createDeepAgentsRuntimeHandoff).mock.calls.length, 1);
 });
 
 test("MCP adapter uses mandated LangChain MCP client path and preserves source identity", async () => {

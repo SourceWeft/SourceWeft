@@ -1,5 +1,6 @@
 import type { ModelItem, ModelType } from "../../_components/model-catalog-utils";
 import type { PromptThinkingSettings } from "../../_components/chat-canvas";
+import type { ThreadChatPreferences } from "@sourceweft/contracts";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
@@ -7,39 +8,18 @@ const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   vision: false,
 };
 
-const SEARCH_PREFERENCE_STORAGE_VERSION = "v2";
+const DEFAULT_THINKING_SETTINGS: PromptThinkingSettings = {
+  mode: "auto",
+  effort: "medium",
+};
 
-function getSearchPreferenceStorageKey(workspaceId: string) {
-  return `chat:search:${SEARCH_PREFERENCE_STORAGE_VERSION}:${workspaceId}:current`;
-}
-
-function parseStoredThinkingSettings(
-  value: string | null,
-): PromptThinkingSettings | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as Partial<PromptThinkingSettings>;
-    const mode = parsed.mode;
-    const effort = parsed.effort;
-    if (mode !== "auto" && mode !== "off" && mode !== "effort") {
-      return null;
-    }
-    if (
-      effort !== "minimal" &&
-      effort !== "low" &&
-      effort !== "medium" &&
-      effort !== "high" &&
-      effort !== "xhigh"
-    ) {
-      return null;
-    }
-    return { mode, effort };
-  } catch {
-    return null;
-  }
+function mapChatPreferencesToThinkingSettings(
+  preferences: ThreadChatPreferences,
+): PromptThinkingSettings {
+  return {
+    mode: preferences.thinking.mode,
+    effort: preferences.thinking.effort,
+  };
 }
 
 function normalizeThinkingSettingsForModel(input: {
@@ -76,7 +56,7 @@ function normalizeThinkingSettingsForModel(input: {
 
 export {
   EMPTY_MODEL_KIND_FLAGS,
-  getSearchPreferenceStorageKey,
+  DEFAULT_THINKING_SETTINGS,
+  mapChatPreferencesToThinkingSettings,
   normalizeThinkingSettingsForModel,
-  parseStoredThinkingSettings,
 };

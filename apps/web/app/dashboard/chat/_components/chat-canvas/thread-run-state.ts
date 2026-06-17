@@ -33,6 +33,7 @@ export function summarizeMessageVersionThreadRun(
 
   return [
     run.id ?? "",
+    run.assistantMessageId ?? "",
     run.idempotencyKey ?? "",
     run.status ?? "",
     run.mode ?? "",
@@ -148,6 +149,7 @@ export function resolveMessageVersionRunLifecycle(input: {
   }
 
   if (
+    isStreaming &&
     Boolean(version.renderKey) &&
     hasActiveMessageVersionThreadRunStatus(version)
   ) {

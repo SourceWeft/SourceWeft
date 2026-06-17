@@ -1,0 +1,4 @@
+# Ignore everything — we only need the Dockerfile.
+# Context is docker/sourceweft-sandbox/.
+*
+!Dockerfile

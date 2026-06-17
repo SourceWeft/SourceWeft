@@ -142,11 +142,19 @@ test("default global config includes tts-default", async () => {
   const loaded = await loadGlobalModelGatewayConfig(
     resolve("config/model-gateway.global.json"),
   );
+  const openRouterGateway = loaded?.gateways.find(
+    (entry) => entry.slug === "openrouter-default",
+  );
 
   const ttsDefault = loaded?.ttsProfiles.find(
     (entry) => entry.profileAlias === "tts-default",
   );
 
+  assert.deepEqual(openRouterGateway?.defaultHeaders, {
+    "X-OpenRouter-Title": "SourceWeft",
+    "X-Title": "SourceWeft",
+    "HTTP-Referer": "https://sourceweft.com",
+  });
   assert.equal(ttsDefault?.targetModel, "openai/gpt-4o-mini-tts-2025-12-15");
   assert.equal(ttsDefault?.gatewaySlug, "openrouter-default");
   assert.equal(ttsDefault?.providerName, "openrouter");

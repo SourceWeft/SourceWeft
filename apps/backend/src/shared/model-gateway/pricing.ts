@@ -1,4 +1,1 @@
-export {
-  resolveModelCapabilitiesFromLitellm,
-  syncModelPricing,
-} from "../scripts/sync-model-pricing";
+export { resolveModelCapabilitiesFromLitellm, syncModelPricing } from "./sync-pricing";

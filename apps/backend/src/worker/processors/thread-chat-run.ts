@@ -1,10 +1,10 @@
 import type { Job } from "bullmq";
 import type { ThreadChatRunJobPayload } from "../../modules/content/queue";
-import { processThreadChatRunJob as processDurableThreadChatRunJob } from "../../modules/content/threads/durable/runner";
+import { processThreadChatRunJob as processDurableThreadChatRunJob } from "../../modules/threads";
 import { ContentError } from "../../modules/content/errors";
-import { toSseData } from "../../modules/content/threads/stream/helpers";
-import { durableChatRunService } from "../../modules/content/threads/durable/service";
-import { findChatThreadRunById } from "../../modules/content/threads/durable/repository";
+import { toSseData } from "../../modules/threads";
+import { durableChatRunService } from "../../modules/threads";
+import { findChatThreadRunById } from "../../modules/threads";
 import { logger } from "../../shared/logger";
 
 function toContentRunError(error: unknown) {
@@ -18,7 +18,7 @@ function toContentRunError(error: unknown) {
   );
 }
 
-async function failThreadRunAtProcessorBoundary(input: {
+export async function failThreadRunAtProcessorBoundary(input: {
   payload: ThreadChatRunJobPayload;
   error: unknown;
 }) {

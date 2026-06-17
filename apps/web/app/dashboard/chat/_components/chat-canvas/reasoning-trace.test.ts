@@ -9,7 +9,13 @@ import {
   getReasoningTraceTitle,
   isToolConfirmationResolved,
   isReasoningTraceThinking,
+  shouldShowGeneratedPresentationItem,
 } from "./reasoning-trace-state";
+import {
+  getTodoListTraceItems,
+  isTodoListTraceStep,
+} from "./reasoning-trace-todos";
+import { formatThoughtDuration } from "./duration-format";
 import type { ToolConfirmationRequestOutput } from "./tool-confirmation-state";
 
 test("completed tool-only traces do not show thinking title", () => {
@@ -58,14 +64,14 @@ test("streaming model reasoning remains in the active thinking state", () => {
   );
 });
 
-test("active presentation generation step keeps trace in thinking state", () => {
+test("active presentation publishing step keeps trace in thinking state", () => {
   assert.equal(
     getReasoningTraceTitle({
       activeStep: {
         id: "presentation-generation",
-        title: "Generating presentation",
+        title: "Publishing presentation",
         status: "in_progress",
-        items: ["Planning deck content and visual structure"],
+        items: ["Preparing presentation artifact"],
         sequence: 1,
       },
       hasModelReasoning: true,
@@ -73,7 +79,129 @@ test("active presentation generation step keeps trace in thinking state", () => 
       isStreaming: false,
       reasoningDurationMs: 42_000,
     }),
-    "Thinking · Generating presentation",
+    "Thinking · Publishing presentation",
+  );
+});
+
+test("sandbox presentation publisher card waits for completed artifact URL", () => {
+  assert.equal(
+    shouldShowGeneratedPresentationItem({
+      fileUrl: null,
+      isSandboxArtifactPublisher: true,
+      isVideoPresentation: false,
+      previewArtifact: null,
+      status: "running",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowGeneratedPresentationItem({
+      fileUrl: null,
+      isSandboxArtifactPublisher: true,
+      isVideoPresentation: false,
+      previewArtifact: null,
+      status: "approval_requested",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowGeneratedPresentationItem({
+      fileUrl: "/artifact-preview?artifactId=artifact-1",
+      isSandboxArtifactPublisher: true,
+      isVideoPresentation: false,
+      previewArtifact: null,
+      status: "completed",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldShowGeneratedPresentationItem({
+      fileUrl: null,
+      isSandboxArtifactPublisher: true,
+      isVideoPresentation: false,
+      previewArtifact: null,
+      status: "completed",
+    }),
+    false,
+  );
+});
+
+test("todo list trace steps are detected from generic display metadata", () => {
+  assert.equal(
+    isTodoListTraceStep({
+      id: "deepagents:todos",
+      title: "Task plan",
+      status: "in_progress",
+      items: [],
+      metadata: {
+        display: "todo_list",
+        visibility: "user",
+      },
+    }),
+    true,
+  );
+
+  assert.equal(
+    isTodoListTraceStep({
+      id: "deepagents:todos",
+      title: "Task plan",
+      status: "in_progress",
+      items: [],
+      metadata: {
+        display: "todo_list",
+      },
+    }),
+    false,
+  );
+});
+
+test("todo list trace items normalize public todo metadata", () => {
+  assert.deepEqual(
+    getTodoListTraceItems({
+      todos: [
+        {
+          content: "Plan content structure",
+          description: "Outline the main sections",
+          id: "todo-1",
+          status: "completed",
+        },
+        {
+          content: "Generate draft",
+          status: "in_progress",
+        },
+        {
+          title: "Review final output",
+          status: "pending",
+        },
+        {
+          content: "Ignore unsupported status",
+          status: "blocked",
+        },
+      ],
+    }),
+    [
+      {
+        content: "Plan content structure",
+        description: "Outline the main sections",
+        id: "todo-1",
+        status: "completed",
+      },
+      {
+        content: "Generate draft",
+        id: "1:Generate draft",
+        status: "in_progress",
+      },
+      {
+        content: "Review final output",
+        id: "2:Review final output",
+        status: "pending",
+      },
+      {
+        content: "Ignore unsupported status",
+        id: "3:Ignore unsupported status",
+        status: "pending",
+      },
+    ],
   );
 });
 
@@ -86,7 +214,7 @@ test("completed model reasoning shows elapsed thought duration", () => {
       isStreaming: false,
       reasoningDurationMs: 12_000,
     }),
-    "Thought for 12 seconds",
+    "Thought for 12s",
   );
   assert.equal(
     isReasoningTraceThinking({
@@ -98,6 +226,16 @@ test("completed model reasoning shows elapsed thought duration", () => {
     }),
     false,
   );
+});
+
+test("thought durations use compact elapsed time", () => {
+  assert.equal(formatThoughtDuration(0), "Thought for 1s");
+  assert.equal(formatThoughtDuration(999), "Thought for 1s");
+  assert.equal(formatThoughtDuration(42_000), "Thought for 42s");
+  assert.equal(formatThoughtDuration(60_000), "Thought for 1m");
+  assert.equal(formatThoughtDuration(92_000), "Thought for 1m32s");
+  assert.equal(formatThoughtDuration(1_375_000), "Thought for 22m55s");
+  assert.equal(formatThoughtDuration(undefined), "Thought for a few seconds");
 });
 
 test("completed steps remain thinking while the message version is streaming", () => {

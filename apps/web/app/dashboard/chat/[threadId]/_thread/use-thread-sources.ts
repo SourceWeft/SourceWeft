@@ -21,12 +21,76 @@ import {
   type SourceItem,
 } from "../../_components/source-types";
 import { contentClient } from "../../../../../lib/sdk";
+import type { ListCapabilityCatalogResponse } from "@sourceweft/sdk";
+import type {
+  ListSkillsCatalogResponse,
+  ListWorkspaceSkillsResponse,
+} from "@sourceweft/contracts";
 import { removeDisabledToolSkills } from "./thread-utils";
+import { resolveDefaultActiveSkillIds } from "../../_components/chat-canvas/tool-selection";
 
 type UseThreadSourcesInput = {
   threadId: string;
   workspaceId: string | null;
 };
+
+function catalogBuiltinSkillToChatSkill(
+  skill: ListSkillsCatalogResponse["items"][number],
+): ChatSkillItem | null {
+  if (
+    skill.sourceType !== "builtin" ||
+    skill.installable ||
+    !skill.selectionId
+  ) {
+    return null;
+  }
+  return {
+    id: skill.selectionId,
+    catalogId: skill.catalogId,
+    slug: skill.slug,
+    name: skill.name,
+    displayName: skill.displayName,
+    description: skill.description,
+    sourceType: skill.sourceType,
+    version: skill.version,
+    hasReadme: skill.hasReadme,
+    capabilities: skill.capabilities,
+    models: skill.models,
+    tools: skill.tools,
+    slash: skill.slash,
+    slashConfig: skill.slashConfig,
+    commands: skill.commands,
+    defaultConfig: skill.defaultConfig,
+    defaultEnabled: skill.defaultEnabled,
+    options: skill.options,
+  };
+}
+
+function workspaceInstalledSkillToChatSkill(
+  skill: ListWorkspaceSkillsResponse["items"][number],
+): ChatSkillItem | null {
+  return {
+    id: skill.selectionId,
+    workspaceSkillId: skill.workspaceSkillId,
+    catalogId: skill.catalogId,
+    slug: skill.slug,
+    name: skill.name,
+    displayName: skill.displayName,
+    description: skill.description,
+    sourceType: skill.sourceType,
+    version: skill.version,
+    enabled: skill.enabled,
+    hasReadme: false,
+    capabilities: skill.capabilities,
+    models: skill.models,
+    tools: skill.tools,
+    slash: skill.slash,
+    slashConfig: skill.slashConfig,
+    commands: skill.commands,
+    defaultConfig: skill.defaultConfig,
+    options: skill.options,
+  };
+}
 
 export function useThreadSources({
   threadId,
@@ -35,12 +99,18 @@ export function useThreadSources({
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
   const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
+  const [hubSkills, setHubSkills] = useState<ChatSkillItem[]>([]);
+  const [capabilityCatalog, setCapabilityCatalog] =
+    useState<ListCapabilityCatalogResponse | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
   const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
-  const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>([]);
+  const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>(
+    [],
+  );
   const [selectionLoaded, setSelectionLoaded] = useState(false);
   const skillsLoadGenerationRef = useRef(0);
+  const capabilityCatalogLoadGenerationRef = useRef(0);
 
   const initialSourcesForWorkspace = useMemo(
     () => getCachedWorkspaceSources(workspaceId) ?? librarySources,
@@ -142,50 +212,51 @@ export function useThreadSources({
     const loadGeneration = ++skillsLoadGenerationRef.current;
     if (!workspaceId) {
       setAvailableSkills([]);
+      setHubSkills([]);
       setActiveSkillIds([]);
       return;
     }
 
     const activeWorkspaceId = workspaceId;
     try {
-      const result = await contentClient.listSkillsCatalog(activeWorkspaceId);
+      const [installedResult, catalogResult] = await Promise.all([
+        contentClient.listWorkspaceSkills(activeWorkspaceId),
+        contentClient.listSkillsCatalog(activeWorkspaceId),
+      ]);
       if (
         skillsLoadGenerationRef.current !== loadGeneration ||
         activeWorkspaceId !== workspaceId
       ) {
         return;
       }
-      const enabledSkills = result.items
-        .filter((skill) => skill.enabled && skill.enabledWorkspaceSkillId)
-        .map((skill) => ({
-          id: skill.enabledWorkspaceSkillId as string,
-          catalogId: skill.catalogId,
-          slug: skill.slug,
-          name: skill.name,
-          displayName: skill.displayName,
-          description: skill.description,
-          sourceType: skill.sourceType,
-          version: skill.version,
-          hasReadme: skill.hasReadme,
-          capabilities: skill.capabilities,
-          models: skill.models,
-          tools: skill.tools,
-          slash: skill.slash,
-          slashConfig: skill.slashConfig,
-          commands: skill.commands,
-          defaultConfig: skill.defaultConfig,
-        }));
+      const builtinOptionSkills = catalogResult.items
+        .map(catalogBuiltinSkillToChatSkill)
+        .filter((skill): skill is ChatSkillItem => Boolean(skill));
+      const workspaceInstalledSkills = installedResult.items
+        .map(workspaceInstalledSkillToChatSkill)
+        .filter((skill): skill is ChatSkillItem => Boolean(skill));
+      const enabledWorkspaceSkills = workspaceInstalledSkills.filter(
+        (skill) => skill.enabled,
+      );
+      const enabledSkills = [...builtinOptionSkills, ...enabledWorkspaceSkills];
       setAvailableSkills(enabledSkills);
+      setHubSkills([...builtinOptionSkills, ...workspaceInstalledSkills]);
 
-      const enabledIds = new Set(enabledSkills.map((skill) => skill.id));
+      const optionControlledIds = new Set(
+        builtinOptionSkills.map((skill) => skill.id),
+      );
       setActiveSkillIds((current) =>
-        current.filter((id) => enabledIds.has(id)).slice(0, 5),
+        resolveDefaultActiveSkillIds({
+          availableSkills: builtinOptionSkills,
+          currentSkillIds: current.filter((id) => optionControlledIds.has(id)),
+        }),
       );
     } catch {
       if (skillsLoadGenerationRef.current !== loadGeneration) {
         return;
       }
       setAvailableSkills([]);
+      setHubSkills([]);
       setActiveSkillIds([]);
     }
   }, [workspaceId]);
@@ -193,6 +264,33 @@ export function useThreadSources({
   useEffect(() => {
     void loadAvailableSkills();
   }, [loadAvailableSkills]);
+
+  useEffect(() => {
+    const loadGeneration = ++capabilityCatalogLoadGenerationRef.current;
+    if (!workspaceId) {
+      setCapabilityCatalog(null);
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    void contentClient
+      .listCapabilityCatalog(activeWorkspaceId)
+      .then((result) => {
+        if (
+          capabilityCatalogLoadGenerationRef.current !== loadGeneration ||
+          activeWorkspaceId !== workspaceId
+        ) {
+          return;
+        }
+        setCapabilityCatalog(result);
+      })
+      .catch(() => {
+        if (capabilityCatalogLoadGenerationRef.current !== loadGeneration) {
+          return;
+        }
+        setCapabilityCatalog({ commands: [], tools: [] });
+      });
+  }, [workspaceId]);
 
   const effectiveActiveSkillIds = useMemo(
     () =>
@@ -215,6 +313,8 @@ export function useThreadSources({
     activeSkillIds,
     activeSourceIds,
     availableSkills,
+    hubSkills,
+    capabilityCatalog,
     disabledToolNames,
     effectiveActiveSkillIds,
     handleLibrarySourcesLoad,

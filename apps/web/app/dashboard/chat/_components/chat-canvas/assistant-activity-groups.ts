@@ -16,9 +16,6 @@ function isToolRelatedActivityItem(item: AssistantActivityItem) {
   if (item.type === "step") {
     return typeof item.toolCallId === "string" && item.toolCallId.length > 0;
   }
-  if (item.type === "reasoning") {
-    return typeof item.toolCallId === "string" && item.toolCallId.length > 0;
-  }
   return false;
 }
 

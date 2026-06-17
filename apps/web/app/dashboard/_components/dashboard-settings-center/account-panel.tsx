@@ -6,7 +6,9 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
+import { DEFAULT_USER_THEME } from "@sourceweft/contracts";
 import { authClient } from "../../../../lib/auth-client";
+import { userSettingsClient } from "../../../../lib/sdk";
 import { RawImage } from "../../../_components/raw-image";
 
 export function AccountPanel({
@@ -29,6 +31,7 @@ export function AccountPanel({
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isSigningOut, setIsSigningOut] = React.useState(false);
+  const [isThemeSaving, setIsThemeSaving] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const { theme, setTheme } = useTheme();
 
@@ -109,6 +112,25 @@ export function AccountPanel({
       await authClient.signOut();
     } finally {
       setIsSigningOut(false);
+    }
+  }
+
+  async function handleThemeChange(nextTheme: "light" | "system" | "dark") {
+    const previousTheme =
+      theme === "light" || theme === "dark" || theme === "system"
+        ? theme
+        : DEFAULT_USER_THEME;
+    setTheme(nextTheme);
+    setIsThemeSaving(true);
+    try {
+      await userSettingsClient.updateSettings({
+        appearance: { theme: nextTheme },
+      });
+    } catch {
+      setTheme(previousTheme);
+      toast.error("Unable to save theme.");
+    } finally {
+      setIsThemeSaving(false);
     }
   }
 
@@ -222,12 +244,13 @@ export function AccountPanel({
               <button
                 className={cn(
                   "rounded-md px-3 py-1 text-xs transition-colors",
-                  (theme ?? "system") === t
+                  (theme ?? DEFAULT_USER_THEME) === t
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
+                disabled={isThemeSaving}
                 key={t}
-                onClick={() => setTheme(t)}
+                onClick={() => void handleThemeChange(t)}
                 type="button"
               >
                 {t.charAt(0).toUpperCase() + t.slice(1)}

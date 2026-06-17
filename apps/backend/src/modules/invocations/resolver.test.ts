@@ -8,14 +8,21 @@ function provider(definitions: SelectableInvocationDefinition[]) {
   return { id: "fake", list: () => definitions };
 }
 
-const builtinDefinition: SelectableInvocationDefinition = {
-  id: "builtin_tool.generate_image",
+const capabilityToolDefinition: SelectableInvocationDefinition = {
+  id: "cap:sourceweft/generate-image:generate_image",
   label: "Generate image",
   enabled: true,
-  sourceRef: { kind: "builtin_tool", toolName: "generate_image" },
+  sourceRef: {
+    kind: "capability_tool",
+    capabilityId: "sourceweft/generate-image",
+    contributionId: "generate_image",
+    legacyToolName: "generate_image",
+    sourcePackageName: null,
+    toolName: "generate_image",
+  },
   semantics: {
     kind: "fixed_tool_choice",
-    target: "builtin_tool",
+    target: "capability_tool",
     toolName: "generate_image",
   },
 };
@@ -88,15 +95,16 @@ const directExecuteDefinition: SelectableInvocationDefinition = {
   },
 };
 
-test("resolver resolves built-in selection to bind tool choice", () => {
-  const registry = createSelectableInvocationRegistry({ providers: [provider([builtinDefinition])] });
+test("resolver resolves capability tool selection to bind tool choice", () => {
+  const registry = createSelectableInvocationRegistry({ providers: [provider([capabilityToolDefinition])] });
   const result = resolveInvocationSelection({
     registry,
-    envelope: { selectableId: builtinDefinition.id, userInput: "make an image" },
+    envelope: { selectableId: capabilityToolDefinition.id, userInput: "make an image" },
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.ok ? result.plan.kind : null, "bind_tool_choice");
+  assert.equal(result.ok ? result.plan.sourceRef.kind : null, "capability_tool");
 });
 
 test("resolver resolves skill command to context injection only", () => {
@@ -186,7 +194,7 @@ test("resolver resolves MCP prompt and resource to typed planned states", () => 
 });
 
 test("resolver returns normalized error for unavailable or missing explicit selection", () => {
-  const unavailable = { ...builtinDefinition, enabled: false, unavailableReason: "Disabled" };
+  const unavailable = { ...capabilityToolDefinition, enabled: false, unavailableReason: "Disabled" };
   const registry = createSelectableInvocationRegistry({ providers: [provider([unavailable])] });
   const disabledResult = resolveInvocationSelection({
     registry,

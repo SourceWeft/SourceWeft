@@ -1,4 +1,4 @@
-import { isVideoPresentationArtifactToolName } from "@sourceweft/sdk";
+import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
 import { resolveGeneratedPresentationArtifact } from "../../_components/chat-canvas/message-assets";
 import type { ArtifactStatusSnapshot } from "../../_components/chat-canvas";
 import type { contentClient } from "../../../../../lib/sdk";
@@ -37,7 +37,7 @@ export function collectPendingVideoPresentationArtifactIds(
 
   for (const message of messages) {
     for (const toolCall of resolveToolCallsFromMetadata(message.metadata)) {
-      if (!isVideoPresentationArtifactToolName(toolCall.tool)) {
+      if (!hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")) {
         continue;
       }
       const artifact = resolveGeneratedPresentationArtifact(toolCall);

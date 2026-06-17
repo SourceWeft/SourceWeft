@@ -8,11 +8,7 @@ import { dispatchDashboardBillingSummaryRefresh } from "../../_components/dashbo
 export type ActiveThreadRun = {
   id?: string;
   idempotencyKey: string;
-  status:
-    | "queued"
-    | "running"
-    | "cancel_requested"
-    | "waiting_for_approval";
+  status: "queued" | "running" | "cancel_requested" | "waiting_for_approval";
   mode?: "send" | "refresh" | "edit" | "resume";
   userMessageId?: string | null;
   assistantMessageId?: string | null;
@@ -39,7 +35,10 @@ export function resolveChatExecutionState(input: {
   activeThreadRun: ActiveThreadRun | null;
   isStopping: boolean;
 }): ChatExecutionState {
-  if (input.isStopping || input.activeThreadRun?.status === "cancel_requested") {
+  if (
+    input.isStopping ||
+    input.activeThreadRun?.status === "cancel_requested"
+  ) {
     return "stopping";
   }
   if (input.activeThreadRun?.status === "waiting_for_approval") {
@@ -49,6 +48,30 @@ export function resolveChatExecutionState(input: {
     return "executing";
   }
   return "idle";
+}
+
+export function resolveWaitingForApprovalRun(input: {
+  assistantMessageId?: string | null;
+  current: ActiveThreadRun | null;
+  durableRunKey: string;
+  mode?: ActiveThreadRun["mode"];
+  threadRunId?: string | null;
+}): ActiveThreadRun | null {
+  if (input.current && input.current.idempotencyKey !== input.durableRunKey) {
+    return input.current;
+  }
+
+  return {
+    ...(input.current ?? {}),
+    idempotencyKey: input.durableRunKey,
+    ...(input.threadRunId ? { id: input.threadRunId } : {}),
+    assistantMessageId:
+      input.assistantMessageId ?? input.current?.assistantMessageId ?? null,
+    ...((input.mode ?? input.current?.mode)
+      ? { mode: input.mode ?? input.current?.mode }
+      : {}),
+    status: "waiting_for_approval",
+  };
 }
 
 export function useChatStreamRunnerControl({

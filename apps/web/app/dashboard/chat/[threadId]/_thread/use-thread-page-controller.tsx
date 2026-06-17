@@ -35,7 +35,10 @@ import {
 } from "../../../../../lib/desktop-bridge";
 import { contentClient, connectorsClient } from "../../../../../lib/sdk";
 import type { SourceConnector } from "@sourceweft/sdk";
-import { useChatStreamRunnerControl } from "../chat-stream-runner-control";
+import {
+  resolveWaitingForApprovalRun,
+  useChatStreamRunnerControl,
+} from "../chat-stream-runner-control";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
 import { useThreadMessages } from "./use-thread-messages";
 import { useThreadModels } from "./use-thread-models";
@@ -56,16 +59,18 @@ import {
 } from "./video-presentation-artifacts";
 import {
   buildToolConfirmationResumeStreamInput,
+  createToolConfirmationResumeQueueState,
   flushPendingToolConfirmationResume,
   resolveToolConfirmationResumeRequest,
   type ToolConfirmationResumeRequest,
+  type ToolConfirmationResumeQueueState,
 } from "./tool-confirmation-resume-queue";
 import {
   resolveContextSourceIds,
   resolveEditSourceIds,
   resolveRefreshSourceIds,
 } from "./message-groups";
-import { mergeSourceIds } from "./thread-utils";
+import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
@@ -110,6 +115,7 @@ export function useThreadPageController({
     toggleSourcesVisible,
     updateChatTitle,
     updateChatSourceCount,
+    rememberChatPreferences,
     workspaceId,
     workspaceName,
     workspaces,
@@ -141,10 +147,14 @@ export function useThreadPageController({
   >(null);
   const [activeConnectorTools, setActiveConnectorTools] =
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
-  const [toolConfirmationInterventionSignal, setToolConfirmationInterventionSignal] =
-    useState<ToolConfirmationInterventionSignal | null>(null);
-  const pendingToolConfirmationResumeRef =
-    useRef<ToolConfirmationResumeRequest | null>(null);
+  const [
+    toolConfirmationInterventionSignal,
+    setToolConfirmationInterventionSignal,
+  ] = useState<ToolConfirmationInterventionSignal | null>(null);
+  const toolConfirmationResumeQueueRef =
+    useRef<ToolConfirmationResumeQueueState>(
+      createToolConfirmationResumeQueueState(),
+    );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -180,6 +190,8 @@ export function useThreadPageController({
     activeSkillIds,
     activeSourceIds,
     availableSkills,
+    hubSkills,
+    capabilityCatalog,
     disabledToolNames,
     effectiveActiveSkillIds,
     handleLibrarySourcesLoad,
@@ -196,9 +208,12 @@ export function useThreadPageController({
     setActiveSkillIds,
     setDisabledToolNames,
   } = useThreadSources({ threadId, workspaceId });
-  const handleConnectorsChange = useCallback((connectors: SourceConnector[]) => {
-    setActiveConnectorTools(resolveActiveConnectorToolState(connectors));
-  }, []);
+  const handleConnectorsChange = useCallback(
+    (connectors: SourceConnector[]) => {
+      setActiveConnectorTools(resolveActiveConnectorToolState(connectors));
+    },
+    [],
+  );
   const handleMcpSelectionChange = useCallback(
     (selection: { installIds?: string[]; toolIds?: string[] }) => {
       setActiveMcpInstallIds(selection.installIds ?? []);
@@ -240,6 +255,7 @@ export function useThreadPageController({
   } = useThreadModels({
     availableSkills,
     effectiveActiveSkillIds,
+    onChatPreferencesChange: rememberChatPreferences,
     threadId,
     workspaceId,
   });
@@ -342,9 +358,7 @@ export function useThreadPageController({
         const failureCount =
           (videoPresentationPollFailuresRef.current.get(artifactId) ?? 0) + 1;
         videoPresentationPollFailuresRef.current.set(artifactId, failureCount);
-        if (
-          failureCount < VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES
-        ) {
+        if (failureCount < VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES) {
           return;
         }
 
@@ -458,7 +472,9 @@ export function useThreadPageController({
       .list(workspaceId)
       .then((result) => {
         if (!cancelled) {
-          setActiveConnectorTools(resolveActiveConnectorToolState(result.items));
+          setActiveConnectorTools(
+            resolveActiveConnectorToolState(result.items),
+          );
         }
       })
       .catch(() => {
@@ -485,11 +501,25 @@ export function useThreadPageController({
     onToolConfirmationRequested: ({
       assistantMessageId,
       liveConfirmations,
+      mode,
       runKey,
       threadRunId,
     }) => {
+      setActiveThreadRun((current) =>
+        resolveWaitingForApprovalRun({
+          assistantMessageId,
+          current,
+          durableRunKey: runKey,
+          mode,
+          threadRunId,
+        }),
+      );
       setToolConfirmationInterventionSignal({
-        id: `${Date.now()}:${Math.random().toString(36).slice(2)}`,
+        id: [
+          runKey,
+          assistantMessageId ?? "assistant:unknown",
+          ...liveConfirmations.map((item) => item.confirmation.id),
+        ].join(":"),
         assistantMessageId,
         liveConfirmations,
         runKey,
@@ -533,12 +563,23 @@ export function useThreadPageController({
     loadThreadMessagesRef.current = loadThreadMessagesWithStatus;
   }, [loadThreadMessagesWithStatus]);
 
-  useEffect(() => {
+  useBrowserLayoutEffect(() => {
+    if (
+      !shouldResetThreadLocalState({
+        bootstrappedThreadKey: bootstrappedThreadKeyRef.current,
+        threadId,
+        workspaceId,
+      })
+    ) {
+      return;
+    }
     clearEditingState();
     resetVersioningState();
     setStreamingAssistantSnapshot(null);
     setArtifactStatuses(new Map());
     setToolConfirmationInterventionSignal(null);
+    toolConfirmationResumeQueueRef.current =
+      createToolConfirmationResumeQueueState();
     clearTerminalLocalRunState();
   }, [
     clearEditingState,
@@ -564,7 +605,7 @@ export function useThreadPageController({
     setSelectedModels,
     setStreamWithSelectedLlm,
     setThinkingSettings,
-    streamThreadActionRef,
+    streamThreadAction,
     threadId,
     workspaceId,
   });
@@ -671,12 +712,11 @@ export function useThreadPageController({
       return;
     }
 
-    const hasPendingVideoPresentation = pendingVideoPresentationArtifactIds.some(
-      (artifactId) => {
+    const hasPendingVideoPresentation =
+      pendingVideoPresentationArtifactIds.some((artifactId) => {
         const status = artifactStatuses.get(artifactId)?.status ?? "pending";
         return status === "pending" || status === "running";
-      },
-    );
+      });
     if (!hasPendingVideoPresentation) {
       return;
     }
@@ -801,6 +841,7 @@ export function useThreadPageController({
           skillIds: selectedSkillIds,
           tools,
           command: input.command,
+          invocation: input.invocation,
           searchEnabled,
           userMessageId: editingMessageId,
           assistantMessageId: editingAssistantMessageId,
@@ -817,6 +858,7 @@ export function useThreadPageController({
         skillIds: selectedSkillIds,
         tools,
         command: input.command,
+        invocation: input.invocation,
         searchEnabled,
       });
     },
@@ -908,8 +950,9 @@ export function useThreadPageController({
       const next = resolveToolConfirmationResumeRequest({
         isStreaming,
         request: input,
+        state: toolConfirmationResumeQueueRef.current,
       });
-      pendingToolConfirmationResumeRef.current = next.pending;
+      toolConfirmationResumeQueueRef.current = next.state;
       if (!next.runnable) {
         return;
       }
@@ -921,9 +964,9 @@ export function useThreadPageController({
   useEffect(() => {
     const next = flushPendingToolConfirmationResume({
       isStreaming,
-      pending: pendingToolConfirmationResumeRef.current,
+      state: toolConfirmationResumeQueueRef.current,
     });
-    pendingToolConfirmationResumeRef.current = next.pending;
+    toolConfirmationResumeQueueRef.current = next.state;
     if (!next.runnable) {
       return;
     }
@@ -1003,6 +1046,8 @@ export function useThreadPageController({
     artifactsRefreshKey,
     availableModels,
     availableSkills,
+    hubSkills,
+    capabilityCatalog,
     byokCredentials,
     byokModelConfig,
     byokModels,

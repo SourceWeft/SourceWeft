@@ -56,9 +56,27 @@ function resolveAttachOnlyAssistantMessage(input: {
   );
 }
 
+function getThreadBootstrapKey(
+  workspaceId: string | null | undefined,
+  threadId: string,
+) {
+  return workspaceId ? `${workspaceId}:${threadId}` : null;
+}
+
+function shouldResetThreadLocalState(input: {
+  bootstrappedThreadKey: string | null;
+  threadId: string;
+  workspaceId: string | null | undefined;
+}) {
+  const bootstrapKey = getThreadBootstrapKey(input.workspaceId, input.threadId);
+  return !bootstrapKey || input.bootstrappedThreadKey !== bootstrapKey;
+}
+
 export {
+  getThreadBootstrapKey,
   mergeSourceIds,
   removeDisabledToolSkills,
   resolveAttachOnlyAssistantMessage,
   resolveClientTimezone,
+  shouldResetThreadLocalState,
 };

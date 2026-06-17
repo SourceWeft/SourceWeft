@@ -1,4 +1,4 @@
-import { closeDatabase } from "../shared/database";
+import { closeDatabase } from "@sourceweft/db";
 import { parseSyncLocale, syncNotionBlog } from "../modules/blog/sync";
 
 type CliOptions = {

@@ -15,11 +15,12 @@ import {
   GeneratedPresentationArtifactBlock,
 } from "./reasoning-trace";
 import { AssistantToolCard } from "./assistant-tool-card";
+import { WebToolResults } from "../web-tool-results";
 import type {
   ArtifactPreviewRecord,
   ArtifactStatusSnapshot,
   CitationRecord,
-  MessageVersion,
+  ToolCallRecord,
   ToolConfirmationResolution,
 } from "./types";
 
@@ -41,21 +42,25 @@ export function AssistantWorkflowAccordion({
   onCitationClick,
   onWorkfileClick,
   resolvedConfirmations,
-  version,
+  availableCitations,
+  citations,
+  toolCalls,
   workspaceId,
 }: {
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
+  availableCitations?: CitationRecord[];
   blocks: AssistantWorkflowBlock[];
+  citations?: CitationRecord[];
   durationMs?: number | null;
   isRunning: boolean;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
   resolvedConfirmations?: ToolConfirmationResolution[];
-  version: MessageVersion;
+  toolCalls?: ToolCallRecord[];
   workspaceId?: string | null;
 }) {
-  const inferredDurationMs = inferWorkflowDurationMs({ blocks, version });
+  const inferredDurationMs = inferWorkflowDurationMs({ blocks, toolCalls });
   const resolvedDurationMs =
     typeof durationMs === "number" && Number.isFinite(durationMs)
       ? durationMs
@@ -63,7 +68,7 @@ export function AssistantWorkflowAccordion({
   const shouldDefaultOpen = shouldWorkflowAccordionDefaultOpen({
     blocks,
     isRunning,
-    version,
+    toolCalls,
   });
   const [isOpen, setIsOpen] = useState(shouldDefaultOpen);
   const label = getWorkflowHeaderLabel({
@@ -111,8 +116,8 @@ export function AssistantWorkflowAccordion({
             if (block.type === "reasoning" || block.type === "text") {
               return (
                 <CitationAwareMessageResponse
-                  availableCitations={version.availableCitations}
-                  citations={version.citations}
+                  availableCitations={availableCitations}
+                  citations={citations}
                   key={block.id}
                   onCitationClick={onCitationClick}
                   onWorkfileClick={onWorkfileClick}
@@ -122,7 +127,7 @@ export function AssistantWorkflowAccordion({
               );
             }
 
-            const toolCall = version.toolCalls?.find(
+            const toolCall = toolCalls?.find(
               (item) => item.id === block.toolCallId,
             );
             if (!toolCall) {
@@ -153,12 +158,19 @@ export function AssistantWorkflowAccordion({
             }
 
             return (
-              <AssistantToolCard
-                key={block.id}
-                onWorkfileClick={onWorkfileClick}
-                resolvedConfirmations={resolvedConfirmations}
-                toolCall={toolCall}
-              />
+              <div key={block.id}>
+                <AssistantToolCard
+                  onWorkfileClick={onWorkfileClick}
+                  resolvedConfirmations={resolvedConfirmations}
+                  toolCall={toolCall}
+                />
+                <WebToolResults
+                  availableCitations={availableCitations}
+                  onCitationClick={onCitationClick}
+                  toolCall={toolCall}
+                  variant="activity-row"
+                />
+              </div>
             );
           })}
           {showRunningTextLoading ? <LoadingDots /> : null}

@@ -90,6 +90,29 @@ function targetPath(value: Record<string, unknown>) {
   );
 }
 
+function prepareSourcePath(value: Record<string, unknown>) {
+  return stringValue(value.sourcePath) ?? stringValue(value.path);
+}
+
+function prepareSandboxPath(value: Record<string, unknown>) {
+  return stringValue(value.sandboxPath) ?? stringValue(value.targetPath);
+}
+
+function formatPrepareMappingList(files: Record<string, unknown>[]) {
+  if (files.length === 0) {
+    return null;
+  }
+  const visible = files.slice(0, 3).map((file) => {
+    const sourcePath = prepareSourcePath(file) ?? "unknown source";
+    const sandboxPath = prepareSandboxPath(file) ?? "unknown sandbox path";
+    return `${sourcePath} -> ${sandboxPath}`;
+  });
+  const remaining = files.length - visible.length;
+  return remaining > 0
+    ? `${visible.join(", ")}, +${remaining} more`
+    : visible.join(", ");
+}
+
 export function parseSandboxToolResultDisplay(
   resultValue: unknown,
 ): SandboxToolResultDisplay | null {
@@ -299,6 +322,7 @@ export function getSandboxToolResultSummary(input: {
 }
 
 export function getSandboxToolResultDetails(input: {
+  input?: unknown;
   output: unknown;
   toolName: string;
 }): SandboxToolResultDetail[] {
@@ -315,10 +339,12 @@ export function getSandboxToolResultDetails(input: {
   const byteCount = formatByteCount(result.totalBytes);
 
   if (input.toolName === "prepare_sandbox_workspace") {
+    const requestedFiles = arrayRecord(record(input.input)?.files);
+    const inputCount = Math.max(result.filePaths.length, requestedFiles.length);
     details.push({ label: "Operation", value: "Prepared sandbox workspace" });
     details.push({
       label: "Inputs",
-      value: `${result.filePaths.length} file${result.filePaths.length === 1 ? "" : "s"}`,
+      value: `${inputCount} file${inputCount === 1 ? "" : "s"}`,
     });
     if (byteCount) {
       details.push({ label: "Size", value: byteCount });
@@ -326,6 +352,10 @@ export function getSandboxToolResultDetails(input: {
     const paths = formatPathList(result.filePaths);
     if (paths) {
       details.push({ label: "Input paths", value: paths });
+    }
+    const requestedMappings = formatPrepareMappingList(requestedFiles);
+    if (requestedMappings) {
+      details.push({ label: "Requested transfer", value: requestedMappings });
     }
   } else if (input.toolName === "collect_sandbox_outputs") {
     details.push({ label: "Operation", value: "Collected sandbox outputs" });
@@ -370,7 +400,9 @@ export function getSandboxCollectedWorkfilePaths(input: {
   }
 
   return Array.from(
-    new Set(result.outputPaths.filter((path) => path.startsWith("/work/"))),
+    new Set(
+      result.outputPaths.filter((path) => path.startsWith("/workfiles/")),
+    ),
   );
 }
 
@@ -414,15 +446,15 @@ const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
   SANDBOX_BINARY_OUTPUT_UNSUPPORTED:
     "This sandbox output appears to be binary. Binary output collection is not supported here yet; use a supported artifact flow when available.",
   SANDBOX_COLLECT_CONFLICT:
-    "A target /work file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
+    "A target /workfiles file already exists. Choose a different destination or approve the operation again with overwrite enabled.",
   SANDBOX_COLLECT_PATH_DENIED:
-    "The requested sandbox output path is outside the allowed collection area. Collect from /workspace/output or /workspace/work.",
+    "The requested sandbox output path is outside the provider-allowed collection area. Use one of the sandbox collect source roots shown in the runtime instructions.",
   SANDBOX_COMMAND_TIMEOUT:
     "The sandbox command exceeded the configured timeout. Try a shorter command or split the work into smaller steps.",
   SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT:
     "The sandbox returned an unsupported download result. Try collecting a plain text output file instead.",
   SANDBOX_EXECUTE_CWD_DENIED:
-    "The command working directory must stay inside sandbox /workspace.",
+    "The command working directory must stay inside the provider sandbox workspace root.",
   SANDBOX_FILE_NOT_FOUND:
     "The requested sandbox file was not found. Re-run the command or check the output path before collecting.",
   SANDBOX_FILE_TOO_LARGE:
@@ -432,7 +464,7 @@ const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
   SANDBOX_NOT_FOUND_OR_EXPIRED:
     "The sandbox was not found or has expired. Retry the operation to create a fresh sandbox.",
   SANDBOX_PREPARE_PATH_DENIED:
-    "The requested prepare path is outside the allowed /work to /workspace/input or /workspace/work boundary.",
+    "Prepare requires sourcePath under SourceWeft DB-backed /workfiles and sandboxPath under a provider-allowed prepare target root.",
   SANDBOX_PROVIDER_AUTH_FAILED:
     "Sandbox credentials were rejected. Ask an operator to check the backend sandbox credentials.",
   SANDBOX_PROVIDER_ERROR:

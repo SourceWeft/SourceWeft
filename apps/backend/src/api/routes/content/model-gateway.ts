@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { contentService } from "../../../modules/content";
+import { contentThreadService } from "../../../modules/threads";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { requireRouteParam } from "./helpers";
@@ -11,7 +11,7 @@ export function registerModelGatewayRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.listThreadModelCatalog({
+    const result = await contentThreadService.listThreadModelCatalog({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
     });

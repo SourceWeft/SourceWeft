@@ -57,6 +57,8 @@ function HubSlot() {
       initialSources={registration.initialSources}
       initialSourcesLoaded={registration.initialSourcesLoaded}
       installedSkills={registration.availableSkills}
+      hubSkills={registration.hubSkills}
+      capabilityCatalog={registration.capabilityCatalog}
       mode={registration.mode}
       onArtifactOpen={registration.onArtifactOpen}
       onCitationLocate={registration.onCitationLocate}
@@ -91,10 +93,7 @@ function MobileHubDrawer() {
   }
 
   return (
-    <Sheet
-      open={context.mobileHubOpen}
-      onOpenChange={context.setMobileHubOpen}
-    >
+    <Sheet open={context.mobileHubOpen} onOpenChange={context.setMobileHubOpen}>
       <SheetContent
         className="w-[calc(100vw-1rem)] max-w-[360px] gap-0 overflow-hidden p-0 sm:w-[380px] sm:max-w-[380px] [&>button]:hidden"
         side="right"
@@ -109,6 +108,8 @@ function MobileHubDrawer() {
           initialSources={registration.initialSources}
           initialSourcesLoaded={registration.initialSourcesLoaded}
           installedSkills={registration.availableSkills}
+          hubSkills={registration.hubSkills}
+          capabilityCatalog={registration.capabilityCatalog}
           mode={registration.mode}
           onArtifactOpen={(artifact) => {
             registration.onArtifactOpen(artifact);
@@ -147,7 +148,8 @@ function ChatHubScaffold({
   children: ReactNode;
   mode: ChatHubMode;
 }) {
-  const { sourcesVisible, workspaceId, workspaceName } = useDashboardChatState();
+  const { sourcesVisible, workspaceId, workspaceName } =
+    useDashboardChatState();
   const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
   const isPersistentLayout = useMediaQuery("(min-width: 768px)");
 

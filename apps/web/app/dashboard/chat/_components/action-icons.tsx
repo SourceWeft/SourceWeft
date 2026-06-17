@@ -1,7 +1,7 @@
 import {
   getAgentToolDefinition,
   getAgentToolSlashCommand,
-} from "@sourceweft/sdk";
+} from "@sourceweft/agent-tool-registry";
 import type {
   PromptInputCommandIconName,
   PromptInputCommandIconTone,

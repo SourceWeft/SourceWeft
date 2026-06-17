@@ -32,6 +32,7 @@ export function createStreamingRenderBuffer({
 
       renderBlocks.push({
         id: `stream-generated-image-${toolCallId}`,
+        placement: "terminal",
         type: "generated_image",
         toolCallId,
       });
@@ -50,6 +51,7 @@ export function createStreamingRenderBuffer({
 
       renderBlocks.push({
         id: `stream-generated-presentation-${toolCallId}`,
+        placement: "terminal",
         type: "generated_presentation",
         toolCallId,
       });

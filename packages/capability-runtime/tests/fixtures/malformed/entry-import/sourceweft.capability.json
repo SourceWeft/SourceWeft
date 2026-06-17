@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "local/entry-import",
+  "kind": "tool",
+  "name": "Entry Import Guard",
+  "version": "0.0.0",
+  "entry": "./entry.js",
+  "contributes": {
+    "commands": [],
+    "skills": [],
+    "tools": [],
+    "vfs": [],
+    "artifacts": [],
+    "retrieval": [],
+    "mcp": []
+  }
+}

@@ -2,6 +2,8 @@ import type { SelectableInvocationDefinition } from "./types";
 
 export type SelectableInvocationDefinitionWithAlias =
   SelectableInvocationDefinition & {
+    alternateSlashAliases?: readonly string[];
+    legacyIds?: readonly string[];
     slashAlias?: string;
   };
 
@@ -26,30 +28,37 @@ export function createSelectableInvocationRegistry(input: {
 }): SelectableInvocationRegistry {
   let cachedDefinitions: SelectableInvocationDefinitionWithAlias[] | null = null;
   let cachedAliasMap: Map<string, SelectableInvocationDefinitionWithAlias> | null = null;
+  let cachedIdMap: Map<string, SelectableInvocationDefinitionWithAlias> | null = null;
 
   function build() {
-    if (cachedDefinitions && cachedAliasMap) {
-      return { definitions: cachedDefinitions, aliasMap: cachedAliasMap };
+    if (cachedDefinitions && cachedAliasMap && cachedIdMap) {
+      return {
+        aliasMap: cachedAliasMap,
+        definitions: cachedDefinitions,
+        idMap: cachedIdMap,
+      };
     }
 
     const definitions: SelectableInvocationDefinitionWithAlias[] = [];
-    const ids = new Set<string>();
     const aliasMap = new Map<string, SelectableInvocationDefinitionWithAlias>();
+    const idMap = new Map<string, SelectableInvocationDefinitionWithAlias>();
 
     for (const provider of input.providers) {
       if (provider.enabled === false) {
         continue;
       }
       for (const definition of provider.list()) {
-        if (ids.has(definition.id)) {
-          throw new Error(
-            `SCHEMA_MISMATCH: Duplicate selectable invocation id: ${definition.id}`,
-          );
+        registerId(idMap, definition.id, definition, "id");
+        for (const legacyId of definition.legacyIds ?? []) {
+          registerId(idMap, legacyId, definition, "legacy id");
         }
-        ids.add(definition.id);
 
-        if (definition.slashAlias) {
-          const alias = normalizeSlashAlias(definition.slashAlias);
+        const slashAliases = [
+          ...(definition.slashAlias ? [definition.slashAlias] : []),
+          ...(definition.alternateSlashAliases ?? []),
+        ];
+        for (const slashAlias of slashAliases) {
+          const alias = normalizeSlashAlias(slashAlias);
           if (aliasMap.has(alias)) {
             throw new Error(
               `SCHEMA_MISMATCH: Duplicate selectable invocation slash alias: ${alias}`,
@@ -64,7 +73,28 @@ export function createSelectableInvocationRegistry(input: {
 
     cachedDefinitions = definitions;
     cachedAliasMap = aliasMap;
-    return { definitions, aliasMap };
+    cachedIdMap = idMap;
+    return { definitions, aliasMap, idMap };
+  }
+
+  function registerId(
+    idMap: Map<string, SelectableInvocationDefinitionWithAlias>,
+    id: string,
+    definition: SelectableInvocationDefinitionWithAlias,
+    label: "id" | "legacy id",
+  ) {
+    const existing = idMap.get(id);
+    if (existing && existing !== definition) {
+      if (label === "id") {
+        throw new Error(
+          `SCHEMA_MISMATCH: Duplicate selectable invocation id: ${definition.id}`,
+        );
+      }
+      throw new Error(
+        `SCHEMA_MISMATCH: Duplicate selectable invocation legacy id: ${id}`,
+      );
+    }
+    idMap.set(id, definition);
   }
 
   return {
@@ -72,7 +102,7 @@ export function createSelectableInvocationRegistry(input: {
       return [...build().definitions];
     },
     resolve(id) {
-      return build().definitions.find((definition) => definition.id === id) ?? null;
+      return build().idMap.get(id) ?? null;
     },
     resolveAlias(alias) {
       return build().aliasMap.get(normalizeSlashAlias(alias)) ?? null;

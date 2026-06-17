@@ -1,154 +1,289 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { AGENT_TOOL_NAMES } from "@sourceweft/sdk";
 import {
+  AGENT_TOOL_NAMES,
+  registerAgentTools,
+} from "@sourceweft/agent-tool-registry";
+import {
+  buildChatToolsRequest,
   buildComposerToolsSelection,
-  DEFAULT_IMAGE_ARTIFACT_CONFIG,
-  DEFAULT_PPTX_ARTIFACT_CONFIG,
+  buildSkillOptionToolsSelection,
+  isCapabilityToolVisibleInComposerOptions,
+  resolveDefaultActiveSkillIds,
 } from "./tool-selection";
 
-test("buildComposerToolsSelection includes custom pptx design settings", () => {
-  const tools = buildComposerToolsSelection({
-    imageGenerationEnabled: true,
-    imageSupported: false,
-    imageConfig: DEFAULT_IMAGE_ARTIFACT_CONFIG,
-    pptxConfig: {
-      design: {
-        ...DEFAULT_PPTX_ARTIFACT_CONFIG.design,
-        aspectRatio: "16:10",
-        stylePreset: "technical",
+const TEST_NOTION_TOOL = "test_notion_pages";
+
+registerAgentTools([
+  {
+    id: "testNotionPages",
+    name: TEST_NOTION_TOOL,
+    domain: "connector",
+    capabilities: ["connector", "notion", "connector_read"],
+    activation: {
+      default: "off",
+      userControl: "enable-disable",
+      skill: {
+        declarable: true,
+        activates: true,
       },
-      generationMode: DEFAULT_PPTX_ARTIFACT_CONFIG.generationMode,
-      output: {
-        ...DEFAULT_PPTX_ARTIFACT_CONFIG.output,
-        includeSourceJson: true,
-      },
-      rendering: DEFAULT_PPTX_ARTIFACT_CONFIG.rendering,
     },
-    pptxGenerationEnabled: true,
-    selectedSkills: [],
+    defaultPermission: "allow",
+    riskLevel: "low",
+  },
+]);
+
+test("buildChatToolsRequest preserves dynamic tool selections and invoked skills", () => {
+  const tools = buildChatToolsRequest({
+    invokedSkillIds: ["skill-invoked"],
+    skillIds: ["skill-selected"],
+    tools: {
+      generate_image: {
+        enabled: true,
+        config: {
+          aspectRatio: "16:9",
+          style: "cartoon",
+        },
+      },
+      mcp: {
+        enabled: true,
+        installIds: ["mcp-1"],
+        toolIds: ["tool-1"],
+      },
+    },
   });
 
-  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generatePptx], {
-    enabled: true,
-    design: {
-      aspectRatio: "16:10",
-      language: "auto",
-      stylePreset: "technical",
+  assert.deepEqual(tools, {
+    skillIds: ["skill-selected"],
+    invokedSkillIds: ["skill-invoked"],
+    generate_image: {
+      enabled: true,
+      config: {
+        aspectRatio: "16:9",
+        style: "cartoon",
+      },
     },
-    output: {
-      includeSourceJson: true,
+    mcp: {
+      enabled: true,
+      installIds: ["mcp-1"],
+      toolIds: ["tool-1"],
     },
   });
 });
 
-test("buildComposerToolsSelection sends only supported pptx output settings", () => {
-  const tools = buildComposerToolsSelection({
-    imageGenerationEnabled: true,
-    imageSupported: false,
-    imageConfig: DEFAULT_IMAGE_ARTIFACT_CONFIG,
-    pptxConfig: {
-      design: DEFAULT_PPTX_ARTIFACT_CONFIG.design,
-      generationMode: DEFAULT_PPTX_ARTIFACT_CONFIG.generationMode,
-      output: {
-        ...DEFAULT_PPTX_ARTIFACT_CONFIG.output,
-        includeSourceJson: true,
+test("buildChatToolsRequest serializes web access as search and fetch selections", () => {
+  assert.deepEqual(
+    buildChatToolsRequest({
+      searchEnabled: false,
+      skillIds: [],
+    }),
+    {
+      skillIds: [],
+      [AGENT_TOOL_NAMES.webSearch]: { enabled: false },
+      [AGENT_TOOL_NAMES.webFetch]: { enabled: false },
+    },
+  );
+
+  assert.deepEqual(
+    buildChatToolsRequest({
+      searchEnabled: true,
+      tools: {
+        [AGENT_TOOL_NAMES.webSearch]: { enabled: false },
       },
-      rendering: DEFAULT_PPTX_ARTIFACT_CONFIG.rendering,
+    }),
+    {
+      skillIds: [],
+      [AGENT_TOOL_NAMES.webSearch]: { enabled: true },
+      [AGENT_TOOL_NAMES.webFetch]: { enabled: true },
     },
-    pptxGenerationEnabled: true,
+  );
+});
+
+test("composer options hide internal web, retrieval, and sandbox tools", () => {
+  assert.equal(
+    isCapabilityToolVisibleInComposerOptions({
+      toolName: AGENT_TOOL_NAMES.generateImage,
+    }),
+    true,
+  );
+  assert.equal(
+    isCapabilityToolVisibleInComposerOptions({
+      toolName: AGENT_TOOL_NAMES.publishSandboxArtifact,
+    }),
+    false,
+  );
+  assert.equal(
+    isCapabilityToolVisibleInComposerOptions({
+      toolName: AGENT_TOOL_NAMES.webSearch,
+    }),
+    false,
+  );
+  assert.equal(
+    isCapabilityToolVisibleInComposerOptions({
+      toolName: AGENT_TOOL_NAMES.webFetch,
+    }),
+    false,
+  );
+  assert.equal(
+    isCapabilityToolVisibleInComposerOptions({
+      toolName: AGENT_TOOL_NAMES.searchSources,
+    }),
+    false,
+  );
+  assert.equal(
+    isCapabilityToolVisibleInComposerOptions({
+      toolName: AGENT_TOOL_NAMES.execute,
+    }),
+    false,
+  );
+  assert.equal(
+    isCapabilityToolVisibleInComposerOptions({ toolName: "custom_tool" }),
+    true,
+  );
+});
+
+test("buildComposerToolsSelection maps connector tool enabled state", () => {
+  const tools = buildComposerToolsSelection({
+    activeConnectorIds: { notion: "connector-1" },
+    connectorToolsEnabled: { notion: false },
+    disabledToolNames: [],
     selectedSkills: [],
   });
 
-  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generatePptx], {
-    enabled: true,
-    output: {
-      includeSourceJson: true,
-    },
+  assert.deepEqual(tools?.[TEST_NOTION_TOOL], {
+    connectorId: "connector-1",
+    enabled: false,
   });
 });
 
-test("buildComposerToolsSelection maps editable pptx switch to native mode", () => {
+test("buildComposerToolsSelection omits tools when no connector state is configured", () => {
   const tools = buildComposerToolsSelection({
-    imageGenerationEnabled: true,
-    imageSupported: false,
-    imageConfig: DEFAULT_IMAGE_ARTIFACT_CONFIG,
-    pptxConfig: {
-      ...DEFAULT_PPTX_ARTIFACT_CONFIG,
-      generationMode: "editable_native",
-    },
-    pptxGenerationEnabled: true,
+    disabledToolNames: [],
     selectedSkills: [],
   });
 
-  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generatePptx], {
-    enabled: true,
-    generationMode: "editable_native",
-  });
+  assert.equal(tools, undefined);
 });
 
-test("buildComposerToolsSelection enables video presentation for supporting skills", () => {
-  const tools = buildComposerToolsSelection({
-    imageGenerationEnabled: true,
-    imageSupported: false,
-    imageConfig: DEFAULT_IMAGE_ARTIFACT_CONFIG,
-    pptxConfig: DEFAULT_PPTX_ARTIFACT_CONFIG,
-    pptxGenerationEnabled: true,
-    videoPresentationGenerationEnabled: true,
+test("buildSkillOptionToolsSelection maps selected skill option overrides to tool config", () => {
+  const tools = buildSkillOptionToolsSelection({
     selectedSkills: [
       {
         id: "skill-1",
-        catalogId: "catalog-1",
-        slug: "video-presentation",
-        name: "video-presentation",
-        displayName: "Video presentation",
-        description: "Creates video presentations",
+        catalogId: "skill:1",
+        slug: "visual-story",
+        name: "visual-story",
+        displayName: "Visual Story",
+        description: "Create visual stories.",
         sourceType: "builtin",
         version: "1.0.0",
         hasReadme: false,
-        tools: [AGENT_TOOL_NAMES.generateVideoPresentation],
+        tools: [AGENT_TOOL_NAMES.generateImage],
+        options: [
+          {
+            id: "style",
+            title: "Style",
+            valueType: "string",
+            defaultValue: "auto",
+            target: {
+              toolName: AGENT_TOOL_NAMES.generateImage,
+              path: "config.style",
+            },
+            values: [
+              { value: "auto", label: "Auto" },
+              { value: "cartoon", label: "Cartoon" },
+            ],
+          },
+          {
+            id: "quality",
+            title: "Quality",
+            valueType: "string",
+            defaultValue: "auto",
+            target: {
+              toolName: AGENT_TOOL_NAMES.generateImage,
+              path: "config.quality",
+            },
+            values: [
+              { value: "auto", label: "Auto" },
+              { value: "high", label: "High" },
+            ],
+          },
+        ],
       },
     ],
+    overrides: {
+      "skill-1": {
+        quality: "high",
+        style: "cartoon",
+      },
+    },
   });
 
-  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateVideoPresentation], {
+  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateImage], {
     enabled: true,
+    config: {
+      quality: "high",
+      style: "cartoon",
+    },
   });
 });
 
-test("buildComposerToolsSelection sends explicit video presentation switch", () => {
-  const tools = buildComposerToolsSelection({
-    imageGenerationEnabled: true,
-    imageSupported: false,
-    imageConfig: DEFAULT_IMAGE_ARTIFACT_CONFIG,
-    pptxConfig: DEFAULT_PPTX_ARTIFACT_CONFIG,
-    pptxGenerationEnabled: true,
-    videoPresentationGenerationEnabled: true,
-    videoPresentationUserConfigured: true,
-    selectedSkills: [],
-  });
-
-  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateVideoPresentation], {
-    enabled: true,
-  });
+test("resolveDefaultActiveSkillIds keeps default-enabled skills active", () => {
+  assert.deepEqual(
+    resolveDefaultActiveSkillIds({
+      availableSkills: [
+        { id: "ppt-skill", defaultEnabled: true },
+        { id: "manual-skill", defaultEnabled: false },
+      ],
+      currentSkillIds: ["missing-skill", "manual-skill"],
+    }),
+    ["ppt-skill", "manual-skill"],
+  );
 });
 
-test("buildComposerToolsSelection sends disabled video narration config", () => {
-  const tools = buildComposerToolsSelection({
-    imageGenerationEnabled: true,
-    imageSupported: false,
-    imageConfig: DEFAULT_IMAGE_ARTIFACT_CONFIG,
-    pptxConfig: DEFAULT_PPTX_ARTIFACT_CONFIG,
-    pptxGenerationEnabled: true,
-    videoPresentationGenerationEnabled: true,
-    videoPresentationNarrationEnabled: false,
-    selectedSkills: [],
+test("buildSkillOptionToolsSelection maps runtime skill options to skill config", () => {
+  const tools = buildSkillOptionToolsSelection({
+    selectedSkills: [
+      {
+        id: "ppt-skill",
+        catalogId: "skill:ppt",
+        slug: "ppt-deck",
+        name: "ppt-deck",
+        displayName: "PPT Deck",
+        description: "Create decks.",
+        sourceType: "builtin",
+        version: "1.0.0",
+        hasReadme: false,
+        defaultEnabled: true,
+        options: [
+          {
+            id: "stylePreset",
+            title: "Style",
+            valueType: "string",
+            defaultValue: "auto",
+            target: {
+              path: "runtime.config.stylePreset",
+            },
+            values: [
+              { value: "auto", label: "Auto" },
+              { value: "executive", label: "Executive" },
+            ],
+          },
+        ],
+      },
+    ],
+    overrides: {
+      "ppt-skill": {
+        stylePreset: "executive",
+      },
+    },
   });
 
-  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateVideoPresentation], {
-    enabled: true,
-    narration: {
-      enabled: false,
+  assert.deepEqual(tools?.skillRuntimeConfig, {
+    "ppt-skill": {
+      config: {
+        stylePreset: "executive",
+      },
     },
   });
 });

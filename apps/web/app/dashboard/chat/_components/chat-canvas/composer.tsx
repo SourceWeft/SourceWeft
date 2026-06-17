@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -10,17 +11,10 @@ import type { FileUIPart } from "ai";
 import {
   ArrowUp,
   Brain,
-  Brush,
   Globe,
   Image as ImageIcon,
-  LayoutTemplate,
-  Loader2,
-  Palette,
-  PanelTop,
   RotateCcw,
   SlidersHorizontal,
-  Square,
-  Table2,
   X,
 } from "lucide-react";
 import {
@@ -64,73 +58,78 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@sourceweft/ui-web/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@sourceweft/ui-web/components/ui/select";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import {
   AGENT_TOOL_NAMES,
   getAgentToolSlashCommand,
-  isGeneratedImageArtifactToolName,
-  isNotionToolName,
+  hasAgentToolCapability,
+  isAgentToolEnabledByDefault,
+} from "@sourceweft/agent-tool-registry";
+import type {
+  CapabilityCatalogCommand,
+  CapabilityCatalogTool,
+  CapabilityToolOption,
+  SkillOption,
+  ThreadInvocationRequest,
 } from "@sourceweft/sdk";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { SkillIcon } from "../../../_components/dashboard-icons";
 import { RawImage } from "../../../../_components/raw-image";
 import {
   getPromptInputActionIcon,
   getSerializableActionIcon,
+  type PromptInputActionIconPayload,
 } from "../action-icons";
 import type { SourceItem } from "../source-types";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
   buildComposerToolsSelection,
-  clampImageConfigToCapabilities,
-  DEFAULT_IMAGE_ARTIFACT_CONFIG,
-  DEFAULT_PPTX_ARTIFACT_CONFIG,
-  DEFAULT_PROMPT_THINKING_SETTINGS,
-  imageAspectRatioOptions,
-  imageConfigFromSkills,
-  imageConfigSummary,
-  imageModelAliasFromSkills,
-  imageQualityOptions,
-  imageStyleOptions,
-  notionAgentToolNames,
-  pptxAspectRatioOptions,
-  pptxLanguageOptions,
-  pptxStylePresetOptions,
-  skillSupportsImageGeneration,
-  skillSupportsNotion,
-  skillSupportsPptxGeneration,
-  skillSupportsVideoPresentationGeneration,
+  buildSkillOptionToolsSelection,
+  getConnectorAgentToolNames,
+  isCapabilityToolVisibleInComposerOptions,
+  isSkillViable,
+  skillActivatedToolNames,
+  skillSupportsConnector,
   thinkingEffortOptions,
 } from "./tool-selection";
 import type {
   ChatSendInput,
-  ChatConnectorToolSelection,
-  ChatImageArtifactConfig,
-  ChatPptxArtifactConfig,
   ChatSkillItem,
   ChatToolName,
   ChatToolsSelection,
-  ImageAspectRatio,
+  ChatToolSelection,
+  CapabilityCatalog,
   ImageModelCapabilities,
-  ImageQuality,
-  ImageStyle,
-  PptxAspectRatio,
-  PptxLanguage,
-  PptxStylePreset,
   PromptThinkingCapabilities,
   PromptThinkingSettings,
   ThinkingEffort,
 } from "./types";
+import {
+  buildSkillSlashCommandFamilies,
+  capabilityCommandDisplayLabel,
+  isCapabilityCatalogSlashCommand,
+} from "./capability-slash-command";
 
 type ComposerSlashCommandMeta =
   | {
-      command: NonNullable<ChatSkillItem["commands"]>[number];
-      kind: "skill-command";
-      skill: ChatSkillItem;
-    }
-  | {
       kind: "tool-command";
       tool: ChatToolName;
+    }
+  | {
+      command: CapabilityCatalogCommand;
+      kind: "capability-tool-command";
+      tool?: CapabilityCatalogTool;
+    }
+  | {
+      command: CapabilityCatalogCommand;
+      kind: "capability-skill-command";
+      skill: ChatSkillItem;
     }
   | {
       kind: "skill";
@@ -191,20 +190,26 @@ function commandKindForPromptInput(
   return command?.kind === "tool" || command?.toolName ? "tool" : "skill";
 }
 
+function getCapabilityCommandIcon(
+  command: Pick<CapabilityCatalogCommand, "iconName" | "iconTone"> | undefined,
+): PromptInputActionIconPayload {
+  return command?.iconName
+    ? {
+        iconName: command.iconName,
+        ...(command.iconTone ? { iconTone: command.iconTone } : {}),
+      }
+    : {};
+}
+
 function createPromptCommandMarker(input: {
-  kind: "skill" | "skill-command" | "tool";
+  kind: "skill" | "tool";
   label?: string;
   value: string;
 }) {
   const normalizedValue = input.value.startsWith("/")
     ? input.value
     : `/${input.value}`;
-  const prefix =
-    input.kind === "tool"
-      ? "tool"
-      : input.kind === "skill-command"
-        ? "skill-command"
-        : "skills";
+  const prefix = input.kind === "tool" ? "tool" : "skills";
   const markerValue = encodeURIComponent(normalizedValue.replace(/^\//, ""));
   const label = escapeMarkerLabel(input.label?.trim() || normalizedValue);
   return `[${prefix}:${markerValue}](${label})`;
@@ -274,27 +279,238 @@ function uniqueCommandSegments(segments: PromptInputSegment[]) {
 type ResolvedComposerCommand =
   | {
       arguments: string;
-      command: NonNullable<ChatSkillItem["commands"]>[number];
-      kind: "skill-command";
-      skill: ChatSkillItem;
-    }
-  | {
-      arguments: string;
       kind: "skill";
       skill: ChatSkillItem;
     }
   | {
       arguments: string;
       kind: "tool-command";
-      toolName: ChatToolName;
+      toolName: string;
       name: `/${string}`;
+    }
+  | {
+      arguments: string;
+      displayName: string;
+      kind: "capability-skill-command";
+      name: `/${string}`;
+      skill: ChatSkillItem;
+    }
+  | {
+      arguments: string;
+      kind: "capability-tool-invocation";
+      name: `/${string}`;
+      selectableId: string;
+      toolName: string;
     };
 
-function notionOptionSummary(enabled: boolean, connectorId: string | null) {
+type CapabilityOptionValue = string | number | boolean;
+type CapabilityOptionOverrides = Record<
+  string,
+  Record<string, CapabilityOptionValue | undefined>
+>;
+type SkillOptionOverrides = Record<
+  string,
+  Record<string, CapabilityOptionValue | undefined>
+>;
+type CapabilityToolEnabledOverrides = Record<string, boolean | undefined>;
+type ComposerOptionDescriptor = Pick<
+  CapabilityToolOption,
+  "id" | "title" | "description" | "valueType" | "defaultValue" | "values"
+>;
+
+function connectorOptionSummary(enabled: boolean, connectorId: string | null) {
   if (!connectorId) {
     return "Unavailable";
   }
   return enabled ? "On" : "Off";
+}
+
+function normalizeSlashValue(value: string) {
+  const trimmed = value.trim();
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function normalizeCapabilityCommandLookup(value: string) {
+  return value.trim().replace(/^\//, "").toLowerCase();
+}
+
+function primaryCapabilityCommandValue(command: CapabilityCatalogCommand) {
+  const primary =
+    command.aliases.find((alias) => alias.trim().length > 0) ??
+    command.action.targetId ??
+    command.contributionId;
+  return normalizeSlashValue(primary);
+}
+
+function capabilityCommandLookups(command: CapabilityCatalogCommand) {
+  return [command.action.targetId, command.contributionId, ...command.aliases]
+    .map(normalizeCapabilityCommandLookup)
+    .filter(Boolean);
+}
+
+function isWebAccessToolName(toolName: string) {
+  return (
+    toolName === AGENT_TOOL_NAMES.webSearch ||
+    toolName === AGENT_TOOL_NAMES.webFetch
+  );
+}
+
+function capabilityOptionValueKey(value: CapabilityOptionValue | undefined) {
+  return value === undefined ? "" : `${typeof value}:${String(value)}`;
+}
+
+function capabilityOptionValueLabel(
+  option: ComposerOptionDescriptor,
+  value: CapabilityOptionValue | undefined,
+) {
+  const configured = option.values.find(
+    (candidate) => candidate.value === value,
+  );
+  if (configured?.label) {
+    return configured.label;
+  }
+  if (typeof value === "boolean") {
+    return value ? "On" : "Off";
+  }
+  return value === undefined ? "Default" : String(value);
+}
+
+function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
+  if (option.defaultValue !== undefined) {
+    return option.defaultValue;
+  }
+  return option.valueType === "boolean" ? false : undefined;
+}
+
+function isSafeCapabilityOptionPath(path: string) {
+  return path
+    .split(".")
+    .every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== "__proto__" &&
+        segment !== "constructor" &&
+        segment !== "prototype",
+    );
+}
+
+function setValueAtCapabilityOptionPath(
+  target: Record<string, unknown>,
+  path: string,
+  value: CapabilityOptionValue,
+) {
+  const segments = path.split(".");
+  if (segments.length === 0 || !isSafeCapabilityOptionPath(path)) {
+    return false;
+  }
+  let current = target;
+  for (const segment of segments.slice(0, -1)) {
+    const child = current[segment];
+    if (child === undefined) {
+      const nextChild: Record<string, unknown> = {};
+      current[segment] = nextChild;
+      current = nextChild;
+      continue;
+    }
+    if (!child || typeof child !== "object" || Array.isArray(child)) {
+      return false;
+    }
+    current = child as Record<string, unknown>;
+  }
+  const leaf = segments.at(-1);
+  if (!leaf) {
+    return false;
+  }
+  current[leaf] = value;
+  return true;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergePlainRecords(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+) {
+  const next = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const existing = next[key];
+    next[key] =
+      isPlainRecord(existing) && isPlainRecord(value)
+        ? mergePlainRecords(existing, value)
+        : value;
+  }
+  return next;
+}
+
+function mergeChatToolsSelection(
+  left: ChatToolsSelection | undefined,
+  right: ChatToolsSelection | undefined,
+): ChatToolsSelection | undefined {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  const next: ChatToolsSelection = { ...left };
+  for (const [toolName, selection] of Object.entries(right)) {
+    if (!selection) {
+      continue;
+    }
+    const existing = next[toolName];
+    next[toolName] =
+      isPlainRecord(existing) && isPlainRecord(selection)
+        ? (mergePlainRecords(existing, selection) as ChatToolSelection)
+        : selection;
+  }
+  return next;
+}
+
+function buildCapabilityOptionSelection(input: {
+  catalogTools: readonly CapabilityCatalogTool[];
+  overrides: CapabilityOptionOverrides;
+}): ChatToolsSelection | undefined {
+  const selections: ChatToolsSelection = {};
+  for (const tool of input.catalogTools) {
+    const toolOverrides = input.overrides[tool.toolName];
+    if (!toolOverrides) {
+      continue;
+    }
+    const selection: ChatToolSelection = { enabled: true };
+    let changed = false;
+    for (const option of tool.options) {
+      const value = toolOverrides[option.id];
+      if (value === undefined || !option.target?.path) {
+        continue;
+      }
+      if (
+        setValueAtCapabilityOptionPath(selection, option.target.path, value)
+      ) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      selections[tool.toolName] = selection;
+    }
+  }
+  return Object.keys(selections).length > 0 ? selections : undefined;
+}
+
+function buildCapabilityToolToggleSelection(input: {
+  catalogTools: readonly CapabilityCatalogTool[];
+  overrides: CapabilityToolEnabledOverrides;
+}): ChatToolsSelection | undefined {
+  const selections: ChatToolsSelection = {};
+  for (const tool of input.catalogTools) {
+    const enabled = input.overrides[tool.toolName];
+    if (enabled === undefined) {
+      continue;
+    }
+    selections[tool.toolName] = { enabled };
+  }
+  return Object.keys(selections).length > 0 ? selections : undefined;
 }
 
 export function Composer({
@@ -314,18 +530,21 @@ export function Composer({
   selectedSkillIds = [],
   selectedMcpInstallIds = [],
   selectedMcpToolIds = [],
+  capabilityCatalog,
   onRemoveSource,
   onSkillSelectionChange,
   submitDisabled = false,
   searchEnabled = false,
   onSearchEnabledChange,
   thinkingCapabilities,
-  thinkingSettings = DEFAULT_PROMPT_THINKING_SETTINGS,
+  thinkingSettings = { mode: "auto" as const, effort: "medium" as const },
   onThinkingSettingsChange,
   imageCapabilities,
   imageModelAvailable = false,
   imageModelAlias,
   notionConnectorId = null,
+  activeConnectorIds,
+  connectorToolsEnabled = {},
   disabledToolNames = [],
   onDisabledToolNamesChange,
   onStopStreaming,
@@ -339,6 +558,7 @@ export function Composer({
     command?: ChatSendInput["command"],
     skillIds?: string[],
     content?: string,
+    invocation?: ChatSendInput["invocation"],
   ) => void;
   onCancelEditing?: () => void;
   className?: string;
@@ -353,6 +573,7 @@ export function Composer({
   selectedSkillIds?: string[];
   selectedMcpInstallIds?: string[];
   selectedMcpToolIds?: string[];
+  capabilityCatalog?: CapabilityCatalog | null;
   onRemoveSource?: (id: string) => void;
   onSkillSelectionChange?: (skillIds: string[]) => void;
   submitDisabled?: boolean;
@@ -365,6 +586,8 @@ export function Composer({
   imageModelAvailable?: boolean;
   imageModelAlias?: string | null;
   notionConnectorId?: string | null;
+  activeConnectorIds?: Record<string, string | null>;
+  connectorToolsEnabled?: Record<string, boolean>;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
   onStopStreaming?: () => void;
@@ -373,65 +596,56 @@ export function Composer({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [, setDraftText] = useState(initialInput);
   const [draftSegments, setDraftSegments] = useState<PromptInputSegment[]>([]);
+  const [capabilityOptionOverrides, setCapabilityOptionOverrides] =
+    useState<CapabilityOptionOverrides>({});
+  const [skillOptionOverrides, setSkillOptionOverrides] =
+    useState<SkillOptionOverrides>({});
+  const [capabilityToolEnabledOverrides, setCapabilityToolEnabledOverrides] =
+    useState<CapabilityToolEnabledOverrides>({});
   const [composerSessionKey, setComposerSessionKey] = useState(0);
   const previousEditingRef = useRef(isEditing);
-  const [imageConfig, setImageConfig] = useState<ChatImageArtifactConfig>(
-    DEFAULT_IMAGE_ARTIFACT_CONFIG,
-  );
-  const [pptxConfig, setPptxConfig] = useState<ChatPptxArtifactConfig>(
-    DEFAULT_PPTX_ARTIFACT_CONFIG,
-  );
-  const [videoPresentationNarrationEnabled, setVideoPresentationNarrationEnabled] =
-    useState(true);
-  const [imageConfigPinned, setImageConfigPinned] = useState(false);
   const disabledToolNameSet = useMemo(
     () => new Set(disabledToolNames),
     [disabledToolNames],
   );
-  const imageGenerationEnabled = !disabledToolNameSet.has(
-    AGENT_TOOL_NAMES.generateImage,
+  const resolvedConnectorIds: Record<string, string | null> = {
+    ...activeConnectorIds,
+    ...(notionConnectorId ? { notion: notionConnectorId } : {}),
+  };
+  const connectorTypes = Object.keys(resolvedConnectorIds).filter(
+    (type) => resolvedConnectorIds[type] !== null,
   );
-  const pptxGenerationEnabled = !disabledToolNameSet.has(
-    AGENT_TOOL_NAMES.generatePptx,
+  const mentionSources = useMemo(
+    () =>
+      allSources.filter((source) =>
+        selectedSources.every((selected) => selected.id !== source.id),
+      ),
+    [allSources, selectedSources],
   );
-  const videoPresentationGenerationEnabled = !disabledToolNameSet.has(
-    AGENT_TOOL_NAMES.generateVideoPresentation,
-  );
-  const notionToolsAvailable = Boolean(notionConnectorId);
-  const notionToolsEnabled =
-    notionToolsAvailable &&
-    !notionAgentToolNames.some((toolName) => disabledToolNameSet.has(toolName));
   const effectiveSelectedSkillIds = useMemo(
     () =>
       selectedSkillIds.filter((skillId) => {
         const skill = availableSkills.find((item) => item.id === skillId);
-        if (!skill) {
-          return true;
-        }
-        if (!imageGenerationEnabled && skillSupportsImageGeneration(skill)) {
-          return false;
-        }
-        if (!pptxGenerationEnabled && skillSupportsPptxGeneration(skill)) {
-          return false;
-        }
-        if (
-          !videoPresentationGenerationEnabled &&
-          skillSupportsVideoPresentationGeneration(skill)
-        ) {
-          return false;
-        }
-        if (!notionToolsEnabled && skillSupportsNotion(skill)) {
-          return false;
+        if (!skill) return true;
+        // Filter out skills whose activated tools are all disabled
+        if (!isSkillViable(skill, disabledToolNameSet)) return false;
+        // Filter skills with connector tools that are disabled
+        for (const connectorType of connectorTypes) {
+          if (
+            !connectorToolsEnabled[connectorType] &&
+            skillSupportsConnector(skill, connectorType)
+          ) {
+            return false;
+          }
         }
         return true;
       }),
     [
       availableSkills,
-      imageGenerationEnabled,
-      notionToolsEnabled,
-      pptxGenerationEnabled,
+      connectorToolsEnabled,
+      connectorTypes,
+      disabledToolNames,
       selectedSkillIds,
-      videoPresentationGenerationEnabled,
     ],
   );
   const effectiveSelectedSkillIdSet = useMemo(
@@ -445,102 +659,178 @@ export function Composer({
       ),
     [availableSkills, effectiveSelectedSkillIdSet],
   );
-  const skillImageConfig = useMemo(
-    () => imageConfigFromSkills(effectiveSelectedSkills),
-    [effectiveSelectedSkills],
+  const activeSlashSkills = useMemo(
+    () =>
+      availableSkills.filter(
+        (skill) =>
+          (skill.sourceType === "builtin" &&
+            effectiveSelectedSkillIdSet.has(skill.id)) ||
+          skill.sourceType !== "builtin",
+      ),
+    [availableSkills, effectiveSelectedSkillIdSet],
   );
-  const skillImageModelAlias = useMemo(
-    () => imageModelAliasFromSkills(effectiveSelectedSkills),
-    [effectiveSelectedSkills],
+  const capabilityCatalogTools = useMemo(
+    () => capabilityCatalog?.tools ?? [],
+    [capabilityCatalog],
   );
-  const effectiveImageModelAlias = imageModelAlias ?? skillImageModelAlias;
-  const selectedSkillNames = effectiveSelectedSkills
-    .map((skill) => skill.displayName)
-    .join(", ");
-  const effectiveImageCapabilities =
-    imageCapabilities ?? thinkingCapabilities?.imageGeneration;
-  const imageSupported =
-    imageModelAvailable && effectiveImageCapabilities?.supported !== false;
-  const effectiveImageConfig = clampImageConfigToCapabilities({
-    config: imageConfig,
-    capabilities: effectiveImageCapabilities,
-  });
-  const imageOptionsChanged =
-    effectiveImageConfig.aspectRatio !== "auto" ||
-    effectiveImageConfig.quality !== "auto" ||
-    effectiveImageConfig.style !== "auto";
-  const imageToolChanged = imageOptionsChanged || !imageGenerationEnabled;
-  const imageOptionSummary = imageConfigSummary(effectiveImageConfig);
-  const pptxStyleLabel =
-    pptxStylePresetOptions.find(
-      (option) => option.value === pptxConfig.design.stylePreset,
-    )?.label ?? pptxConfig.design.stylePreset;
-  const pptxLanguageLabel =
-    pptxConfig.design.language !== "auto"
-      ? (pptxLanguageOptions.find(
-          (option) => option.value === pptxConfig.design.language,
-        )?.label ?? pptxConfig.design.language)
-      : null;
-  const pptxOptionSummary = [
-    "Native editable PPTX",
-    pptxStyleLabel,
-    pptxConfig.design.aspectRatio,
-    pptxLanguageLabel,
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join(" · ");
-  const notionToolChanged = notionToolsAvailable && !notionToolsEnabled;
-  const pptxOptionsChanged =
-    pptxConfig.design.aspectRatio !==
-      DEFAULT_PPTX_ARTIFACT_CONFIG.design.aspectRatio ||
-    pptxConfig.design.language !==
-      DEFAULT_PPTX_ARTIFACT_CONFIG.design.language ||
-    pptxConfig.design.stylePreset !==
-      DEFAULT_PPTX_ARTIFACT_CONFIG.design.stylePreset;
-  const pptxToolChanged = !pptxGenerationEnabled || pptxOptionsChanged;
-  const videoPresentationToolChanged =
-    !videoPresentationGenerationEnabled || !videoPresentationNarrationEnabled;
-  const videoPresentationOptionSummary =
-    videoPresentationGenerationEnabled
-      ? videoPresentationNarrationEnabled
-        ? "Narration on"
-        : "Narration off"
-      : "Off";
-  const mcpToolChanged =
-    selectedMcpInstallIds.length > 0 || selectedMcpToolIds.length > 0;
-  const notionSummary = notionOptionSummary(
-    notionToolsEnabled,
-    notionConnectorId,
+  const visibleCapabilityTools = useMemo(
+    () =>
+      capabilityCatalogTools.filter((tool) =>
+        isCapabilityToolVisibleInComposerOptions(tool),
+      ),
+    [capabilityCatalogTools],
   );
-  const filteredAspectRatioOptions = imageAspectRatioOptions.filter((option) =>
-    (
-      effectiveImageCapabilities?.controls?.aspectRatio?.values ??
-      imageAspectRatioOptions.map((item) => item.value)
-    ).includes(option.value),
+  const visibleCapabilityToolNameSet = useMemo(
+    () => new Set(visibleCapabilityTools.map((tool) => tool.toolName)),
+    [visibleCapabilityTools],
   );
-  const filteredImageQualityOptions = imageQualityOptions.filter((option) =>
-    (
-      effectiveImageCapabilities?.controls?.quality?.values ??
-      imageQualityOptions.map((item) => item.value)
-    ).includes(option.value),
+  const capabilityToolByName = useMemo(() => {
+    const map = new Map<string, CapabilityCatalogTool>();
+    for (const tool of capabilityCatalogTools) {
+      map.set(tool.toolName, tool);
+    }
+    return map;
+  }, [capabilityCatalogTools]);
+  const capabilityCommands = useMemo(
+    () => capabilityCatalog?.commands ?? [],
+    [capabilityCatalog],
   );
-  const filteredImageStyleOptions = imageStyleOptions.filter((option) =>
-    (
-      effectiveImageCapabilities?.controls?.style?.values ??
-      imageStyleOptions.map((item) => item.value)
-    ).includes(option.value),
+  const capabilityCommandByLookup = useMemo(() => {
+    const map = new Map<string, CapabilityCatalogCommand>();
+    for (const command of capabilityCommands) {
+      if (!isCapabilityCatalogSlashCommand(command)) {
+        continue;
+      }
+      if (
+        command.action.kind === "tool" &&
+        isWebAccessToolName(command.action.targetId) &&
+        !searchEnabled
+      ) {
+        continue;
+      }
+      for (const lookup of capabilityCommandLookups(command)) {
+        map.set(lookup, command);
+      }
+    }
+    return map;
+  }, [capabilityCommands, searchEnabled]);
+  const availableSkillByName = useMemo(() => {
+    const map = new Map<string, ChatSkillItem>();
+    for (const skill of availableSkills) {
+      map.set(skill.name.toLowerCase(), skill);
+      map.set(skill.slug.toLowerCase(), skill);
+    }
+    return map;
+  }, [availableSkills]);
+  const activeSlashSkillByName = useMemo(() => {
+    const map = new Map<string, ChatSkillItem>();
+    for (const skill of activeSlashSkills) {
+      map.set(skill.name.toLowerCase(), skill);
+      map.set(skill.slug.toLowerCase(), skill);
+    }
+    return map;
+  }, [activeSlashSkills]);
+  const capabilitySkillCommandBySkillId = useMemo(() => {
+    const map = new Map<string, CapabilityCatalogCommand>();
+    for (const command of capabilityCommands) {
+      if (
+        command.action.kind !== "skill" ||
+        !isCapabilityCatalogSlashCommand(command)
+      ) {
+        continue;
+      }
+      const skill = activeSlashSkillByName.get(
+        command.action.targetId.toLowerCase(),
+      );
+      if (skill) {
+        map.set(skill.id, command);
+      }
+    }
+    return map;
+  }, [activeSlashSkillByName, capabilityCommands]);
+  const builtinSkills = useMemo(
+    () => availableSkills.filter((skill) => skill.sourceType === "builtin"),
+    [availableSkills],
   );
+  const builtinSkillsWithOptions = useMemo(
+    () => builtinSkills.filter((skill) => (skill.options?.length ?? 0) > 0),
+    [builtinSkills],
+  );
+  const builtinSkillWithOptionsIdSet = useMemo(
+    () => new Set(builtinSkillsWithOptions.map((skill) => skill.id)),
+    [builtinSkillsWithOptions],
+  );
+  const capabilityToolsWithOptions = useMemo(
+    () =>
+      visibleCapabilityTools.filter((tool) =>
+        tool.options.some((option) => option.target?.path),
+      ),
+    [visibleCapabilityTools],
+  );
+  const capabilityOptionOverrideCount = useMemo(
+    () =>
+      Object.entries(capabilityOptionOverrides).reduce(
+        (count, [toolName, toolOptions]) =>
+          !visibleCapabilityToolNameSet.has(toolName)
+            ? count
+            : count +
+              Object.values(toolOptions).filter((value) => value !== undefined)
+                .length,
+        0,
+      ),
+    [capabilityOptionOverrides, visibleCapabilityToolNameSet],
+  );
+  const capabilityToolToggleChangedCount = useMemo(
+    () =>
+      visibleCapabilityTools.filter((tool) => {
+        const override = capabilityToolEnabledOverrides[tool.toolName];
+        if (override !== undefined) {
+          return true;
+        }
+        return (
+          disabledToolNameSet.has(tool.toolName as ChatToolName) &&
+          isAgentToolEnabledByDefault(tool.toolName)
+        );
+      }).length,
+    [
+      visibleCapabilityTools,
+      capabilityToolEnabledOverrides,
+      disabledToolNameSet,
+    ],
+  );
+  const skillOptionOverrideCount = useMemo(
+    () =>
+      Object.entries(skillOptionOverrides).reduce(
+        (count, [skillId, options]) =>
+          !builtinSkillWithOptionsIdSet.has(skillId)
+            ? count
+            : count +
+              Object.values(options).filter((value) => value !== undefined)
+                .length,
+        0,
+      ),
+    [builtinSkillWithOptionsIdSet, skillOptionOverrides],
+  );
+
+  const connectorToolChanged = connectorTypes.some(
+    (type) => connectorToolsEnabled[type] === false,
+  );
+  const optionCount =
+    (connectorToolChanged ? 1 : 0) +
+    (selectedMcpInstallIds.length > 0 || selectedMcpToolIds.length > 0
+      ? 1
+      : 0) +
+    (thinkingSettings.mode !== "off" && thinkingSettings.mode !== "auto"
+      ? 1
+      : 0) +
+    skillOptionOverrideCount +
+    capabilityToolToggleChangedCount +
+    capabilityOptionOverrideCount;
+
   const supportsThinking = thinkingCapabilities?.supportsThinking === true;
   const activeThinkingSettings = supportsThinking
     ? thinkingSettings
-    : DEFAULT_PROMPT_THINKING_SETTINGS;
-  const optionCount =
-    (imageToolChanged ? 1 : 0) +
-    (pptxToolChanged ? 1 : 0) +
-    (videoPresentationToolChanged ? 1 : 0) +
-    (notionToolChanged ? 1 : 0) +
-    (mcpToolChanged ? 1 : 0) +
-    (supportsThinking && activeThinkingSettings.mode !== "auto" ? 1 : 0);
+    : { mode: "auto" as const, effort: "medium" as const };
   const thinkingEnabled = activeThinkingSettings.mode !== "off";
   const supportedThinkingEfforts = thinkingEffortOptions.filter((option) =>
     (thinkingCapabilities?.supportedEfforts ?? []).includes(option.value),
@@ -551,188 +841,131 @@ export function Composer({
       : activeThinkingSettings.mode === "effort"
         ? activeThinkingSettings.effort
         : "auto";
-  const initialAttachmentsKey = initialAttachments
-    .map(
-      (attachment) =>
-        `${attachment.id}:${attachment.url}:${attachment.filename ?? ""}`,
-    )
-    .join("|");
-  const mentionSources = allSources
-    .filter(
-      (source) => source.sourceType !== "directory" && source.type !== "DIR",
-    )
-    .map((source) => ({
-      id: source.id,
-      meta: source.meta,
-      title: source.title,
-      type: source.type,
-    }));
+
   const slashCommandOptions = useMemo<PromptInputSlashCommand[]>(() => {
-    const generateImageSlash = getAgentToolSlashCommand(
-      AGENT_TOOL_NAMES.generateImage,
-    );
-    const generatePptxSlash = getAgentToolSlashCommand(
-      AGENT_TOOL_NAMES.generatePptx,
-    );
-    const generateVideoPresentationSlash = getAgentToolSlashCommand(
-      AGENT_TOOL_NAMES.generateVideoPresentation,
-    );
-    const notionToolCommands: PromptInputSlashCommand[] = notionToolsAvailable
-      ? notionAgentToolNames.flatMap((toolName) => {
+    // Dynamic connector tool commands — iterates all active connector types
+    const connectorToolCommands: PromptInputSlashCommand[] =
+      connectorTypes.flatMap((connectorType) => {
+        const toolNames = getConnectorAgentToolNames(connectorType);
+        if (toolNames.length === 0) return [];
+        const childCommands = toolNames.flatMap((toolName) => {
           const slash = getAgentToolSlashCommand(toolName);
           return slash
             ? [
                 {
                   description: slash.description,
-                  group: "Notion",
+                  group: connectorType,
                   id: `tool-command:${toolName}`,
                   ...getPromptInputActionIcon(toolName),
                   kind: "tool" as const,
                   label: slash.displayName,
                   meta: {
                     kind: "tool-command",
-                    tool: toolName,
+                    tool: toolName as ChatToolName,
                   } satisfies ComposerSlashCommandMeta,
-                  value: `/${toolName}`,
+                  value: `/${toolName as ChatToolName}`,
                 },
               ]
             : [];
-        })
-      : [];
-    const notionCommands: PromptInputSlashCommand[] =
-      notionToolCommands.length > 0
-        ? [
-            {
-              children: notionToolCommands,
-              description: "Search, create, update, and save Notion pages",
-              group: "Tools",
-              id: "tool-group:notion",
-              ...getPromptInputActionIcon(notionAgentToolNames[0]),
-              kind: "tool" as const,
-              label: "Notion",
-              value: "/notion",
-            },
-          ]
-        : [];
-    const toolCommands: PromptInputSlashCommand[] = [
-      ...(imageSupported && generateImageSlash
-        ? [
-            {
-              description: generateImageSlash.description,
-              group: "Tools",
-              id: "tool-command:generate_image",
-              ...getPromptInputActionIcon(AGENT_TOOL_NAMES.generateImage),
-              kind: "tool" as const,
-              label: generateImageSlash.displayName,
-              meta: {
-                kind: "tool-command",
-                tool: AGENT_TOOL_NAMES.generateImage,
-              } satisfies ComposerSlashCommandMeta,
-              value: "/generate_image",
-            },
-          ]
-        : []),
-      ...(generatePptxSlash
-        ? [
-            {
-              description: generatePptxSlash.description,
-              group: "Tools",
-              id: "tool-command:generate_pptx",
-              ...getPromptInputActionIcon(AGENT_TOOL_NAMES.generatePptx),
-              kind: "tool" as const,
-              label: generatePptxSlash.displayName,
-              meta: {
-                kind: "tool-command",
-                tool: AGENT_TOOL_NAMES.generatePptx,
-              } satisfies ComposerSlashCommandMeta,
-              value: "/generate_pptx",
-            },
-          ]
-        : []),
-      ...(generateVideoPresentationSlash
-        ? [
-            {
-              description: generateVideoPresentationSlash.description,
-              group: "Tools",
-              id: "tool-command:generate_video_presentation",
-              ...getPromptInputActionIcon(
-                AGENT_TOOL_NAMES.generateVideoPresentation,
-              ),
-              kind: "tool" as const,
-              label: generateVideoPresentationSlash.displayName,
-              meta: {
-                kind: "tool-command",
-                tool: AGENT_TOOL_NAMES.generateVideoPresentation,
-              } satisfies ComposerSlashCommandMeta,
-              value: "/generate_video_presentation",
-            },
-          ]
-        : []),
+        });
+        if (childCommands.length === 0) return [];
+        const firstIconTool = toolNames[0];
+        return [
+          {
+            children: childCommands,
+            description: `Use ${connectorType} tools`,
+            group: "Tools",
+            id: `tool-group:${connectorType}`,
+            ...(firstIconTool ? getPromptInputActionIcon(firstIconTool) : {}),
+            kind: "tool" as const,
+            label:
+              connectorType.charAt(0).toUpperCase() + connectorType.slice(1),
+            value: `/${connectorType}`,
+          },
+        ];
+      });
+    const allConnectorCommands: PromptInputSlashCommand[] = [
+      ...connectorToolCommands,
     ];
-    const skillCommands = availableSkills.flatMap((skill) =>
-      skill.slash === false || skill.slashConfig?.enabled === false
-        ? []
-        : (skill.commands ?? [])
-            .filter((command) => command.slash !== false)
-            .map((command) => ({
-              description: [skill.displayName, command.description]
-                .filter(Boolean)
-                .join(" · "),
-              group: skill.displayName,
-              id: `${skill.id}:${command.id}`,
-              kind: "skill-command" as const,
-              label:
-                sanitizeCommandDisplayName(command.displayName) ||
-                command.title ||
-                humanizeCommandName(command.name),
-              meta: {
-                command,
-                kind: "skill-command",
-                skill,
-              } satisfies ComposerSlashCommandMeta,
-              value: command.canonicalName,
-            })),
-    );
-    const skillActivationCommands = availableSkills
-      .filter(
-        (skill) =>
-          skill.slash !== false && skill.slashConfig?.enabled !== false,
-      )
-      .map((skill) => ({
-        description: skill.description,
-        group: "Skills",
-        id: `skill:${skill.id}`,
-        kind: "skill" as const,
-        label: skill.displayName,
-        meta: {
-          kind: "skill",
-          skill,
-        } satisfies ComposerSlashCommandMeta,
-        value: `/${skill.slug}`,
-      }));
-    return [
-      ...toolCommands,
-      ...notionCommands,
-      ...skillCommands,
-      ...skillActivationCommands,
-    ];
-  }, [availableSkills, imageSupported, notionToolsAvailable]);
-  const commandByCanonicalName = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        command: NonNullable<ChatSkillItem["commands"]>[number];
-        skill: ChatSkillItem;
+    const capabilityCommandOptions: PromptInputSlashCommand[] = [];
+    for (const command of capabilityCommands) {
+      if (!isCapabilityCatalogSlashCommand(command)) {
+        continue;
       }
-    >();
-    for (const skill of availableSkills) {
-      for (const command of skill.commands ?? []) {
-        map.set(command.canonicalName.toLowerCase(), { command, skill });
+      if (
+        command.action.kind === "tool" &&
+        isWebAccessToolName(command.action.targetId) &&
+        !searchEnabled
+      ) {
+        continue;
+      }
+      const value = primaryCapabilityCommandValue(command);
+      if (command.action.kind === "tool") {
+        const tool = capabilityToolByName.get(command.action.targetId);
+        capabilityCommandOptions.push({
+          description: tool?.description,
+          group: command.category ?? "Tools",
+          id: `capability-command:${command.id}`,
+          ...getPromptInputActionIcon(command.action.targetId),
+          kind: "tool" as const,
+          label: capabilityCommandDisplayLabel(command),
+          meta: {
+            command,
+            kind: "capability-tool-command",
+            ...(tool ? { tool } : {}),
+          } satisfies ComposerSlashCommandMeta,
+          value,
+        });
+        continue;
       }
     }
-    return map;
-  }, [availableSkills]);
-
+    const skillFamilyCommands = buildSkillSlashCommandFamilies({
+      commands: capabilityCommands,
+      skills: activeSlashSkills,
+    }).map((item): PromptInputSlashCommand => {
+      if (item.kind === "capability-skill-command") {
+        return {
+          description: item.skill.description,
+          group: item.command.category ?? "Skills",
+          id: `capability-command:${item.command.id}`,
+          ...getCapabilityCommandIcon(item.command),
+          kind: "skill" as const,
+          label:
+            capabilityCommandDisplayLabel(item.command) ||
+            item.skill.displayName,
+          meta: {
+            command: item.command,
+            kind: "capability-skill-command",
+            skill: item.skill,
+          } satisfies ComposerSlashCommandMeta,
+          value: primaryCapabilityCommandValue(item.command),
+        };
+      }
+      return {
+        description: item.skill.description,
+        group: "Skills",
+        id: `skill:${item.skill.id}`,
+        kind: "skill" as const,
+        label: item.skill.displayName,
+        meta: {
+          kind: "skill",
+          skill: item.skill,
+        } satisfies ComposerSlashCommandMeta,
+        value: `/${item.skill.slug}`,
+      };
+    });
+    return [
+      ...capabilityCommandOptions,
+      ...allConnectorCommands,
+      ...skillFamilyCommands,
+    ];
+  }, [
+    activeSlashSkills,
+    capabilityCommands,
+    capabilityToolByName,
+    connectorTypes.join(","),
+    searchEnabled,
+  ]);
   function supportsSkillSlash(
     skill: ChatSkillItem | undefined,
   ): skill is ChatSkillItem {
@@ -794,67 +1027,17 @@ export function Composer({
     });
   }
 
-  function updateImageConfig(next: Partial<ChatImageArtifactConfig>) {
-    setImageConfig((current) =>
-      clampImageConfigToCapabilities({
-        config: { ...current, ...next },
-        capabilities: effectiveImageCapabilities,
-      }),
-    );
-    setImageConfigPinned(true);
-  }
-
-  function updatePptxConfig(next: {
-    design?: Partial<ChatPptxArtifactConfig["design"]>;
-    output?: Partial<ChatPptxArtifactConfig["output"]>;
-    rendering?: Partial<ChatPptxArtifactConfig["rendering"]>;
-  }) {
-    setPptxConfig((current) => ({
-      ...current,
-      design: { ...current.design, ...(next.design ?? {}) },
-      output: { ...current.output, ...(next.output ?? {}) },
-      rendering: { ...current.rendering, ...(next.rendering ?? {}) },
-    }));
-  }
-
-  function updateImageGenerationEnabled(next: boolean) {
-    const nextDisabledTools = next
-      ? disabledToolNames.filter(
-          (toolName) => !isGeneratedImageArtifactToolName(toolName),
-        )
-      : Array.from(
-          new Set([...disabledToolNames, AGENT_TOOL_NAMES.generateImage]),
-        );
-    onDisabledToolNamesChange?.(nextDisabledTools);
-    if (!next) {
-      const remainingSkillIds = selectedSkillIds.filter((skillId) => {
-        const skill = availableSkills.find((item) => item.id === skillId);
-        return !skill || !skillSupportsImageGeneration(skill);
-      });
-      if (remainingSkillIds.length !== selectedSkillIds.length) {
-        onSkillSelectionChange?.(remainingSkillIds);
-      }
-    }
-  }
-
   function updateToolEnabled(toolName: ChatToolName, next: boolean) {
     const nextDisabledTools = next
       ? disabledToolNames.filter((candidate) => candidate !== toolName)
       : Array.from(new Set([...disabledToolNames, toolName]));
     onDisabledToolNamesChange?.(nextDisabledTools);
-    if (!next && toolName === AGENT_TOOL_NAMES.generatePptx) {
+    if (!next) {
+      // Remove skills whose activated tools are all now disabled
+      const newDisabledSet = new Set(nextDisabledTools);
       const remainingSkillIds = selectedSkillIds.filter((skillId) => {
         const skill = availableSkills.find((item) => item.id === skillId);
-        return !skill || !skillSupportsPptxGeneration(skill);
-      });
-      if (remainingSkillIds.length !== selectedSkillIds.length) {
-        onSkillSelectionChange?.(remainingSkillIds);
-      }
-    }
-    if (!next && toolName === AGENT_TOOL_NAMES.generateVideoPresentation) {
-      const remainingSkillIds = selectedSkillIds.filter((skillId) => {
-        const skill = availableSkills.find((item) => item.id === skillId);
-        return !skill || !skillSupportsVideoPresentationGeneration(skill);
+        return !skill || isSkillViable(skill, newDisabledSet);
       });
       if (remainingSkillIds.length !== selectedSkillIds.length) {
         onSkillSelectionChange?.(remainingSkillIds);
@@ -862,15 +1045,102 @@ export function Composer({
     }
   }
 
-  function updateNotionToolsEnabled(next: boolean) {
-    const nextDisabledTools = next
-      ? disabledToolNames.filter((toolName) => !isNotionToolName(toolName))
-      : Array.from(new Set([...disabledToolNames, ...notionAgentToolNames]));
+  function updateSkillSelected(skill: ChatSkillItem, next: boolean) {
+    if (next) {
+      const activatedTools = new Set(skillActivatedToolNames(skill));
+      if (activatedTools.size > 0) {
+        const nextDisabledTools = disabledToolNames.filter(
+          (toolName) => !activatedTools.has(toolName),
+        );
+        if (nextDisabledTools.length !== disabledToolNames.length) {
+          onDisabledToolNamesChange?.(nextDisabledTools);
+        }
+      }
+      onSkillSelectionChange?.(
+        Array.from(new Set([...selectedSkillIds, skill.id])).slice(0, 5),
+      );
+      return;
+    }
+
+    onSkillSelectionChange?.(
+      selectedSkillIds.filter((skillId) => skillId !== skill.id),
+    );
+  }
+
+  function getCapabilityToolEnabled(tool: CapabilityCatalogTool) {
+    const override = capabilityToolEnabledOverrides[tool.toolName];
+    if (override !== undefined) {
+      return override;
+    }
+    if (disabledToolNameSet.has(tool.toolName as ChatToolName)) {
+      return false;
+    }
+    return isAgentToolEnabledByDefault(tool.toolName);
+  }
+
+  function updateCapabilityToolEnabled(
+    tool: CapabilityCatalogTool,
+    next: boolean,
+  ) {
+    const defaultEnabled = isAgentToolEnabledByDefault(tool.toolName);
+    setCapabilityToolEnabledOverrides((current) => {
+      const updated = { ...current };
+      if (next === defaultEnabled) {
+        delete updated[tool.toolName];
+      } else {
+        updated[tool.toolName] = next;
+      }
+      return updated;
+    });
+
+    if (
+      defaultEnabled ||
+      next ||
+      disabledToolNameSet.has(tool.toolName as ChatToolName)
+    ) {
+      updateToolEnabled(tool.toolName as ChatToolName, next);
+    }
+  }
+
+  function resetCapabilityToolEnabled(tool: CapabilityCatalogTool) {
+    setCapabilityToolEnabledOverrides((current) => {
+      if (current[tool.toolName] === undefined) {
+        return current;
+      }
+      const updated = { ...current };
+      delete updated[tool.toolName];
+      return updated;
+    });
+
+    if (isAgentToolEnabledByDefault(tool.toolName)) {
+      updateToolEnabled(tool.toolName as ChatToolName, true);
+      return;
+    }
+
+    if (disabledToolNameSet.has(tool.toolName as ChatToolName)) {
+      onDisabledToolNamesChange?.(
+        disabledToolNames.filter((toolName) => toolName !== tool.toolName),
+      );
+    }
+  }
+
+  function updateConnectorToolsEnabled(connectorType: string, next: boolean) {
+    const toolNames = getConnectorAgentToolNames(connectorType);
+    const nextDisabledTools: ChatToolName[] = next
+      ? disabledToolNames.filter(
+          (toolName) => !hasAgentToolCapability(toolName, connectorType),
+        )
+      : (Array.from(
+          new Set([
+            ...disabledToolNames,
+            ...(toolNames as readonly ChatToolName[]),
+          ]),
+        ) as ChatToolName[]);
     onDisabledToolNamesChange?.(nextDisabledTools);
     if (!next) {
       const remainingSkillIds = selectedSkillIds.filter((skillId) => {
         const skill = availableSkills.find((item) => item.id === skillId);
-        return !skill || !skillSupportsNotion(skill);
+        return !skill || !skillSupportsConnector(skill, connectorType);
       });
       if (remainingSkillIds.length !== selectedSkillIds.length) {
         onSkillSelectionChange?.(remainingSkillIds);
@@ -878,24 +1148,139 @@ export function Composer({
     }
   }
 
-  function applyCommandTools(
-    command: NonNullable<ChatSkillItem["commands"]>[number],
+  function getCapabilityOptionValues(
+    tool: CapabilityCatalogTool,
+    option: CapabilityToolOption,
   ) {
-    if (command.tools?.includes(AGENT_TOOL_NAMES.webSearch)) {
-      onSearchEnabledChange?.(true);
+    const configuredValues = option.values ?? [];
+    if (tool.toolName !== AGENT_TOOL_NAMES.generateImage) {
+      return configuredValues;
     }
-    if (command.tools?.includes(AGENT_TOOL_NAMES.generateImage)) {
-      updateImageGenerationEnabled(true);
+    const supportedValues =
+      option.id === "aspectRatio"
+        ? imageCapabilities?.controls?.aspectRatio?.values
+        : option.id === "quality"
+          ? imageCapabilities?.controls?.quality?.values
+          : option.id === "style"
+            ? imageCapabilities?.controls?.style?.values
+            : undefined;
+    if (!supportedValues?.length) {
+      return configuredValues;
     }
-    if (command.tools?.includes(AGENT_TOOL_NAMES.generatePptx)) {
-      updateToolEnabled(AGENT_TOOL_NAMES.generatePptx, true);
+    const supported = new Set<string>(supportedValues as readonly string[]);
+    return configuredValues.filter(
+      (candidate) =>
+        typeof candidate.value !== "string" || supported.has(candidate.value),
+    );
+  }
+
+  function getSkillOptionValues(option: SkillOption) {
+    const configuredValues = option.values ?? [];
+    if (option.target.toolName !== AGENT_TOOL_NAMES.generateImage) {
+      return configuredValues;
     }
-    if (command.tools?.includes(AGENT_TOOL_NAMES.generateVideoPresentation)) {
-      updateToolEnabled(AGENT_TOOL_NAMES.generateVideoPresentation, true);
+    const targetConfigKey = option.target.path.split(".").at(-1);
+    const supportedValues =
+      targetConfigKey === "aspectRatio"
+        ? imageCapabilities?.controls?.aspectRatio?.values
+        : targetConfigKey === "quality"
+          ? imageCapabilities?.controls?.quality?.values
+          : targetConfigKey === "style"
+            ? imageCapabilities?.controls?.style?.values
+            : undefined;
+    if (!supportedValues?.length) {
+      return configuredValues;
     }
-    if (command.tools?.some((toolName) => isNotionToolName(toolName))) {
-      updateNotionToolsEnabled(true);
-    }
+    const supported = new Set<string>(supportedValues as readonly string[]);
+    return configuredValues.filter(
+      (candidate) =>
+        typeof candidate.value !== "string" || supported.has(candidate.value),
+    );
+  }
+
+  function getCapabilityOptionValue(
+    tool: CapabilityCatalogTool,
+    option: CapabilityToolOption,
+  ) {
+    return (
+      capabilityOptionOverrides[tool.toolName]?.[option.id] ??
+      capabilityOptionDefaultValue(option)
+    );
+  }
+
+  function getSkillOptionValue(skill: ChatSkillItem, option: SkillOption) {
+    return (
+      skillOptionOverrides[skill.id]?.[option.id] ??
+      capabilityOptionDefaultValue(option)
+    );
+  }
+
+  function updateCapabilityOption(
+    tool: CapabilityCatalogTool,
+    option: CapabilityToolOption,
+    value: CapabilityOptionValue,
+  ) {
+    setCapabilityOptionOverrides((current) => {
+      const defaultValue = capabilityOptionDefaultValue(option);
+      const toolOptions = { ...(current[tool.toolName] ?? {}) };
+      if (value === defaultValue) {
+        delete toolOptions[option.id];
+      } else {
+        toolOptions[option.id] = value;
+      }
+      const next = { ...current };
+      if (Object.values(toolOptions).some((item) => item !== undefined)) {
+        next[tool.toolName] = toolOptions;
+      } else {
+        delete next[tool.toolName];
+      }
+      return next;
+    });
+  }
+
+  function updateSkillOption(
+    skill: ChatSkillItem,
+    option: SkillOption,
+    value: CapabilityOptionValue,
+  ) {
+    setSkillOptionOverrides((current) => {
+      const defaultValue = capabilityOptionDefaultValue(option);
+      const skillOptions = { ...(current[skill.id] ?? {}) };
+      if (value === defaultValue) {
+        delete skillOptions[option.id];
+      } else {
+        skillOptions[option.id] = value;
+      }
+      const next = { ...current };
+      if (Object.values(skillOptions).some((item) => item !== undefined)) {
+        next[skill.id] = skillOptions;
+      } else {
+        delete next[skill.id];
+      }
+      return next;
+    });
+  }
+
+  function resetCapabilityToolOptions(tool: CapabilityCatalogTool) {
+    setCapabilityOptionOverrides((current) => {
+      if (!current[tool.toolName]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[tool.toolName];
+      return next;
+    });
+  }
+
+  function resetSkillOptions(skill: ChatSkillItem) {
+    setSkillOptionOverrides((current) => {
+      if (!current[skill.id]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[skill.id];
+      return next;
+    });
   }
 
   function buildCommandSkillIds(skill: ChatSkillItem | undefined) {
@@ -906,70 +1291,74 @@ export function Composer({
     commandName: string,
     argumentsText = "",
   ): ResolvedComposerCommand | null {
+    const normalizedCommandName = normalizeSlashValue(commandName);
+    const normalizedToolName = normalizedCommandName
+      .replace(/^\//, "")
+      .toLowerCase();
     const args = argumentsText.trim();
-    const normalizedToolName = commandName.replace(/^\//, "").toLowerCase();
-    if (normalizedToolName === AGENT_TOOL_NAMES.generateImage) {
+    const capabilityCommand = capabilityCommandByLookup.get(normalizedToolName);
+    if (capabilityCommand?.action.kind === "tool") {
+      const name = primaryCapabilityCommandValue(
+        capabilityCommand,
+      ) as `/${string}`;
+      if (capabilityCommand.hasWorkflow) {
+        return {
+          arguments: args,
+          kind: "tool-command",
+          name,
+          toolName: capabilityCommand.action.targetId,
+        };
+      }
       return {
         arguments: args,
-        kind: "tool-command",
-        name: "/generate_image",
-        toolName: AGENT_TOOL_NAMES.generateImage,
+        kind: "capability-tool-invocation",
+        name,
+        selectableId: capabilityCommand.id,
+        toolName: capabilityCommand.action.targetId,
       };
     }
-    if (normalizedToolName === AGENT_TOOL_NAMES.generatePptx) {
-      return {
-        arguments: args,
-        kind: "tool-command",
-        name: "/generate_pptx",
-        toolName: AGENT_TOOL_NAMES.generatePptx,
-      };
-    }
-    if (normalizedToolName === AGENT_TOOL_NAMES.generateVideoPresentation) {
-      return {
-        arguments: args,
-        kind: "tool-command",
-        name: "/generate_video_presentation",
-        toolName: AGENT_TOOL_NAMES.generateVideoPresentation,
-      };
-    }
-    const notionToolName = notionAgentToolNames.find(
-      (toolName) => toolName.toLowerCase() === normalizedToolName,
-    );
-    if (notionToolsAvailable && notionToolName) {
-      return {
-        arguments: args,
-        kind: "tool-command",
-        name: `/${notionToolName}`,
-        toolName: notionToolName,
-      };
+    if (capabilityCommand?.action.kind === "skill") {
+      const skill = activeSlashSkillByName.get(
+        capabilityCommand.action.targetId.toLowerCase(),
+      );
+      if (skill && skill.slashConfig?.enabled !== false) {
+        return {
+          arguments: args,
+          displayName: capabilityCommand.title || skill.displayName,
+          kind: "capability-skill-command",
+          name: primaryCapabilityCommandValue(
+            capabilityCommand,
+          ) as `/${string}`,
+          skill,
+        };
+      }
     }
 
-    const skillActivation = availableSkills.find(
+    // Check all active connector types for matching tool names
+    for (const connectorType of connectorTypes) {
+      const toolNames = getConnectorAgentToolNames(connectorType);
+      const matchedToolName = toolNames.find(
+        (toolName) => toolName.toLowerCase() === normalizedToolName,
+      );
+      if (matchedToolName) {
+        return {
+          arguments: args,
+          kind: "tool-command",
+          name: `/${matchedToolName}`,
+          toolName: matchedToolName as ChatToolName,
+        };
+      }
+    }
+    const skillActivation = activeSlashSkills.find(
       (skill) =>
-        commandName.toLowerCase() === `/${skill.slug}`.toLowerCase() &&
-        supportsSkillSlash(skill),
+        normalizedCommandName.toLowerCase() ===
+          `/${skill.slug}`.toLowerCase() && supportsSkillSlash(skill),
     );
     if (skillActivation) {
       return {
         arguments: args,
         kind: "skill",
         skill: skillActivation,
-      };
-    }
-
-    const resolvedCommand = commandByCanonicalName.get(
-      commandName.toLowerCase(),
-    );
-    if (
-      resolvedCommand &&
-      supportsSkillSlash(resolvedCommand.skill) &&
-      resolvedCommand.command.slash !== false
-    ) {
-      return {
-        arguments: args,
-        command: resolvedCommand.command,
-        kind: "skill-command",
-        skill: resolvedCommand.skill,
       };
     }
 
@@ -995,21 +1384,29 @@ export function Composer({
       }
 
       if (
-        tokenCommand.kind === "skill" &&
+        (tokenCommand.kind === "skill" ||
+          tokenCommand.kind === "capability-skill-command") &&
         seenSkillIds.has(tokenCommand.skill.id)
       ) {
         continue;
       }
       if (
-        tokenCommand.kind === "tool-command" &&
+        (tokenCommand.kind === "tool-command" ||
+          tokenCommand.kind === "capability-tool-invocation") &&
         seenTools.has(tokenCommand.name)
       ) {
         continue;
       }
 
-      if (tokenCommand.kind === "skill") {
+      if (
+        tokenCommand.kind === "skill" ||
+        tokenCommand.kind === "capability-skill-command"
+      ) {
         seenSkillIds.add(tokenCommand.skill.id);
-      } else if (tokenCommand.kind === "tool-command") {
+      } else if (
+        tokenCommand.kind === "tool-command" ||
+        tokenCommand.kind === "capability-tool-invocation"
+      ) {
         seenTools.add(tokenCommand.name);
       }
       resolved.push(tokenCommand);
@@ -1017,18 +1414,6 @@ export function Composer({
 
     return resolved;
   }
-
-  useEffect(() => {
-    if (imageConfigPinned) {
-      return;
-    }
-    setImageConfig(
-      clampImageConfigToCapabilities({
-        config: skillImageConfig,
-        capabilities: effectiveImageCapabilities,
-      }),
-    );
-  }, [effectiveImageCapabilities, imageConfigPinned, skillImageConfig]);
 
   useEffect(() => {
     setDraftText(initialInput);
@@ -1085,7 +1470,7 @@ export function Composer({
       <PromptInputProvider
         initialAttachments={initialAttachments}
         initialInput={initialInput}
-        key={`${String(inputKey ?? "composer")}:${composerSessionKey}:${initialAttachmentsKey}`}
+        key={`${String(inputKey ?? "composer")}:${composerSessionKey}:${initialAttachments.map((a) => a.id).join(",")}`}
       >
         <PromptInput
           accept="image/png,image/jpeg,image/webp,image/gif"
@@ -1109,59 +1494,113 @@ export function Composer({
             const activeCommand =
               [...tokenResolvedCommands]
                 .reverse()
-                .find((command) => command.kind === "skill-command") ?? null;
+                .find(
+                  (command) =>
+                    command.kind === "skill" ||
+                    command.kind === "capability-skill-command",
+                ) ?? null;
             const activeToolCommand =
               activeCommand === null
                 ? ([...tokenResolvedCommands]
                     .reverse()
                     .find((command) => command.kind === "tool-command") ?? null)
                 : null;
+            const activeToolInvocation =
+              activeCommand === null && activeToolCommand === null
+                ? ([...tokenResolvedCommands]
+                    .reverse()
+                    .find(
+                      (command) =>
+                        command.kind === "capability-tool-invocation",
+                    ) ?? null)
+                : null;
             const invokedSkillIds = [
               ...new Set(
                 tokenResolvedCommands
                   .flatMap((command) =>
-                    command.kind === "skill" || command.kind === "skill-command"
+                    command.kind === "skill" ||
+                    command.kind === "capability-skill-command"
                       ? buildCommandSkillIds(command.skill)
                       : [],
                   )
                   .filter(Boolean),
               ),
             ].slice(0, 5);
+            const optionSelectedSkillIds = effectiveSelectedSkillIds.filter(
+              (skillId) => {
+                const skill = availableSkills.find(
+                  (candidate) => candidate.id === skillId,
+                );
+                return !skill || skill.sourceType === "builtin";
+              },
+            );
+            const requestSkillIds = [
+              ...new Set([...optionSelectedSkillIds, ...invokedSkillIds]),
+            ].slice(0, 5);
             const turnSkillIds = [
               ...new Set([...effectiveSelectedSkillIds, ...invokedSkillIds]),
-            ].slice(0, 5);
+            ];
+            const turnSkills = availableSkills.filter((skill) =>
+              turnSkillIds.includes(skill.id),
+            );
             const submittedMessage = message;
             const commandRequest =
-              activeCommand?.kind === "skill-command"
+              activeCommand?.kind === "skill"
                 ? {
-                    arguments: markerContent,
-                    kind: "skill-command" as const,
-                    name: activeCommand.command.canonicalName,
+                    arguments: userTextContent,
+                    displayName: activeCommand.skill.displayName,
+                    kind: "skill" as const,
+                    name: `/${activeCommand.skill.slug}`,
                   }
-                : activeToolCommand?.kind === "tool-command"
+                : activeCommand?.kind === "capability-skill-command"
                   ? {
                       arguments: userTextContent,
-                      kind: "tool" as const,
-                      name: activeToolCommand.name,
-                      toolName: activeToolCommand.toolName,
+                      displayName: activeCommand.displayName,
+                      kind: "skill" as const,
+                      name: activeCommand.name,
                     }
-                  : undefined;
+                  : activeToolCommand?.kind === "tool-command"
+                    ? {
+                        arguments: userTextContent,
+                        kind: "tool" as const,
+                        name: activeToolCommand.name,
+                        toolName: activeToolCommand.toolName,
+                      }
+                    : undefined;
+            const invocationRequest: ThreadInvocationRequest | undefined =
+              activeToolInvocation?.kind === "capability-tool-invocation"
+                ? {
+                    selectableId: activeToolInvocation.selectableId,
+                    userInput: userTextContent,
+                  }
+                : undefined;
             const tools = buildComposerToolsSelection({
-              imageGenerationEnabled,
-              imageSupported,
-              pptxConfig,
-              pptxGenerationEnabled,
-              videoPresentationGenerationEnabled,
-              videoPresentationNarrationEnabled,
-              videoPresentationUserConfigured: videoPresentationToolChanged,
-              notionConnectorId,
-              notionToolsEnabled,
-              selectedSkills: availableSkills.filter((skill) =>
-                turnSkillIds.includes(skill.id),
-              ),
-              imageConfig: effectiveImageConfig,
-              imageModelAlias: effectiveImageModelAlias,
+              disabledToolNames,
+              selectedSkills: turnSkills,
+              activeConnectorIds: resolvedConnectorIds,
+              connectorToolsEnabled,
             });
+            const toolsWithSkillOptions = mergeChatToolsSelection(
+              tools,
+              buildSkillOptionToolsSelection({
+                selectedSkills: turnSkills,
+                overrides: skillOptionOverrides,
+              }),
+            );
+            const toolsWithCapabilityOptions = mergeChatToolsSelection(
+              toolsWithSkillOptions,
+              buildCapabilityOptionSelection({
+                catalogTools: capabilityToolsWithOptions,
+                overrides: capabilityOptionOverrides,
+              }),
+            );
+            const toolsWithCapabilityToggles = mergeChatToolsSelection(
+              toolsWithCapabilityOptions,
+              buildCapabilityToolToggleSelection({
+                catalogTools: visibleCapabilityTools,
+                overrides: capabilityToolEnabledOverrides,
+              }),
+            );
             const toolCommandNames = new Set(
               tokenResolvedCommands
                 .filter((command) => command.kind === "tool-command")
@@ -1170,28 +1609,13 @@ export function Composer({
             const toolsWithTokenCommands: ChatToolsSelection | undefined =
               toolCommandNames.size
                 ? (() => {
-                    const nextTools: ChatToolsSelection = { ...(tools ?? {}) };
+                    const commandTools: ChatToolsSelection = {};
                     for (const toolName of toolCommandNames) {
-                      if (toolName === AGENT_TOOL_NAMES.generatePptx) {
-                        nextTools[AGENT_TOOL_NAMES.generatePptx] = {
-                          ...(nextTools[AGENT_TOOL_NAMES.generatePptx] ?? {}),
-                          enabled: true,
-                        };
-                      } else if (
-                        toolName === AGENT_TOOL_NAMES.generateVideoPresentation
-                      ) {
-                        nextTools[
-                          AGENT_TOOL_NAMES.generateVideoPresentation
-                        ] = {
-                          ...(nextTools[
-                            AGENT_TOOL_NAMES.generateVideoPresentation
-                          ] ?? {}),
-                          enabled: true,
-                        };
-                      } else if (isNotionToolName(toolName)) {
-                        const connectorTools = nextTools as Record<
+                      // Enable connector tools whose capability matches
+                      if (hasAgentToolCapability(toolName, "notion")) {
+                        const connectorTools = commandTools as Record<
                           string,
-                          ChatConnectorToolSelection | undefined
+                          ChatToolSelection | undefined
                         >;
                         connectorTools[toolName] = {
                           ...(connectorTools[toolName] ?? {}),
@@ -1200,11 +1624,19 @@ export function Composer({
                             : {}),
                           enabled: true,
                         };
+                      } else {
+                        commandTools[toolName] = {
+                          ...(commandTools[toolName] ?? {}),
+                          enabled: true,
+                        };
                       }
                     }
-                    return nextTools;
+                    return mergeChatToolsSelection(
+                      toolsWithCapabilityToggles,
+                      commandTools,
+                    );
                   })()
-                : tools;
+                : toolsWithCapabilityToggles;
             const toolsWithInvokedSkills =
               invokedSkillIds.length > 0
                 ? {
@@ -1227,8 +1659,9 @@ export function Composer({
               submittedMessage,
               toolsWithMcp,
               commandRequest,
-              turnSkillIds,
+              requestSkillIds,
               markerContent,
+              invocationRequest,
             );
             setComposerSessionKey((value) => value + 1);
           }}
@@ -1277,10 +1710,15 @@ export function Composer({
                 if (meta.kind === "tool-command") {
                   return;
                 }
+                if (meta.kind === "capability-tool-command") {
+                  return;
+                }
+                if (meta.kind === "capability-skill-command") {
+                  return;
+                }
                 if (meta.kind === "skill") {
                   return;
                 }
-                applyCommandTools(meta.command);
               }}
               slashCommands={slashCommandOptions}
               sourceLoader={sourceMentionLoader}
@@ -1316,392 +1754,608 @@ export function Composer({
                     <DropdownMenuLabel className="px-2 py-1.5 text-[11px] text-muted-foreground">
                       Options
                     </DropdownMenuLabel>
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
-                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                          <PromptCommandIcon
-                            className="size-3.5 shrink-0 text-muted-foreground"
-                            fallbackIconName="tool"
-                            {...getPromptInputActionIcon(
-                              AGENT_TOOL_NAMES.generateImage,
-                            )}
-                          />
-                          <span className="shrink-0">Image generation</span>
-                          <span
-                            className={cn(
-                              "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
-                              imageToolChanged && "text-primary",
-                            )}
-                          >
-                            {imageGenerationEnabled
-                              ? imageOptionSummary
-                              : "Off"}
-                          </span>
-                        </span>
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent
-                        alignOffset={-6}
-                        className="max-h-[min(520px,var(--radix-dropdown-menu-content-available-height))] w-[340px] overflow-y-auto p-3"
-                        sideOffset={8}
-                      >
-                        <div className="space-y-3.5">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-xs font-medium text-foreground">
-                                Image generation
-                              </div>
-                            </div>
-                            <Switch
-                              checked={imageGenerationEnabled}
-                              onCheckedChange={(checked) =>
-                                updateImageGenerationEnabled(Boolean(checked))
-                              }
-                              size="sm"
-                            />
-                          </div>
-                          {!imageSupported ? (
-                            <div className="rounded-md bg-muted/40 px-2.5 py-2 text-xs text-muted-foreground">
-                              Select an image model to generate.
-                            </div>
-                          ) : null}
-                          <ImageConfigGroup
-                            disabled={
-                              !imageSupported || !imageGenerationEnabled
-                            }
-                            label="Aspect ratio"
-                            onValueChange={(value) =>
-                              updateImageConfig({
-                                aspectRatio: value as ImageAspectRatio,
-                              })
-                            }
-                            options={filteredAspectRatioOptions}
-                            value={effectiveImageConfig.aspectRatio}
-                          />
-                          <ImageConfigGroup
-                            disabled={
-                              !imageSupported || !imageGenerationEnabled
-                            }
-                            label="Image quality"
-                            onValueChange={(value) =>
-                              updateImageConfig({
-                                quality: value as ImageQuality,
-                              })
-                            }
-                            options={filteredImageQualityOptions}
-                            value={effectiveImageConfig.quality}
-                          />
-                          <ImageConfigGroup
-                            disabled={
-                              !imageSupported || !imageGenerationEnabled
-                            }
-                            label="Style"
-                            onValueChange={(value) =>
-                              updateImageConfig({
-                                style: value as ImageStyle,
-                              })
-                            }
-                            options={filteredImageStyleOptions}
-                            value={effectiveImageConfig.style}
-                          />
-                          <div className="flex items-center justify-between border-border/60 border-t pt-2">
-                            <span className="text-[11px] text-muted-foreground">
-                              {imageGenerationEnabled
-                                ? imageOptionSummary
-                                : "Off"}
-                            </span>
-                            <button
-                              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              onClick={() => {
-                                setImageConfig(DEFAULT_IMAGE_ARTIFACT_CONFIG);
-                                setImageConfigPinned(false);
-                                updateImageGenerationEnabled(true);
-                              }}
-                              type="button"
-                            >
-                              <RotateCcw className="size-3" />
-                              Reset
-                            </button>
-                          </div>
-                        </div>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
                     <DropdownMenuSeparator />
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
-                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                          <PromptCommandIcon
-                            className="size-3.5 shrink-0 text-muted-foreground"
-                            fallbackIconName="tool"
-                            {...getPromptInputActionIcon(
-                              AGENT_TOOL_NAMES.generatePptx,
-                            )}
-                          />
-                          <span className="shrink-0">Generate PPTX</span>
-                          <span
-                            className={cn(
-                              "ml-auto min-w-0 max-w-[112px] truncate text-right text-muted-foreground",
-                              pptxToolChanged && "text-primary",
-                            )}
-                          >
-                            {pptxGenerationEnabled ? pptxOptionSummary : "Off"}
-                          </span>
-                        </span>
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent
-                        alignOffset={-6}
-                        className="max-h-[min(620px,var(--radix-dropdown-menu-content-available-height))] w-[420px] overflow-y-auto p-3"
-                        sideOffset={8}
-                      >
-                        <div className="space-y-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 space-y-1">
-                              <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                    {connectorTypes.map((connectorType) => {
+                      const toolNames =
+                        getConnectorAgentToolNames(connectorType);
+                      if (toolNames.length === 0) return null;
+                      const connectorEnabled =
+                        connectorToolsEnabled[connectorType] ?? true;
+                      const connectorChanged =
+                        connectorEnabled !== undefined && !connectorEnabled;
+                      const connectorSummary = connectorOptionSummary(
+                        connectorEnabled,
+                        resolvedConnectorIds[connectorType] ?? null,
+                      );
+                      const displayName =
+                        connectorType.charAt(0).toUpperCase() +
+                        connectorType.slice(1);
+                      const firstToolName = toolNames[0];
+                      return (
+                        <Fragment key={connectorType}>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                              <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                                 <PromptCommandIcon
-                                  className="size-3.5 text-muted-foreground"
+                                  className="size-3.5 shrink-0"
                                   fallbackIconName="tool"
-                                  {...getPromptInputActionIcon(
-                                    AGENT_TOOL_NAMES.generatePptx,
+                                  {...(firstToolName
+                                    ? getPromptInputActionIcon(firstToolName)
+                                    : {})}
+                                />
+                                <span className="shrink-0">{displayName}</span>
+                                <span
+                                  className={cn(
+                                    "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
+                                    connectorChanged && "text-primary",
                                   )}
-                                />
-                                Generate PPTX
-                              </div>
-                              <div className="text-[11px] text-muted-foreground">
-                                SourceWeft creates a native editable,
-                                high-quality PowerPoint deck.
-                              </div>
-                            </div>
-                            <Switch
-                              checked={pptxGenerationEnabled}
-                              onCheckedChange={(checked) =>
-                                updateToolEnabled(
-                                  AGENT_TOOL_NAMES.generatePptx,
-                                  Boolean(checked),
-                                )
-                              }
-                              size="sm"
-                            />
-                          </div>
-
-                          <PptxStylePresetGroup
-                            disabled={!pptxGenerationEnabled}
-                            onValueChange={(stylePreset) =>
-                              updatePptxConfig({
-                                design: { stylePreset },
-                              })
-                            }
-                            value={pptxConfig.design.stylePreset}
-                          />
-
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <PptxConfigGroup
-                              disabled={!pptxGenerationEnabled}
-                              icon={<PanelTop className="size-3.5" />}
-                              label="Canvas"
-                              onValueChange={(value) =>
-                                updatePptxConfig({
-                                  design: {
-                                    aspectRatio: value as PptxAspectRatio,
-                                  },
-                                })
-                              }
-                              options={pptxAspectRatioOptions}
-                              value={pptxConfig.design.aspectRatio}
-                            />
-                            <PptxConfigGroup
-                              disabled={!pptxGenerationEnabled}
-                              icon={<LayoutTemplate className="size-3.5" />}
-                              label="Language"
-                              onValueChange={(value) =>
-                                updatePptxConfig({
-                                  design: {
-                                    language: value as PptxLanguage,
-                                  },
-                                })
-                              }
-                              options={pptxLanguageOptions}
-                              value={pptxConfig.design.language}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between border-border/60 border-t pt-2">
-                            <span className="max-w-[280px] truncate text-[11px] text-muted-foreground">
-                              {pptxGenerationEnabled
-                                ? pptxOptionSummary
-                                : "Off"}
-                            </span>
-                            <button
-                              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              onClick={() => {
-                                setPptxConfig(DEFAULT_PPTX_ARTIFACT_CONFIG);
-                                updateToolEnabled(
-                                  AGENT_TOOL_NAMES.generatePptx,
-                                  true,
-                                );
-                              }}
-                              type="button"
-                            >
-                              <RotateCcw className="size-3" />
-                              Reset
-                            </button>
-                          </div>
-                        </div>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
-                        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                          <PromptCommandIcon
-                            className="size-3.5 shrink-0 text-muted-foreground"
-                            fallbackIconName="tool"
-                            {...getPromptInputActionIcon(
-                              AGENT_TOOL_NAMES.generateVideoPresentation,
-                            )}
-                          />
-                          <span className="shrink-0">Video presentation</span>
-                          <span
-                            className={cn(
-                              "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
-                              videoPresentationToolChanged && "text-primary",
-                            )}
-                          >
-                            {videoPresentationOptionSummary}
-                          </span>
-                        </span>
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent className="w-72 p-3">
-                        <div className="space-y-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 space-y-1">
-                              <div className="flex items-center gap-2 text-xs font-medium text-foreground">
-                                <PromptCommandIcon
-                                  className="size-3.5 text-muted-foreground"
-                                  fallbackIconName="tool"
-                                  {...getPromptInputActionIcon(
-                                    AGENT_TOOL_NAMES.generateVideoPresentation,
-                                  )}
-                                />
-                                Video presentation
-                              </div>
-                              <div className="text-[11px] leading-4 text-muted-foreground">
-                                Browser-rendered video project. Put style,
-                                pacing, and audience direction in the prompt.
-                              </div>
-                            </div>
-                            <Switch
-                              checked={videoPresentationGenerationEnabled}
-                              onCheckedChange={(checked) =>
-                                updateToolEnabled(
-                                  AGENT_TOOL_NAMES.generateVideoPresentation,
-                                  Boolean(checked),
-                                )
-                              }
-                              size="sm"
-                            />
-                          </div>
-                          <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-xs font-medium text-foreground">
-                                  Narration
-                                </div>
-                                <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                                  {videoPresentationNarrationEnabled
-                                    ? "Voiceover audio"
-                                    : "Silent video"}
-                                </div>
-                              </div>
-                              <Switch
-                                checked={videoPresentationNarrationEnabled}
-                                disabled={!videoPresentationGenerationEnabled}
-                                onCheckedChange={(checked) =>
-                                  setVideoPresentationNarrationEnabled(
-                                    Boolean(checked),
-                                  )
-                                }
-                                size="sm"
-                              />
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between border-border/60 border-t pt-2">
-                            <span className="truncate text-[11px] text-muted-foreground">
-                              {videoPresentationOptionSummary}
-                            </span>
-                            <button
-                              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                              onClick={() => {
-                                setVideoPresentationNarrationEnabled(true);
-                                updateToolEnabled(
-                                  AGENT_TOOL_NAMES.generateVideoPresentation,
-                                  true,
-                                );
-                              }}
-                              type="button"
-                            >
-                              <RotateCcw className="size-3" />
-                              Reset
-                            </button>
-                          </div>
-                        </div>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                    <DropdownMenuSeparator />
-                    {notionToolsAvailable ? (
-                      <>
-                        <DropdownMenuSub>
-                          <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
-                            <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                              <PromptCommandIcon
-                                className="size-3.5 shrink-0"
-                                fallbackIconName="tool"
-                                {...getPromptInputActionIcon(
-                                  notionAgentToolNames[0],
-                                )}
-                              />
-                              <span className="shrink-0">Notion</span>
-                              <span
-                                className={cn(
-                                  "ml-auto min-w-0 max-w-[108px] truncate text-right text-muted-foreground",
-                                  notionToolChanged && "text-primary",
-                                )}
-                              >
-                                {notionSummary}
-                              </span>
-                            </span>
-                          </DropdownMenuSubTrigger>
-                          <DropdownMenuSubContent className="w-64 p-3">
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-xs font-medium text-foreground">
-                                    Notion tools
-                                  </div>
-                                </div>
-                                <Switch
-                                  checked={notionToolsEnabled}
-                                  onCheckedChange={(checked) =>
-                                    updateNotionToolsEnabled(Boolean(checked))
-                                  }
-                                  size="sm"
-                                />
-                              </div>
-                              <div className="flex items-center justify-between border-border/60 border-t pt-2">
-                                <span className="truncate text-[11px] text-muted-foreground">
-                                  {notionSummary}
-                                </span>
-                                <button
-                                  className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                  onClick={() => updateNotionToolsEnabled(true)}
-                                  type="button"
                                 >
-                                  <RotateCcw className="size-3" />
-                                  Reset
-                                </button>
+                                  {connectorSummary}
+                                </span>
+                              </span>
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent className="w-64 p-3">
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-medium text-foreground">
+                                      {displayName} tools
+                                    </div>
+                                  </div>
+                                  <Switch
+                                    checked={connectorEnabled}
+                                    onCheckedChange={(checked) =>
+                                      updateConnectorToolsEnabled(
+                                        connectorType,
+                                        Boolean(checked),
+                                      )
+                                    }
+                                    size="sm"
+                                  />
+                                </div>
+                                <div className="flex items-center justify-between border-border/60 border-t pt-2">
+                                  <span className="truncate text-[11px] text-muted-foreground">
+                                    {connectorSummary}
+                                  </span>
+                                  <button
+                                    className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    onClick={() =>
+                                      updateConnectorToolsEnabled(
+                                        connectorType,
+                                        true,
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    <RotateCcw className="size-3" />
+                                    Reset
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          </DropdownMenuSubContent>
-                        </DropdownMenuSub>
-                        <DropdownMenuSeparator />
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator />
+                        </Fragment>
+                      );
+                    })}
+                    {visibleCapabilityTools.map((tool) => {
+                      const toolOptions = tool.options.filter(
+                        (option) => option.target?.path,
+                      );
+                      const overrides =
+                        capabilityOptionOverrides[tool.toolName] ?? {};
+                      const changedCount = Object.values(overrides).filter(
+                        (value) => value !== undefined,
+                      ).length;
+                      const toolEnabled = getCapabilityToolEnabled(tool);
+                      const toolToggleChanged =
+                        capabilityToolEnabledOverrides[tool.toolName] !==
+                          undefined ||
+                        toolEnabled !==
+                          isAgentToolEnabledByDefault(tool.toolName);
+                      const summary = !toolEnabled
+                        ? "Off"
+                        : changedCount > 0
+                          ? `${changedCount} changed`
+                          : capabilityToolEnabledOverrides[tool.toolName] ===
+                              true
+                            ? "On"
+                            : "Default";
+                      const toolChanged = changedCount > 0 || toolToggleChanged;
+                      return (
+                        <Fragment key={tool.id}>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                              <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                                <PromptCommandIcon
+                                  className="size-3.5 shrink-0"
+                                  fallbackIconName="tool"
+                                  {...getPromptInputActionIcon(tool.toolName)}
+                                />
+                                <span className="min-w-0 shrink truncate">
+                                  {tool.title}
+                                </span>
+                                <span
+                                  className={cn(
+                                    "ml-auto min-w-0 max-w-[96px] truncate text-right text-muted-foreground",
+                                    toolChanged && "text-primary",
+                                  )}
+                                >
+                                  {summary}
+                                </span>
+                              </span>
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent className="w-80 p-3">
+                              <div className="space-y-3">
+                                <div className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5">
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-medium text-foreground">
+                                      Enable tool
+                                    </div>
+                                    <div className="truncate text-[11px] text-muted-foreground">
+                                      {tool.description}
+                                    </div>
+                                  </div>
+                                  <Switch
+                                    checked={toolEnabled}
+                                    onCheckedChange={(checked) =>
+                                      updateCapabilityToolEnabled(
+                                        tool,
+                                        Boolean(checked),
+                                      )
+                                    }
+                                    size="sm"
+                                  />
+                                </div>
+                                {toolOptions.length > 0 ? (
+                                  <div
+                                    className={cn(
+                                      "space-y-2",
+                                      !toolEnabled && "opacity-60",
+                                    )}
+                                  >
+                                    {toolOptions.map((option) => {
+                                      const value = getCapabilityOptionValue(
+                                        tool,
+                                        option,
+                                      );
+                                      const values = getCapabilityOptionValues(
+                                        tool,
+                                        option,
+                                      );
+                                      const optionChanged =
+                                        overrides[option.id] !== undefined;
+                                      const valueLabel =
+                                        capabilityOptionValueLabel(
+                                          option,
+                                          value,
+                                        );
+                                      if (option.valueType === "boolean") {
+                                        return (
+                                          <div
+                                            className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5"
+                                            key={option.id}
+                                            title={option.description}
+                                          >
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                              <span
+                                                className={cn(
+                                                  "min-w-0 truncate text-xs font-medium text-foreground",
+                                                  optionChanged &&
+                                                    "text-primary",
+                                                )}
+                                              >
+                                                {option.title}
+                                              </span>
+                                              {optionChanged ? (
+                                                <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                                              ) : null}
+                                            </div>
+                                            <Switch
+                                              checked={value === true}
+                                              disabled={!toolEnabled}
+                                              onCheckedChange={(checked) =>
+                                                updateCapabilityOption(
+                                                  tool,
+                                                  option,
+                                                  Boolean(checked),
+                                                )
+                                              }
+                                              size="sm"
+                                            />
+                                          </div>
+                                        );
+                                      }
+                                      if (values.length === 0) {
+                                        return (
+                                          <div
+                                            className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5"
+                                            key={option.id}
+                                            title={option.description}
+                                          >
+                                            <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                                              {option.title}
+                                            </span>
+                                            <span className="shrink-0 text-[11px] text-muted-foreground">
+                                              Unavailable
+                                            </span>
+                                          </div>
+                                        );
+                                      }
+                                      const selectedValueKey = values
+                                        .map((candidate) =>
+                                          capabilityOptionValueKey(
+                                            candidate.value,
+                                          ),
+                                        )
+                                        .includes(
+                                          capabilityOptionValueKey(value),
+                                        )
+                                        ? capabilityOptionValueKey(value)
+                                        : undefined;
+                                      return (
+                                        <div
+                                          className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5"
+                                          key={option.id}
+                                          title={option.description}
+                                        >
+                                          <div className="flex min-w-0 items-center gap-1.5">
+                                            <span
+                                              className={cn(
+                                                "min-w-0 truncate text-xs font-medium text-foreground",
+                                                optionChanged && "text-primary",
+                                              )}
+                                            >
+                                              {option.title}
+                                            </span>
+                                            {optionChanged ? (
+                                              <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                                            ) : null}
+                                          </div>
+                                          <Select
+                                            disabled={!toolEnabled}
+                                            onValueChange={(nextValue) => {
+                                              const selected = values.find(
+                                                (candidate) =>
+                                                  capabilityOptionValueKey(
+                                                    candidate.value,
+                                                  ) === nextValue,
+                                              );
+                                              if (!selected) {
+                                                return;
+                                              }
+                                              updateCapabilityOption(
+                                                tool,
+                                                option,
+                                                selected.value,
+                                              );
+                                            }}
+                                            value={selectedValueKey}
+                                          >
+                                            <SelectTrigger
+                                              className={cn(
+                                                "h-7 w-[116px] rounded-md text-xs",
+                                                optionChanged &&
+                                                  "border-primary/50 text-primary",
+                                              )}
+                                              size="sm"
+                                            >
+                                              <SelectValue
+                                                placeholder={valueLabel}
+                                              />
+                                            </SelectTrigger>
+                                            <SelectContent className="max-h-64">
+                                              {values.map((candidate) => (
+                                                <SelectItem
+                                                  className="text-xs"
+                                                  key={capabilityOptionValueKey(
+                                                    candidate.value,
+                                                  )}
+                                                  value={capabilityOptionValueKey(
+                                                    candidate.value,
+                                                  )}
+                                                >
+                                                  {candidate.label ??
+                                                    String(candidate.value)}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="rounded-lg bg-muted/40 px-2 py-2 text-[11px] text-muted-foreground">
+                                    No configurable options
+                                  </div>
+                                )}
+                                <div className="flex items-center justify-between border-border/60 border-t pt-2">
+                                  <span className="truncate text-[11px] text-muted-foreground">
+                                    {summary}
+                                  </span>
+                                  <button
+                                    className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                    onClick={() => {
+                                      resetCapabilityToolEnabled(tool);
+                                      resetCapabilityToolOptions(tool);
+                                    }}
+                                    type="button"
+                                  >
+                                    <RotateCcw className="size-3" />
+                                    Reset
+                                  </button>
+                                </div>
+                              </div>
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator />
+                        </Fragment>
+                      );
+                    })}
+                    {builtinSkillsWithOptions.length > 0 ? (
+                      <>
+                        {builtinSkillsWithOptions.map((skill) => {
+                          const options = skill.options ?? [];
+                          const overrides =
+                            skillOptionOverrides[skill.id] ?? {};
+                          const changedCount = Object.values(overrides).filter(
+                            (value) => value !== undefined,
+                          ).length;
+                          const skillEnabled = effectiveSelectedSkillIdSet.has(
+                            skill.id,
+                          );
+                          const skillUnavailable = !isSkillViable(
+                            skill,
+                            disabledToolNameSet,
+                          );
+                          const summary = !skillEnabled
+                            ? "Off"
+                            : changedCount > 0
+                              ? `${changedCount} changed`
+                              : "Default";
+                          const skillChanged = changedCount > 0;
+                          const skillCommandIcon =
+                            capabilitySkillCommandBySkillId.get(skill.id);
+                          return (
+                            <Fragment key={skill.id}>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="h-9 min-w-0 overflow-hidden rounded-lg px-2 text-xs whitespace-nowrap">
+                                  <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                                    <PromptCommandIcon
+                                      className={cn(
+                                        "size-3.5 shrink-0 text-muted-foreground",
+                                        skillEnabled && "text-primary",
+                                      )}
+                                      fallbackIconName="skill"
+                                      {...getCapabilityCommandIcon(
+                                        skillCommandIcon,
+                                      )}
+                                    />
+                                    <span
+                                      className={cn(
+                                        "min-w-0 shrink truncate",
+                                        skillUnavailable &&
+                                          "text-muted-foreground",
+                                      )}
+                                    >
+                                      {skill.displayName}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "ml-auto min-w-0 max-w-[96px] truncate text-right text-muted-foreground",
+                                        skillChanged && "text-primary",
+                                      )}
+                                    >
+                                      {summary}
+                                    </span>
+                                  </span>
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent className="w-80 p-3">
+                                  <div className="space-y-3">
+                                    <div className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5">
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-medium text-foreground">
+                                          Enable skill
+                                        </div>
+                                        <div className="truncate text-[11px] text-muted-foreground">
+                                          {skill.description}
+                                        </div>
+                                      </div>
+                                      <Switch
+                                        checked={skillEnabled}
+                                        disabled={
+                                          !onSkillSelectionChange ||
+                                          skillUnavailable
+                                        }
+                                        onCheckedChange={(checked) =>
+                                          updateSkillSelected(
+                                            skill,
+                                            Boolean(checked),
+                                          )
+                                        }
+                                        size="sm"
+                                      />
+                                    </div>
+                                    <div
+                                      className={cn(
+                                        "space-y-2",
+                                        (!skillEnabled || skillUnavailable) &&
+                                          "opacity-60",
+                                      )}
+                                    >
+                                      {options.map((option) => {
+                                        const value = getSkillOptionValue(
+                                          skill,
+                                          option,
+                                        );
+                                        const values =
+                                          getSkillOptionValues(option);
+                                        const optionChanged =
+                                          overrides[option.id] !== undefined;
+                                        const valueLabel =
+                                          capabilityOptionValueLabel(
+                                            option,
+                                            value,
+                                          );
+                                        const disabled =
+                                          !skillEnabled || skillUnavailable;
+                                        if (option.valueType === "boolean") {
+                                          return (
+                                            <div
+                                              className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5"
+                                              key={option.id}
+                                              title={option.description}
+                                            >
+                                              <div className="flex min-w-0 items-center gap-1.5">
+                                                <span
+                                                  className={cn(
+                                                    "min-w-0 truncate text-xs font-medium text-foreground",
+                                                    optionChanged &&
+                                                      "text-primary",
+                                                  )}
+                                                >
+                                                  {option.title}
+                                                </span>
+                                                {optionChanged ? (
+                                                  <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                                                ) : null}
+                                              </div>
+                                              <Switch
+                                                checked={value === true}
+                                                disabled={disabled}
+                                                onCheckedChange={(checked) =>
+                                                  updateSkillOption(
+                                                    skill,
+                                                    option,
+                                                    Boolean(checked),
+                                                  )
+                                                }
+                                                size="sm"
+                                              />
+                                            </div>
+                                          );
+                                        }
+                                        if (values.length === 0) {
+                                          return (
+                                            <div
+                                              className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5"
+                                              key={option.id}
+                                              title={option.description}
+                                            >
+                                              <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                                                {option.title}
+                                              </span>
+                                              <span className="shrink-0 text-[11px] text-muted-foreground">
+                                                Unavailable
+                                              </span>
+                                            </div>
+                                          );
+                                        }
+                                        const selectedValueKey = values
+                                          .map((candidate) =>
+                                            capabilityOptionValueKey(
+                                              candidate.value,
+                                            ),
+                                          )
+                                          .includes(
+                                            capabilityOptionValueKey(value),
+                                          )
+                                          ? capabilityOptionValueKey(value)
+                                          : undefined;
+                                        return (
+                                          <div
+                                            className="flex min-h-9 items-center justify-between gap-3 rounded-lg px-2 py-1.5"
+                                            key={option.id}
+                                            title={option.description}
+                                          >
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                              <span
+                                                className={cn(
+                                                  "min-w-0 truncate text-xs font-medium text-foreground",
+                                                  optionChanged &&
+                                                    "text-primary",
+                                                )}
+                                              >
+                                                {option.title}
+                                              </span>
+                                              {optionChanged ? (
+                                                <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+                                              ) : null}
+                                            </div>
+                                            <Select
+                                              disabled={disabled}
+                                              onValueChange={(nextValue) => {
+                                                const selected = values.find(
+                                                  (candidate) =>
+                                                    capabilityOptionValueKey(
+                                                      candidate.value,
+                                                    ) === nextValue,
+                                                );
+                                                if (!selected) {
+                                                  return;
+                                                }
+                                                updateSkillOption(
+                                                  skill,
+                                                  option,
+                                                  selected.value,
+                                                );
+                                              }}
+                                              value={selectedValueKey}
+                                            >
+                                              <SelectTrigger
+                                                className={cn(
+                                                  "h-7 w-[116px] rounded-md text-xs",
+                                                  optionChanged &&
+                                                    "border-primary/50 text-primary",
+                                                )}
+                                                size="sm"
+                                              >
+                                                <SelectValue
+                                                  placeholder={valueLabel}
+                                                />
+                                              </SelectTrigger>
+                                              <SelectContent className="max-h-64">
+                                                {values.map((candidate) => (
+                                                  <SelectItem
+                                                    className="text-xs"
+                                                    key={capabilityOptionValueKey(
+                                                      candidate.value,
+                                                    )}
+                                                    value={capabilityOptionValueKey(
+                                                      candidate.value,
+                                                    )}
+                                                  >
+                                                    {candidate.label ??
+                                                      String(candidate.value)}
+                                                  </SelectItem>
+                                                ))}
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                    <div className="flex items-center justify-between border-border/60 border-t pt-2">
+                                      <span className="truncate text-[11px] text-muted-foreground">
+                                        {summary}
+                                      </span>
+                                      <button
+                                        className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                        onClick={() => resetSkillOptions(skill)}
+                                        type="button"
+                                      >
+                                        <RotateCcw className="size-3" />
+                                        Reset
+                                      </button>
+                                    </div>
+                                  </div>
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
+                              <DropdownMenuSeparator />
+                            </Fragment>
+                          );
+                        })}
                       </>
                     ) : null}
                     {supportsThinking && supportedThinkingEfforts.length > 0 ? (
@@ -1727,8 +2381,10 @@ export function Composer({
                             onValueChange={(value) => {
                               if (value === "off") {
                                 updateThinkingSettings({
-                                  ...(activeThinkingSettings ??
-                                    DEFAULT_PROMPT_THINKING_SETTINGS),
+                                  ...(activeThinkingSettings ?? {
+                                    mode: "auto" as const,
+                                    effort: "medium" as const,
+                                  }),
                                   mode: "off",
                                 });
                                 return;
@@ -1736,8 +2392,10 @@ export function Composer({
 
                               if (value === "auto") {
                                 updateThinkingSettings({
-                                  ...(activeThinkingSettings ??
-                                    DEFAULT_PROMPT_THINKING_SETTINGS),
+                                  ...(activeThinkingSettings ?? {
+                                    mode: "auto" as const,
+                                    effort: "medium" as const,
+                                  }),
                                   mode: "auto",
                                 });
                                 return;
@@ -1787,20 +2445,6 @@ export function Composer({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                {effectiveSelectedSkillIds.length > 0 ? (
-                  <PromptInputButton
-                    aria-pressed
-                    className="rounded-xl bg-foreground text-background shadow-sm hover:bg-foreground/90 hover:text-background"
-                    size="icon-sm"
-                    tooltip={selectedSkillNames || "Selected skills"}
-                    type="button"
-                    variant="secondary"
-                  >
-                    <SkillIcon className="size-4" />
-                    <span className="sr-only">Selected skills</span>
-                  </PromptInputButton>
-                ) : null}
-
                 <PromptInputButton
                   aria-pressed={searchEnabled}
                   className={
@@ -1810,12 +2454,12 @@ export function Composer({
                   }
                   onClick={() => onSearchEnabledChange?.(!searchEnabled)}
                   size="icon-sm"
-                  tooltip={{ content: "Search sources", shortcut: "S" }}
+                  tooltip={{ content: "Web access", shortcut: "S" }}
                   type="button"
                   variant={searchEnabled ? "secondary" : "ghost"}
                 >
                   <Globe className="size-4" />
-                  <span className="sr-only">Search</span>
+                  <span className="sr-only">Web access</span>
                 </PromptInputButton>
 
                 {supportsThinking ? (
@@ -1877,24 +2521,14 @@ export function Composer({
 
                 <div>
                   {submitDisabled && onStopStreaming ? (
-                    <PromptInputButton
+                    <PromptInputSubmit
                       className="size-9 shrink-0 rounded-full px-0 shadow-xs"
                       disabled={isStopping}
-                      onClick={onStopStreaming}
-                      size="icon-sm"
-                      tooltip={isStopping ? "Stopping" : "Stop"}
+                      onStop={isStopping ? undefined : onStopStreaming}
+                      status={isStopping ? "submitted" : "streaming"}
+                      title={isStopping ? "Stopping" : "Stop"}
                       type="button"
-                      variant="default"
-                    >
-                      {isStopping ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Square className="size-3.5 fill-current" />
-                      )}
-                      <span className="sr-only">
-                        {isStopping ? "Stopping" : "Stop"}
-                      </span>
-                    </PromptInputButton>
+                    />
                   ) : (
                     <PromptInputSubmit
                       aria-disabled={submitDisabled || undefined}
@@ -1906,7 +2540,6 @@ export function Composer({
                             }
                           : undefined
                       }
-                      status={submitDisabled ? "streaming" : undefined}
                       tabIndex={submitDisabled ? -1 : undefined}
                       type={submitDisabled ? "button" : "submit"}
                     >
@@ -2071,163 +2704,5 @@ function ComposerAddImageButton({ disabled }: { disabled?: boolean }) {
       <ImageIcon className="size-4" />
       <span className="sr-only">Add image</span>
     </PromptInputButton>
-  );
-}
-
-function ImageConfigGroup({
-  disabled,
-  label,
-  onValueChange,
-  options,
-  value,
-}: {
-  disabled?: boolean;
-  label: string;
-  onValueChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-  value: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="text-[11px] font-medium text-foreground/85">{label}</div>
-      <div className="flex flex-wrap gap-1">
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <button
-              aria-pressed={selected}
-              className={cn(
-                "h-7 rounded-md border px-2 text-xs transition-colors",
-                selected
-                  ? "border-foreground bg-foreground text-background"
-                  : "border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                disabled &&
-                  "cursor-not-allowed opacity-45 hover:bg-background hover:text-muted-foreground",
-              )}
-              disabled={disabled}
-              key={option.value}
-              onClick={() => onValueChange(option.value)}
-              type="button"
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function PptxStylePresetGroup({
-  disabled,
-  onValueChange,
-  value,
-}: {
-  disabled?: boolean;
-  onValueChange: (value: PptxStylePreset) => void;
-  value: PptxStylePreset;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-[11px] font-medium text-foreground/85">
-        <Palette className="size-3.5 text-muted-foreground" />
-        Style
-      </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        {pptxStylePresetOptions.map((option) => {
-          const selected = option.value === value;
-          return (
-            <button
-              aria-pressed={selected}
-              className={cn(
-                "min-h-[58px] rounded-lg border p-2 text-left transition-colors",
-                selected
-                  ? "border-foreground bg-foreground text-background"
-                  : "border-border/70 bg-background text-foreground hover:bg-muted",
-                disabled && "cursor-not-allowed opacity-45 hover:bg-background",
-              )}
-              disabled={disabled}
-              key={option.value}
-              onClick={() => onValueChange(option.value)}
-              type="button"
-            >
-              <span className="flex items-center gap-1.5 text-xs font-medium">
-                {option.value === "editorial" ? (
-                  <Brush className="size-3.5" />
-                ) : option.value === "data-heavy" ? (
-                  <Table2 className="size-3.5" />
-                ) : option.value === "technical" ? (
-                  <LayoutTemplate className="size-3.5" />
-                ) : (
-                  <PromptCommandIcon
-                    className="size-3.5"
-                    fallbackIconName="tool"
-                    iconName="presentation"
-                  />
-                )}
-                {option.label}
-              </span>
-              <span
-                className={cn(
-                  "mt-1 line-clamp-2 block text-[10px] leading-snug",
-                  selected ? "text-background/70" : "text-muted-foreground",
-                )}
-              >
-                {option.description}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function PptxConfigGroup({
-  disabled,
-  icon,
-  label,
-  onValueChange,
-  options,
-  value,
-}: {
-  disabled?: boolean;
-  icon: ReactNode;
-  label: string;
-  onValueChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-  value: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2 text-[11px] font-medium text-foreground/85">
-        <span className="text-muted-foreground">{icon}</span>
-        {label}
-      </div>
-      <div className="flex flex-wrap gap-1">
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <button
-              aria-pressed={selected}
-              className={cn(
-                "h-7 rounded-md border px-2 text-xs transition-colors",
-                selected
-                  ? "border-foreground bg-foreground text-background"
-                  : "border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                disabled &&
-                  "cursor-not-allowed opacity-45 hover:bg-background hover:text-muted-foreground",
-              )}
-              disabled={disabled}
-              key={option.value}
-              onClick={() => onValueChange(option.value)}
-              type="button"
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }

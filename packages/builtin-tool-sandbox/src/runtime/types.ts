@@ -1,0 +1,296 @@
+import type { ExecuteResponse } from "deepagents";
+
+export const SOURCEWEFT_WORK_ROOT = "/workfiles";
+export const SOURCEWEFT_KB_ROOT = "/kb";
+
+export type SandboxBridgeOperationType = "prepare" | "execute" | "collect";
+export type SandboxOperationType =
+  | SandboxBridgeOperationType
+  | "create"
+  | "close"
+  | "cleanup";
+
+export type SandboxOperationStatus =
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled";
+
+export type SandboxStatus =
+  | "creating"
+  | "ready"
+  | "expired"
+  | "closed"
+  | "error";
+
+export type SandboxProviderId = string;
+
+export type SandboxProviderPathPolicy = {
+  workspaceRoot: string;
+  defaultCwd: string;
+  prepareTargetRoots: readonly string[];
+  collectSourceRoots: readonly string[];
+  readWriteRoots: readonly string[];
+};
+
+export type SandboxRef = {
+  id: string;
+  provider: SandboxProviderId;
+  providerSandboxId: string;
+};
+
+export type SandboxExecuteResult = ExecuteResponse;
+
+export type SandboxPreparedFile = {
+  sourcePath: string;
+  sandboxPath: string;
+  sizeBytes: number;
+};
+
+export type SandboxCollectedOutput = {
+  sandboxPath: string;
+  targetKind: "workfile" | "artifact";
+  targetPath?: string;
+  sizeBytes: number;
+};
+
+export type SandboxRuntimeContext = {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  messageId: string;
+  runId: string;
+  sandboxExecuteToolCallId?: string;
+};
+
+export type SandboxRuntimeLimits = {
+  ttlSeconds: number;
+  commandTimeoutMs: number;
+  maxOutputChars: number;
+  maxPrepareFileBytes: number;
+  maxPrepareTotalBytes: number;
+  maxCollectFileBytes: number;
+  maxCollectTotalBytes: number;
+};
+
+export type CreateSandboxInput = {
+  labels: Record<string, string>;
+  snapshot?: string;
+  ttlSeconds: number;
+};
+
+export type SandboxProvider = {
+  id: SandboxProviderId;
+  pathPolicy: SandboxProviderPathPolicy;
+  createSandbox(input: CreateSandboxInput): Promise<{ id: string }>;
+  getSandbox(providerSandboxId: string): Promise<unknown>;
+  checkSandboxHealth?(providerSandboxId: string): Promise<unknown>;
+  deleteSandbox(providerSandboxId: string): Promise<unknown>;
+  execute(input: {
+    providerSandboxId: string;
+    command: string;
+    cwd?: string;
+    timeoutMs: number;
+    maxOutputChars: number;
+  }): Promise<SandboxExecuteResult>;
+  executeSystem?(input: {
+    providerSandboxId: string;
+    command: string;
+    cwd?: string;
+    timeoutMs: number;
+    maxOutputChars: number;
+  }): Promise<SandboxExecuteResult>;
+  uploadFile(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+    content: Uint8Array;
+  }): Promise<unknown>;
+  downloadFile(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+  }): Promise<Buffer>;
+  listFiles?(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+  }): Promise<
+    Array<{
+      path: string;
+      is_dir?: boolean;
+      size?: number;
+      modified_at?: string;
+    }>
+  >;
+  readTextFile?(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+  }): Promise<string>;
+  writeTextFile?(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+    content: string;
+  }): Promise<unknown>;
+  editTextFile?(input: {
+    providerSandboxId: string;
+    sandboxPath: string;
+    oldString: string;
+    newString: string;
+    replaceAll?: boolean;
+  }): Promise<{ occurrences: number }>;
+  grepFiles?(input: {
+    providerSandboxId: string;
+    pattern: string;
+    sandboxPath?: string | null;
+    glob?: string | null;
+  }): Promise<
+    Array<{
+      path: string;
+      line: number;
+      text: string;
+    }>
+  >;
+  globFiles?(input: {
+    providerSandboxId: string;
+    pattern: string;
+    sandboxPath?: string;
+  }): Promise<
+    Array<{
+      path: string;
+      is_dir?: boolean;
+      size?: number;
+      modified_at?: string;
+    }>
+  >;
+  ensureDirectory(input: {
+    providerSandboxId: string;
+    directory: string;
+  }): Promise<unknown>;
+};
+
+export type SandboxRecord = {
+  id: string;
+  provider: SandboxProviderId;
+  providerSandboxId: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  status: SandboxStatus;
+  updatedAt: Date;
+  expiresAt: Date | null;
+};
+
+export type SandboxStore = {
+  findLatestActiveThreadSandbox(input: {
+    provider: SandboxProviderId;
+    context: SandboxRuntimeContext;
+  }): Promise<SandboxRecord | null>;
+  markCreatingSandboxError(input: {
+    sandboxId: string;
+    expectedUpdatedAt?: Date;
+  }): Promise<boolean>;
+  insertCreatingSandbox(input: {
+    sandboxId: string;
+    provider: SandboxProviderId;
+    providerSandboxId: string;
+    context: SandboxRuntimeContext;
+    expiresAt: Date;
+  }): Promise<boolean>;
+  markSandboxReady(input: {
+    sandboxId: string;
+    providerSandboxId: string;
+    expiresAt: Date;
+  }): Promise<void>;
+  markSandboxExpired(input: { sandboxId: string }): Promise<void>;
+  releaseReadyThreadSandboxLease(input: {
+    context: SandboxRuntimeContext;
+    expiresAt: Date;
+    provider: SandboxProviderId;
+    reason: string;
+  }): Promise<number>;
+  touchSandbox(input: { sandboxId: string; expiresAt: Date }): Promise<void>;
+};
+
+export type ExistingSandboxOperation = {
+  id?: string;
+  createdAt?: Date;
+  messageId?: string;
+  status: "running" | "succeeded" | "failed";
+  requestJsonRedacted: Record<string, unknown>;
+  resultJsonRedacted: Record<string, unknown>;
+};
+
+export type SandboxOperationStore = {
+  findLatestToolOperation(input: {
+    context: SandboxRuntimeContext;
+    operationType: SandboxBridgeOperationType;
+    toolCallId: string;
+    statuses: Array<"running" | "succeeded" | "failed">;
+  }): Promise<ExistingSandboxOperation | null>;
+  insertRunningToolOperation(input: {
+    operationId: string;
+    context: SandboxRuntimeContext;
+    operationType: SandboxBridgeOperationType;
+    toolCallId: string;
+    request: Record<string, unknown>;
+  }): Promise<boolean>;
+  findLatestActiveToolOperation(input: {
+    context: SandboxRuntimeContext;
+    operationType: SandboxBridgeOperationType;
+    toolCallId: string;
+  }): Promise<ExistingSandboxOperation | null>;
+  markStaleRunningToolOperationFailed(input: {
+    context: SandboxRuntimeContext;
+    operationType: SandboxBridgeOperationType;
+    staleBefore: Date;
+    toolCallId: string;
+    result: Record<string, unknown>;
+  }): Promise<boolean>;
+  completeToolOperation(input: {
+    operationId: string;
+    sandboxId?: string | null;
+    status: "succeeded" | "failed";
+    result?: Record<string, unknown>;
+    durationMs?: number;
+  }): Promise<void>;
+  recordOperation(input: {
+    operationId: string;
+    context: SandboxRuntimeContext;
+    sandboxId?: string | null;
+    operationType: SandboxOperationType;
+    status: SandboxOperationStatus;
+    toolCallId?: string | null;
+    request?: Record<string, unknown>;
+    result?: Record<string, unknown>;
+    durationMs?: number;
+  }): Promise<void>;
+  findSucceededOperationByToolCall(input: {
+    context: SandboxRuntimeContext;
+    operationType: SandboxBridgeOperationType;
+    toolCallId: string;
+  }): Promise<{ result: Record<string, unknown> } | null>;
+};
+
+// ---- Sandbox service types ----
+
+export type SandboxProviderConfigurationStatus = {
+  configured: boolean;
+  missing: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type SandboxProviderFactory = {
+  id: string;
+  createProvider(): SandboxProvider;
+  getConfigurationStatus(): SandboxProviderConfigurationStatus;
+};
+
+export type SandboxServiceConfig = {
+  enabled: boolean;
+  toolApprovalEnabled: boolean;
+  provider: string;
+  limits: SandboxRuntimeLimits;
+};

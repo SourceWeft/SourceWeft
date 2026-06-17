@@ -3,15 +3,12 @@ import { logger } from "../shared/logger";
 import { syncGlobalModelGatewayConfig } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
-import { durableChatRunService } from "../modules/content/threads/durable/service";
-import { cleanupExpiredDaytonaSandboxes } from "../modules/content/agent/sandbox";
-import { logSandboxStartupWarning } from "../modules/content/agent/sandbox/startup-log";
+import { durableChatRunService } from "../modules/threads";
+import { agentSandboxService } from "../modules/threads";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleExampleJob } from "./schedules/example-schedule";
 import { reconcileTeamSubscriptionsSchedule } from "./schedules/reconcile-team-subscriptions";
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
-
-const MODEL_PRICING_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
 await syncGlobalModelGatewayConfig();
 
@@ -39,7 +36,8 @@ async function tick() {
 
     jobs.push(scheduleConnectorSyncs());
     jobs.push(durableChatRunService.expireWaitingApprovals());
-    jobs.push(cleanupExpiredDaytonaSandboxes());
+    jobs.push(agentSandboxService.cleanupExpiredSandboxes());
+    jobs.push(agentSandboxService.cleanupStaleSandboxOperations());
 
     if (jobs.length === 0) {
       return;
@@ -97,15 +95,16 @@ const timer = setInterval(() => {
 
 const modelPricingSyncTimer = setInterval(() => {
   void scheduleModelPricingSyncTick();
-}, MODEL_PRICING_SYNC_INTERVAL_MS);
+}, config.modelPricingSyncIntervalMs);
 
 logger.info("Scheduler started", {
   intervalMs: config.schedulerIntervalMs,
+  modelPricingSyncIntervalMs: config.modelPricingSyncIntervalMs,
   exampleJobEnabled: config.schedulerExampleJobEnabled,
   billingReconcileEnabled:
     config.billing.teamBillingEnabled && config.billing.reconcileEnabled,
 });
-logSandboxStartupWarning("scheduler");
+agentSandboxService.logStartupWarning("scheduler");
 
 async function shutdown() {
   clearInterval(timer);

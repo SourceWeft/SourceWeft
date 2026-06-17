@@ -1,10 +1,9 @@
 import {
+  hasAgentToolCapability,
   isAgentToolDomain,
-  isGeneratedImageArtifactToolName,
-  isWebFetchToolName,
-  isWebSearchToolName,
-} from "@sourceweft/sdk";
+} from "@sourceweft/agent-tool-registry";
 import { isPendingToolConfirmation } from "@sourceweft/contracts";
+import { formatThoughtDuration } from "./duration-format";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import type {
   ModelReasoningSegmentRecord,
@@ -12,15 +11,6 @@ import type {
   ToolConfirmationResolution,
   ToolCallRecord,
 } from "./types";
-
-function formatThoughtDuration(durationMs: number | undefined) {
-  if (durationMs === undefined) {
-    return "Thought for a few seconds";
-  }
-
-  const duration = Math.max(1, Math.ceil(durationMs / 1000));
-  return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
-}
 
 function isVisionFallbackStep(step: ThinkingStepRecord) {
   return step.metadata?.strategy === "vision_fallback";
@@ -90,6 +80,33 @@ export function isReasoningTraceThinking(input: {
   }
 
   return input.isStreaming;
+}
+
+export function shouldShowGeneratedPresentationItem(input: {
+  fileUrl?: string | null;
+  isSandboxArtifactPublisher: boolean;
+  isVideoPresentation: boolean;
+  previewArtifact?: unknown;
+  status: ToolCallRecord["status"];
+}) {
+  if (
+    input.isSandboxArtifactPublisher &&
+    (input.status === "running" ||
+      input.status === "approval_requested" ||
+      input.status === "error")
+  ) {
+    return false;
+  }
+  if (
+    input.status === "running" ||
+    input.status === "approval_requested" ||
+    input.status === "error"
+  ) {
+    return true;
+  }
+  return Boolean(
+    input.fileUrl || (input.isVideoPresentation && input.previewArtifact),
+  );
 }
 
 function getRecordValue(
@@ -359,15 +376,15 @@ export function getToolCallDetailParts(
   confirmationResolution?: ToolConfirmationResolution | null,
 ) {
   const hitCount = getToolHitCount(toolCall, toolStep);
-  const resultCount = isWebSearchToolName(toolCall.tool)
+  const resultCount = hasAgentToolCapability(toolCall.tool, "web_query")
     ? getToolResultCount(toolCall, toolStep)
     : isAgentToolDomain(toolCall.tool, "connector")
       ? getConnectorResultCount(toolCall)
       : null;
-  const fetchCount = isWebFetchToolName(toolCall.tool)
+  const fetchCount = hasAgentToolCapability(toolCall.tool, "web_page_fetch")
     ? getToolFetchCount(toolCall, toolStep)
     : null;
-  const concurrency = isWebFetchToolName(toolCall.tool)
+  const concurrency = hasAgentToolCapability(toolCall.tool, "web_page_fetch")
     ? getToolConcurrency(toolStep)
     : null;
   const latencyMs =
@@ -375,7 +392,7 @@ export function getToolCallDetailParts(
     (typeof toolStep?.metadata?.latencyMs === "number"
       ? toolStep.metadata.latencyMs
       : null);
-  const imageStage = isGeneratedImageArtifactToolName(toolCall.tool)
+  const imageStage = hasAgentToolCapability(toolCall.tool, "generated_image_artifact")
     ? getGeneratedImageStage(toolCall)
     : null;
   const confirmation = getToolConfirmationOutput(toolCall.output);

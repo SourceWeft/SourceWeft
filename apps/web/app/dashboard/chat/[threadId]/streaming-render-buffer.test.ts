@@ -55,6 +55,7 @@ test("keeps text, tool, generated presentation, and trailing text in order", () 
     },
     {
       id: "stream-generated-presentation-tool-2",
+      placement: "terminal",
       type: "generated_presentation",
       toolCallId: "tool-2",
     },
@@ -62,6 +63,28 @@ test("keeps text, tool, generated presentation, and trailing text in order", () 
       id: "stream-text-3",
       type: "text",
       text: "after",
+    },
+  ]);
+});
+
+test("marks generated artifact blocks as terminal placement", () => {
+  const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
+
+  buffer.appendGeneratedImageBlock("image-tool");
+  buffer.appendGeneratedPresentationBlock("presentation-tool");
+
+  assert.deepEqual(buffer.snapshotRenderBlocks(), [
+    {
+      id: "stream-generated-image-image-tool",
+      placement: "terminal",
+      type: "generated_image",
+      toolCallId: "image-tool",
+    },
+    {
+      id: "stream-generated-presentation-presentation-tool",
+      placement: "terminal",
+      type: "generated_presentation",
+      toolCallId: "presentation-tool",
     },
   ]);
 });

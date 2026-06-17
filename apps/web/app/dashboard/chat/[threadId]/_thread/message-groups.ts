@@ -6,7 +6,6 @@ import type {
 } from "../../_components/chat-canvas";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import {
-  hasRenderBlocksMetadata,
   resolveCitationMetadata,
   resolveModelReasoningFromMetadata,
   resolveModelReasoningSegmentsFromMetadata,
@@ -533,6 +532,13 @@ function buildVersionedMessageGroups(
               group.role === "assistant" && threadRun
                 ? {
                     id: toNullableString(threadRun.id) ?? undefined,
+                    ...(toNullableString(threadRun.assistantMessageId)
+                      ? {
+                          assistantMessageId: toNullableString(
+                            threadRun.assistantMessageId,
+                          ),
+                        }
+                      : {}),
                     idempotencyKey:
                       toNullableString(threadRun.idempotencyKey) ?? undefined,
                     status: toNullableString(threadRun.status) ?? undefined,
@@ -585,9 +591,10 @@ function buildVersionedMessageGroups(
                 : undefined,
             toolCalls: resolveToolCallsFromMetadata(version.metadata),
             renderBlocks:
-              group.role === "assistant" &&
-              hasRenderBlocksMetadata(version.metadata)
-                ? resolveRenderBlocksFromMetadata(version.metadata)
+              group.role === "assistant"
+                ? resolveRenderBlocksFromMetadata(version.metadata, {
+                    content: version.content,
+                  })
                 : undefined,
             thinkingSteps:
               group.role === "assistant"

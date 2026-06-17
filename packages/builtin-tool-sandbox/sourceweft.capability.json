@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/sandbox",
+  "kind": "tool",
+  "name": "Sandbox",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "tools": [
+    {
+      "id": "prepare_sandbox_workspace",
+      "title": "Prepare Sandbox Workspace",
+      "description": "Materialize selected SourceWeft DB-backed /workfiles Workfile content as ordinary provider sandbox files.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "write",
+      "options": []
+    },
+    {
+      "id": "execute",
+      "title": "Execute Sandbox Command",
+      "description": "Execute a shell command in the provider sandbox filesystem.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "destructive",
+      "options": []
+    },
+    {
+      "id": "collect_sandbox_outputs",
+      "title": "Collect Sandbox Outputs",
+      "description": "Persist selected provider sandbox text outputs into SourceWeft DB-backed /workfiles Workfiles.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "write",
+      "options": []
+    }
+  ]
+}

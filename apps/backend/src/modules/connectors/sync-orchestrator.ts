@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import type { ContentBillingPort } from "../content/billing-port";
-import { SourceIndexingService } from "../content/sources";
+import { SourceIndexingService } from "../sources";
 import {
   createSourceRecord,
   createSourceRevisionRecord,
   findSourceRecordByConnectorExternalId,
   updateSourceRecord,
-} from "../content/sources/repository";
+} from "../sources";
 import { ConnectorError, toConnectorError } from "./errors";
 import { requireConnectorWorkspace } from "./permissions";
 import {
@@ -114,7 +114,7 @@ function shouldSkipExtract(input: {
   if (!input.existing) {
     return false;
   }
-  if (input.item.metadata.provider === "notion") {
+  if (input.item.metadata.forceRefetch) {
     return false;
   }
   if (

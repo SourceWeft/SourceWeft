@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { db } from "../../shared/database";
-import { workspaceMemberships, workspaces } from "../../shared/db/schema";
+import { db, workspaceMemberships, workspaces } from "@sourceweft/db";
 import type { Workspace, WorkspaceMembership, WorkspaceRole } from "./types";
 
 type WorkspaceRow = Pick<
@@ -584,3 +583,4 @@ export async function findMembershipByUser(userId: string) {
     .limit(1);
   return row ? mapMembershipRow(row) : null;
 }
+

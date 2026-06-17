@@ -3,27 +3,41 @@ import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import { groupConsecutiveToolItems } from "./assistant-activity-groups";
 import { buildAssistantActivityItems } from "./assistant-activity-items";
 import type { AssistantActivityItem } from "./assistant-activity-items";
+import {
+  ASSISTANT_ACTIVITY_ICON_CLASS,
+  ASSISTANT_ACTIVITY_LABEL_CLASS,
+  ASSISTANT_ACTIVITY_ROW_CLASS,
+} from "./assistant-activity-layout";
 import { AssistantActivitySegment } from "./assistant-activity-segment";
 import { AssistantToolCard } from "./assistant-tool-card";
-import type { MessageVersion, ToolConfirmationResolution } from "./types";
+import { WebToolResults } from "../web-tool-results";
+import type {
+  CitationRecord,
+  MessageVersion,
+  ToolConfirmationResolution,
+} from "./types";
 
 export type AssistantActivityPlaceholderPhase = "thinking" | "responding";
 
 function getPlaceholderLabel(phase: AssistantActivityPlaceholderPhase) {
-  return phase === "responding" ? "Responding..." : "Thinking...";
+  return phase === "responding" ? "Responding..." : "Working";
 }
 
-function AssistantActivityPlaceholder({
+export function AssistantActivityPlaceholder({
   phase,
 }: {
   phase: AssistantActivityPlaceholderPhase;
 }) {
   return (
-    <div className="flex min-h-8 max-w-2xl items-center gap-1 rounded-md px-1 py-1 text-muted-foreground text-sm">
-      <span className="grid size-6 shrink-0 place-items-center">
+    <div
+      className={`${ASSISTANT_ACTIVITY_ROW_CLASS} max-w-2xl text-muted-foreground text-sm`}
+    >
+      <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
         <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
       </span>
-      <span className="text-[13px] text-foreground/75">
+      <span
+        className={`${ASSISTANT_ACTIVITY_LABEL_CLASS} text-[13px] text-foreground/75`}
+      >
         <Shimmer duration={1}>{getPlaceholderLabel(phase)}</Shimmer>
       </span>
     </div>
@@ -31,13 +45,19 @@ function AssistantActivityPlaceholder({
 }
 
 function AssistantToolGroup({
+  availableCitations,
   header,
+  isStreaming = false,
   items,
+  onCitationClick,
   onWorkfileClick,
   resolvedConfirmations,
 }: {
+  availableCitations?: CitationRecord[];
   header: Extract<AssistantActivityItem, { type: "tool" }>;
+  isStreaming?: boolean;
   items: AssistantActivityItem[];
+  onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
   resolvedConfirmations?: ToolConfirmationResolution[];
 }) {
@@ -56,54 +76,88 @@ function AssistantToolGroup({
   });
 
   return (
-    <AssistantToolCard
-      contentClassName="ml-0 px-0"
-      defaultOpen={shouldDefaultOpen}
-      onWorkfileClick={onWorkfileClick}
-      resolvedConfirmations={resolvedConfirmations}
-      toolCall={header.toolCall}
-      toolStep={header.toolStep}
-    >
-      {items.length > 0 ? (
-        <div className="space-y-1">
-          {items.map((item) => {
-            if (item.type === "tool") {
+    <>
+      <AssistantToolCard
+        defaultOpen={shouldDefaultOpen}
+        onWorkfileClick={onWorkfileClick}
+        resolvedConfirmations={resolvedConfirmations}
+        toolCall={header.toolCall}
+        toolStep={header.toolStep}
+      >
+        {items.length > 0 ? (
+          <div className="space-y-1">
+            {items.map((item) => {
+              if (item.type === "tool") {
+                return (
+                  <div key={item.key}>
+                    <AssistantToolCard
+                      onWorkfileClick={onWorkfileClick}
+                      resolvedConfirmations={resolvedConfirmations}
+                      toolCall={item.toolCall}
+                      toolStep={item.toolStep}
+                    />
+                    <WebToolResults
+                      availableCitations={availableCitations}
+                      className="ml-7"
+                      onCitationClick={onCitationClick}
+                      toolCall={item.toolCall}
+                      variant="activity-row"
+                    />
+                  </div>
+                );
+              }
+
               return (
-                <AssistantToolCard
+                <AssistantActivitySegment
+                  availableCitations={availableCitations}
+                  item={item}
                   key={item.key}
+                  onCitationClick={onCitationClick}
                   onWorkfileClick={onWorkfileClick}
                   resolvedConfirmations={resolvedConfirmations}
-                  toolCall={item.toolCall}
-                  toolStep={item.toolStep}
                 />
               );
-            }
-
-            return (
-              <AssistantActivitySegment
-                item={item}
-                key={item.key}
-                onWorkfileClick={onWorkfileClick}
-                resolvedConfirmations={resolvedConfirmations}
-              />
-            );
-          })}
-        </div>
-      ) : null}
-    </AssistantToolCard>
+            })}
+          </div>
+        ) : null}
+      </AssistantToolCard>
+      <WebToolResults
+        availableCitations={availableCitations}
+        onCitationClick={onCitationClick}
+        toolCall={header.toolCall}
+        variant="activity-row"
+      />
+    </>
   );
 }
 
 export function AssistantActivityRenderItems({
+  availableCitations,
+  isStreaming = false,
   items,
+  onCitationClick,
   onWorkfileClick,
   resolvedConfirmations,
 }: {
+  availableCitations?: CitationRecord[];
+  isStreaming?: boolean;
   items: AssistantActivityItem[];
+  onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
   resolvedConfirmations?: ToolConfirmationResolution[];
 }) {
   const renderItems = groupConsecutiveToolItems(items);
+  const streamingReasoningKey = isStreaming
+    ? (() => {
+        for (let i = items.length - 1; i >= 0; i -= 1) {
+          const candidate = items[i];
+          if (candidate && candidate.type === "reasoning") {
+            return candidate.key;
+          }
+        }
+        return undefined;
+      })()
+    : undefined;
 
   return (
     <>
@@ -111,14 +165,20 @@ export function AssistantActivityRenderItems({
         <div key={item.key}>
           {item.type === "tool-group" ? (
             <AssistantToolGroup
+              availableCitations={availableCitations}
               header={item.header}
+              isStreaming={isStreaming}
               items={item.items}
+              onCitationClick={onCitationClick}
               onWorkfileClick={onWorkfileClick}
               resolvedConfirmations={resolvedConfirmations}
             />
           ) : (
             <AssistantActivitySegment
+              availableCitations={availableCitations}
+              isStreaming={item.key === streamingReasoningKey}
               item={item}
+              onCitationClick={onCitationClick}
               onWorkfileClick={onWorkfileClick}
               resolvedConfirmations={resolvedConfirmations}
             />
@@ -131,6 +191,9 @@ export function AssistantActivityRenderItems({
 
 export function AssistantActivityStack({
   assistantText,
+  availableCitations,
+  isStreaming,
+  onCitationClick,
   onWorkfileClick,
   placeholderPhase,
   isCancelled = false,
@@ -138,6 +201,8 @@ export function AssistantActivityStack({
   version,
 }: {
   assistantText?: string;
+  availableCitations?: CitationRecord[];
+  onCitationClick?: (citation: CitationRecord) => void;
   onWorkfileClick?: (path: string) => void;
   placeholderPhase?: AssistantActivityPlaceholderPhase | null;
   isCancelled?: boolean;
@@ -173,7 +238,10 @@ export function AssistantActivityStack({
         <AssistantActivityPlaceholder phase={placeholderPhase!} />
       ) : null}
       <AssistantActivityRenderItems
+        availableCitations={availableCitations}
+        isStreaming={isStreaming}
         items={items}
+        onCitationClick={onCitationClick}
         onWorkfileClick={onWorkfileClick}
         resolvedConfirmations={resolvedConfirmations}
       />

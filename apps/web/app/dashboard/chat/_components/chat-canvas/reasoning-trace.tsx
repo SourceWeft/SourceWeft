@@ -1,23 +1,21 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   ChevronDownIcon,
+  CheckIcon,
+  CircleIcon,
   Download,
   ImageIcon,
   Loader2,
   Presentation,
+  ListChecks,
   WrenchIcon,
 } from "lucide-react";
 import {
+  AGENT_TOOL_NAMES,
   getAgentToolSlashCommand,
-  isGeneratedImageArtifactToolName,
+  hasAgentToolCapability,
   isAgentToolDomain,
-  isPresentationArtifactToolName,
-  isRetrievalToolName,
-  isVideoPresentationArtifactToolName,
-  isWebFetchToolName,
-  isWebSearchToolName,
-  isWebToolName,
-} from "@sourceweft/sdk";
+} from "@sourceweft/agent-tool-registry";
 import { isPendingToolConfirmation } from "@sourceweft/contracts";
 import {
   ChainOfThought,
@@ -28,7 +26,18 @@ import {
   ChainOfThoughtSearchResults,
   ChainOfThoughtStep,
 } from "@sourceweft/ui-web/components/ai-elements/chain-of-thought";
+import {
+  QueueItem,
+  QueueItemContent,
+  QueueItemDescription,
+  QueueItemIndicator,
+} from "@sourceweft/ui-web/components/ai-elements/queue";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
+import {
+  Task,
+  TaskContent,
+  TaskTrigger,
+} from "@sourceweft/ui-web/components/ai-elements/task";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { RawImage } from "../../../../_components/raw-image";
 import { apiBaseUrl } from "../../../../../lib/sdk";
@@ -57,7 +66,13 @@ import {
   getReasoningTraceTitle,
   isToolConfirmationResolved,
   isReasoningTraceThinking,
+  shouldShowGeneratedPresentationItem,
 } from "./reasoning-trace-state";
+import {
+  getTodoListTraceItems,
+  isTodoListTraceStep,
+  type TodoListTraceItem,
+} from "./reasoning-trace-todos";
 import { getSandboxToolSafeErrorMessage } from "./sandbox-tool-result-display";
 import type {
   ArtifactPreviewRecord,
@@ -189,6 +204,112 @@ function getToolFetchUrls(toolCall: ToolCallRecord) {
 
 function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return count === 1 ? singular : plural;
+}
+
+function TodoStatusIcon({
+  status,
+}: {
+  status: TodoListTraceItem["status"];
+}) {
+  if (status === "completed") {
+    return <CheckIcon className="size-3 text-muted-foreground/60" />;
+  }
+  if (status === "in_progress") {
+    return <Loader2 className="size-3 animate-spin text-primary" />;
+  }
+  return <CircleIcon className="size-2.5 text-muted-foreground/60" />;
+}
+
+function DeepAgentTodoTrace({
+  isCancelled,
+  step,
+}: {
+  isCancelled: boolean;
+  step: ThinkingStepRecord;
+}) {
+  const todos = getTodoListTraceItems(step.metadata);
+  if (todos.length === 0) {
+    return null;
+  }
+
+  const completedCount = todos.filter(
+    (todo) => todo.status === "completed",
+  ).length;
+  const isActive = !isCancelled && step.status === "in_progress";
+  const title = isActive
+    ? "Working through task plan..."
+    : `Task plan ${completedCount}/${todos.length}`;
+
+  return (
+    <Task className="py-1" defaultOpen={isActive}>
+      <TaskTrigger title={title}>
+        <div className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-muted-foreground text-sm transition-colors hover:text-foreground">
+          {isActive ? (
+            <Loader2 className="size-4 animate-spin text-primary" />
+          ) : (
+            <ListChecks className="size-4" />
+          )}
+          <span className="min-w-0 flex-1 truncate">
+            {isActive ? <Shimmer duration={1}>{title}</Shimmer> : title}
+          </span>
+          <span className="text-muted-foreground/80 text-xs">
+            {completedCount}/{todos.length}{" "}
+            {pluralize(todos.length, "item")}
+          </span>
+          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
+      <TaskContent className="pl-1">
+        <ul className="space-y-1">
+          {todos.map((todo) => {
+            const completed = todo.status === "completed";
+            const inProgress = todo.status === "in_progress" && !isCancelled;
+            return (
+              <QueueItem
+                className="px-1 py-1 hover:bg-transparent"
+                key={todo.id}
+              >
+                <div className="flex min-w-0 items-start gap-2">
+                  <QueueItemIndicator
+                    className={cn(
+                      "mt-1 flex items-center justify-center",
+                      inProgress
+                        ? "border-primary/40 bg-primary/10"
+                        : completed
+                          ? "border-muted-foreground/20 bg-muted"
+                          : undefined,
+                    )}
+                    completed={completed}
+                  >
+                    <TodoStatusIcon status={todo.status} />
+                  </QueueItemIndicator>
+                  <div className="min-w-0 flex-1">
+                    <QueueItemContent
+                      className={cn(
+                        "line-clamp-none",
+                        inProgress ? "text-foreground" : undefined,
+                      )}
+                      completed={completed}
+                    >
+                      {todo.content}
+                    </QueueItemContent>
+                    {todo.description ? (
+                      <QueueItemDescription
+                        className="ml-0"
+                        completed={completed}
+                      >
+                        {todo.description}
+                      </QueueItemDescription>
+                    ) : null}
+                  </div>
+                </div>
+              </QueueItem>
+            );
+          })}
+        </ul>
+      </TaskContent>
+    </Task>
+  );
 }
 
 function summarizeToolOutput(output: unknown) {
@@ -591,7 +712,7 @@ function getToolDisplayLabel(
     );
   }
 
-  if (isGeneratedImageArtifactToolName(toolCall.tool)) {
+  if (hasAgentToolCapability(toolCall.tool, "generated_image_artifact")) {
     const title = getGeneratedImageTitle(toolCall);
     const imageStatus = getGeneratedImageStatus(toolCall);
     const verb =
@@ -604,42 +725,51 @@ function getToolDisplayLabel(
   }
 
   if (
-    isPresentationArtifactToolName(toolCall.tool) ||
-    isVideoPresentationArtifactToolName(toolCall.tool)
+    hasAgentToolCapability(toolCall.tool, "presentation_artifact") ||
+    hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")
   ) {
-    const isVideoPresentation = isVideoPresentationArtifactToolName(
+    const isVideoPresentation = hasAgentToolCapability(
       toolCall.tool,
+      "video_presentation_artifact",
     );
+    const isSandboxArtifactPublisher =
+      toolCall.tool === AGENT_TOOL_NAMES.publishSandboxArtifact;
     const title = getGeneratedPresentationTitle(toolCall);
     const verb =
       toolCall.status === "running" || toolCall.status === "approval_requested"
         ? isVideoPresentation
           ? "Generating video presentation"
-          : "Generating presentation"
+          : isSandboxArtifactPublisher
+            ? "Publishing presentation"
+            : "Generating presentation"
         : toolCall.status === "error"
           ? isVideoPresentation
             ? "Video presentation generation failed"
-            : "Presentation generation failed"
+            : isSandboxArtifactPublisher
+              ? "Presentation publishing failed"
+              : "Presentation generation failed"
           : isVideoPresentation
             ? "Generated video presentation"
-            : "Generated presentation";
+            : isSandboxArtifactPublisher
+              ? "Published presentation"
+              : "Generated presentation";
     return title ? `${verb}: ${compactText(title, 72)}` : verb;
   }
 
-  if (isRetrievalToolName(toolCall.tool)) {
+  if (isAgentToolDomain(toolCall.tool, "retrieval")) {
     const query = getToolQuery(toolCall);
     return query
       ? `Search sources: ${compactText(query, 72)}`
       : "Search sources";
   }
 
-  if (isWebSearchToolName(toolCall.tool)) {
+  if (hasAgentToolCapability(toolCall.tool, "web_query")) {
     const query = getToolQuery(toolCall);
     const verb = getWebSearchStatusLabel(toolCall.status);
     return query ? `${verb}: ${compactText(query, 72)}` : verb;
   }
 
-  if (isWebFetchToolName(toolCall.tool)) {
+  if (hasAgentToolCapability(toolCall.tool, "web_page_fetch")) {
     const urls = getToolFetchUrls(toolCall);
     const count = urls.length;
     const firstUrl = urls[0] ? compactText(urls[0], 56) : null;
@@ -1013,7 +1143,7 @@ function ToolCallDetails({
   workspaceId?: string | null;
 }) {
   const query = getToolQuery(toolCall, toolStep);
-  const shouldShowQuery = Boolean(query && !isRetrievalToolName(toolCall.tool));
+  const shouldShowQuery = Boolean(query && !isAgentToolDomain(toolCall.tool, "retrieval"));
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
   const toolConfirmation = getToolConfirmationOutput(toolCall.output);
@@ -1036,10 +1166,10 @@ function ToolCallDetails({
     toolCall,
     toolStep,
   );
-  const imageStatus = isGeneratedImageArtifactToolName(toolCall.tool)
+  const imageStatus = hasAgentToolCapability(toolCall.tool, "generated_image_artifact")
     ? getGeneratedImageStatus(toolCall)
     : null;
-  const imagePrompt = isGeneratedImageArtifactToolName(toolCall.tool)
+  const imagePrompt = hasAgentToolCapability(toolCall.tool, "generated_image_artifact")
     ? getGeneratedImagePrompt(toolCall)
     : null;
   const imageUrl = imageArtifact
@@ -1054,11 +1184,12 @@ function ToolCallDetails({
     ? getGeneratedPresentationFileName({
         artifactFileName: presentationArtifact.fileName,
         title: presentationTitle,
-        videoPresentation: isVideoPresentationArtifactToolName(toolCall.tool),
+        videoPresentation: hasAgentToolCapability(toolCall.tool, "video_presentation_artifact"),
       })
     : null;
-  const isVideoPresentationTool = isVideoPresentationArtifactToolName(
+  const isVideoPresentationTool = hasAgentToolCapability(
     toolCall.tool,
+    "video_presentation_artifact",
   );
   const presentationArtifactStatus = getPresentationArtifactPreviewStatus({
     isVideoPresentation: isVideoPresentationTool,
@@ -1147,8 +1278,8 @@ function ToolCallDetails({
       !imageArtifact &&
       !presentationArtifact &&
       !toolConfirmation &&
-      !isRetrievalToolName(toolCall.tool) &&
-      !isWebToolName(toolCall.tool) &&
+      !isAgentToolDomain(toolCall.tool, "retrieval") &&
+      !isAgentToolDomain(toolCall.tool, "web") &&
       outputSummary !== "{}",
   );
 
@@ -1446,7 +1577,7 @@ export function GeneratedImageArtifacts({
   workspaceId?: string | null;
 }) {
   const imageItems = (toolCalls ?? [])
-    .filter((toolCall) => isGeneratedImageArtifactToolName(toolCall.tool))
+    .filter((toolCall) => hasAgentToolCapability(toolCall.tool, "generated_image_artifact"))
     .map((toolCall) => {
       const artifact = resolveGeneratedImageArtifact(toolCall);
       const imageUrl = artifact
@@ -1575,6 +1706,7 @@ function GeneratedPresentationArtifactItem({
   downloadUrl,
   generationMode,
   isVideoPresentation,
+  isSandboxArtifactPublisher,
   modeLabel,
   onArtifactPreview,
   slideCount,
@@ -1590,6 +1722,7 @@ function GeneratedPresentationArtifactItem({
   downloadUrl?: string | null;
   generationMode?: "visual_html" | "editable_native" | null;
   isVideoPresentation?: boolean;
+  isSandboxArtifactPublisher?: boolean;
   modeLabel: string;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   slideCount?: number | null;
@@ -1762,7 +1895,9 @@ function GeneratedPresentationArtifactItem({
                     (artifactStatus === "running"
                       ? "Preparing video project..."
                       : "Preparing video project..."))
-                  : "Generating presentation..."}
+                  : isSandboxArtifactPublisher
+                    ? "Publishing presentation..."
+                    : "Generating presentation..."}
               </span>
             ) : null}
           </div>
@@ -1771,7 +1906,9 @@ function GeneratedPresentationArtifactItem({
               {isVideoPresentation
                 ? (videoProjectStageLabel ??
                   "Video presentation generation failed.")
-                : "PPTX generation failed."}
+                : isSandboxArtifactPublisher
+                  ? "Presentation publishing failed."
+                  : "PPTX generation failed."}
             </p>
           ) : null}
         </div>
@@ -1794,13 +1931,16 @@ export function GeneratedPresentationArtifacts({
   const presentationItems = (toolCalls ?? [])
     .filter(
       (toolCall) =>
-        isPresentationArtifactToolName(toolCall.tool) ||
-        isVideoPresentationArtifactToolName(toolCall.tool),
+        hasAgentToolCapability(toolCall.tool, "presentation_artifact") ||
+        hasAgentToolCapability(toolCall.tool, "video_presentation_artifact"),
     )
     .map((toolCall) => {
-      const isVideoPresentation = isVideoPresentationArtifactToolName(
+      const isVideoPresentation = hasAgentToolCapability(
         toolCall.tool,
+        "video_presentation_artifact",
       );
+      const isSandboxArtifactPublisher =
+        toolCall.tool === AGENT_TOOL_NAMES.publishSandboxArtifact;
       const artifact = resolveGeneratedPresentationArtifact(toolCall);
       const fileUrl = artifact
         ? resolveArtifactUrl({ artifact, workspaceId })
@@ -1816,7 +1956,9 @@ export function GeneratedPresentationArtifacts({
       const title =
         artifact?.title ||
         getGeneratedPresentationTitle(toolCall) ||
-        (isVideoPresentation
+        (isSandboxArtifactPublisher
+          ? "Published presentation"
+          : isVideoPresentation
           ? "Generated video presentation"
           : "Generated presentation");
       const description = getGeneratedPresentationPrompt(toolCall);
@@ -1825,6 +1967,8 @@ export function GeneratedPresentationArtifacts({
         (artifact?.htmlUrl ? "visual_html" : "editable_native");
       const modeLabel = isVideoPresentation
         ? "Video presentation"
+        : isSandboxArtifactPublisher
+          ? "PowerPoint presentation"
         : generationMode === "editable_native"
           ? "Editable PowerPoint"
           : "Visual deck";
@@ -1866,6 +2010,7 @@ export function GeneratedPresentationArtifacts({
         fileUrl: isVideoPresentation ? null : fileUrl,
         generationMode,
         isVideoPresentation,
+        isSandboxArtifactPublisher,
         previewArtifact,
         description,
         modeLabel,
@@ -1874,16 +2019,15 @@ export function GeneratedPresentationArtifacts({
         toolCall,
       };
     })
-    .filter(({ fileUrl, isVideoPresentation, previewArtifact, toolCall }) => {
-      if (
-        toolCall.status === "running" ||
-        toolCall.status === "approval_requested" ||
-        toolCall.status === "error"
-      ) {
-        return true;
-      }
-      return Boolean(fileUrl || (isVideoPresentation && previewArtifact));
-    })
+    .filter((item) =>
+      shouldShowGeneratedPresentationItem({
+        fileUrl: item.fileUrl,
+        isSandboxArtifactPublisher: item.isSandboxArtifactPublisher,
+        isVideoPresentation: item.isVideoPresentation,
+        previewArtifact: item.previewArtifact,
+        status: item.toolCall.status,
+      }),
+    )
     .filter((item, index, items) => {
       if (!item.artifact?.artifactId) {
         return true;
@@ -1912,6 +2056,7 @@ export function GeneratedPresentationArtifacts({
           fileUrl,
           generationMode,
           isVideoPresentation,
+          isSandboxArtifactPublisher,
           modeLabel,
           previewArtifact,
           title,
@@ -1942,6 +2087,7 @@ export function GeneratedPresentationArtifacts({
               downloadUrl={downloadUrl ?? fileUrl}
               generationMode={generationMode}
               isVideoPresentation={isVideoPresentation}
+              isSandboxArtifactPublisher={isSandboxArtifactPublisher}
               key={toolCall.id}
               modeLabel={modeLabel}
               onArtifactPreview={onArtifactPreview}
@@ -2559,6 +2705,16 @@ export function ReasoningTrace({
 
             if (item.kind === "step") {
               const { step } = item;
+              if (isTodoListTraceStep(step)) {
+                return (
+                  <DeepAgentTodoTrace
+                    isCancelled={isCancelled}
+                    key={item.key}
+                    step={step}
+                  />
+                );
+              }
+
               const isVisionFallback = isVisionFallbackStep(step);
               const metadataParts = getThinkingMetadataParts(step.metadata);
               const stepDescription =

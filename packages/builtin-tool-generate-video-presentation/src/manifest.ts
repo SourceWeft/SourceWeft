@@ -1,0 +1,50 @@
+import type { CapabilityManifestInput } from "@sourceweft/capability-contracts";
+
+export const builtinGenerateVideoPresentationCapabilityManifest: CapabilityManifestInput =
+  {
+    schemaVersion: 1,
+    id: "sourceweft/generate-video-presentation",
+    kind: "tool",
+    name: "Generate Video Presentation",
+    version: "0.1.0",
+    entry: "./src/index.ts",
+    tools: [
+        {
+          id: "generate_video_presentation",
+          title: "Generate Video Presentation",
+          description:
+            "Generate a persisted SourceWeft narrated video presentation artifact.",
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+          risk: "write",
+          options: [
+            {
+              id: "narrationEnabled",
+              title: "Narration",
+              description:
+                "Generate narration audio for the video presentation by default.",
+              valueType: "boolean",
+              defaultValue: true,
+              target: { path: "narration.enabled" },
+              values: [],
+            },
+          ],
+          runtime: {
+            execution: "agent",
+            promptIntro:
+              "Create a narrated video presentation artifact from the user's request. Gather the factual source material, choose a concise video title, and pass audience, tone, pacing, or visual style as natural-language user_prompt. Then call generate_video_presentation with source_content. Do not write the internal video schema, schemaVersion JSON, slides array, scenes array, or narrationEnabled object in the chat response; those are produced inside the tool only. The command is complete once the video_presentation artifact has been created and background project preparation has been queued; do not describe it as server-side MP4 rendering or a completed MP4.",
+            tools: ["generate_video_presentation"],
+            permissionOverrides: { generate_video_presentation: "allow" },
+            output: {
+              kind: "artifact",
+              artifactType: "video_presentation",
+              publisherTool: "generate_video_presentation",
+            },
+          },
+          command: {
+            aliases: ["video-presentation", "video"],
+            category: "Artifacts",
+          },
+        },
+    ],
+  };

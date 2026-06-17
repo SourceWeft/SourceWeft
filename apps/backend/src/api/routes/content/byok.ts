@@ -4,7 +4,7 @@ import {
   createByokCredentialRequestSchema,
   resolveByokModelCapabilitiesRequestSchema,
 } from "@sourceweft/contracts";
-import { contentByokService } from "../../../modules/content/byok";
+import { contentByokService } from "../../../modules/byok";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";

@@ -91,13 +91,10 @@ export function buildAssistantTimelineSegments(input: {
 
   for (const item of input.items) {
     if (item.type === "reasoning") {
-      flushWorkflow();
-      if (!isDuplicateText({ candidate: item.text, text: finalAssistantText })) {
-        appendAssistantTextSegment(segments, {
-          key: item.key,
-          order: item.order,
-          text: item.text,
-        });
+      if (isDuplicateText({ candidate: item.text, text: finalAssistantText })) {
+        flushWorkflow();
+      } else {
+        pendingWorkflowItems.push(item);
       }
       continue;
     }

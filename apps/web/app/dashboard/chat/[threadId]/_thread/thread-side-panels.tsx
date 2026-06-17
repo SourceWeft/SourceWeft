@@ -17,8 +17,11 @@ import type {
   CitationRecord,
 } from "../../_components/chat-canvas";
 import type { SourceItem } from "../../_components/source-types";
-import type { SourceConnector } from "@sourceweft/sdk";
-import type { McpToolSelection } from "@sourceweft/sdk";
+import type {
+  ListCapabilityCatalogResponse,
+  McpToolSelection,
+  SourceConnector,
+} from "@sourceweft/sdk";
 
 const SourcesHub = dynamic(
   () => import("../../_components/sources-hub").then((mod) => mod.SourcesHub),
@@ -52,6 +55,8 @@ export function ThreadSidePanels({
   activeSourceIds,
   artifactsRefreshKey,
   availableSkills,
+  hubSkills,
+  capabilityCatalog,
   disabledToolNames,
   displayedCitations,
   hubDrawerOpen,
@@ -88,6 +93,8 @@ export function ThreadSidePanels({
   activeSourceIds: string[];
   artifactsRefreshKey: number;
   availableSkills: ChatSkillItem[];
+  hubSkills?: ChatSkillItem[];
+  capabilityCatalog?: ListCapabilityCatalogResponse | null;
   disabledToolNames: ChatToolName[];
   displayedCitations: CitationRecord[];
   hubDrawerOpen: boolean;
@@ -132,6 +139,8 @@ export function ThreadSidePanels({
           currentCitationMessageId={activeCitationMessageId}
           disabledToolNames={disabledToolNames}
           installedSkills={availableSkills}
+          hubSkills={hubSkills}
+          capabilityCatalog={capabilityCatalog}
           mode="thread"
           onArtifactOpen={onArtifactOpen}
           onCitationLocate={onCitationLocate}
@@ -157,7 +166,10 @@ export function ThreadSidePanels({
         />
       ) : null}
 
-      {sourcesVisible && previewArtifact && isDesktopPanel && !usePersistentHub ? (
+      {sourcesVisible &&
+      previewArtifact &&
+      isDesktopPanel &&
+      !usePersistentHub ? (
         <ArtifactPreviewPanel
           artifact={previewArtifact}
           className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 animate-in slide-in-from-right-4 duration-200"
@@ -208,6 +220,8 @@ export function ThreadSidePanels({
             currentCitationMessageId={activeCitationMessageId}
             disabledToolNames={disabledToolNames}
             installedSkills={availableSkills}
+            hubSkills={hubSkills}
+            capabilityCatalog={capabilityCatalog}
             mode="thread"
             onClose={() => onHubDrawerOpenChange(false)}
             onArtifactOpen={(artifact) => {

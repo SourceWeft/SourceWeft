@@ -1,8 +1,0 @@
-{
-  "slug": "meeting-summary",
-  "displayName": "Meeting Summary",
-  "description": "Use this skill when summarizing meeting notes, extracting decisions, and preparing action items.",
-  "visibility": "public",
-  "categories": ["operate"],
-  "version": "1.0.0"
-}

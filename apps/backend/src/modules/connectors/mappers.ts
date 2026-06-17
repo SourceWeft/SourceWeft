@@ -5,7 +5,7 @@ import type {
   connectorSyncRuns,
   connectorWebhookEvents,
   sourceConnectors,
-} from "../../shared/db/schema";
+} from "@sourceweft/db";
 import type {
   AgentToolTrustRuleRecord,
   ConnectorActionRunRecord,

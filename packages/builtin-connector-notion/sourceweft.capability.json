@@ -1,0 +1,475 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/notion",
+  "kind": "connector",
+  "name": "Notion Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "notion",
+      "title": "Notion",
+      "auth": {
+        "kind": "oauth2",
+        "authorizationUrl": "https://www.notion.so/install-integration",
+        "tokenUrl": "https://api.notion.com/v1/oauth/token",
+        "scopes": [],
+        "authorizationParams": {
+          "owner": "user"
+        },
+        "sendScope": false
+      },
+      "sync": {
+        "supportsIncremental": true,
+        "defaultFrequencyMinutes": 360,
+        "resources": [
+          {
+            "type": "notion_page",
+            "title": "Notion page",
+            "supportsDeleteDetection": false
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "notion.page.create",
+          "title": "Create Notion page",
+          "agentToolName": "create_notion_page",
+          "description": "Propose creating a Notion page in the authorized workspace selected by this connector. Only include parentPageId/pageId or dataSourceId when the user explicitly requested and confirmed a parent page or data source. Requires user approval before execution.",
+          "capabilities": [
+            "connector_write",
+            "connector_create"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "title",
+              "content"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "parentPageId": {
+                "type": "string",
+                "description": "Optional explicit parent page ID. Omit by default so Notion creates the page in the authorized workspace selected by this connector."
+              },
+              "pageId": {
+                "type": "string",
+                "description": "Optional alias for parentPageId. Omit by default unless the user explicitly requested and confirmed a parent page."
+              },
+              "dataSourceId": {
+                "type": "string",
+                "description": "Optional explicit data source ID. Omit by default unless the user explicitly requested and confirmed a target data source."
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "targetHint": {
+                "type": "string"
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.page.save_artifact",
+          "title": "Save artifact to Notion",
+          "agentToolName": "save_artifact_to_notion",
+          "description": "Save an artifact reference to a new Notion page in the authorized workspace selected by this connector. Requires user approval before execution.",
+          "capabilities": [
+            "connector_write",
+            "connector_create",
+            "artifact"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "title",
+              "artifactId"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "artifactId": {
+                "type": "string"
+              },
+              "artifactUrl": {
+                "type": "string"
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.page.save_final_answer",
+          "title": "Save final answer to Notion",
+          "agentToolName": "save_final_answer_to_notion",
+          "description": "Save the final answer markdown to a new Notion page in the authorized workspace selected by this connector. Requires user approval before execution.",
+          "capabilities": [
+            "connector_write",
+            "connector_create"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "title",
+              "content"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.page.append",
+          "title": "Append to Notion page",
+          "agentToolName": "append_notion_page",
+          "description": "Propose appending markdown content to an existing Notion page by page id.",
+          "capabilities": [
+            "connector_write",
+            "connector_append"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "pageId",
+              "content"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "pageId": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.page.update_properties",
+          "title": "Update Notion page properties",
+          "description": "Update properties on an existing Notion page. Intended for internal workflows.",
+          "capabilities": [
+            "connector_write",
+            "connector_update"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "pageId",
+              "properties"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "pageId": {
+                "type": "string"
+              },
+              "properties": {
+                "type": "object"
+              }
+            }
+          },
+          "visibility": "internal"
+        },
+        {
+          "id": "notion.page.trash",
+          "title": "Move Notion page to trash",
+          "agentToolName": "delete_notion_page",
+          "description": "Move one or more existing Notion pages to trash by page ID. Use pageIds for batch deletion and whenever page titles are duplicated.",
+          "capabilities": [
+            "connector_write",
+            "connector_delete"
+          ],
+          "risk": "high",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "anyOf": [
+              {
+                "required": [
+                  "pageId"
+                ]
+              },
+              {
+                "required": [
+                  "pageIds"
+                ]
+              }
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pageId": {
+                "type": "string",
+                "description": "Single Notion page ID to move to trash. Prefer pageIds for batch deletion."
+              },
+              "pageIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "One or more Notion page IDs to move to trash. Use this for duplicate-title or batch deletion."
+              },
+              "deleteFromKnowledgeBase": {
+                "type": "boolean"
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.comment.create",
+          "title": "Create Notion comment",
+          "description": "Create a Notion comment on a page or discussion. Intended for internal workflows.",
+          "capabilities": [
+            "connector_write",
+            "connector_comment"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "richText"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "pageId": {
+                "type": "string"
+              },
+              "discussionId": {
+                "type": "string"
+              },
+              "richText": {
+                "type": "string"
+              }
+            }
+          },
+          "visibility": "internal"
+        },
+        {
+          "id": "notion.data_source.query",
+          "title": "Query Notion data source",
+          "description": "Query a Notion data source. Intended for internal or future read workflows.",
+          "capabilities": [
+            "connector_read"
+          ],
+          "risk": "low",
+          "requiresApproval": false,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "dataSourceId"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "dataSourceId": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "object"
+              },
+              "sorts": {
+                "type": "array"
+              }
+            }
+          },
+          "visibility": "internal"
+        },
+        {
+          "id": "notion.page.find",
+          "title": "Find Notion page",
+          "agentToolName": "search_notion_pages",
+          "description": "Search Notion pages and return page IDs. Always pass query as non-empty page search text from the user's request, such as a title, keyword, or topic. Use this for discovery before reading, updating, or deleting when the user did not provide a page ID. If there is no searchable text, ask the user what page to find instead of calling this action with empty input.",
+          "capabilities": [
+            "connector_read"
+          ],
+          "risk": "low",
+          "requiresApproval": false,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Required non-empty Notion page search text from the user's request, usually a title, keyword, or topic."
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.page.read",
+          "title": "Read Notion page",
+          "agentToolName": "read_notion_page",
+          "description": "Read a Notion page by page ID and return markdown content plus page metadata.",
+          "capabilities": [
+            "connector_read"
+          ],
+          "risk": "low",
+          "requiresApproval": false,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "pageId"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pageId": {
+                "type": "string"
+              },
+              "includeProperties": {
+                "type": "boolean"
+              },
+              "includeContent": {
+                "type": "boolean"
+              },
+              "maxChars": {
+                "type": "number"
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.page.update",
+          "title": "Update Notion page",
+          "agentToolName": "update_notion_page",
+          "description": "Propose updating a Notion page by page ID. Supports appending markdown content, replacing top-level page content, and updating page properties.",
+          "capabilities": [
+            "connector_write",
+            "connector_update"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "pageId"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "pageId": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "append",
+                  "replace"
+                ],
+                "description": "append adds markdown blocks after existing content. replace archives existing top-level blocks before writing content."
+              },
+              "properties": {
+                "type": "object"
+              }
+            }
+          },
+          "visibility": "agent"
+        },
+        {
+          "id": "notion.file_upload.create",
+          "title": "Create Notion file upload",
+          "description": "Create a Notion file upload. Intended for internal file workflows.",
+          "capabilities": [
+            "connector_write",
+            "connector_upload"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "fileName"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "fileName": {
+                "type": "string"
+              },
+              "contentType": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              }
+            }
+          },
+          "visibility": "internal"
+        },
+        {
+          "id": "notion.file_upload.attach_to_page",
+          "title": "Attach Notion file upload to page",
+          "description": "Attach a Notion file upload to a page. Intended for internal file workflows.",
+          "capabilities": [
+            "connector_write",
+            "connector_upload"
+          ],
+          "risk": "medium",
+          "requiresApproval": true,
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "pageId",
+              "fileUploadId",
+              "fileName"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "pageId": {
+                "type": "string"
+              },
+              "fileUploadId": {
+                "type": "string"
+              },
+              "fileName": {
+                "type": "string"
+              }
+            }
+          },
+          "visibility": "internal"
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "includePages": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  ]
+}

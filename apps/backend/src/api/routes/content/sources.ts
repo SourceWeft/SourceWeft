@@ -11,7 +11,7 @@ import {
   retrySourceRequestSchema,
   updateSourceRequestSchema,
 } from "@sourceweft/contracts";
-import { contentService } from "../../../modules/content";
+import { contentSourceService, sourceIndexingService, sourceParsingService } from "../../../modules/sources";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
@@ -50,7 +50,7 @@ export function registerSourceRoutes(app: Hono) {
       throw new ApiError(400, "FILE_REQUIRED", "file is required");
     }
 
-    const result = await contentService.uploadSource({
+    const result = await contentSourceService.uploadSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       fileName: file.name || "upload.bin",
@@ -91,7 +91,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.listSources({
+    const result = await contentSourceService.listSources({
       view: parsed.data.view,
       includeContent: parsed.data.includeContent ?? true,
       limit: parsed.data.limit,
@@ -124,7 +124,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.listSourceMentions({
+    const result = await contentSourceService.listSourceMentions({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       query: parsed.data.query,
@@ -149,7 +149,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.bulkDeleteSources({
+    const result = await contentSourceService.bulkDeleteSources({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       sourceIds: parsed.data.sourceIds,
@@ -172,7 +172,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.listSourceStatuses({
+    const result = await contentSourceService.listSourceStatuses({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       sourceIds: parsed.data.ids,
@@ -195,7 +195,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.createSource({
+    const result = await contentSourceService.createSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       title: parsed.data.title,
@@ -221,7 +221,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.createUrlSource({
+    const result = await contentSourceService.createUrlSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       url: parsed.data.url,
@@ -239,7 +239,7 @@ export function registerSourceRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getSource({
+    const result = await contentSourceService.getSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -256,7 +256,7 @@ export function registerSourceRoutes(app: Hono) {
         throw ApiError.unauthorized();
       }
 
-      const result = await contentService.getSourceDocument({
+      const result = await contentSourceService.getSourceDocument({
         workspaceId: requireRouteParam(c, "workspaceId"),
         sourceId: requireRouteParam(c, "id"),
         documentId: requireRouteParam(c, "documentId"),
@@ -273,7 +273,7 @@ export function registerSourceRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getSourceStatus({
+    const result = await contentSourceService.getSourceStatus({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -288,7 +288,7 @@ export function registerSourceRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.getSourceContent({
+    const result = await contentSourceService.getSourceContent({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -303,7 +303,7 @@ export function registerSourceRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.downloadSource({
+    const result = await contentSourceService.downloadSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -326,7 +326,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.updateSource({
+    const result = await contentSourceService.updateSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -344,7 +344,7 @@ export function registerSourceRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const result = await contentService.deleteSource({
+    const result = await contentSourceService.deleteSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -367,7 +367,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.indexSource({
+    const result = await sourceIndexingService.indexSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -391,7 +391,7 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.reparseSource({
+    const result = await sourceParsingService.reparseSource({
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
@@ -416,13 +416,20 @@ export function registerSourceRoutes(app: Hono) {
       );
     }
 
-    const result = await contentService.retrySource({
+    const retryInput = {
       workspaceId: requireRouteParam(c, "workspaceId"),
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
       chunkSize: parsed.data.chunkSize,
       forceRefresh: parsed.data.forceRefresh,
-    });
+    };
+    const reparsed = await sourceParsingService.tryQueueSourceReparse(retryInput);
+    const result = reparsed
+      ? { ...reparsed, mode: "reparse" as const }
+      : {
+          ...(await sourceIndexingService.indexSource(retryInput)),
+          mode: "index" as const,
+        };
 
     return ApiResponse.success(c, result, 202);
   });
