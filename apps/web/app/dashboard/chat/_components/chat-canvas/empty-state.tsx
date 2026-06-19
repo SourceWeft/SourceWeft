@@ -20,6 +20,7 @@ import type {
   PromptThinkingCapabilities,
   PromptThinkingSettings,
 } from "./types";
+import type { ComposerOptionsState } from "./composer-options";
 
 const starterSuggestions = [
   "Summarize the selected sources",
@@ -78,6 +79,8 @@ export function EmptyState({
   onDisabledToolNamesChange,
   onStopStreaming,
   isStopping = false,
+  composerOptions,
+  onComposerOptionsChange,
 }: {
   onSendMessage: (input: ChatSendInput) => void;
   composerInitialInput?: string;
@@ -107,6 +110,8 @@ export function EmptyState({
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
   onStopStreaming?: () => void;
   isStopping?: boolean;
+  composerOptions?: ComposerOptionsState;
+  onComposerOptionsChange?: (options: ComposerOptionsState) => void;
 }) {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -194,6 +199,8 @@ export function EmptyState({
             activeConnectorIds={activeConnectorIds}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={onDisabledToolNamesChange}
+            composerOptions={composerOptions}
+            onComposerOptionsChange={onComposerOptionsChange}
           />
         </div>
       </div>

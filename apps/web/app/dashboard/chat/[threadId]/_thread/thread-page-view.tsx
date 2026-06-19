@@ -80,6 +80,7 @@ export function DashboardChatThreadPageView({
   composerInitialCommand,
   composerInitialInput,
   composerResetKey,
+  composerOptions,
   disabledToolNames,
   displayedCitations,
   editingGroupId,
@@ -87,6 +88,7 @@ export function DashboardChatThreadPageView({
   handleActiveVersionChange,
   handleArtifactPreview,
   handleCitationClick,
+  handleComposerOptionsChange,
   handleConnectorsChange,
   handleLibrarySourcesLoad,
   handleLibrarySourcesMerge,
@@ -275,6 +277,7 @@ export function DashboardChatThreadPageView({
             composerInitialCommand={composerInitialCommand}
             composerInitialInput={composerInitialInput}
             composerResetKey={composerResetKey}
+            composerOptions={composerOptions}
             editingMessageId={editingMessageId}
             highlightedMessageId={highlightedMessageId}
             hasOlderMessages={Boolean(olderMessagesCursor)}
@@ -288,6 +291,7 @@ export function DashboardChatThreadPageView({
             artifactStatuses={artifactStatuses}
             onArtifactPreview={handleArtifactPreview}
             onCancelEditing={cancelEditing}
+            onComposerOptionsChange={handleComposerOptionsChange}
             onCitationClick={handleCitationClick}
             onSourcePreview={handleSourcePreview}
             onWorkfileClick={handleWorkfilePreview}

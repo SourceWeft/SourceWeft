@@ -6,6 +6,8 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import {
   buildChatToolsRequest,
+  buildCapabilityOptionToolsSelection,
+  buildCapabilityToolToggleSelection,
   buildComposerToolsSelection,
   buildSkillOptionToolsSelection,
   isCapabilityToolVisibleInComposerOptions,
@@ -285,5 +287,93 @@ test("buildSkillOptionToolsSelection maps runtime skill options to skill config"
         stylePreset: "executive",
       },
     },
+  });
+});
+
+test("buildCapabilityOptionToolsSelection maps tool option overrides to tool selection", () => {
+  const tools = buildCapabilityOptionToolsSelection({
+    catalogTools: [
+      {
+        id: "tool-generate-image",
+        capabilityId: "capability-generate-image",
+        contributionId: "contribution-generate-image",
+        toolName: AGENT_TOOL_NAMES.generateImage,
+        title: "Generate image",
+        description: "Generate an image.",
+        inputSchema: {},
+        outputSchema: {},
+        risk: "write",
+        sourcePackageName: null,
+        options: [
+          {
+            id: "aspectRatio",
+            title: "Aspect ratio",
+            valueType: "string",
+            defaultValue: "auto",
+            target: {
+              path: "config.aspectRatio",
+            },
+            values: [
+              { value: "auto", label: "Auto" },
+              { value: "16:9", label: "16:9" },
+            ],
+          },
+          {
+            id: "quality",
+            title: "Quality",
+            valueType: "string",
+            defaultValue: "auto",
+            target: {
+              path: "config.quality",
+            },
+            values: [
+              { value: "auto", label: "Auto" },
+              { value: "higher", label: "Higher" },
+            ],
+          },
+        ],
+      },
+    ],
+    overrides: {
+      [AGENT_TOOL_NAMES.generateImage]: {
+        aspectRatio: "16:9",
+        quality: "higher",
+      },
+    },
+  });
+
+  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateImage], {
+    enabled: true,
+    config: {
+      aspectRatio: "16:9",
+      quality: "higher",
+    },
+  });
+});
+
+test("buildCapabilityToolToggleSelection maps tool enabled overrides", () => {
+  const tools = buildCapabilityToolToggleSelection({
+    catalogTools: [
+      {
+        id: "tool-generate-image",
+        capabilityId: "capability-generate-image",
+        contributionId: "contribution-generate-image",
+        toolName: AGENT_TOOL_NAMES.generateImage,
+        title: "Generate image",
+        description: "Generate an image.",
+        inputSchema: {},
+        outputSchema: {},
+        risk: "write",
+        sourcePackageName: null,
+        options: [],
+      },
+    ],
+    overrides: {
+      [AGENT_TOOL_NAMES.generateImage]: false,
+    },
+  });
+
+  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateImage], {
+    enabled: false,
   });
 });

@@ -53,6 +53,7 @@ import type {
   ToolConfirmationInterventionSignal,
   VersionedMessageGroup,
 } from "./types";
+import type { ComposerOptionsState } from "./composer-options";
 
 type PromptImageMimeType = NonNullable<
   NonNullable<ChatSendInput["images"]>[number]["mimeType"]
@@ -175,6 +176,8 @@ export function ChatCanvas({
   activeConnectorIds,
   disabledToolNames = [],
   onDisabledToolNamesChange,
+  composerOptions,
+  onComposerOptionsChange,
 }: {
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
@@ -253,6 +256,8 @@ export function ChatCanvas({
   activeConnectorIds?: Record<string, string | null>;
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
+  composerOptions?: ComposerOptionsState;
+  onComposerOptionsChange?: (options: ComposerOptionsState) => void;
 }) {
   void sourcesVisible;
   const lastTrackedSkillCountRef = useRef(selectedSkillIds.length);
@@ -592,6 +597,8 @@ export function ChatCanvas({
         activeConnectorIds={activeConnectorIds}
         disabledToolNames={disabledToolNames}
         onDisabledToolNamesChange={onDisabledToolNamesChange}
+        composerOptions={composerOptions}
+        onComposerOptionsChange={onComposerOptionsChange}
       />
     );
   }
@@ -765,6 +772,8 @@ export function ChatCanvas({
             notionConnectorId={notionConnectorId}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={onDisabledToolNamesChange}
+            composerOptions={composerOptions}
+            onComposerOptionsChange={onComposerOptionsChange}
           />
         </div>
       </div>

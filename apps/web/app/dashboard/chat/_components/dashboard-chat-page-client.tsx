@@ -115,6 +115,10 @@ import {
 } from "./chat-hub-context";
 import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
 import { resolveDefaultActiveSkillIds } from "./chat-canvas/tool-selection";
+import {
+  normalizeComposerOptionsState,
+  type ComposerOptionsState,
+} from "./chat-canvas/composer-options";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
@@ -468,6 +472,9 @@ export function DashboardChatPageClient() {
   const [hasSavedThinkingPreference, setHasSavedThinkingPreference] =
     useState(false);
   const [searchEnabled, setSearchEnabled] = useState(true);
+  const [composerOptions, setComposerOptions] = useState<ComposerOptionsState>(
+    () => normalizeComposerOptionsState(initialChatPreferences.composerOptions),
+  );
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useDashboardShortcutsOpenListener(() => setShortcutsOpen(true));
   const [hubDrawerOpen, setHubDrawerOpen] = useState(false);
@@ -932,6 +939,7 @@ export function DashboardChatPageClient() {
     if (!workspaceId) {
       setThinkingSettings(DEFAULT_THINKING_SETTINGS);
       setSearchEnabled(true);
+      setComposerOptions(normalizeComposerOptionsState({}));
       return;
     }
 
@@ -943,6 +951,9 @@ export function DashboardChatPageClient() {
       mapChatPreferencesToThinkingSettings(initialChatPreferences),
     );
     setSearchEnabled(initialChatPreferences.webAccess);
+    setComposerOptions(
+      normalizeComposerOptionsState(initialChatPreferences.composerOptions),
+    );
   }, [initialChatPreferences, workspaceId]);
 
   useEffect(() => {
@@ -1227,7 +1238,7 @@ export function DashboardChatPageClient() {
           chatPreferences: {
             thinking: thinkingSettings,
             webAccess: searchEnabled,
-            composerOptions: {},
+            composerOptions,
           },
         });
         adoptChat(result.thread);
@@ -1253,6 +1264,7 @@ export function DashboardChatPageClient() {
           thinking,
           thinkingSettings,
           searchEnabled,
+          composerOptions,
           modelState: {
             availableModels,
             catalogKindEnabled,
@@ -1293,6 +1305,7 @@ export function DashboardChatPageClient() {
       selectedModels,
       thinkingSettings,
       searchEnabled,
+      composerOptions,
     ],
   );
 
@@ -1442,6 +1455,8 @@ export function DashboardChatPageClient() {
             activeConnectorIds={activeConnectorTools.activeConnectorIds}
             disabledToolNames={disabledToolNames}
             onDisabledToolNamesChange={setDisabledToolNames}
+            composerOptions={composerOptions}
+            onComposerOptionsChange={setComposerOptions}
             thinkingSettings={thinkingSettings}
             onThinkingSettingsChange={handleThinkingSettingsChange}
             threadTitle="New chat"

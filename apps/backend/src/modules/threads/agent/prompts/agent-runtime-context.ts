@@ -112,6 +112,7 @@ function buildActiveSkillsRuntimePrompt(input: {
       }
       return [
         lines,
+        "runtime_config_policy=\"User-selected options for this skill. Treat these values as generation constraints and follow them unless they conflict with higher-priority instructions or the user's latest explicit request.\"",
         `<skill_runtime_config name="${escapeRuntimeValue(skill.name)}">`,
         ...Object.entries(runtimeConfig).map(
           ([key, value]) =>

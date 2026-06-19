@@ -5,6 +5,7 @@ import type {
   ChatSendInput,
   PromptThinkingSettings,
 } from "./chat-canvas/types";
+import type { ComposerOptionsState } from "./chat-canvas/composer-options";
 import type {
   ModelItem,
   ModelType,
@@ -24,6 +25,7 @@ export type PendingThreadTurn = {
   thinking?: RequestThinkingConfig;
   thinkingSettings?: PromptThinkingSettings;
   searchEnabled?: boolean;
+  composerOptions?: ComposerOptionsState;
   modelState?: {
     availableModels?: Record<ModelType, ModelItem[]>;
     catalogKindEnabled?: Record<ModelType, boolean>;

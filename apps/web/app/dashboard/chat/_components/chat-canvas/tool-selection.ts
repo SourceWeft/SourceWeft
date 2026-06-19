@@ -118,6 +118,7 @@ type SkillOptionOverrides = Record<
   string,
   Record<string, SkillOptionValue | undefined>
 >;
+type CapabilityToolEnabledOverrides = Record<string, boolean | undefined>;
 
 function isSafeSelectionPath(path: string) {
   return path
@@ -162,6 +163,49 @@ function setValueAtSelectionPath(
   return true;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergePlainRecords(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+) {
+  const next = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const existing = next[key];
+    next[key] =
+      isPlainRecord(existing) && isPlainRecord(value)
+        ? mergePlainRecords(existing, value)
+        : value;
+  }
+  return next;
+}
+
+export function mergeChatToolsSelection(
+  left: ChatToolsSelection | undefined,
+  right: ChatToolsSelection | undefined,
+): ChatToolsSelection | undefined {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  const next: ChatToolsSelection = { ...left };
+  for (const [toolName, selection] of Object.entries(right)) {
+    if (!selection) {
+      continue;
+    }
+    const existing = next[toolName];
+    next[toolName] =
+      isPlainRecord(existing) && isPlainRecord(selection)
+        ? (mergePlainRecords(existing, selection) as ChatToolSelection)
+        : selection;
+  }
+  return next;
+}
+
 export function buildSkillOptionToolsSelection(input: {
   selectedSkills: readonly ChatSkillItem[];
   overrides: SkillOptionOverrides;
@@ -204,6 +248,49 @@ export function buildSkillOptionToolsSelection(input: {
   }
   if (Object.keys(skillRuntimeConfig).length > 0) {
     selections.skillRuntimeConfig = skillRuntimeConfig;
+  }
+  return Object.keys(selections).length > 0 ? selections : undefined;
+}
+
+export function buildCapabilityOptionToolsSelection(input: {
+  catalogTools: readonly CapabilityCatalogTool[];
+  overrides: SkillOptionOverrides;
+}): ChatToolsSelection | undefined {
+  const selections: ChatToolsSelection = {};
+  for (const tool of input.catalogTools) {
+    const toolOverrides = input.overrides[tool.toolName];
+    if (!toolOverrides) {
+      continue;
+    }
+    const selection: ChatToolSelection = { enabled: true };
+    let changed = false;
+    for (const option of tool.options) {
+      const value = toolOverrides[option.id];
+      if (value === undefined || !option.target?.path) {
+        continue;
+      }
+      if (setValueAtSelectionPath(selection, option.target.path, value)) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      selections[tool.toolName] = selection;
+    }
+  }
+  return Object.keys(selections).length > 0 ? selections : undefined;
+}
+
+export function buildCapabilityToolToggleSelection(input: {
+  catalogTools: readonly CapabilityCatalogTool[];
+  overrides: CapabilityToolEnabledOverrides;
+}): ChatToolsSelection | undefined {
+  const selections: ChatToolsSelection = {};
+  for (const tool of input.catalogTools) {
+    const enabled = input.overrides[tool.toolName];
+    if (enabled === undefined) {
+      continue;
+    }
+    selections[tool.toolName] = { enabled };
   }
   return Object.keys(selections).length > 0 ? selections : undefined;
 }

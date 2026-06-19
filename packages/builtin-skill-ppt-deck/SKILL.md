@@ -20,6 +20,19 @@ From-scratch decks must feel like finished presentations, not documents split
 across slides. Use topic-specific visual direction and varied slide structures,
 but do not use this skill's examples as a fixed template.
 
+## Runtime Options
+
+When `<skill_runtime_config name="ppt-deck">` is present in the runtime
+context, treat those values as user-selected generation constraints:
+
+- `slideCount`: target number of slides for the finished deck.
+- `language`: main deck language; `auto` means infer from the user's request.
+- `visualDensity`: how much information each slide should carry.
+- `stylePreset`: visual direction for layout, typography, and tone.
+
+Follow these options unless they conflict with higher-priority system rules or
+the user's latest explicit request.
+
 ## Quick Reference
 
 | Task | What to do |

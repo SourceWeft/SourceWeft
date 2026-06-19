@@ -3947,6 +3947,8 @@ test("runtime prompt exposes invoked skill runtime config", () => {
   });
 
   assert.match(prompt, /<skill_runtime_config name="ppt-deck">/);
+  assert.match(prompt, /User-selected options for this skill/);
+  assert.match(prompt, /generation constraints/);
   assert.match(prompt, /stylePreset: editorial/);
   assert.match(prompt, /visualDensity: dense/);
   assert.match(prompt, /language: zh-CN/);

@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useLayoutEffect, type RefObject } from "react";
-import type { PromptThinkingSettings } from "../../_components/chat-canvas";
+import {
+  normalizeComposerOptionsState,
+  type ComposerOptionsState,
+  type PromptThinkingSettings,
+} from "../../_components/chat-canvas";
 import {
   clearPendingThreadTurn,
   readPendingThreadTurn,
@@ -27,6 +31,7 @@ type UseThreadBootstrapInput = {
   setAvailableModels: (models: Record<ModelType, ModelItem[]>) => void;
   setBaseSelectedModels: (models: SelectedModels) => void;
   setCatalogKindEnabled: (enabled: Record<ModelType, boolean>) => void;
+  setComposerOptions: (options: ComposerOptionsState) => void;
   setHasSavedThinkingPreference: (hasSavedPreference: boolean) => void;
   setModelSelectionSources: (
     sources: typeof DEFAULT_MODEL_SELECTION_SOURCES,
@@ -51,6 +56,7 @@ export function useThreadBootstrap({
   setAvailableModels,
   setBaseSelectedModels,
   setCatalogKindEnabled,
+  setComposerOptions,
   setHasSavedThinkingPreference,
   setModelSelectionSources,
   setSearchEnabled,
@@ -90,6 +96,7 @@ export function useThreadBootstrap({
           thinking,
           thinkingSettings: pendingThinkingSettings,
           searchEnabled: pendingSearchEnabled,
+          composerOptions: pendingComposerOptions,
           modelState: pendingModelState,
         } = pendingTurn;
         const pendingSourceIds = Array.isArray(sourceIds)
@@ -117,6 +124,11 @@ export function useThreadBootstrap({
         }
         if (typeof pendingSearchEnabled === "boolean") {
           setSearchEnabled(pendingSearchEnabled);
+        }
+        if (pendingComposerOptions) {
+          setComposerOptions(
+            normalizeComposerOptionsState(pendingComposerOptions),
+          );
         }
         if (
           pendingModelState?.catalogReady &&
@@ -182,6 +194,7 @@ export function useThreadBootstrap({
     setAvailableModels,
     setBaseSelectedModels,
     setCatalogKindEnabled,
+    setComposerOptions,
     setHasSavedThinkingPreference,
     setModelSelectionSources,
     setSearchEnabled,

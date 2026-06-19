@@ -89,11 +89,14 @@ import {
 import type { SourceItem } from "../source-types";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
+  buildCapabilityOptionToolsSelection,
+  buildCapabilityToolToggleSelection,
   buildComposerToolsSelection,
   buildSkillOptionToolsSelection,
   getConnectorAgentToolNames,
   isCapabilityToolVisibleInComposerOptions,
   isSkillViable,
+  mergeChatToolsSelection,
   skillActivatedToolNames,
   skillSupportsConnector,
   thinkingEffortOptions,
@@ -102,8 +105,8 @@ import type {
   ChatSendInput,
   ChatSkillItem,
   ChatToolName,
-  ChatToolsSelection,
   ChatToolSelection,
+  ChatToolsSelection,
   CapabilityCatalog,
   ImageModelCapabilities,
   PromptThinkingCapabilities,
@@ -115,6 +118,15 @@ import {
   capabilityCommandDisplayLabel,
   isCapabilityCatalogSlashCommand,
 } from "./capability-slash-command";
+import {
+  composerOptionsStatesEqual,
+  EMPTY_COMPOSER_OPTIONS,
+  normalizeComposerOptionsState,
+  type ComposerOptionsState,
+  type ComposerOptionOverrides,
+  type ComposerOptionValue,
+  type ComposerToolEnabledOverrides,
+} from "./composer-options";
 
 type ComposerSlashCommandMeta =
   | {
@@ -303,16 +315,6 @@ type ResolvedComposerCommand =
       toolName: string;
     };
 
-type CapabilityOptionValue = string | number | boolean;
-type CapabilityOptionOverrides = Record<
-  string,
-  Record<string, CapabilityOptionValue | undefined>
->;
-type SkillOptionOverrides = Record<
-  string,
-  Record<string, CapabilityOptionValue | undefined>
->;
-type CapabilityToolEnabledOverrides = Record<string, boolean | undefined>;
 type ComposerOptionDescriptor = Pick<
   CapabilityToolOption,
   "id" | "title" | "description" | "valueType" | "defaultValue" | "values"
@@ -355,13 +357,13 @@ function isWebAccessToolName(toolName: string) {
   );
 }
 
-function capabilityOptionValueKey(value: CapabilityOptionValue | undefined) {
+function capabilityOptionValueKey(value: ComposerOptionValue | undefined) {
   return value === undefined ? "" : `${typeof value}:${String(value)}`;
 }
 
 function capabilityOptionValueLabel(
   option: ComposerOptionDescriptor,
-  value: CapabilityOptionValue | undefined,
+  value: ComposerOptionValue | undefined,
 ) {
   const configured = option.values.find(
     (candidate) => candidate.value === value,
@@ -380,137 +382,6 @@ function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
     return option.defaultValue;
   }
   return option.valueType === "boolean" ? false : undefined;
-}
-
-function isSafeCapabilityOptionPath(path: string) {
-  return path
-    .split(".")
-    .every(
-      (segment) =>
-        segment.length > 0 &&
-        segment !== "__proto__" &&
-        segment !== "constructor" &&
-        segment !== "prototype",
-    );
-}
-
-function setValueAtCapabilityOptionPath(
-  target: Record<string, unknown>,
-  path: string,
-  value: CapabilityOptionValue,
-) {
-  const segments = path.split(".");
-  if (segments.length === 0 || !isSafeCapabilityOptionPath(path)) {
-    return false;
-  }
-  let current = target;
-  for (const segment of segments.slice(0, -1)) {
-    const child = current[segment];
-    if (child === undefined) {
-      const nextChild: Record<string, unknown> = {};
-      current[segment] = nextChild;
-      current = nextChild;
-      continue;
-    }
-    if (!child || typeof child !== "object" || Array.isArray(child)) {
-      return false;
-    }
-    current = child as Record<string, unknown>;
-  }
-  const leaf = segments.at(-1);
-  if (!leaf) {
-    return false;
-  }
-  current[leaf] = value;
-  return true;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function mergePlainRecords(
-  base: Record<string, unknown>,
-  override: Record<string, unknown>,
-) {
-  const next = { ...base };
-  for (const [key, value] of Object.entries(override)) {
-    const existing = next[key];
-    next[key] =
-      isPlainRecord(existing) && isPlainRecord(value)
-        ? mergePlainRecords(existing, value)
-        : value;
-  }
-  return next;
-}
-
-function mergeChatToolsSelection(
-  left: ChatToolsSelection | undefined,
-  right: ChatToolsSelection | undefined,
-): ChatToolsSelection | undefined {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-  const next: ChatToolsSelection = { ...left };
-  for (const [toolName, selection] of Object.entries(right)) {
-    if (!selection) {
-      continue;
-    }
-    const existing = next[toolName];
-    next[toolName] =
-      isPlainRecord(existing) && isPlainRecord(selection)
-        ? (mergePlainRecords(existing, selection) as ChatToolSelection)
-        : selection;
-  }
-  return next;
-}
-
-function buildCapabilityOptionSelection(input: {
-  catalogTools: readonly CapabilityCatalogTool[];
-  overrides: CapabilityOptionOverrides;
-}): ChatToolsSelection | undefined {
-  const selections: ChatToolsSelection = {};
-  for (const tool of input.catalogTools) {
-    const toolOverrides = input.overrides[tool.toolName];
-    if (!toolOverrides) {
-      continue;
-    }
-    const selection: ChatToolSelection = { enabled: true };
-    let changed = false;
-    for (const option of tool.options) {
-      const value = toolOverrides[option.id];
-      if (value === undefined || !option.target?.path) {
-        continue;
-      }
-      if (
-        setValueAtCapabilityOptionPath(selection, option.target.path, value)
-      ) {
-        changed = true;
-      }
-    }
-    if (changed) {
-      selections[tool.toolName] = selection;
-    }
-  }
-  return Object.keys(selections).length > 0 ? selections : undefined;
-}
-
-function buildCapabilityToolToggleSelection(input: {
-  catalogTools: readonly CapabilityCatalogTool[];
-  overrides: CapabilityToolEnabledOverrides;
-}): ChatToolsSelection | undefined {
-  const selections: ChatToolsSelection = {};
-  for (const tool of input.catalogTools) {
-    const enabled = input.overrides[tool.toolName];
-    if (enabled === undefined) {
-      continue;
-    }
-    selections[tool.toolName] = { enabled };
-  }
-  return Object.keys(selections).length > 0 ? selections : undefined;
 }
 
 export function Composer({
@@ -549,6 +420,8 @@ export function Composer({
   onDisabledToolNamesChange,
   onStopStreaming,
   isStopping = false,
+  composerOptions = EMPTY_COMPOSER_OPTIONS,
+  onComposerOptionsChange,
 }: {
   isEditing?: boolean;
   placeholder?: string;
@@ -592,18 +465,50 @@ export function Composer({
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
   onStopStreaming?: () => void;
   isStopping?: boolean;
+  composerOptions?: ComposerOptionsState;
+  onComposerOptionsChange?: (options: ComposerOptionsState) => void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [, setDraftText] = useState(initialInput);
   const [draftSegments, setDraftSegments] = useState<PromptInputSegment[]>([]);
+  const normalizedComposerOptions = useMemo(
+    () => normalizeComposerOptionsState(composerOptions),
+    [composerOptions],
+  );
   const [capabilityOptionOverrides, setCapabilityOptionOverrides] =
-    useState<CapabilityOptionOverrides>({});
+    useState<ComposerOptionOverrides>(
+      normalizedComposerOptions.capabilityOptionOverrides,
+    );
   const [skillOptionOverrides, setSkillOptionOverrides] =
-    useState<SkillOptionOverrides>({});
+    useState<ComposerOptionOverrides>(
+      normalizedComposerOptions.skillOptionOverrides,
+    );
   const [capabilityToolEnabledOverrides, setCapabilityToolEnabledOverrides] =
-    useState<CapabilityToolEnabledOverrides>({});
+    useState<ComposerToolEnabledOverrides>(
+      normalizedComposerOptions.capabilityToolEnabledOverrides,
+    );
+  const activeComposerOptions = useMemo<ComposerOptionsState>(
+    () => ({
+      capabilityOptionOverrides,
+      capabilityToolEnabledOverrides,
+      skillOptionOverrides,
+    }),
+    [
+      capabilityOptionOverrides,
+      capabilityToolEnabledOverrides,
+      skillOptionOverrides,
+    ],
+  );
+  const normalizedComposerOptionsKey = useMemo(
+    () => JSON.stringify(normalizedComposerOptions),
+    [normalizedComposerOptions],
+  );
   const [composerSessionKey, setComposerSessionKey] = useState(0);
   const previousEditingRef = useRef(isEditing);
+  const lastEmittedComposerOptionsRef = useRef<ComposerOptionsState>(
+    normalizedComposerOptions,
+  );
+  const skipNextComposerOptionsEmitRef = useRef(false);
   const disabledToolNameSet = useMemo(
     () => new Set(disabledToolNames),
     [disabledToolNames],
@@ -1218,7 +1123,7 @@ export function Composer({
   function updateCapabilityOption(
     tool: CapabilityCatalogTool,
     option: CapabilityToolOption,
-    value: CapabilityOptionValue,
+    value: ComposerOptionValue,
   ) {
     setCapabilityOptionOverrides((current) => {
       const defaultValue = capabilityOptionDefaultValue(option);
@@ -1241,7 +1146,7 @@ export function Composer({
   function updateSkillOption(
     skill: ChatSkillItem,
     option: SkillOption,
-    value: CapabilityOptionValue,
+    value: ComposerOptionValue,
   ) {
     setSkillOptionOverrides((current) => {
       const defaultValue = capabilityOptionDefaultValue(option);
@@ -1421,6 +1326,32 @@ export function Composer({
   }, [initialCommand, initialInput, initialPromptSegments, inputKey]);
 
   useEffect(() => {
+    const next = normalizeComposerOptionsState(normalizedComposerOptions);
+    lastEmittedComposerOptionsRef.current = next;
+    skipNextComposerOptionsEmitRef.current = true;
+    setCapabilityOptionOverrides(next.capabilityOptionOverrides);
+    setCapabilityToolEnabledOverrides(next.capabilityToolEnabledOverrides);
+    setSkillOptionOverrides(next.skillOptionOverrides);
+  }, [normalizedComposerOptionsKey]);
+
+  useEffect(() => {
+    if (skipNextComposerOptionsEmitRef.current) {
+      skipNextComposerOptionsEmitRef.current = false;
+      return;
+    }
+    if (
+      composerOptionsStatesEqual(
+        activeComposerOptions,
+        lastEmittedComposerOptionsRef.current,
+      )
+    ) {
+      return;
+    }
+    lastEmittedComposerOptionsRef.current = activeComposerOptions;
+    onComposerOptionsChange?.(activeComposerOptions);
+  }, [activeComposerOptions, onComposerOptionsChange]);
+
+  useEffect(() => {
     if (previousEditingRef.current !== isEditing) {
       previousEditingRef.current = isEditing;
       setComposerSessionKey((value) => value + 1);
@@ -1589,7 +1520,7 @@ export function Composer({
             );
             const toolsWithCapabilityOptions = mergeChatToolsSelection(
               toolsWithSkillOptions,
-              buildCapabilityOptionSelection({
+              buildCapabilityOptionToolsSelection({
                 catalogTools: capabilityToolsWithOptions,
                 overrides: capabilityOptionOverrides,
               }),

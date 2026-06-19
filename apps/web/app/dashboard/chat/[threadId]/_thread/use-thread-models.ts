@@ -29,9 +29,11 @@ import {
   DEFAULT_MODEL_SELECTION_SOURCES,
   type ModelSelectionSources,
 } from "../../_components/skill-model-presets";
-import type {
-  ChatSkillItem,
-  PromptThinkingSettings,
+import {
+  normalizeComposerOptionsState,
+  type ChatSkillItem,
+  type ComposerOptionsState,
+  type PromptThinkingSettings,
 } from "../../_components/chat-canvas";
 import { contentClient } from "../../../../../lib/sdk";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
@@ -93,6 +95,9 @@ export function useThreadModels({
   const [hasSavedThinkingPreference, setHasSavedThinkingPreference] =
     useState(false);
   const [searchEnabled, setSearchEnabled] = useState(true);
+  const [composerOptions, setComposerOptions] = useState<ComposerOptionsState>(
+    () => normalizeComposerOptionsState({}),
+  );
   const modelLoadGenerationRef = useRef(0);
 
   useEffect(() => {
@@ -255,6 +260,27 @@ export function useThreadModels({
     [onChatPreferencesChange, threadId, workspaceId],
   );
 
+  const handleComposerOptionsChange = useCallback(
+    (options: ComposerOptionsState) => {
+      const nextOptions = normalizeComposerOptionsState(options);
+      setComposerOptions(nextOptions);
+      if (!workspaceId) {
+        return;
+      }
+      void contentClient
+        .updateThreadChatPreferences(workspaceId, threadId, {
+          composerOptions: nextOptions,
+        })
+        .then((result) => {
+          onChatPreferencesChange?.(result.thread.chatPreferences);
+        })
+        .catch(() => {
+          toast.error("Failed to save options for this chat.");
+        });
+    },
+    [onChatPreferencesChange, threadId, workspaceId],
+  );
+
   const loadThreadModelState = useCallback(async () => {
     const loadGeneration = modelLoadGenerationRef.current + 1;
     modelLoadGenerationRef.current = loadGeneration;
@@ -274,6 +300,7 @@ export function useThreadModels({
       setByokCredentials([]);
       setByokModels([]);
       setSelectedByokModels({});
+      setComposerOptions(normalizeComposerOptionsState({}));
       setStreamWithSelectedLlm(false);
       return;
     }
@@ -349,6 +376,11 @@ export function useThreadModels({
         ),
       );
       setSearchEnabled(threadResponse.thread.chatPreferences.webAccess);
+      setComposerOptions(
+        normalizeComposerOptionsState(
+          threadResponse.thread.chatPreferences.composerOptions,
+        ),
+      );
       onChatPreferencesChange?.(threadResponse.thread.chatPreferences);
       setStreamWithSelectedLlm(kindEnabled.llm);
       setModelCatalogStatus("ready");
@@ -370,6 +402,7 @@ export function useThreadModels({
       setByokCredentials([]);
       setByokModels([]);
       setSelectedByokModels({});
+      setComposerOptions(normalizeComposerOptionsState({}));
       setStreamWithSelectedLlm(false);
     }
   }, [onChatPreferencesChange, threadId, workspaceId]);
@@ -484,7 +517,9 @@ export function useThreadModels({
     byokModels,
     byokProviders,
     catalogKindEnabled,
+    composerOptions,
     handleModelSelect,
+    handleComposerOptionsChange,
     handleThreadByokSelect,
     handleSearchEnabledChange,
     handleThinkingSettingsChange,
@@ -501,6 +536,7 @@ export function useThreadModels({
     setByokModels,
     setByokProviders,
     setCatalogKindEnabled,
+    setComposerOptions,
     setHasSavedThinkingPreference,
     setModelSelectionSources,
     setSearchEnabled: handleSearchEnabledChange,

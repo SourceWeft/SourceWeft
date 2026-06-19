@@ -34,6 +34,15 @@ async function loadPendingTurnModule() {
 }
 
 const pendingTurn = {
+  composerOptions: {
+    capabilityOptionOverrides: {},
+    capabilityToolEnabledOverrides: {},
+    skillOptionOverrides: {
+      "builtin:ppt-deck": {
+        slideCount: 6,
+      },
+    },
+  },
   content: "hello",
   searchEnabled: true,
   sourceIds: ["source-1"],
