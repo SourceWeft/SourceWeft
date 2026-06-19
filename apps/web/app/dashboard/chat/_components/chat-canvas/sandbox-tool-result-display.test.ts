@@ -6,6 +6,7 @@ import {
   getSandboxToolResultDetails,
   getSandboxToolResultSummary,
   getSandboxToolSafeErrorMessage,
+  isSandboxToolResultFailure,
   parseSandboxToolResultDisplay,
 } from "./sandbox-tool-result-display";
 
@@ -28,8 +29,12 @@ test("parses sandbox prepare result JSON", () => {
       }),
     ),
     {
+      code: null,
+      message: null,
       ok: true,
       output: null,
+      recoverable: null,
+      status: null,
       totalBytes: 3072,
       filePaths: ["/workspace/input/input.md", "/workspace/input/data.csv"],
       outputPaths: [],
@@ -58,8 +63,12 @@ test("parses sandbox collect result JSON", () => {
       }),
     ),
     {
+      code: null,
+      message: null,
       ok: true,
       output: null,
+      recoverable: null,
+      status: null,
       totalBytes: 4096,
       filePaths: [],
       outputPaths: ["/workfiles/report.md", "/workfiles/chart.png"],
@@ -80,8 +89,12 @@ test("parses sandbox execution metadata when present", () => {
       }),
     ),
     {
+      code: null,
+      message: null,
       ok: false,
       output: "command failed",
+      recoverable: null,
+      status: null,
       totalBytes: null,
       filePaths: [],
       outputPaths: [],
@@ -111,6 +124,51 @@ test("summarizes sandbox prepare results for tool cards", () => {
       }),
     }),
     "Prepared 2 files · 2 KiB · /workspace/input/a.md, /workspace/input/b.md",
+  );
+});
+
+test("summarizes sandbox prepare recoverable failures for tool cards", () => {
+  assert.equal(
+    getSandboxToolResultSummary({
+      toolName: "prepare_sandbox_workspace",
+      output: {
+        ok: false,
+        type: "sandbox_prepare_error",
+        status: "failed",
+        code: "ENOENT",
+        message: "ENOENT: no such file",
+        recoverable: true,
+      },
+    }),
+    "Failed · ENOENT · ENOENT: no such file",
+  );
+});
+
+test("detects sandbox result-level failures", () => {
+  assert.equal(
+    isSandboxToolResultFailure({
+      toolName: "prepare_sandbox_workspace",
+      output: {
+        ok: false,
+        status: "failed",
+        message: "failed",
+      },
+    }),
+    true,
+  );
+  assert.equal(
+    isSandboxToolResultFailure({
+      toolName: "prepare_sandbox_workspace",
+      output: { ok: true },
+    }),
+    false,
+  );
+  assert.equal(
+    isSandboxToolResultFailure({
+      toolName: "read_file",
+      output: { ok: false },
+    }),
+    false,
   );
 });
 
@@ -156,6 +214,42 @@ test("formats sandbox prepare operation details for tool cards", () => {
   );
 });
 
+test("formats sandbox prepare recoverable failure details for tool cards", () => {
+  assert.deepEqual(
+    getSandboxToolResultDetails({
+      toolName: "prepare_sandbox_workspace",
+      input: {
+        files: [
+          {
+            sourcePath: "/workfiles/missing.md",
+            sandboxPath: "/workspace/input/missing.md",
+          },
+        ],
+      },
+      output: {
+        ok: false,
+        type: "sandbox_prepare_error",
+        status: "failed",
+        code: "ENOENT",
+        message: "ENOENT: no such file",
+        recoverable: true,
+      },
+    }),
+    [
+      { label: "Operation", value: "Prepared sandbox workspace" },
+      { label: "Status", value: "Failed" },
+      { label: "Code", value: "ENOENT" },
+      { label: "Message", value: "ENOENT: no such file" },
+      { label: "Recoverable", value: "Yes" },
+      { label: "Inputs", value: "1 file" },
+      {
+        label: "Requested transfer",
+        value: "/workfiles/missing.md -> /workspace/input/missing.md",
+      },
+    ],
+  );
+});
+
 test("formats sandbox prepare request details when execution fails before result files exist", () => {
   assert.deepEqual(
     getSandboxToolResultDetails({
@@ -195,6 +289,23 @@ test("summarizes sandbox collect results for tool cards", () => {
       },
     }),
     "Collected 2 outputs · 512 B · /workfiles/report.md, /workfiles/chart.csv",
+  );
+});
+
+test("summarizes sandbox collect recoverable failures for tool cards", () => {
+  assert.equal(
+    getSandboxToolResultSummary({
+      toolName: "collect_sandbox_outputs",
+      output: {
+        ok: false,
+        type: "sandbox_collect_error",
+        status: "failed",
+        code: "SANDBOX_COLLECT_CONFLICT",
+        message: "/workfiles/report.md already exists",
+        recoverable: true,
+      },
+    }),
+    "Failed · SANDBOX_COLLECT_CONFLICT · /workfiles/report.md already exists",
   );
 });
 
@@ -442,6 +553,24 @@ test("maps sandbox credential and timeout errors to user-safe messages", () => {
       error: "SANDBOX_PROVIDER_AUTH_FAILED: sandbox credentials failed.",
     }),
     "Sandbox credentials were rejected. Ask an operator to check the backend sandbox credentials.",
+  );
+  assert.equal(
+    getSandboxToolSafeErrorMessage({
+      toolName: "execute",
+      error:
+        "SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include /workfiles.",
+    }),
+    "Execute commands cannot use SourceWeft /workfiles, /kb, or /skills paths. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
+  );
+});
+
+test("keeps normalized execute exit-code errors visible", () => {
+  assert.equal(
+    getSandboxToolSafeErrorMessage({
+      toolName: "execute",
+      error: "Command failed with exit code 2.",
+    }),
+    "Command failed with exit code 2.",
   );
 });
 

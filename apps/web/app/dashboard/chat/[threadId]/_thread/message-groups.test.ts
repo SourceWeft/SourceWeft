@@ -193,7 +193,7 @@ test("error messages are terminal even if thread run metadata is stale", () => {
 
 test("raw tool schema failures are sanitized for persisted error versions", () => {
   const rawError =
-    'Error invoking tool \'publish_sandbox_artifact\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
+    'Error invoking tool \'publish_artifact\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
   const userMessage = createMessage({
     id: "user-1",
     role: "user",
@@ -220,11 +220,11 @@ test("raw tool schema failures are sanitized for persisted error versions", () =
 
   assert.equal(
     sanitizeClientErrorMessage(rawError),
-    "publish_sandbox_artifact failed because the generated tool arguments were invalid. Please retry.",
+    "publish_artifact failed because the generated tool arguments were invalid. Please retry.",
   );
   assert.equal(
     error,
-    "publish_sandbox_artifact failed because the generated tool arguments were invalid. Please retry.",
+    "publish_artifact failed because the generated tool arguments were invalid. Please retry.",
   );
   assert.doesNotMatch(
     error ?? "",
@@ -237,7 +237,7 @@ test("completed presentation publisher with error is not treated as artifact car
     isCompletedPresentationArtifactToolCall(
       {
         id: "tool-1",
-        tool: "publish_sandbox_artifact",
+        tool: "publish_artifact",
         input: {},
         output: {
           artifact_url:

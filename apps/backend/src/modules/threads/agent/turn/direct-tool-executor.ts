@@ -2,8 +2,15 @@ import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { TraceContext } from "../../../llm-observability";
 import { endSpan, startSpan } from "../../../llm-observability";
-import type { CommandSuccessCriteria, PreparedThreadTurn, ToolCallTrace } from "../..";
-import { createMessageRenderBlockBuilder, finalizeMessageRenderBlocks } from "../../turn/render-blocks";
+import type {
+  CommandSuccessCriteria,
+  PreparedThreadTurn,
+  ToolCallTrace,
+} from "../..";
+import {
+  createMessageRenderBlockBuilder,
+  finalizeMessageRenderBlocks,
+} from "../../turn/render-blocks";
 import type { DeepAgentTurnEvent, DeepAgentTurnOutcome } from "./events";
 import { sanitizeSseValue } from "./content";
 import { normalizeErrorText } from "./tool-utils";
@@ -43,13 +50,15 @@ export function resolveDirectToolCommand(
 
 type GenerateImageToolInvoker = StructuredToolInterface;
 
-export async function* runDirectToolCommand(input: Omit<
-  Parameters<typeof runDirectGenerateImageCommand>[0],
-  "generateImageTool" | "toolCommand"
-> & {
-  artifactTools: GenerateImageToolInvoker[];
-  toolCommand: ResolvedDirectToolCommand;
-}): AsyncGenerator<DeepAgentTurnEvent> {
+export async function* runDirectToolCommand(
+  input: Omit<
+    Parameters<typeof runDirectGenerateImageCommand>[0],
+    "generateImageTool" | "toolCommand"
+  > & {
+    artifactTools: GenerateImageToolInvoker[];
+    toolCommand: ResolvedDirectToolCommand;
+  },
+): AsyncGenerator<DeepAgentTurnEvent> {
   if (input.toolCommand.name === AGENT_TOOL_NAMES.generateImage) {
     yield* runDirectGenerateImageCommand({
       ...input,
@@ -108,6 +117,7 @@ export async function* runDirectGenerateImageCommand(input: {
         availableCitations: [],
         retrievalCalls: [],
         toolCalls: [],
+        meteredLlmCalls: [],
         renderBlocks: finalizeMessageRenderBlocks({
           blocks: renderBlocks.list(),
           finalText: errorText,
@@ -359,10 +369,13 @@ export async function* runDirectGenerateImageCommand(input: {
       availableCitations: [],
       retrievalCalls: [],
       toolCalls: [finalToolCall],
+      meteredLlmCalls: [],
       ...(commandSatisfied
         ? {}
         : { finishReason: "command_success_criteria_failed" }),
-      ...(finalRenderBlocks.length > 0 ? { renderBlocks: finalRenderBlocks } : {}),
+      ...(finalRenderBlocks.length > 0
+        ? { renderBlocks: finalRenderBlocks }
+        : {}),
       thinkingSteps: [],
       reasoningSegments: input.reasoningSegments,
       agentCheckpoint: {

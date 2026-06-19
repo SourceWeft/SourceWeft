@@ -1,436 +1,198 @@
 # Design System
 
-## Color Palette Reference
-
-| # | Name | Colors | Style | Use Cases | Tips |
-|---|------|--------|-------|-----------|------|
-| 1 | Modern & Wellness | `#006d77` `#83c5be` `#edf6f9` `#ffddd2` `#e29578` | Fresh, soothing | Healthcare, counseling, skincare, yoga/spa | Deep teal for titles, light pink for background |
-| 2 | Business & Authority | `#2b2d42` `#8d99ae` `#edf2f4` `#ef233c` `#d90429` | Formal, classic | Annual reports, financial analysis, corporate intro, government | Deep blue for professionalism, bright red to highlight data |
-| 3 | Nature & Outdoors | `#606c38` `#283618` `#fefae0` `#dda15e` `#bc6c25` | Grounded, earthy | Outdoor gear, environmental, agriculture, historical culture | Dark green base, cream text |
-| 4 | Vintage & Academic | `#780000` `#c1121f` `#fdf0d5` `#003049` `#669bbc` | Classic, scholarly | Academic lectures, history reviews, museums, heritage brands | Strong contrast between deep red and deep blue |
-| 5 | Soft & Creative | `#cdb4db` `#ffc8dd` `#ffafcc` `#bde0fe` `#a2d2ff` | Dreamy, candy-toned | Mother & baby, desserts, women's fashion, kindergarten | Use dark gray or black for text |
-| 6 | Bohemian | `#ccd5ae` `#e9edc9` `#fefae0` `#faedcd` `#d4a373` | Gentle, muted | Wedding planning, home decor, organic food, slow living | Cream background, green-brown accents |
-| 7 | Vibrant & Tech | `#8ecae6` `#219ebc` `#023047` `#ffb703` `#fb8500` | High energy, sporty | Sports events, gyms, startup pitches, youth education | Deep blue for stability, orange as focal accent |
-| 8 | Craft & Artisan | `#7f5539` `#a68a64` `#ede0d4` `#656d4a` `#414833` | Rustic, coffee-toned | Coffee shops, handicrafts, traditional culture, bakery | Suited for paper/leather textures |
-| 9 | Tech & Night | `#000814` `#001d3d` `#003566` `#ffc300` `#ffd60a` | Deep, luminous | Tech launches, astronomy, night economy, luxury automobiles | Must use dark mode |
-| 10 | Education & Charts | `#264653` `#2a9d8f` `#e9c46a` `#f4a261` `#e76f51` | Clear, logical | Statistical reports, education, market analysis, general business | Perfect chart color scheme |
-| 11 | Forest & Eco | `#dad7cd` `#a3b18a` `#588157` `#3a5a40` `#344e41` | Monochrome gradient, forest | Landscape design, ESG reports, environmental causes, botanical | Monochrome palette is safe and cohesive |
-| 12 | Elegant & Fashion | `#edafb8` `#f7e1d7` `#dedbd2` `#b0c4b1` `#4a5759` | Muted, Morandi tones | Haute couture, art galleries, beauty brands, magazine style | Negative space is key |
-| 13 | Art & Food | `#335c67` `#fff3b0` `#e09f3e` `#9e2a2b` `#540b0e` | Rich, vintage-poster | Food documentaries, art exhibitions, ethnic themes, vintage restaurants | Works well with large color blocks |
-| 14 | Luxury & Mysterious | `#22223b` `#4a4e69` `#9a8c98` `#c9ada7` `#f2e9e4` | Cool, purple-toned | Jewelry showcases, hotel management, high-end consulting, psychology | Purple evokes premium atmosphere |
-| 15 | Pure Tech Blue | `#03045e` `#0077b6` `#00b4d8` `#90e0ef` `#caf0f8` | Futuristic, clean | Cloud/AI, water/ocean, hospitals, clean energy | Deep ocean to sky gradient |
-| 16 | Coastal Coral | `#0081a7` `#00afb9` `#fdfcdc` `#fed9b7` `#f07167` | Refreshing, summery | Travel, summer events, beverage brands, ocean themes | Teal and coral as complementary focal colors |
-| 17 | Vibrant Orange Mint | `#ff9f1c` `#ffbf69` `#ffffff` `#cbf3f0` `#2ec4b6` | Bright, cheerful | Children's events, promotional posters, FMCG, social media | Orange grabs attention, mint feels fresh |
-| 18 | Platinum White Gold | `#0a0a0a` `#0070F3` `#D4AF37` `#f5f5f5` `#ffffff` | Premium, professional | Agent products, corporate websites, fintech, luxury brands | White-gold base, blue for action, gold for emphasis |
-
----
-
-### Agent Design System — Full Color Scale
-
-Based on the Platinum White-Gold Theme design tokens. Provides complete color scales for fine-grained design work.
-
-#### White Scale (Backgrounds & Light Surfaces)
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| white-0 | `#ffffff` | Primary background |
-| white-50 | `#fefefe` | Slightly warm white |
-| white-75 | `#fcfcfc` | Near-white |
-| white-100 | `#fafafa` | Secondary background |
-| white-200 | `#f7f7f7` | Card background |
-| white-300 | `#f5f5f5` | Tertiary background |
-| white-400 | `#f0f0f0` | Separator zones |
-| white-500 | `#ebebeb` | Light border |
-| white-600 | `#e5e5e5` | Disabled background |
-| white-700 | `#e0e0e0` | Deep white-gray |
-| white-800 | `#d9d9d9` | Placeholder |
-| white-900 | `#d4d4d4` | Divider lines |
-| white-1000 | `#cccccc` | Deepest white |
-
-#### Gold Scale (Platinum Business Accent)
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| gold-25 | `#FFFDF5` | Extremely light gold background |
-| gold-50 | `#FEF9E7` | Light gold background |
-| gold-75 | `#FCF3D0` | Pale gold highlight |
-| gold-100 | `#FAECB8` | Gold hover state |
-| gold-200 | `#F5DC8A` | Bright gold accent |
-| gold-300 | `#E8C860` | Gold hover |
-| gold-400 | `#D4AF37` | **Primary gold (core)** |
-| gold-500 | `#B8972E` | Gold text |
-| gold-600 | `#9A7E26` | Deep gold accent |
-| gold-700 | `#7C651E` | Dark gold border |
-| gold-800 | `#5E4C16` | Deep gold background |
-| gold-900 | `#40330F` | Very deep gold |
-| gold-1000 | `#221A08` | Black gold |
-
-#### Blue Scale (Primary Action Color)
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| blue-25 | `#F0F7FF` | Extremely light blue background |
-| blue-50 | `#E0EFFF` | Info alert background |
-| blue-75 | `#C2DFFF` | Light blue highlight |
-| blue-100 | `#A3CFFF` | Disabled blue |
-| blue-200 | `#66AFFF` | Bright blue |
-| blue-300 | `#338FFF` | Blue hover |
-| blue-400 | `#0070F3` | **Primary blue (core)** |
-| blue-500 | `#005FCC` | Blue text |
-| blue-600 | `#004FA6` | Deep blue accent |
-| blue-700 | `#003F80` | Dark blue border |
-| blue-800 | `#002F5A` | Deep blue background |
-| blue-900 | `#001F3D` | Very deep blue |
-| blue-1000 | `#001026` | Black blue |
-
-#### Gray Scale (Text & Neutral Colors)
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| gray-0 | `#ffffff` | White |
-| gray-50 | `#fafafa` | Extremely light gray |
-| gray-75 | `#f5f5f5` | Light gray background |
-| gray-100 | `#ededed` | Light divider |
-| gray-200 | `#d4d4d4` | Light border |
-| gray-300 | `#a3a3a3` | Quaternary text |
-| gray-400 | `#737373` | Tertiary text |
-| gray-500 | `#525252` | Secondary text |
-| gray-600 | `#404040` | Dark gray |
-| gray-700 | `#2e2e2e` | Dark background |
-| gray-800 | `#1f1f1f` | Deep background |
-| gray-900 | `#141414` | Very deep background |
-| gray-1000 | `#0a0a0a` | **Primary text (core)** |
-
-#### Opacity Values
-
-##### Opacity Black
-
-| Opacity | Value | Usage |
-|---------|-------|-------|
-| 0% | `#0a0a0a00` | Fully transparent |
-| 2% | `#0a0a0a05` | Subtle overlay |
-| 4% | `#0a0a0a0a` | Secondary interactive background |
-| 8% | `#0a0a0a14` | Border / divider |
-| 15% | `#0a0a0a26` | Pressed state |
-| 20% | `#0a0a0a33` | Light overlay |
-| 25% | `#0a0a0a40` | Medium overlay |
-| 50% | `#0a0a0a80` | Semi-transparent |
-| 70% | `#0a0a0ab2` | Deep overlay |
-| 80% | `#0a0a0acc` | Hover state |
-| 90% | `#0a0a0ae5` | Tooltip |
-| 95% | `#0a0a0af2` | Modal |
-
-##### Opacity White
-
-| Opacity | Value | Usage |
-|---------|-------|-------|
-| 0% | `#ffffff00` | Fully transparent |
-| 2% | `#ffffff05` | Subtle overlay |
-| 4% | `#ffffff0a` | Secondary interactive background |
-| 8% | `#ffffff12` | Border / divider |
-| 15% | `#ffffff26` | Pressed state |
-| 20% | `#ffffff33` | Light overlay |
-| 25% | `#ffffff40` | Medium overlay |
-| 50% | `#ffffff80` | Semi-transparent |
-| 70% | `#ffffffb2` | Deep overlay |
-| 80% | `#ffffffcc` | Hover state |
-| 90% | `#ffffffe5` | Tooltip |
-| 95% | `#fffffff2` | Modal |
-
----
-
-## Color Palette Guidance
-
-### Color Dominance Rules
-
-Every deck should define a clear palette hierarchy before slide coding starts.
-
-| Role | Visual Weight | Purpose |
-|------|---------------|---------|
-| Dominant color | 60-70% | Main background fields, large blocks, cover/section mood |
-| Supporting color(s) | 20-30% | Cards, secondary panels, diagram structure, body text accents |
-| Accent color | 5-10% | Important numbers, key labels, connectors, highlights |
-| Background color | As needed | Reading comfort and contrast |
-
-Rules:
-
-- Never give all colors equal visual weight. Equal-weight palettes look noisy and generic.
-- The dominant color should fit the topic. For example, a learning-method deck can use notebook cream, blackboard green, chalk white, or ink blue; it should not default to generic tech blue.
-- Use the accent color sparingly. If every card, icon, and title uses the accent, it stops being an accent.
-- Record the dominant/supporting/accent choices in the deck brief or code comments when that helps keep the design coherent.
-
-### Palette Adherence
-
-Use a limited, intentional palette. When the user provides a brand palette, honor it.
-
-- Prefer colors from the chosen palette.
-- Avoid introducing extra colors without a clear role.
-- Add transparency using the `transparency` property (0-100), not 8-digit hex.
-
-```javascript
-// Correct: Using palette colors
-slide.addShape(pres.shapes.RECTANGLE, { fill: { color: theme.primary } });
-slide.addText("Title", { color: theme.accent });
-
-// Avoid: Unplanned colors outside the chosen palette
-slide.addShape(pres.shapes.RECTANGLE, { fill: { color: "1a1a2e" } });
-```
-
-### Gradients
-
-PptxGenJS does not natively support gradient fills. Prefer solid colors, or use a
-raster background image when a gradient is truly important.
-
-### Animations
-
-Avoid animations and transitions unless the user explicitly requests them.
-
----
-
-## Font Reference
-
-### Recommended Fonts
-
-| Language | Default Font | Alternatives |
-|----------|-------------|--------------|
-| **Chinese** | Microsoft YaHei | — |
-| **English** | Arial | Georgia, Calibri, Cambria, Trebuchet MS |
-
-- For mixed Chinese-English content: use Microsoft YaHei for Chinese, the chosen font for English
-- Prefer system fonts for cross-platform compatibility
-- Titles and body text can use different font pairings (e.g. Georgia + Calibri)
-
-### Recommended Font Pairings
-
-| Header Font | Body Font |
-|-------------|-----------|
-| Georgia | Calibri |
-| Arial Black | Arial |
-| Calibri | Calibri Light |
-| Cambria | Calibri |
-| Trebuchet MS | Calibri |
-| Impact | Arial |
-| Palatino | Garamond |
-| Consolas | Calibri |
-
-**Choose an interesting font pairing** — don't default to Arial for everything. Pick a header font with personality and pair it with a clean body font.
-
-### Chinese Typography Rules
-
-For Chinese or mixed Chinese-English decks:
-
-- Use `Microsoft YaHei` as the safe CJK fallback in all text styles that may contain Chinese.
-- Keep Chinese slide titles shorter than English titles; split long concepts into subtitle or callout text instead of shrinking below readable sizes.
-- Prefer 30-38 pt for Chinese slide titles, 18-22 pt for section labels, 14-17 pt for body text, and 10-12 pt for sources or captions.
-- Use fewer bullets than an English deck. Chinese text becomes dense quickly; prefer callout cards, numbered steps, matrices, and concept maps.
-- Avoid mixing too many Latin display fonts with Chinese text. If the deck is mostly Chinese, use one CJK-safe heading/body system and use Latin fonts only for small labels, code terms, or numbers.
-- Leave slightly more horizontal breathing room for Chinese lines. Do not pack Chinese text to the edge of cards.
-
-### No Bold for Body Text
-
-**Plain body text and caption/legend text must NOT use bold.**
-
-- Body paragraphs, descriptions → normal weight
-- Captions, legends, footnotes → normal weight
-- Reserve bold for titles and headings only
-
-```javascript
-// Correct
-slide.addText("Main Title", { bold: true, fontSize: 36, fontFace: "Arial" });
-slide.addText("Body text here.", { bold: false, fontSize: 14, fontFace: "Arial" });
-
-// Wrong
-slide.addText("Body text here.", { bold: true, fontSize: 14 });
-```
-
----
-
-## Style Recipes
-
-The same design can be rendered in 4 distinct visual styles by adjusting corner radius (`rectRadius`) and spacing. Choose the style recipe that fits the presentation tone.
-
-> **Unit note**: PptxGenJS uses inches. Slide dimensions are 10" x 5.625" (LAYOUT_16x9).
-
-### Style Overview
-
-| Style | Corner Radius | Spacing | Best For |
-|-------|--------------|---------|----------|
-| **Sharp & Compact** | 0 ~ 0.05" | Tight | Data-dense, tables, professional reports |
-| **Soft & Balanced** | 0.08" ~ 0.12" | Moderate | Corporate, business presentations, general use |
-| **Rounded & Spacious** | 0.15" ~ 0.25" | Relaxed | Product intros, marketing, creative showcases |
-| **Pill & Airy** | 0.3" ~ 0.5" | Open | Brand showcases, launch events, premium presentations |
-
-### Sharp & Compact
-
-**Visual character**: Geometric, high information density, formal and serious.
-
-| Category | Value (inches) | Notes |
-|----------|---------------|-------|
-| Corner radius — small | 0" | Full right angle |
-| Corner radius — medium | 0.03" | Micro-rounded |
-| Corner radius — large | 0.05" | Slight rounding |
-| Element padding | 0.1" ~ 0.15" | Compact |
-| Element gap | 0.1" ~ 0.2" | Compact |
-| Page margin | 0.3" | Narrow |
-| Block gap | 0.25" ~ 0.35" | Compact |
-
-### Soft & Balanced
-
-**Visual character**: Moderate rounding, comfortable whitespace, professional yet approachable.
-
-| Category | Value (inches) | Notes |
-|----------|---------------|-------|
-| Corner radius — small | 0.05" | Slight rounding |
-| Corner radius — medium | 0.08" | Medium rounding |
-| Corner radius — large | 0.12" | Larger rounding |
-| Element padding | 0.15" ~ 0.2" | Moderate |
-| Element gap | 0.15" ~ 0.25" | Moderate |
-| Page margin | 0.4" | Standard |
-| Block gap | 0.35" ~ 0.5" | Moderate |
-
-### Rounded & Spacious
-
-**Visual character**: Large corners, generous whitespace, friendly and modern.
-
-| Category | Value (inches) | Notes |
-|----------|---------------|-------|
-| Corner radius — small | 0.1" | Medium rounding |
-| Corner radius — medium | 0.15" | Large rounding |
-| Corner radius — large | 0.25" | Very large rounding |
-| Element padding | 0.2" ~ 0.3" | Relaxed |
-| Element gap | 0.25" ~ 0.4" | Relaxed |
-| Page margin | 0.5" | Wide |
-| Block gap | 0.5" ~ 0.7" | Relaxed |
-
-### Pill & Airy
-
-**Visual character**: Full pill-shaped corners, abundant whitespace, light and open feel, strong brand presence.
-
-| Category | Value (inches) | Notes |
-|----------|---------------|-------|
-| Corner radius — small | 0.2" | Large rounding |
-| Corner radius — medium | 0.3" | Pill shape |
-| Corner radius — large | 0.5" | Full pill |
-| Element padding | 0.25" ~ 0.4" | Open |
-| Element gap | 0.3" ~ 0.5" | Open |
-| Page margin | 0.6" | Wide |
-| Block gap | 0.6" ~ 0.9" | Open |
-
-### Component Style Mapping
-
-| Component | Sharp | Soft | Rounded | Pill |
-|-----------|-------|------|---------|------|
-| **Button / Tag** | rectRadius: 0 | rectRadius: 0.05 | rectRadius: 0.1 | rectRadius: 0.2 |
-| **Card / Container** | rectRadius: 0.03 | rectRadius: 0.1 | rectRadius: 0.2 | rectRadius: 0.3 |
-| **Image Container** | rectRadius: 0 | rectRadius: 0.08 | rectRadius: 0.15 | rectRadius: 0.25 |
-| **Input Field** | rectRadius: 0 | rectRadius: 0.05 | rectRadius: 0.1 | rectRadius: 0.2 |
-| **Badge** | rectRadius: 0.02 | rectRadius: 0.05 | rectRadius: 0.08 | rectRadius: 0.15 |
-| **Avatar Frame** | rectRadius: 0 | rectRadius: 0.1 | rectRadius: 0.2 | rectRadius: 0.5 (circle) |
-
-#### PptxGenJS Corner Radius Examples
-
-```javascript
-// Sharp style card
-slide.addShape("rect", {
-  x: 0.5, y: 1, w: 4, h: 2.5,
-  fill: { color: "F5F5F5" },
-  rectRadius: 0.03
-});
-
-// Rounded style card
-slide.addShape("rect", {
-  x: 0.5, y: 1, w: 4, h: 2.5,
-  fill: { color: "F5F5F5" },
-  rectRadius: 0.2
-});
-
-// Pill style button (height 0.4", rectRadius 0.2" = perfect pill)
-slide.addShape("rect", {
-  x: 3, y: 4, w: 2, h: 0.4,
-  fill: { color: "4A90D9" },
-  rectRadius: 0.2
-});
-```
-
-### Mixing Rules
-
-#### 1. Outer container corner >= inner element corner
-
-```javascript
-// Correct: outer > inner
-card:   rectRadius: 0.2
-button: rectRadius: 0.1
-
-// Wrong: inner > outer → visual overflow effect
-card:   rectRadius: 0.1
-button: rectRadius: 0.2
-```
-
-#### 2. Information density drives spacing
-
-| Zone Type | Recommended Style |
-|-----------|------------------|
-| Data display zone | Sharp / Soft (compact spacing) |
-| Content browsing zone | Rounded / Pill (relaxed spacing) |
-| Title zone | Soft / Rounded (moderate spacing) |
-
-#### 3. Corner radius vs element height
-
-| Element Height | Sharp | Soft | Rounded | Pill |
-|---------------|-------|------|---------|------|
-| Small (< 0.3") | 0" | 0.03" | 0.08" | height/2 |
-| Medium (0.3" ~ 0.6") | 0.02" | 0.05" | 0.12" | height/2 |
-| Large (0.6" ~ 1.2") | 0.03" | 0.08" | 0.2" | 0.3" |
-| Extra large (> 1.2") | 0.05" | 0.12" | 0.25" | 0.4" |
-
-> **Pill tip**: For a perfect pill shape, set `rectRadius = element height / 2`
-
-### Typography Scale (PPT)
-
-| Usage | Size (pt) | Notes |
-|-------|-----------|-------|
-| Annotations / Sources | 10 ~ 12 | Minimum readable size |
-| Body / Description | 14 ~ 16 | Standard body |
-| Subtitle | 18 ~ 22 | Secondary heading |
-| Title | 28 ~ 36 | Page title |
-| Large Title | 44 ~ 60 | Cover / section title |
-| Data Callout | 60 ~ 96 | Key number display |
-
-### Spacing Scale (PPT)
-
-Based on 10" x 5.625" slide dimensions:
-
-| Usage | Recommended (inches) |
-|-------|---------------------|
-| Icon-to-text gap | 0.08" ~ 0.15" |
-| List item spacing | 0.15" ~ 0.25" |
-| Card inner padding | 0.2" ~ 0.4" |
-| Element group gap | 0.3" ~ 0.5" |
-| Page safe margin | 0.4" ~ 0.6" |
-| Major block gap | 0.5" ~ 0.8" |
-
-### Quick Selection Guide
-
-| Presentation Type | Recommended Style | Reason |
-|------------------|------------------|--------|
-| Finance / Data reports | Sharp & Compact | High density, serious and precise |
-| Corporate / Business | Soft & Balanced | Balances professionalism and approachability |
-| Product intro / Marketing | Rounded & Spacious | Modern feel, friendly |
-| Launch events / Brand | Pill & Airy | Premium feel, visual impact |
-| Training / Education | Soft / Rounded | Clear, readable, friendly |
-| Tech sharing | Sharp / Soft | Professional, information-dense |
-
-## Topic-to-Visual Heuristics
-
-Use the topic to choose a visual metaphor before selecting layouts.
-
-| Topic Type | Visual Motif Ideas | Useful Layouts |
-|------------|--------------------|----------------|
-| Learning / education | notebook paper, blackboard, teaching loops, highlighted mistakes, concept cards | process, concept map, misconception/fix, recap matrix |
-| Research / academic | manuscript margins, citations, field notes, evidence boards, annotated diagrams | framework canvas, comparison, case/example, data visualization |
-| Business / strategy | decision map, operating dashboard, road signs, portfolio grid, scorecard | comparison, framework canvas, roadmap, KPI callout |
-| Product / startup | product surface, user journey, launch path, modular blocks, feature map | mixed media, process, case/example, 2x2 grid |
-| Technical / AI | graph nodes, pipeline, layers, console/code fragments, model cards | architecture diagram, process, data visualization, concept map |
-| Wellness / personal growth | habit loop, calendar rhythm, gentle progress markers, reflection cards | timeline, recap matrix, process, quote/principle |
-
-Reject visual systems that could be reused unchanged for any unrelated business topic.
+Use this file for every from-scratch deck. The goal is a coherent visual system:
+theme preset, palette dominance, motif, background rhythm, typography, and
+layout mix. Do not default to generic blue or a pile of white cards.
+
+## Design Brief
+
+Before writing `deck.js`, state the brief in working notes:
+
+| Field | Required decision |
+| --- | --- |
+| Audience and context | Who will see this deck and in what setting |
+| Theme preset | One preset below, or an equivalent custom preset |
+| Palette roles | Dominant, support, accent, reading background |
+| Motif | One repeated topic-specific visual idea |
+| Dark/light rhythm | Sandwich, all-dark premium, or all-light editorial |
+| Layout mix | At least three layout families |
+| Asset plan | Native shapes, procedural SVG/PNG, user assets, screenshots, or generated raster |
+
+Reject a brief if the same palette and motif could be reused unchanged for an
+unrelated business deck.
+
+## Theme Presets
+
+Choose the closest preset, then adapt details to the topic.
+
+### Learning Studio
+
+- Good for: training, learning methods, education, workshops, internal enablement.
+- Palette: `102B27` blackboard, `2C5F2D` forest, `97BC62` moss, `F5F5F5` chalk cream, `F2C84B` sticky-note yellow.
+- Dominant: blackboard or notebook cream. Accent: yellow or moss.
+- Fonts: Microsoft YaHei for Chinese; Trebuchet MS or Calibri for English labels.
+- Motif: blackboard surface, notebook lines, sticky notes, chalk arrows, correction marks, learning loop.
+- Backgrounds: dark cover/closing; light notebook or canvas surfaces for content; occasional diagram field.
+- Layout mix: process loop, misconception/fix, concept map, recap matrix, case/example.
+- Avoid: dense lesson notes, tiny school icons, beige-only pages, decorative title underlines.
+
+### Executive Strategy
+
+- Good for: business strategy, board updates, finance, consulting, operating plans.
+- Palette: `111827` executive charcoal, `1E2761` midnight navy, `CADCFC` ice blue, `FFFFFF` white, `D4AF37` gold accent.
+- Dominant: charcoal/navy. Accent: gold or ice blue, used sparingly.
+- Fonts: Aptos/Calibri body; Georgia or Arial Black only for short headings.
+- Motif: decision map, scorecard, dashboard tiles, portfolio grid, strategic axis.
+- Backgrounds: dark cover/closing; light report surfaces; split fields for tradeoffs.
+- Layout mix: framework canvas, comparison, KPI callout, roadmap, dashboard grid.
+- Avoid: generic blue SaaS look, scattered cards without hierarchy, vague stock-photo metaphors.
+
+### Product Launch
+
+- Good for: product announcement, feature walkthrough, startup pitch, GTM, marketing.
+- Palette: `2F3C7E` launch navy, `F96167` coral, `F9E795` warm gold, `FFFFFF` white, `121826` ink.
+- Dominant: navy or white. Accent: coral for feature focus, gold for launch moments.
+- Fonts: Arial/Calibri; use bold display only for short launch statements.
+- Motif: product surface, launch path, feature modules, spotlight rings, user journey.
+- Backgrounds: hero product surface, half-bleed screenshots, modular white surfaces.
+- Layout mix: mixed media, feature grid, user journey, before/after, launch roadmap.
+- Avoid: fake screenshots, tiny unreadable UI, feature bullets with no product visual.
+
+### Data Report
+
+- Good for: analytics, market reports, experiment results, research summaries.
+- Palette: `1F2937` charcoal, `F2F2F2` off-white, `0D9488` teal, `EAB308` amber, `111827` black.
+- Dominant: off-white or charcoal. Accent: teal for signal, amber for caution.
+- Fonts: Calibri/Aptos; tabular numbers should be large and clean.
+- Motif: data cards, chart surfaces, insight callouts, evidence strips, benchmark bars.
+- Backgrounds: canvas surfaces, dark insight pages, split field for key findings.
+- Layout mix: data insight, chart + takeaway, KPI callout, comparison, recap matrix.
+- Avoid: default Excel charts, too many gridlines, small labels, invented data.
+
+### Academic Explainer
+
+- Good for: science, research, history, medicine, public knowledge, conceptual talks.
+- Palette: `003049` deep teal/navy, `FDF0D5` warm cream, `669BBC` muted blue, `C1121F` red accent, `2B2D42` ink.
+- Dominant: warm cream or deep teal. Accent: red for warnings or key distinctions.
+- Fonts: Cambria/Georgia for headings when mostly English; Microsoft YaHei for Chinese.
+- Motif: annotated diagram, field notes, citation margin, evidence board, cause-effect arrows.
+- Backgrounds: cream note surface, dark section pages, diagram fields, annotated examples.
+- Layout mix: concept map, annotated diagram, timeline/process, case/example, principle poster.
+- Avoid: paper-like walls of text, too many citations on-slide, decorative lab icons.
+
+### Premium Dark Tech
+
+- Good for: AI, security, cloud, infrastructure, astronomy, high-end technical decks.
+- Palette: `000814` near-black, `001D3D` deep navy, `003566` blue, `FFC300` amber, `CAF0F8` pale cyan.
+- Dominant: near-black/deep navy. Accent: amber or cyan, never both everywhere.
+- Fonts: Consolas for small code labels; Calibri/Aptos for body.
+- Motif: graph nodes, pipeline layers, console fragments, orbit paths, model cards.
+- Backgrounds: dark fields, network diagrams, low-contrast grids, glowing data moments.
+- Layout mix: architecture diagram, process pipeline, concept map, data callout, comparison.
+- Avoid: low-contrast gray text, generic cyber gradients, decorative nodes with no meaning.
+
+## Palette Rules
+
+- One dominant color should carry 60-70% of visual weight.
+- Supporting colors carry structure and secondary surfaces.
+- Accent color is for key numbers, labels, arrows, and emphasis only.
+- Use 6-character hex colors without `#` in PptxGenJS.
+- Never encode opacity in 8-character hex colors. Use `transparency` for fills
+  or `opacity` for shadows.
+- If the user gives brand colors, build a preset around those colors while
+  keeping the same dominance rules.
+
+## Typography
+
+| Use | Size | Notes |
+| --- | --- | --- |
+| Cover title | 44-64 pt | Strong hierarchy; use `fit: "shrink"` for long Chinese titles |
+| Slide title | 28-38 pt | Short, high contrast |
+| Section label | 18-24 pt | Bold only for labels/headings |
+| Body/callout | 13-17 pt | Regular weight; avoid body bold |
+| Caption/source | 9-12 pt | Muted but readable |
+| Hero number | 54-84 pt | Data and KPI slides |
+
+Chinese or mixed Chinese-English decks:
+
+- Use `Microsoft YaHei` as the safe CJK font.
+- Keep Chinese titles shorter; move detail to subtitle or callouts.
+- Use fewer bullets than English decks; prefer labels, matrices, and diagrams.
+- Leave slightly more horizontal room for Chinese lines.
+
+## Background Rhythm
+
+Choose one rhythm and stick to it:
+
+- **Sandwich**: dark or full-visual cover, lighter content slides, dark/punchy closing. Reliable default.
+- **All-dark premium**: dark throughout with bright charts and high-contrast labels. Use for tech, security, finance, luxury.
+- **All-light editorial**: light surfaces throughout, with strong image/diagram moments. Use for teaching, reports, academic explainers.
+
+Every slide needs an intentional background treatment:
+
+- strong solid field
+- split color field
+- canvas surface
+- diagram field
+- notebook/blackboard/topic texture
+- full-bleed or half-bleed image/visual
+
+Plain white is acceptable only when the foreground composition is strong and not
+a title-and-bullet page.
+
+## Layout Families
+
+Rotate at least three in each from-scratch deck:
+
+- **Hero cover/closing**: oversized title, large motif, full-bleed or dark field.
+- **Process / timeline**: numbered stages, arrows, loops, funnels, ladders.
+- **Comparison**: before/after, misconception/fix, option A/B, tradeoff columns.
+- **Concept map**: central idea with causes, signals, examples, or relationships.
+- **Framework canvas**: 2x2, layers, scorecard, decision map, quadrant.
+- **Data insight**: chart or large number as hero plus 2-3 takeaways.
+- **Mixed media**: half-bleed image/screenshot/illustration with structured callouts.
+- **Case / example**: concrete scenario, annotated surface, lesson card.
+- **Recap matrix**: compact action summary, before/during/after, do/don't.
+
+Do not repeat the same layout key on three consecutive slides.
+
+## Topic-to-Preset Map
+
+| Topic | First choice | Alternate | Motif cue |
+| --- | --- | --- | --- |
+| Learning / training | Learning Studio | Academic Explainer | loop, notebook, blackboard, sticky notes |
+| Business strategy | Executive Strategy | Data Report | dashboard, decision map, matrix |
+| Product / startup | Product Launch | Premium Dark Tech | product surface, launch path, modules |
+| Analytics / data | Data Report | Executive Strategy | chart cards, benchmark bars, insight strip |
+| Science / academic | Academic Explainer | Premium Dark Tech | annotated diagram, evidence board |
+| AI / technical | Premium Dark Tech | Data Report | nodes, pipeline, model cards |
+| Wellness / growth | Learning Studio | Academic Explainer | habit loop, calendar, reflection cards |
+
+## Avoid
+
+- Plain title + bullets unless the user explicitly asks for an outline.
+- Styling only the cover while content slides remain plain.
+- Title underline accents; use composition, whitespace, or background fields.
+- Generic blue when the topic suggests a stronger palette.
+- Tiny icons beside paragraphs as the only visual.
+- Center-aligned body paragraphs.
+- Low-contrast gray text on cream, pale blue, or dark backgrounds.
+- One-note palettes dominated by near-identical shades.
+- Fake screenshots, fake logos, fake metrics, or promised assets that are not present.
+
+## Final Visual Checklist
+
+Before coding:
+
+- The brief names one preset or custom equivalent.
+- The motif can appear in cover, diagrams, and closing without feeling random.
+- Each content slide has a meaningful visual role.
+- At least three layout families are planned.
+- Text has been compressed into labels, captions, callouts, or diagram nodes.
+
+Before publishing:
+
+- The rendered contact sheet looks like one designed deck.
+- No content page looks like a document.
+- Cover and closing are visually distinct.
+- Repeated colors and motif create recognition without monotony.

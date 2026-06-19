@@ -42,6 +42,22 @@ function compactError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function compactRecoverableToolError(error: unknown) {
+  const message = compactError(error)
+    .replace(/\0/g, "\uFFFD")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .trim();
+  if (message.length <= 2_000) {
+    return message;
+  }
+  return `${message.slice(0, 2_000).trimEnd()}\n[Output truncated.]`;
+}
+
+function sandboxErrorCode(error: unknown) {
+  const match = compactError(error).match(/^([A-Z0-9_]+):/u);
+  return match?.[1] ?? "SANDBOX_TOOL_FAILED";
+}
+
 class SandboxCollectUnsupportedOutputError extends Error {
   readonly code = "SANDBOX_BINARY_OUTPUT_UNSUPPORTED";
 
@@ -64,6 +80,20 @@ function toRecoverableCollectErrorOutput(
     code: error.code,
     message: error.message,
     sandboxPath: error.sandboxPath,
+    recoverable: true as const,
+  };
+}
+
+function toRecoverableSandboxToolErrorOutput(input: {
+  error: unknown;
+  operationType: "prepare" | "collect";
+}) {
+  return {
+    ok: false,
+    type: `sandbox_${input.operationType}_error` as const,
+    status: "failed" as const,
+    code: sandboxErrorCode(input.error),
+    message: compactRecoverableToolError(input.error),
     recoverable: true as const,
   };
 }
@@ -101,7 +131,7 @@ function requireSandboxToolCallId(input: {
 function decodeSandboxTextOutput(content: Buffer, sandboxPath: string) {
   if (content.includes(0)) {
     throw new SandboxCollectUnsupportedOutputError(
-      `SANDBOX_BINARY_OUTPUT_UNSUPPORTED: ${sandboxPath} appears to be binary. Use publish_sandbox_artifact for supported binary artifacts such as PPTX files.`,
+      `SANDBOX_BINARY_OUTPUT_UNSUPPORTED: ${sandboxPath} appears to be binary. Use publish_artifact with artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`,
       sandboxPath,
     );
   }
@@ -109,7 +139,7 @@ function decodeSandboxTextOutput(content: Buffer, sandboxPath: string) {
     return new TextDecoder("utf-8", { fatal: true }).decode(content);
   } catch {
     throw new SandboxCollectUnsupportedOutputError(
-      `SANDBOX_BINARY_OUTPUT_UNSUPPORTED: ${sandboxPath} is not valid UTF-8 text. Use publish_sandbox_artifact for supported binary artifacts such as PPTX files.`,
+      `SANDBOX_BINARY_OUTPUT_UNSUPPORTED: ${sandboxPath} is not valid UTF-8 text. Use publish_artifact with artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`,
       sandboxPath,
     );
   }
@@ -212,11 +242,15 @@ export function createSandboxTools(input: {
         });
         return JSON.stringify(result);
       } catch (error) {
+        const result = toRecoverableSandboxToolErrorOutput({
+          error,
+          operationType: "prepare",
+        });
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
-          status: "failed",
-          result: { error: compactError(error) },
+          status: "succeeded",
+          result,
           durationMs: Date.now() - startedAt,
         });
         await input.manager
@@ -230,7 +264,7 @@ export function createSandboxTools(input: {
             .expireThreadSandbox({ sandboxId })
             .catch(() => undefined);
         }
-        throw error;
+        return JSON.stringify(result);
       }
     },
     {
@@ -346,11 +380,15 @@ export function createSandboxTools(input: {
           });
           return JSON.stringify(result);
         }
+        const result = toRecoverableSandboxToolErrorOutput({
+          error,
+          operationType: "collect",
+        });
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
-          status: "failed",
-          result: { error: compactError(error) },
+          status: "succeeded",
+          result,
           durationMs: Date.now() - startedAt,
         });
         await input.manager
@@ -364,7 +402,7 @@ export function createSandboxTools(input: {
             .expireThreadSandbox({ sandboxId })
             .catch(() => undefined);
         }
-        throw error;
+        return JSON.stringify(result);
       }
     },
     {

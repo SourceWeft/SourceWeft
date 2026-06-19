@@ -100,6 +100,7 @@ export {
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
 } from "./progress-events";
+import { flushPendingLlmCallUsage } from "./llm-call-billing";
 import {
   buildToolCollection,
   buildRuntimePromptContext,
@@ -155,6 +156,7 @@ export async function* invokeDeepAgentTurn(input: {
   billing: ContentBillingPort;
   llm?: LlmExecutionConfig;
   traceContext?: TraceContext;
+  operation?: "chat.stream" | "chat.complete";
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const runtime = createTurnRuntime({ prepared: input.prepared });
   const {
@@ -216,15 +218,13 @@ export async function* invokeDeepAgentTurn(input: {
     const toolCollection = await buildToolCollection({
       prepared: input.prepared,
       billing: input.billing,
+      filesystemBackend,
       llm: input.llm,
       traceContext: input.traceContext,
       runtime,
       sandboxRuntime,
     });
-    const {
-      connectorToolContext,
-      mcpToolRuntime: mcpRuntime,
-    } = toolCollection;
+    const { connectorToolContext, mcpToolRuntime: mcpRuntime } = toolCollection;
     mcpToolRuntime = mcpRuntime;
     const runtimePromptContext = await buildRuntimePromptContext({
       prepared: input.prepared,
@@ -329,6 +329,10 @@ export async function* invokeDeepAgentTurn(input: {
             commandSuccessCriteria: input.prepared.commandSuccessCriteria,
             runtime,
             suppressModelReasoning,
+            prepared: input.prepared,
+            billing: input.billing,
+            llm: input.llm,
+            operation: input.operation ?? "chat.stream",
           });
           continue;
         }
@@ -339,9 +343,12 @@ export async function* invokeDeepAgentTurn(input: {
             autoApprovedHitlResumeCount,
             beforeAssistantCheckpoint,
             beforeInputCheckpoint,
+            billing: input.billing,
             connectorToolContext,
             finalCheckpoint,
+            llm: input.llm,
             maxAutoApprovedHitlResumes,
+            prepared: input.prepared,
             payload,
             runConfig,
             runtime,
@@ -385,6 +392,13 @@ export async function* invokeDeepAgentTurn(input: {
         const { event } = toolCallSnapshot;
 
         if (event === "on_tool_start") {
+          yield* flushPendingLlmCallUsage({
+            runtime,
+            billing: input.billing,
+            prepared: input.prepared,
+            llm: input.llm,
+            reason: "tool_start",
+          });
           yield* handleToolStartStreamChunk({
             artifactIntent: input.prepared.artifactIntent,
             prepared: input.prepared,
@@ -433,6 +447,15 @@ export async function* invokeDeepAgentTurn(input: {
       }
       break;
     }
+  } catch (error) {
+    yield* flushPendingLlmCallUsage({
+      runtime,
+      billing: input.billing,
+      prepared: input.prepared,
+      llm: input.llm,
+      reason: "error",
+    });
+    throw error;
   } finally {
     try {
       await mcpToolRuntime?.close();
@@ -446,6 +469,13 @@ export async function* invokeDeepAgentTurn(input: {
     }
   }
 
+  yield* flushPendingLlmCallUsage({
+    runtime,
+    billing: input.billing,
+    prepared: input.prepared,
+    llm: input.llm,
+    reason: "final_outcome",
+  });
   yield* buildFinalOutcome({
     agent,
     beforeAssistantCheckpoint,

@@ -43,6 +43,13 @@
       "when": 1781712000000,
       "tag": "0005_workspace_skill_version_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781855158000,
+      "tag": "0006_artifact_file_type",
+      "breakpoints": true
     }
   ]
 }

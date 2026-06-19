@@ -603,6 +603,7 @@ function buildGeneratedPresentationPreviewArtifact(input: {
     editable?: boolean | null;
     fileName?: string | null;
     htmlUrl?: string | null;
+    previewImageUrl?: string | null;
     pptxUrl?: string | null;
     previewRenderer?: "html_iframe" | "pptxviewjs" | null;
     renderStrategy?: string | null;
@@ -659,6 +660,11 @@ function buildGeneratedPresentationPreviewArtifact(input: {
       previewRenderer:
         input.source.previewRenderer ??
         (generationMode === "editable_native" ? "pptxviewjs" : "html_iframe"),
+      previewImage: input.source.previewImageUrl
+        ? {
+            assetUrl: input.source.previewImageUrl,
+          }
+        : undefined,
       pptx:
         input.source.pptxUrl && input.source.fileName
           ? {
@@ -732,25 +738,25 @@ function getToolDisplayLabel(
       toolCall.tool,
       "video_presentation_artifact",
     );
-    const isSandboxArtifactPublisher =
-      toolCall.tool === AGENT_TOOL_NAMES.publishSandboxArtifact;
+    const isArtifactPublisher =
+      toolCall.tool === AGENT_TOOL_NAMES.publishArtifact;
     const title = getGeneratedPresentationTitle(toolCall);
     const verb =
       toolCall.status === "running" || toolCall.status === "approval_requested"
         ? isVideoPresentation
           ? "Generating video presentation"
-          : isSandboxArtifactPublisher
+          : isArtifactPublisher
             ? "Publishing presentation"
             : "Generating presentation"
         : toolCall.status === "error"
           ? isVideoPresentation
             ? "Video presentation generation failed"
-            : isSandboxArtifactPublisher
+            : isArtifactPublisher
               ? "Presentation publishing failed"
               : "Presentation generation failed"
           : isVideoPresentation
             ? "Generated video presentation"
-            : isSandboxArtifactPublisher
+            : isArtifactPublisher
               ? "Published presentation"
               : "Generated presentation";
     return title ? `${verb}: ${compactText(title, 72)}` : verb;
@@ -1706,7 +1712,7 @@ function GeneratedPresentationArtifactItem({
   downloadUrl,
   generationMode,
   isVideoPresentation,
-  isSandboxArtifactPublisher,
+  isArtifactPublisher,
   modeLabel,
   onArtifactPreview,
   slideCount,
@@ -1722,7 +1728,7 @@ function GeneratedPresentationArtifactItem({
   downloadUrl?: string | null;
   generationMode?: "visual_html" | "editable_native" | null;
   isVideoPresentation?: boolean;
-  isSandboxArtifactPublisher?: boolean;
+  isArtifactPublisher?: boolean;
   modeLabel: string;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   slideCount?: number | null;
@@ -1774,6 +1780,14 @@ function GeneratedPresentationArtifactItem({
     !isPending &&
     !isError;
   const effectiveDownloadUrl = isVideoPresentation ? null : downloadUrl;
+  const previewImage = effectiveArtifactPreview?.payloadJson?.previewImage;
+  const previewImageUrl =
+    previewImage &&
+    typeof previewImage === "object" &&
+    !Array.isArray(previewImage) &&
+    typeof (previewImage as Record<string, unknown>).assetUrl === "string"
+      ? ((previewImage as Record<string, unknown>).assetUrl as string)
+      : null;
   const handleDownload = () => {
     if (!effectiveDownloadUrl) {
       return;
@@ -1822,8 +1836,15 @@ function GeneratedPresentationArtifactItem({
       tabIndex={canPreview ? 0 : undefined}
     >
       <div className="flex items-start gap-3 p-3">
-        <div className="grid size-11 shrink-0 place-items-center rounded-md border border-border bg-muted/60">
-          {isPending ? (
+        <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-muted/60">
+          {previewImageUrl && !isPending ? (
+            <RawImage
+              alt={title}
+              className="size-full object-cover"
+              loading="lazy"
+              src={previewImageUrl}
+            />
+          ) : isPending ? (
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
           ) : (
             <Presentation className="size-5 text-foreground/80" />
@@ -1895,7 +1916,7 @@ function GeneratedPresentationArtifactItem({
                     (artifactStatus === "running"
                       ? "Preparing video project..."
                       : "Preparing video project..."))
-                  : isSandboxArtifactPublisher
+                  : isArtifactPublisher
                     ? "Publishing presentation..."
                     : "Generating presentation..."}
               </span>
@@ -1906,7 +1927,7 @@ function GeneratedPresentationArtifactItem({
               {isVideoPresentation
                 ? (videoProjectStageLabel ??
                   "Video presentation generation failed.")
-                : isSandboxArtifactPublisher
+                : isArtifactPublisher
                   ? "Presentation publishing failed."
                   : "PPTX generation failed."}
             </p>
@@ -1939,8 +1960,8 @@ export function GeneratedPresentationArtifacts({
         toolCall.tool,
         "video_presentation_artifact",
       );
-      const isSandboxArtifactPublisher =
-        toolCall.tool === AGENT_TOOL_NAMES.publishSandboxArtifact;
+      const isArtifactPublisher =
+        toolCall.tool === AGENT_TOOL_NAMES.publishArtifact;
       const artifact = resolveGeneratedPresentationArtifact(toolCall);
       const fileUrl = artifact
         ? resolveArtifactUrl({ artifact, workspaceId })
@@ -1956,7 +1977,7 @@ export function GeneratedPresentationArtifacts({
       const title =
         artifact?.title ||
         getGeneratedPresentationTitle(toolCall) ||
-        (isSandboxArtifactPublisher
+        (isArtifactPublisher
           ? "Published presentation"
           : isVideoPresentation
           ? "Generated video presentation"
@@ -1967,7 +1988,7 @@ export function GeneratedPresentationArtifacts({
         (artifact?.htmlUrl ? "visual_html" : "editable_native");
       const modeLabel = isVideoPresentation
         ? "Video presentation"
-        : isSandboxArtifactPublisher
+        : isArtifactPublisher
           ? "PowerPoint presentation"
         : generationMode === "editable_native"
           ? "Editable PowerPoint"
@@ -2010,7 +2031,7 @@ export function GeneratedPresentationArtifacts({
         fileUrl: isVideoPresentation ? null : fileUrl,
         generationMode,
         isVideoPresentation,
-        isSandboxArtifactPublisher,
+        isArtifactPublisher,
         previewArtifact,
         description,
         modeLabel,
@@ -2022,7 +2043,7 @@ export function GeneratedPresentationArtifacts({
     .filter((item) =>
       shouldShowGeneratedPresentationItem({
         fileUrl: item.fileUrl,
-        isSandboxArtifactPublisher: item.isSandboxArtifactPublisher,
+        isArtifactPublisher: item.isArtifactPublisher,
         isVideoPresentation: item.isVideoPresentation,
         previewArtifact: item.previewArtifact,
         status: item.toolCall.status,
@@ -2056,7 +2077,7 @@ export function GeneratedPresentationArtifacts({
           fileUrl,
           generationMode,
           isVideoPresentation,
-          isSandboxArtifactPublisher,
+          isArtifactPublisher,
           modeLabel,
           previewArtifact,
           title,
@@ -2087,7 +2108,7 @@ export function GeneratedPresentationArtifacts({
               downloadUrl={downloadUrl ?? fileUrl}
               generationMode={generationMode}
               isVideoPresentation={isVideoPresentation}
-              isSandboxArtifactPublisher={isSandboxArtifactPublisher}
+              isArtifactPublisher={isArtifactPublisher}
               key={toolCall.id}
               modeLabel={modeLabel}
               onArtifactPreview={onArtifactPreview}

@@ -1,6 +1,14 @@
-import type { AgentMiddleware } from "langchain";
+import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
+import {
+  modelRetryMiddleware,
+  toolCallLimitMiddleware,
+  toolRetryMiddleware,
+  type AgentMiddleware,
+} from "langchain";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import type { AgentFilesystemMountCapability } from "../filesystem-capabilities";
+import { isRetryableModelContentError } from "../../../content/model-gateway-error";
+import { config } from "../../../../shared/config";
 import {
   createCommandToolChoiceMiddleware,
   type CommandExecutionPolicy,
@@ -13,6 +21,14 @@ import {
   type SourceWeftToolObservabilityContext,
 } from "./tool-observability";
 import type { TraceContext } from "../../../llm-observability";
+
+const RETRYABLE_READ_TOOL_NAMES = [
+  AGENT_TOOL_NAMES.searchSources,
+  AGENT_TOOL_NAMES.ls,
+  AGENT_TOOL_NAMES.glob,
+  AGENT_TOOL_NAMES.grep,
+  AGENT_TOOL_NAMES.readFile,
+];
 
 export type SourceWeftAgentMiddlewareStackInput = {
   chatProfileConfig?: unknown;
@@ -52,7 +68,19 @@ export async function createSourceWeftAgentMiddlewareStack(
       context: input.toolObservabilityContext,
       traceContext: input.traceContext,
     }),
+    toolRetryMiddleware({
+      tools: RETRYABLE_READ_TOOL_NAMES,
+    }),
     ...contextCompressionMiddleware,
+    modelRetryMiddleware({
+      retryOn: isRetryableModelContentError,
+      onFailure: "error",
+    }),
+    toolCallLimitMiddleware({
+      runLimit: config.chat.agent.toolCallRunLimit,
+      threadLimit: config.chat.agent.toolCallThreadLimit,
+      exitBehavior: "continue",
+    }),
     ...(input.extraMiddleware ?? []),
   ];
 }

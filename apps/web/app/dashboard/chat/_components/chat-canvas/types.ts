@@ -210,6 +210,7 @@ export type ArtifactPreviewRecord = {
   workspaceId: string;
   threadId: string | null;
   artifactType:
+    | "file"
     | "report"
     | "slides"
     | "mindmap"

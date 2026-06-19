@@ -87,7 +87,7 @@ test("sandbox presentation publisher card waits for completed artifact URL", () 
   assert.equal(
     shouldShowGeneratedPresentationItem({
       fileUrl: null,
-      isSandboxArtifactPublisher: true,
+      isArtifactPublisher: true,
       isVideoPresentation: false,
       previewArtifact: null,
       status: "running",
@@ -97,7 +97,7 @@ test("sandbox presentation publisher card waits for completed artifact URL", () 
   assert.equal(
     shouldShowGeneratedPresentationItem({
       fileUrl: null,
-      isSandboxArtifactPublisher: true,
+      isArtifactPublisher: true,
       isVideoPresentation: false,
       previewArtifact: null,
       status: "approval_requested",
@@ -107,7 +107,7 @@ test("sandbox presentation publisher card waits for completed artifact URL", () 
   assert.equal(
     shouldShowGeneratedPresentationItem({
       fileUrl: "/artifact-preview?artifactId=artifact-1",
-      isSandboxArtifactPublisher: true,
+      isArtifactPublisher: true,
       isVideoPresentation: false,
       previewArtifact: null,
       status: "completed",
@@ -117,7 +117,7 @@ test("sandbox presentation publisher card waits for completed artifact URL", () 
   assert.equal(
     shouldShowGeneratedPresentationItem({
       fileUrl: null,
-      isSandboxArtifactPublisher: true,
+      isArtifactPublisher: true,
       isVideoPresentation: false,
       previewArtifact: null,
       status: "completed",
@@ -437,6 +437,102 @@ test("connector tool details include canonical tool and action names", () => {
       "2 results",
       "time: 1196ms",
     ],
+  );
+});
+
+test("execute tool details include display-safe command", () => {
+  assert.deepEqual(
+    getToolCallDetailParts({
+      id: "tool-execute",
+      tool: "execute",
+      input: { command: "pnpm test" },
+      output: { output: "ok", exitCode: 0, truncated: false },
+      latencyMs: 42,
+      status: "completed",
+      error: null,
+      sequence: 1,
+    }),
+    ["status: completed", "command: pnpm test", "time: 42ms"],
+  );
+
+  assert.deepEqual(
+    getToolCallDetailParts({
+      id: "tool-execute",
+      tool: "execute",
+      input: { command: "printf 'a\nb'\t\u0001" },
+      output: null,
+      latencyMs: null,
+      status: "error",
+      error: "failed",
+      sequence: 1,
+    }),
+    ["status: error", "command: printf 'a\\nb'\\t\\u0001"],
+  );
+
+  assert.deepEqual(
+    getToolCallDetailParts({
+      id: "tool-execute",
+      tool: "execute",
+      input: { command: "   " },
+      output: null,
+      latencyMs: null,
+      status: "completed",
+      error: null,
+      sequence: 1,
+    }),
+    ["status: completed"],
+  );
+
+  assert.deepEqual(
+    getToolCallDetailParts({
+      id: "tool-execute",
+      tool: "execute",
+      input: {},
+      output: null,
+      latencyMs: null,
+      status: "completed",
+      error: null,
+      sequence: 1,
+    }),
+    ["status: completed"],
+  );
+
+  const longCommand = `node ${"x".repeat(300)}`;
+  const longCommandDetails = getToolCallDetailParts({
+    id: "tool-execute",
+    tool: "execute",
+    input: { command: longCommand },
+    output: null,
+    latencyMs: null,
+    status: "completed",
+    error: null,
+    sequence: 1,
+  });
+  assert.equal(longCommandDetails[1]?.startsWith("command: node "), true);
+  assert.equal(longCommandDetails[1]?.endsWith("..."), true);
+  assert.ok((longCommandDetails[1]?.length ?? 0) <= 250);
+});
+
+test("sandbox result-level failures render as error details", () => {
+  assert.deepEqual(
+    getToolCallDetailParts({
+      id: "tool-prepare",
+      tool: "prepare_sandbox_workspace",
+      input: {},
+      output: {
+        ok: false,
+        type: "sandbox_prepare_error",
+        status: "failed",
+        code: "ENOENT",
+        message: "ENOENT: no such file",
+        recoverable: true,
+      },
+      latencyMs: null,
+      status: "completed",
+      error: null,
+      sequence: 1,
+    })[0],
+    "status: error",
   );
 });
 

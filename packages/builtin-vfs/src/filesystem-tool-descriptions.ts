@@ -61,7 +61,8 @@ export function buildReadFileToolDescription(
 ) {
   const mounts = input.mounts ?? createDefaultFilesystemMounts();
   return sentenceList([
-    `Reads a file from mounted filesystems: ${readableMountRoots(mounts)}.`,
+    `Reads text files from mounted filesystems: ${readableMountRoots(mounts)}.`,
+    `Do not use ${READ_FILE_TOOL_NAME} for binary files such as images, PDFs, PPTX decks, videos, archives, or generated slide screenshots; use a media-aware inspection, conversion, or artifact tool instead.`,
     getMount(mounts, "/kb")
       ? `/kb files are internal markdown virtual files backed by the source's canonical markdown. In /kb, ${READ_FILE_TOOL_NAME} offset and limit are source-line based, not chunk based; default limit is ${KB_READ_FILE_DEFAULT_LINE_LIMIT} source lines and explicit limits are capped at ${KB_READ_FILE_MAX_LINE_LIMIT}. Use it for source-wide coverage, full-document analysis, extraction, or surrounding context. Only /kb ${READ_FILE_TOOL_NAME} output may include valid [citation:cN] markers that must be copied exactly for supported final-answer claims.`
       : "",

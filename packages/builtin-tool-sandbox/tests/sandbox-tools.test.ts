@@ -27,7 +27,7 @@ const TEST_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy = {
   defaultCwd: "/workspace",
   prepareTargetRoots: ["/workspace/input", "/workspace"],
   collectSourceRoots: ["/workspace/output", "/workspace"],
-  readWriteRoots: ["/workspace", "/tmp/sourceweft"],
+  readWriteRoots: ["/workspace"],
 };
 
 const TEST_CONTEXT: SandboxRuntimeContext = {
@@ -165,11 +165,27 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
   );
   assert.match(
     sandboxToolDescriptions.execute,
-    /SourceWeft DB-backed VFS logical paths such as \/workfiles, \/kb, and \/skills are not mounted/u,
+    /Never include SourceWeft DB-backed VFS logical paths such as \/workfiles, \/kb, or \/skills/u,
+  );
+  assert.match(
+    sandboxToolDescriptions.execute,
+    /they are not sandbox paths even for mkdir, ls, cat, test, node, python, or shell redirection/u,
+  );
+  assert.match(
+    sandboxToolDescriptions.execute,
+    /current provider read\/write roots/u,
   );
   assert.match(
     sandboxToolDescriptions.prepareSandboxWorkspace,
     /Materialize explicitly selected SourceWeft DB-backed VFS \/workfiles Workfile content as ordinary provider sandbox files/u,
+  );
+  assert.match(
+    sandboxToolDescriptions.prepareSandboxWorkspace,
+    /Put generated code, data files, plans, and QA notes in \/workfiles first/u,
+  );
+  assert.match(
+    sandboxToolDescriptions.prepareSandboxWorkspace,
+    /prepare only files needed for sandbox execution/u,
   );
   assert.match(
     sandboxToolDescriptions.prepareSandboxWorkspace,
@@ -181,17 +197,16 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
   );
   assert.match(
     sandboxToolDescriptions.collectSandboxOutputs,
-    /Do not use this tool for binary outputs such as \.pptx files/u,
+    /Do not use this tool for binary outputs such as \.pptx, \.pdf, \.zip, or \.xlsx files/u,
   );
   assert.match(
     sandboxToolDescriptions.collectSandboxOutputs,
-    /publish_sandbox_artifact for PPTX slides/u,
+    /artifactType=slides for PPTX decks or artifactType=file/u,
   );
   assert.doesNotMatch(
     sandboxToolDescriptions.prepareSandboxWorkspace,
     /\/workspace/u,
   );
-  assert.doesNotMatch(sandboxToolDescriptions.execute, /\/workspace/u);
   assert.doesNotMatch(
     sandboxToolDescriptions.collectSandboxOutputs,
     /\/workspace/u,
@@ -270,10 +285,28 @@ test("sandbox package owns agent-facing runtime prompt", () => {
     prompt,
     /\/workfiles, \/kb, and \/skills inside execute are provider sandbox filesystem paths only/u,
   );
+  assert.match(
+    prompt,
+    /Never include \/workfiles, \/kb, or \/skills in an execute command/u,
+  );
+  assert.match(
+    prompt,
+    /even for mkdir, ls, cat, test, node, python, or shell redirection/u,
+  );
   assert.match(prompt, /Provider sandbox workspace root: \/task/u);
   assert.match(prompt, /Provider sandbox prepare targets: \/task\/input/u);
   assert.match(prompt, /Provider sandbox collect sources: \/task\/output/u);
+  assert.match(prompt, /scratch files, QA renders, thumbnails, and artifacts/u);
+  assert.match(prompt, /Do not use \/tmp for those files/u);
   assert.match(prompt, /explicit selected-content materialization/u);
+  assert.match(
+    prompt,
+    /Put command inputs such as generated code, data files, plans, and QA notes in \/workfiles first/u,
+  );
+  assert.match(
+    prompt,
+    /Commands needing Workfiles should prepare the selected \/workfiles\/\.\.\. files/u,
+  );
   assert.match(prompt, /provider sandbox filesystem paths/u);
   assert.match(prompt, /explicit artifact pipelines/u);
   assert.match(
@@ -288,6 +321,7 @@ test("sandbox package owns agent-facing runtime prompt", () => {
   assert.doesNotMatch(prompt, /\/workfiles directory into sandbox/u);
   assert.doesNotMatch(prompt, /Enabled sandbox skills/u);
   assert.doesNotMatch(prompt, /\/skills\/<skill-name>/u);
+  assert.doesNotMatch(prompt, /\/tmp\/sourceweft/u);
   assert.doesNotMatch(prompt, /~\/\.creds/u);
   assert.doesNotMatch(prompt, /GITHUB_TOKEN/u);
   assert.doesNotMatch(prompt, /git push/u);
@@ -305,8 +339,8 @@ test("sandbox runtime prompt includes default environment only when enabled", ()
   });
   assert.doesNotMatch(unknownPrompt, /<sandbox_environment>/u);
   assert.doesNotMatch(unknownPrompt, /npm install pptxgenjs/u);
-  assert.match(unknownPrompt, /binary outputs such as \.pptx files/u);
-  assert.match(unknownPrompt, /publish_sandbox_artifact for PPTX slides/u);
+  assert.match(unknownPrompt, /binary outputs such as \.pptx, \.pdf, \.zip, or \.xlsx files/u);
+  assert.match(unknownPrompt, /artifactType=slides for PPTX decks or artifactType=file/u);
 
   const defaultPrompt = buildSandboxRuntimePrompt({
     prepareToolAvailable: true,
@@ -404,11 +438,96 @@ test("collect_sandbox_outputs returns a recoverable error for binary PPTX output
     status: "failed",
     code: "SANDBOX_BINARY_OUTPUT_UNSUPPORTED",
     message:
-      "SANDBOX_BINARY_OUTPUT_UNSUPPORTED: /workspace/ppt-deck/output/feynman-method.pptx appears to be binary. Use publish_sandbox_artifact for supported binary artifacts such as PPTX files.",
+      "SANDBOX_BINARY_OUTPUT_UNSUPPORTED: /workspace/ppt-deck/output/feynman-method.pptx appears to be binary. Use publish_artifact with artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.",
     sandboxPath: "/workspace/ppt-deck/output/feynman-method.pptx",
     recoverable: true,
   });
   assert.deepEqual(writes, []);
+  assert.deepEqual(operationStore.completed, [
+    {
+      status: "succeeded",
+      result: output,
+    },
+  ]);
+});
+
+test("prepare_sandbox_workspace returns a recoverable error instead of throwing", async () => {
+  const operationStore = createOperationStore();
+  const provider: SandboxProvider = {
+    id: "fake",
+    pathPolicy: TEST_SANDBOX_PATH_POLICY,
+    async createSandbox() {
+      return { id: "provider-sandbox-1" };
+    },
+    async getSandbox() {
+      return {};
+    },
+    async deleteSandbox() {},
+    async execute() {
+      return { output: "", exitCode: 0, truncated: false };
+    },
+    async uploadFile() {
+      throw new Error("should not upload missing source");
+    },
+    async ensureDirectory() {
+      throw new Error("should not create directory for missing source");
+    },
+    async downloadFile() {
+      return Buffer.from("");
+    },
+  };
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore,
+    ttlSeconds: TEST_LIMITS.ttlSeconds,
+    commandTimeoutMs: TEST_LIMITS.commandTimeoutMs,
+  });
+  const tools = createSandboxTools({
+    filesystem: {
+      readRaw: async () => ({ error: "ENOENT: no such file" }),
+    } as never,
+    manager,
+    context: TEST_CONTEXT,
+    limits: TEST_LIMITS,
+  });
+  const prepareTool = tools.find(
+    (candidate) => candidate.name === "prepare_sandbox_workspace",
+  );
+  assert.ok(prepareTool);
+
+  const toolOutput = await prepareTool.invoke(
+    {
+      files: [
+        {
+          sourcePath: "/workfiles/ppt-deck/missing.js",
+          sandboxPath: "/workspace/input/missing.js",
+        },
+      ],
+    },
+    {
+      toolCall: {
+        id: "prepare-call-1",
+        type: "tool_call",
+        name: "prepare_sandbox_workspace",
+        args: {},
+      },
+    },
+  );
+  const outputContent =
+    toolOutput && typeof toolOutput === "object" && "content" in toolOutput
+      ? (toolOutput as { content?: unknown }).content
+      : toolOutput;
+  const output = JSON.parse(String(outputContent));
+
+  assert.deepEqual(output, {
+    ok: false,
+    type: "sandbox_prepare_error",
+    status: "failed",
+    code: "ENOENT",
+    message: "ENOENT: no such file",
+    recoverable: true,
+  });
   assert.deepEqual(operationStore.completed, [
     {
       status: "succeeded",

@@ -142,7 +142,9 @@ function extractPendingConfirmationIds(toolCalls: unknown[] | undefined) {
           ? (toolCall as Record<string, unknown>)
           : null;
       const output =
-        record?.output && typeof record.output === "object" && !Array.isArray(record.output)
+        record?.output &&
+        typeof record.output === "object" &&
+        !Array.isArray(record.output)
           ? (record.output as Record<string, unknown>)
           : null;
       return output?.type === "tool_confirmation_request" &&
@@ -167,7 +169,10 @@ function createThreadRunStream(input: {
     return input.streamService.resumeThreadEvents(input.request, input.options);
   }
   if (input.request.mode === "refresh") {
-    return input.streamService.refreshThreadEvents(input.request, input.options);
+    return input.streamService.refreshThreadEvents(
+      input.request,
+      input.options,
+    );
   }
   if (input.request.mode === "edit") {
     return input.streamService.editThreadEvents(input.request, input.options);
@@ -282,7 +287,8 @@ function mergeToolCallFromPayload(input: {
           ? input.payload.status
           : (toolCall?.status ?? "completed")
         : (toolCall?.status ?? existingRecord?.status ?? "running");
-  const sequence = getTraceSequence(toolCall) ?? getTraceSequence(existingRecord);
+  const sequence =
+    getTraceSequence(toolCall) ?? getTraceSequence(existingRecord);
 
   return mergeToolCall(input.existing, {
     ...(existingRecord ?? {}),
@@ -335,7 +341,10 @@ function normalizeToolStatus(value: unknown): ToolCallTrace["status"] {
     : "running";
 }
 
-function findToolCallSnapshotById(toolCalls: unknown[] | undefined, id: string) {
+function findToolCallSnapshotById(
+  toolCalls: unknown[] | undefined,
+  id: string,
+) {
   return (toolCalls ?? [])
     .map(getObjectRecord)
     .find((record) => record?.id === id);
@@ -352,7 +361,10 @@ function toolCallTraceFromPayload(input: {
     return null;
   }
 
-  const snapshotToolCall = findToolCallSnapshotById(input.snapshot.toolCalls, id);
+  const snapshotToolCall = findToolCallSnapshotById(
+    input.snapshot.toolCalls,
+    id,
+  );
   const output =
     input.payload.type === "tool-call-event"
       ? input.payload.data
@@ -360,7 +372,7 @@ function toolCallTraceFromPayload(input: {
         ? input.payload.output
         : input.payload.type === "tool-call-error"
           ? null
-          : payloadToolCall?.output ?? snapshotToolCall?.output ?? null;
+          : (payloadToolCall?.output ?? snapshotToolCall?.output ?? null);
   return {
     id,
     tool,
@@ -376,7 +388,9 @@ function toolCallTraceFromPayload(input: {
         : input.payload.type === "tool-call-result" ||
             input.payload.type === "tool-call-end"
           ? normalizeToolStatus(input.payload.status ?? payloadToolCall?.status)
-          : normalizeToolStatus(payloadToolCall?.status ?? snapshotToolCall?.status),
+          : normalizeToolStatus(
+              payloadToolCall?.status ?? snapshotToolCall?.status,
+            ),
     latencyMs:
       typeof input.payload.latencyMs === "number"
         ? input.payload.latencyMs
@@ -392,14 +406,17 @@ function toolCallTraceFromPayload(input: {
         ? typeof input.payload.error === "string"
           ? input.payload.error
           : null
-        : typeof payloadToolCall?.error === "string" || payloadToolCall?.error === null
+        : typeof payloadToolCall?.error === "string" ||
+            payloadToolCall?.error === null
           ? payloadToolCall.error
           : typeof snapshotToolCall?.error === "string" ||
               snapshotToolCall?.error === null
             ? snapshotToolCall.error
             : null,
     sequence:
-      getTraceSequence(payloadToolCall) ?? getTraceSequence(snapshotToolCall) ?? 0,
+      getTraceSequence(payloadToolCall) ??
+      getTraceSequence(snapshotToolCall) ??
+      0,
   };
 }
 
@@ -505,7 +522,8 @@ function normalizeRenderBlock(value: unknown): MessageRenderBlock | null {
 
   if (record.type === "reasoning" && typeof record.text === "string") {
     const durationMs =
-      typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
+      typeof record.durationMs === "number" &&
+      Number.isFinite(record.durationMs)
         ? record.durationMs
         : undefined;
     return {
@@ -696,7 +714,10 @@ function getRenderBlockTypeForArtifactTool(input: {
 
 function getArtifactRenderBlockId(input: {
   toolCallId: string;
-  type: Extract<MessageRenderBlock["type"], "generated_image" | "generated_presentation">;
+  type: Extract<
+    MessageRenderBlock["type"],
+    "generated_image" | "generated_presentation"
+  >;
 }) {
   return input.type === "generated_image"
     ? `generated-image-${input.toolCallId}`
@@ -771,23 +792,20 @@ function appendArtifactRenderBlock(input: {
 
 function appendArtifactBlocksFromToolCalls(snapshot: ChatRunSnapshot) {
   const toolCalls = Array.isArray(snapshot.toolCalls) ? snapshot.toolCalls : [];
-  return toolCalls.reduce<MessageRenderBlock[]>(
-    (blocks, toolCall) => {
-      const record = getObjectRecord(toolCall);
-      const toolCallId = typeof record?.id === "string" ? record.id : null;
-      const toolName = typeof record?.tool === "string" ? record.tool : null;
-      return toolCallId
-        ? appendArtifactRenderBlock({
-            blocks,
-            output: record?.output,
-            status: record?.status,
-            toolCallId,
-            toolName,
-          })
-        : normalizeRenderBlocks(blocks);
-    },
-    normalizeRenderBlocks(snapshot.renderBlocks),
-  );
+  return toolCalls.reduce<MessageRenderBlock[]>((blocks, toolCall) => {
+    const record = getObjectRecord(toolCall);
+    const toolCallId = typeof record?.id === "string" ? record.id : null;
+    const toolName = typeof record?.tool === "string" ? record.tool : null;
+    return toolCallId
+      ? appendArtifactRenderBlock({
+          blocks,
+          output: record?.output,
+          status: record?.status,
+          toolCallId,
+          toolName,
+        })
+      : normalizeRenderBlocks(blocks);
+  }, normalizeRenderBlocks(snapshot.renderBlocks));
 }
 
 function updateSnapshotFromPayload(
@@ -835,7 +853,9 @@ function updateSnapshotFromPayload(
         next.renderBlocks = appendReasoningRenderBlock({
           blocks: next.renderBlocks,
           durationMs:
-            typeof segment.durationMs === "number" ? segment.durationMs : undefined,
+            typeof segment.durationMs === "number"
+              ? segment.durationMs
+              : undefined,
           id: `reasoning-${segment.id}`,
           text: payload.reasoning,
         });
@@ -1005,9 +1025,10 @@ function buildTraceEventId(input: {
   const suffix = [input.phase, input.eventType, input.eventIndex]
     .filter((item) => item !== undefined && item !== null && item !== "")
     .join(":");
-  const id = input.sequence === null
-    ? input.baseId
-    : `${input.baseId}:${input.sequence}`;
+  const id =
+    input.sequence === null
+      ? input.baseId
+      : `${input.baseId}:${input.sequence}`;
   return suffix ? `${id}:${suffix}` : id;
 }
 
@@ -1160,6 +1181,11 @@ function buildSnapshotMetadata(input: {
     traceEvents: input.snapshot.traceEvents ?? [],
     traceParts: input.snapshot.traceParts ?? [],
     renderBlocks: input.snapshot.renderBlocks ?? [],
+    meteredLlmCalls: input.snapshot.meteredLlmCalls ?? [],
+    meteredLlmCreditsConsumed: (input.snapshot.meteredLlmCalls ?? []).reduce(
+      (sum, item) => sum + item.consumedCredits,
+      0,
+    ),
     ...(input.snapshot.finishReason !== undefined
       ? { finishReason: input.snapshot.finishReason }
       : {}),
@@ -1279,7 +1305,8 @@ async function createAssistantPlaceholder(input: {
     metadata: {
       userMessageId: input.prepared.userMessage.id,
       sourceUserMessageId: input.prepared.userMessage.id,
-      traceId: input.prepared.traceContext?.traceId ?? input.prepared.runTraceId,
+      traceId:
+        input.prepared.traceContext?.traceId ?? input.prepared.runTraceId,
       modelAlias: input.prepared.modelAlias,
       profileAlias: input.prepared.profileAlias,
       versionOf: input.prepared.assistantMessageParentId,
@@ -1334,6 +1361,19 @@ async function createDurableErrorMessage(input: {
 
   const isClientCancelled =
     input.createErrorInput.contentError.code === "CLIENT_CANCELLED";
+  const meteredLlmCalls =
+    input.createErrorInput.partialState?.meteredLlmCalls ??
+    input.snapshot.meteredLlmCalls ??
+    [];
+  const meteredLlmCreditsConsumed = meteredLlmCalls.reduce(
+    (sum, item) => sum + item.consumedCredits,
+    0,
+  );
+  const preflightCreditsConsumed =
+    input.createErrorInput.prepared.preflightBilling.reduce(
+      (sum, item) => sum + item.consumedCredits,
+      0,
+    );
   const assistantContent = appendAssistantContinuationContent({
     existingContent: input.snapshot.assistantMessage?.content,
     nextContent:
@@ -1347,10 +1387,7 @@ async function createDurableErrorMessage(input: {
     messageId: input.assistantMessageId,
     content: assistantContent,
     model: input.createErrorInput.prepared.modelAlias,
-    creditsConsumed: input.createErrorInput.prepared.preflightBilling.reduce(
-      (sum, item) => sum + item.consumedCredits,
-      0,
-    ),
+    creditsConsumed: preflightCreditsConsumed + meteredLlmCreditsConsumed,
     metadata: {
       isError: !isClientCancelled,
       isCancelled: isClientCancelled,
@@ -1366,14 +1403,24 @@ async function createDurableErrorMessage(input: {
       profileAlias: input.createErrorInput.prepared.profileAlias,
       agentMode: input.createErrorInput.prepared.agentMode,
       versionOf: input.createErrorInput.prepared.assistantMessageParentId,
-      billingSkipped: true,
-      billingSkipReason: "model_error",
+      billingFinalizerSkipped: true,
+      billingFinalizerSkipReason: "model_error",
+      meteredLlmCalls,
+      meteredLlmCreditsConsumed,
+      billingSkipped:
+        meteredLlmCalls.length === 0 ||
+        meteredLlmCalls.every((call) => call.billingStatus === "skipped"),
+      billingSkipReason:
+        meteredLlmCalls.length === 0
+          ? "model_error_before_llm_usage"
+          : meteredLlmCalls.every((call) => call.billingStatus === "skipped")
+            ? (meteredLlmCalls
+                .map((call) => call.skipReason)
+                .find((reason): reason is string => Boolean(reason)) ??
+              "llm_calls_skipped")
+            : null,
       preflightBilling: input.createErrorInput.prepared.preflightBilling,
-      preflightCreditsConsumed:
-        input.createErrorInput.prepared.preflightBilling.reduce(
-          (sum, item) => sum + item.consumedCredits,
-          0,
-        ),
+      preflightCreditsConsumed,
       reasoning: input.snapshot.reasoning,
       reasoningSegments: input.snapshot.reasoningSegments ?? [],
       traceParts: input.snapshot.traceParts ?? [],
@@ -1440,7 +1487,9 @@ export async function persistTerminalFailure(input: {
     ...(terminalRun.userMessageId
       ? { userMessageId: terminalRun.userMessageId }
       : {}),
-    ...(input.assistantMessageId ? { messageId: input.assistantMessageId } : {}),
+    ...(input.assistantMessageId
+      ? { messageId: input.assistantMessageId }
+      : {}),
   });
   await input.appendRunEvent({
     run: input.run,
@@ -1472,7 +1521,9 @@ export async function persistTerminalFailure(input: {
             : clientErrorMessage,
       }),
       metadata: {
-        ...(currentMessage?.metadata ?? snapshot.assistantMessage?.metadata ?? {}),
+        ...(currentMessage?.metadata ??
+          snapshot.assistantMessage?.metadata ??
+          {}),
         isError: input.status === "failed",
         isCancelled: input.status === "cancelled",
         error: input.contentError.message,
@@ -1593,9 +1644,7 @@ export async function processThreadChatRunJob(
         ...pendingTextDeltaPayload,
         delta: `${pendingTextDeltaPayload.delta ?? ""}${delta}`,
       };
-      if (
-        now - pendingTextDeltaStartedAt < STREAM_APPEND_TEXT_DELTA_FLUSH_MS
-      ) {
+      if (now - pendingTextDeltaStartedAt < STREAM_APPEND_TEXT_DELTA_FLUSH_MS) {
         return;
       }
       await flushPendingTextDelta();
@@ -1695,9 +1744,7 @@ export async function processThreadChatRunJob(
         terminalErrorCode =
           typeof payload.code === "string" ? payload.code : "CHAT_RUN_FAILED";
         terminalErrorMessage =
-          typeof payload.error === "string"
-            ? payload.error
-            : "Chat run failed";
+          typeof payload.error === "string" ? payload.error : "Chat run failed";
         terminalStatus =
           terminalErrorCode === "CLIENT_CANCELLED" ? "cancelled" : "failed";
       }
@@ -1756,7 +1803,9 @@ export async function processThreadChatRunJob(
           run,
           assistantMessageId,
           snapshot: finalSnapshot,
-          confirmationIds: extractPendingConfirmationIds(finalSnapshot.toolCalls),
+          confirmationIds: extractPendingConfirmationIds(
+            finalSnapshot.toolCalls,
+          ),
         })
       : await durableChatRunService.finishRun({
           run,
@@ -1798,7 +1847,9 @@ export async function processThreadChatRunJob(
           appendRunEvent: durableChatRunService.appendRunEvent.bind(
             durableChatRunService,
           ),
-          finishRun: durableChatRunService.finishRun.bind(durableChatRunService),
+          finishRun: durableChatRunService.finishRun.bind(
+            durableChatRunService,
+          ),
         });
         terminalStatus = "cancelled";
         terminalErrorCode = contentError.code;
@@ -1829,38 +1880,40 @@ export async function processThreadChatRunJob(
         workspaceId: run.workspaceId,
         threadId: run.threadId,
         messageId: assistantMessageId,
-        metadata: terminalStatus === "waiting_for_approval"
-          ? buildSnapshotMetadata({
-              currentMetadata:
-                finalMessage?.metadata ?? finalSnapshot.assistantMessage?.metadata,
-              run: finalRun,
-              snapshot: finalSnapshot,
-            })
-          : {
-              ...(finalMessage?.metadata ??
-                snapshot.assistantMessage?.metadata ??
-                {}),
-              ...buildThreadRunMetadata(finalRun),
-              threadRun: {
-                ...buildThreadRunMetadata(finalRun).threadRun,
-                ...(finalMessage?.metadata &&
-                typeof finalMessage.metadata === "object" &&
-                !Array.isArray(finalMessage.metadata) &&
-                finalMessage.metadata.threadRun &&
-                typeof finalMessage.metadata.threadRun === "object" &&
-                !Array.isArray(finalMessage.metadata.threadRun) &&
-                "durationMs" in finalMessage.metadata.threadRun
-                  ? {
-                      durationMs: (
-                        finalMessage.metadata.threadRun as Record<
-                          string,
-                          unknown
-                        >
-                      ).durationMs,
-                    }
-                  : {}),
+        metadata:
+          terminalStatus === "waiting_for_approval"
+            ? buildSnapshotMetadata({
+                currentMetadata:
+                  finalMessage?.metadata ??
+                  finalSnapshot.assistantMessage?.metadata,
+                run: finalRun,
+                snapshot: finalSnapshot,
+              })
+            : {
+                ...(finalMessage?.metadata ??
+                  snapshot.assistantMessage?.metadata ??
+                  {}),
+                ...buildThreadRunMetadata(finalRun),
+                threadRun: {
+                  ...buildThreadRunMetadata(finalRun).threadRun,
+                  ...(finalMessage?.metadata &&
+                  typeof finalMessage.metadata === "object" &&
+                  !Array.isArray(finalMessage.metadata) &&
+                  finalMessage.metadata.threadRun &&
+                  typeof finalMessage.metadata.threadRun === "object" &&
+                  !Array.isArray(finalMessage.metadata.threadRun) &&
+                  "durationMs" in finalMessage.metadata.threadRun
+                    ? {
+                        durationMs: (
+                          finalMessage.metadata.threadRun as Record<
+                            string,
+                            unknown
+                          >
+                        ).durationMs,
+                      }
+                    : {}),
+                },
               },
-            },
       });
     }
 
@@ -1900,19 +1953,18 @@ export async function processThreadChatRunJob(
       errorCode: contentError.code,
       errorMessage: contentError.message,
     };
-    finalRun =
-      await persistTerminalFailure({
-        run,
-        status,
-        userMessageId: durableUserMessageIdFallback({ run, request }),
-        assistantMessageId,
-        snapshot,
-        contentError,
-        appendRunEvent: durableChatRunService.appendRunEvent.bind(
-          durableChatRunService,
-        ),
-        finishRun: durableChatRunService.finishRun.bind(durableChatRunService),
-      });
+    finalRun = await persistTerminalFailure({
+      run,
+      status,
+      userMessageId: durableUserMessageIdFallback({ run, request }),
+      assistantMessageId,
+      snapshot,
+      contentError,
+      appendRunEvent: durableChatRunService.appendRunEvent.bind(
+        durableChatRunService,
+      ),
+      finishRun: durableChatRunService.finishRun.bind(durableChatRunService),
+    });
     return {
       status,
       runId: run.id,

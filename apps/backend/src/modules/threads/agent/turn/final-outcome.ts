@@ -213,6 +213,7 @@ export async function* buildFinalOutcome(input: {
       availableCitations: finalCitations,
       retrievalCalls,
       toolCalls,
+      meteredLlmCalls: runtime.collectMeteredLlmCalls(),
       ...(finalRenderBlocks.length > 0
         ? { renderBlocks: finalRenderBlocks }
         : {}),

@@ -3,18 +3,100 @@
 ## Setup & Basic Structure
 
 ```javascript
+const fs = require("fs");
+const path = require("path");
 const pptxgen = require("pptxgenjs");
 
-let pres = new pptxgen();
-pres.layout = 'LAYOUT_16x9';  // or 'LAYOUT_16x10', 'LAYOUT_4x3', 'LAYOUT_WIDE'
-pres.author = 'Your Name';
-pres.title = 'Presentation Title';
+const PPTX_PATH = "<sandbox output pptx path>";
 
-let slide = pres.addSlide();
-slide.addText("Hello World!", { x: 0.5, y: 0.5, fontSize: 36, color: "363636" });
+const txt = (value) => String(value ?? "");
 
-pres.writeFile({ fileName: "Presentation.pptx" });
+const DATA = {
+  title: `Presentation Title`,
+  subtitle: `Why this matters`,
+};
+
+async function main() {
+  fs.mkdirSync(path.dirname(PPTX_PATH), { recursive: true });
+
+  const pres = new pptxgen();
+  pres.layout = "LAYOUT_16x9";
+  pres.author = "SourceWeft";
+  pres.title = txt(DATA.title);
+
+  const slide = pres.addSlide();
+  slide.addText(txt(DATA.title), { x: 0.5, y: 0.5, fontSize: 36, color: "363636" });
+
+  await pres.writeFile({ fileName: PPTX_PATH });
+  const bytes = fs.statSync(PPTX_PATH).size;
+  console.log(`PPTX generated: ${PPTX_PATH}`);
+  console.log(`PPTX_ARTIFACT_PATH=${PPTX_PATH}`);
+  console.log(`PPTX_ARTIFACT_BYTES=${bytes}`);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 ```
+
+## SourceWeft Generation Command
+
+Create the builder as a Workfile, then prepare it into the sandbox workspace
+according to the sandbox runtime rules. Run generation as one shell phase
+instead of splitting each check into separate tool calls:
+
+```bash
+set -e
+test -f "<prepared sandbox builder path>"
+node --check "<prepared sandbox builder path>"
+node "<prepared sandbox builder path>"
+```
+
+Run QA as one later shell phase using the exact `PPTX_ARTIFACT_PATH` printed by
+the program:
+
+```bash
+set -e
+PPTX_ARTIFACT_PATH="<path printed by deck.js>"
+QA_DIR="<sandbox QA directory>"
+mkdir -p "$QA_DIR"
+
+echo "===CONTENT_QA==="
+python3 -m markitdown "$PPTX_ARTIFACT_PATH" > "$QA_DIR/content.txt"
+python3 -m markitdown "$PPTX_ARTIFACT_PATH" | grep -iE "xxxx|lorem|ipsum|placeholder" || true
+
+echo "===PPTX_TO_PDF==="
+soffice --headless --convert-to pdf --outdir "$QA_DIR" "$PPTX_ARTIFACT_PATH"
+PDF_PATH="$(find "$QA_DIR" -maxdepth 1 -type f -iname '*.pdf' | head -n 1)"
+test -s "$PDF_PATH"
+echo "PDF_PATH=$PDF_PATH"
+
+echo "===PDF_TO_JPG==="
+pdftoppm -jpeg -r 150 "$PDF_PATH" "$QA_DIR/slide"
+find "$QA_DIR" -maxdepth 1 -type f -name 'slide*.jpg' | sort > "$QA_DIR/slide-images.txt"
+QA_IMAGE_COUNT="$(wc -l < "$QA_DIR/slide-images.txt" | tr -d ' ')"
+echo "QA_IMAGE_COUNT=$QA_IMAGE_COUNT"
+test "$QA_IMAGE_COUNT" -gt 0
+cat "$QA_DIR/slide-images.txt"
+PREVIEW_SOURCE_PATH="$(head -n 1 "$QA_DIR/slide-images.txt")"
+test -s "$PREVIEW_SOURCE_PATH"
+cp "$PREVIEW_SOURCE_PATH" "$QA_DIR/preview.jpg"
+echo "PREVIEW_IMAGE_PATH=$QA_DIR/preview.jpg"
+
+echo "===VISUAL_QA_SUMMARY==="
+echo "Inspect the rendered slide JPG files listed above for overlap, clipping, odd wraps, decorative lines through text, low contrast, cramped margins, and missing promised visuals before publishing."
+```
+
+The slides preview image is the first rendered slide from the final PPTX QA
+pass. Provide the printed `PREVIEW_IMAGE_PATH` to the configured artifact
+publisher; do not reuse preview images from earlier renders.
+
+Do not run `which`, `file`, `identify`, repeated `ls`, or other environment
+probes on the happy path. If a concrete phase fails, inspect that failure and
+repair only that class of problem. `file` is optional diagnostic only; if needed,
+make it non-blocking and feed it the discovered paths from
+`$QA_DIR/slide-images.txt` instead of any fixed QA directory or filename pattern.
 
 ## Layout Dimensions
 
@@ -24,9 +106,78 @@ Slide dimensions (coordinates in inches):
 - `LAYOUT_4x3`: 10" x 7.5"
 - `LAYOUT_WIDE`: 13.3" x 7.5"
 
+**Layout names are case-sensitive.** Use `LAYOUT_16x9`, not `LAYOUT_16X9`.
+`LAYOUT_16X9` causes `UNKNOWN-LAYOUT` in PptxGenJS.
+
 ---
 
 ## Text & Formatting
+
+### JS Literal Safety
+
+Most generation failures come from natural-language text breaking JavaScript
+syntax before PptxGenJS runs. Keep long text in `DATA` constants and reference
+it through `txt(DATA.key)`.
+
+```javascript
+// Correct: user-facing quotes are Chinese curly quotes inside a template string
+const DATA = {
+  title: `为什么“讲出来”能让你真正学会`,
+  loop: `形成一个“简化 -> 复述 -> 纠错”的循环，知识才会真正留下。`,
+  event: `挑战者号事故调查中的“O环”演示`,
+};
+
+slide.addText(txt(DATA.title), titleOpts);
+slide.addText(txt(DATA.loop), bodyOpts);
+
+// Wrong: nested straight quotes break JavaScript
+slide.addText("为什么"讲出来"能让你真正学会", titleOpts);
+slide.addText("挑战者号事故调查中的"O环"演示", bodyOpts);
+```
+
+Rules:
+
+- Do not scatter long Chinese/user-provided strings inside drawing calls.
+- Prefer template strings for authored deck text and visible curly quotes for
+  quoted words.
+- Use `JSON.stringify(value)` only when converting external/untrusted text into
+  source code during repair or preprocessing. Do not paste template expressions
+  like `${JSON.stringify(...)}` literally into `deck.js`.
+- If `node --check` fails near Chinese text, quoted words, or examples, fix the
+  string boundary before changing slide design.
+
+### Safe `addText` Patterns
+
+`slide.addText` accepts either a plain string or a rich text array. Do not pass a
+single object as the first argument, and do not mix raw strings inside rich text
+arrays.
+
+```javascript
+const rich = (items) =>
+  items.map((item) => ({ text: txt(item.text), options: item.options ?? {} }));
+
+// Correct: plain string
+slide.addText("✓", { x: 1, y: 1, w: 0.3, h: 0.3, fontSize: 14 });
+
+// Correct: plain natural-language string from DATA
+slide.addText(txt(DATA.title), { x: 1, y: 1, w: 6, h: 0.5 });
+
+// Correct: rich text array
+slide.addText(rich([
+  { text: "Key idea: ", options: { bold: true } },
+  { text: "explain it simply" },
+]), { x: 1, y: 1.5, w: 4, h: 0.4 });
+
+// Wrong: object as first argument
+slide.addText({ text: "Key idea" }, { x: 1, y: 1, w: 4, h: 0.4 });
+
+// Wrong: raw string mixed into rich text array
+slide.addText(["✓", { text: "Done" }], { x: 1, y: 1, w: 4, h: 0.4 });
+```
+
+For checkmarks, bullets, numbers, badges, or icons, prefer a separate
+`slide.addText("✓", opts)`, native shape, or raster icon. Do not mix symbols as
+raw array items in rich text.
 
 ```javascript
 // Basic text
@@ -367,6 +518,20 @@ titleSlide.addText("My Title", { placeholder: "title" });
 
 These issues cause file corruption, visual bugs, or broken output. Avoid them.
 
+0. **Use exact layout names** - layout names are case-sensitive.
+   ```javascript
+   pres.layout = "LAYOUT_16x9"; // CORRECT
+   pres.layout = "LAYOUT_16X9"; // WRONG: UNKNOWN-LAYOUT
+   ```
+
+0.1. **Keep deck text in DATA** - long Chinese/user text and quoted text should
+   not be inline inside `addText` calls.
+   ```javascript
+   const DATA = { title: `为什么“讲出来”能让你真正学会` };
+   slide.addText(txt(DATA.title), opts); // CORRECT
+   slide.addText("为什么"讲出来"能让你真正学会", opts); // SYNTAX ERROR
+   ```
+
 1. **NEVER use "#" with hex colors** - causes file corruption
    ```javascript
    color: "FF0000"      // CORRECT
@@ -416,5 +581,6 @@ These issues cause file corruption, visual bugs, or broken output. Avoid them.
 - **Shapes**: RECTANGLE, OVAL, LINE, ROUNDED_RECTANGLE
 - **Charts**: BAR, LINE, PIE, DOUGHNUT, SCATTER, BUBBLE, RADAR
 - **Layouts**: LAYOUT_16x9 (10"x5.625"), LAYOUT_16x10, LAYOUT_4x3, LAYOUT_WIDE
+- **Text**: `addText(string, opts)` or `addText([{ text, options? }], opts)` only
 - **Alignment**: "left", "center", "right"
 - **Chart data labels**: "outEnd", "inEnd", "center"

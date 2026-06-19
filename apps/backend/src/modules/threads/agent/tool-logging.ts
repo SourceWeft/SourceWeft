@@ -47,6 +47,8 @@ export type AgentToolLogMetadata = {
   attempt?: unknown;
   commandFingerprint?: unknown;
   failureCode?: unknown;
+  failureHint?: unknown;
+  failureMessage?: unknown;
   maxAttempts?: unknown;
   repeatCount?: unknown;
   runId?: unknown;
@@ -70,6 +72,8 @@ const stringFields = [
   "artifactId",
   "commandFingerprint",
   "failureCode",
+  "failureHint",
+  "failureMessage",
   "requestKey",
   "runId",
   "stage",

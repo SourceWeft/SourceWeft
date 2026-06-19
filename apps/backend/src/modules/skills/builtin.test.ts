@@ -45,7 +45,7 @@ test("ppt-deck builtin skill stays hidden from the public gallery", async () => 
   assert.deepEqual(skill.manifestJson.tools, [
     "prepare_sandbox_workspace",
     "execute",
-    "publish_sandbox_artifact",
+    "publish_artifact",
   ]);
   assert.deepEqual(
     skill.manifestJson.options?.map((option) => option.id),
@@ -71,85 +71,81 @@ test("ppt-deck builtin skill includes sandbox-based generation guidance", async 
   assert.doesNotMatch(content ?? "", new RegExp(["sourceweft", ":"].join("")));
   assert.match(content ?? "", /sandbox/);
   assert.doesNotMatch(content ?? "", /slides\.json/);
-  assert.match(content ?? "", /\/workfiles\/ppt-deck\/deck\.js/);
-  assert.match(content ?? "", /\/workspace\/ppt-deck\/deck\.js/);
+  assert.doesNotMatch(content ?? "", /\/workfiles\/ppt-deck\/deck\.js/);
+  assert.doesNotMatch(content ?? "", /\/workspace\/ppt-deck\/deck\.js/);
+  assert.doesNotMatch(content ?? "", /SourceWeft Runtime Rules/);
+  assert.doesNotMatch(content ?? "", /OUTPUT_DIR/);
   assert.match(content ?? "", /Quick Reference/);
-  assert.match(content ?? "", /Reading Content/);
-  assert.match(content ?? "", /Editing Workflow/);
-  assert.match(content ?? "", /Creating From Scratch/);
-  assert.match(content ?? "", /Design Ideas/);
-  assert.match(content ?? "", /QA Required/);
-  assert.match(content ?? "", /Converting To Images/);
+  assert.match(content ?? "", /Read or analyze a PPTX/);
+  assert.match(content ?? "", /Edit Existing Decks/);
+  assert.match(content ?? "", /Create From Scratch/);
+  assert.match(content ?? "", /Design Guardrails/);
+  assert.match(content ?? "", /QA/);
   assert.match(content ?? "", /Dependencies/);
-  assert.match(content ?? "", /node --check \/workspace\/ppt-deck\/deck\.js/);
-  assert.match(content ?? "", /node \/workspace\/ppt-deck\/deck\.js/);
-  assert.match(content ?? "", /Required reads/);
+  assert.match(content ?? "", /prepared sandbox builder path/);
   assert.match(
     content ?? "",
-    /Before creating, editing, writing, preparing, or executing any PPTX\s+generation code, read \[pptxgenjs\.md\]/,
+    /prepare it into the\s+sandbox workspace according to the sandbox runtime rules/,
   );
-  assert.match(
-    content ?? "",
-    /Do not write\s+`\/workfiles\/ppt-deck\/deck\.js`, call `prepare_sandbox_workspace`, or run\s+`execute`/,
-  );
-  assert.match(
-    content ?? "",
-    /Before retrying after a syntax, runtime, rendering, output-path, or QA\s+failure, read \[pitfalls\.md\]/,
-  );
-  assert.match(
-    content ?? "",
-    /mandatory and must happen before `node \/workspace\/ppt-deck\/deck\.js`/,
-  );
-  assert.match(content ?? "", /publish_sandbox_artifact/);
-  assert.match(content ?? "", /artifactType: "slides"/);
+  assert.doesNotMatch(content ?? "", /publish_artifact/);
+  assert.doesNotMatch(content ?? "", /artifactType: "slides"/);
   assert.match(content ?? "", /PPTX_ARTIFACT_PATH/);
-  assert.match(content ?? "", /PPTX_ARTIFACT_BYTES/);
-  assert.match(
-    content ?? "",
-    /PPTX_ARTIFACT_PATH` must be a complete absolute sandbox path ending in\s+`\.pptx`/,
-  );
-  assert.match(content ?? "", /fs\.mkdirSync\(OUTPUT_DIR, \{ recursive: true \}\)/);
-  assert.match(content ?? "", /await pres\.writeFile\(\{ fileName: PPTX_PATH \}\)/);
-  assert.match(
-    content ?? "",
-    /PPTX generated: \/workspace\/ppt-deck\/output\/deck-slug\.pptx/,
-  );
-  assert.match(content ?? "", /source of truth for QA and publishing/);
+  assert.match(content ?? "", /PREVIEW_IMAGE_PATH/);
+  assert.match(content ?? "", /\$QA_DIR\/preview\.jpg/);
   assert.doesNotMatch(content ?? "", /deckData/);
-  assert.match(content ?? "", /JSON\.stringify\(value\)/);
-  assert.match(content ?? "", /safe literal\s+strategy/);
-  assert.match(content ?? "", /const text = \(value\) => String\(value \?\? ""\)/);
-  assert.match(content ?? "", /Do not inline Chinese\s+or quoted prose into JavaScript string literals/);
-  assert.match(content ?? "", /minimal repair mode/);
-  assert.match(content ?? "", /line\/column/);
-  assert.match(content ?? "", /visual direction|Design Ideas/);
-  assert.match(content ?? "", /Vary layouts/);
-  assert.match(content ?? "", /promised visual elements/);
-  assert.match(content ?? "", /reliable asset is\s+unavailable/);
+  assert.match(content ?? "", /promised visuals/);
   assert.doesNotMatch(content ?? "", /backgroundMode/);
   assert.doesNotMatch(content ?? "", /renderBackground/);
   assert.doesNotMatch(content ?? "", /applyBackground/);
   assert.doesNotMatch(content ?? "", /role\s*\/\s*visualIntent/);
   assert.doesNotMatch(content ?? "", /Feynman Method/);
   assert.doesNotMatch(content ?? "", /feynman-method\.pptx/);
-  assert.match(content ?? "", /\/workspace\/ppt-deck\/qa/);
-  assert.match(content ?? "", /Use the exact path printed by `PPTX_ARTIFACT_PATH/);
+  assert.doesNotMatch(content ?? "", /\/workspace\/ppt-deck\/qa/);
+  assert.match(content ?? "", /QA_DIR="<sandbox QA directory>"/);
+  assert.match(content ?? "", /Use the exact path printed by the deck builder/);
+  assert.match(content ?? "", /===CONTENT_QA===/);
+  assert.match(content ?? "", /===PPTX_TO_PDF===/);
+  assert.match(content ?? "", /===PDF_TO_JPG===/);
+  assert.match(content ?? "", /===VISUAL_QA_SUMMARY===/);
   assert.match(content ?? "", /pdftoppm/);
-  assert.match(content ?? "", /text-only content slides/);
-  assert.match(content ?? "", /visualChecked": true/);
+  assert.match(content ?? "", /QA_IMAGE_COUNT/);
+  assert.match(content ?? "", /test "\$QA_IMAGE_COUNT" -gt 0/);
+  assert.match(content ?? "", /PREVIEW_SOURCE_PATH="\$\(head -n 1 "\$QA_DIR\/slide-images\.txt"\)"/);
+  assert.match(content ?? "", /echo "PREVIEW_IMAGE_PATH=\$QA_DIR\/preview\.jpg"/);
   assert.match(
     content ?? "",
-    /find \/workspace\/ppt-deck -type f -iname '\*\.pptx'/,
+    /find "\$QA_DIR" -maxdepth 1 -type f -name 'slide\*\.jpg' \| sort > "\$QA_DIR\/slide-images\.txt"/,
   );
+  assert.match(content ?? "", /Do not run `file` against slide JPGs on the happy path/);
+  assert.match(content ?? "", /use the\s+discovered slide image paths from `\$QA_DIR\/slide-images\.txt`/);
+  assert.doesNotMatch(content ?? "", /\/workspace\/qa/);
+  assert.match(content ?? "", /Do not assume a fixed filename such as `slide-01\.jpg`/);
+  assert.match(content ?? "", /text-only content slides/);
+  assert.match(content ?? "", /find "<sandbox task directory>" -type f -iname '\*\.pptx'/);
+  assert.match(content ?? "", /roughly 12 visible tool calls/);
+  assert.match(content ?? "", /roughly 18 visible tool calls/);
+  assert.match(content ?? "", /If visible tool calls approach 20/);
+  assert.doesNotMatch(content ?? "", /visible tool calls reach 20, stop/);
+  assert.match(bundledContent ?? "", /===PPTX_TO_PDF===/);
+  assert.match(bundledContent ?? "", /===PDF_TO_JPG===/);
+  assert.match(bundledContent ?? "", /QA_IMAGE_COUNT/);
+  assert.match(bundledContent ?? "", /PREVIEW_IMAGE_PATH/);
+  assert.match(bundledContent ?? "", /visual QA summary/);
   assert.match(
     bundledContent ?? "",
-    /Color Dominance Rules|Color Palette Guidance/,
+    /Theme Presets/,
   );
-  assert.match(bundledContent ?? "", /Chinese Typography Rules/);
-  assert.match(bundledContent ?? "", /Topic-to-Visual Heuristics/);
-  assert.match(bundledContent ?? "", /Misconception \/ Fix/);
+  assert.match(bundledContent ?? "", /Learning Studio/);
+  assert.match(bundledContent ?? "", /Executive Strategy/);
+  assert.match(bundledContent ?? "", /Chinese or mixed Chinese-English decks/);
+  assert.match(bundledContent ?? "", /Topic-to-Preset Map/);
+  assert.match(bundledContent ?? "", /Concept Map/);
   assert.match(bundledContent ?? "", /Framework Canvas/);
   assert.match(bundledContent ?? "", /Recap Matrix/);
+  assert.match(bundledContent ?? "", /sandbox-local scratch path/);
+  assert.doesNotMatch(bundledContent ?? "", /Always write to `\/tmp\/` first/);
+  assert.doesNotMatch(bundledContent ?? "", /\/workspace\/ppt-deck/);
+  assert.doesNotMatch(bundledContent ?? "", /\/workfiles\/ppt-deck/);
   assert.doesNotMatch(bundledContent ?? "", /Page Number Badge.*MANDATORY/);
   assert.doesNotMatch(bundledContent ?? "", /Use ONLY the provided color palette/);
   assert.doesNotMatch(bundledContent ?? "", /Feynman Method/);
@@ -170,20 +166,19 @@ test("ppt-deck builtin skill guards against unsafe natural-language literals", a
   const skill = await getBuiltinSkillBySlug("ppt-deck");
   assert.ok(skill);
   const bundle = await loadBuiltinSkillBundle(skill.storagePointer);
-  const content = bundle?.files.find(
-    (file) => file.path === "SKILL.md",
-  )?.contentText;
+  const content = bundle?.files
+    .filter((file) => file.path.endsWith(".md"))
+    .map((file) => file.contentText)
+    .join("\n\n");
 
-  assert.match(content ?? "", /Chinese text/);
-  assert.match(content ?? "", /quotes/);
-  assert.match(content ?? "", /multiline content/);
-  assert.match(content ?? "", /Do not rely on a blacklist of bad phrases/);
-  assert.match(
-    content ?? "",
-    /Guard the path from natural\s+language into executable code/,
-  );
-  assert.match(content ?? "", /If `node --check` fails twice/);
-  assert.match(content ?? "", /Do not redesign slides during syntax repair/);
+  assert.match(content ?? "", /long Chinese\/user text and quoted text/);
+  assert.match(content ?? "", /quoted words/);
+  assert.match(content ?? "", /DATA/);
+  assert.match(content ?? "", /txt\(DATA/);
+  assert.match(content ?? "", /visible curly quotes/);
+  assert.match(content ?? "", /为什么“讲出来”能让你真正学会/);
+  assert.match(content ?? "", /If `node --check` fails/);
+  assert.match(content ?? "", /Do not redesign slides while repairing syntax/);
 });
 
 test("builtin skill bundles no longer include legacy skill.json", async () => {

@@ -220,7 +220,7 @@ test("validateCustomSkillBundle rejects unknown publisher tool declarations", ()
   );
 });
 
-test("validateCustomSkillBundle rejects publish_sandbox_artifact tool declarations", () => {
+test("validateCustomSkillBundle rejects publish_artifact tool declarations", () => {
   assert.throws(
     () =>
       validateCustomSkillBundle({
@@ -235,7 +235,7 @@ test("validateCustomSkillBundle rejects publish_sandbox_artifact tool declaratio
               description: "Use this skill when reviewing custom material.",
               visibility: "workspace",
               categories: ["visual"],
-              tools: ["publish_sandbox_artifact"],
+              tools: ["publish_artifact"],
             }),
           },
         ],

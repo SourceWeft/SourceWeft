@@ -27,13 +27,13 @@ function pptSkillCommand(): ResolvedThreadCommand {
       defaultTools: [
         AGENT_TOOL_NAMES.prepareSandboxWorkspace,
         AGENT_TOOL_NAMES.execute,
-        AGENT_TOOL_NAMES.publishSandboxArtifact,
+        AGENT_TOOL_NAMES.publishArtifact,
       ],
       permissionOverrides: {},
       successCriteria: {
         kind: "artifact",
         artifactType: "slides",
-        toolName: AGENT_TOOL_NAMES.publishSandboxArtifact,
+        toolName: AGENT_TOOL_NAMES.publishArtifact,
       },
       execution: "agent",
     },
@@ -49,12 +49,12 @@ test("mergeCommandTools enables ppt skill sandbox tools and publisher tool", () 
   assert.deepEqual(tools?.[AGENT_TOOL_NAMES.execute], {
     enabled: true,
   });
-  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.publishSandboxArtifact], {
+  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.publishArtifact], {
     enabled: true,
   });
   const permissions = resolveToolPermissions({ command: null, tools });
   assert.equal(permissions[AGENT_TOOL_NAMES.generateImage], "allow");
-  assert.equal(permissions[AGENT_TOOL_NAMES.publishSandboxArtifact], "ask");
+  assert.equal(permissions[AGENT_TOOL_NAMES.publishArtifact], "ask");
 });
 
 test("mergeActiveSkillRuntimeTools enables skill tools without command and respects disabled tools", () => {
@@ -62,7 +62,7 @@ test("mergeActiveSkillRuntimeTools enables skill tools without command and respe
     defaultTools: [
       AGENT_TOOL_NAMES.prepareSandboxWorkspace,
       AGENT_TOOL_NAMES.execute,
-      AGENT_TOOL_NAMES.publishSandboxArtifact,
+      AGENT_TOOL_NAMES.publishArtifact,
     ],
     permissionOverrides: {},
   } as const;
@@ -70,20 +70,20 @@ test("mergeActiveSkillRuntimeTools enables skill tools without command and respe
   assert.deepEqual(mergeActiveSkillRuntimeTools(undefined, runtime), {
     [AGENT_TOOL_NAMES.prepareSandboxWorkspace]: { enabled: true },
     [AGENT_TOOL_NAMES.execute]: { enabled: true },
-    [AGENT_TOOL_NAMES.publishSandboxArtifact]: { enabled: true },
+    [AGENT_TOOL_NAMES.publishArtifact]: { enabled: true },
   });
 
   assert.deepEqual(
     mergeActiveSkillRuntimeTools(
       {
-        [AGENT_TOOL_NAMES.publishSandboxArtifact]: { enabled: false },
+        [AGENT_TOOL_NAMES.publishArtifact]: { enabled: false },
       },
       runtime,
     ),
     {
       [AGENT_TOOL_NAMES.prepareSandboxWorkspace]: { enabled: true },
       [AGENT_TOOL_NAMES.execute]: { enabled: true },
-      [AGENT_TOOL_NAMES.publishSandboxArtifact]: { enabled: false },
+      [AGENT_TOOL_NAMES.publishArtifact]: { enabled: false },
     },
   );
 });
@@ -92,16 +92,16 @@ test("resolveToolPermissions keeps publisher denied when disabled outside ppt wo
   const command = pptSkillCommand();
   const enabledTools = mergeCommandTools(undefined, command);
 
-  assert.deepEqual(enabledTools?.[AGENT_TOOL_NAMES.publishSandboxArtifact], {
+  assert.deepEqual(enabledTools?.[AGENT_TOOL_NAMES.publishArtifact], {
     enabled: true,
   });
 
   const disabledTools = {
-    [AGENT_TOOL_NAMES.publishSandboxArtifact]: { enabled: false },
+    [AGENT_TOOL_NAMES.publishArtifact]: { enabled: false },
   };
   assert.equal(
     resolveToolPermissions({ command, tools: disabledTools })[
-      AGENT_TOOL_NAMES.publishSandboxArtifact
+      AGENT_TOOL_NAMES.publishArtifact
     ],
     "deny",
   );

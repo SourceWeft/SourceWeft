@@ -38,6 +38,20 @@ test("redacts skills read_file output for client observability", () => {
   );
 });
 
+test("normalizes read_file output to display-safe bounded content", () => {
+  const output = normalizeToolOutputForObservability("read_file", {
+    type: "tool",
+    lc_kwargs: {
+      content: [{ text: `hello\u0000\u0001${"x".repeat(9000)}` }],
+    },
+  });
+
+  assert.equal(typeof output.content, "string");
+  assert.match(output.content, /^hello�x/u);
+  assert.match(output.content, /\[Output truncated for display.\]$/u);
+  assert.ok(output.content.length < 8_100);
+});
+
 test("filesystem tool metadata marks skills reads as internal instructions", () => {
   assert.equal(
     getFilesystemToolStartTitle("read_file", {
@@ -192,7 +206,7 @@ test("execute recoverable failures normalize as filesystem tool errors", () => {
   assert.equal(
     getFilesystemToolOutputError(
       "execute",
-      "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.\nHint: Use a non-empty single-line command without control characters.\n[Command failed with exit code 1]",
+      "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.\nHint: Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.\n[Command failed with exit code 1]",
     ),
     "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
   );
@@ -221,6 +235,14 @@ test("execute recoverable failures normalize as filesystem tool errors", () => {
   );
   assert.equal(
     getFilesystemToolOutputError("execute", {
+      failureCode: "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+      exitCode: 1,
+      output: "bad path",
+    }),
+    "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+  );
+  assert.equal(
+    getFilesystemToolOutputError("execute", {
       output: "tests failed",
       exitCode: 2,
       truncated: false,
@@ -239,6 +261,7 @@ test("execute failure metadata is extracted for diagnostics", () => {
       "execute",
       [
         "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
+        "Hint: Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.",
         "Diagnostics: toolName=execute commandFingerprint=sha256:abc failureCode=SANDBOX_EXECUTE_COMMAND_DENIED repeatCount=2 runId=run-1",
         "[Command failed with exit code 1]",
       ].join("\n"),
@@ -246,6 +269,10 @@ test("execute failure metadata is extracted for diagnostics", () => {
     {
       commandFingerprint: "sha256:abc",
       failureCode: "SANDBOX_EXECUTE_COMMAND_DENIED",
+      failureHint:
+        "Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.",
+      failureMessage:
+        "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
       repeatCount: 2,
       runId: "run-1",
     },
@@ -256,6 +283,7 @@ test("execute failure metadata is extracted for diagnostics", () => {
       failureCode: "SANDBOX_EXECUTE_COMMAND_DENIED",
       repeatCount: 2,
       runId: "run-1",
+      output: "tests failed\n[Command failed with exit code 2]",
     }),
     {
       commandFingerprint: "sha256:abc",
@@ -263,6 +291,14 @@ test("execute failure metadata is extracted for diagnostics", () => {
       repeatCount: 2,
       runId: "run-1",
     },
+  );
+  assert.deepEqual(
+    getFilesystemToolFailureMetadata("execute", {
+      output: "tests failed\n[Command failed with exit code 2]",
+      exitCode: 2,
+      truncated: false,
+    }),
+    {},
   );
   assert.deepEqual(
     getFilesystemToolFailureMetadata("read_file", {

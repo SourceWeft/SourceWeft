@@ -17,8 +17,8 @@ export type GeneratedArtifactProgressEvent = {
   data: Record<string, unknown>;
 };
 
-export const PUBLISH_SANDBOX_ARTIFACT_PROGRESS_EVENT_TYPE =
-  "publish_sandbox_artifact_progress";
+export const PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE =
+  "publish_artifact_progress";
 
 const PRESENTATION_GENERATION_STEP_ID = "presentation-generation";
 
@@ -72,7 +72,7 @@ export function buildPresentationGenerationStep(input: {
             ? "Adding explicit slide content"
             : input.phase === "completed"
               ? "Presentation artifact created"
-              : "publish_sandbox_artifact did not create an artifact");
+              : "publish_artifact did not create an artifact");
   const description =
     input.description ??
     (input.phase === "planning"
@@ -98,7 +98,7 @@ export function buildPresentationGenerationStep(input: {
     metadata: {
       artifactType: "slides",
       phase: input.phase,
-      tool: input.tool ?? AGENT_TOOL_NAMES.publishSandboxArtifact,
+      tool: input.tool ?? AGENT_TOOL_NAMES.publishArtifact,
       ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
       ...(typeof input.latencyMs === "number"
         ? { latencyMs: input.latencyMs }
@@ -115,7 +115,7 @@ export function buildPresentationProgressThinkingStep(input: {
     typeof input.data.tool === "string" &&
     hasAgentToolCapability(input.data.tool, "presentation_artifact")
       ? input.data.tool
-      : AGENT_TOOL_NAMES.publishSandboxArtifact;
+      : AGENT_TOOL_NAMES.publishArtifact;
   const stage =
     typeof input.data.stage === "string" ? input.data.stage.trim() : "";
   switch (stage) {
@@ -209,7 +209,7 @@ export function normalizeGeneratedPresentationProgressEvent(
   payload: unknown,
 ): GeneratedArtifactProgressEvent | null {
   const record = toObjectRecord(payload);
-  if (!record || record.type !== PUBLISH_SANDBOX_ARTIFACT_PROGRESS_EVENT_TYPE) {
+  if (!record || record.type !== PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE) {
     return null;
   }
 
@@ -225,7 +225,7 @@ export function normalizeGeneratedPresentationProgressEvent(
     typeof record.tool === "string" &&
     hasAgentToolCapability(record.tool, "presentation_artifact")
       ? record.tool
-      : AGENT_TOOL_NAMES.publishSandboxArtifact;
+      : AGENT_TOOL_NAMES.publishArtifact;
 
   return {
     toolCallId,

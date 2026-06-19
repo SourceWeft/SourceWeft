@@ -34,12 +34,14 @@ import {
   getSkillInstructionReadFileLabel,
   isRedactedSkillInstructionRead,
 } from "./assistant-tool-display";
+import { getReadFilePreview, type ReadFilePreview } from "./read-file-preview";
 import {
   getSandboxCollectedWorkfilePaths,
   getSandboxToolOperationTimeline,
   getSandboxToolResultDetails,
   getSandboxToolResultSummary,
   getSandboxToolSafeErrorMessage,
+  isSandboxToolResultFailure,
 } from "./sandbox-tool-result-display";
 import type { SandboxToolOperationTimelineItem } from "./sandbox-tool-result-display";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
@@ -75,6 +77,14 @@ function getStatusLabel(input: {
   if (input.toolCall.status === "error") {
     return "Failed";
   }
+  if (
+    isSandboxToolResultFailure({
+      output: input.toolCall.output,
+      toolName: input.toolCall.tool,
+    })
+  ) {
+    return "Failed";
+  }
   return "Done";
 }
 
@@ -84,6 +94,17 @@ function shouldAutoOpenToolStatus(label: string) {
     label === "Needs approval" ||
     label === "Failed" ||
     label === "Rejected"
+  );
+}
+
+export function resolveAssistantToolCardDefaultOpen(input: {
+  defaultOpen?: boolean;
+  hasReadFilePreview: boolean;
+  statusLabel: string;
+}) {
+  return (
+    input.defaultOpen ??
+    (input.hasReadFilePreview || shouldAutoOpenToolStatus(input.statusLabel))
   );
 }
 
@@ -109,9 +130,14 @@ function ToolTypeIcon({ toolName }: { toolName: string }) {
     case "generate_image":
       return <ImageIcon className="size-3.5 text-muted-foreground/75" />;
     default:
-      if (toolName.startsWith("search_notion") || toolName.startsWith("read_notion") ||
-          toolName.startsWith("create_notion") || toolName.startsWith("append_notion") ||
-          toolName.startsWith("update_notion") || toolName.startsWith("delete_notion")) {
+      if (
+        toolName.startsWith("search_notion") ||
+        toolName.startsWith("read_notion") ||
+        toolName.startsWith("create_notion") ||
+        toolName.startsWith("append_notion") ||
+        toolName.startsWith("update_notion") ||
+        toolName.startsWith("delete_notion")
+      ) {
         return <FileSearch className="size-3.5 text-muted-foreground/75" />;
       }
       return <Wrench className="size-3.5 text-muted-foreground/75" />;
@@ -151,6 +177,9 @@ function getOutputSummary(toolCall: ToolCallRecord) {
   if (isRedactedSkillInstructionRead(toolCall)) {
     return null;
   }
+  if (getReadFilePreview(toolCall)) {
+    return null;
+  }
   const confirmation = getToolConfirmationOutput(toolCall.output);
   if (confirmation) {
     return null;
@@ -164,6 +193,30 @@ function getOutputSummary(toolCall: ToolCallRecord) {
   }
   const content = getToolOutputContent(toolCall.output);
   return content && content !== "{}" ? compactText(content, 220) : null;
+}
+
+function ReadFilePreviewDetails({ preview }: { preview: ReadFilePreview }) {
+  const pathLabel = preview.path ?? preview.fileName ?? "unknown file";
+  const fileLabel =
+    preview.fileName && preview.path && preview.fileName !== preview.path
+      ? `${preview.path} (${preview.fileName})`
+      : pathLabel;
+
+  return (
+    <div className="space-y-1.5">
+      <p className="break-words">
+        Read file: <span className="text-foreground/75">{fileLabel}</span>
+      </p>
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/35 px-2 py-1.5 font-mono text-[12px] text-foreground/80 leading-5">
+        {preview.lines.join("\n")}
+      </pre>
+      {preview.isTruncated ? (
+        <p className="text-muted-foreground/65 text-xs">
+          Preview truncated to {preview.lineLimit} lines.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function SandboxOperationTimeline({
@@ -236,13 +289,12 @@ export function AssistantToolCard({
   const skillReadFileLabel = isRedactedSkillRead
     ? getSkillInstructionReadFileLabel(toolCall)
     : null;
+  const readFilePreview = isRedactedSkillRead
+    ? null
+    : getReadFilePreview(toolCall);
   const detailParts = isRedactedSkillRead
     ? []
-    : getToolCallDetailParts(
-        toolCall,
-        toolStep,
-        confirmationResolution,
-      );
+    : getToolCallDetailParts(toolCall, toolStep, confirmationResolution);
   const outputSummary = getOutputSummary(toolCall);
   const collectedWorkfilePaths = isRedactedSkillRead
     ? []
@@ -273,13 +325,17 @@ export function AssistantToolCard({
     confirmation,
     confirmationResolution,
   });
-  const [isOpen, setIsOpen] = useState(
-    defaultOpen ??
-      shouldAutoOpenToolStatus(statusLabel),
-  );
+  const hasReadFilePreview = Boolean(readFilePreview);
+  const effectiveDefaultOpen = resolveAssistantToolCardDefaultOpen({
+    defaultOpen,
+    hasReadFilePreview,
+    statusLabel,
+  });
+  const [isOpen, setIsOpen] = useState(effectiveDefaultOpen);
   const hasDetails =
     detailParts.length > 0 ||
     Boolean(skillReadFileLabel) ||
+    Boolean(readFilePreview) ||
     Boolean(outputSummary) ||
     sandboxDetails.length > 0 ||
     sandboxTimeline.length > 0 ||
@@ -290,8 +346,8 @@ export function AssistantToolCard({
   const hasExpandableContent = hasDetails || Boolean(children);
 
   useEffect(() => {
-    setIsOpen(defaultOpen ?? shouldAutoOpenToolStatus(statusLabel));
-  }, [defaultOpen, statusLabel]);
+    setIsOpen(effectiveDefaultOpen);
+  }, [effectiveDefaultOpen]);
 
   return (
     <div className="group text-muted-foreground transition-colors hover:text-foreground">
@@ -335,17 +391,15 @@ export function AssistantToolCard({
         ) : null}
       </button>
       {isOpen && hasExpandableContent ? (
-        <div
-          className={cn(
-            ASSISTANT_ACTIVITY_DETAIL_CLASS,
-            contentClassName,
-          )}
-        >
+        <div className={cn(ASSISTANT_ACTIVITY_DETAIL_CLASS, contentClassName)}>
           {hasDetails && detailParts.length > 0 ? (
             <p className="break-words">{detailParts.join(" · ")}</p>
           ) : null}
           {hasDetails && skillReadFileLabel ? (
             <p className="break-words">Read file: {skillReadFileLabel}</p>
+          ) : null}
+          {hasDetails && readFilePreview ? (
+            <ReadFilePreviewDetails preview={readFilePreview} />
           ) : null}
           {hasDetails && toolStep?.detail ? (
             <p className="break-words">{toolStep.detail}</p>

@@ -20,7 +20,11 @@ import type {
   DeepAgentTurnOutcome,
 } from "../agent/turn/runner";
 import type { MessageRecord } from "../../content/types";
-import type { PreparedThreadTurn, ToolCallTrace } from "../turn/types";
+import type {
+  MeteredLlmCallTrace,
+  PreparedThreadTurn,
+  ToolCallTrace,
+} from "../turn/types";
 import { SANDBOX_EXECUTE_TOOL_CALL_ID_REQUIRED } from "../turn/sandbox-execute-error";
 
 afterAll(async () => {
@@ -144,6 +148,41 @@ function createConfirmationToolCall(
     error: null,
     sequence: 1,
     approvalConfirmationId: confirmation.id,
+    ...overrides,
+  };
+}
+
+function createMeteredLlmCall(
+  overrides: Partial<MeteredLlmCallTrace> = {},
+): MeteredLlmCallTrace {
+  return {
+    id: "llm-call:user-message-1:gen-1",
+    operation: "chat.stream",
+    modelKind: "chat",
+    modelAlias: "test-model",
+    profileAlias: "test-profile",
+    gatewayConfigId: "gateway-1",
+    usage: {
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+    },
+    billingStatus: "metered",
+    consumedCredits: 3,
+    billedBy: "provider_cost",
+    skipReason: null,
+    idempotencyKey: "llm-call:user-message-1:gen-1",
+    referenceId: "thread:thread-1:message:user-message-1:llm-call:1",
+    providerCostUsd: 0.001,
+    costSource: "provider_actual",
+    missingPriceComponents: [],
+    pricingSnapshot: null,
+    metadata: {
+      threadId: "thread-1",
+      messageId: "user-message-1",
+      traceId: "user-message-1",
+      generationId: "gen-1",
+    },
     ...overrides,
   };
 }
@@ -1116,7 +1155,7 @@ test("streamThreadEvents persists terminal command verification thinking steps",
     items: [],
     sequence: 1,
     description:
-      "Command failed because publish_sandbox_artifact did not create a slides artifact.",
+      "Command failed because publish_artifact did not create a slides artifact.",
   };
   const turnService = createTurnService({
     finalize: async (input) => {
@@ -1162,7 +1201,7 @@ test("streamThreadEvents persists terminal command verification thinking steps",
         outcome: {
           ...outcome,
           assistantContent:
-            "Command failed because publish_sandbox_artifact did not create a slides artifact.",
+            "Command failed because publish_artifact did not create a slides artifact.",
           finishReason: "command_success_criteria_failed",
           thinkingSteps: [commandStep],
         },
@@ -1625,6 +1664,61 @@ test("streamThreadEvents preserves preflight billing for finalization", async ()
   );
 });
 
+test("streamThreadEvents passes metered LLM calls to finalization", async () => {
+  const meteredLlmCall = createMeteredLlmCall();
+  let finalizedMeteredCalls: MeteredLlmCallTrace[] | undefined;
+  const turnService = createTurnService({
+    finalize: async (input) => {
+      finalizedMeteredCalls = (
+        input as { meteredLlmCalls?: MeteredLlmCallTrace[] }
+      ).meteredLlmCalls;
+      return {
+        assistantMessage: createAssistantMessageRecord({
+          id: "assistant-message-1",
+          content: "Answer",
+          creditsConsumed: 3,
+        }),
+        billing: {
+          teamId: "team-1",
+          consumedCredits: 3,
+          availableCredits: 97,
+          consumedThisCycle: 3,
+          idempotencyReplayed: false,
+        },
+      };
+    },
+  });
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "billing",
+        meteredLlmCall,
+      };
+      yield { type: "text-delta", delta: "Answer" };
+      yield {
+        type: "done",
+        outcome: { ...outcome, meteredLlmCalls: [meteredLlmCall] },
+      };
+    },
+    async () => null,
+  );
+
+  for await (const _event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  })) {
+    // Drain stream.
+  }
+
+  assert.deepEqual(finalizedMeteredCalls, [meteredLlmCall]);
+});
+
 test("streamThreadEvents sends available citations when final text uses none", async () => {
   const citation = {
     citation: "c1",
@@ -1885,6 +1979,62 @@ test("streamThreadEvents preserves preflight billing on persisted errors", async
     errorPrepared?.preflightBilling,
     preparedWithPreflightBilling.preflightBilling,
   );
+});
+
+test("streamThreadEvents preserves metered LLM calls on persisted errors", async () => {
+  const meteredLlmCall = createMeteredLlmCall({
+    id: "llm-call:user-message-1:gen-before-tool-error",
+    consumedCredits: 4,
+    metadata: {
+      threadId: "thread-1",
+      messageId: "user-message-1",
+      traceId: "user-message-1",
+      generationId: "gen-before-tool-error",
+      operation: "chat.stream",
+    },
+  });
+  let errorMeteredCalls: MeteredLlmCallTrace[] | undefined;
+  const turnService = createTurnService();
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "billing",
+        meteredLlmCall,
+      };
+      throw new Error("tool exploded after model usage");
+    },
+    async () => null,
+    async (input) => {
+      errorMeteredCalls = input.partialState?.meteredLlmCalls;
+      return createAssistantMessageRecord({
+        id: "assistant-error-1",
+        content: input.contentError.message,
+        creditsConsumed: 4,
+        metadata: {
+          isError: true,
+          meteredLlmCalls: errorMeteredCalls ?? [],
+          meteredLlmCreditsConsumed: 4,
+          billingFinalizerSkipped: true,
+          billingFinalizerSkipReason: "model_error",
+        },
+      });
+    },
+  );
+
+  for await (const _event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "Use a tool after answering",
+  })) {
+    // Drain stream.
+  }
+
+  assert.deepEqual(errorMeteredCalls, [meteredLlmCall]);
 });
 
 test("streamThreadEvents preserves partial assistant content for persisted errors", async () => {

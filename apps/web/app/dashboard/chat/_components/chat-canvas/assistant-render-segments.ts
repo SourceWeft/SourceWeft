@@ -1,4 +1,4 @@
-import type { MessageRenderBlock, ToolCallRecord } from "./types";
+import type { MessageRenderBlock } from "./types";
 
 export type AssistantAnswerBlock = Extract<MessageRenderBlock, { type: "text" }>;
 
@@ -70,17 +70,8 @@ export function buildAssistantRenderSegments(
     inlineBlocks.push(block);
   }
 
-  let lastWorkflowBlockIndex = -1;
-
-  for (let index = inlineBlocks.length - 1; index >= 0; index -= 1) {
-    if (inlineBlocks[index]?.type !== "text") {
-      lastWorkflowBlockIndex = index;
-      break;
-    }
-  }
-
-  for (const [index, block] of inlineBlocks.entries()) {
-    if (block.type === "text" && index > lastWorkflowBlockIndex) {
+  for (const block of inlineBlocks) {
+    if (block.type === "text") {
       appendAnswerSegment(segments, block);
       continue;
     }
@@ -97,63 +88,4 @@ export function buildAssistantRenderSegments(
   }
 
   return segments;
-}
-
-export function formatWorkedDuration(durationMs: number) {
-  const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
-
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  return seconds > 0 ? `${minutes}m${seconds}s` : `${minutes}m`;
-}
-
-export function inferWorkflowDurationMs(input: {
-  blocks: AssistantWorkflowBlock[];
-  toolCalls?: ToolCallRecord[];
-}) {
-  const reasoningDurationMs = input.blocks.reduce((sum, block) => {
-    if (block.type !== "reasoning") {
-      return sum;
-    }
-    return typeof block.durationMs === "number" && Number.isFinite(block.durationMs)
-      ? sum + block.durationMs
-      : sum;
-  }, 0);
-  const toolDurationMs = input.blocks.reduce((sum, block) => {
-    if (block.type !== "tool") {
-      return sum;
-    }
-    const latencyMs = input.toolCalls?.find(
-      (toolCall) => toolCall.id === block.toolCallId,
-    )?.latencyMs;
-    return typeof latencyMs === "number" && Number.isFinite(latencyMs)
-      ? sum + latencyMs
-      : sum;
-  }, 0);
-
-  return reasoningDurationMs + toolDurationMs;
-}
-
-export function getWorkflowHeaderLabel(input: {
-  durationMs?: number | null;
-  isRunning: boolean;
-}) {
-  if (input.isRunning) {
-    return "Working";
-  }
-
-  if (
-    typeof input.durationMs !== "number" ||
-    !Number.isFinite(input.durationMs) ||
-    input.durationMs <= 0
-  ) {
-    return "Finished working";
-  }
-
-  return `Worked for ${formatWorkedDuration(input.durationMs)}`;
 }

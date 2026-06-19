@@ -16,7 +16,7 @@ const TEST_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy = {
   defaultCwd: "/workspace",
   prepareTargetRoots: ["/workspace/input", "/workspace"],
   collectSourceRoots: ["/workspace/output", "/workspace"],
-  readWriteRoots: ["/workspace", "/tmp/sourceweft"],
+  readWriteRoots: ["/workspace"],
 };
 
 const context: SandboxRuntimeContext = {
@@ -408,6 +408,40 @@ test("SourceWeftSandboxBackend reads and writes sandbox files without user execu
   );
 });
 
+test("SourceWeftSandboxBackend skips read_file on binary image files", async () => {
+  const { backend, files, provider } = createBackend();
+  files.set(
+    "/workspace/ppt-deck/qa/slide-01.jpg",
+    new Uint8Array([0xff, 0xd8, 0xff]),
+  );
+
+  const result = await backend.read("/workspace/ppt-deck/qa/slide-01.jpg");
+
+  assert.equal(result.error, undefined);
+  assert.equal(
+    result.content,
+    "Skipped binary file: /workspace/ppt-deck/qa/slide-01.jpg (image/jpeg). read_file only supports text.",
+  );
+  assert.equal(result.mimeType, "image/jpeg");
+  assert.deepEqual(provider.systemExecuted, []);
+});
+
+test("SourceWeftSandboxBackend returns recoverable errors for sandbox file paths outside workspace", async () => {
+  const { backend, provider } = createBackend();
+
+  const read = await backend.read("/tmp/qa_hires/slide-01.jpg");
+  const raw = await backend.readRaw("/tmp/qa_hires/slide-01.jpg");
+  const ls = await backend.ls("/tmp/qa_hires");
+  const grep = await backend.grep("slide", "/tmp/qa_hires");
+  const glob = await backend.glob("*.jpg", "/tmp/qa_hires");
+
+  for (const result of [read, raw, ls, grep, glob]) {
+    assert.match(result.error ?? "", /SANDBOX_READ_PATH_DENIED/u);
+    assert.match(result.error ?? "", /\/workspace/u);
+  }
+  assert.deepEqual(provider.systemExecuted, []);
+});
+
 test("SourceWeftSandboxBackend treats /skills as a SourceWeft DB-backed VFS path outside sandbox file tools", async () => {
   const { backend, provider } = createBackend();
 
@@ -426,12 +460,11 @@ test("SourceWeftSandboxBackend treats /skills as a SourceWeft DB-backed VFS path
   const executeResult = await backend.execute(
     "node /skills/ppt-deck/scripts/run.js",
   );
-  assert.deepEqual(executeResult, {
-    output: "user execute",
-    exitCode: 0,
-    truncated: false,
-  });
-  assert.deepEqual(provider.executed, ["node /skills/ppt-deck/scripts/run.js"]);
+  assert.equal(executeResult.exitCode, 1);
+  assert.equal(executeResult.truncated, false);
+  assert.match(executeResult.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
+  assert.match(executeResult.output, /\/skills/u);
+  assert.deepEqual(provider.executed, []);
 });
 
 test("SourceWeftSandboxBackend does not stage skills before execute", async () => {
@@ -449,7 +482,28 @@ test("SourceWeftSandboxBackend does not stage skills before execute", async () =
 test("SourceWeftSandboxBackend passes raw execute commands with backend-controlled limits", async () => {
   const { backend, provider } = createBackend();
   const command =
-    "GITHUB_TOKEN=caller-provided node /work/a.js && cat /kb/source.md";
+    "GITHUB_TOKEN=caller-provided node /workspace/a.js && cat /workspace/source.md";
+
+  assert.deepEqual(await backend.execute(command), {
+    output: "user execute",
+    exitCode: 0,
+    truncated: false,
+  });
+
+  assert.deepEqual(provider.executeInputs, [
+    {
+      providerSandboxId: "provider-sandbox-1",
+      command,
+      cwd: "/workspace",
+      timeoutMs: limits.commandTimeoutMs,
+      maxOutputChars: limits.maxOutputChars,
+    },
+  ]);
+});
+
+test("SourceWeftSandboxBackend passes multiline execute commands through unchanged", async () => {
+  const { backend, provider } = createBackend();
+  const command = "set -e\npwd\necho ok";
 
   assert.deepEqual(await backend.execute(command), {
     output: "user execute",
@@ -483,7 +537,7 @@ test("SourceWeftSandboxBackend returns recoverable failure for execute commands 
   assert.equal(result.exitCode, 1);
   assert.equal(result.truncated, false);
   assert.match(result.output, /SANDBOX_EXECUTE_COMMAND_DENIED/u);
-  assert.match(result.output, /write_file\/edit_file/u);
+  assert.match(result.output, /unsafe control characters/u);
   assert.match(
     result.output,
     /Diagnostics: toolName=execute commandFingerprint=sha256:/u,
@@ -535,6 +589,31 @@ test("SourceWeftSandboxBackend returns recoverable failure for empty execute com
   );
 });
 
+test("SourceWeftSandboxBackend returns recoverable failure for VFS paths in execute commands", async () => {
+  const operationStore = createOperationStore();
+  const { provider } = createProvider();
+  const sandboxStore = createSandboxStore();
+  const { backend } = createBackendWithProvider(
+    provider,
+    sandboxStore,
+    operationStore,
+  );
+
+  const result = await backend.execute("mkdir -p /workfiles/ppt-deck");
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.truncated, false);
+  assert.match(result.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
+  assert.match(result.output, /prepare_sandbox_workspace/u);
+  assert.match(result.output, /\/workspace/u);
+  assert.deepEqual(provider.executed, []);
+  assert.deepEqual(sandboxStore.releaseReasons, []);
+  assert.equal(
+    operationStore.completed[0]?.result?.failureCode,
+    "SANDBOX_EXECUTE_VFS_PATH_DENIED",
+  );
+});
+
 test("SourceWeftSandboxBackend replays recoverable execute failures by tool call id", async () => {
   const operationStore = createReplayOperationStore();
   const { backend, provider } = createBackendWithOperationStore(operationStore);
@@ -568,6 +647,35 @@ test("SourceWeftSandboxBackend escalates repeated recoverable execute failures i
   });
 
   assert.match(first.output, /SANDBOX_EXECUTE_COMMAND_DENIED/u);
+  assert.doesNotMatch(first.output, /Repeated execute input failure/u);
+  assert.match(second.output, /Repeated execute input failure detected/u);
+  assert.match(second.output, /repeatCount=2/u);
+  assert.deepEqual(provider.executed, []);
+  assert.deepEqual(
+    operationStore.completed.map((entry) => entry.result?.repeatCount),
+    [1, 2],
+  );
+});
+
+test("SourceWeftSandboxBackend escalates repeated VFS path execute failures in turn memory", async () => {
+  const operationStore = createOperationStore();
+  const { provider } = createProvider();
+  const { backend } = createBackendWithProvider(
+    provider,
+    createSandboxStore(),
+    operationStore,
+    contextWithoutExecuteToolCallId,
+    false,
+  );
+
+  const first = await backend.execute("ls /workfiles", {
+    toolCallId: "call-vfs-1",
+  });
+  const second = await backend.execute("ls /workfiles", {
+    toolCallId: "call-vfs-2",
+  });
+
+  assert.match(first.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
   assert.doesNotMatch(first.output, /Repeated execute input failure/u);
   assert.match(second.output, /Repeated execute input failure detected/u);
   assert.match(second.output, /repeatCount=2/u);
@@ -701,16 +809,27 @@ test("SourceWeftSandboxBackend replays duplicate execute operations by canonical
   );
 });
 
-test("SourceWeftSandboxBackend releases sandbox lease when execute provider throws", async () => {
+test("SourceWeftSandboxBackend throws and records failed operation when execute provider throws", async () => {
   const { provider } = createProvider();
   provider.execute = async () => {
     throw new Error("provider bridge failed");
   };
   const sandboxStore = createSandboxStore();
-  const { backend } = createBackendWithProvider(provider, sandboxStore);
+  const operationStore = createOperationStore();
+  const { backend } = createBackendWithProvider(
+    provider,
+    sandboxStore,
+    operationStore,
+  );
 
   await assert.rejects(
     () => backend.execute("node /workspace/ppt-deck/a.js"),
+    /provider bridge failed/u,
+  );
+
+  assert.equal(operationStore.completed.at(-1)?.status, "failed");
+  assert.match(
+    String(operationStore.completed.at(-1)?.result?.error),
     /provider bridge failed/u,
   );
   assert.deepEqual(sandboxStore.releaseReasons, [
@@ -782,12 +901,11 @@ test("SourceWeftSandboxBackend rejects SourceWeft DB-backed VFS paths for sandbo
     /SANDBOX_FILE_PATH_DENIED|SANDBOX_READ_PATH_DENIED/u,
   );
   const executeResult = await backend.execute("node /workfiles/output.js");
-  assert.deepEqual(executeResult, {
-    output: "user execute",
-    exitCode: 0,
-    truncated: false,
-  });
-  assert.deepEqual(provider.executed, ["node /workfiles/output.js"]);
+  assert.equal(executeResult.exitCode, 1);
+  assert.equal(executeResult.truncated, false);
+  assert.match(executeResult.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
+  assert.match(executeResult.output, /\/workfiles/u);
+  assert.deepEqual(provider.executed, []);
   assert.deepEqual(provider.ensuredDirectories, []);
   assert.deepEqual(provider.uploadedFiles, []);
 });
@@ -806,11 +924,10 @@ test("SourceWeftSandboxBackend returns per-file permission errors for invalid do
   );
 });
 
-test("SourceWeftSandboxBackend rejects absolute glob patterns outside sandbox roots", async () => {
+test("SourceWeftSandboxBackend returns recoverable error for absolute glob patterns outside sandbox roots", async () => {
   const { backend } = createBackend();
 
-  await assert.rejects(
-    () => backend.glob("/workfiles/**/*.md", "/workspace/ppt-deck"),
-    /SANDBOX_READ_PATH_DENIED/u,
-  );
+  const result = await backend.glob("/workfiles/**/*.md", "/workspace/ppt-deck");
+
+  assert.match(result.error ?? "", /SANDBOX_READ_PATH_DENIED/u);
 });

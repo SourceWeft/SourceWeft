@@ -1,4 +1,5 @@
 import {
+  resolveArtifactPreviewImageUrl,
   resolveArtifactPageUrlFromArtifact,
   resolveArtifactProxyFileUrlFromArtifact,
 } from "../artifact-urls";
@@ -19,6 +20,41 @@ export function artifactTitle(artifact: ArtifactListItem) {
 
 function hasArtifactFile(artifact: ArtifactListItem) {
   return Boolean(artifact.storageKey || artifact.previewUrl);
+}
+
+function toRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+export function artifactPreviewImageMetadata(artifact: ArtifactListItem) {
+  const payload = toRecord(artifact.payloadJson);
+  const previewImage = toRecord(payload?.previewImage);
+  const storageKey =
+    typeof previewImage?.storageKey === "string"
+      ? previewImage.storageKey.trim()
+      : "";
+  if (!storageKey) {
+    return null;
+  }
+  return {
+    altText:
+      typeof previewImage?.altText === "string" &&
+      previewImage.altText.trim().length > 0
+        ? previewImage.altText.trim()
+        : null,
+    fileName:
+      typeof previewImage?.fileName === "string" &&
+      previewImage.fileName.trim().length > 0
+        ? previewImage.fileName.trim()
+        : "preview.jpg",
+    mimeType:
+      typeof previewImage?.mimeType === "string"
+        ? previewImage.mimeType.trim()
+        : "",
+    storageKey,
+  };
 }
 
 function canOpenArtifactFile(artifact: ArtifactListItem) {
@@ -61,6 +97,20 @@ export function resolveArtifactProxyFileUrl(input: {
   return resolveArtifactProxyFileUrlFromArtifact({
     artifactId: artifact.id,
     fallbackUrl: artifact.previewUrl,
+    workspaceId,
+  });
+}
+
+export function resolveArtifactPreviewImageProxyUrl(input: {
+  artifact: ArtifactListItem;
+  workspaceId?: string | null;
+}) {
+  const { artifact, workspaceId } = input;
+  if (!workspaceId || !artifactPreviewImageMetadata(artifact)) {
+    return null;
+  }
+  return resolveArtifactPreviewImageUrl({
+    artifactId: artifact.id,
     workspaceId,
   });
 }

@@ -65,6 +65,8 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
 
   assert.match(withoutSkills.read_file, /default limit is 100 source lines/);
   assert.match(withoutSkills.read_file, /explicit limits are capped at 1000/);
+  assert.match(withoutSkills.read_file, /Do not use read_file for binary files/);
+  assert.match(withoutSkills.read_file, /images, PDFs, PPTX decks/);
   assert.match(
     withoutSkills.read_file,
     /Only \/kb read_file output may include valid/,

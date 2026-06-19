@@ -8,13 +8,11 @@ export function shouldShowAssistantLiveThinking(input: {
 export function shouldShowAssistantBottomLoading(input: {
   isCancelled?: boolean;
   isStreaming: boolean;
-  isTextPaused?: boolean;
   threadRunStatus?: string;
 }) {
   return (
     input.isStreaming &&
     input.isCancelled !== true &&
-    input.isTextPaused !== true &&
     input.threadRunStatus !== "waiting_for_approval"
   );
 }

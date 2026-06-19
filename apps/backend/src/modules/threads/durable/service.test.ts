@@ -303,10 +303,10 @@ test("forced stop preserves partial artifact snapshot metadata", async () => {
       toolCalls: [
         {
           id: "pptx-tool",
-          tool: "publish_sandbox_artifact",
+          tool: "publish_artifact",
           input: {},
           output: {
-            type: "publish_sandbox_artifact_progress",
+            type: "publish_artifact_progress",
             stage: "planning",
             toolCallId: "pptx-tool",
             title: "ASR",
@@ -332,7 +332,7 @@ test("forced stop preserves partial artifact snapshot metadata", async () => {
           createdAt: new Date(0).toISOString(),
           updatedAt: new Date(0).toISOString(),
           toolCallId: "pptx-tool",
-          tool: "publish_sandbox_artifact",
+          tool: "publish_artifact",
           status: "running",
           input: {},
           output: null,
@@ -378,10 +378,10 @@ test("forced stop preserves partial artifact snapshot metadata", async () => {
   assert.deepEqual(snapshotJson?.toolCalls, [
     {
       id: "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       input: {},
       output: {
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
         stage: "planning",
         toolCallId: "pptx-tool",
         title: "ASR",
@@ -784,7 +784,7 @@ test("finished active snapshots can be terminalized without waiting for heartbea
         parentMessageId: null,
         role: "assistant",
         content:
-          "Command failed because publish_sandbox_artifact did not create a slides artifact.",
+          "Command failed because publish_artifact did not create a slides artifact.",
         createdBy: null,
         model: null,
         creditsConsumed: null,
@@ -860,7 +860,7 @@ test("finished active run is marked terminal from snapshot", async () => {
         parentMessageId: null,
         role: "assistant",
         content:
-          "Command failed because publish_sandbox_artifact did not create a slides artifact.",
+          "Command failed because publish_artifact did not create a slides artifact.",
         createdBy: null,
         model: null,
         creditsConsumed: null,

@@ -16,7 +16,7 @@ const policy: SandboxProviderPathPolicy = {
   defaultCwd: "/workspace",
   prepareTargetRoots: ["/workspace/input", "/workspace"],
   collectSourceRoots: ["/workspace/output", "/workspace"],
-  readWriteRoots: ["/workspace", "/tmp/sourceweft"],
+  readWriteRoots: ["/workspace"],
 };
 
 test("sandbox path validation accepts only explicit SourceWeft and sandbox paths", () => {
@@ -44,10 +44,6 @@ test("sandbox path validation accepts only explicit SourceWeft and sandbox paths
   assert.equal(
     assertExecuteCwd("/workspace/ppt-deck", policy),
     "/workspace/ppt-deck",
-  );
-  assert.equal(
-    assertSandboxReadPath("/tmp/sourceweft/status.json", policy),
-    "/tmp/sourceweft/status.json",
   );
   assert.equal(
     assertSandboxWritePath("/workspace/ppt-deck/deck.js", policy),
@@ -97,6 +93,14 @@ test("sandbox bridge path validation rejects kb, skills, traversal, and host pat
     /SourceWeft DB-backed VFS logical path/,
   );
   assert.throws(
+    () => assertSandboxReadPath("/tmp/sourceweft/status.json", policy),
+    /SANDBOX_READ_PATH_DENIED/,
+  );
+  assert.throws(
+    () => assertSandboxReadPath("/tmp/file", policy),
+    /SANDBOX_READ_PATH_DENIED/,
+  );
+  assert.throws(
     () => assertSandboxWritePath("/skills/ppt-deck/SKILL.md", policy),
     /SANDBOX_READ_PATH_DENIED/,
   );
@@ -131,22 +135,33 @@ test("sandbox path validation is driven by provider policy", () => {
 });
 
 describe("assertExecuteCommandPathPolicy", () => {
-  test("does not interpret absolute paths in execute commands as SourceWeft VFS paths", () => {
+  test("rejects SourceWeft VFS paths in execute commands", () => {
     assert.equal(
       assertExecuteCommandPathPolicy("python /work/foo.py"),
       "python /work/foo.py",
     );
-    assert.equal(
-      assertExecuteCommandPathPolicy("python /workfiles/foo.py"),
-      "python /workfiles/foo.py",
+    assert.throws(
+      () => assertExecuteCommandPathPolicy("mkdir -p /workfiles/ppt-deck"),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
-    assert.equal(
-      assertExecuteCommandPathPolicy("cat '/kb/source.txt'"),
-      "cat '/kb/source.txt'",
+    assert.throws(
+      () => assertExecuteCommandPathPolicy("ls /kb"),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
-    assert.equal(
-      assertExecuteCommandPathPolicy("node /skills/tool-a/scripts/run.js"),
-      "node /skills/tool-a/scripts/run.js",
+    assert.throws(
+      () =>
+        assertExecuteCommandPathPolicy(
+          "set -e\ncat /workfiles/ppt-deck/deck.js\npwd",
+        ),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
+    );
+    assert.throws(
+      () => assertExecuteCommandPathPolicy("node /skills/tool-a/scripts/run.js"),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
+    );
+    assert.throws(
+      () => assertExecuteCommandPathPolicy("printf '/workfiles literal only'"),
+      /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
   });
 
@@ -162,7 +177,7 @@ describe("assertExecuteCommandPathPolicy", () => {
     );
   });
 
-  test("rejects empty commands and control characters but leaves shell path syntax to the provider", () => {
+  test("rejects empty commands and unsafe control characters but leaves shell path syntax to the provider", () => {
     assert.throws(
       () => assertExecuteCommandPathPolicy("  "),
       /SANDBOX_EXECUTE_COMMAND_DENIED: command is empty/,
@@ -170,6 +185,22 @@ describe("assertExecuteCommandPathPolicy", () => {
     assert.throws(
       () => assertExecuteCommandPathPolicy("cat good\u0000bad"),
       /SANDBOX_EXECUTE_COMMAND_DENIED/,
+    );
+    assert.throws(
+      () => assertExecuteCommandPathPolicy("cat good\u000bbad"),
+      /SANDBOX_EXECUTE_COMMAND_DENIED/,
+    );
+    assert.equal(
+      assertExecuteCommandPathPolicy("set -e\npwd\necho ok"),
+      "set -e\npwd\necho ok",
+    );
+    assert.equal(
+      assertExecuteCommandPathPolicy("set -e\r\npwd\r\necho ok"),
+      "set -e\r\npwd\r\necho ok",
+    );
+    assert.equal(
+      assertExecuteCommandPathPolicy("printf 'x\t%s' value"),
+      "printf 'x\t%s' value",
     );
     assert.equal(
       assertExecuteCommandPathPolicy("cat /workspace/../etc/passwd"),
@@ -181,7 +212,7 @@ describe("assertExecuteCommandPathPolicy", () => {
     );
   });
 
-  test("allows sandbox workspace and temp paths", () => {
+  test("allows shell commands without interpreting command path strings", () => {
     assert.equal(assertExecuteCommandPathPolicy("npm test"), "npm test");
     assert.equal(
       assertExecuteCommandPathPolicy("node scripts/run.js"),

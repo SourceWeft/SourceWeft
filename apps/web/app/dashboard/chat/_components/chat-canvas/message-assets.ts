@@ -14,7 +14,7 @@ import type {
 } from "./types";
 
 const TOOL_ONLY_EMPTY_RESPONSE_TEXT = "Model returned an empty response.";
-const PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME = "publish_sandbox_artifact";
+const PUBLISH_ARTIFACT_TOOL_NAME = "publish_artifact";
 
 export type GeneratedImageArtifact = {
   artifactId: string | null;
@@ -29,6 +29,7 @@ export type GeneratedPresentationArtifact = {
   fileName: string | null;
   generationMode: "visual_html" | "editable_native" | null;
   htmlUrl: string | null;
+  previewImageUrl: string | null;
   previewRenderer: "html_iframe" | "pptxviewjs" | null;
   pptxUrl: string | null;
   renderStrategy: string | null;
@@ -331,7 +332,7 @@ export function resolveGeneratedPresentationArtifact(
   }
 
   if (
-    toolCall.tool === PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME &&
+    toolCall.tool === PUBLISH_ARTIFACT_TOOL_NAME &&
     toolCall.error
   ) {
     return null;
@@ -392,12 +393,15 @@ export function resolveGeneratedPresentationArtifact(
   const pptxUrl =
     getToolOutputField(toolCall.output, "pptx_url") ||
     getToolOutputField(toolCall.output, "pptxUrl");
+  const previewImageUrl =
+    getToolOutputField(toolCall.output, "preview_image_url") ||
+    getToolOutputField(toolCall.output, "previewImageUrl");
   const renderStrategy = getToolOutputField(toolCall.output, "render_strategy");
   const status = normalizeGeneratedPresentationArtifactStatus(
     getToolOutputField(toolCall.output, "status"),
   );
 
-  if (toolCall.tool === PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME && !artifactUrl) {
+  if (toolCall.tool === PUBLISH_ARTIFACT_TOOL_NAME && !artifactUrl) {
     return null;
   }
 
@@ -412,6 +416,7 @@ export function resolveGeneratedPresentationArtifact(
     fileName: fileName || null,
     generationMode,
     htmlUrl: htmlUrl || null,
+    previewImageUrl: previewImageUrl || null,
     previewRenderer,
     pptxUrl: pptxUrl || null,
     renderStrategy: renderStrategy || null,

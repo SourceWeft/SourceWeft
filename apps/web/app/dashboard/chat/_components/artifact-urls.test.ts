@@ -4,6 +4,7 @@ import {
   artifactApiUrlToPageUrl,
   artifactApiUrlToProxyFileUrl,
   normalizeWebAssetUrl,
+  resolveArtifactPreviewImageUrl,
   resolveArtifactProxyAssetUrl,
   resolveArtifactPageUrl,
   resolveArtifactPageUrlFromArtifact,
@@ -45,6 +46,25 @@ test("resolveArtifactProxyFileUrl builds the internal file proxy URL", () => {
       workspaceId: "workspace-1",
     }),
     "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1",
+  );
+});
+
+test("resolveArtifactPreviewImageUrl builds the semantic preview image proxy URL", () => {
+  assert.equal(
+    resolveArtifactPreviewImageUrl({
+      artifactId: "artifact-1",
+      workspaceId: "workspace-1",
+    }),
+    "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+  );
+});
+
+test("artifactApiUrlToProxyFileUrl preserves semantic preview image proxy URLs", () => {
+  assert.equal(
+    artifactApiUrlToProxyFileUrl(
+      "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+    ),
+    "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
   );
 });
 

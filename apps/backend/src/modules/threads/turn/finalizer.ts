@@ -4,7 +4,6 @@ import {
   buildGatewayAuditMetadata,
   recordGatewayOperationEvent,
 } from "../../content/model-gateway-audit";
-import { meterBillableModelUsage } from "../../content/model-billing";
 import { consumeSourceWeftContextCompressionReport } from "../agent/context-compression";
 import {
   createMessageRecord,
@@ -58,21 +57,27 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     (sum, item) => sum + item.consumedCredits,
     0,
   );
-  const contextCompression =
-    consumeSourceWeftContextCompressionReport(prepared.userMessage.id) ?? {
-      enabled: false,
-      contextEditingEnabled: false,
-      toolPruned: false,
-      summarized: false,
-      summaryModelAlias: null,
-      estimatedInputTokensBefore: null,
-      estimatedInputTokensAfter: null,
-      retainedMessageCount: null,
-      triggerReason: "not_recorded",
-      prunedToolCount: 0,
-      contextLength: 0,
-      usableInputTokens: 0,
-    };
+  const meteredLlmCalls = input.meteredLlmCalls ?? [];
+  const meteredLlmCreditsConsumed = meteredLlmCalls.reduce(
+    (sum, item) => sum + item.consumedCredits,
+    0,
+  );
+  const contextCompression = consumeSourceWeftContextCompressionReport(
+    prepared.userMessage.id,
+  ) ?? {
+    enabled: false,
+    contextEditingEnabled: false,
+    toolPruned: false,
+    summarized: false,
+    summaryModelAlias: null,
+    estimatedInputTokensBefore: null,
+    estimatedInputTokensAfter: null,
+    retainedMessageCount: null,
+    triggerReason: "not_recorded",
+    prunedToolCount: 0,
+    contextLength: 0,
+    usableInputTokens: 0,
+  };
   const {
     providerCostUsd,
     pricingSnapshot,
@@ -113,33 +118,20 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     },
   });
 
-  const billedUsage = await meterBillableModelUsage({
-    billing: input.billing,
-    teamId: prepared.workspace.organizationId,
-    workspaceId: prepared.workspace.id,
-    actorUserId: prepared.userId,
-    feature: "chat",
-    operation: input.operation,
-    modelKind: "chat",
-    gatewayConfigId: prepared.chatProfile.gatewayConfigId,
-    profileAlias: prepared.profileAlias,
-    modelAlias: prepared.modelAlias,
-    referenceId: `thread:${prepared.thread.id}:message:${prepared.userMessage.id}`,
-    idempotencyKey: prepared.llmIdempotencyKey,
-    usage: input.usage,
-    llm: input.llm,
-    metadata: {
-      traceId: prepared.traceContext?.traceId ?? prepared.userMessage.id,
-      threadId: prepared.thread.id,
-      messageId: prepared.userMessage.id,
-      pricingSnapshot,
-      costSource,
-      missingPriceComponents,
-    },
-  });
-  const billing = billedUsage.billing;
   const totalCreditsConsumed =
-    billing.consumedCredits + preflightCreditsConsumed;
+    meteredLlmCreditsConsumed + preflightCreditsConsumed;
+  const billingSummary = await input.billing.getSummary(
+    prepared.workspace.organizationId,
+  );
+  const billing = {
+    teamId: prepared.workspace.organizationId,
+    consumedCredits: meteredLlmCreditsConsumed,
+    availableCredits: billingSummary.credits.available,
+    consumedThisCycle: billingSummary.credits.consumedThisCycle,
+    idempotencyReplayed: meteredLlmCalls.some(
+      (call) => call.billing?.idempotencyReplayed === true,
+    ),
+  };
 
   const existingAssistantMessage = input.assistantMessageId
     ? await findMessageRecord({
@@ -174,9 +166,25 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     providerCostUsd,
     costSource,
     missingPriceComponents,
-    billingSkipped: billedUsage.billedBy === "skipped",
-    billingSkipReason: billedUsage.skipReason,
-    billedBy: billedUsage.billedBy,
+    billingFinalizerSkipped: true,
+    billingFinalizerSkipReason: "llm_call_level_metering",
+    meteredLlmCalls,
+    meteredLlmCreditsConsumed,
+    billingSkipped:
+      meteredLlmCalls.length === 0 ||
+      meteredLlmCalls.every((call) => call.billingStatus === "skipped"),
+    billingSkipReason:
+      meteredLlmCalls.length === 0
+        ? "no_metered_llm_calls"
+        : meteredLlmCalls.every((call) => call.billingStatus === "skipped")
+          ? (meteredLlmCalls
+              .map((call) => call.skipReason)
+              .find((reason): reason is string => Boolean(reason)) ??
+            "llm_calls_skipped")
+          : null,
+    billedBy: meteredLlmCalls
+      .map((call) => call.billedBy)
+      .find((billedBy) => billedBy && billedBy !== "skipped"),
     preflightBilling: prepared.preflightBilling,
     preflightCreditsConsumed,
     modelAlias: prepared.modelAlias,

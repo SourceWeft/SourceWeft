@@ -78,6 +78,20 @@ test("non-slides artifact downloads keep payload file name", () => {
   );
 });
 
+test("generic file artifacts keep payload file name and MIME type", () => {
+  const artifact = {
+    artifactType: "file",
+    payloadJson: {
+      fileName: "table.csv",
+      mimeType: "text/csv",
+    },
+    title: "Table Export",
+  };
+
+  assert.equal(testExports.resolveArtifactFileName(artifact as never), "table.csv");
+  assert.equal(testExports.resolveArtifactContentType(artifact as never), "text/csv");
+});
+
 test("artifact capabilities distinguish files from image artifacts", () => {
   assert.deepEqual(
     testExports.buildArtifactCapabilities({
@@ -89,6 +103,7 @@ test("artifact capabilities distinguish files from image artifacts", () => {
       canOpenFile: true,
       canDownloadFile: true,
       canPreviewInline: true,
+      canRenderClientVideo: false,
     },
   );
   assert.deepEqual(
@@ -101,6 +116,140 @@ test("artifact capabilities distinguish files from image artifacts", () => {
       canOpenFile: false,
       canDownloadFile: false,
       canPreviewInline: false,
+      canRenderClientVideo: false,
     },
+  );
+});
+
+test("generic file artifact preview capability follows MIME type", () => {
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities({
+      artifactType: "file",
+      status: "ready",
+      storageKey: "workspace/artifact/report.pdf",
+      payloadJson: {
+        mimeType: "application/pdf",
+      },
+    } as never),
+    {
+      canOpenFile: true,
+      canDownloadFile: true,
+      canPreviewInline: true,
+      canRenderClientVideo: false,
+    },
+  );
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities({
+      artifactType: "file",
+      status: "ready",
+      storageKey: "workspace/artifact/page.html",
+      payloadJson: {
+        mimeType: "text/html",
+      },
+    } as never),
+    {
+      canOpenFile: true,
+      canDownloadFile: true,
+      canPreviewInline: true,
+      canRenderClientVideo: false,
+    },
+  );
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities({
+      artifactType: "file",
+      status: "ready",
+      storageKey: "workspace/artifact/data.csv",
+      payloadJson: {
+        mimeType: "text/csv; charset=utf-8",
+      },
+    } as never),
+    {
+      canOpenFile: true,
+      canDownloadFile: true,
+      canPreviewInline: true,
+      canRenderClientVideo: false,
+    },
+  );
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities({
+      artifactType: "file",
+      status: "ready",
+      storageKey: "workspace/artifact/archive.zip",
+      payloadJson: {
+        mimeType: "application/zip",
+      },
+    } as never),
+    {
+      canOpenFile: true,
+      canDownloadFile: true,
+      canPreviewInline: false,
+      canRenderClientVideo: false,
+    },
+  );
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities({
+      artifactType: "file",
+      status: "ready",
+      storageKey: "workspace/artifact/report.xlsx",
+      payloadJson: {
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+    } as never),
+    {
+      canOpenFile: true,
+      canDownloadFile: true,
+      canPreviewInline: false,
+      canRenderClientVideo: false,
+    },
+  );
+});
+
+test("video presentation artifact advertises browser render capability", () => {
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities({
+      artifactType: "video_presentation",
+      status: "running",
+      storageKey: null,
+    } as never),
+    {
+      canOpenFile: false,
+      canDownloadFile: false,
+      canPreviewInline: false,
+      canRenderClientVideo: true,
+    },
+  );
+});
+
+test("artifact preview image metadata resolves from payload", () => {
+  assert.deepEqual(
+    testExports.resolveArtifactPreviewImage({
+      artifactType: "slides",
+      status: "ready",
+      storageBucket: "content",
+      payloadJson: {
+        previewImage: {
+          storageKey: "workspaces/workspace-1/artifacts/artifact-1/preview.jpg",
+          mimeType: "image/jpeg",
+          fileName: "preview.jpg",
+        },
+      },
+    } as never),
+    {
+      contentType: "image/jpeg",
+      fileName: "preview.jpg",
+      storageBucket: "content",
+      storageKey: "workspaces/workspace-1/artifacts/artifact-1/preview.jpg",
+    },
+  );
+});
+
+test("artifact preview image metadata is unavailable for missing payload", () => {
+  assert.equal(
+    testExports.resolveArtifactPreviewImage({
+      status: "ready",
+      payloadJson: {},
+    } as never),
+    null,
   );
 });

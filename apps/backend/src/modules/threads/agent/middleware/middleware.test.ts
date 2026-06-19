@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { tool } from "langchain";
 import { test, vi } from "vitest";
+import { config } from "../../../../shared/config";
 import { logger } from "../../../../shared/logger";
 
 vi.mock("./context-compression", () => ({
@@ -29,6 +31,14 @@ type MiddlewareWithAfterAgent = {
   afterAgent?: (state: unknown) => unknown | Promise<unknown>;
 };
 
+type MiddlewareWithAfterModel = {
+  afterModel?:
+    | ((state: unknown, runtime?: unknown) => unknown | Promise<unknown>)
+    | {
+        hook: (state: unknown, runtime?: unknown) => unknown | Promise<unknown>;
+      };
+};
+
 type MiddlewareWithWrapToolCall = {
   wrapToolCall?: (
     request: unknown,
@@ -49,6 +59,17 @@ function afterAgentHook(middleware: unknown) {
     throw new Error("Expected afterAgent hook");
   }
   return hook;
+}
+
+function afterModelHook(middleware: unknown) {
+  const hook = (middleware as MiddlewareWithAfterModel).afterModel;
+  if (typeof hook === "function") {
+    return hook;
+  }
+  if (hook && typeof hook === "object" && typeof hook.hook === "function") {
+    return hook.hook;
+  }
+  throw new Error("Expected afterModel hook");
 }
 
 function wrapModelCallHook(middleware: unknown) {
@@ -76,16 +97,26 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       modelAlias: "chat-default",
       filesystemMounts: [],
       commandExecutionPolicy: { targetToolName: "target_tool" },
+      extraMiddleware: [{ name: "ExtraMiddleware" }],
     });
 
+    const expectedMiddlewareOrder = [
+      "SourceWeftImageHistorySanitizer",
+      "SourceWeftKnowledgeFilesystemDescriptions",
+      "SourceWeftCommandToolChoice",
+      "SourceWeftToolObservability",
+      "toolRetryMiddleware",
+      "SourceWeftContextCompressionTrace",
+      "modelRetryMiddleware",
+      "ToolCallLimitMiddleware",
+      "ExtraMiddleware",
+    ];
+
     assert.deepEqual(
-      stack.slice(0, 4).map((middleware) => middleware.name),
-      [
-        "SourceWeftImageHistorySanitizer",
-        "SourceWeftKnowledgeFilesystemDescriptions",
-        "SourceWeftCommandToolChoice",
-        "SourceWeftToolObservability",
-      ],
+      stack
+        .slice(0, expectedMiddlewareOrder.length)
+        .map((middleware) => middleware.name),
+      expectedMiddlewareOrder,
     );
   } finally {
     if (previousCompaction === undefined) {
@@ -93,6 +124,119 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
     } else {
       process.env.SOURCEWEFT_AGENT_COMPACTION_ENABLED = previousCompaction;
     }
+  }
+});
+
+test("tool retry only wraps safe read-only tools", async () => {
+  const stack = await createSourceWeftAgentMiddlewareStack({
+    modelAlias: "chat-default",
+    filesystemMounts: [],
+  });
+  const middleware = stack.find((item) => item.name === "toolRetryMiddleware");
+  assert.ok(middleware);
+
+  let readAttempts = 0;
+  const readResult = await wrapToolCallHook(middleware)(
+    {
+      toolCall: {
+        id: "call-read",
+        name: AGENT_TOOL_NAMES.readFile,
+        args: {},
+      },
+    },
+    async () => {
+      readAttempts += 1;
+      if (readAttempts === 1) {
+        throw new Error("temporary read failure");
+      }
+      return new ToolMessage({
+        content: "ok",
+        name: AGENT_TOOL_NAMES.readFile,
+        tool_call_id: "call-read",
+      });
+    },
+  );
+
+  assert.ok(ToolMessage.isInstance(readResult));
+  assert.equal(readAttempts, 2);
+
+  let executeAttempts = 0;
+  await assert.rejects(
+    wrapToolCallHook(middleware)(
+      {
+        toolCall: {
+          id: "call-execute",
+          name: AGENT_TOOL_NAMES.execute,
+          args: {},
+        },
+      },
+      async () => {
+        executeAttempts += 1;
+        throw new Error("execute failed");
+      },
+    ),
+    /execute failed/,
+  );
+  assert.equal(executeAttempts, 1);
+});
+
+test("tool call limit blocks calls beyond the configured run limit", async () => {
+  const originalAgentConfig = { ...config.chat.agent };
+
+  try {
+    config.chat.agent.toolCallRunLimit = 2;
+    config.chat.agent.toolCallThreadLimit = 10;
+
+    const stack = await createSourceWeftAgentMiddlewareStack({
+      modelAlias: "chat-default",
+      filesystemMounts: [],
+    });
+    const middleware = stack.find(
+      (item) => item.name === "ToolCallLimitMiddleware",
+    );
+    assert.ok(middleware);
+
+    const update = await afterModelHook(middleware)({
+      messages: [
+        new HumanMessage("Use tools"),
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "search_sources", args: {} },
+            { id: "call-2", name: "search_sources", args: {} },
+            { id: "call-3", name: "search_sources", args: {} },
+          ],
+        }),
+      ],
+      threadToolCallCount: {},
+      runToolCallCount: {},
+    });
+
+    const messages = (update as { messages?: unknown[] }).messages ?? [];
+    assert.equal(messages.length, 1);
+    const blocked = messages[0];
+    assert.ok(ToolMessage.isInstance(blocked));
+    const blockedToolMessage = blocked as ToolMessage;
+    assert.equal(blockedToolMessage.tool_call_id, "call-3");
+    assert.equal(blockedToolMessage.name, "search_sources");
+    assert.equal(
+      blockedToolMessage.content,
+      "Tool call limit exceeded. Do not make additional tool calls.",
+    );
+    assert.deepEqual(
+      (update as { threadToolCallCount?: unknown }).threadToolCallCount,
+      {
+        __all__: 2,
+      },
+    );
+    assert.deepEqual(
+      (update as { runToolCallCount?: unknown }).runToolCallCount,
+      {
+        __all__: 3,
+      },
+    );
+  } finally {
+    Object.assign(config.chat.agent, originalAgentConfig);
   }
 });
 
@@ -289,6 +433,72 @@ test("tool observability logs thrown tool errors", async () => {
     assert.equal(metadata.status, "error");
     assert.deepEqual(metadata.error, {
       name: "Error",
+      message: "Tool execution failed.",
+    });
+  } finally {
+    infoSpy.mockRestore();
+    errorSpy.mockRestore();
+  }
+});
+
+test("tool observability logs execute failure diagnostics without raw command", async () => {
+  const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+  const errorSpy = vi
+    .spyOn(logger, "error")
+    .mockImplementation(() => undefined);
+  const middleware = createSourceWeftToolObservabilityMiddleware({
+    context: { runId: "run-context" },
+  });
+
+  try {
+    const result = await wrapToolCallHook(middleware)(
+      {
+        toolCall: {
+          id: "call-execute",
+          name: "execute",
+          args: { command: "printf 'a\nb'" },
+        },
+      },
+      async () => ({
+        content: [
+          "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
+          "Hint: Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.",
+          "Diagnostics: toolName=execute commandFingerprint=sha256:abc failureCode=SANDBOX_EXECUTE_COMMAND_DENIED repeatCount=2 runId=run-1",
+          "[Command failed with exit code 1]",
+        ].join("\n"),
+        status: "error",
+      }),
+    );
+
+    assert.deepEqual(result, {
+      content: [
+        "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
+        "Hint: Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.",
+        "Diagnostics: toolName=execute commandFingerprint=sha256:abc failureCode=SANDBOX_EXECUTE_COMMAND_DENIED repeatCount=2 runId=run-1",
+        "[Command failed with exit code 1]",
+      ].join("\n"),
+      status: "error",
+    });
+    assert.equal(errorSpy.mock.calls.length, 1);
+    assert.equal(errorSpy.mock.calls[0]?.[0], "agent.tool.failed");
+    const metadata = errorSpy.mock.calls[0]?.[1] as Record<string, unknown>;
+    assert.equal(metadata.toolName, "execute");
+    assert.equal(metadata.toolCallId, "call-execute");
+    assert.equal(metadata.status, "error");
+    assert.equal(metadata.commandFingerprint, "sha256:abc");
+    assert.equal(metadata.failureCode, "SANDBOX_EXECUTE_COMMAND_DENIED");
+    assert.equal(metadata.repeatCount, 2);
+    assert.equal(metadata.runId, "run-1");
+    assert.equal(
+      metadata.failureMessage,
+      "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
+    );
+    assert.equal(
+      metadata.failureHint,
+      "Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.",
+    );
+    assert.equal(JSON.stringify(metadata).includes("printf"), false);
+    assert.deepEqual(metadata.error, {
       message: "Tool execution failed.",
     });
   } finally {

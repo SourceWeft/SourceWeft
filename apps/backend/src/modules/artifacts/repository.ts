@@ -121,6 +121,53 @@ export async function createSlidesArtifactRecord(input: {
   };
 }
 
+export async function createFileArtifactRecord(input: {
+  artifactId: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  title: string;
+  prompt: string;
+  payload: Record<string, unknown>;
+  storageBucket: string;
+  storageKey: string;
+}) {
+  const versionId = randomUUID();
+  const now = new Date();
+
+  await db.insert(artifacts).values({
+    id: input.artifactId,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadId: input.threadId,
+    artifactType: "file",
+    status: "ready",
+    title: input.title,
+    promptText: input.prompt,
+    payloadJson: input.payload,
+    storageBucket: input.storageBucket,
+    storageKey: input.storageKey,
+    createdBy: input.userId,
+    completedAt: now,
+  });
+
+  await db.insert(artifactVersions).values({
+    id: versionId,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    artifactId: input.artifactId,
+    versionNo: 1,
+    contentJson: input.payload,
+    createdBy: input.userId,
+  });
+
+  return {
+    artifactId: input.artifactId,
+    versionId,
+  };
+}
+
 export async function markArtifactRunning(input: {
   artifactId: string;
   teamId?: string;
@@ -263,4 +310,3 @@ export async function listArtifactRecords(input: {
       : null,
   };
 }
-

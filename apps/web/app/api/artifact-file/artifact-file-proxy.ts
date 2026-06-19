@@ -249,6 +249,7 @@ html[data-sourceweft-deck="visual_html"] body:not(.sw-export) .sourceweft-previe
 export async function proxyArtifactFile(request: NextRequest) {
   const workspaceId = request.nextUrl.searchParams.get("workspaceId");
   const artifactId = request.nextUrl.searchParams.get("artifactId");
+  const asset = request.nextUrl.searchParams.get("asset");
   const assetFileName = request.nextUrl.searchParams.get("assetFileName");
   const isDownload = request.nextUrl.searchParams.get("download") === "1";
 
@@ -259,12 +260,16 @@ export async function proxyArtifactFile(request: NextRequest) {
   if (assetFileName && !isSafeFlatArtifactAssetFileName(assetFileName)) {
     return badRequest("assetFileName must be a flat artifact asset file name.");
   }
+  if (asset && asset !== "previewImage") {
+    return badRequest("asset must be previewImage when provided.");
+  }
 
-  const upstreamAction = assetFileName
-    ? `assets/${encodeURIComponent(assetFileName)}`
-    : isDownload
-      ? "download"
-      : "file";
+  let upstreamAction = isDownload ? "download" : "file";
+  if (asset === "previewImage") {
+    upstreamAction = "preview-image";
+  } else if (assetFileName) {
+    upstreamAction = `assets/${encodeURIComponent(assetFileName)}`;
+  }
   const upstreamUrl = new URL(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/${upstreamAction}`,
     apiBaseUrl,

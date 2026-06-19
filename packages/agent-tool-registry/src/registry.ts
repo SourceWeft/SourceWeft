@@ -13,14 +13,14 @@ import { webAgentToolDefs } from "@sourceweft/builtin-tool-web-search";
 import { sandboxAgentToolDefs } from "@sourceweft/builtin-tool-sandbox";
 import { retrievalAgentToolDefs } from "@sourceweft/builtin-retrieval";
 import { generateImageAgentToolDefs } from "@sourceweft/builtin-tool-generate-image";
-import { publishSandboxArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-sandbox-artifact";
+import { publishArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-artifact";
 import { generateVideoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-generate-video-presentation";
 export const AGENT_TOOLS = [
   ...filesystemAgentToolDefs,
   ...generateImageAgentToolDefs,
   ...retrievalAgentToolDefs,
   ...webAgentToolDefs,
-  ...publishSandboxArtifactAgentToolDefs,
+  ...publishArtifactAgentToolDefs,
   ...generateVideoPresentationAgentToolDefs,
   ...sandboxAgentToolDefs,
 ] as const;

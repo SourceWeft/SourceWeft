@@ -85,7 +85,7 @@ test("buildTurnOptionsSnapshot stores effective canonical tool selections", () =
       generate_image: {
         config: { style: "cartoon" },
       },
-      publish_sandbox_artifact: {
+      publish_artifact: {
         enabled: true,
       },
       skillRuntimeConfig: {
@@ -111,7 +111,7 @@ test("buildTurnOptionsSnapshot stores effective canonical tool selections", () =
       web_search: { enabled: true },
       web_fetch: { enabled: true },
       generate_image: { enabled: true, config: { style: "cartoon" } },
-      publish_sandbox_artifact: {
+      publish_artifact: {
         enabled: true,
       },
       skillRuntimeConfig: {

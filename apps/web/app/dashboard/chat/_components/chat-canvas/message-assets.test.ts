@@ -10,7 +10,7 @@ import type { ToolCallRecord } from "./types";
 test("resolves presentation artifacts from JSON tool message content", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "publish_sandbox_artifact",
+    tool: "publish_artifact",
     input: {},
     output: {
       content: JSON.stringify({
@@ -45,6 +45,7 @@ test("resolves presentation artifacts from JSON tool message content", () => {
     htmlUrl:
       "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
     pptxUrl: null,
+    previewImageUrl: null,
     previewRenderer: "html_iframe",
     renderStrategy: null,
     slideCount: 12,
@@ -58,7 +59,7 @@ test("resolves presentation artifacts from JSON tool message content", () => {
 test("does not resolve presentation artifact from needs_content tool output", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "publish_sandbox_artifact",
+    tool: "publish_artifact",
     input: {},
     output: {
       content: JSON.stringify({
@@ -78,7 +79,7 @@ test("does not resolve presentation artifact from needs_content tool output", ()
 test("does not resolve published sandbox presentation artifact without URL", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "publish_sandbox_artifact",
+    tool: "publish_artifact",
     input: {},
     output: {
       ok: true,
@@ -101,7 +102,7 @@ test("does not resolve published sandbox presentation artifact without URL", () 
 test("does not resolve errored sandbox presentation artifact with only artifact id", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "publish_sandbox_artifact",
+    tool: "publish_artifact",
     input: {},
     output: {
       ok: false,
@@ -121,7 +122,7 @@ test("does not resolve errored sandbox presentation artifact with only artifact 
 test("does not resolve errored sandbox presentation artifact even with URL", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "publish_sandbox_artifact",
+    tool: "publish_artifact",
     input: {},
     output: {
       ok: true,
@@ -145,7 +146,7 @@ test("does not resolve errored sandbox presentation artifact even with URL", () 
 test("resolves published sandbox presentation artifact output", () => {
   const toolCall: ToolCallRecord = {
     id: "tool-1",
-    tool: "publish_sandbox_artifact",
+    tool: "publish_artifact",
     input: {},
     output: {
       ok: true,
@@ -161,6 +162,8 @@ test("resolves published sandbox presentation artifact output", () => {
         "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
       pptx_url:
         "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      preview_image_url:
+        "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
       byteLength: 42,
       byte_length: 42,
       editable: true,
@@ -184,6 +187,8 @@ test("resolves published sandbox presentation artifact output", () => {
     htmlUrl: null,
     pptxUrl:
       "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    previewImageUrl:
+      "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
     previewRenderer: null,
     renderStrategy: null,
     slideCount: null,
@@ -222,6 +227,7 @@ test("resolves video presentation artifacts from tool output", () => {
     generationMode: null,
     htmlUrl: null,
     pptxUrl: null,
+    previewImageUrl: null,
     previewRenderer: null,
     renderStrategy: "frontend_remotion_project_to_video",
     slideCount: null,

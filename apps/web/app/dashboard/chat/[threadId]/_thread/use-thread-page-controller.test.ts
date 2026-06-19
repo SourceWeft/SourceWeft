@@ -28,7 +28,7 @@ test("collects video presentation artifact ids from assistant tool metadata", ()
             },
             {
               id: "tool-2",
-              tool: "publish_sandbox_artifact",
+              tool: "publish_artifact",
               input: {},
               output: {
                 artifact_id: "slides-1",

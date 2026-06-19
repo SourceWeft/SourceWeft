@@ -157,6 +157,7 @@ type MessageRole = "user" | "assistant" | "system" | "tool";
 type ThreadVisibility = "private" | "workspace" | "public_link";
 type NoteType = "manual" | "saved_response" | "generated";
 type ArtifactType =
+  | "file"
   | "report"
   | "slides"
   | "mindmap"
@@ -4216,7 +4217,7 @@ export const artifacts = pgTable(
     }).onDelete("cascade"),
     check(
       "artifacts_artifact_type_check",
-      sql`${table.artifactType} in ('report', 'slides', 'mindmap', 'podcast', 'audio_overview', 'video_overview', 'video_presentation', 'flashcards', 'quiz', 'table', 'infographic', 'image')`,
+      sql`${table.artifactType} in ('file', 'report', 'slides', 'mindmap', 'podcast', 'audio_overview', 'video_overview', 'video_presentation', 'flashcards', 'quiz', 'table', 'infographic', 'image')`,
     ),
     check(
       "artifacts_status_check",

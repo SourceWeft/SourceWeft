@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  artifactPreviewImageMetadata,
   resolveArtifactDownloadUrl,
   resolveArtifactPageUrl,
+  resolveArtifactPreviewImageProxyUrl,
   resolveArtifactProxyFileUrl,
 } from "./artifacts";
 import type { ArtifactListItem } from "./types";
@@ -47,6 +49,44 @@ test("resolveArtifactProxyFileUrl returns the file proxy for thumbnails and medi
       workspaceId: "workspace-1",
     }),
     "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1",
+  );
+});
+
+test("resolveArtifactPreviewImageProxyUrl returns semantic preview image proxy", () => {
+  const slides = artifact({
+    artifactType: "slides",
+    payloadJson: {
+      previewImage: {
+        altText: "First slide",
+        fileName: "preview.jpg",
+        mimeType: "image/jpeg",
+        storageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
+      },
+    },
+  });
+
+  assert.deepEqual(artifactPreviewImageMetadata(slides), {
+    altText: "First slide",
+    fileName: "preview.jpg",
+    mimeType: "image/jpeg",
+    storageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
+  });
+  assert.equal(
+    resolveArtifactPreviewImageProxyUrl({
+      artifact: slides,
+      workspaceId: "workspace-1",
+    }),
+    "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+  );
+});
+
+test("resolveArtifactPreviewImageProxyUrl returns null without preview image metadata", () => {
+  assert.equal(
+    resolveArtifactPreviewImageProxyUrl({
+      artifact: artifact({ artifactType: "slides" }),
+      workspaceId: "workspace-1",
+    }),
+    null,
   );
 });
 

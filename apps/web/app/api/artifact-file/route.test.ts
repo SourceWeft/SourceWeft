@@ -163,6 +163,51 @@ test("artifact file proxy streams artifact assets", async () => {
   assert.equal(await response.text(), "audio-bytes");
 });
 
+test("artifact file proxy streams preview image assets", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: URL) => {
+      assert.match(
+        url.toString(),
+        /\/v1\/workspaces\/workspace-1\/artifacts\/artifact-1\/preview-image$/,
+      );
+      return new Response("jpeg-bytes", {
+        headers: {
+          "content-disposition": "inline; filename*=UTF-8''preview.jpg",
+          "content-type": "image/jpeg",
+        },
+        status: 200,
+      });
+    }),
+  );
+
+  const { GET } = await import("./route");
+  const response = await GET(
+    new NextRequest(
+      "http://localhost:3000/api/artifact-file?workspaceId=workspace-1&artifactId=artifact-1&asset=previewImage",
+    ),
+  );
+
+  assert.equal(response.headers.get("content-type"), "image/jpeg");
+  assert.equal(
+    response.headers.get("content-disposition"),
+    "inline; filename*=UTF-8''preview.jpg",
+  );
+  assert.equal(await response.text(), "jpeg-bytes");
+});
+
+test("artifact file proxy rejects unknown semantic assets", async () => {
+  const { GET } = await import("./route");
+  const response = await GET(
+    new NextRequest(
+      "http://localhost:3000/api/artifact-file?workspaceId=workspace-1&artifactId=artifact-1&asset=cover",
+    ),
+  );
+
+  assert.equal(response.status, 400);
+  assert.match(await response.text(), /asset must be previewImage/);
+});
+
 test("artifact file proxy does not treat missing content type as HTML", async () => {
   vi.stubGlobal(
     "fetch",

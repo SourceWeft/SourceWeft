@@ -8,7 +8,7 @@ import { toolApprovalResumeSchema } from "./agent-confirmations";
 import {
   GENERATE_IMAGE_TOOL_NAME,
   GENERATE_VIDEO_PRESENTATION_TOOL_NAME,
-  PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME,
+  PUBLISH_ARTIFACT_TOOL_NAME,
   WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   SEARCH_NOTION_PAGES_TOOL_NAME,
@@ -283,6 +283,7 @@ export const artifactSchema = z.object({
   workspaceId: z.string(),
   threadId: z.string().nullable(),
   artifactType: z.enum([
+    "file",
     "report",
     "slides",
     "mindmap",
@@ -681,7 +682,7 @@ const generateImageToolSelectionSchema = z
   })
   .strict();
 
-const publishSandboxArtifactToolSelectionSchema = z
+const publishArtifactToolSelectionSchema = z
   .object({
     enabled: z.boolean().optional(),
   })
@@ -908,8 +909,8 @@ const threadToolsRequestSchema = z
     webSearchEnabled: z.boolean().optional(),
     artifact: artifactToolSelectionSchema.optional(),
     [GENERATE_IMAGE_TOOL_NAME]: generateImageToolSelectionSchema.optional(),
-    [PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME]:
-      publishSandboxArtifactToolSelectionSchema.optional(),
+    [PUBLISH_ARTIFACT_TOOL_NAME]:
+      publishArtifactToolSelectionSchema.optional(),
     [GENERATE_VIDEO_PRESENTATION_TOOL_NAME]:
       generateVideoPresentationToolSelectionSchema.optional(),
     [WEB_SEARCH_TOOL_NAME]: webToolSelectionSchema.optional(),
@@ -1632,8 +1633,8 @@ export type ArtifactToolSelection = z.infer<typeof artifactToolSelectionSchema>;
 export type GenerateImageToolSelection = z.infer<
   typeof generateImageToolSelectionSchema
 >;
-export type PublishSandboxArtifactToolSelection = z.infer<
-  typeof publishSandboxArtifactToolSelectionSchema
+export type PublishArtifactToolSelection = z.infer<
+  typeof publishArtifactToolSelectionSchema
 >;
 export type GenerateVideoPresentationToolSelection = z.infer<
   typeof generateVideoPresentationToolSelectionSchema

@@ -141,8 +141,10 @@ import { SourcePreviewPanel } from "../source-preview-panel";
 import { expandSelectedSources, type SourceItem } from "../source-types";
 import {
   artifactMatchesQuery,
+  artifactPreviewImageMetadata,
   artifactTitle,
   artifactTypeLabel,
+  resolveArtifactPreviewImageProxyUrl,
   resolveArtifactProxyFileUrl,
 } from "./artifacts";
 import { cloneItems, getThreadWorkfilesCacheKey } from "./cache";
@@ -1814,6 +1816,11 @@ const ArtifactsTab = memoComponent(function ArtifactsTab({
           artifact,
           workspaceId,
         });
+        const previewImage = artifactPreviewImageMetadata(artifact);
+        const previewImageUrl = resolveArtifactPreviewImageProxyUrl({
+          artifact,
+          workspaceId,
+        });
 
         return (
           <button
@@ -1823,7 +1830,16 @@ const ArtifactsTab = memoComponent(function ArtifactsTab({
             title={`Preview ${artifactTitle(artifact)}`}
             type="button"
           >
-            {artifact.artifactType === "image" && proxyFileUrl ? (
+            {previewImageUrl ? (
+              <span className="block h-14 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
+                <RawImage
+                  alt={previewImage?.altText ?? artifactTitle(artifact)}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  src={previewImageUrl}
+                />
+              </span>
+            ) : artifact.artifactType === "image" && proxyFileUrl ? (
               <span className="block h-14 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
                 <RawImage
                   alt={artifactTitle(artifact)}

@@ -414,6 +414,14 @@ export const config = {
         process.env.AGENT_MAX_READ_OUTPUT_CHARS,
         80_000,
       ),
+      toolCallRunLimit: parsePositiveInteger(
+        process.env.SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT,
+        48,
+      ),
+      toolCallThreadLimit: parsePositiveInteger(
+        process.env.SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT,
+        300,
+      ),
     },
   },
   sandbox: {

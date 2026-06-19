@@ -14,7 +14,7 @@
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-tool-generate-image": "workspace:*",
     "@sourceweft/builtin-tool-generate-video-presentation": "workspace:*",
-    "@sourceweft/builtin-tool-publish-sandbox-artifact": "workspace:*",
+    "@sourceweft/builtin-tool-publish-artifact": "workspace:*",
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
     "@sourceweft/builtin-tool-web-search": "workspace:*",
     "@sourceweft/builtin-vfs": "workspace:*",

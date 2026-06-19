@@ -10,7 +10,7 @@
       "@sourceweft/builtin-retrieval": ["../builtin-retrieval/src/index.ts"],
       "@sourceweft/builtin-tool-generate-image": ["../builtin-tool-generate-image/src/index.ts"],
       "@sourceweft/builtin-tool-generate-video-presentation": ["../builtin-tool-generate-video-presentation/src/index.ts"],
-      "@sourceweft/builtin-tool-publish-sandbox-artifact": ["../builtin-tool-publish-sandbox-artifact/src/index.ts"],
+      "@sourceweft/builtin-tool-publish-artifact": ["../builtin-tool-publish-artifact/src/index.ts"],
       "@sourceweft/builtin-tool-sandbox": ["../builtin-tool-sandbox/src/index.ts"],
       "@sourceweft/builtin-tool-web-search": ["../builtin-tool-web-search/src/index.ts"],
       "@sourceweft/builtin-vfs": ["../builtin-vfs/src/index.ts"],

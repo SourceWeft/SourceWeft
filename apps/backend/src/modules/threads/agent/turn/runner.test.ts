@@ -3,7 +3,7 @@ import { test, vi } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { testExports as agentTestExports } from "..";
 import { imageRuntimePromptProvider } from "@sourceweft/builtin-tool-generate-image";
-import { createCapabilityAgentTools as createPublishSandboxArtifactTools } from "@sourceweft/builtin-tool-publish-sandbox-artifact";
+import { createCapabilityAgentTools as createPublishArtifactTools } from "@sourceweft/builtin-tool-publish-artifact";
 import {
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
@@ -82,10 +82,10 @@ function toolNames(tools: readonly unknown[]) {
   });
 }
 
-function publishSandboxArtifactPromptProviders(
-  toolName = AGENT_TOOL_NAMES.publishSandboxArtifact,
+function publishArtifactPromptProviders(
+  toolName = AGENT_TOOL_NAMES.publishArtifact,
 ) {
-  return createPublishSandboxArtifactTools({
+  return createPublishArtifactTools({
     toolIds: [toolName],
     context: {
       shouldBindAgentTool: (candidate: string) => candidate === toolName,
@@ -105,9 +105,9 @@ function publishSandboxArtifactPromptProviders(
   } as never).promptProviders;
 }
 
-function publishSandboxArtifactRuntimeTools(
+function publishArtifactRuntimeTools(
   selection: Record<string, unknown>,
-  toolName = AGENT_TOOL_NAMES.publishSandboxArtifact,
+  toolName = AGENT_TOOL_NAMES.publishArtifact,
 ) {
   const normalizedSelection = {
     ...selection,
@@ -156,7 +156,7 @@ test("tool stream handler leaves generic tool logging to middleware", async () =
   try {
     const currentToolCall = {
       id: "call-pptx",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       input: {},
       output: null,
       status: "running" as const,
@@ -178,7 +178,7 @@ test("tool stream handler leaves generic tool logging to middleware", async () =
             source_content: "raw source content must not be logged",
           },
           toolCallId: "call-pptx",
-          toolName: "publish_sandbox_artifact",
+          toolName: "publish_artifact",
           toolPayload: {},
         },
       }),
@@ -193,7 +193,7 @@ test("tool stream handler leaves generic tool logging to middleware", async () =
           event: "on_tool_end",
           normalizedInput: { title: "Quarterly update" },
           toolCallId: "call-pptx",
-          toolName: "publish_sandbox_artifact",
+          toolName: "publish_artifact",
           toolPayload: {
             output: {
               artifactId: "artifact-1",
@@ -550,7 +550,7 @@ test("command execution policy does not force publisher tools for skill artifact
     commandSuccessCriteria: {
       kind: "artifact",
       artifactType: "slides",
-      toolName: "publish_sandbox_artifact",
+      toolName: "publish_artifact",
     },
   } as unknown as Parameters<typeof commandExecutionPolicyFor>[0];
 
@@ -2643,7 +2643,7 @@ test("final assistant text preserves natural artifact summaries", () => {
       commandSuccessCriteria: {
         artifactType: "slides",
         kind: "artifact",
-        toolName: "publish_sandbox_artifact",
+        toolName: "publish_artifact",
       },
       hasCompletedToolOutput: true,
     }),
@@ -2667,7 +2667,7 @@ test("suppresses leaked presentation publisher outputs without suppressing natur
   const criteria = {
     artifactType: "slides" as const,
     kind: "artifact" as const,
-    toolName: "publish_sandbox_artifact",
+    toolName: "publish_artifact",
   };
 
   assert.equal(
@@ -2744,7 +2744,7 @@ test("presentation publishing trace step records needs_content repair state", ()
 test("presentation progress events map to CoT-safe publishing steps", () => {
   const planning = testExports.buildPresentationProgressThinkingStep({
     data: {
-      type: "publish_sandbox_artifact_progress",
+      type: "publish_artifact_progress",
       toolCallId: "call-1",
       stage: "planning",
       title: "Launch deck",
@@ -2753,7 +2753,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   });
   const generating = testExports.buildPresentationProgressThinkingStep({
     data: {
-      type: "publish_sandbox_artifact_progress",
+      type: "publish_artifact_progress",
       toolCallId: "call-1",
       stage: "generating",
       slideCount: 8,
@@ -2762,7 +2762,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   });
   const saving = testExports.buildPresentationProgressThinkingStep({
     data: {
-      type: "publish_sandbox_artifact_progress",
+      type: "publish_artifact_progress",
       toolCallId: "call-1",
       stage: "saving",
       fileName: "launch-deck.html",
@@ -2771,7 +2771,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   });
   const ready = testExports.buildPresentationProgressThinkingStep({
     data: {
-      type: "publish_sandbox_artifact_progress",
+      type: "publish_artifact_progress",
       toolCallId: "call-1",
       stage: "ready",
       artifactId: "artifact-1",
@@ -2797,7 +2797,7 @@ test("unknown presentation progress stages do not create CoT steps", () => {
   assert.equal(
     testExports.buildPresentationProgressThinkingStep({
       data: {
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
         toolCallId: "call-1",
         stage: "internal_layout_pass",
       },
@@ -2810,7 +2810,7 @@ test("unknown presentation progress stages do not create CoT steps", () => {
 test("presentation progress emits tool event before CoT step", () => {
   const sequence: number[] = [];
   const progressEvent = normalizeGeneratedPresentationProgressEvent({
-    type: "publish_sandbox_artifact_progress",
+    type: "publish_artifact_progress",
     toolCallId: "call-1",
     stage: "saving",
   });
@@ -2871,7 +2871,7 @@ test("custom stream handler emits generated artifact progress events", async () 
   });
   runtime.toolCallsById.set("pptx-call", {
     id: "pptx-call",
-    tool: "publish_sandbox_artifact",
+    tool: "publish_artifact",
     input: {},
     output: null,
     status: "running",
@@ -2891,7 +2891,7 @@ test("custom stream handler emits generated artifact progress events", async () 
   });
   const pptxEvents = await collectCustomStreamEvents({
     payload: {
-      type: "publish_sandbox_artifact_progress",
+      type: "publish_artifact_progress",
       toolCallId: "pptx-call",
       stage: "saving",
     },
@@ -2914,7 +2914,7 @@ test("custom stream handler emits generated artifact progress events", async () 
   assert.equal(pptxEvents[0]?.type, "tool-call-event");
   assert.equal(
     pptxEvents[0]?.type === "tool-call-event" ? pptxEvents[0].tool : null,
-    "publish_sandbox_artifact",
+    "publish_artifact",
   );
   assert.equal(pptxEvents[1]?.type, "thinking-step");
   assert.deepEqual(
@@ -3258,7 +3258,7 @@ test("resolveDirectToolCommand leaves ppt skill commands on the agent workflow",
         successCriteria: {
           artifactType: "slides",
           kind: "artifact",
-          toolName: "publish_sandbox_artifact",
+          toolName: "publish_artifact",
         },
       },
     },
@@ -3325,7 +3325,7 @@ test("command success accepts published PPTX artifact output", () => {
       criteria: {
         kind: "artifact",
         artifactType: "slides",
-        toolName: "publish_sandbox_artifact",
+        toolName: "publish_artifact",
       },
       toolCalls: [
         {
@@ -3336,7 +3336,7 @@ test("command success accepts published PPTX artifact output", () => {
               "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
           },
           status: "completed",
-          tool: "publish_sandbox_artifact",
+          tool: "publish_artifact",
           latencyMs: 10,
           error: null,
           sequence: 1,
@@ -3350,7 +3350,7 @@ test("command success accepts published PPTX artifact output", () => {
       criteria: {
         kind: "artifact",
         artifactType: "slides",
-        toolName: "publish_sandbox_artifact",
+        toolName: "publish_artifact",
       },
       toolCalls: [
         {
@@ -3358,7 +3358,7 @@ test("command success accepts published PPTX artifact output", () => {
           input: {},
           output: {},
           status: "completed",
-          tool: "publish_sandbox_artifact",
+          tool: "publish_artifact",
           latencyMs: 10,
           error: null,
           sequence: 1,
@@ -3376,10 +3376,10 @@ test("raw textual tool calls are suppressed while command success is pending", (
       criteria: {
         artifactType: "slides",
         kind: "artifact",
-        toolName: "publish_sandbox_artifact",
+        toolName: "publish_artifact",
       },
       delta:
-        '<｜DSML｜tool_calls>\n<｜DSML｜invoke name="publish_sandbox_artifact">',
+        '<｜DSML｜tool_calls>\n<｜DSML｜invoke name="publish_artifact">',
       suppressing: false,
     }),
     true,
@@ -3390,7 +3390,7 @@ test("raw textual tool calls are suppressed while command success is pending", (
       criteria: {
         artifactType: "slides",
         kind: "artifact",
-        toolName: "publish_sandbox_artifact",
+        toolName: "publish_artifact",
       },
       delta: "普通回答",
       suppressing: false,
@@ -3403,7 +3403,7 @@ test("raw textual tool calls are suppressed while command success is pending", (
       criteria: {
         artifactType: "slides",
         kind: "artifact",
-        toolName: "publish_sandbox_artifact",
+        toolName: "publish_artifact",
       },
       delta: "<｜DSML｜tool_calls>",
       suppressing: false,
@@ -3421,13 +3421,13 @@ test("messages stream handler suppresses raw tool call text and keeps suppressio
     payload: [
       {
         role: "assistant",
-        content: '<tool_call name="publish_sandbox_artifact">',
+        content: '<tool_call name="publish_artifact">',
       },
     ],
     commandSuccessCriteria: {
       artifactType: "slides",
       kind: "artifact",
-      toolName: "publish_sandbox_artifact",
+      toolName: "publish_artifact",
     },
     runtime,
     suppressModelReasoning: false,
@@ -3442,7 +3442,7 @@ test("messages stream handler suppresses raw tool call text and keeps suppressio
     commandSuccessCriteria: {
       artifactType: "slides",
       kind: "artifact",
-      toolName: "publish_sandbox_artifact",
+      toolName: "publish_artifact",
     },
     runtime,
     suppressModelReasoning: false,
@@ -3462,7 +3462,7 @@ test("messages stream handler clears streamed text when leaked artifact specs ap
   const criteria = {
     artifactType: "slides" as const,
     kind: "artifact" as const,
-    toolName: "publish_sandbox_artifact",
+    toolName: "publish_artifact",
   };
 
   const firstEvents = await collectMessageStreamEvents({
@@ -3510,7 +3510,7 @@ test("presentation artifact trace labels needs_content without claiming artifact
 
   assert.equal(
     testExports.getFilesystemToolEndTitle(
-      "publish_sandbox_artifact",
+      "publish_artifact",
       {},
       output,
     ),
@@ -3518,7 +3518,7 @@ test("presentation artifact trace labels needs_content without claiming artifact
   );
   assert.equal(
     testExports.getFilesystemToolDescription(
-      "publish_sandbox_artifact",
+      "publish_artifact",
       {
         resultType: "presentation_artifact_input_required",
         status: "needs_content",
@@ -3865,7 +3865,7 @@ test("command success accepts structured presentation artifact output", () => {
       criteria: {
         artifactType: "slides",
         kind: "artifact",
-        toolName: "publish_sandbox_artifact",
+        toolName: "publish_artifact",
       },
       toolCalls: [
         {
@@ -3878,7 +3878,7 @@ test("command success accepts structured presentation artifact output", () => {
             title: "费曼学习法",
           },
           status: "completed",
-          tool: "publish_sandbox_artifact",
+          tool: "publish_artifact",
           latencyMs: 10,
           error: null,
           sequence: 1,
@@ -3956,14 +3956,20 @@ test("runtime prompt exposes invoked skill runtime config", () => {
 test("runtime prompt does not expose publisher tool generation options", () => {
   const prompt = testExports.buildAgentRuntimeContext({
     timezone: "UTC",
-    availableArtifactTools: ["publish_sandbox_artifact"],
-    artifactToolRuntimePromptProviders: publishSandboxArtifactPromptProviders(),
+    availableArtifactTools: ["publish_artifact"],
+    artifactToolRuntimePromptProviders: publishArtifactPromptProviders(),
   });
 
   assert.match(
     prompt,
-    /Use `publish_sandbox_artifact` only after the output file has already been generated and QA has passed\./,
+    /Use `publish_artifact` only after the output file has already been generated; for slides, content QA plus visual QA must have passed\./,
   );
+  assert.match(prompt, /artifactType=file/);
+  assert.match(prompt, /rendered slide image count and visual QA result/);
+  assert.match(prompt, /QA_IMAGE_COUNT/);
+  assert.match(prompt, /PREVIEW_IMAGE_PATH/);
+  assert.match(prompt, /previewImage/);
+  assert.match(prompt, /does not search the QA directory automatically/);
   assert.doesNotMatch(prompt, /stylePreset:/);
   assert.doesNotMatch(prompt, /visualDensity:/);
   assert.doesNotMatch(prompt, /language:/);
@@ -3972,8 +3978,8 @@ test("runtime prompt does not expose publisher tool generation options", () => {
 });
 
 test("PPTX publisher capability omits prompt guidance when tool is not bound", () => {
-  const result = createPublishSandboxArtifactTools({
-    toolIds: [AGENT_TOOL_NAMES.publishSandboxArtifact],
+  const result = createPublishArtifactTools({
+    toolIds: [AGENT_TOOL_NAMES.publishArtifact],
     context: {
       shouldBindAgentTool: () => false,
       teamId: "team-1",
@@ -3996,14 +4002,14 @@ test("PPTX publisher capability omits prompt guidance when tool is not bound", (
 });
 
 test("runtime prompt omits PPTX publisher guidance when disabled", () => {
-  const result = createPublishSandboxArtifactTools({
-    toolIds: [AGENT_TOOL_NAMES.publishSandboxArtifact],
+  const result = createPublishArtifactTools({
+    toolIds: [AGENT_TOOL_NAMES.publishArtifact],
     context: {
-      runtimeTools: publishSandboxArtifactRuntimeTools({
+      runtimeTools: publishArtifactRuntimeTools({
         enabled: false,
       }),
       shouldBindAgentTool: (toolName: string) =>
-        toolName === AGENT_TOOL_NAMES.publishSandboxArtifact,
+        toolName === AGENT_TOOL_NAMES.publishArtifact,
       teamId: "team-1",
       workspaceId: "workspace-1",
       threadId: "thread-1",
@@ -4017,14 +4023,14 @@ test("runtime prompt omits PPTX publisher guidance when disabled", () => {
   } as never);
   const prompt = testExports.buildAgentRuntimeContext({
     timezone: "UTC",
-    availableArtifactTools: ["publish_sandbox_artifact"],
+    availableArtifactTools: ["publish_artifact"],
     artifactToolRuntimePromptProviders: result.promptProviders,
-    runtimeTools: publishSandboxArtifactRuntimeTools({
+    runtimeTools: publishArtifactRuntimeTools({
       enabled: false,
     }),
   });
 
-  assert.doesNotMatch(prompt, /publish_sandbox_artifact` only after/);
+  assert.doesNotMatch(prompt, /publish_artifact` only after/);
   assert.doesNotMatch(prompt, /<ppt_deck_options>/);
 });
 
@@ -4036,7 +4042,7 @@ test("skill commands bind workflow default artifact tools", () => {
         defaultTools: [
           "prepare_sandbox_workspace",
           "execute",
-          "publish_sandbox_artifact",
+          "publish_artifact",
         ],
       },
     },
@@ -4047,7 +4053,7 @@ test("skill commands bind workflow default artifact tools", () => {
   assert.equal(
     testExports.shouldBindAgentTool({
       prepared,
-      toolName: "publish_sandbox_artifact",
+      toolName: "publish_artifact",
     }),
     true,
   );
@@ -4064,7 +4070,7 @@ test("non-command active skill turns bind runtime-selected artifact tools", () =
   const prepared = {
     command: null,
     runtimeTools: {
-      publish_sandbox_artifact: {
+      publish_artifact: {
         shouldBind: true,
       },
       generate_video_presentation: {
@@ -4078,7 +4084,7 @@ test("non-command active skill turns bind runtime-selected artifact tools", () =
   assert.equal(
     testExports.shouldBindAgentTool({
       prepared,
-      toolName: "publish_sandbox_artifact",
+      toolName: "publish_artifact",
     }),
     true,
   );

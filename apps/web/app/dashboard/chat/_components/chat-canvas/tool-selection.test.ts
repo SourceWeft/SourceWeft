@@ -108,7 +108,7 @@ test("composer options hide internal web, retrieval, and sandbox tools", () => {
   );
   assert.equal(
     isCapabilityToolVisibleInComposerOptions({
-      toolName: AGENT_TOOL_NAMES.publishSandboxArtifact,
+      toolName: AGENT_TOOL_NAMES.publishArtifact,
     }),
     false,
   );

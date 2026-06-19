@@ -1,6 +1,10 @@
 export type SandboxToolResultDisplay = {
+  code: string | null;
+  message: string | null;
   ok: boolean | null;
   output: string | null;
+  recoverable: boolean | null;
+  status: string | null;
   totalBytes: number | null;
   filePaths: string[];
   outputPaths: string[];
@@ -123,8 +127,12 @@ export function parseSandboxToolResultDisplay(
   }
 
   return {
+    code: trimmedStringValue(result.code),
+    message: trimmedStringValue(result.message),
     ok: booleanValue(result.ok),
     output: stringValue(result.output),
+    recoverable: booleanValue(result.recoverable),
+    status: trimmedStringValue(result.status),
     totalBytes: finiteNumber(result.totalBytes),
     filePaths: arrayRecord(result.files)
       .map(targetPath)
@@ -135,6 +143,17 @@ export function parseSandboxToolResultDisplay(
     truncated: booleanValue(result.truncated),
     exitCode: finiteNumber(result.exitCode),
   };
+}
+
+export function isSandboxToolResultFailure(input: {
+  output: unknown;
+  toolName: string;
+}) {
+  if (!SANDBOX_TOOL_NAMES.has(input.toolName)) {
+    return false;
+  }
+  const result = parseSandboxToolResultDisplay(input.output);
+  return result?.ok === false || result?.status === "failed";
 }
 
 function formatByteCount(value: number | null) {
@@ -159,6 +178,43 @@ function formatPathList(paths: string[]) {
   const visible = paths.slice(0, 3).join(", ");
   const remaining = paths.length - 3;
   return remaining > 0 ? `${visible}, +${remaining} more` : visible;
+}
+
+function formatSandboxFailureSummary(result: SandboxToolResultDisplay) {
+  const parts = ["Failed"];
+  if (result.code) {
+    parts.push(result.code);
+  }
+  if (result.message) {
+    parts.push(result.message);
+  } else if (result.output) {
+    parts.push(result.output);
+  }
+  return parts.join(" · ");
+}
+
+function appendSandboxFailureDetails(
+  details: SandboxToolResultDetail[],
+  result: SandboxToolResultDisplay,
+) {
+  if (result.ok !== false && result.status !== "failed") {
+    return;
+  }
+  details.push({ label: "Status", value: "Failed" });
+  if (result.code) {
+    details.push({ label: "Code", value: result.code });
+  }
+  if (result.message) {
+    details.push({ label: "Message", value: result.message });
+  } else if (result.output) {
+    details.push({ label: "Message", value: result.output });
+  }
+  if (result.recoverable !== null) {
+    details.push({
+      label: "Recoverable",
+      value: result.recoverable ? "Yes" : "No",
+    });
+  }
 }
 
 function formatDurationMs(value: number | null) {
@@ -284,6 +340,10 @@ export function getSandboxToolResultSummary(input: {
   const parts: string[] = [];
   const byteCount = formatByteCount(result.totalBytes);
 
+  if (result.ok === false || result.status === "failed") {
+    return formatSandboxFailureSummary(result);
+  }
+
   if (input.toolName === "prepare_sandbox_workspace") {
     parts.push(
       `Prepared ${result.filePaths.length} file${result.filePaths.length === 1 ? "" : "s"}`,
@@ -342,6 +402,7 @@ export function getSandboxToolResultDetails(input: {
     const requestedFiles = arrayRecord(record(input.input)?.files);
     const inputCount = Math.max(result.filePaths.length, requestedFiles.length);
     details.push({ label: "Operation", value: "Prepared sandbox workspace" });
+    appendSandboxFailureDetails(details, result);
     details.push({
       label: "Inputs",
       value: `${inputCount} file${inputCount === 1 ? "" : "s"}`,
@@ -359,6 +420,7 @@ export function getSandboxToolResultDetails(input: {
     }
   } else if (input.toolName === "collect_sandbox_outputs") {
     details.push({ label: "Operation", value: "Collected sandbox outputs" });
+    appendSandboxFailureDetails(details, result);
     details.push({
       label: "Outputs",
       value: `${result.outputPaths.length} file${result.outputPaths.length === 1 ? "" : "s"}`,
@@ -372,6 +434,7 @@ export function getSandboxToolResultDetails(input: {
     }
   } else {
     details.push({ label: "Operation", value: "Executed sandbox command" });
+    appendSandboxFailureDetails(details, result);
     if (result.exitCode !== null) {
       details.push({ label: "Exit code", value: String(result.exitCode) });
     }
@@ -455,6 +518,8 @@ const SANDBOX_SAFE_ERROR_MESSAGES: Record<string, string> = {
     "The sandbox returned an unsupported download result. Try collecting a plain text output file instead.",
   SANDBOX_EXECUTE_CWD_DENIED:
     "The command working directory must stay inside the provider sandbox workspace root.",
+  SANDBOX_EXECUTE_VFS_PATH_DENIED:
+    "Execute commands cannot use SourceWeft /workfiles, /kb, or /skills paths. Create or edit Workfiles with file tools, prepare them into /workspace, then run the command against /workspace paths.",
   SANDBOX_FILE_NOT_FOUND:
     "The requested sandbox file was not found. Re-run the command or check the output path before collecting.",
   SANDBOX_FILE_TOO_LARGE:
@@ -483,6 +548,12 @@ export function getSandboxToolSafeErrorMessage(input: {
 
   const code = extractSandboxErrorCode(input.error);
   if (!code) {
+    const exitCodeMatch = input.error.match(
+      /^Command failed with exit code -?\d+\.$/,
+    );
+    if (exitCodeMatch) {
+      return input.error;
+    }
     return "Sandbox operation failed. Review the operation details and try again.";
   }
 

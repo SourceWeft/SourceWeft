@@ -32,6 +32,16 @@ function hasControlChars(value: string) {
   return /[\x00-\x1f\x7f]/.test(value);
 }
 
+function hasDisallowedCommandControlChars(value: string) {
+  return /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value);
+}
+
+function disallowedExecuteVfsRoot(command: string) {
+  return SOURCEWEFT_VFS_ROOT_POLICY.disallowedVirtualRoots.find((root) =>
+    command.includes(root),
+  );
+}
+
 function isRootOrChild(path: string, root: string) {
   const normalizedRoot = normalizePath(root);
   return path === normalizedRoot || path.startsWith(`${normalizedRoot}/`);
@@ -222,9 +232,15 @@ export function assertExecuteCommandPathPolicy(command: string) {
   if (!command.trim()) {
     throw new Error("SANDBOX_EXECUTE_COMMAND_DENIED: command is empty.");
   }
-  if (hasControlChars(command)) {
+  if (hasDisallowedCommandControlChars(command)) {
     throw new Error(
       "SANDBOX_EXECUTE_COMMAND_DENIED: command contains control characters.",
+    );
+  }
+  const vfsRoot = disallowedExecuteVfsRoot(command);
+  if (vfsRoot) {
+    throw new Error(
+      `SANDBOX_EXECUTE_VFS_PATH_DENIED: execute commands must not include SourceWeft VFS logical path ${vfsRoot}. SourceWeft VFS roots (${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, /skills) must be accessed with SourceWeft file or source tools. Use prepare_sandbox_workspace to materialize selected files under /workspace. Use only /workspace/... paths inside execute.`,
     );
   }
   return command;

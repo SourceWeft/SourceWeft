@@ -668,10 +668,10 @@ test("observed LangChain chat model summarizes tool call loop inputs", async () 
     },
   })) as LangChainChatModelLike;
 
-  const boundModel = model.bindTools?.([{ name: "publish_sandbox_artifact" }], {
+  const boundModel = model.bindTools?.([{ name: "publish_artifact" }], {
     tool_choice: {
       type: "function",
-      function: { name: "publish_sandbox_artifact" },
+      function: { name: "publish_artifact" },
     },
   });
 
@@ -731,10 +731,10 @@ test("observed LangChain chat model summarizes tool call loop inputs", async () 
       },
     ],
     toolCount: 1,
-    tools: ["publish_sandbox_artifact"],
+    tools: ["publish_artifact"],
     toolChoice: {
       type: "function",
-      function: { name: "publish_sandbox_artifact" },
+      function: { name: "publish_artifact" },
     },
     stream: true,
   });

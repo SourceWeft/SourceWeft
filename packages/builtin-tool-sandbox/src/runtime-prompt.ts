@@ -38,11 +38,11 @@ export function buildSandboxRuntimePrompt(
 
   const bridgeInstructions = [
     capabilities.prepareToolAvailable
-      ? `- ${PREPARE_SANDBOX_TOOL_NAME} reads explicitly selected SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfile content and materializes it as ordinary sandbox files under provider-allowed prepare targets: ${prepareTargetRoots}.`
+      ? `- ${PREPARE_SANDBOX_TOOL_NAME} reads explicitly selected SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfile content and materializes it as ordinary sandbox files under provider-allowed prepare targets: ${prepareTargetRoots}. Put command inputs such as generated code, data files, plans, and QA notes in ${SOURCEWEFT_WORK_ROOT} first, then prepare only the files needed for sandbox execution.`
       : null,
     `- ${EXECUTE_TOOL_NAME} runs commands in the provider sandbox filesystem and uses ${defaultCwd} by default.`,
     capabilities.collectToolAvailable
-      ? `- ${COLLECT_SANDBOX_OUTPUTS_TOOL_NAME} persists explicitly selected sandbox text outputs from provider-allowed collect sources (${collectSourceRoots}) into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfiles. Do not use it for binary outputs such as .pptx files; publish supported binary artifacts with explicit artifact pipelines such as publish_sandbox_artifact for PPTX slides.`
+      ? `- ${COLLECT_SANDBOX_OUTPUTS_TOOL_NAME} persists explicitly selected sandbox text outputs from provider-allowed collect sources (${collectSourceRoots}) into SourceWeft DB-backed ${SOURCEWEFT_WORK_ROOT} Workfiles. Do not use it for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`
       : null,
   ].filter((line): line is string => line !== null);
 
@@ -57,7 +57,7 @@ export function buildSandboxRuntimePrompt(
 - Python packages include markitdown[pptx], python-pptx, python-docx, pandas, numpy, matplotlib, plotly, and openpyxl.
 - System and browser tools include LibreOffice, pandoc, poppler-utils, ffmpeg, Noto fonts, and Chromium via Playwright.
 - Prefer these preinstalled tools first. Do not run installs such as npm install pptxgenjs or pip install markitdown[pptx] unless a required version or package is missing.
-- Install any extra task-specific dependency locally under a task directory inside ${defaultCwd} or a provider-allowed temp/project directory instead of changing global packages.
+- Install any extra task-specific dependency locally under a task directory inside ${defaultCwd} instead of changing global packages.
 </sandbox_environment>`
     : "";
   const providerPolicyLines = pathPolicy
@@ -78,11 +78,13 @@ export function buildSandboxRuntimePrompt(
 - SourceWeft VFS logical paths are not mounted into sandbox command execution and are not automatically synced with the sandbox filesystem.
 - Preparing files is explicit selected-content materialization, not a ${SOURCEWEFT_WORK_ROOT} directory mount, mirror, root-level copy, or bidirectional sync.
 - ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, and /skills inside execute are provider sandbox filesystem paths only; they do not access SourceWeft VFS.
+- Never include ${SOURCEWEFT_WORK_ROOT}, ${SOURCEWEFT_KB_ROOT}, or /skills in an ${EXECUTE_TOOL_NAME} command. They are not sandbox paths, even for mkdir, ls, cat, test, node, python, or shell redirection.
 ${providerPolicyLines}
 - Sandbox files become SourceWeft durable state only when explicitly collected back into ${SOURCEWEFT_WORK_ROOT} as text Workfiles or published through explicit artifact pipelines.
+- Put all scratch files, QA renders, thumbnails, and artifacts that SourceWeft may need to read, inspect, collect, or publish under the provider sandbox read/write roots, normally ${defaultCwd}. Do not use /tmp for those files.
 - Use the sandbox for command execution, dependency installation, format conversion, batch processing, testing, or computation.
 ${bridgeInstructions.join("\n")}
-- Commands needing prepared Workfiles should explicitly work under one of the provider prepare target roots.
+- Commands needing Workfiles should prepare the selected ${SOURCEWEFT_WORK_ROOT}/... files into one of the provider prepare target roots, then explicitly work from those sandbox paths.
 ${virtualPathExecutionRule}
 - ${SOURCEWEFT_KB_ROOT} and /skills are not prepared directly into the sandbox. If source content needs command processing, extract the minimum necessary content into ${SOURCEWEFT_WORK_ROOT} first, then explicitly prepare that Workfile.
 - Prepared files, collected Workfiles, and sandbox outputs are not citable evidence.

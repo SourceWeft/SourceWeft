@@ -13,7 +13,7 @@ import type {
 } from "@sourceweft/builtin-tool-generate-image";
 import type {
   GenerateVideoPresentationToolSelection,
-  PublishSandboxArtifactToolSelection,
+  PublishArtifactToolSelection,
 } from "../../artifacts/types";
 import type { RuntimeModelGatewayProfile } from "../../../shared/model-gateway/types";
 import type { TraceContext } from "../../llm-observability";
@@ -72,7 +72,7 @@ export type ThreadToolsSelection = {
   artifact?: unknown;
   skillRuntimeConfig?: Record<string, Record<string, unknown>>;
   [AGENT_TOOL_NAMES.generateImage]?: GenerateImageToolSelection;
-  [AGENT_TOOL_NAMES.publishSandboxArtifact]?: PublishSandboxArtifactToolSelection;
+  [AGENT_TOOL_NAMES.publishArtifact]?: PublishArtifactToolSelection;
   [AGENT_TOOL_NAMES.generateVideoPresentation]?: GenerateVideoPresentationToolSelection;
   [AGENT_TOOL_NAMES.webSearch]?: {
     enabled?: boolean;
@@ -279,6 +279,34 @@ export type PreflightBillingTrace = {
   metadata?: Record<string, unknown>;
 };
 
+export type MeteredLlmCallTrace = {
+  id: string;
+  operation: string;
+  modelKind: "chat";
+  modelAlias: string | null;
+  profileAlias: string | null;
+  gatewayConfigId: string;
+  usage?: UsageInfo;
+  billingStatus: "metered" | "skipped" | "meter_failed";
+  consumedCredits: number;
+  billedBy?: "provider_cost" | "minimum_credit" | "skipped";
+  skipReason?: string | null;
+  idempotencyKey: string;
+  referenceId: string;
+  providerCostUsd?: number | null;
+  costSource?: string;
+  missingPriceComponents?: string[];
+  pricingSnapshot?: unknown;
+  billing?: {
+    teamId: string;
+    availableCredits: number;
+    consumedThisCycle: number;
+    idempotencyReplayed: boolean;
+  };
+  error?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type AgentMultimodalContentPart =
   | {
       type: "text";
@@ -380,6 +408,7 @@ export type FinalizeThreadTurnCommand = {
   availableCitations?: AgentCitation[];
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
+  meteredLlmCalls?: MeteredLlmCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
   renderBlocks?: MessageRenderBlock[];
   reasoningSegments?: ModelReasoningSegmentTrace[];

@@ -375,6 +375,12 @@ describe("sandbox runtime assembly tool permissions", () => {
       ),
       true,
     );
+    assert.equal(
+      prompt.includes(
+        "Never include /workfiles, /kb, or /skills in an execute command",
+      ),
+      true,
+    );
     assert.equal(prompt.includes("Provider sandbox prepare targets:"), true);
   });
 

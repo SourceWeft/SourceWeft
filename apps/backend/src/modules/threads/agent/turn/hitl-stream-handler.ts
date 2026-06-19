@@ -6,7 +6,9 @@ import type {
   ConnectorActionExecutionCursor,
 } from "../../../connectors/agent-tool-idempotency";
 import { ContentError } from "../../../content/errors";
-import type { AgentCheckpointRef, ToolCallTrace } from "../..";
+import type { ContentBillingPort } from "../../../content/billing-port";
+import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
+import type { AgentCheckpointRef, PreparedThreadTurn, ToolCallTrace } from "../..";
 import { finalizeMessageRenderBlocks } from "../../turn/render-blocks";
 import { logger } from "../../../../shared/logger";
 import { resolveAssistantContentFromUpdatesChunk } from "./content";
@@ -33,6 +35,7 @@ import {
   rememberObservedToolCalls,
 } from "./tool-tracker";
 import type { TurnRuntime } from "./turn-runtime";
+import { flushPendingLlmCallUsage } from "./llm-call-billing";
 
 type Agent = Awaited<ReturnType<typeof createThreadAgent>>;
 
@@ -66,9 +69,12 @@ export async function* handleHitlStreamChunk(input: {
   autoApprovedHitlResumeCount: number;
   beforeAssistantCheckpoint: AgentCheckpointRef | null;
   beforeInputCheckpoint: AgentCheckpointRef | null;
+  billing?: ContentBillingPort;
   connectorToolContext: HitlConnectorContext;
   finalCheckpoint: AgentCheckpointRef | null;
+  llm?: LlmExecutionConfig;
   maxAutoApprovedHitlResumes: number;
+  prepared?: PreparedThreadTurn;
   payload: unknown;
   runConfig: AgentRunnableConfig;
   runtime: TurnRuntime;
@@ -199,7 +205,10 @@ export async function* handleHitlStreamChunk(input: {
           : {}),
         requestJson: action.args,
         ...(input.connectorToolContext.sourceUserMessageId
-          ? { sourceUserMessageId: input.connectorToolContext.sourceUserMessageId }
+          ? {
+              sourceUserMessageId:
+                input.connectorToolContext.sourceUserMessageId,
+            }
           : {}),
         ...(input.connectorToolContext.sourceAssistantMessageId
           ? {
@@ -278,6 +287,16 @@ export async function* handleHitlStreamChunk(input: {
     }
   }
 
+  if (input.billing && input.prepared) {
+    yield* flushPendingLlmCallUsage({
+      runtime,
+      billing: input.billing,
+      prepared: input.prepared,
+      llm: input.llm,
+      reason: "hitl_pause",
+    });
+  }
+
   const finalText = runtime.assistantContent.trim();
   const finalRenderBlocks = finalizeMessageRenderBlocks({
     blocks: runtime.renderBlocks.list(),
@@ -295,6 +314,7 @@ export async function* handleHitlStreamChunk(input: {
       availableCitations: runtime.citationRegistry.list(),
       retrievalCalls: runtime.collectRetrievalCalls(),
       toolCalls: runtime.collectToolCalls(),
+      meteredLlmCalls: runtime.collectMeteredLlmCalls(),
       ...(finalRenderBlocks.length > 0
         ? { renderBlocks: finalRenderBlocks }
         : {}),

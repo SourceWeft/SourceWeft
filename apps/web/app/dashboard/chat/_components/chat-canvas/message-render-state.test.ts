@@ -48,6 +48,32 @@ test("buildMessageRenderState exposes explicit assistant render fields", () => {
   assert.equal(state.citations.length, 1);
 });
 
+test("buildMessageRenderState keeps bottom loading visible during paused text output", () => {
+  const state = buildMessageRenderState({
+    isAssistantStreaming: true,
+    role: "assistant",
+    version: assistantVersion({
+      isTextPaused: true,
+      threadRun: { status: "running" },
+    }),
+  });
+
+  assert.equal(state.shouldShowBottomLoading, true);
+});
+
+test("buildMessageRenderState hides bottom loading while waiting for approval", () => {
+  const state = buildMessageRenderState({
+    isAssistantStreaming: true,
+    role: "assistant",
+    version: assistantVersion({
+      isTextPaused: true,
+      threadRun: { status: "waiting_for_approval" },
+    }),
+  });
+
+  assert.equal(state.shouldShowBottomLoading, false);
+});
+
 test("buildMessageRenderState revision changes when citation content changes", () => {
   const baseVersion = assistantVersion({
     citations: [citation({ excerpt: "first excerpt" })],

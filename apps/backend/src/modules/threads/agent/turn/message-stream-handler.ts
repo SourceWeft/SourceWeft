@@ -1,5 +1,8 @@
 import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
 import type { CommandSuccessCriteria } from "../..";
+import type { ContentBillingPort } from "../../../content/billing-port";
+import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
+import type { PreparedThreadTurn } from "../..";
 import type { DeepAgentTurnEvent } from "./events";
 import {
   extractFinishReasonFromMessageChunk,
@@ -7,6 +10,7 @@ import {
   extractReasoningFromMessageChunk,
   extractTextDeltasFromMessageChunk,
   extractUsageFromMessageChunk,
+  toObjectRecord,
 } from "./content";
 import {
   shouldSuppressLeakedCommandSpecText,
@@ -19,15 +23,47 @@ import {
   rememberObservedToolCalls,
 } from "./tool-tracker";
 import { sanitizeFilesystemToolInputForClient } from "./output-normalizer";
-import { addUsage } from "./usage";
 import type { TurnRuntime } from "./turn-runtime";
 import { appendReasoningChunk } from "./thinking";
+import {
+  flushPendingLlmCallUsage,
+  isTerminalFinishReason,
+  observeLlmCallUsage,
+} from "./llm-call-billing";
+
+function readString(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function resolveGenerationId(input: {
+  callIndex: number;
+  messageChunk: unknown;
+  messageMetadata: unknown;
+}) {
+  const chunkRecord = toObjectRecord(input.messageChunk);
+  const metadataRecord = toObjectRecord(input.messageMetadata);
+  const responseMetadata = toObjectRecord(chunkRecord?.response_metadata);
+  return (
+    readString(chunkRecord, "id") ??
+    readString(responseMetadata, "id") ??
+    readString(responseMetadata, "generation_id") ??
+    readString(responseMetadata, "generationId") ??
+    readString(metadataRecord, "generation_id") ??
+    readString(metadataRecord, "generationId") ??
+    `call-${input.callIndex}`
+  );
+}
 
 export async function* handleMessagesStreamChunk(input: {
   payload: unknown;
   commandSuccessCriteria: CommandSuccessCriteria;
   runtime: TurnRuntime;
   suppressModelReasoning: boolean;
+  prepared?: PreparedThreadTurn;
+  billing?: ContentBillingPort;
+  llm?: LlmExecutionConfig;
+  operation?: "chat.stream" | "chat.complete";
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const { payload, commandSuccessCriteria, runtime, suppressModelReasoning } =
     input;
@@ -38,10 +74,7 @@ export async function* handleMessagesStreamChunk(input: {
   const messageChunk = payload[0];
   const messageMetadata = payload[1];
   const messageToolCalls = extractToolCallsFromMessage(messageChunk);
-  rememberObservedToolCalls(
-    runtime.observedToolCallsById,
-    messageToolCalls,
-  );
+  rememberObservedToolCalls(runtime.observedToolCallsById, messageToolCalls);
   const promotedToolStreams = promotePendingToolStreamsFromToolCalls({
     pendingToolStreamsByRunId: runtime.pendingToolStreamsByRunId,
     resolveToolCallSequence: runtime.resolveToolCallSequence,
@@ -74,14 +107,37 @@ export async function* handleMessagesStreamChunk(input: {
       },
     };
   }
-  runtime.usage = addUsage(
-    runtime.usage,
-    extractUsageFromMessageChunk(messageChunk),
-  );
-  runtime.finishReason =
-    extractFinishReasonFromMessageChunk(messageChunk) ?? runtime.finishReason;
+  const nextUsage = extractUsageFromMessageChunk(messageChunk);
+  const nextFinishReason = extractFinishReasonFromMessageChunk(messageChunk);
+  runtime.finishReason = nextFinishReason ?? runtime.finishReason;
   runtime.providerFields =
-    extractProviderFieldsFromMessageChunk(messageChunk) ?? runtime.providerFields;
+    extractProviderFieldsFromMessageChunk(messageChunk) ??
+    runtime.providerFields;
+  if (nextUsage || isTerminalFinishReason(nextFinishReason)) {
+    observeLlmCallUsage({
+      runtime,
+      usage: nextUsage,
+      finishReason: nextFinishReason,
+      operation: input.operation ?? "chat.stream",
+      spanId: input.prepared?.traceContext?.parentSpanId ?? "agent_run",
+      generationId: resolveGenerationId({
+        callIndex:
+          runtime.pendingLlmCallUsage?.callIndex ??
+          runtime.llmCallSequence + 1,
+        messageChunk,
+        messageMetadata,
+      }),
+    });
+  }
+  if (isTerminalFinishReason(nextFinishReason)) {
+    yield* flushPendingLlmCallUsage({
+      runtime,
+      billing: input.billing,
+      prepared: input.prepared,
+      llm: input.llm,
+      reason: `finish:${nextFinishReason}`,
+    });
+  }
   const nextReasoning =
     extractReasoningFromMessageChunk(messageChunk) ??
     extractReasoningFromMessageChunk(messageMetadata) ??

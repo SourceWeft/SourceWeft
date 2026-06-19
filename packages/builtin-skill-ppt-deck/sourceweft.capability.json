@@ -73,12 +73,12 @@
         "tools": [
           "prepare_sandbox_workspace",
           "execute",
-          "publish_sandbox_artifact"
+          "publish_artifact"
         ],
         "output": {
           "kind": "artifact",
           "artifactType": "slides",
-          "publisherTool": "publish_sandbox_artifact"
+          "publisherTool": "publish_artifact"
         }
       },
       "command": {

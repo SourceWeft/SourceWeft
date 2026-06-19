@@ -24,6 +24,12 @@ type ParsedArtifactRoute =
     }
   | {
       artifactId: string;
+      asset: "previewImage";
+      kind: "semanticAsset";
+      workspaceId: string;
+    }
+  | {
+      artifactId: string;
       fileName: string;
       kind: "asset";
       workspaceId: string;
@@ -39,6 +45,7 @@ export function isSafeFlatArtifactAssetFileName(fileName: string) {
 
 function buildArtifactUrl(input: {
   artifactId: string;
+  asset?: "previewImage";
   assetFileName?: string;
   download?: boolean;
   route: string;
@@ -51,6 +58,9 @@ function buildArtifactUrl(input: {
   if (input.download) {
     params.set("download", "1");
   }
+  if (input.asset) {
+    params.set("asset", input.asset);
+  }
   if (input.assetFileName) {
     if (!isSafeFlatArtifactAssetFileName(input.assetFileName)) {
       return null;
@@ -62,10 +72,22 @@ function buildArtifactUrl(input: {
 
 export function resolveArtifactProxyFileUrl(input: {
   artifactId: string;
+  asset?: "previewImage";
   download?: boolean;
   workspaceId: string;
 }) {
   return buildArtifactUrl({ ...input, route: ARTIFACT_FILE_API_ROUTE }) ?? "";
+}
+
+export function resolveArtifactPreviewImageUrl(input: {
+  artifactId: string;
+  workspaceId: string;
+}) {
+  return resolveArtifactProxyFileUrl({
+    artifactId: input.artifactId,
+    asset: "previewImage",
+    workspaceId: input.workspaceId,
+  });
 }
 
 export function resolveArtifactPageUrl(input: {
@@ -158,6 +180,19 @@ function parseArtifactQueryRoute(value: string): ParsedArtifactRoute | null {
   }
 
   const assetFileName = url.searchParams.get("assetFileName");
+  const asset = url.searchParams.get("asset");
+  if (asset === "previewImage") {
+    return {
+      artifactId,
+      asset,
+      kind: "semanticAsset",
+      workspaceId,
+    };
+  }
+  if (asset) {
+    return null;
+  }
+
   if (assetFileName) {
     if (!isSafeFlatArtifactAssetFileName(assetFileName)) {
       return null;
@@ -191,6 +226,9 @@ export function artifactApiUrlToPageUrl(value: string) {
   if (route.kind === "asset") {
     return resolveArtifactProxyAssetUrl(route);
   }
+  if (route.kind === "semanticAsset") {
+    return resolveArtifactProxyFileUrl(route);
+  }
 
   return resolveArtifactPageUrl(route);
 }
@@ -203,6 +241,9 @@ export function artifactApiUrlToProxyFileUrl(value: string) {
 
   if (route.kind === "asset") {
     return resolveArtifactProxyAssetUrl(route);
+  }
+  if (route.kind === "semanticAsset") {
+    return resolveArtifactProxyFileUrl(route);
   }
 
   return resolveArtifactProxyFileUrl(route);
@@ -268,6 +309,9 @@ export function resolveArtifactProxyFileUrlFromArtifact(input: {
   if (route) {
     if (route.kind === "asset") {
       return resolveArtifactProxyAssetUrl(route);
+    }
+    if (route.kind === "semanticAsset") {
+      return resolveArtifactProxyFileUrl(route);
     }
 
     return resolveArtifactProxyFileUrl({

@@ -65,6 +65,7 @@ import type {
 } from "../../content/queue";
 import type {
   MessageRenderBlock,
+  MeteredLlmCallTrace,
   ModelReasoningSegmentTrace,
   ThinkingStepTrace,
   ToolCallTrace,
@@ -547,6 +548,7 @@ function buildTraceOutput(outcome: DeepAgentTurnOutcome) {
     toolCalls: outcome.toolCalls,
     retrievalCalls: outcome.retrievalCalls,
     renderBlockCount: outcome.renderBlocks?.length ?? 0,
+    meteredLlmCallCount: outcome.meteredLlmCalls?.length ?? 0,
     citationCount: outcome.citations.length,
     availableCitationCount: outcome.availableCitations.length,
     citations: buildCitationObservations(outcome.citations),
@@ -564,6 +566,7 @@ function buildPartialErrorState(input: {
   renderBlocks?: MessageRenderBlock[];
   citations: AgentCitation[];
   availableCitations: AgentCitation[];
+  meteredLlmCalls: MeteredLlmCallTrace[];
 }): ThreadStreamPartialErrorState {
   const terminalTraceState = buildTerminalAssistantTraceState({
     mode: "error",
@@ -582,6 +585,7 @@ function buildPartialErrorState(input: {
     renderBlocks: input.renderBlocks,
     citations: input.citations,
     availableCitations: input.availableCitations,
+    meteredLlmCalls: input.meteredLlmCalls,
   };
 }
 
@@ -1214,6 +1218,7 @@ class ContentThreadStreamService {
     }
     let citations: AgentCitation[] = [];
     let availableCitations: AgentCitation[] = [];
+    const meteredLlmCalls: MeteredLlmCallTrace[] = [];
     let responseFinished = false;
     let persistedErrorMessage = false;
     let finalizedAssistantMessage: MessageRecord | null = null;
@@ -1294,6 +1299,7 @@ class ContentThreadStreamService {
             ...prepared.traceContext,
             parentSpanId: "agent_run",
           },
+          operation: "chat.stream",
         });
         await threadStreamObservability.startSpan({
           ...prepared.traceContext,
@@ -1364,7 +1370,15 @@ class ContentThreadStreamService {
           nextAgentEvent = agentEvents.next();
           await throwIfClientCancelled(options.shouldCancel);
           if (event.type === "done") {
-            outcome = event.outcome;
+            outcome = {
+              ...event.outcome,
+              meteredLlmCalls: event.outcome.meteredLlmCalls ?? meteredLlmCalls,
+            };
+            continue;
+          }
+
+          if (event.type === "billing") {
+            meteredLlmCalls.push(event.meteredLlmCall);
             continue;
           }
 
@@ -1468,6 +1482,8 @@ class ContentThreadStreamService {
               availableCitations: completedOutcome.availableCitations,
               retrievalCalls: completedOutcome.retrievalCalls,
               toolCalls: completedOutcome.toolCalls,
+              meteredLlmCalls:
+                completedOutcome.meteredLlmCalls ?? meteredLlmCalls,
               thinkingSteps: terminalTraceState.thinkingSteps,
               renderBlocks: completedOutcome.renderBlocks,
               reasoningSegments: completedOutcome.reasoningSegments,
@@ -1549,6 +1565,7 @@ class ContentThreadStreamService {
             renderBlocks: outcome?.renderBlocks,
             citations,
             availableCitations,
+            meteredLlmCalls,
           }),
         });
         persistedErrorMessage = Boolean(errorMessage);
@@ -1667,6 +1684,7 @@ class ContentThreadStreamService {
               renderBlocks: outcome?.renderBlocks,
               citations,
               availableCitations,
+              meteredLlmCalls,
             }),
           });
           persistedErrorMessage = Boolean(errorMessage);
@@ -1797,6 +1815,7 @@ class ContentThreadStreamService {
     let agentSpanCompleted = false;
     let traceEnded = false;
     let outcome: DeepAgentTurnOutcome | null = null;
+    const meteredLlmCalls: MeteredLlmCallTrace[] = [];
     let traceParts: TracePart[] = prepared.preflightThinkingSteps.reduce<
       TracePart[]
     >(
@@ -1815,7 +1834,12 @@ class ContentThreadStreamService {
             ...prepared.traceContext!,
             parentSpanId: "agent_run",
           },
+          operation: "chat.complete",
         })) {
+          if (event.type === "billing") {
+            meteredLlmCalls.push(event.meteredLlmCall);
+            continue;
+          }
           if (event.type === "reasoning") {
             traceParts = upsertTracePart(
               traceParts,
@@ -1841,7 +1865,10 @@ class ContentThreadStreamService {
             );
           }
           if (event.type === "done") {
-            doneOutcome = event.outcome;
+            doneOutcome = {
+              ...event.outcome,
+              meteredLlmCalls: event.outcome.meteredLlmCalls ?? meteredLlmCalls,
+            };
           }
         }
 
@@ -1867,6 +1894,7 @@ class ContentThreadStreamService {
           contentError,
           partialState: {
             thinkingSteps: prepared.preflightThinkingSteps,
+            meteredLlmCalls,
           },
         });
         if (
@@ -1945,6 +1973,8 @@ class ContentThreadStreamService {
             availableCitations: completedOutcome.availableCitations,
             retrievalCalls: completedOutcome.retrievalCalls,
             toolCalls: completedOutcome.toolCalls,
+            meteredLlmCalls:
+              completedOutcome.meteredLlmCalls ?? meteredLlmCalls,
             thinkingSteps: terminalTraceState.thinkingSteps,
             renderBlocks: completedOutcome.renderBlocks,
             reasoningSegments: completedOutcome.reasoningSegments,

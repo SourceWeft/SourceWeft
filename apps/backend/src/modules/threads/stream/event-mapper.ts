@@ -168,7 +168,7 @@ function normalizeReasoningSegmentForSse(
 }
 
 export function mapDeepAgentEventToSse(
-  event: Exclude<DeepAgentTurnEvent, { type: "done" }>,
+  event: Exclude<DeepAgentTurnEvent, { type: "done" } | { type: "billing" }>,
   textId: string,
 ) {
   if (event.type === "text-delta") {

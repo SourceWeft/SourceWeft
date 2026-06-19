@@ -27,14 +27,14 @@ test("ppt-deck active skill enables sandbox tools without requiring slides outpu
     defaultTools: [
       AGENT_TOOL_NAMES.prepareSandboxWorkspace,
       AGENT_TOOL_NAMES.execute,
-      AGENT_TOOL_NAMES.publishSandboxArtifact,
+      AGENT_TOOL_NAMES.publishArtifact,
     ],
     permissionOverrides: {},
     additionalPromptLines: [],
     successCriteria: {
       kind: "artifact",
       artifactType: "slides",
-      toolName: AGENT_TOOL_NAMES.publishSandboxArtifact,
+      toolName: AGENT_TOOL_NAMES.publishArtifact,
     },
   };
   const runtime = resolveActiveSkillRuntimeContract({
@@ -46,7 +46,7 @@ test("ppt-deck active skill enables sandbox tools without requiring slides outpu
   assert.deepEqual(runtime.defaultTools, [
     AGENT_TOOL_NAMES.prepareSandboxWorkspace,
     AGENT_TOOL_NAMES.execute,
-    AGENT_TOOL_NAMES.publishSandboxArtifact,
+    AGENT_TOOL_NAMES.publishArtifact,
   ]);
   assert.deepEqual(runtime.permissionOverrides, {});
 });

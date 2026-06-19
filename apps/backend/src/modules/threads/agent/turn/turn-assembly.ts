@@ -340,6 +340,7 @@ export async function buildRuntimePromptContext(
 export interface ToolCollectionInput {
   prepared: PreparedThreadTurn;
   billing: ContentBillingPort;
+  filesystemBackend?: FilesystemBackend;
   llm?: LlmExecutionConfig;
   traceContext?: TraceContext;
   runtime: TurnRuntime;
@@ -448,6 +449,7 @@ export async function buildTurnAssembly(
   const toolCollection = await buildToolCollection({
     prepared,
     billing,
+    filesystemBackend,
     llm,
     traceContext,
     runtime,
@@ -658,12 +660,20 @@ export async function buildThreadAgentAssembly(
 export async function buildToolCollection(
   input: ToolCollectionInput,
 ): Promise<ToolCollection> {
-  const { prepared, billing, llm, traceContext, runtime, sandboxRuntime } =
-    input;
+  const {
+    prepared,
+    billing,
+    filesystemBackend,
+    llm,
+    traceContext,
+    runtime,
+    sandboxRuntime,
+  } = input;
 
   const capabilityAgentTools = await createCapabilityAgentToolsForTurn({
     prepared,
     billing,
+    filesystemBackend,
     llm,
     traceContext,
     runtime,

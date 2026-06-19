@@ -227,17 +227,17 @@ test("resolveThreadCommand resolves manifest skill aliases to enabled skills", a
   assert.doesNotMatch(command?.workflow?.renderedPrompt ?? "", /SKILL\.md/);
   assert.match(
     command?.workflow?.renderedPrompt ?? "",
-    /publish_sandbox_artifact/,
+    /publish_artifact/,
   );
   assert.deepEqual(command?.workflow?.defaultTools, [
     "prepare_sandbox_workspace",
     "execute",
-    "publish_sandbox_artifact",
+    "publish_artifact",
   ]);
   assert.deepEqual(command?.workflow?.successCriteria, {
     kind: "artifact",
     artifactType: "slides",
-    toolName: "publish_sandbox_artifact",
+    toolName: "publish_artifact",
   });
 });
 

@@ -4,6 +4,7 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import { isPendingToolConfirmation } from "@sourceweft/contracts";
 import { formatThoughtDuration } from "./duration-format";
+import { isSandboxToolResultFailure } from "./sandbox-tool-result-display";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import type {
   ModelReasoningSegmentRecord,
@@ -84,13 +85,13 @@ export function isReasoningTraceThinking(input: {
 
 export function shouldShowGeneratedPresentationItem(input: {
   fileUrl?: string | null;
-  isSandboxArtifactPublisher: boolean;
+  isArtifactPublisher: boolean;
   isVideoPresentation: boolean;
   previewArtifact?: unknown;
   status: ToolCallRecord["status"];
 }) {
   if (
-    input.isSandboxArtifactPublisher &&
+    input.isArtifactPublisher &&
     (input.status === "running" ||
       input.status === "approval_requested" ||
       input.status === "error")
@@ -124,6 +125,38 @@ function getOutputRecord(toolCall: ToolCallRecord) {
 
 function formatApprovalState(state: ToolCallRecord["approvalState"]) {
   return state === "approved" || state === "rejected" ? state : null;
+}
+
+function escapeExecuteCommandForDisplay(command: string) {
+  return command.replace(/[\x00-\x1f\x7f]/g, (character) => {
+    if (character === "\n") return "\\n";
+    if (character === "\r") return "\\r";
+    if (character === "\t") return "\\t";
+    const code = character.charCodeAt(0).toString(16).padStart(4, "0");
+    return `\\u${code}`;
+  });
+}
+
+function compactExecuteCommandForDisplay(command: string) {
+  const escaped = escapeExecuteCommandForDisplay(command);
+  if (escaped.length <= 240) {
+    return escaped;
+  }
+  return `${escaped.slice(0, 237).trimEnd()}...`;
+}
+
+function getExecuteCommandDetail(toolCall: ToolCallRecord) {
+  if (toolCall.tool !== "execute") {
+    return null;
+  }
+  const command =
+    toolCall.input && typeof toolCall.input === "object"
+      ? (toolCall.input as Record<string, unknown>).command
+      : null;
+  if (typeof command !== "string" || command.trim().length === 0) {
+    return null;
+  }
+  return `command: ${compactExecuteCommandForDisplay(command)}`;
 }
 
 function getToolHitCount(
@@ -430,10 +463,19 @@ export function getToolCallDetailParts(
     statusLabel = "approved action failed";
   } else if (toolCall.approvalState === "rejected") {
     statusLabel = "approval rejected";
+  } else if (
+    isSandboxToolResultFailure({
+      output: toolCall.output,
+      toolName: toolCall.tool,
+    })
+  ) {
+    statusLabel = "error";
   }
   const approvalState = formatApprovalState(toolCall.approvalState);
+  const executeCommandDetail = getExecuteCommandDetail(toolCall);
   return [
     `status: ${statusLabel}`,
+    executeCommandDetail,
     approvalState ? `approval: ${approvalState}` : null,
     toolCall.approvalConfirmationId
       ? `confirmation: ${toolCall.approvalConfirmationId}`

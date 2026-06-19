@@ -56,17 +56,40 @@ export function commandSuccessFailureText(
   switch (criteria.kind) {
     case "none":
       return "Command failed because its success criteria were not satisfied.";
-    case "artifact":
-      if (toolCalls.some((call) => call.tool === criteria.toolName)) {
+    case "artifact": {
+      const matchingToolCalls = toolCalls.filter(
+        (call) => call.tool === criteria.toolName,
+      );
+      const latestToolMessage = latestToolFailureMessage(matchingToolCalls);
+      if (matchingToolCalls.length > 0) {
+        if (latestToolMessage) {
+          return `Command failed because ${criteria.toolName} reported: ${latestToolMessage}`;
+        }
         return `Command failed because ${criteria.toolName} did not create a ${criteria.artifactType} artifact.`;
       }
       return `Command failed because ${criteria.toolName} was not called to create a ${criteria.artifactType} artifact.`;
-    case "tool_call":
-      if (toolCalls.some((call) => call.tool === criteria.toolName)) {
+    }
+    case "tool_call": {
+      const matchingToolCalls = toolCalls.filter(
+        (call) => call.tool === criteria.toolName,
+      );
+      const latestToolMessage = latestToolFailureMessage(matchingToolCalls);
+      if (matchingToolCalls.length > 0) {
+        if (latestToolMessage) {
+          return `Command failed because ${criteria.toolName} reported: ${latestToolMessage}`;
+        }
         return `Command failed because ${criteria.toolName} did not complete successfully.`;
       }
       return `Command failed because ${criteria.toolName} was not called.`;
+    }
   }
+}
+
+function latestToolFailureMessage(toolCalls: ToolCallTrace[]) {
+  return [...toolCalls]
+    .reverse()
+    .map((call) => extractToolOutputField(call.output, "message") ?? call.error)
+    .find((message): message is string => Boolean(message));
 }
 
 export function commandExecutionPolicyFor(

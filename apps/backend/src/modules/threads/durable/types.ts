@@ -8,6 +8,7 @@ import type {
 } from "../stream/types";
 import type {
   AgentCheckpointMetadata,
+  MeteredLlmCallTrace,
   StreamThreadEventInput,
 } from "../turn/types";
 
@@ -78,6 +79,7 @@ export type ChatRunSnapshot = DurableRunResultSnapshot & {
   traceEvents?: unknown[];
   traceParts?: unknown[];
   renderBlocks?: unknown[];
+  meteredLlmCalls?: MeteredLlmCallTrace[];
   citations?: unknown[];
   availableCitations?: unknown[];
   lastEventType?: string;

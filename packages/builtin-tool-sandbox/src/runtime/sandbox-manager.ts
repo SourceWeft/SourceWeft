@@ -17,6 +17,8 @@ import {
 } from "./redaction";
 
 const SANDBOX_CREATING_STALE_MS = 2 * 60 * 1000;
+const SANDBOX_CREATING_WAIT_TIMEOUT_MS = 15_000;
+const SANDBOX_CREATING_WAIT_INTERVAL_MS = 250;
 export const SANDBOX_OPERATION_STALE_GRACE_MS = 30 * 1000;
 export const SANDBOX_RELEASE_LEASE_GRACE_MS = 5 * 60 * 1000;
 export const SANDBOX_OPERATION_STALE_RELEASED_CODE =
@@ -64,6 +66,10 @@ function failedRetryMessage(input: {
   const oldCreatedAt = input.existing.createdAt?.toISOString() ?? "unknown";
   const requestFingerprint = sandboxRequestFingerprint(input.request);
   return `SANDBOX_OPERATION_FAILED_RETRY_REQUIRED: sandbox ${input.operationType} previously failed for this tool call. Use a new toolCallId or include an explicit retry nonce/request hash to retry. Previous operation: id=${operationId}, messageId=${oldMessageId}, createdAt=${oldCreatedAt}. Current messageId=${currentMessageId}. Request fingerprint=${requestFingerprint}.${error}`;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function resolveSandboxToolOperationReplay(input: {
@@ -139,106 +145,129 @@ export class SandboxManager {
     );
   }
 
-  async getOrCreateThreadSandbox(context: SandboxRuntimeContext): Promise<SandboxRef> {
-    const existing = await this.input.sandboxStore.findLatestActiveThreadSandbox({
-      provider: this.input.provider.id,
-      context,
-    });
+  async getOrCreateThreadSandbox(
+    context: SandboxRuntimeContext,
+    options: { waitTimeoutMs?: number; waitIntervalMs?: number } = {},
+  ): Promise<SandboxRef> {
+    const waitTimeoutMs =
+      options.waitTimeoutMs ?? SANDBOX_CREATING_WAIT_TIMEOUT_MS;
+    const waitIntervalMs =
+      options.waitIntervalMs ?? SANDBOX_CREATING_WAIT_INTERVAL_MS;
+    const waitStartedAt = Date.now();
 
-    if (existing) {
-      if (existing.status === "creating") {
-        const ageMs = Date.now() - existing.updatedAt.getTime();
-        if (ageMs < SANDBOX_CREATING_STALE_MS) {
-          throw new Error("SANDBOX_CREATION_IN_PROGRESS: sandbox creation is already running for this thread.");
-        }
-        const claimed = await this.input.sandboxStore.markCreatingSandboxError({
-          sandboxId: existing.id,
-          expectedUpdatedAt: existing.updatedAt,
-        });
-        if (!claimed) {
-          throw new Error(
-            "SANDBOX_CREATION_IN_PROGRESS: stale sandbox creation was already claimed by another worker.",
-          );
-        }
-      } else {
-        try {
-          await this.input.provider.getSandbox(existing.providerSandboxId);
-          await this.input.provider.checkSandboxHealth?.(
-            existing.providerSandboxId,
-          );
-          await this.input.sandboxStore.touchSandbox({
+    for (;;) {
+      const existing = await this.input.sandboxStore.findLatestActiveThreadSandbox({
+        provider: this.input.provider.id,
+        context,
+      });
+
+      if (existing) {
+        if (existing.status === "creating") {
+          const ageMs = Date.now() - existing.updatedAt.getTime();
+          if (ageMs < SANDBOX_CREATING_STALE_MS) {
+            if (Date.now() - waitStartedAt < waitTimeoutMs) {
+              await sleep(waitIntervalMs);
+              continue;
+            }
+            throw new Error(
+              "SANDBOX_CREATION_WAIT_TIMEOUT: sandbox creation is still running for this thread.",
+            );
+          }
+          const claimed = await this.input.sandboxStore.markCreatingSandboxError({
             sandboxId: existing.id,
-            expiresAt: this.sandboxExpiresAt(),
+            expectedUpdatedAt: existing.updatedAt,
           });
-          return {
-            id: existing.id,
-            provider: this.input.provider.id,
-            providerSandboxId: existing.providerSandboxId,
-          };
-        } catch {
-          await this.input.sandboxStore.markSandboxExpired({
-            sandboxId: existing.id,
-          });
+          if (!claimed) {
+            throw new Error(
+              "SANDBOX_CREATION_IN_PROGRESS: stale sandbox creation was already claimed by another worker.",
+            );
+          }
+        } else {
+          try {
+            await this.input.provider.getSandbox(existing.providerSandboxId);
+            await this.input.provider.checkSandboxHealth?.(
+              existing.providerSandboxId,
+            );
+            await this.input.sandboxStore.touchSandbox({
+              sandboxId: existing.id,
+              expiresAt: this.sandboxExpiresAt(),
+            });
+            return {
+              id: existing.id,
+              provider: this.input.provider.id,
+              providerSandboxId: existing.providerSandboxId,
+            };
+          } catch {
+            await this.input.sandboxStore.markSandboxExpired({
+              sandboxId: existing.id,
+            });
+          }
         }
       }
-    }
 
-    const id = randomUUID();
-    const pendingProviderSandboxId = `creating:${id}`;
-    const inserted = await this.input.sandboxStore.insertCreatingSandbox({
-      sandboxId: id,
-      provider: this.input.provider.id,
-      providerSandboxId: pendingProviderSandboxId,
-      context,
-      expiresAt: this.sandboxExpiresAt(),
-    });
-
-    if (!inserted) {
-      return this.getOrCreateThreadSandbox(context);
-    }
-
-    const startedAt = Date.now();
-    try {
-      const sandbox = await this.input.provider.createSandbox({
-        ttlSeconds: this.input.ttlSeconds,
-        labels: {
-          sourceweft: "true",
-          provider: this.input.provider.id,
-          team_id: context.teamId,
-          workspace_id: context.workspaceId,
-          thread_id: context.threadId,
-          user_id: context.userId,
-          environment: this.input.environment ?? "development",
-        },
-      });
-      await this.input.provider.checkSandboxHealth?.(sandbox.id);
-      await this.input.sandboxStore.markSandboxReady({
+      const id = randomUUID();
+      const pendingProviderSandboxId = `creating:${id}`;
+      const inserted = await this.input.sandboxStore.insertCreatingSandbox({
         sandboxId: id,
-        providerSandboxId: sandbox.id,
+        provider: this.input.provider.id,
+        providerSandboxId: pendingProviderSandboxId,
+        context,
         expiresAt: this.sandboxExpiresAt(),
       });
-      await this.recordOperation({
-        context,
-        sandboxId: id,
-        operationType: "create",
-        status: "succeeded",
-        result: { providerSandboxId: sandbox.id },
-        durationMs: Date.now() - startedAt,
-      });
-      return { id, provider: this.input.provider.id, providerSandboxId: sandbox.id };
-    } catch (error) {
-      await this.input.sandboxStore.markCreatingSandboxError({
-        sandboxId: id,
-      });
-      await this.recordOperation({
-        context,
-        sandboxId: id,
-        operationType: "create",
-        status: "failed",
-        result: { error: error instanceof Error ? error.message : String(error) },
-        durationMs: Date.now() - startedAt,
-      });
-      throw error;
+
+      if (!inserted) {
+        return this.getOrCreateThreadSandbox(context, options);
+      }
+
+      const startedAt = Date.now();
+      try {
+        const sandbox = await this.input.provider.createSandbox({
+          ttlSeconds: this.input.ttlSeconds,
+          labels: {
+            sourceweft: "true",
+            provider: this.input.provider.id,
+            team_id: context.teamId,
+            workspace_id: context.workspaceId,
+            thread_id: context.threadId,
+            user_id: context.userId,
+            environment: this.input.environment ?? "development",
+          },
+        });
+        await this.input.provider.checkSandboxHealth?.(sandbox.id);
+        await this.input.sandboxStore.markSandboxReady({
+          sandboxId: id,
+          providerSandboxId: sandbox.id,
+          expiresAt: this.sandboxExpiresAt(),
+        });
+        await this.recordOperation({
+          context,
+          sandboxId: id,
+          operationType: "create",
+          status: "succeeded",
+          result: { providerSandboxId: sandbox.id },
+          durationMs: Date.now() - startedAt,
+        });
+        return {
+          id,
+          provider: this.input.provider.id,
+          providerSandboxId: sandbox.id,
+        };
+      } catch (error) {
+        await this.input.sandboxStore.markCreatingSandboxError({
+          sandboxId: id,
+        });
+        await this.recordOperation({
+          context,
+          sandboxId: id,
+          operationType: "create",
+          status: "failed",
+          result: {
+            error: error instanceof Error ? error.message : String(error),
+          },
+          durationMs: Date.now() - startedAt,
+        });
+        throw error;
+      }
     }
   }
 

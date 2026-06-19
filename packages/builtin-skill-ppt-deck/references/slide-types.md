@@ -1,522 +1,216 @@
-# Slide Page Types
-
-Classify **every slide** as **exactly one** of these 5 types:
-
-## 1. Cover Page
-
-- **Use for**: Opening + tone setting
-- **Content**: Big title, subtitle/presenter, date/occasion, strong background/motif
-
-### Layout Options
-
-**Asymmetric Left-Right Layout**
-
-- Text concentrated on one side, image on the opposite
-- Best for: Corporate presentations, product launches, professional reports
-
-```
-|  Title & Subtitle  |    Visual/Image    |
-|  Description       |                    |
-```
-
-**Center-Aligned Layout**
-
-- Content centered with background image
-- Best for: Inspirational talks, event presentations, creative pitches
-
-```
-|                                        |
-|           [Background Image]           |
-|              MAIN TITLE                |
-|              Subtitle                  |
-|                                        |
-```
-
-### Font Size Hierarchy
-
-| Element                | Recommended Size | Ratio to Base |
-| ---------------------- | ---------------- | ------------- |
-| Main Title             | 72-120px         | 3x-5x         |
-| Subtitle               | 28-40px          | 1.5x-2x       |
-| Supporting Text        | 18-24px          | 1x (base)     |
-| Meta Info (date, name) | 14-18px          | 0.7x-1x       |
-
-**Key Principles:**
-
-1. **Dramatic Contrast**: Main title should be at least 2-3x larger than subtitle
-2. **Visual Anchor**: The largest text becomes the focal point
-3. **Readable Hierarchy**: Viewers should instantly understand what's most important
-4. **Avoid Similarity**: Never let adjacent text elements be within 20% of each other's size
-
-### Content Elements
-
-1. **Main Title** — Always required, largest font
-2. **Subtitle** — When additional context is needed (clearly smaller than title)
-3. **Icons** — When they reinforce the theme
-4. **Date/Event Info** — When relevant (smallest text)
-5. **Company/Brand Logo** — When representing an organization
-6. **Presenter Name** — For keynotes (small, subtle)
-
-### Design Decisions
-
-Consider: Purpose (corporate/educational/creative), Audience, Tone, Content Volume, Visual Assets needed.
-
-### Workflow
-
-1. **Analyze**: Understand topic, audience, purpose
-2. **Choose Layout**: Select based on content
-3. **Write Slide**: Use PptxGenJS. Use shapes and SVG elements for visual interest.
-4. **Verify**: Run the full `deck.js`, extract text from the actual generated PPTX path, and verify all cover content is present with no placeholder text.
-
----
-
-## 2. Table of Contents
-
-- **Use for**: Navigation + expectation setting (3-5 sections)
-- **Content**: Section list (optional icons / page numbers)
-
-### Layout Options
-
-**Numbered Vertical List** — Best for 3-5 sections, straightforward presentations
-
-```
-|  TABLE OF CONTENTS            |
-|                                |
-|  01  Section Title One         |
-|  02  Section Title Two         |
-|  03  Section Title Three       |
-```
-
-**Two-Column Grid** — Best for 4-6 sections, content-rich presentations
-
-```
-|  TABLE OF CONTENTS              |
-|                                  |
-|  01  Section One   02  Section Two  |
-|      Description       Description  |
-|  03  Section Three 04  Section Four |
-```
-
-**Sidebar Navigation** — Best for 3-5 sections, modern/corporate
-
-```
-| ▌01 |  Section Title One           |
-| ▌02 |  Section Title Two           |
-| ▌03 |  Section Title Three         |
-```
-
-**Card-Based** — Best for 3-4 sections, creative/modern
-
-```
-|  TABLE OF CONTENTS                    |
-|  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  |
-|  │ 01  │  │ 02  │  │ 03  │  │ 04  │  |
-|  │Title│  │Title│  │Title│  │Title│  |
-|  └─────┘  └─────┘  └─────┘  └─────┘  |
-```
-
-### Font Size Hierarchy
-
-| Element                                     | Recommended Size | Ratio to Base |
-| ------------------------------------------- | ---------------- | ------------- |
-| Page Title ("Table of Contents" / "Agenda") | 36-44px          | 2.5x-3x       |
-| Section Number                              | 28-36px          | 2x-2.5x       |
-| Section Title                               | 20-28px          | 1.5x-2x       |
-| Section Description                         | 14-16px          | 1x (base)     |
-
-**Key Principles:**
-
-1. **Clear Numbering**: Section numbers should be visually prominent — bold, accent color, or larger size
-2. **Scannable Structure**: Viewer should scan all sections in 2-3 seconds
-3. **Consistent Spacing**: Equal vertical spacing between sections
-4. **Visual Markers**: Colored dots, lines, numbers, or icons to anchor each section
-5. **Avoid Clutter**: Descriptions one line max or omit entirely
-
-### Content Elements
-
-1. **Page Title** — Always required ("Table of Contents", "Agenda", "Overview")
-2. **Section Numbers** — Consistent format (01, 02... or I, II...)
-3. **Section Titles** — Clear and concise
-4. **Section Descriptions** — Optional one-line summaries
-5. **Visual Separators** — SVG dividers or spacing
-6. **Decorative Elements** — Subtle accent shapes
-7. **Page Number / Progress Marker** — Optional when navigation helps
-
-### Design Decisions
-
-1. **Section Count**: 3 → vertical list; 4-6 → grid or compact; 7+ → multi-column
-2. **Description Length**: Long → vertical list; None → compact grid/cards
-3. **Tone**: Corporate → numbered list; Creative → card-based; Academic → Roman numerals
-4. **Consistency**: Match visual style of cover page
-
-### Workflow
-
-1. **Analyze**: Section list, count, presentation context
-2. **Choose Layout**: Based on section count and content
-3. **Plan Visual Hierarchy**: Numbering style, font sizes, spacing
-4. **Write Slide**: Use PptxGenJS. Use shapes for decorative elements. **MUST include page number badge.**
-5. **Verify**: Run the full `deck.js`, extract text with markitdown, and verify content and badge.
-
----
-
-## 3. Section Divider
-
-- **Use for**: Clear transitions between major parts
-- **Content**: Section number + title (+ optional 1-2 line intro)
-
-### Layout Options
-
-**Bold Center** — Best for minimal, modern presentations
-
-```
-|                  02                    |
-|           SECTION TITLE               |
-|         Optional intro line           |
-```
-
-**Left-Aligned with Accent Block** — Best for corporate, structured presentations
-
-```
-| ████ |  02                            |
-| ████ |  SECTION TITLE                 |
-| ████ |  Optional intro line           |
-```
-
-**Split Background** — Best for high-contrast, dramatic transitions
-
-```
-| ██████████ |     SECTION TITLE        |
-| ██  02  ██ |     Optional intro       |
-| ██████████ |                          |
-```
-
-**Full-Bleed Background with Overlay** — Best for creative, bold presentations
-
-```
-| ████████████████████████████████████  |
-| ████       large 02        █████████ |
-| ████    SECTION TITLE      █████████ |
-| ████████████████████████████████████  |
-```
-
-### Font Size Hierarchy
-
-| Element        | Recommended Size | Notes                                  |
-| -------------- | ---------------- | -------------------------------------- |
-| Section Number | 72-120px         | Bold, accent color or semi-transparent |
-| Section Title  | 36-48px          | Bold, clear, primary text color        |
-| Intro Text     | 16-20px          | Light weight, muted color, optional    |
-
-**Key Principles:**
-
-1. **Dramatic Number**: Section number = most prominent visual element
-2. **Strong Title**: Large but clearly secondary to the number
-3. **Minimal Content**: Just number + title + optional one-liner
-4. **Breathing Room**: Leave generous whitespace — dividers are pause moments
-
-### Content Elements
-
-1. **Section Number** — Always required. Format: `01`, `02`... or `I`, `II`... Match TOC style.
-2. **Section Title** — Always required. Clear, concise.
-3. **Intro Text** — Optional 1-2 line description.
-4. **Decorative Elements** — SVG accent shapes (bars, lines, geometric blocks).
-5. **Page Number / Progress Marker** — Optional when navigation helps.
-
-### Design Decisions
-
-1. **Tone**: Corporate → accent block; Creative → full-bleed; Minimal → bold center
-2. **Color**: Strong palette color for background/accent; high-contrast text
-3. **Consistency**: Same divider style across all dividers in one presentation
-4. **Contrast with content slides**: Visually distinct (different background color, more whitespace)
-
-### Workflow
-
-1. **Analyze**: Section number, title, optional intro
-2. **Choose Layout**: Based on content and tone
-3. **Write Slide**: Use PptxGenJS. Use shapes for decorative elements. **MUST include page number badge.**
-4. **Verify**: Run the full `deck.js`, extract text with markitdown, and verify content and badge.
-
----
-
-## 4. Content Page
-
-Pick a subtype based on the content. Each content slide belongs to exactly ONE subtype:
-
-### Subtypes
-
-**Text** — Bullets, quotes, or short paragraphs
-
-- Must still include icons or SVG shapes — never plain text only
-
-```
-|  SLIDE TITLE                          |
-|  * Bullet point one                   |
-|  * Bullet point two                   |
-|  * Bullet point three                 |
-```
-
-**Mixed Media** — Two-column or half-bleed image + text
-
-```
-|  SLIDE TITLE                          |
-|  Text content     |  [Image/Visual]   |
-|  and bullets      |                   |
-```
-
-**Data Visualization** — Chart (SVG bar/progress/ring) + takeaways
-
-- Must include data source
-
-```
-|  SLIDE TITLE                          |
-|  [SVG Chart]      |  Key Takeaway 1   |
-|                   |  Key Takeaway 2   |
-|                   Source: xxx          |
-```
-
-**Comparison** — Side-by-side columns or cards (A vs B, pros/cons)
-
-```
-|  SLIDE TITLE                          |
-|  ┌─ Option A ─┐  ┌─ Option B ─┐      |
-|  │  Detail 1  │  │  Detail 1  │      |
-|  └────────────┘  └────────────┘      |
-```
-
-**Timeline / Process** — Steps with arrows, journey, phases
-
-```
-|  SLIDE TITLE                          |
-|  [1] ──→ [2] ──→ [3] ──→ [4]         |
-|  Step    Step    Step    Step          |
-```
-
-**Process** — A loop, cycle, funnel, ladder, or staged method
-
-- Best for methods, workflows, learning loops, onboarding, implementation plans
-- Use numbered icon badges, arrows, or a circular path
-- Keep each step label short; put explanation in one-line captions
-
-```
-|  SLIDE TITLE                          |
-|        [1] → [2] → [3] → [4]          |
-|          ↖──────────────↙             |
-|  One-line explanation below            |
-```
-
-**Concept Map** — Central idea with surrounding causes, examples, or signals
-
-- Best for explaining abstract ideas, relationships, root causes, mental models
-- Use a central node, 3-6 surrounding nodes, and light connectors
-- Avoid more than 6 nodes unless the slide is intentionally dense
-
-```
-|  SLIDE TITLE                          |
-|     [A]          [B]                  |
-|          \      /                     |
-|          [CORE]                       |
-|          /      \                     |
-|     [C]          [D]                  |
-```
-
-**Case / Example** — Concrete scenario, story, or application
-
-- Best for training, sales, product walkthroughs, and educational examples
-- Use a situation/result structure, annotated screenshot, or scenario card
-- Highlight the lesson visually instead of burying it in bullets
-
-```
-|  SLIDE TITLE                          |
-|  Scenario card       | Lesson card     |
-|  Evidence/example    | What to copy    |
-```
-
-**Misconception / Fix** — Wrong mental model vs corrected understanding
-
-- Best for teaching, debugging, best practices, and conceptual clarification
-- Use a strong contrast between "looks right" and "actually right"
-- Accent the correction, not the mistake
-
-```
-|  SLIDE TITLE                          |
-|  Misconception       | Better model    |
-|  x vague idea        | ✓ clear rewrite |
-```
-
-**Framework Canvas** — A 2x2, layered model, scorecard, or decision canvas
-
-- Best for strategy, frameworks, planning, and summarizing dimensions
-- Use stable grid geometry and concise labels
-- Color-code only the key axis or active quadrant
-
-```
-|  SLIDE TITLE                          |
-|  ┌──────────┬──────────┐              |
-|  │ Segment  │ Segment  │              |
-|  ├──────────┼──────────┤              |
-|  │ Segment  │ Segment  │              |
-|  └──────────┴──────────┘              |
-```
-
-**Recap Matrix** — Compact summary of actions, takeaways, or before/after states
-
-- Best for closing sections or turning learning into action
-- Use 2-4 rows and 2-3 columns
-- Pair each row with a small icon or number marker
-
-```
-|  SLIDE TITLE                          |
-|  When          | What to do           |
-|  Before study  | Choose one concept   |
-|  During review | Teach it simply      |
-```
-
-**Image Showcase** — Hero image, gallery, visual-first layout
-
-```
-|  SLIDE TITLE                          |
-|  ┌────────────────────────────────┐   |
-|  │         [Hero Image]           │   |
-|  └────────────────────────────────┘   |
-|  Caption or supporting text           |
-```
-
-### Font Size Hierarchy
-
-| Element           | Recommended Size | Notes                                 |
-| ----------------- | ---------------- | ------------------------------------- |
-| Slide Title       | 36-44px          | Bold, top of slide                    |
-| Section Header    | 20-24px          | Bold, for sub-sections within slide   |
-| Body Text         | 14-16px          | Regular weight, left-aligned          |
-| Captions / Source | 10-12px          | Muted color, smallest text            |
-| Stat Callout      | 60-72px          | Large bold numbers for key statistics |
-
-**Key Principles:**
-
-1. **Left-align body text** — never center paragraphs or bullet lists
-2. **Size contrast** — title must be 36pt+ to stand out from 14-16pt body
-3. **Visual elements required** — every content slide must have at least one non-text element
-4. **Breathing room** — 0.5" minimum margins, 0.3-0.5" between content blocks
-
-### Content Elements
-
-1. **Slide Title** — Always required, top of slide
-2. **Body Content** — Text, bullets, data, or comparisons based on subtype
-3. **Visual Element** — Image, chart, icon, or SVG shape — always required
-4. **Source / Caption** — When showing data or external content
-5. **Page Number / Progress Marker** — Optional when navigation helps
-
-### Design Decisions
-
-1. **Subtype**: Determine first — drives the entire layout
-2. **Content Volume**: Dense → multi-column or smaller font; Light → larger elements with more whitespace
-3. **Data vs Narrative**: Data-heavy → charts + stat callouts; Story-driven → images + quotes
-4. **Variety**: Each content slide should use a different layout from the previous one
-5. **Consistency**: Typography, colors, and spacing must match the rest of the presentation
-
-### Workflow
-
-1. **Analyze**: Content, determine subtype, plan layout
-2. **Choose Layout**: Best fit for subtype and content volume
-3. **Write Slide**: Use PptxGenJS. Use shapes for charts, decorative elements, icons. **MUST include page number badge.**
-4. **Verify**: Run the full `deck.js`, extract text with markitdown, and verify all content is present, no placeholder text remains, and the badge is included.
-
----
-
-## 5. Summary / Closing Page
-
-- **Use for**: Wrap-up + action
-- **Content**: Key takeaways, CTA/next steps, contact/QR, thank-you
-
-### Layout Options
-
-**Key Takeaways** — Best for educational, corporate, data-driven presentations
-
-```
-|  KEY TAKEAWAYS                        |
-|  ✓  Takeaway one                      |
-|  ✓  Takeaway two                      |
-|  ✓  Takeaway three                    |
-```
-
-**CTA / Next Steps** — Best for sales pitches, proposals, project kick-offs
-
-```
-|  NEXT STEPS                           |
-|  [1] Action item one                  |
-|  [2] Action item two                  |
-|  Contact: email@example.com           |
-```
-
-**Thank You / Contact** — Best for conference talks, keynotes
-
-```
-|            THANK YOU                   |
-|         name@company.com              |
-|         @handle | website.com         |
-```
-
-**Split Recap** — Best for presentations needing both recap and action
-
-```
-|  SUMMARY            |  NEXT STEPS      |
-|  * Point one        |  Contact us at   |
-|  * Point two        |  email@co.com    |
-|  * Point three      |  [QR Code]       |
-```
-
-### Font Size Hierarchy
-
-| Element                                 | Recommended Size | Notes            |
-| --------------------------------------- | ---------------- | ---------------- |
-| Closing Title ("Thank You" / "Summary") | 48-72px          | Bold, commanding |
-| Takeaway / Action Item                  | 18-24px          | Clear, scannable |
-| Supporting Text                         | 14-16px          | Regular weight   |
-| Contact Info                            | 14-16px          | Muted color      |
-
-**Key Principles:**
-
-1. **Strong closing statement**: Main message should be largest, most prominent
-2. **Scannable items**: Takeaways/action items concise (one line each)
-3. **Contact clarity**: Legible but not dominant
-4. **Memorable finish**: Confident, polished ending
-
-### Content Elements
-
-1. **Closing Title** — Always required
-2. **Takeaway Points** — 3-5 concise summary points (if applicable)
-3. **Call to Action** — Clear next steps (if applicable)
-4. **Contact Info** — Email, website, social handles (if provided)
-5. **Decorative Elements** — SVG accents for visual consistency
-6. **Page Number / Progress Marker** — Optional when navigation helps
-
-### Design Decisions
-
-1. **Closing Type**: Recap, CTA, thank-you, or combination
-2. **Content Volume**: Many takeaways → list; Simple closing → centered thank-you
-3. **Audience Action**: Audience needs to do something → CTA; Informational → takeaways
-4. **Tone Consistency**: Match energy of cover page
-5. **Visual Distinction**: Special but not disconnected from the rest
-
-### Workflow
-
-1. **Analyze**: Closing content — takeaways, CTA, contact, thank-you
-2. **Choose Layout**: Based on content type
-3. **Write Slide**: Use PptxGenJS. Use shapes for decorative elements. **MUST include page number badge.**
-4. **Verify**: Run the full `deck.js`, extract text with markitdown, and verify content and badge.
-
----
-
-## Additional Layout Patterns
-
-Use these across content slides for visual variety:
-
-- **Two-column** (text left, illustration right)
-- **Icon + text rows** (icon in colored circle, bold header, description below)
-- **2x2 or 2x3 grid** (image on one side, grid of content blocks on other)
-- **Half-bleed image** (full left or right side) with content overlay
-- **Large stat callouts** (big numbers 60-72pt with small labels below)
-- **Comparison columns** (before/after, pros/cons)
-- **Timeline or process flow** (numbered steps, arrows)
-- **Icons in small colored circles** next to section headers
-- **Italic accent text** for key stats or taglines
+# Slide Types
+
+Use this file to build the required storyboard before coding a from-scratch
+deck. Every slide needs exactly one `slideType`, one `layoutPattern`, one
+`primaryVisual`, one `backgroundTreatment`, and one `textBudget`.
+
+Plain title-and-bullet slides are not a default slide type. Convert bullet
+content into process, comparison, concept map, framework canvas, data insight,
+case/example, recap matrix, or mixed media.
+
+## Storyboard Fields
+
+| Field | Meaning |
+| --- | --- |
+| `slideType` | Cover, Agenda, Divider, Process, Comparison, Concept Map, Framework Canvas, Data Insight, Mixed Media, Case/Example, Recap Matrix, Principle Poster, Closing |
+| `layoutPattern` | A concrete layout key such as `hero-left-visual-right`, `process-loop`, `split-comparison`, `canvas-2x2` |
+| `primaryVisual` | The main non-text visual or structure; small icons/page numbers do not count |
+| `backgroundTreatment` | Solid field, split field, canvas surface, diagram field, topic texture, half-bleed, full-bleed, dark field |
+| `textBudget` | Max visible text, expressed as labels, callouts, bullets, or character count |
+
+Reject the storyboard if any content slide has `primaryVisual: none`, if three
+consecutive slides use the same layout pattern, or if body text has not been
+compressed into structured labels.
+
+## Cover
+
+- Use for: opening tone, promise, audience framing.
+- Primary visual: full-slide motif, half-bleed visual, large abstract shape, big topic object, or procedural background.
+- Background: dark field, full-bleed image/visual, split field, or topic texture.
+- Text budget: title, subtitle, optional context/date.
+- Typical patterns:
+  - `hero-left-visual-right`: large title left, topic visual right.
+  - `center-poster`: centered title over full-field motif.
+  - `dark-object-stage`: dark background with oversized motif/object.
+- Failure modes: timid title, small decoration, white background, subtitle too long.
+
+## Agenda
+
+- Use for: decks with 8+ slides or multiple sections.
+- Primary visual: numbered navigation rail, section cards, map/path, or progress system.
+- Background: canvas surface or split field.
+- Text budget: 3-5 section labels, optional one-line descriptors.
+- Typical patterns:
+  - `numbered-rail`: large section numbers and short labels.
+  - `agenda-grid`: 2x2 or 2x3 section cards.
+  - `journey-map`: sections placed along a path or timeline.
+- Failure modes: long descriptions, weak numbering, looks like a bullet list.
+
+## Divider
+
+- Use for: major transitions.
+- Primary visual: oversized section number, strong color block, image field, or motif poster.
+- Background: dark field, split field, full-bleed visual, or oversized motif.
+- Text budget: section number, title, optional one-line setup.
+- Typical patterns:
+  - `oversized-number`: huge translucent number with title.
+  - `split-divider`: color field plus title area.
+  - `motif-poster`: section title over topic texture or illustration.
+- Failure modes: ordinary content layout, tiny section number, too much text.
+
+## Process / Timeline
+
+- Use for: methods, workflows, phases, learning loops, implementation steps.
+- Primary visual: numbered steps, loop, ladder, funnel, timeline, or connected stages.
+- Background: diagram field, canvas surface, topic texture.
+- Text budget: 3-6 step labels plus one-line captions.
+- Typical patterns:
+  - `process-ribbon`: horizontal numbered stages.
+  - `process-loop`: circular or returning loop.
+  - `funnel-to-output`: wide inputs narrowing to output.
+  - `ladder`: vertical progression with checkpoints.
+- Failure modes: paragraphs inside steps, arrows too small, labels too close.
+
+## Comparison
+
+- Use for: before/after, misconception/fix, option A/B, tradeoffs, pros/cons.
+- Primary visual: two or three strong fields/columns with balanced content.
+- Background: split field, canvas surface, or side-by-side color fields.
+- Text budget: 2-4 short rows per side.
+- Typical patterns:
+  - `split-comparison`: two large columns.
+  - `misconception-fix`: problem side muted, correction side emphasized.
+  - `tradeoff-scorecard`: options as columns, criteria as rows.
+- Failure modes: uneven text length, weak contrast, both sides visually identical.
+
+## Concept Map
+
+- Use for: abstract ideas, mental models, root causes, relationships, definitions.
+- Primary visual: central node with 3-6 connected surrounding nodes.
+- Background: diagram field or topic texture.
+- Text budget: central phrase, 3-6 short labels, optional one-sentence takeaway.
+- Typical patterns:
+  - `hub-and-spoke`: core idea in center.
+  - `cause-map`: causes flow into outcome.
+  - `layers-map`: nested circles or stacked layers.
+- Failure modes: too many nodes, long node text, connectors through words.
+
+## Framework Canvas
+
+- Use for: strategy, models, matrices, operating systems, planning tools.
+- Primary visual: 2x2, 2x3, layers, scorecard, decision map, or quadrant.
+- Background: canvas surface or split field.
+- Text budget: 4-6 cells with short labels and one-line details.
+- Typical patterns:
+  - `canvas-2x2`: quadrant framework.
+  - `layer-stack`: layers or maturity levels.
+  - `decision-map`: criteria leading to recommendation.
+- Failure modes: dense paragraphs, unstable grid alignment, too many colors.
+
+## Data Insight
+
+- Use for: metrics, research findings, market sizing, survey results, benchmarks.
+- Primary visual: chart, large stat, benchmark bar, ring, slope, or data cards.
+- Background: canvas surface, dark field, or insight strip.
+- Text budget: one headline insight, 1-3 takeaways, source note if data is external.
+- Typical patterns:
+  - `hero-stat`: large number plus explanation.
+  - `chart-left-takeaways-right`: chart as hero, short takeaways.
+  - `benchmark-bars`: ranked bars or progress bands.
+- Failure modes: invented data, default chart styling, tiny labels, no source.
+
+## Mixed Media
+
+- Use for: concrete examples, product flows, scenes, screenshots, people, objects.
+- Primary visual: image/screenshot/illustration occupying 35-55% of slide.
+- Background: half-bleed visual, full-bleed with overlay, or canvas surface.
+- Text budget: title, 2-4 callouts, captions.
+- Typical patterns:
+  - `half-bleed-right`: visual on right, structured text on left.
+  - `annotated-surface`: screenshot/wireframe with numbered callouts.
+  - `image-plus-grid`: large image plus 2x2 explanation grid.
+- Failure modes: small unreadable image, promised image absent, decorative photo with no explanatory purpose.
+
+## Case / Example
+
+- Use for: training scenarios, sales stories, applications, demonstrations.
+- Primary visual: scenario card, annotated example, before/after scene, or lesson panel.
+- Background: canvas surface, split field, half-bleed.
+- Text budget: situation, action, result, lesson.
+- Typical patterns:
+  - `scenario-lesson`: situation left, lesson right.
+  - `example-strip`: visual example with 3 annotations.
+  - `before-action-result`: three-stage story.
+- Failure modes: story too long, no visual evidence, lesson hidden in body copy.
+
+## Recap Matrix
+
+- Use for: section summaries, takeaways, implementation checklist, classroom exercises.
+- Primary visual: table-like matrix, checklist canvas, action grid.
+- Background: canvas surface or topic texture.
+- Text budget: 2-4 rows, 2-3 columns, short action labels.
+- Typical patterns:
+  - `do-dont-matrix`: action vs avoid.
+  - `before-during-after`: temporal summary.
+  - `takeaway-grid`: 2x2 summary cards.
+- Failure modes: too many rows, tiny text, no hierarchy.
+
+## Principle Poster
+
+- Use sparingly for: quotes, maxims, core principles, emotional turning points.
+- Primary visual: oversized quote/principle plus large motif or strong background.
+- Background: dark field, full-bleed, topic texture, or oversized motif.
+- Text budget: one short sentence plus 1-3 labels.
+- Typical patterns:
+  - `quote-poster`: large centered sentence.
+  - `principle-left-motif-right`: principle plus large symbolic visual.
+  - `poster-stack`: statement, subtitle, tiny supporting labels.
+- Failure modes: ordinary text slide, long quote, decorative underline.
+
+## Closing
+
+- Use for: final takeaway, CTA, next steps, memorable finish.
+- Primary visual: strong motif return, recap matrix, CTA path, or poster statement.
+- Background: dark field, full-bleed visual, split field, or oversized motif.
+- Text budget: 1 closing statement, up to 3 takeaways or next steps, optional contact.
+- Typical patterns:
+  - `dark-closing-poster`: strong statement on dark field.
+  - `recap-plus-action`: three takeaways and next step.
+  - `loop-complete`: motif from cover returns as final visual.
+- Failure modes: weak thank-you slide, too many bullets, no relationship to cover.
+
+## Layout Rotation Rules
+
+- Plan the entire deck before coding. Verify neighboring slides do not share the
+  same layout key too often.
+- Use recurring motif and palette to create coherence; use layout variation to
+  prevent monotony.
+- In a 9-10 slide deck, include at least:
+  - one cover or divider visual moment
+  - two process/timeline or concept map slides
+  - one comparison or framework canvas
+  - one recap/closing visual
+- If a slide starts as bullets, first ask which structure the bullets imply:
+  sequence -> process; contrast -> comparison; relationship -> concept map;
+  categories -> framework canvas; evidence -> data insight; application -> case.
+
+## Text Budgets
+
+| Slide type | Target visible text |
+| --- | --- |
+| Cover | title + subtitle |
+| Agenda | 3-5 short section labels |
+| Divider | section number + title + optional one-liner |
+| Process | 3-6 labels, captions under 12 words each |
+| Comparison | 2-4 balanced rows per side |
+| Concept Map | 3-6 short nodes |
+| Framework Canvas | 4-6 cells, one short detail each |
+| Data Insight | one headline, 1-3 takeaways, source |
+| Mixed Media | 2-4 callouts |
+| Case / Example | situation/action/result/lesson |
+| Recap Matrix | 2-4 rows |
+| Principle Poster | one sentence + 1-3 labels |
+| Closing | 1 statement + up to 3 takeaways |
+
+If visible text exceeds the budget, split the slide or switch to a denser
+structure intentionally.

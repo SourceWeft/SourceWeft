@@ -168,7 +168,6 @@ export function buildMessageRenderState(input: {
       ? shouldShowAssistantBottomLoading({
           isCancelled: version.isCancelled,
           isStreaming: isAssistantStreaming,
-          isTextPaused: version.isTextPaused,
           threadRunStatus: version.threadRun?.status,
         })
       : false;

@@ -323,7 +323,7 @@ test("finish status marks tool confirmation pauses as waiting for approval", () 
 
 test("streaming errors hide raw tool kwargs and schema details", () => {
   const rawError =
-    'Error invoking tool \'publish_sandbox_artifact\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
+    'Error invoking tool \'publish_artifact\' with kwargs {"brief":"x","slides":[{"kind":"title"}]} with error: Error: Received tool input did not match expected schema\n\n✖ Invalid input: expected string, received undefined\n  → at title';
   const captured: {
     markedError?: {
       code?: string | null;
@@ -354,7 +354,7 @@ test("streaming errors hide raw tool kwargs and schema details", () => {
   });
 
   const expected =
-    "publish_sandbox_artifact failed because the generated tool arguments were invalid. Please retry.";
+    "publish_artifact failed because the generated tool arguments were invalid. Please retry.";
   assert.equal(captured.markedError?.error, expected);
   assert.equal(captured.streamError?.message, expected);
   assert.equal(captured.suppressErrorToast, false);
@@ -491,7 +491,7 @@ test("finish event completes canonical tool calls without rewriting trace parts"
           createdAt: new Date(0).toISOString(),
           updatedAt: new Date(0).toISOString(),
           toolCallId: "tool-1",
-          tool: "publish_sandbox_artifact",
+          tool: "publish_artifact",
           status: "running",
           input: {},
           output: null,
@@ -512,7 +512,7 @@ test("finish event completes canonical tool calls without rewriting trace parts"
       "tool-1",
       {
         id: "tool-1",
-        tool: "publish_sandbox_artifact",
+        tool: "publish_artifact",
         input: {},
         output: null,
         status: "running" as const,
@@ -1219,17 +1219,17 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
   let drainCount = 0;
   const context = createBaseStreamingContext({
     isCompletedPresentationArtifactToolCall: (toolCall, event) =>
-      toolCall.tool === "publish_sandbox_artifact" &&
+      toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
     isPresentationArtifactToolName: (toolName) =>
-      toolName === "publish_sandbox_artifact",
+      toolName === "publish_artifact",
     resolveToolCallFromStreamEvent: ({ event, streamToolCallsById }) => {
       const existing = streamToolCallsById.get(event.id ?? "pptx-tool");
       const eventData = getToolEventData(event);
       return {
         id: event.id ?? "pptx-tool",
-        tool: "publish_sandbox_artifact",
+        tool: "publish_artifact",
         input: { title: "费曼学习法" },
         output:
           event.type === "tool-call-result"
@@ -1290,7 +1290,7 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
       type: "tool-call-event",
       id: "pptx-tool",
       data: {
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
         toolCallId: "pptx-tool",
         stage: "planning",
         title: "费曼学习法",
@@ -1308,7 +1308,7 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
   assert.equal(refreshCount, 0);
   assert.deepEqual(message.metadata.renderBlocks, []);
   assert.deepEqual(streamToolCallsById.get("pptx-tool")?.output, {
-    type: "publish_sandbox_artifact_progress",
+    type: "publish_artifact_progress",
     toolCallId: "pptx-tool",
     stage: "planning",
     title: "费曼学习法",
@@ -1362,7 +1362,7 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
     },
   ]);
   assert.deepEqual(streamToolCallsById.get("pptx-tool")?.output, {
-    type: "publish_sandbox_artifact_progress",
+    type: "publish_artifact_progress",
     toolCallId: "pptx-tool",
     stage: "planning",
     artifact_id: "artifact-1",
@@ -1402,16 +1402,16 @@ test("presentation artifact result appends after earlier progress without reorde
   let drainCount = 0;
   const context = createBaseStreamingContext({
     isCompletedPresentationArtifactToolCall: (toolCall, event) =>
-      toolCall.tool === "publish_sandbox_artifact" &&
+      toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
     isPresentationArtifactToolName: (toolName) =>
-      toolName === "publish_sandbox_artifact",
+      toolName === "publish_artifact",
     resolveToolCallFromStreamEvent: ({ event }) => {
       const eventData = getToolEventData(event);
       return {
         id: event.id ?? "pptx-tool",
-        tool: "publish_sandbox_artifact",
+        tool: "publish_artifact",
         input: { title: "费曼学习法" },
         output:
           event.type === "tool-call-result"
@@ -1456,7 +1456,7 @@ test("presentation artifact result appends after earlier progress without reorde
       type: "tool-call-event",
       id: "pptx-tool",
       data: {
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
         toolCallId: "pptx-tool",
         stage: "planning",
         title: "费曼学习法",
@@ -1530,15 +1530,15 @@ test("presentation artifact result without a published URL does not append card"
   let refreshCount = 0;
   const context = createBaseStreamingContext({
     isCompletedPresentationArtifactToolCall: (toolCall, event) =>
-      toolCall.tool === "publish_sandbox_artifact" &&
+      toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result" &&
       Boolean((toolCall.output as Record<string, unknown>).artifact_url),
     isPresentationArtifactToolName: (toolName) =>
-      toolName === "publish_sandbox_artifact",
+      toolName === "publish_artifact",
     resolveToolCallFromStreamEvent: ({ event }) => ({
       id: event.id ?? "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       input: { title: "费曼学习法" },
       output:
         event.type === "tool-call-result"

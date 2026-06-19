@@ -1,8 +1,8 @@
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
 
-export const publishSandboxArtifactAgentTool = defineAgentTool({
-  id: "publishSandboxArtifact",
-  name: "publish_sandbox_artifact",
+export const publishArtifactAgentTool = defineAgentTool({
+  id: "publishArtifact",
+  name: "publish_artifact",
   domain: "artifact",
   capabilities: ["artifact", "workfile_write", "presentation_artifact"],
   activation: {
@@ -16,17 +16,17 @@ export const publishSandboxArtifactAgentTool = defineAgentTool({
   defaultPermission: "ask",
   riskLevel: "medium",
   slash: {
-    description: "Publish a sandbox-generated artifact",
-    displayName: "Publish Sandbox Artifact",
+    description: "Publish an existing file artifact",
+    displayName: "Publish Artifact",
     enabled: false,
     iconName: "upload",
     supportsCommand: false,
   },
 });
 
-export const PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME =
-  publishSandboxArtifactAgentTool.name;
+export const PUBLISH_ARTIFACT_TOOL_NAME =
+  publishArtifactAgentTool.name;
 
-export const publishSandboxArtifactAgentToolDefs = [
-  publishSandboxArtifactAgentTool,
+export const publishArtifactAgentToolDefs = [
+  publishArtifactAgentTool,
 ] as const;

@@ -19,7 +19,7 @@ const TEST_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy = {
   defaultCwd: "/workspace",
   prepareTargetRoots: ["/workspace/input", "/workspace"],
   collectSourceRoots: ["/workspace/output", "/workspace"],
-  readWriteRoots: ["/workspace", "/tmp/sourceweft"],
+  readWriteRoots: ["/workspace"],
 };
 
 function createTestSandboxStore(): SandboxStore {
@@ -524,6 +524,63 @@ test("getOrCreateThreadSandbox expires unhealthy ready sandbox and creates a fre
   assert.deepEqual(checked, ["provider-existing", "provider-new"]);
   assert.deepEqual(expired, ["sandbox-existing"]);
   assert.deepEqual(created, ["provider-new"]);
+});
+
+test("getOrCreateThreadSandbox waits for concurrent sandbox creation and reuses ready sandbox", async () => {
+  let lookupCount = 0;
+  const touched: string[] = [];
+  const readyAfterWait = {
+    id: "sandbox-concurrent",
+    provider: "fake",
+    providerSandboxId: "provider-concurrent",
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    status: "ready" as const,
+    updatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+  };
+  const creating = {
+    ...readyAfterWait,
+    providerSandboxId: "creating:sandbox-concurrent",
+    status: "creating" as const,
+  };
+  const manager = new SandboxManager({
+    provider: createTestProvider(),
+    sandboxStore: {
+      ...createTestSandboxStore(),
+      async findLatestActiveThreadSandbox() {
+        lookupCount += 1;
+        return lookupCount === 1 ? creating : readyAfterWait;
+      },
+      async insertCreatingSandbox() {
+        throw new Error("should not create a second sandbox");
+      },
+      async touchSandbox(input) {
+        touched.push(input.sandboxId);
+      },
+    },
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    commandTimeoutMs: 1,
+  });
+
+  const sandbox = await manager.getOrCreateThreadSandbox(
+    {
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      messageId: "message-1",
+      runId: "run-1",
+    },
+    { waitIntervalMs: 1, waitTimeoutMs: 50 },
+  );
+
+  assert.equal(sandbox.providerSandboxId, "provider-concurrent");
+  assert.equal(lookupCount, 2);
+  assert.deepEqual(touched, ["sandbox-concurrent"]);
 });
 
 test("beginToolOperation replays succeeded operations only within the same message id", async () => {

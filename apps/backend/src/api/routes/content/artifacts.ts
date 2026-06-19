@@ -86,6 +86,27 @@ export function registerArtifactRoutes(app: Hono) {
     return c.body(result.body);
   });
 
+  app.get("/artifacts/:id/preview-image", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentArtifactsService.getArtifactPreviewImage({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      artifactId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    c.header("Content-Type", result.contentType);
+    c.header(
+      "Content-Disposition",
+      `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
+    );
+    c.header("Cache-Control", "private, max-age=60");
+    return c.body(result.body);
+  });
+
   app.get("/artifacts/:id/assets/:fileName", async (c) => {
     const session = await requireSession(c);
     if (!session) {

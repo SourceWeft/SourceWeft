@@ -17,7 +17,7 @@ export default defineConfig({
     /^@sourceweft\/builtin-retrieval(\/.*)?$/,
     /^@sourceweft\/builtin-tool-generate-image(\/.*)?$/,
     /^@sourceweft\/builtin-tool-generate-video-presentation(\/.*)?$/,
-    /^@sourceweft\/builtin-tool-publish-sandbox-artifact(\/.*)?$/,
+    /^@sourceweft\/builtin-tool-publish-artifact(\/.*)?$/,
     /^@sourceweft\/builtin-tool-web-search(\/.*)?$/,
     /^@sourceweft\/builtin-vfs(\/.*)?$/,
     /^@sourceweft\/capability-contracts(\/.*)?$/,

@@ -11,16 +11,16 @@ import type {
   ToolCallStatus,
   TracePart,
 } from "../..";
+import type { MeteredLlmCallTrace } from "../../turn/types";
 
 export type DeepAgentTurnOutcome = {
   assistantContent: string;
-  retrieval: Awaited<
-    ReturnType<typeof runToolRetrieval>
-  > | null;
+  retrieval: Awaited<ReturnType<typeof runToolRetrieval>> | null;
   citations: AgentCitation[];
   availableCitations: AgentCitation[];
   retrievalCalls: RetrievalCallTrace[];
   toolCalls: ToolCallTrace[];
+  meteredLlmCalls?: MeteredLlmCallTrace[];
   thinkingSteps: ThinkingStepTrace[];
   renderBlocks?: MessageRenderBlock[];
   reasoningSegments: ModelReasoningSegmentTrace[];
@@ -101,6 +101,10 @@ export type DeepAgentTurnEvent =
       type: "reasoning";
       reasoning: string;
       segment: ModelReasoningSegmentTrace;
+    }
+  | {
+      type: "billing";
+      meteredLlmCall: MeteredLlmCallTrace;
     }
   | {
       type: "done";

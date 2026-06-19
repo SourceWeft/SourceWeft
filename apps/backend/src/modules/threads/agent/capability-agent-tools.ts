@@ -9,6 +9,7 @@ import type { ContentBillingPort } from "../../content/billing-port";
 import type { LlmExecutionConfig } from "../../content/model-gateway-audit";
 import type { PreparedThreadTurn } from "..";
 import {
+  createFileArtifactRecord,
   createImageArtifactRecord,
   createSlidesArtifactRecord,
 } from "../../artifacts/repository";
@@ -28,6 +29,7 @@ import type { ArtifactToolRuntimePromptProvider } from "./prompts/tool-prompt-pr
 import { runToolRetrieval } from "./turn/retrieval-runner";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import type { TurnRuntime } from "./turn/turn-runtime";
+import type { FilesystemBackend } from "./turn/turn-assembly";
 import {
   isToolDenied,
   resolveSourceUserMessageId,
@@ -71,6 +73,7 @@ export type CapabilityAgentToolsForTurnInput = {
   readonly billing: ContentBillingPort;
   readonly llm?: LlmExecutionConfig;
   readonly prepared: PreparedThreadTurn;
+  readonly filesystemBackend?: FilesystemBackend;
   readonly runtime: TurnRuntime;
   readonly sandboxRuntime: AgentSandboxRuntimeForTurn | null;
   readonly traceContext?: TraceContext;
@@ -173,12 +176,20 @@ function createCapabilityAgentToolTurnContext(
 function createCapabilityAgentToolHostServices(
   input: CapabilityAgentToolsForTurnInput,
 ) {
-  const { prepared, billing, llm, runtime, sandboxRuntime, traceContext } =
-    input;
+  const {
+    prepared,
+    billing,
+    filesystemBackend,
+    llm,
+    runtime,
+    sandboxRuntime,
+    traceContext,
+  } = input;
   const fontAssetBaseUrl = config.visualDeck.fontAssetBaseUrl;
 
   return {
     artifacts: {
+      createFileArtifactRecord,
       createImageArtifactRecord,
       createSlidesArtifactRecord,
     },
@@ -188,6 +199,14 @@ function createCapabilityAgentToolHostServices(
     },
     citationRegistry: runtime.citationRegistry,
     fontAssetBaseUrl,
+    filesystem: filesystemBackend
+      ? {
+          downloadFiles: (paths: readonly string[]) =>
+            filesystemBackend.backend.downloadFiles([...paths]),
+          readRaw: (filePath: string) =>
+            filesystemBackend.backend.readRaw(filePath),
+        }
+      : undefined,
     logger,
     modelGateway: {
       getClient: getModelGatewayClient,
@@ -227,6 +246,7 @@ function createCapabilityAgentToolHostServices(
     },
     sandbox: sandboxRuntime
       ? {
+          allowedReadRoots: sandboxRuntime.pathPolicy.readWriteRoots,
           downloadCurrentFile: (downloadInput: { sandboxPath: string }) =>
             sandboxRuntime.downloadFile(downloadInput),
         }

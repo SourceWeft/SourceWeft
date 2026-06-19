@@ -480,9 +480,9 @@ test("run snapshots create tool trace parts from stable event payloads without t
     {
       type: "tool-call-event",
       id: "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       data: {
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
         stage: "planning",
         title: "Quarterly review",
       },
@@ -492,10 +492,10 @@ test("run snapshots create tool trace parts from stable event payloads without t
   assert.deepEqual(snapshot.toolCalls, [
     {
       id: "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       input: {},
       output: {
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
         stage: "planning",
         title: "Quarterly review",
       },
@@ -524,7 +524,7 @@ test("run snapshots create tool trace parts from stable event payloads without t
         toolCallId: "pptx-tool",
         status: "running",
         output: {
-          type: "publish_sandbox_artifact_progress",
+          type: "publish_artifact_progress",
           stage: "planning",
           title: "Quarterly review",
         },
@@ -731,9 +731,9 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     {
       type: "tool-call-event",
       id: "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       data: {
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
         stage: "planning",
         toolCallId: "pptx-tool",
         title: "ASR",
@@ -745,7 +745,7 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     {
       type: "tool-call-start",
       id: "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
     },
   );
   const searchSnapshotBeforePublish = testExports.updateSnapshotFromPayload(
@@ -780,7 +780,7 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     {
       type: "tool-call-result",
       id: "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       output: {
         artifact_id: "artifact-1",
         artifact_url:
@@ -791,7 +791,7 @@ test("run snapshots preserve generated artifact render blocks generically", () =
       latencyMs: 120,
       toolCall: {
         id: "pptx-tool",
-        tool: "publish_sandbox_artifact",
+        tool: "publish_artifact",
         input: {},
         output: {
           artifact_id: "artifact-1",
@@ -853,7 +853,7 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     },
     {
       id: "pptx-tool",
-      tool: "publish_sandbox_artifact",
+      tool: "publish_artifact",
       input: {},
       output: {
         artifact_id: "artifact-1",
@@ -863,7 +863,7 @@ test("run snapshots preserve generated artifact render blocks generically", () =
         status: "ready",
         title: "ASR",
         toolCallId: "pptx-tool",
-        type: "publish_sandbox_artifact_progress",
+        type: "publish_artifact_progress",
       },
       status: "completed",
       latencyMs: 120,

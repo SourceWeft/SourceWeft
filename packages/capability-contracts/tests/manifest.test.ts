@@ -153,12 +153,12 @@ test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () =>
           tools: [
             "prepare_sandbox_workspace",
             "execute",
-            "publish_sandbox_artifact",
+            "publish_artifact",
           ],
           output: {
             kind: "artifact",
             artifactType: "slides",
-            publisherTool: "publish_sandbox_artifact",
+            publisherTool: "publish_artifact",
           },
         },
         command: {
@@ -172,7 +172,7 @@ test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () =>
   assert.deepEqual(manifest.contributes.skills[0]?.runtime?.output, {
     kind: "artifact",
     artifactType: "slides",
-    publisherTool: "publish_sandbox_artifact",
+    publisherTool: "publish_artifact",
   });
   assert.equal(manifest.contributes.skills[0]?.visibility, "restricted");
   assert.deepEqual(manifest.contributes.skills[0]?.categories, [
@@ -261,8 +261,8 @@ test("capability-manifest.kind rejects mismatched top-level contributions", () =
     version: "1.0.0",
     tools: [
       {
-        id: "publish_sandbox_artifact",
-        title: "Publish Sandbox Artifact",
+        id: "publish_artifact",
+        title: "Publish Artifact",
         description: "Publish artifacts.",
       },
     ],
@@ -285,8 +285,8 @@ test("capability-manifest.kind rejects mismatched legacy contributes", () => {
     contributes: {
       tools: [
         {
-          id: "publish_sandbox_artifact",
-          title: "Publish Sandbox Artifact",
+          id: "publish_artifact",
+          title: "Publish Artifact",
           description: "Publish artifacts.",
         },
       ],

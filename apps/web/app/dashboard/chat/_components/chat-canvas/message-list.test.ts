@@ -112,18 +112,21 @@ test("shouldShowAssistantBottomLoading stays visible while answer text streams",
   assert.equal(shouldShowAssistantBottomLoading({ isStreaming: true }), true);
 });
 
+test("shouldShowAssistantBottomLoading stays visible while text output is paused", () => {
+  assert.equal(
+    shouldShowAssistantBottomLoading({
+      isStreaming: true,
+      threadRunStatus: "running",
+    }),
+    true,
+  );
+});
+
 test("shouldShowAssistantBottomLoading hides for inactive assistant states", () => {
   const base = {
     isStreaming: true,
   };
 
-  assert.equal(
-    shouldShowAssistantBottomLoading({
-      ...base,
-      isTextPaused: true,
-    }),
-    false,
-  );
   assert.equal(
     shouldShowAssistantBottomLoading({
       ...base,

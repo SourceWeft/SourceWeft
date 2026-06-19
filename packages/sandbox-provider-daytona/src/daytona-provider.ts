@@ -21,7 +21,7 @@ export const DAYTONA_SANDBOX_PATH_POLICY: SandboxProviderPathPolicy =
     defaultCwd: "/workspace",
     prepareTargetRoots: Object.freeze(["/workspace/input", "/workspace"]),
     collectSourceRoots: Object.freeze(["/workspace/output", "/workspace"]),
-    readWriteRoots: Object.freeze(["/workspace", "/tmp/sourceweft"]),
+    readWriteRoots: Object.freeze(["/workspace"]),
   });
 
 export type DaytonaProviderOperation =

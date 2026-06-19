@@ -12,7 +12,7 @@ import {
   buildPresentationProgressThinkingEvent,
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
-  PUBLISH_SANDBOX_ARTIFACT_PROGRESS_EVENT_TYPE,
+  PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE,
 } from "./progress-events";
 import type { TurnRuntime } from "./turn-runtime";
 import {
@@ -125,7 +125,7 @@ export async function* handleToolStartStreamChunk(input: {
   }
   if (hasAgentToolCapability(toolName, "presentation_artifact")) {
     const progressEvent = normalizeGeneratedPresentationProgressEvent({
-      type: PUBLISH_SANDBOX_ARTIFACT_PROGRESS_EVENT_TYPE,
+      type: PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE,
       toolCallId,
       tool: toolName,
       stage: "planning",

@@ -1,6 +1,12 @@
 import { ModelGatewayError } from "@sourceweft/model-gateway";
 import { ContentError } from "./errors";
 
+const RETRYABLE_CONTENT_ERROR_CODES = new Set([
+  "MODEL_TIMEOUT",
+  "MODEL_RATE_LIMITED",
+  "MODEL_UPSTREAM_ERROR",
+]);
+
 function toRecord(value: unknown) {
   return value && typeof value === "object"
     ? value as Record<string, unknown>
@@ -38,6 +44,9 @@ function findGatewayError(error: unknown, seen = new Set<unknown>()): ModelGatew
 function findGatewayErrorData(error: unknown, seen = new Set<unknown>()): {
   code?: unknown;
   message?: unknown;
+  provider?: unknown;
+  requestId?: unknown;
+  retryable?: unknown;
   statusCode?: unknown;
 } | null {
   if (!error || seen.has(error)) {
@@ -60,10 +69,15 @@ function findGatewayErrorData(error: unknown, seen = new Set<unknown>()): {
 function contentErrorFromGatewayCode(input: {
   code: string;
   message: string;
+  provider?: unknown;
+  requestId?: unknown;
+  retryable?: unknown;
+  statusCode?: unknown;
 }) {
   const message = sanitizeClientErrorMessage(input.message);
+  const metadata = gatewayContentErrorMetadata(input);
   if (input.code === "BAD_REQUEST") {
-    return new ContentError(400, "MODEL_REQUEST_INVALID", message);
+    return new ContentError(400, "MODEL_REQUEST_INVALID", message, metadata);
   }
 
   if (input.code === "RATE_LIMIT") {
@@ -71,11 +85,12 @@ function contentErrorFromGatewayCode(input: {
       429,
       "MODEL_RATE_LIMITED",
       "LLM provider rate limit reached",
+      metadata,
     );
   }
 
   if (input.code === "TIMEOUT") {
-    return new ContentError(504, "MODEL_TIMEOUT", "LLM request timed out");
+    return new ContentError(504, "MODEL_TIMEOUT", "LLM request timed out", metadata);
   }
 
   if (input.code === "AUTH") {
@@ -83,10 +98,35 @@ function contentErrorFromGatewayCode(input: {
       502,
       "MODEL_GATEWAY_AUTH_ERROR",
       "Model gateway authentication failed",
+      metadata,
     );
   }
 
-  return new ContentError(502, "MODEL_UPSTREAM_ERROR", message);
+  return new ContentError(502, "MODEL_UPSTREAM_ERROR", message, metadata);
+}
+
+function gatewayContentErrorMetadata(input: {
+  code: string;
+  provider?: unknown;
+  requestId?: unknown;
+  retryable?: unknown;
+  statusCode?: unknown;
+}) {
+  return {
+    details: {
+      gatewayCode: input.code,
+      ...(typeof input.retryable === "boolean"
+        ? { retryable: input.retryable }
+        : {}),
+      ...(typeof input.provider === "string" ? { provider: input.provider } : {}),
+      ...(typeof input.requestId === "string"
+        ? { requestId: input.requestId }
+        : {}),
+      ...(typeof input.statusCode === "number"
+        ? { statusCode: input.statusCode }
+        : {}),
+    },
+  };
 }
 
 export function sanitizeClientErrorMessage(value: string) {
@@ -114,6 +154,10 @@ export function toContentError(error: unknown): ContentError {
     return contentErrorFromGatewayCode({
       code: gatewayError.code,
       message: gatewayError.message,
+      provider: gatewayError.provider,
+      requestId: gatewayError.requestId,
+      retryable: gatewayError.retryable,
+      statusCode: gatewayError.statusCode,
     });
   }
 
@@ -122,6 +166,10 @@ export function toContentError(error: unknown): ContentError {
     return contentErrorFromGatewayCode({
       code: gatewayData.code,
       message: gatewayData.message,
+      provider: gatewayData.provider,
+      requestId: gatewayData.requestId,
+      retryable: gatewayData.retryable,
+      statusCode: gatewayData.statusCode,
     });
   }
 
@@ -131,4 +179,22 @@ export function toContentError(error: unknown): ContentError {
       ? sanitizeClientErrorMessage(record.message)
       : "LLM request failed";
   return new ContentError(502, "MODEL_UPSTREAM_ERROR", message);
+}
+
+export function isRetryableModelContentError(error: unknown): boolean {
+  if (error instanceof ContentError) {
+    const details = toRecord(error.details);
+    return (
+      RETRYABLE_CONTENT_ERROR_CODES.has(error.code) &&
+      details?.retryable === true
+    );
+  }
+
+  const gatewayError = findGatewayError(error);
+  if (gatewayError) {
+    return gatewayError.retryable;
+  }
+
+  const gatewayData = findGatewayErrorData(error);
+  return gatewayData?.retryable === true;
 }

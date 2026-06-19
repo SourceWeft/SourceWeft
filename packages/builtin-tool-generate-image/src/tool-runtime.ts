@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { tool, type ToolRuntime } from "langchain";
 import type { ImageGenerateInput, ImageGenerateResult } from "@sourceweft/model-gateway";
+import { publishPreparedArtifact } from "@sourceweft/builtin-tool-publish-artifact";
 import { GENERATE_IMAGE_TOOL_NAME } from "./agent-tool-defs";
 import {
   buildImageToolResult,
@@ -8,7 +8,6 @@ import {
   sanitizeImageArtifactFileBase,
 } from "./image-tools";
 import { buildImageRuntimePromptLines as buildPackageImageRuntimePromptLines } from "./image-tools";
-import { buildArtifactPreviewUrl } from "./artifact-urls";
 import { compactArtifactText } from "./artifact-text";
 import type { ArtifactImageConfig } from "./image-types";
 
@@ -22,7 +21,6 @@ export {
 export { normalizeArtifactToolSelection, normalizeGenerateImageToolSelection } from "./image-config";
 export { resolveGenerateImageIntentDecision } from "./intent";
 export { resolveImageModelCapabilities } from "./image-capabilities";
-export { buildArtifactPreviewUrl };
 
 export const GENERATED_IMAGE_PROGRESS_EVENT_TYPE = "generate_image_progress";
 
@@ -326,51 +324,55 @@ export function createGenerateImageTool(
         providerModel: result.providerModel,
       });
       const decoded = await decodeGeneratedImage(image);
-      const artifactIdForPath = randomUUID();
       const fileName = `${sanitizeImageArtifactFileBase(title)}.png`;
-      const storageKey = deps.storage.buildStorageKey({
-        workspaceId: ctx.workspaceId,
-        artifactId: artifactIdForPath,
-        fileName,
-      });
-      await deps.storage.upload({
-        key: storageKey,
-        body: decoded.body,
-        contentType: decoded.mimeType,
-      });
 
-      const bucket = deps.storage.getBucketName();
-      const { artifactId, versionId } = await deps.artifacts.createRecord({
-        artifactId: artifactIdForPath,
-        teamId: ctx.teamId,
-        workspaceId: ctx.workspaceId,
-        threadId: ctx.threadId,
-        userId: ctx.userId,
-        title,
-        prompt,
-        storageBucket: bucket,
-        storageKey,
-        payload: {
-          prompt,
-          title,
-          config: ctx.config,
-          mimeType: decoded.mimeType,
-          sizeBytes: decoded.body.byteLength,
-          fileName,
-          storageKey,
-          provider: result.provider,
-          providerModel: result.providerModel,
-          routeDecision: result.routeDecision,
-          revisedPrompt: image.revisedPrompt,
-          width: image.width,
-          height: image.height,
+      const published = await publishPreparedArtifact({
+        context: {
+          teamId: ctx.teamId,
+          workspaceId: ctx.workspaceId,
+          threadId: ctx.threadId,
+          userId: ctx.userId,
         },
+        descriptor: {
+          artifactType: "image",
+          title,
+          description: prompt,
+          source: {
+            kind: "generated_image",
+            tool: GENERATE_IMAGE_TOOL_NAME,
+          },
+        },
+        source: {
+          bytes: decoded.body,
+          mimeType: decoded.mimeType,
+          path: fileName,
+          payload: {
+            prompt,
+            config: ctx.config,
+            sizeBytes: decoded.body.byteLength,
+            provider: result.provider,
+            providerModel: result.providerModel,
+            routeDecision: result.routeDecision,
+            revisedPrompt: image.revisedPrompt,
+            width: image.width,
+            height: image.height,
+          },
+        },
+        services: {
+          artifacts: {
+            createImageArtifactRecord: deps.artifacts.createRecord,
+          },
+          storage: {
+            buildArtifactStorageKey: deps.storage.buildStorageKey,
+            getContentStorageBucketName: deps.storage.getBucketName,
+            uploadArtifactObject: deps.storage.upload,
+          },
+        },
+        toolCallId,
       });
-
-      const artifactUrl = buildArtifactPreviewUrl({
-        workspaceId: ctx.workspaceId,
-        artifactId,
-      });
+      const artifactId = published.artifactId;
+      const versionId = published.record.versionId;
+      const artifactUrl = published.output.artifactUrl;
 
       emitProgress("billing", {
         artifactId,

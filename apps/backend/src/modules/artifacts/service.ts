@@ -1,3 +1,7 @@
+import {
+  ARTIFACT_MIME_TYPES,
+  isInlinePreviewableMimeType,
+} from "@sourceweft/builtin-tool-publish-artifact";
 import { requireContentWorkspace } from "../workspace/guards";
 import { ContentError } from "../content/errors";
 import { downloadArtifactObject } from "../sources/storage";
@@ -69,8 +73,12 @@ function resolveArtifactContentType(
   }
 
   return artifact?.artifactType === "image"
-    ? "image/png"
-    : "application/octet-stream";
+    ? ARTIFACT_MIME_TYPES.png
+    : ARTIFACT_MIME_TYPES.binary;
+}
+
+function isInlinePreviewableContentType(contentType: string) {
+  return isInlinePreviewableMimeType(contentType);
 }
 
 function resolveArtifactRenderer(
@@ -89,12 +97,18 @@ function resolveArtifactRenderer(
 function hasArtifactPreviewFile(
   artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
 ) {
-  if (!artifact?.storageKey) {
+  if (!artifact || !artifact.storageKey || artifact.status !== "ready") {
     return false;
   }
-  if (artifact.status === "ready") {
+
+  if (artifact.artifactType === "slides" || artifact.artifactType === "image") {
     return true;
   }
+
+  if (artifact.artifactType === "file") {
+    return isInlinePreviewableContentType(resolveArtifactContentType(artifact));
+  }
+
   return false;
 }
 
@@ -109,6 +123,11 @@ function buildArtifactCapabilities(
     canOpenFile: hasFile,
     canDownloadFile: hasFile,
     canPreviewInline: hasArtifactPreviewFile(artifact),
+    canRenderClientVideo: Boolean(
+      artifact &&
+        artifact.artifactType === "video_presentation" &&
+        artifact.status !== "failed",
+    ),
   };
 }
 
@@ -158,7 +177,7 @@ function resolveArtifactAsset(
       contentType:
         typeof payload.mimeType === "string"
           ? payload.mimeType
-          : "application/octet-stream",
+          : ARTIFACT_MIME_TYPES.binary,
       fileName: decodedFileName,
       storageBucket: artifact.storageBucket,
       storageKey: artifact.storageKey,
@@ -166,6 +185,45 @@ function resolveArtifactAsset(
   }
 
   return null;
+}
+
+function resolveArtifactPreviewImage(
+  artifact: Awaited<ReturnType<typeof findArtifactRecord>>,
+) {
+  if (
+    !artifact ||
+    artifact.status !== "ready" ||
+    artifact.artifactType !== "slides"
+  ) {
+    return null;
+  }
+  const payload = toObjectRecord(artifact.payloadJson);
+  const previewImage = toObjectRecord(payload?.previewImage);
+  if (!previewImage) {
+    return null;
+  }
+  const storageKey =
+    typeof previewImage.storageKey === "string"
+      ? previewImage.storageKey.trim()
+      : "";
+  if (!storageKey) {
+    return null;
+  }
+  const mimeType =
+    typeof previewImage.mimeType === "string"
+      ? previewImage.mimeType.trim()
+      : "";
+  const fileName =
+    typeof previewImage.fileName === "string" &&
+    previewImage.fileName.trim().length > 0
+      ? previewImage.fileName.trim()
+      : "preview.jpg";
+  return {
+    contentType: mimeType || ARTIFACT_MIME_TYPES.jpeg,
+    fileName,
+    storageBucket: artifact.storageBucket,
+    storageKey,
+  };
 }
 
 function decodeArtifactCursor(cursor: string | undefined) {
@@ -378,6 +436,43 @@ export class ContentArtifactsService {
     );
   }
 
+  async getArtifactPreviewImage(input: {
+    workspaceId: string;
+    artifactId: string;
+    userId: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const artifact = await findArtifactRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      artifactId: input.artifactId,
+    });
+
+    if (!artifact) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+    const previewImage = resolveArtifactPreviewImage(artifact);
+    if (!previewImage) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_PREVIEW_IMAGE_NOT_FOUND",
+        "Artifact preview image not found",
+      );
+    }
+
+    return {
+      body: await downloadArtifactObject({
+        bucket: previewImage.storageBucket,
+        key: previewImage.storageKey,
+      }),
+      contentType: previewImage.contentType,
+      fileName: previewImage.fileName,
+    };
+  }
+
   async getArtifactAsset(input: {
     workspaceId: string;
     artifactId: string;
@@ -421,8 +516,11 @@ export const contentArtifactsService = new ContentArtifactsService();
 
 export const testExports = {
   hasArtifactPreviewFile,
+  isInlinePreviewableContentType,
   buildArtifactCapabilities,
   resolveArtifactAsset,
+  resolveArtifactPreviewImage,
+  resolveArtifactContentType,
   resolveArtifactFileName,
   resolveArtifactRenderer,
 };

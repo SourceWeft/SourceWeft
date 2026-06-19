@@ -9,6 +9,7 @@ import {
   startSpan,
   type TraceContext,
 } from "../../../llm-observability";
+import { getFilesystemToolFailureMetadata } from "../turn/output-normalizer";
 
 export type SourceWeftToolObservabilityContext = {
   runId?: string | null;
@@ -53,6 +54,7 @@ function buildAgentToolLogMetadata(input: {
   context?: SourceWeftToolObservabilityContext;
   durationMs?: number | null;
   error?: unknown;
+  failureMetadata?: AgentToolLogMetadata;
   status?: string;
   toolCallId?: string;
   toolName: string;
@@ -66,6 +68,7 @@ function buildAgentToolLogMetadata(input: {
     teamId: input.context?.teamId,
     userId: input.context?.userId,
     runId: input.context?.runId,
+    ...input.failureMetadata,
     durationMs: input.durationMs ?? undefined,
     error: input.error,
     status: input.status,
@@ -117,6 +120,10 @@ export function createSourceWeftToolObservabilityMiddleware(
           status === "error" && result && typeof result === "object"
             ? (result as { content?: unknown }).content
             : undefined;
+        const failureMetadata =
+          status === "error"
+            ? getFilesystemToolFailureMetadata(toolName, result)
+            : {};
 
         logAgentToolEvent(
           status === "error" ? "error" : "info",
@@ -127,6 +134,7 @@ export function createSourceWeftToolObservabilityMiddleware(
             context: input.context,
             durationMs: latencyMs,
             error,
+            failureMetadata,
             status,
             toolCallId,
             toolName,

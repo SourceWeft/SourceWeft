@@ -56,7 +56,6 @@ import {
   type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
 import { findLastAnswerSegmentId } from "./message-evidence";
-import { AssistantWorkflowAccordion } from "./assistant-workflow-accordion";
 import {
   buildMessageRenderState,
   getVisibleAssistantAnswerText,
@@ -538,20 +537,61 @@ function AssistantMessageBody({
       );
     }
 
+    if (block.type === "text") {
+      return (
+        <CitationAwareMessageResponse
+          availableCitations={renderState.availableCitations}
+          citations={renderState.citations}
+          onCitationClick={onCitationClick}
+          onWorkfileClick={onWorkfileClick}
+        >
+          {block.text}
+        </CitationAwareMessageResponse>
+      );
+    }
+
+    const toolCall = version.toolCalls?.find(
+      (item) => item.id === block.toolCallId,
+    );
+    if (!toolCall) {
+      return null;
+    }
+
+    if (block.type === "generated_image") {
+      return (
+        <GeneratedImageArtifactBlock
+          onArtifactPreview={onArtifactPreview}
+          toolCall={toolCall}
+          workspaceId={workspaceId}
+        />
+      );
+    }
+
+    if (block.type === "generated_presentation") {
+      return (
+        <GeneratedPresentationArtifactBlock
+          artifactStatuses={artifactStatuses}
+          onArtifactPreview={onArtifactPreview}
+          toolCall={toolCall}
+          workspaceId={workspaceId}
+        />
+      );
+    }
+
     return (
-      <AssistantWorkflowAccordion
-        artifactStatuses={artifactStatuses}
-        blocks={[block]}
-        isRunning={input.isRunning}
-        onArtifactPreview={onArtifactPreview}
-        onCitationClick={onCitationClick}
-        onWorkfileClick={onWorkfileClick}
-        resolvedConfirmations={resolvedConfirmations}
-        availableCitations={renderState.availableCitations}
-        citations={renderState.citations}
-        toolCalls={version.toolCalls}
-        workspaceId={workspaceId}
-      />
+      <div>
+        <AssistantToolCard
+          onWorkfileClick={onWorkfileClick}
+          resolvedConfirmations={resolvedConfirmations}
+          toolCall={toolCall}
+        />
+        <WebToolResults
+          availableCitations={renderState.availableCitations}
+          onCitationClick={onCitationClick}
+          toolCall={toolCall}
+          variant="activity-row"
+        />
+      </div>
     );
   }
 

@@ -69,12 +69,16 @@ function buildOpenRouterReasoningModelKwargs(
 export class OpenRouterChatAdapter implements ChatAdapter {
   readonly kind = "openrouter" as const;
 
-  createModel(target: Parameters<ChatAdapter["createModel"]>[0], input: Parameters<ChatAdapter["createModel"]>[1]) {
+  createModel(
+    target: Parameters<ChatAdapter["createModel"]>[0],
+    input: Parameters<ChatAdapter["createModel"]>[1],
+    options?: Parameters<ChatAdapter["createModel"]>[2],
+  ) {
     return new ChatOpenAI({
       model: target.providerModel,
       temperature: input.temperature,
       topP: input.topP,
-      maxRetries: 2,
+      maxRetries: options?.maxRetries ?? 2,
       apiKey: target.apiKey,
       configuration: {
         baseURL: target.baseUrl,

@@ -1,5 +1,5 @@
 {
-  "name": "@sourceweft/builtin-tool-publish-sandbox-artifact",
+  "name": "@sourceweft/builtin-tool-publish-artifact",
   "version": "1.0.0",
   "private": true,
   "type": "module",

@@ -5,9 +5,7 @@ import {
   applyGeneratedThreadTitle,
   generateThreadTitle,
 } from "../thread/title-generation";
-import {
-  normalizeGeneratedChatTitle,
-} from "../thread/title";
+import { normalizeGeneratedChatTitle } from "../thread/title";
 import { finalizeThreadTurn } from "./finalizer";
 import { prepareThreadTurn } from "./preparer";
 import type {
@@ -22,6 +20,7 @@ export {
 } from "../thread/title";
 export type {
   PreparedThreadTurn,
+  MeteredLlmCallTrace,
   RetrievalCallTrace,
   StreamThreadEventInput,
   ThreadToolsSelection,
@@ -34,7 +33,9 @@ export { summarizeRetrievalCalls } from "./retrieval-summary";
 class ContentThreadTurnService {
   constructor(private readonly billing: ContentBillingPort) {}
 
-  async prepareThreadTurn(input: StreamThreadEventInput): Promise<PreparedThreadTurn> {
+  async prepareThreadTurn(
+    input: StreamThreadEventInput,
+  ): Promise<PreparedThreadTurn> {
     return prepareThreadTurn(input, { billing: this.billing });
   }
 

@@ -1,4 +1,4 @@
-export type PublishSandboxArtifactToolSelection = {
+export type PublishArtifactToolSelection = {
   enabled?: boolean;
 };
 

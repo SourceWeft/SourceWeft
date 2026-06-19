@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { MessageRenderBlock } from "./types";
-import {
-  buildAssistantRenderSegments,
-  formatWorkedDuration,
-  getWorkflowHeaderLabel,
-} from "./assistant-render-segments";
+import { buildAssistantRenderSegments } from "./assistant-render-segments";
 
 function reasoning(id: string): MessageRenderBlock {
   return { id, text: `Reasoning ${id}`, type: "reasoning" };
@@ -28,7 +24,7 @@ function text(id: string): MessageRenderBlock {
   return { id, text: `Answer ${id}`, type: "text" };
 }
 
-test("buildAssistantRenderSegments keeps text before later work inside workflow", () => {
+test("buildAssistantRenderSegments keeps assistant text visible around workflow", () => {
   const segments = buildAssistantRenderSegments([
     reasoning("reasoning-1"),
     tool("tool-1"),
@@ -40,11 +36,54 @@ test("buildAssistantRenderSegments keeps text before later work inside workflow"
 
   assert.deepEqual(
     segments.map((segment) => segment.type),
-    ["workflow", "answer"],
+    ["workflow", "answer", "workflow", "answer"],
   );
   assert.deepEqual(
     segments.map((segment) => segment.blocks.map((block) => block.id)),
-    [["reasoning-1", "tool-1", "text-1", "reasoning-2", "tool-2"], ["text-2"]],
+    [
+      ["reasoning-1", "tool-1"],
+      ["text-1"],
+      ["reasoning-2", "tool-2"],
+      ["text-2"],
+    ],
+  );
+});
+
+test("buildAssistantRenderSegments keeps interrupted output outside workflow", () => {
+  const segments = buildAssistantRenderSegments([
+    { id: "text-read", text: "Let me read the reference.", type: "text" },
+    tool("read"),
+    reasoning("thought"),
+    { id: "text-plan", text: "I have enough information.", type: "text" },
+    tool("write"),
+  ]);
+
+  assert.deepEqual(
+    segments.map((segment) => segment.type),
+    ["answer", "workflow", "answer", "workflow"],
+  );
+  assert.deepEqual(
+    segments.map((segment) => segment.blocks.map((block) => block.id)),
+    [["text-read"], ["read", "thought"], ["text-plan"], ["write"]],
+  );
+});
+
+test("buildAssistantRenderSegments alternates text and tool segments", () => {
+  const segments = buildAssistantRenderSegments([
+    text("text-1"),
+    tool("tool-1"),
+    text("text-2"),
+    tool("tool-2"),
+    text("text-3"),
+  ]);
+
+  assert.deepEqual(
+    segments.map((segment) => segment.type),
+    ["answer", "workflow", "answer", "workflow", "answer"],
+  );
+  assert.deepEqual(
+    segments.map((segment) => segment.blocks.map((block) => block.id)),
+    [["text-1"], ["tool-1"], ["text-2"], ["tool-2"], ["text-3"]],
   );
 });
 
@@ -98,7 +137,7 @@ test("buildAssistantRenderSegments preserves terminal block order at the end", (
   );
 });
 
-test("buildAssistantRenderSegments leaves unplaced workflow blocks inline", () => {
+test("buildAssistantRenderSegments leaves workflow blocks between answers inline", () => {
   const segments = buildAssistantRenderSegments([
     text("text-1"),
     tool("tool-1"),
@@ -107,38 +146,10 @@ test("buildAssistantRenderSegments leaves unplaced workflow blocks inline", () =
 
   assert.deepEqual(
     segments.map((segment) => segment.type),
-    ["workflow", "answer"],
+    ["answer", "workflow", "answer"],
   );
   assert.deepEqual(
     segments.map((segment) => segment.blocks.map((block) => block.id)),
-    [["text-1", "tool-1"], ["text-2"]],
-  );
-});
-
-test("formatWorkedDuration keeps minute durations precise to seconds", () => {
-  assert.equal(formatWorkedDuration(999), "1s");
-  assert.equal(formatWorkedDuration(42_000), "42s");
-  assert.equal(formatWorkedDuration(60_000), "1m");
-  assert.equal(formatWorkedDuration(92_000), "1m32s");
-  assert.equal(formatWorkedDuration(120_000), "2m");
-  assert.equal(formatWorkedDuration(151_000), "2m31s");
-});
-
-test("getWorkflowHeaderLabel uses Working while running", () => {
-  assert.equal(
-    getWorkflowHeaderLabel({ durationMs: 92_000, isRunning: true }),
-    "Working",
-  );
-  assert.equal(
-    getWorkflowHeaderLabel({ durationMs: 92_000, isRunning: false }),
-    "Worked for 1m32s",
-  );
-  assert.equal(
-    getWorkflowHeaderLabel({ durationMs: 0, isRunning: false }),
-    "Finished working",
-  );
-  assert.equal(
-    getWorkflowHeaderLabel({ durationMs: null, isRunning: false }),
-    "Finished working",
+    [["text-1"], ["tool-1"], ["text-2"]],
   );
 });

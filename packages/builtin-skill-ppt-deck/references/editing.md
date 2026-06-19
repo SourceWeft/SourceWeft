@@ -41,7 +41,11 @@ When using an existing presentation as a template:
 
 7. **Pack**: Repack the XML tree into a PPTX file. Validate, repair, condense XML, re-encode smart quotes.
 
-   Always write to `/tmp/` first, then copy to the final path. Python's `zipfile` module uses `seek` internally, which fails on some volume mounts (e.g. Docker bind mounts). Writing to a local temp path avoids this.
+   Always write to a sandbox-local scratch path first, then copy to the final
+   path. Python's `zipfile` module uses `seek` internally, which fails on some
+   volume mounts (e.g. Docker bind mounts). Writing inside the sandbox
+   workspace avoids this while keeping the artifact readable by SourceWeft
+   tools.
 
 ## Output Structure
 

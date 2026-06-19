@@ -8,12 +8,24 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import { normalizeToolInput } from "./tool-utils";
 
+const MAX_OBSERVABLE_TOOL_CONTENT_CHARS = 8_000;
+
 export function compactTraceText(value: string, maxLength = 96) {
   const compacted = value.replace(/\s+/g, " ").trim();
   if (compacted.length <= maxLength) {
     return compacted;
   }
   return `${compacted.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function compactObservableToolContent(value: string) {
+  const sanitized = value
+    .replace(/\0/g, "\uFFFD")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  if (sanitized.length <= MAX_OBSERVABLE_TOOL_CONTENT_CHARS) {
+    return sanitized;
+  }
+  return `${sanitized.slice(0, MAX_OBSERVABLE_TOOL_CONTENT_CHARS).trimEnd()}\n[Output truncated for display.]`;
 }
 
 export function formatDateInTimeZone(date: Date, timeZone: string) {
@@ -843,12 +855,12 @@ export function normalizeToolOutputForObservability(
 
   const outputText = extractToolOutputText(output);
   if (outputText) {
-    return { content: outputText };
+    return { content: compactObservableToolContent(outputText) };
   }
 
   const record = toObjectRecord(output);
   if (typeof record?.error === "string") {
-    return { error: record.error };
+    return { error: compactObservableToolContent(record.error) };
   }
 
   return output;
@@ -1037,7 +1049,8 @@ export function getFilesystemToolOutputError(
         : "";
   if (
     structuredFailureCode === "SANDBOX_EXECUTE_COMMAND_DENIED" ||
-    structuredFailureCode === "SANDBOX_EXECUTE_CWD_DENIED"
+    structuredFailureCode === "SANDBOX_EXECUTE_CWD_DENIED" ||
+    structuredFailureCode === "SANDBOX_EXECUTE_VFS_PATH_DENIED"
   ) {
     return structuredFailureCode;
   }
@@ -1053,7 +1066,7 @@ export function getFilesystemToolOutputError(
   }
 
   const deniedMatch = combinedOutputText.match(
-    /(SANDBOX_EXECUTE_(?:COMMAND|CWD)_DENIED:[^\n]*)/u,
+    /(SANDBOX_EXECUTE_(?:COMMAND|CWD|VFS_PATH)_DENIED:[^\n]*)/u,
   );
   if (deniedMatch?.[1]) {
     return deniedMatch[1].trim();
@@ -1086,7 +1099,7 @@ export function getFilesystemToolFailureMetadata(
   if (!record) {
     const outputText = extractToolOutputText(output);
     return outputText
-      ? extractExecuteFailureDiagnosticsFromText(outputText)
+      ? extractExecuteFailureMetadataFromText(outputText)
       : {};
   }
 
@@ -1108,7 +1121,7 @@ export function getFilesystemToolFailureMetadata(
     typeof record.runId === "string" ? record.runId.trim() : undefined;
   const outputText = extractToolOutputText(output);
   const textMetadata = outputText
-    ? extractExecuteFailureDiagnosticsFromText(outputText)
+    ? extractExecuteFailureMetadataFromText(outputText)
     : {};
 
   return {
@@ -1120,17 +1133,42 @@ export function getFilesystemToolFailureMetadata(
   };
 }
 
-function extractExecuteFailureDiagnosticsFromText(outputText: string) {
-  const diagnosticsMatch = outputText.match(/^Diagnostics:\s+(.+)$/mu);
-  if (!diagnosticsMatch?.[1]) {
-    return {};
+function safeExecuteFailureMessage(outputText: string) {
+  const firstLine = outputText
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (
+    firstLine?.startsWith("SANDBOX_EXECUTE_COMMAND_DENIED:") ||
+    firstLine?.startsWith("SANDBOX_EXECUTE_CWD_DENIED:") ||
+    firstLine?.startsWith("SANDBOX_EXECUTE_VFS_PATH_DENIED:")
+  ) {
+    return firstLine;
   }
-  const fields = Object.fromEntries(
-    [...diagnosticsMatch[1].matchAll(/([A-Za-z][A-Za-z0-9]*)=([^\s]+)/gu)]
-      .map((match) => [match[1], match[2]] as const),
-  );
+  return undefined;
+}
+
+function safeExecuteFailureHint(outputText: string) {
+  const match = outputText.match(/^Hint:\s+(.+)$/mu);
+  return match?.[1]?.trim() || undefined;
+}
+
+function extractExecuteFailureMetadataFromText(outputText: string) {
+  const diagnosticsMatch = outputText.match(/^Diagnostics:\s+(.+)$/mu);
+  const fields = diagnosticsMatch?.[1]
+    ? Object.fromEntries(
+        [...diagnosticsMatch[1].matchAll(/([A-Za-z][A-Za-z0-9]*)=([^\s]+)/gu)]
+          .map((match) => [match[1], match[2]] as const),
+      )
+    : {};
   const repeatCount = Number(fields.repeatCount);
+  const failureMessage = safeExecuteFailureMessage(outputText);
+  const failureHint = failureMessage
+    ? safeExecuteFailureHint(outputText)
+    : undefined;
   return {
+    ...(failureMessage ? { failureMessage } : {}),
+    ...(failureHint ? { failureHint } : {}),
     ...(fields.commandFingerprint
       ? { commandFingerprint: fields.commandFingerprint }
       : {}),

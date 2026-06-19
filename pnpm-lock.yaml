@@ -104,9 +104,9 @@ importers:
       '@sourceweft/builtin-tool-generate-video-presentation':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-generate-video-presentation
-      '@sourceweft/builtin-tool-publish-sandbox-artifact':
+      '@sourceweft/builtin-tool-publish-artifact':
         specifier: workspace:*
-        version: link:../../packages/builtin-tool-publish-sandbox-artifact
+        version: link:../../packages/builtin-tool-publish-artifact
       '@sourceweft/builtin-tool-sandbox':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-sandbox
@@ -554,9 +554,9 @@ importers:
       '@sourceweft/builtin-tool-generate-video-presentation':
         specifier: workspace:*
         version: link:../builtin-tool-generate-video-presentation
-      '@sourceweft/builtin-tool-publish-sandbox-artifact':
+      '@sourceweft/builtin-tool-publish-artifact':
         specifier: workspace:*
-        version: link:../builtin-tool-publish-sandbox-artifact
+        version: link:../builtin-tool-publish-artifact
       '@sourceweft/builtin-tool-sandbox':
         specifier: workspace:*
         version: link:../builtin-tool-sandbox
@@ -684,6 +684,9 @@ importers:
 
   packages/builtin-tool-generate-image:
     dependencies:
+      '@sourceweft/builtin-tool-publish-artifact':
+        specifier: workspace:*
+        version: link:../builtin-tool-publish-artifact
       '@sourceweft/capability-contracts':
         specifier: workspace:*
         version: link:../capability-contracts
@@ -735,7 +738,7 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
-  packages/builtin-tool-publish-sandbox-artifact:
+  packages/builtin-tool-publish-artifact:
     dependencies:
       '@sourceweft/capability-contracts':
         specifier: workspace:*

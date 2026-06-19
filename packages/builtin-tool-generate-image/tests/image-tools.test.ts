@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildArtifactPreviewUrl,
+  createGenerateImageTool,
   buildImageRuntimePromptLines,
   buildImageToolResult,
   generateImageSchema,
@@ -78,4 +79,146 @@ test("image prompt and result helpers preserve backend behavior", () => {
     ].join("\n"),
   );
   assert.doesNotMatch(result, /!\[\]\(/u);
+});
+
+test("generate_image runtime persists image artifacts through the shared publisher core", async () => {
+  const generatedBytes = Buffer.from("generated-png");
+  const progressEvents: unknown[] = [];
+  const storageUploads: unknown[] = [];
+  const artifactRecords: unknown[] = [];
+  const billingEvents: unknown[] = [];
+  const imageTool = createGenerateImageTool(
+    {
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      userMessageId: "message-1",
+      traceId: "trace-1",
+      parentSpanId: "span-1",
+      profile: {
+        gatewayConfigId: "gateway-1",
+        profileAlias: "image-default",
+        modelAlias: "gpt-image-1",
+      },
+      config: {
+        aspectRatio: "1:1",
+        quality: "standard",
+        style: "cartoon",
+      },
+    },
+    {
+      modelGateway: {
+        images: {
+          generate: async (request, opts) => {
+            assert.equal(request.model, "image-default");
+            assert.equal(request.responseFormat, "b64_json");
+            assert.equal(opts?.traceId, "trace-1");
+            return {
+              model: "gpt-image-1",
+              provider: "openai",
+              providerModel: "gpt-image-1",
+              routeDecision: {
+                alias: "image-default",
+                mode: "GLOBAL",
+                provider: "openai",
+                providerKind: "openai",
+                strategy: "priority",
+              },
+              usage: { totalTokens: 12 },
+              images: [
+                {
+                  b64Json: generatedBytes.toString("base64"),
+                  mimeType: "image/png",
+                  revisedPrompt: "A revised prompt",
+                  width: 1024,
+                  height: 1024,
+                },
+              ],
+              raw: {
+                model: "gpt-image-1",
+              },
+            };
+          },
+        },
+      },
+      storage: {
+        buildStorageKey: (input) =>
+          `artifacts/${input.workspaceId}/${input.artifactId}/${input.fileName}`,
+        getBucketName: () => "content",
+        upload: async (input) => {
+          storageUploads.push(input);
+        },
+      },
+      artifacts: {
+        createRecord: async (input) => {
+          artifactRecords.push(input);
+          return {
+            artifactId: input.artifactId,
+            versionId: "version-1",
+          };
+        },
+      },
+      billing: {
+        meterUsage: async (input) => {
+          billingEvents.push(input);
+        },
+      },
+    },
+  );
+
+  const output = await imageTool.invoke(
+    {
+      prompt: "Draw a launch image",
+      title: "Launch Image",
+    },
+    {
+      toolCallId: "tool-call-1",
+      writer: (event: unknown) => {
+        progressEvents.push(event);
+      },
+    } as never,
+  );
+
+  const record = artifactRecords[0] as {
+    artifactId: string;
+    payload: {
+      artifactType: string;
+      source: { kind: string; tool: string };
+      storageKey: string;
+      toolCallId: string;
+      prompt: string;
+      provider: string;
+    };
+    storageBucket: string;
+    storageKey: string;
+  };
+  assert.equal(record.storageBucket, "content");
+  assert.equal(record.payload.artifactType, "image");
+  assert.equal(record.payload.source.kind, "generated_image");
+  assert.equal(record.payload.source.tool, "generate_image");
+  assert.equal(record.payload.toolCallId, "tool-call-1");
+  assert.equal(record.payload.prompt, "Draw a launch image");
+  assert.equal(record.payload.provider, "openai");
+  assert.match(record.storageKey, /launch-image\.png$/u);
+  assert.equal(record.payload.storageKey, record.storageKey);
+
+  const upload = storageUploads[0] as {
+    body: Buffer;
+    contentType: string;
+    key: string;
+  };
+  assert.equal(upload.key, record.storageKey);
+  assert.equal(upload.contentType, "image/png");
+  assert.equal(upload.body.toString(), generatedBytes.toString());
+
+  const billing = billingEvents[0] as {
+    idempotencyKey: string;
+    referenceId: string;
+  };
+  assert.equal(billing.referenceId, `artifact:${record.artifactId}`);
+  assert.equal(billing.idempotencyKey, `artifact-image:${record.artifactId}`);
+  assert.match(String(output), /Image artifact created\./u);
+  assert.match(String(output), new RegExp(`artifact_id: ${record.artifactId}`, "u"));
+  assert.equal(progressEvents.length, 5);
 });

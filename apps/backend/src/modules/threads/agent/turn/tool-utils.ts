@@ -94,7 +94,7 @@ export function shouldBindAgentTool(input: {
   prepared: PreparedThreadTurn;
   toolName: string;
 }) {
-  const runtimeTool = input.prepared.runtimeTools[input.toolName];
+  const runtimeTool = input.prepared.runtimeTools?.[input.toolName];
   if (runtimeTool) {
     return runtimeTool.shouldBind;
   }

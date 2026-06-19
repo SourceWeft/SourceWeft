@@ -28,8 +28,8 @@ export const COLLECT_SANDBOX_OUTPUTS_TOOL_NAME = "collect_sandbox_outputs" as co
 
 /** Artifacts */
 export const GENERATE_IMAGE_TOOL_NAME = "generate_image" as const;
-export const PUBLISH_SANDBOX_ARTIFACT_TOOL_NAME =
-  "publish_sandbox_artifact" as const;
+export const PUBLISH_ARTIFACT_TOOL_NAME =
+  "publish_artifact" as const;
 export const GENERATE_VIDEO_PRESENTATION_TOOL_NAME = "generate_video_presentation" as const;
 
 /** Notion Connector */

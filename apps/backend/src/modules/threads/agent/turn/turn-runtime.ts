@@ -1,6 +1,7 @@
 import { AgentCitationRegistry } from "../citation-registry";
 import type {
   PreparedThreadTurn,
+  MeteredLlmCallTrace,
   RetrievalCallTrace,
   ThinkingStepTrace,
   ToolCallTrace,
@@ -20,6 +21,7 @@ import {
   type PendingToolStream,
   type ObservedAgentToolCall,
 } from "./tool-tracker";
+import type { PendingLlmCallUsage } from "./llm-call-billing";
 
 type ToolRetrieval = Awaited<ReturnType<typeof runToolRetrieval>>;
 type RetrievalCitation = ReturnType<
@@ -40,6 +42,8 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
   const sandboxToolCallAliasesById = new Map<string, string>();
   const thinkingStepsById = new Map<string, ThinkingStepTrace>();
   const thinkingStepOrder: string[] = [];
+  const meteredLlmCallsById = new Map<string, MeteredLlmCallTrace>();
+  const meteredLlmCallOrder: string[] = [];
   const reasoningSegments: DeepAgentTurnOutcome["reasoningSegments"] = [];
   const renderBlocks = createMessageRenderBlockBuilder();
   const runStartedAt = Date.now();
@@ -65,6 +69,8 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     sandboxToolCallAliasesById,
     thinkingStepsById,
     thinkingStepOrder,
+    meteredLlmCallsById,
+    meteredLlmCallOrder,
     reasoningSegments,
     renderBlocks,
     runStartedAt,
@@ -76,11 +82,13 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     assistantContent: "",
     assistantContentFromUpdates: null as string | null,
     usage: undefined as DeepAgentTurnOutcome["usage"],
+    llmCallSequence: 0,
     finishReason: undefined as string | undefined,
     modelReasoning: undefined as string | undefined,
     providerFields: undefined as Record<string, unknown> | undefined,
     hasStreamedText: false,
     hasTextSinceLastToolBoundary: false,
+    pendingLlmCallUsage: null as PendingLlmCallUsage | null,
     suppressRawToolCallText: false,
     suppressLeakedCommandSpecText: false,
     currentReasoningSegment: null as
@@ -116,6 +124,18 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
               (typeof startedAt === "number" ? Date.now() - startedAt : null),
           };
         });
+    },
+    recordMeteredLlmCall(call: MeteredLlmCallTrace) {
+      if (!meteredLlmCallsById.has(call.id)) {
+        meteredLlmCallOrder.push(call.id);
+      }
+      meteredLlmCallsById.set(call.id, call);
+      return call;
+    },
+    collectMeteredLlmCalls() {
+      return meteredLlmCallOrder
+        .map((callId) => meteredLlmCallsById.get(callId))
+        .filter((call): call is MeteredLlmCallTrace => Boolean(call));
     },
     setThinkingStep(step: Omit<ThinkingStepTrace, "sequence">) {
       const existing = thinkingStepsById.get(step.id);

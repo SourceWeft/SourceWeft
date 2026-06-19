@@ -29,13 +29,19 @@ import { redactSandboxText, sandboxRequestFingerprint } from "./redaction";
 
 const TEXT_MIME_TYPE = "text/plain";
 const EXECUTE_TOOL_NAME = "execute";
+const MAX_RECOVERABLE_TOOL_OUTPUT_CHARS = 2_000;
 const RECOVERABLE_EXECUTE_ERROR_CODES = new Set([
   "SANDBOX_EXECUTE_COMMAND_DENIED",
   "SANDBOX_EXECUTE_CWD_DENIED",
+  "SANDBOX_EXECUTE_VFS_PATH_DENIED",
 ]);
 
 function hasControlChars(value: string) {
   return /[\x00-\x1f\x7f]/.test(value);
+}
+
+function hasDisallowedCommandControlChars(value: string) {
+  return /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value);
 }
 
 function escapeControlChars(value: string) {
@@ -66,6 +72,10 @@ function assertSandboxBackendPath(
   return assertSandboxReadPath(normalized, policy);
 }
 
+function sandboxPathError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function rootListings(policy: SandboxProviderPathPolicy) {
   return Array.from(new Set(policy.readWriteRoots.map(normalizePath))).map(
     (root) => ({
@@ -80,18 +90,37 @@ function shellQuote(value: string) {
 }
 
 function inferMimeType(path: string) {
-  if (path.endsWith(".md") || path.endsWith(".markdown"))
+  const lowerPath = path.toLowerCase();
+  if (lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown"))
     return "text/markdown";
-  if (path.endsWith(".json")) return "application/json";
-  if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".cjs"))
+  if (lowerPath.endsWith(".json")) return "application/json";
+  if (
+    lowerPath.endsWith(".js") ||
+    lowerPath.endsWith(".mjs") ||
+    lowerPath.endsWith(".cjs")
+  )
     return "application/javascript";
-  if (path.endsWith(".html")) return "text/html";
-  if (path.endsWith(".css")) return "text/css";
-  if (path.endsWith(".csv")) return "text/csv";
-  if (path.endsWith(".xml")) return "application/xml";
-  if (path.endsWith(".yaml") || path.endsWith(".yml"))
+  if (lowerPath.endsWith(".html")) return "text/html";
+  if (lowerPath.endsWith(".css")) return "text/css";
+  if (lowerPath.endsWith(".csv")) return "text/csv";
+  if (lowerPath.endsWith(".xml")) return "application/xml";
+  if (lowerPath.endsWith(".yaml") || lowerPath.endsWith(".yml"))
     return "application/yaml";
-  if (path.endsWith(".pptx"))
+  if (lowerPath.endsWith(".png")) return "image/png";
+  if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg"))
+    return "image/jpeg";
+  if (lowerPath.endsWith(".gif")) return "image/gif";
+  if (lowerPath.endsWith(".webp")) return "image/webp";
+  if (lowerPath.endsWith(".pdf")) return "application/pdf";
+  if (lowerPath.endsWith(".zip")) return "application/zip";
+  if (lowerPath.endsWith(".tar")) return "application/x-tar";
+  if (lowerPath.endsWith(".gz")) return "application/gzip";
+  if (lowerPath.endsWith(".mp4")) return "video/mp4";
+  if (lowerPath.endsWith(".mov")) return "video/quicktime";
+  if (lowerPath.endsWith(".webm")) return "video/webm";
+  if (lowerPath.endsWith(".mp3")) return "audio/mpeg";
+  if (lowerPath.endsWith(".wav")) return "audio/wav";
+  if (lowerPath.endsWith(".pptx"))
     return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
   return TEXT_MIME_TYPE;
 }
@@ -186,6 +215,16 @@ function compactError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function compactRecoverableToolOutput(value: string) {
+  const sanitized = value
+    .replace(/\0/g, "\uFFFD")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  if (sanitized.length <= MAX_RECOVERABLE_TOOL_OUTPUT_CHARS) {
+    return sanitized;
+  }
+  return `${sanitized.slice(0, MAX_RECOVERABLE_TOOL_OUTPUT_CHARS).trimEnd()}\n[Output truncated.]`;
+}
+
 function sandboxErrorCode(message: string) {
   const match = message.match(/^([A-Z0-9_]+):/u);
   return match?.[1] ?? null;
@@ -198,17 +237,20 @@ function recoverableExecuteErrorCode(error: unknown) {
 
 function recoverableExecuteFailureHint(errorCode: string) {
   if (errorCode === "SANDBOX_EXECUTE_COMMAND_DENIED") {
-    return "Use a non-empty single-line command without control characters. If you need multi-line shell logic, write it to a script file first with write_file/edit_file, then execute that script.";
+    return "Use a non-empty command without NUL bytes or unsafe control characters. Multiline shell commands are allowed.";
   }
   if (errorCode === "SANDBOX_EXECUTE_CWD_DENIED") {
     return "Use the configured sandbox workspace as the working directory, or run commands with absolute paths under the sandbox workspace.";
+  }
+  if (errorCode === "SANDBOX_EXECUTE_VFS_PATH_DENIED") {
+    return "Create or edit /workfiles/... with SourceWeft file tools, then use prepare_sandbox_workspace to materialize it under /workspace/...; rerun execute only against /workspace/... paths.";
   }
   return "Revise the execute request before trying again.";
 }
 
 function executeOperationRequest(command: string) {
   const commandFingerprint = sandboxRequestFingerprint({ command });
-  if (!hasControlChars(command)) {
+  if (!hasDisallowedCommandControlChars(command)) {
     return { command, commandFingerprint };
   }
   return {
@@ -259,7 +301,12 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
 
   async ls(path: string): Promise<LsResult> {
     const policy = this.pathPolicy();
-    const normalized = assertSandboxBackendPath(path || "/", policy);
+    let normalized: string;
+    try {
+      normalized = assertSandboxBackendPath(path || "/", policy);
+    } catch (error) {
+      return { error: sandboxPathError(error) };
+    }
     if (normalized === "/") {
       return {
         files: rootListings(policy),
@@ -286,16 +333,21 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
   }
 
   async read(filePath: string, offset = 0, limit = 500): Promise<ReadResult> {
-    const normalized = assertSandboxBackendPath(filePath, this.pathPolicy());
+    let normalized: string;
+    try {
+      normalized = assertSandboxBackendPath(filePath, this.pathPolicy());
+    } catch (error) {
+      return { error: sandboxPathError(error) };
+    }
     if (normalized === "/") {
       return { error: `EISDIR: is a directory, read_file '${normalized}'` };
     }
     const mimeType = inferMimeType(normalized);
     if (!isTextMimeType(mimeType)) {
-      const raw = await this.readRaw(normalized);
-      if (raw.error || !raw.data)
-        return { error: raw.error ?? `File '${normalized}' not found` };
-      return { content: normalizeFileDataContent(raw.data.content), mimeType };
+      return {
+        content: `Skipped binary file: ${normalized} (${mimeType}). read_file only supports text.`,
+        mimeType,
+      };
     }
     const startLine = Math.max(1, Math.floor(offset) + 1);
     const endLine =
@@ -310,7 +362,12 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
   }
 
   async readRaw(filePath: string): Promise<ReadRawResult> {
-    const normalized = assertSandboxBackendPath(filePath, this.pathPolicy());
+    let normalized: string;
+    try {
+      normalized = assertSandboxBackendPath(filePath, this.pathPolicy());
+    } catch (error) {
+      return { error: sandboxPathError(error) };
+    }
     if (normalized === "/") {
       return { error: `EISDIR: is a directory, read_file '${normalized}'` };
     }
@@ -338,10 +395,12 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     glob?: string | null,
   ): Promise<GrepResult> {
     const policy = this.pathPolicy();
-    const normalized = assertSandboxBackendPath(
-      path || policy.defaultCwd,
-      policy,
-    );
+    let normalized: string;
+    try {
+      normalized = assertSandboxBackendPath(path || policy.defaultCwd, policy);
+    } catch (error) {
+      return { error: sandboxPathError(error) };
+    }
     if (normalized === "/") {
       return { matches: [] };
     }
@@ -374,16 +433,26 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
 
   async glob(pattern: string, path = "/"): Promise<GlobResult> {
     const policy = this.pathPolicy();
-    const normalized = assertSandboxBackendPath(path, policy);
+    let normalized: string;
+    try {
+      normalized = assertSandboxBackendPath(path, policy);
+    } catch (error) {
+      return { error: sandboxPathError(error) };
+    }
     if (normalized === "/") {
       return {
         files: rootListings(policy),
       };
     }
     const patternMatcherTargetIsAbsolute = pattern.trim().startsWith("/");
-    const normalizedPattern = patternMatcherTargetIsAbsolute
-      ? assertSandboxReadPath(pattern, policy)
-      : pattern;
+    let normalizedPattern: string;
+    try {
+      normalizedPattern = patternMatcherTargetIsAbsolute
+        ? assertSandboxReadPath(pattern, policy)
+        : pattern;
+    } catch (error) {
+      return { error: sandboxPathError(error) };
+    }
     const result = await this.runInternalCommand(
       `find ${shellQuote(normalized)} -exec stat -c '%F\t%s\t%Y\t%n' {} \\; | awk -F '\\t' '{type=($1=="directory"?"d":"f"); print type "\\t" $2 "\\t" $3 "\\t" $4}'`,
     );
@@ -716,9 +785,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         sandboxId,
         status: "failed",
         result: {
-          error: redactSandboxText(
-            error instanceof Error ? error.message : String(error),
-          ),
+          error: compactRecoverableToolOutput(redactSandboxText(compactError(error))),
           ...(errorCode ? { errorCode, failureCode: errorCode } : {}),
           commandFingerprint,
           runId: this.input.context.runId,
