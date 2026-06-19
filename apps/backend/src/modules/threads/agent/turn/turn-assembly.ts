@@ -21,7 +21,10 @@ import {
   listVirtualFsSources,
   type VirtualFsSource,
 } from "../database-vfs-store";
-import { createDefaultFilesystemMounts } from "../filesystem-capabilities";
+import {
+  createDefaultFilesystemMounts,
+  createSandboxFilesystemMount,
+} from "../filesystem-capabilities";
 import { MountedAgentFilesystemBackend } from "@sourceweft/builtin-vfs";
 import {
   CompositeBackend,
@@ -118,6 +121,23 @@ export function buildFilesystemBackend(
     filesystemMounts,
     skillsBackend,
   };
+}
+
+export function filesystemMountsForPrompt(input: {
+  filesystemBackend: FilesystemBackend;
+  sandboxRuntime: AgentSandboxRuntimeForTurn | null;
+}) {
+  if (!input.sandboxRuntime) {
+    return input.filesystemBackend.filesystemMounts;
+  }
+  const sandboxRoot =
+    input.sandboxRuntime.pathPolicy.workspaceRoot ||
+    input.sandboxRuntime.pathPolicy.defaultCwd ||
+    "/workspace";
+  return [
+    ...input.filesystemBackend.filesystemMounts,
+    createSandboxFilesystemMount({ root: sandboxRoot }),
+  ];
 }
 
 export function buildAgentBackend(input: {
@@ -499,7 +519,11 @@ export async function buildThreadAgentAssembly(
     mcpTools,
     mcpToolRuntime,
   } = toolCollection;
-  const { filesystemMounts, skillsBackend } = filesystemBackend;
+  const { skillsBackend } = filesystemBackend;
+  const promptFilesystemMounts = filesystemMountsForPrompt({
+    filesystemBackend,
+    sandboxRuntime,
+  });
   const backend = buildAgentBackendFactory({
     filesystemBackend,
     sandboxRuntime,
@@ -543,7 +567,7 @@ export async function buildThreadAgentAssembly(
     gatewayConfigId: prepared.chatProfile.gatewayConfigId,
     tools: boundTools,
     backend,
-    filesystemMounts,
+    filesystemMounts: promptFilesystemMounts,
     skills: skillsBackend ? ["/skills/"] : undefined,
     runtimePrompt,
     chatProfileConfig: prepared.chatProfile.configJson,

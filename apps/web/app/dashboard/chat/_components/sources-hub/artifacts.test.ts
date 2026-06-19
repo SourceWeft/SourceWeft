@@ -55,18 +55,18 @@ test("resolveArtifactProxyFileUrl returns the file proxy for thumbnails and medi
 test("resolveArtifactPreviewImageProxyUrl returns semantic preview image proxy", () => {
   const slides = artifact({
     artifactType: "slides",
-    payloadJson: {
-      previewImage: {
-        altText: "First slide",
-        fileName: "preview.jpg",
-        mimeType: "image/jpeg",
-        storageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
-      },
+    previewMetadataJson: {
+      altText: "First slide",
+      byteLength: 1234,
+      fileName: "preview.jpg",
+      mimeType: "image/jpeg",
     },
+    previewStorageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
   });
 
   assert.deepEqual(artifactPreviewImageMetadata(slides), {
     altText: "First slide",
+    byteLength: 1234,
     fileName: "preview.jpg",
     mimeType: "image/jpeg",
     storageKey: "artifacts/workspace-1/artifact-1/preview.jpg",

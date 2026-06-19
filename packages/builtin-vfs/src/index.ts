@@ -32,13 +32,16 @@ export {
   buildReadFileToolDescription,
   buildWriteFileToolDescription,
   createDefaultFilesystemMounts,
+  createSandboxFilesystemMount,
   KB_READ_FILE_DEFAULT_LINE_LIMIT,
   KB_READ_FILE_MAX_LINE_LIMIT,
   KNOWLEDGE_MOUNT,
   SKILLS_MOUNT,
   WORK_MOUNT,
+  type AgentFilesystemBinaryHandlingContract,
   type AgentFilesystemMountCapability,
   type AgentFilesystemPromptOptions,
+  type AgentFilesystemReadFileContract,
   type FilesystemEvidenceRole,
 } from "./filesystem-capabilities";
 export { MountedAgentFilesystemBackend } from "./mounted-backend";

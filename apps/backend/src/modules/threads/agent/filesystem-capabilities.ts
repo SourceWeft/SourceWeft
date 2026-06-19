@@ -8,6 +8,7 @@ export {
   buildReadFileToolDescription,
   buildWriteFileToolDescription,
   createDefaultFilesystemMounts,
+  createSandboxFilesystemMount,
   KB_READ_FILE_DEFAULT_LINE_LIMIT,
   KB_READ_FILE_MAX_LINE_LIMIT,
   KNOWLEDGE_MOUNT,

@@ -4,6 +4,7 @@ import {
   buildFilesystemMountPrompt,
   buildFilesystemToolDescriptions,
   createDefaultFilesystemMounts,
+  createSandboxFilesystemMount,
   KB_READ_FILE_DEFAULT_LINE_LIMIT,
   KB_READ_FILE_MAX_LINE_LIMIT,
 } from "../src/index";
@@ -45,11 +46,14 @@ test("filesystem mount prompt includes skills only when the mount is enabled", (
 
   assert.match(defaultPrompt, /\/kb: Source Library knowledge/);
   assert.match(defaultPrompt, /\/workfiles: Workfiles/);
+  assert.match(defaultPrompt, /read_file reads UTF-8 text only/);
+  assert.match(defaultPrompt, /read_file contract: markdown-source-view/);
   assert.match(
     defaultPrompt,
     /call search_sources before ls, glob, grep, or read_file/,
   );
   assert.equal(defaultPrompt.includes("/skills"), false);
+  assert.equal(defaultPrompt.includes("/workspace"), false);
 
   const skillsPrompt = buildFilesystemMountPrompt({
     mounts: createDefaultFilesystemMounts({ skillsEnabled: true }),
@@ -60,13 +64,29 @@ test("filesystem mount prompt includes skills only when the mount is enabled", (
   assert.match(skillsPrompt, /\/skills is non-citable/);
 });
 
+test("filesystem mount prompt can include sandbox workspace contract", () => {
+  const prompt = buildFilesystemMountPrompt({
+    mounts: [
+      ...createDefaultFilesystemMounts(),
+      createSandboxFilesystemMount(),
+    ],
+  });
+
+  assert.match(prompt, /\/workspace: sandbox workspace/);
+  assert.match(prompt, /read_file contract: utf8-text-only; line-offset/);
+  assert.match(prompt, /Denied: images, slide screenshots, PDFs/);
+  assert.match(prompt, /Binary handling: use publish_artifact/);
+  assert.match(prompt, /sandbox files are generated or intermediate runtime state and are non-citable/i);
+});
+
 test("filesystem tool descriptions are generated from enabled mounts", () => {
   const withoutSkills = buildFilesystemToolDescriptions();
 
   assert.match(withoutSkills.read_file, /default limit is 100 source lines/);
   assert.match(withoutSkills.read_file, /explicit limits are capped at 1000/);
+  assert.match(withoutSkills.read_file, /Path-specific behavior:/);
   assert.match(withoutSkills.read_file, /Do not use read_file for binary files/);
-  assert.match(withoutSkills.read_file, /images, PDFs, PPTX decks/);
+  assert.match(withoutSkills.read_file, /images, slide screenshots, PDFs, PPTX decks/);
   assert.match(
     withoutSkills.read_file,
     /Only \/kb read_file output may include valid/,
@@ -87,4 +107,17 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
     /\/skills files are selected skill instructions/,
   );
   assert.match(withSkills.grep, /\/skills matches are non-citable/);
+
+  const withSandbox = buildFilesystemToolDescriptions({
+    mounts: [
+      ...createDefaultFilesystemMounts(),
+      createSandboxFilesystemMount(),
+    ],
+  });
+  assert.match(
+    withSandbox.read_file,
+    /\/workspace: utf8-text-only; line-offset; read\/write; non-citable/u,
+  );
+  assert.match(withSandbox.read_file, /slide screenshots/u);
+  assert.match(withSandbox.read_file, /publish_artifact/u);
 });

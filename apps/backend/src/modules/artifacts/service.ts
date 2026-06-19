@@ -197,26 +197,22 @@ function resolveArtifactPreviewImage(
   ) {
     return null;
   }
-  const payload = toObjectRecord(artifact.payloadJson);
-  const previewImage = toObjectRecord(payload?.previewImage);
-  if (!previewImage) {
-    return null;
-  }
   const storageKey =
-    typeof previewImage.storageKey === "string"
-      ? previewImage.storageKey.trim()
+    typeof artifact.previewStorageKey === "string"
+      ? artifact.previewStorageKey.trim()
       : "";
   if (!storageKey) {
     return null;
   }
+  const metadata = toObjectRecord(artifact.previewMetadataJson);
   const mimeType =
-    typeof previewImage.mimeType === "string"
-      ? previewImage.mimeType.trim()
+    typeof metadata?.mimeType === "string"
+      ? metadata.mimeType.trim()
       : "";
   const fileName =
-    typeof previewImage.fileName === "string" &&
-    previewImage.fileName.trim().length > 0
-      ? previewImage.fileName.trim()
+    typeof metadata?.fileName === "string" &&
+    metadata.fileName.trim().length > 0
+      ? metadata.fileName.trim()
       : "preview.jpg";
   return {
     contentType: mimeType || ARTIFACT_MIME_TYPES.jpeg,
@@ -265,6 +261,8 @@ export class ContentArtifactsService {
       payloadJson: artifact.payloadJson,
       storageBucket: artifact.storageBucket,
       storageKey: artifact.storageKey,
+      previewStorageKey: artifact.previewStorageKey,
+      previewMetadataJson: artifact.previewMetadataJson,
       errorCode: artifact.errorCode,
       errorMessage: artifact.errorMessage,
       createdBy: artifact.createdBy,

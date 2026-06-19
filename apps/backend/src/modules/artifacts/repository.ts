@@ -18,6 +18,8 @@ function mapArtifact(row: ArtifactRow) {
     payloadJson: row.payloadJson ?? {},
     storageBucket: row.storageBucket,
     storageKey: row.storageKey,
+    previewStorageKey: row.previewStorageKey,
+    previewMetadataJson: row.previewMetadataJson ?? {},
     errorCode: row.errorCode,
     errorMessage: row.errorMessage,
     createdBy: row.createdBy,
@@ -85,6 +87,8 @@ export async function createSlidesArtifactRecord(input: {
   payload: Record<string, unknown>;
   storageBucket: string;
   storageKey: string;
+  previewStorageKey?: string | null;
+  previewMetadata?: Record<string, unknown> | null;
 }) {
   const versionId = randomUUID();
   const now = new Date();
@@ -101,6 +105,8 @@ export async function createSlidesArtifactRecord(input: {
     payloadJson: input.payload,
     storageBucket: input.storageBucket,
     storageKey: input.storageKey,
+    previewStorageKey: input.previewStorageKey ?? null,
+    previewMetadataJson: input.previewMetadata ?? {},
     createdBy: input.userId,
     completedAt: now,
   });

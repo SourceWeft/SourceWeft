@@ -4,6 +4,7 @@ import {
   resolveArtifactDownloadUrl,
   resolveArtifactUrl,
   resolveGeneratedPresentationArtifact,
+  resolveGeneratedPresentationPreviewImageUrl,
 } from "./message-assets";
 import type { ToolCallRecord } from "./types";
 
@@ -196,6 +197,47 @@ test("resolves published sandbox presentation artifact output", () => {
     status: "ready",
     title: "费曼学习法介绍",
   });
+});
+
+test("generated presentation preview image resolves tool output asset URLs", () => {
+  assert.equal(
+    resolveGeneratedPresentationPreviewImageUrl({
+      previewImageUrl:
+        "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+    }),
+    "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+  );
+});
+
+test("generated presentation preview image resolves persisted snapshot metadata", () => {
+  assert.equal(
+    resolveGeneratedPresentationPreviewImageUrl({
+      artifactPreview: {
+        id: "artifact-1",
+        workspaceId: "workspace-1",
+        previewMetadataJson: {
+          fileName: "preview.jpg",
+          mimeType: "image/jpeg",
+        },
+        previewStorageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
+      },
+    }),
+    "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+  );
+});
+
+test("generated presentation preview image returns null without metadata", () => {
+  assert.equal(
+    resolveGeneratedPresentationPreviewImageUrl({
+      artifactPreview: {
+        id: "artifact-1",
+        workspaceId: "workspace-1",
+        previewMetadataJson: {},
+        previewStorageKey: null,
+      },
+    }),
+    null,
+  );
 });
 
 test("resolves video presentation artifacts from tool output", () => {

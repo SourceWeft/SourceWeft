@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   buildFilesystemToolDescriptions,
   createDefaultFilesystemMounts,
+  createSandboxFilesystemMount,
 } from "./filesystem-capabilities";
 import { CHAT_SYSTEM_PROMPT, buildBaseSystemPrompt } from "./prompts";
 
@@ -14,6 +15,7 @@ test("base chat system prompt does not mention optional web tools", () => {
 test("base chat system prompt treats kb as source evidence and work as user-visible working material", () => {
   assert.match(CHAT_SYSTEM_PROMPT, /\/kb: Source Library knowledge/);
   assert.match(CHAT_SYSTEM_PROMPT, /\/workfiles: Workfiles/);
+  assert.match(CHAT_SYSTEM_PROMPT, /read_file reads UTF-8 text only/);
   assert.match(
     CHAT_SYSTEM_PROMPT,
     /Database-persisted, thread-scoped Workfiles/,
@@ -75,6 +77,7 @@ test("base chat system prompt treats kb as source evidence and work as user-visi
     /Do not provide an uncited source summary before or after a tool approval request/,
   );
   assert.equal(CHAT_SYSTEM_PROMPT.includes("/skills"), false);
+  assert.equal(CHAT_SYSTEM_PROMPT.includes("/workspace"), false);
 });
 
 test("system prompt includes skills only when the skills mount is enabled", () => {
@@ -98,7 +101,7 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
   assert.match(withoutSkills.read_file, /default limit is 100 source lines/);
   assert.match(withoutSkills.read_file, /explicit limits are capped at 1000/);
   assert.match(withoutSkills.read_file, /Do not use read_file for binary files/);
-  assert.match(withoutSkills.read_file, /images, PDFs, PPTX decks/);
+  assert.match(withoutSkills.read_file, /images, slide screenshots, PDFs, PPTX decks/);
   assert.match(
     withoutSkills.read_file,
     /Only \/kb read_file output may include valid/,
@@ -122,4 +125,17 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
     /\/skills files are selected skill instructions/,
   );
   assert.match(withSkills.grep, /\/skills matches are non-citable/);
+
+  const withSandbox = buildFilesystemToolDescriptions({
+    mounts: [
+      ...createDefaultFilesystemMounts(),
+      createSandboxFilesystemMount(),
+    ],
+  });
+  assert.match(
+    withSandbox.read_file,
+    /\/workspace: utf8-text-only; line-offset; read\/write; non-citable/u,
+  );
+  assert.match(withSandbox.read_file, /slide screenshots/u);
+  assert.match(withSandbox.read_file, /publish_artifact/u);
 });

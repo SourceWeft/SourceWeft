@@ -4195,6 +4195,11 @@ export const artifacts = pgTable(
       .default(emptyJsonObject),
     storageBucket: text("storage_bucket"),
     storageKey: text("storage_key"),
+    previewStorageKey: text("preview_storage_key"),
+    previewMetadataJson: jsonb("preview_metadata_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
     createdBy: text("created_by"),

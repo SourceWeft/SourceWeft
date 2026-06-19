@@ -3,7 +3,9 @@ import { test } from "vitest";
 import {
   artifactApiUrlToPageUrl,
   artifactApiUrlToProxyFileUrl,
+  artifactPreviewImageMetadataFromArtifact,
   normalizeWebAssetUrl,
+  resolveArtifactPreviewImageUrlFromArtifact,
   resolveArtifactPreviewImageUrl,
   resolveArtifactProxyAssetUrl,
   resolveArtifactPageUrl,
@@ -56,6 +58,61 @@ test("resolveArtifactPreviewImageUrl builds the semantic preview image proxy URL
       workspaceId: "workspace-1",
     }),
     "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+  );
+});
+
+test("artifact preview image helper resolves structured metadata", () => {
+  assert.deepEqual(
+    artifactPreviewImageMetadataFromArtifact({
+      previewMetadataJson: {
+        altText: "First slide",
+        byteLength: 1234,
+        fileName: "preview.jpg",
+        mimeType: "image/jpeg",
+      },
+      previewStorageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
+    }),
+    {
+      altText: "First slide",
+      byteLength: 1234,
+      fileName: "preview.jpg",
+      mimeType: "image/jpeg",
+      storageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
+    },
+  );
+  assert.equal(
+    resolveArtifactPreviewImageUrlFromArtifact({
+      artifactId: "artifact-1",
+      previewMetadataJson: {
+        fileName: "preview.jpg",
+        mimeType: "image/jpeg",
+      },
+      previewStorageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
+      workspaceId: "workspace-1",
+    }),
+    "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
+  );
+});
+
+test("artifact preview image helper returns null without structured storage key", () => {
+  assert.equal(
+    artifactPreviewImageMetadataFromArtifact({
+      previewMetadataJson: {
+        altText: "First slide",
+        fileName: "preview.jpg",
+      },
+      previewStorageKey: null,
+    }),
+    null,
+  );
+  assert.equal(
+    resolveArtifactPreviewImageUrlFromArtifact({
+      artifactId: "artifact-1",
+      previewMetadataJson: {},
+      previewStorageKey: "",
+      workspaceId: "workspace-1",
+    }),
+    null,
   );
 });
 

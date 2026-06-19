@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   NO_VISIBLE_READ_FILE_CONTENT,
   READ_FILE_PREVIEW_LINE_LIMIT,
+  getReadFileBinaryUnsupported,
   getReadFilePreview,
   resolveReadFilePath,
 } from "./read-file-preview";
@@ -11,15 +12,19 @@ import type { ToolCallRecord } from "./types";
 function readFileToolCall(input: {
   content?: string;
   displayContent?: string;
+  error?: string | null;
   input?: Record<string, unknown>;
+  output?: unknown;
 }): ToolCallRecord {
   const output =
-    input.displayContent !== undefined
-      ? { displayContent: input.displayContent }
-      : { content: input.content ?? "" };
+    input.output !== undefined
+      ? input.output
+      : input.displayContent !== undefined
+        ? { displayContent: input.displayContent }
+        : { content: input.content ?? "" };
 
   return {
-    error: null,
+    error: input.error ?? null,
     id: "call-read-file",
     input: input.input ?? {},
     latencyMs: 12,
@@ -97,6 +102,23 @@ test("shows the file path even when read_file returns empty visible content", ()
   assert.deepEqual(preview?.lines, [NO_VISIBLE_READ_FILE_CONTENT]);
   assert.equal(preview?.fileName, "empty.md");
   assert.equal(preview?.isTruncated, false);
+});
+
+test("recognizes binary unsupported read_file errors without building text preview", () => {
+  const toolCall = readFileToolCall({
+    error:
+      "READ_FILE_BINARY_UNSUPPORTED: /workspace/qa/slide-1.jpg is image/jpeg. read_file only supports UTF-8 text files.",
+    input: { path: "/workspace/qa/slide-1.jpg" },
+    output: { error: "READ_FILE_BINARY_UNSUPPORTED" },
+  });
+
+  assert.equal(getReadFilePreview(toolCall), null);
+  assert.deepEqual(getReadFileBinaryUnsupported(toolCall), {
+    code: "READ_FILE_BINARY_UNSUPPORTED",
+    message:
+      "READ_FILE_BINARY_UNSUPPORTED: /workspace/qa/slide-1.jpg is image/jpeg. read_file only supports UTF-8 text files.",
+    path: "/workspace/qa/slide-1.jpg",
+  });
 });
 
 test("does not build previews for private skill instruction reads", () => {

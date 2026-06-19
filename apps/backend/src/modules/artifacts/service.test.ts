@@ -221,18 +221,16 @@ test("video presentation artifact advertises browser render capability", () => {
   );
 });
 
-test("artifact preview image metadata resolves from payload", () => {
+test("artifact preview image metadata resolves from structured fields", () => {
   assert.deepEqual(
     testExports.resolveArtifactPreviewImage({
       artifactType: "slides",
       status: "ready",
       storageBucket: "content",
-      payloadJson: {
-        previewImage: {
-          storageKey: "workspaces/workspace-1/artifacts/artifact-1/preview.jpg",
-          mimeType: "image/jpeg",
-          fileName: "preview.jpg",
-        },
+      previewStorageKey: "workspaces/workspace-1/artifacts/artifact-1/preview.jpg",
+      previewMetadataJson: {
+        mimeType: "image/jpeg",
+        fileName: "preview.jpg",
       },
     } as never),
     {
@@ -248,7 +246,8 @@ test("artifact preview image metadata is unavailable for missing payload", () =>
   assert.equal(
     testExports.resolveArtifactPreviewImage({
       status: "ready",
-      payloadJson: {},
+      previewStorageKey: null,
+      previewMetadataJson: {},
     } as never),
     null,
   );

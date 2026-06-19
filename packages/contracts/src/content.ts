@@ -303,6 +303,8 @@ export const artifactSchema = z.object({
   payloadJson: z.record(z.string(), z.unknown()),
   storageBucket: z.string().nullable(),
   storageKey: z.string().nullable(),
+  previewStorageKey: z.string().nullable(),
+  previewMetadataJson: z.record(z.string(), z.unknown()),
   errorCode: z.string().nullable(),
   errorMessage: z.string().nullable(),
   createdBy: z.string().nullable(),

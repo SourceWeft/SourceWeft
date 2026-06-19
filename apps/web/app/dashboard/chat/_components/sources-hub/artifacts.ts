@@ -1,6 +1,7 @@
 import {
-  resolveArtifactPreviewImageUrl,
+  artifactPreviewImageMetadataFromArtifact,
   resolveArtifactPageUrlFromArtifact,
+  resolveArtifactPreviewImageUrlFromArtifact,
   resolveArtifactProxyFileUrlFromArtifact,
 } from "../artifact-urls";
 import type { ArtifactListItem } from "./types";
@@ -22,39 +23,11 @@ function hasArtifactFile(artifact: ArtifactListItem) {
   return Boolean(artifact.storageKey || artifact.previewUrl);
 }
 
-function toRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 export function artifactPreviewImageMetadata(artifact: ArtifactListItem) {
-  const payload = toRecord(artifact.payloadJson);
-  const previewImage = toRecord(payload?.previewImage);
-  const storageKey =
-    typeof previewImage?.storageKey === "string"
-      ? previewImage.storageKey.trim()
-      : "";
-  if (!storageKey) {
-    return null;
-  }
-  return {
-    altText:
-      typeof previewImage?.altText === "string" &&
-      previewImage.altText.trim().length > 0
-        ? previewImage.altText.trim()
-        : null,
-    fileName:
-      typeof previewImage?.fileName === "string" &&
-      previewImage.fileName.trim().length > 0
-        ? previewImage.fileName.trim()
-        : "preview.jpg",
-    mimeType:
-      typeof previewImage?.mimeType === "string"
-        ? previewImage.mimeType.trim()
-        : "",
-    storageKey,
-  };
+  return artifactPreviewImageMetadataFromArtifact({
+    previewMetadataJson: artifact.previewMetadataJson,
+    previewStorageKey: artifact.previewStorageKey,
+  });
 }
 
 function canOpenArtifactFile(artifact: ArtifactListItem) {
@@ -106,11 +79,10 @@ export function resolveArtifactPreviewImageProxyUrl(input: {
   workspaceId?: string | null;
 }) {
   const { artifact, workspaceId } = input;
-  if (!workspaceId || !artifactPreviewImageMetadata(artifact)) {
-    return null;
-  }
-  return resolveArtifactPreviewImageUrl({
+  return resolveArtifactPreviewImageUrlFromArtifact({
     artifactId: artifact.id,
+    previewMetadataJson: artifact.previewMetadataJson,
+    previewStorageKey: artifact.previewStorageKey,
     workspaceId,
   });
 }

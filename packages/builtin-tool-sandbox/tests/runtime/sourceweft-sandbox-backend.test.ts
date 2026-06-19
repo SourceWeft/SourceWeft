@@ -408,7 +408,7 @@ test("SourceWeftSandboxBackend reads and writes sandbox files without user execu
   );
 });
 
-test("SourceWeftSandboxBackend skips read_file on binary image files", async () => {
+test("SourceWeftSandboxBackend rejects read_file on binary image files", async () => {
   const { backend, files, provider } = createBackend();
   files.set(
     "/workspace/ppt-deck/qa/slide-01.jpg",
@@ -417,11 +417,9 @@ test("SourceWeftSandboxBackend skips read_file on binary image files", async () 
 
   const result = await backend.read("/workspace/ppt-deck/qa/slide-01.jpg");
 
-  assert.equal(result.error, undefined);
-  assert.equal(
-    result.content,
-    "Skipped binary file: /workspace/ppt-deck/qa/slide-01.jpg (image/jpeg). read_file only supports text.",
-  );
+  assert.match(result.error ?? "", /^READ_FILE_BINARY_UNSUPPORTED:/u);
+  assert.match(result.error ?? "", /image\/jpeg/u);
+  assert.equal(result.content, undefined);
   assert.equal(result.mimeType, "image/jpeg");
   assert.deepEqual(provider.systemExecuted, []);
 });

@@ -90,6 +90,77 @@ export function resolveArtifactPreviewImageUrl(input: {
   });
 }
 
+function toRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+export type ArtifactPreviewImageMetadata = {
+  altText: string | null;
+  byteLength: number | null;
+  fileName: string;
+  mimeType: string;
+  storageKey: string;
+};
+
+export function artifactPreviewImageMetadataFromArtifact(input: {
+  previewMetadataJson?: unknown;
+  previewStorageKey?: string | null;
+}) {
+  const storageKey =
+    typeof input.previewStorageKey === "string" &&
+    input.previewStorageKey.trim().length > 0
+      ? input.previewStorageKey.trim()
+      : null;
+  if (!storageKey) {
+    return null;
+  }
+
+  const metadata = toRecord(input.previewMetadataJson);
+  const byteLength =
+    typeof metadata?.byteLength === "number" &&
+    Number.isFinite(metadata.byteLength) &&
+    metadata.byteLength >= 0
+      ? metadata.byteLength
+      : null;
+
+  return {
+    altText:
+      typeof metadata?.altText === "string" &&
+      metadata.altText.trim().length > 0
+        ? metadata.altText.trim()
+        : null,
+    byteLength,
+    fileName:
+      typeof metadata?.fileName === "string" &&
+      metadata.fileName.trim().length > 0
+        ? metadata.fileName.trim()
+        : "preview.jpg",
+    mimeType:
+      typeof metadata?.mimeType === "string"
+        ? metadata.mimeType.trim()
+        : "",
+    storageKey,
+  } satisfies ArtifactPreviewImageMetadata;
+}
+
+export function resolveArtifactPreviewImageUrlFromArtifact(input: {
+  artifactId?: string | null;
+  previewMetadataJson?: unknown;
+  previewStorageKey?: string | null;
+  workspaceId?: string | null;
+}) {
+  return artifactPreviewImageMetadataFromArtifact(input) &&
+    input.artifactId &&
+    input.workspaceId
+    ? resolveArtifactPreviewImageUrl({
+        artifactId: input.artifactId,
+        workspaceId: input.workspaceId,
+      })
+    : null;
+}
+
 export function resolveArtifactPageUrl(input: {
   artifactId: string;
   workspaceId: string;

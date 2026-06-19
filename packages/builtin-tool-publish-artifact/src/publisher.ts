@@ -67,6 +67,8 @@ export type PublishArtifactServices = ArtifactSourceServices & {
       payload: Record<string, unknown>;
       storageBucket: string;
       storageKey: string;
+      previewStorageKey?: string | null;
+      previewMetadata?: Record<string, unknown> | null;
     }) => Promise<SlidesArtifactRecord>;
     readonly createFileArtifactRecord?: (input: {
       artifactId: string;
@@ -513,19 +515,17 @@ async function createArtifactRecord(input: {
     prompt: input.descriptor.description ?? input.descriptor.title,
     storageBucket: input.storageBucket,
     storageKey: input.storageKey,
+    previewStorageKey: input.previewImage?.storageKey ?? null,
+    previewMetadata: input.previewImage
+      ? {
+          altText: input.previewImage.altText,
+          byteLength: input.previewImage.byteLength,
+          fileName: input.previewImage.fileName,
+          mimeType: input.previewImage.mimeType,
+        }
+      : null,
     payload: {
       ...input.preparedArtifact.payload,
-      ...(input.previewImage
-        ? {
-            previewImage: {
-              altText: input.previewImage.altText,
-              byteLength: input.previewImage.byteLength,
-              fileName: input.previewImage.fileName,
-              mimeType: input.previewImage.mimeType,
-              storageKey: input.previewImage.storageKey,
-            },
-          }
-        : {}),
       storageKey: input.storageKey,
       toolCallId: input.toolCallId,
     },

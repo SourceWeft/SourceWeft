@@ -29,6 +29,7 @@ import { redactSandboxText, sandboxRequestFingerprint } from "./redaction";
 
 const TEXT_MIME_TYPE = "text/plain";
 const EXECUTE_TOOL_NAME = "execute";
+const READ_FILE_BINARY_UNSUPPORTED_CODE = "READ_FILE_BINARY_UNSUPPORTED";
 const MAX_RECOVERABLE_TOOL_OUTPUT_CHARS = 2_000;
 const RECOVERABLE_EXECUTE_ERROR_CODES = new Set([
   "SANDBOX_EXECUTE_COMMAND_DENIED",
@@ -133,6 +134,10 @@ function isTextMimeType(mimeType: string) {
     mimeType === "application/xml" ||
     mimeType === "application/yaml"
   );
+}
+
+function readFileBinaryUnsupportedError(path: string, mimeType: string) {
+  return `${READ_FILE_BINARY_UNSUPPORTED_CODE}: ${path} is ${mimeType}. read_file only supports UTF-8 text files. Use artifact preview, media-aware inspection, or publish_artifact for binary sandbox outputs.`;
 }
 
 function parseFindLine(line: string): FileInfo | null {
@@ -345,7 +350,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     const mimeType = inferMimeType(normalized);
     if (!isTextMimeType(mimeType)) {
       return {
-        content: `Skipped binary file: ${normalized} (${mimeType}). read_file only supports text.`,
+        error: readFileBinaryUnsupportedError(normalized, mimeType),
         mimeType,
       };
     }

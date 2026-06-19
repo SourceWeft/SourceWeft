@@ -229,6 +229,8 @@ export type ArtifactPreviewRecord = {
   payloadJson: Record<string, unknown>;
   storageBucket: string | null;
   storageKey: string | null;
+  previewStorageKey: string | null;
+  previewMetadataJson: Record<string, unknown>;
   errorCode: string | null;
   errorMessage: string | null;
   createdBy: string | null;
@@ -256,6 +258,8 @@ export type ArtifactStatusSnapshot = {
   payloadJson: Record<string, unknown>;
   previewUrl: string | null;
   promptText: string | null;
+  previewMetadataJson: Record<string, unknown>;
+  previewStorageKey: string | null;
   storageBucket: string | null;
   storageKey: string | null;
   status: ArtifactPreviewRecord["status"];

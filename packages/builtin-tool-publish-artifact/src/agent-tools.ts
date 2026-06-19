@@ -53,6 +53,8 @@ type CapabilityAgentToolFactoryInput = {
         payload: Record<string, unknown>;
         storageBucket: string;
         storageKey: string;
+        previewStorageKey?: string | null;
+        previewMetadata?: Record<string, unknown> | null;
       }) => Promise<SlidesArtifactRecord>;
       readonly createFileArtifactRecord?: (input: {
         artifactId: string;

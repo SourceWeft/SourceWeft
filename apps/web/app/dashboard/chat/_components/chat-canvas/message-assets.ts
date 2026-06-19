@@ -3,10 +3,12 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import {
   normalizeWebAssetUrl,
+  resolveArtifactPreviewImageUrlFromArtifact,
   resolveArtifactPageUrlFromArtifact,
   resolveArtifactProxyFileUrlFromArtifact,
 } from "../artifact-urls";
 import type {
+  ArtifactPreviewRecord,
   ChatMessageImagePart,
   MessageVersion,
   ThinkingStepRecord,
@@ -449,6 +451,30 @@ export function resolveArtifactDownloadUrl(input: {
     download: true,
     fallbackUrl: input.artifact.artifactUrl,
     workspaceId: input.workspaceId,
+  });
+}
+
+export function resolveGeneratedPresentationPreviewImageUrl(input: {
+  artifactPreview?: Pick<
+    ArtifactPreviewRecord,
+    "id" | "previewMetadataJson" | "previewStorageKey" | "workspaceId"
+  > | null;
+  previewImageUrl?: string | null;
+}) {
+  const previewImageUrl =
+    typeof input.previewImageUrl === "string" &&
+    input.previewImageUrl.trim().length > 0
+      ? input.previewImageUrl.trim()
+      : null;
+  if (previewImageUrl) {
+    return normalizeWebAssetUrl(previewImageUrl);
+  }
+
+  return resolveArtifactPreviewImageUrlFromArtifact({
+    artifactId: input.artifactPreview?.id,
+    previewMetadataJson: input.artifactPreview?.previewMetadataJson,
+    previewStorageKey: input.artifactPreview?.previewStorageKey,
+    workspaceId: input.artifactPreview?.workspaceId,
   });
 }
 

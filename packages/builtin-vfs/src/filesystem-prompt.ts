@@ -23,11 +23,17 @@ function mountSummary(mount: AgentFilesystemMountCapability) {
 
   return [
     `- ${mount.root}: ${mount.label}; ${attributes.join(", ")}. ${mount.purpose}`,
+    `  read_file contract: ${mount.readFile.contentKind}; ${mount.readFile.pagination}. Allowed: ${mount.readFile.allowedExamples.join(", ")}. Denied: ${mount.readFile.deniedExamples.join(", ")}.`,
+    mount.binaryHandling
+      ? `  Binary handling: use ${mount.binaryHandling.preferredTools.join(", ")} instead of read_file for unsupported binary files.`
+      : "",
     `  Read policy: ${mount.readPolicy}`,
     `  Write policy: ${mount.writePolicy}`,
     `  Citation policy: ${mount.citationPolicy}`,
     `  Path policy: ${mount.pathPolicy}`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildFilesystemMountPrompt(
@@ -41,6 +47,7 @@ ${mounts.map(mountSummary).join("\n")}
 </filesystem_mounts>
 
 <filesystem_rules>
+- ${READ_FILE_TOOL_NAME} reads UTF-8 text only. Backend behavior differs by path prefix according to the mount contracts above; do not use ${READ_FILE_TOOL_NAME} for unsupported binary files.
 - Use /kb as the default source evidence filesystem. ${SEARCH_SOURCES_TOOL_NAME} is scoped to the same selected source tree scope as /kb.
 - User @mentions, attachment labels, and source filenames refer to Source Library entries under /kb unless the user explicitly says they are Workfiles. Do not convert @mentioned source filenames into /workfiles paths.
 - For targeted source-grounded Q&A, extraction, field lookup, local fact lookup, semantic lookup, or finding relevant passages, call ${SEARCH_SOURCES_TOOL_NAME} before ${LS_TOOL_NAME}, ${GLOB_TOOL_NAME}, ${GREP_TOOL_NAME}, or ${READ_FILE_TOOL_NAME}.

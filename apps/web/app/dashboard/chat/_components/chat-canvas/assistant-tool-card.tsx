@@ -23,6 +23,7 @@ import {
   ASSISTANT_ACTIVITY_LABEL_CLASS,
   ASSISTANT_ACTIVITY_ROW_CLASS,
 } from "./assistant-activity-layout";
+import { resolveAssistantToolCardDefaultOpen } from "./assistant-tool-card-state";
 import { compactText, getToolOutputContent } from "./message-assets";
 import {
   getResolvedToolConfirmationMessage,
@@ -34,7 +35,12 @@ import {
   getSkillInstructionReadFileLabel,
   isRedactedSkillInstructionRead,
 } from "./assistant-tool-display";
-import { getReadFilePreview, type ReadFilePreview } from "./read-file-preview";
+import {
+  getReadFileBinaryUnsupported,
+  getReadFilePreview,
+  type ReadFileBinaryUnsupported,
+  type ReadFilePreview,
+} from "./read-file-preview";
 import {
   getSandboxCollectedWorkfilePaths,
   getSandboxToolOperationTimeline,
@@ -86,26 +92,6 @@ function getStatusLabel(input: {
     return "Failed";
   }
   return "Done";
-}
-
-function shouldAutoOpenToolStatus(label: string) {
-  return (
-    label === "Running" ||
-    label === "Needs approval" ||
-    label === "Failed" ||
-    label === "Rejected"
-  );
-}
-
-export function resolveAssistantToolCardDefaultOpen(input: {
-  defaultOpen?: boolean;
-  hasReadFilePreview: boolean;
-  statusLabel: string;
-}) {
-  return (
-    input.defaultOpen ??
-    (input.hasReadFilePreview || shouldAutoOpenToolStatus(input.statusLabel))
-  );
 }
 
 function ToolTypeIcon({ toolName }: { toolName: string }) {
@@ -219,6 +205,20 @@ function ReadFilePreviewDetails({ preview }: { preview: ReadFilePreview }) {
   );
 }
 
+function ReadFileBinaryUnsupportedDetails({
+  unsupported,
+}: {
+  unsupported: ReadFileBinaryUnsupported;
+}) {
+  const pathLabel = unsupported.path ?? "this file";
+  const message = `${pathLabel} is not a UTF-8 text file. Use artifact preview, media-aware inspection, or publish it as an artifact instead of read_file.`;
+  return (
+    <p className="break-words text-muted-foreground/80">
+      {message}
+    </p>
+  );
+}
+
 function SandboxOperationTimeline({
   items,
 }: {
@@ -292,6 +292,9 @@ export function AssistantToolCard({
   const readFilePreview = isRedactedSkillRead
     ? null
     : getReadFilePreview(toolCall);
+  const readFileBinaryUnsupported = isRedactedSkillRead
+    ? null
+    : getReadFileBinaryUnsupported(toolCall);
   const detailParts = isRedactedSkillRead
     ? []
     : getToolCallDetailParts(toolCall, toolStep, confirmationResolution);
@@ -336,6 +339,7 @@ export function AssistantToolCard({
     detailParts.length > 0 ||
     Boolean(skillReadFileLabel) ||
     Boolean(readFilePreview) ||
+    Boolean(readFileBinaryUnsupported) ||
     Boolean(outputSummary) ||
     sandboxDetails.length > 0 ||
     sandboxTimeline.length > 0 ||
@@ -400,6 +404,11 @@ export function AssistantToolCard({
           ) : null}
           {hasDetails && readFilePreview ? (
             <ReadFilePreviewDetails preview={readFilePreview} />
+          ) : null}
+          {hasDetails && readFileBinaryUnsupported ? (
+            <ReadFileBinaryUnsupportedDetails
+              unsupported={readFileBinaryUnsupported}
+            />
           ) : null}
           {hasDetails && toolStep?.detail ? (
             <p className="break-words">{toolStep.detail}</p>

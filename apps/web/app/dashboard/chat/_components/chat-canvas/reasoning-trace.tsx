@@ -56,6 +56,7 @@ import {
   resolveArtifactUrl,
   resolveGeneratedImageArtifact,
   resolveGeneratedPresentationArtifact,
+  resolveGeneratedPresentationPreviewImageUrl,
 } from "./message-assets";
 import { GeneratedImagePreview } from "./generated-image-preview";
 import {
@@ -660,11 +661,6 @@ function buildGeneratedPresentationPreviewArtifact(input: {
       previewRenderer:
         input.source.previewRenderer ??
         (generationMode === "editable_native" ? "pptxviewjs" : "html_iframe"),
-      previewImage: input.source.previewImageUrl
-        ? {
-            assetUrl: input.source.previewImageUrl,
-          }
-        : undefined,
       pptx:
         input.source.pptxUrl && input.source.fileName
           ? {
@@ -676,6 +672,8 @@ function buildGeneratedPresentationPreviewArtifact(input: {
     },
     storageBucket: null,
     storageKey: input.artifactId,
+    previewStorageKey: null,
+    previewMetadataJson: {},
     errorCode: null,
     errorMessage: null,
     createdBy: null,
@@ -1221,6 +1219,8 @@ function ToolCallDetails({
           payloadJson: {},
           storageBucket: null,
           storageKey: imageArtifact.artifactId,
+          previewStorageKey: null,
+          previewMetadataJson: {},
           errorCode: null,
           errorMessage: null,
           createdBy: null,
@@ -1266,6 +1266,12 @@ function ToolCallDetails({
           storageKey:
             presentationArtifactStatusSnapshot?.storageKey ??
             presentationPreviewArtifact.storageKey,
+          previewStorageKey:
+            presentationArtifactStatusSnapshot?.previewStorageKey ??
+            presentationPreviewArtifact.previewStorageKey,
+          previewMetadataJson:
+            presentationArtifactStatusSnapshot?.previewMetadataJson ??
+            presentationPreviewArtifact.previewMetadataJson,
           completedAt:
             presentationArtifactStatus === "ready"
               ? (presentationArtifactStatusSnapshot?.completedAt ??
@@ -1611,6 +1617,8 @@ export function GeneratedImageArtifacts({
               payloadJson: {},
               storageBucket: null,
               storageKey: artifact.artifactId,
+              previewStorageKey: null,
+              previewMetadataJson: {},
               errorCode: null,
               errorMessage: null,
               createdBy: null,
@@ -1715,6 +1723,7 @@ function GeneratedPresentationArtifactItem({
   isArtifactPublisher,
   modeLabel,
   onArtifactPreview,
+  previewImageUrl: toolOutputPreviewImageUrl,
   slideCount,
   sourceJsonUrl,
   status,
@@ -1731,6 +1740,7 @@ function GeneratedPresentationArtifactItem({
   isArtifactPublisher?: boolean;
   modeLabel: string;
   onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
+  previewImageUrl?: string | null;
   slideCount?: number | null;
   sourceJsonUrl?: string | null;
   status: ToolCallRecord["status"];
@@ -1738,7 +1748,7 @@ function GeneratedPresentationArtifactItem({
 }) {
   const previewStatus = artifactStatus ?? artifactPreview?.status ?? "pending";
   const effectiveArtifactPreview =
-    artifactPreview && isVideoPresentation
+    artifactPreview && artifactStatusSnapshot
       ? ({
           ...artifactPreview,
           payloadJson:
@@ -1753,6 +1763,12 @@ function GeneratedPresentationArtifactItem({
             artifactPreview.storageBucket,
           storageKey:
             artifactStatusSnapshot?.storageKey ?? artifactPreview.storageKey,
+          previewStorageKey:
+            artifactStatusSnapshot?.previewStorageKey ??
+            artifactPreview.previewStorageKey,
+          previewMetadataJson:
+            artifactStatusSnapshot?.previewMetadataJson ??
+            artifactPreview.previewMetadataJson,
           completedAt:
             artifactStatus === "ready"
               ? (artifactStatusSnapshot?.completedAt ??
@@ -1780,14 +1796,10 @@ function GeneratedPresentationArtifactItem({
     !isPending &&
     !isError;
   const effectiveDownloadUrl = isVideoPresentation ? null : downloadUrl;
-  const previewImage = effectiveArtifactPreview?.payloadJson?.previewImage;
-  const previewImageUrl =
-    previewImage &&
-    typeof previewImage === "object" &&
-    !Array.isArray(previewImage) &&
-    typeof (previewImage as Record<string, unknown>).assetUrl === "string"
-      ? ((previewImage as Record<string, unknown>).assetUrl as string)
-      : null;
+  const previewImageUrl = resolveGeneratedPresentationPreviewImageUrl({
+    artifactPreview: effectiveArtifactPreview,
+    previewImageUrl: toolOutputPreviewImageUrl,
+  });
   const handleDownload = () => {
     if (!effectiveDownloadUrl) {
       return;
@@ -1837,7 +1849,7 @@ function GeneratedPresentationArtifactItem({
     >
       <div className="flex items-start gap-3 p-3">
         <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-muted/60">
-          {previewImageUrl && !isPending ? (
+          {previewImageUrl && !isPending && !isError ? (
             <RawImage
               alt={title}
               className="size-full object-cover"
@@ -2033,6 +2045,7 @@ export function GeneratedPresentationArtifacts({
         isVideoPresentation,
         isArtifactPublisher,
         previewArtifact,
+        previewImageUrl: artifact?.previewImageUrl ?? null,
         description,
         modeLabel,
         sourceJsonUrl,
@@ -2080,6 +2093,7 @@ export function GeneratedPresentationArtifacts({
           isArtifactPublisher,
           modeLabel,
           previewArtifact,
+          previewImageUrl,
           title,
           sourceJsonUrl,
           toolCall,
@@ -2112,6 +2126,7 @@ export function GeneratedPresentationArtifacts({
               key={toolCall.id}
               modeLabel={modeLabel}
               onArtifactPreview={onArtifactPreview}
+              previewImageUrl={previewImageUrl}
               slideCount={artifact?.slideCount}
               sourceJsonUrl={sourceJsonUrl}
               status={toolCall.status}

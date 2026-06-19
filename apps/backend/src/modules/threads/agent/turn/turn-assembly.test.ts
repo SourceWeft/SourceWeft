@@ -11,6 +11,7 @@ import {
   buildAgentBackendFactory,
   buildRuntimePromptContext,
   buildSandboxRuntimeForPreparedTurn,
+  filesystemMountsForPrompt,
 } from "./turn-assembly";
 
 const originalSandboxConfig = structuredClone(config.sandbox);
@@ -312,6 +313,33 @@ Read this before creating slides.`;
     (await backend.read("/skills/ppt-deck/SKILL.md")).content,
     skillMarkdown,
   );
+});
+
+test("filesystem prompt mounts include sandbox workspace only when sandbox runtime is enabled", () => {
+  const withoutSandbox = filesystemMountsForPrompt({
+    filesystemBackend,
+    sandboxRuntime: null,
+  });
+  assert.deepEqual(
+    withoutSandbox.map((mount) => mount.root),
+    filesystemBackend.filesystemMounts.map((mount) => mount.root),
+  );
+
+  const sandboxRuntime = buildSandboxRuntimeForPreparedTurn({
+    prepared: createPreparedTurn(),
+    filesystemBackend,
+  });
+  assert.ok(sandboxRuntime);
+  const withSandbox = filesystemMountsForPrompt({
+    filesystemBackend,
+    sandboxRuntime,
+  });
+
+  const sandboxMount = withSandbox.find((mount) => mount.root === "/workspace");
+  assert.ok(sandboxMount);
+  assert.equal(sandboxMount.backendKind, "sandbox");
+  assert.equal(sandboxMount.readFile.contentKind, "utf8-text-only");
+  assert.match(sandboxMount.readPolicy, /UTF-8 text/u);
 });
 
 describe("sandbox runtime assembly tool permissions", () => {

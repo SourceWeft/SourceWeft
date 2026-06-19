@@ -3,12 +3,20 @@ import type { ToolCallRecord } from "./types";
 
 export const READ_FILE_PREVIEW_LINE_LIMIT = 6;
 export const NO_VISIBLE_READ_FILE_CONTENT = "(no visible content)";
+export const READ_FILE_BINARY_UNSUPPORTED_CODE =
+  "READ_FILE_BINARY_UNSUPPORTED";
 
 export type ReadFilePreview = {
   fileName: string | null;
   isTruncated: boolean;
   lineLimit: number;
   lines: string[];
+  path: string | null;
+};
+
+export type ReadFileBinaryUnsupported = {
+  code: typeof READ_FILE_BINARY_UNSUPPORTED_CODE;
+  message: string;
   path: string | null;
 };
 
@@ -44,6 +52,49 @@ function isSkillInstructionRead(input: Record<string, unknown> | undefined) {
   );
 }
 
+function getStringRecordValue(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === "string" && candidate.trim().length > 0
+    ? candidate.trim()
+    : null;
+}
+
+function readFileBinaryUnsupportedMessage(toolCall: ToolCallRecord) {
+  const candidates = [
+    toolCall.error,
+    getStringRecordValue(toolCall.output, "error"),
+    getStringRecordValue(toolCall.output, "message"),
+    getToolOutputContent(toolCall.output),
+  ];
+  return (
+    candidates.find(
+      (candidate): candidate is string =>
+        typeof candidate === "string" &&
+        candidate.trim().startsWith(`${READ_FILE_BINARY_UNSUPPORTED_CODE}:`),
+    ) ?? null
+  );
+}
+
+export function getReadFileBinaryUnsupported(
+  toolCall: ToolCallRecord,
+): ReadFileBinaryUnsupported | null {
+  if (toolCall.tool !== "read_file") {
+    return null;
+  }
+  const message = readFileBinaryUnsupportedMessage(toolCall);
+  if (!message) {
+    return null;
+  }
+  return {
+    code: READ_FILE_BINARY_UNSUPPORTED_CODE,
+    message,
+    path: resolveReadFilePath(toolCall.input),
+  };
+}
+
 function basename(path: string | null) {
   if (!path) {
     return null;
@@ -77,6 +128,9 @@ export function getReadFilePreview(
 
   const path = resolveReadFilePath(toolCall.input);
   if (isSkillInstructionRead(toolCall.input)) {
+    return null;
+  }
+  if (getReadFileBinaryUnsupported(toolCall)) {
     return null;
   }
 

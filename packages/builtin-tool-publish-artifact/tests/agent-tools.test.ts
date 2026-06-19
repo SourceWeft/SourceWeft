@@ -673,8 +673,14 @@ test("publishArtifactFromSource stores slides artifact records", async () => {
   );
   assert.equal(
     mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0]
-      .payload.previewImage.storageKey,
+      .previewStorageKey,
     "artifacts/workspace-1/artifact-1/preview.jpg",
+  );
+  assert.equal(
+    "previewImage" in
+      mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0]
+        .payload,
+    false,
   );
 });
 
@@ -726,17 +732,22 @@ test("publishArtifactFromSource stores slides preview images as companion assets
     mockedServices.storage.uploadArtifactObject.mock.calls[1]?.[0].contentType,
     "image/jpeg",
   );
+  const recordInput =
+    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0];
+  assert.equal(
+    recordInput?.previewStorageKey,
+    "artifacts/workspace-1/artifact-1/preview.jpg",
+  );
   assert.deepEqual(
-    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0]
-      .payload.previewImage,
+    recordInput?.previewMetadata,
     {
       altText: "First slide",
       byteLength: "jpeg-bytes".length,
       fileName: "preview.jpg",
       mimeType: "image/jpeg",
-      storageKey: "artifacts/workspace-1/artifact-1/preview.jpg",
     },
   );
+  assert.equal("previewImage" in (recordInput?.payload ?? {}), false);
 });
 
 test("publishArtifactFromSource rejects invalid slides preview images", async () => {

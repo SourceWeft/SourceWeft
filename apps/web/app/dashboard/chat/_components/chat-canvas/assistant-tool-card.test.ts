@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { resolveAssistantToolCardDefaultOpen } from "./assistant-tool-card";
+import { resolveAssistantToolCardDefaultOpen } from "./assistant-tool-card-state";
 
 test("read_file previews do not override explicit collapsed default", () => {
   assert.equal(
