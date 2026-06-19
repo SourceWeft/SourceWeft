@@ -110,20 +110,6 @@ function normalizePriceNumber(value: number | null | undefined): number | null {
   return Number(value.toPrecision(15));
 }
 
-function hasManualPriceConfigured(pricing: Partial<ModelPricing> | undefined): boolean {
-  if (!pricing) {
-    return false;
-  }
-  return PRICING_VALUE_KEYS.some((key) => pricing[key] !== undefined);
-}
-
-function hasAnyManualPriceValue(pricing: Partial<ModelPricing> | undefined): boolean {
-  if (!pricing) {
-    return false;
-  }
-  return PRICING_VALUE_KEYS.some((key) => pricing[key] !== null);
-}
-
 const PRICING_VALUE_KEYS = [
   "input_cost_per_token",
   "output_cost_per_token",
@@ -137,6 +123,53 @@ const PRICING_VALUE_KEYS = [
   "input_cost_per_image",
   "output_cost_per_image",
 ] as const satisfies ReadonlyArray<keyof ModelPricing>;
+
+type ModelPricingConfig = Partial<Omit<ModelPricing, "price_source">> & {
+  price_source?: string | null;
+};
+
+function isLiteLLMManagedPriceSource(source: unknown): boolean {
+  if (source === undefined || source === null) {
+    return true;
+  }
+  if (typeof source !== "string") {
+    return true;
+  }
+  const normalized = source.trim().toLowerCase();
+  return normalized === "" || normalized === "unknown" || normalized === "litellm";
+}
+
+function hasAnyFinitePriceValue(
+  pricing:
+    | Partial<Record<(typeof PRICING_VALUE_KEYS)[number], unknown>>
+    | undefined,
+): boolean {
+  if (!pricing) {
+    return false;
+  }
+  return PRICING_VALUE_KEYS.some((key) => {
+    const value = pricing[key];
+    return typeof value === "number" && Number.isFinite(value);
+  });
+}
+
+function isExternallyManagedPricing(
+  pricing: ModelPricingConfig | undefined,
+): boolean {
+  if (!pricing) {
+    return false;
+  }
+  return (
+    !isLiteLLMManagedPriceSource(pricing.price_source) &&
+    hasAnyFinitePriceValue(pricing)
+  );
+}
+
+function shouldSkipLiteLLMAutoMatch(
+  pricing: ModelPricingConfig | undefined,
+): boolean {
+  return isExternallyManagedPricing(pricing) && !pricing?.litellm_key;
+}
 
 const PRICING_SYNC_CONFIG_KEYS = new Set<string>([
   ...PRICING_VALUE_KEYS,
@@ -300,7 +333,7 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
   let updated = 0;
   let matched = 0;
   let unmatched = 0;
-  let manualSkipped = 0;
+  let preservedExternalPricing = 0;
   let presetKeyUsed = 0;
   let autoMatched = 0;
   let invalidPresetKey = 0;
@@ -314,20 +347,30 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
       profile.configJson && typeof profile.configJson === "object"
         ? (profile.configJson as Record<string, unknown>)
         : {};
-    const existingPricing = existingConfigJson as Partial<ModelPricing>;
+    const existingPricing = existingConfigJson as ModelPricingConfig;
 
-    const pricingLocked =
-      (existingPricing?.price_source === "manual" ||
-        existingPricing?.price_source === "openrouter") &&
-      (hasManualPriceConfigured(existingPricing) ||
-        hasAnyManualPriceValue(existingPricing));
+    const pricingLocked = isExternallyManagedPricing(existingPricing);
 
     if (pricingLocked) {
-      manualSkipped++;
-      logger.info("Preserved manual pricing profile", {
+      preservedExternalPricing++;
+      if (shouldSkipLiteLLMAutoMatch(existingPricing)) {
+        logger.info(
+          "Preserved externally managed pricing; skipped LiteLLM auto match",
+          {
+            kind: profile.kind,
+            profileAlias: profile.profileAlias,
+            modelAlias: profile.modelAlias,
+            priceSource: existingPricing.price_source,
+          },
+        );
+        continue;
+      }
+      logger.info("Preserved externally managed pricing profile", {
         kind: profile.kind,
         profileAlias: profile.profileAlias,
         modelAlias: profile.modelAlias,
+        priceSource: existingPricing.price_source,
+        litellmKey: existingPricing.litellm_key,
       });
     }
 
@@ -339,12 +382,17 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
       } else {
         invalidPresetKey++;
         match = { type: "unmatched" };
-        logger.warn("Preset LiteLLM key is invalid, marked as unknown", {
-          kind: profile.kind,
-          profileAlias: profile.profileAlias,
-          modelAlias: profile.modelAlias,
-          litellmKey: existingPricing.litellm_key,
-        });
+        logger.warn(
+          pricingLocked
+            ? "Preset LiteLLM key is invalid, preserved externally managed pricing"
+            : "Preset LiteLLM key is invalid, marked as unknown",
+          {
+            kind: profile.kind,
+            profileAlias: profile.profileAlias,
+            modelAlias: profile.modelAlias,
+            litellmKey: existingPricing.litellm_key,
+          },
+        );
       }
     } else {
       match = resolveMatchFromCandidates(
@@ -403,13 +451,18 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
     } else {
       unmatched++;
       if (match.type === "ambiguous") {
-        logger.warn("LiteLLM price match is ambiguous, marked as unknown", {
-          kind: profile.kind,
-          profileAlias: profile.profileAlias,
-          modelAlias: profile.modelAlias,
-          routeTargets,
-          candidates: match.candidates,
-        });
+        logger.warn(
+          pricingLocked
+            ? "LiteLLM price match is ambiguous, preserved externally managed pricing"
+            : "LiteLLM price match is ambiguous, marked as unknown",
+          {
+            kind: profile.kind,
+            profileAlias: profile.profileAlias,
+            modelAlias: profile.modelAlias,
+            routeTargets,
+            candidates: match.candidates,
+          },
+        );
       }
       if (!pricingLocked && existingPricing?.price_source !== "unknown") {
         const now = new Date();
@@ -455,7 +508,7 @@ async function syncModelPricingForProfiles(profileIds?: string[]): Promise<void>
     matched,
     unmatched,
     updated,
-    manualSkipped,
+    preservedExternalPricing,
     presetKeyUsed,
     autoMatched,
     invalidPresetKey,
@@ -487,3 +540,10 @@ export async function resolveModelCapabilitiesFromLitellm(modelName: string) {
   };
 }
 
+export const testExports = {
+  buildLiteLLMSyncUpdates,
+  hasAnyFinitePriceValue,
+  isExternallyManagedPricing,
+  isLiteLLMManagedPriceSource,
+  shouldSkipLiteLLMAutoMatch,
+};
