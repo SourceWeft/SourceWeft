@@ -2,7 +2,7 @@ import type { CapabilityCommandWorkflow } from "@sourceweft/capability-runtime";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import type { ResolvedThreadCommand } from "./types";
 
-export type ActiveSkillRuntimeContract = {
+export type SelectedSkillRuntimeContract = {
   defaultTools: string[];
   permissionOverrides: Record<string, "allow" | "ask" | "deny">;
 };
@@ -11,15 +11,15 @@ function skillRuntimeTools(skill: EnabledSkillDescriptor) {
   return skill.tools ?? [];
 }
 
-export function resolveActiveSkillRuntimeContract(input: {
-  activeSkills: readonly EnabledSkillDescriptor[];
+export function resolveSelectedSkillRuntimeContract(input: {
+  selectedSkills: readonly EnabledSkillDescriptor[];
   command: ResolvedThreadCommand | null;
   skillRuntimeWorkflows?: ReadonlyMap<string, CapabilityCommandWorkflow>;
-}): ActiveSkillRuntimeContract {
+}): SelectedSkillRuntimeContract {
   const defaultTools = new Set<string>();
   const permissionOverrides: Record<string, "allow" | "ask" | "deny"> = {};
 
-  for (const skill of input.activeSkills) {
+  for (const skill of input.selectedSkills) {
     for (const toolName of skillRuntimeTools(skill)) {
       defaultTools.add(toolName);
     }

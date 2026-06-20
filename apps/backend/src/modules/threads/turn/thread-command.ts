@@ -7,6 +7,7 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import {
   resolveCapabilityCommand,
+  resolveCapabilitySkillRuntimeWorkflow,
   resolveCapabilityToolCommandWorkflow,
 } from "./capability-command-workflows";
 import {
@@ -112,6 +113,58 @@ function createSkillCommandNotFoundError(input: {
   });
 }
 
+async function resolveHiddenToolCommandSkillCompat(input: {
+  readonly argumentsText: string;
+  readonly enabledSkills: readonly EnabledSkillDescriptor[];
+  readonly toolCommand: NonNullable<
+    Awaited<ReturnType<typeof resolveCapabilityToolCommandWorkflow>>
+  >;
+  readonly requestedName: string;
+}): Promise<ResolvedThreadCommandWithContext | null> {
+  const workflow = input.toolCommand.workflow;
+  const targetToolName = input.toolCommand.toolName;
+
+  for (const skill of input.enabledSkills) {
+    if (skill.slashConfig?.enabled === false) {
+      continue;
+    }
+    const skillWorkflow = await resolveCapabilitySkillRuntimeWorkflow(skill.name);
+    if (!skillWorkflow) {
+      continue;
+    }
+    const sharesTargetTool =
+      skill.tools?.includes(targetToolName) === true ||
+      skillWorkflow.defaultTools.includes(targetToolName) ||
+      (skillWorkflow.successCriteria.kind !== "none" &&
+        "toolName" in skillWorkflow.successCriteria &&
+        skillWorkflow.successCriteria.toolName === targetToolName);
+    if (!sharesTargetTool) {
+      continue;
+    }
+    const canonicalName = `/${skill.name}`;
+    const displayName = skill.displayName ?? skill.name;
+    const renderedWorkflow = renderSkillCommandWorkflow({
+      arguments: input.argumentsText,
+      canonicalName,
+      displayName,
+      skillSlug: skill.name,
+      workflow: skillWorkflow,
+    });
+    return {
+      name: input.requestedName,
+      canonicalName,
+      arguments: input.argumentsText,
+      kind: "skill",
+      displayName,
+      skillSlug: skill.name,
+      description: skill.description,
+      ...(renderedWorkflow ? { workflow: renderedWorkflow } : {}),
+    };
+  }
+
+  return null;
+}
+
 export async function resolveThreadCommand(input: {
   readonly command: RequestedCommand | null;
   readonly enabledSkills: readonly EnabledSkillDescriptor[];
@@ -128,6 +181,17 @@ export async function resolveThreadCommand(input: {
     capabilityToolCommand?.toolName ??
     resolveToolCommandName(input.command.name);
   if (toolName && capabilityToolCommand) {
+    if (capabilityCommand?.visible === false) {
+      const compatSkillCommand = await resolveHiddenToolCommandSkillCompat({
+        argumentsText: input.command.arguments,
+        enabledSkills: input.enabledSkills,
+        requestedName: input.command.name,
+        toolCommand: capabilityToolCommand,
+      });
+      if (compatSkillCommand) {
+        return compatSkillCommand;
+      }
+    }
     const slashCommand = getAgentToolSlashCommand(toolName);
     const canonicalName = `/${toolName}`;
     const argumentsText = input.command.arguments;

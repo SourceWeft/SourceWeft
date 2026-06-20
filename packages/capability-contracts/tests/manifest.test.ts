@@ -87,12 +87,13 @@ test("capability-manifest.runtime parses artifact tool runtime metadata", () => 
           },
         ],
         command: {
-          aliases: ["image"],
+          aliases: ["generate_image"],
           iconName: "image",
           iconTone: "mono",
+          visibleWhen: "hidden",
         },
         runtime: {
-          execution: "direct",
+          execution: "agent",
           promptIntro: "Create an image artifact from the user's request.",
           tools: ["generate_image"],
           permissionOverrides: { generate_image: "allow" },
@@ -118,6 +119,7 @@ test("capability-manifest.runtime parses artifact tool runtime metadata", () => 
   );
   assert.equal(manifest.contributes.tools[0]?.command?.iconName, "image");
   assert.equal(manifest.contributes.tools[0]?.command?.iconTone, "mono");
+  assert.equal(manifest.contributes.tools[0]?.command?.visibleWhen, "hidden");
   assert.deepEqual(
     manifest.contributes.tools[0]?.options.map((option) => option.id),
     ["aspectRatio"],

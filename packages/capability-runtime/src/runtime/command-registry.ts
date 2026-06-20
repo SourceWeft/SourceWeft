@@ -122,7 +122,11 @@ function collectCommands(
       skill.command,
       manifest.name,
       skill.runtime
-        ? runtimeToCommandWorkflow(skill.runtime.output, skill.runtime.tools)
+        ? runtimeToCommandWorkflow(
+            skill.runtime.output,
+            skill.runtime.tools,
+            skill.runtime,
+          )
         : null,
     );
   }
@@ -331,9 +335,11 @@ function toCommandListItem(input: {
       ? { iconTone: input.contributed.command.iconTone }
       : {}),
     visible:
-      configuredVisibility === undefined
-        ? input.contributed.command.visibleWhen !== "configured"
-        : configuredVisibility === "command-list",
+      input.contributed.command.visibleWhen === "hidden"
+        ? false
+        : configuredVisibility === undefined
+          ? input.contributed.command.visibleWhen !== "configured"
+          : configuredVisibility === "command-list",
     order: input.contributionConfig?.order ?? input.packageOrder,
     action: input.contributed.action,
     workflow: input.contributed.workflow,

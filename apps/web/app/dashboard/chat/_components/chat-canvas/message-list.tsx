@@ -33,7 +33,10 @@ import { PromptCommandIcon } from "@sourceweft/ui-web/components/ai-elements/pro
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { LoadingDots } from "@sourceweft/ui-web/components/ui/loading-dots";
-import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
+import {
+  getAgentToolSlashCommand,
+  hasAgentToolCapability,
+} from "@sourceweft/agent-tool-registry";
 import { RawImage } from "../../../../_components/raw-image";
 import { getActionIcon } from "../action-icons";
 import { expandSelectedSources, type SourceItem } from "../source-types";
@@ -52,6 +55,7 @@ import {
 import { AssistantToolCard } from "./assistant-tool-card";
 import {
   buildAssistantRenderSegments,
+  includeGeneratedImageToolInvocationBlocks,
   type AssistantTerminalBlock,
   type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
@@ -171,6 +175,22 @@ function UserMessageImageReference({ image }: { image: ChatMessageImagePart }) {
         </div>
       </AttachmentHoverCardContent>
     </AttachmentHoverCard>
+  );
+}
+
+function getFallbackGeneratedImageToolCalls(input: {
+  renderBlocks: MessageRenderState["bodyBlocks"];
+  toolCalls: MessageVersion["toolCalls"];
+}) {
+  const renderedImageToolCallIds = new Set(
+    input.renderBlocks
+      .filter((block) => block.type === "generated_image")
+      .map((block) => block.toolCallId),
+  );
+  return (input.toolCalls ?? []).filter(
+    (toolCall) =>
+      hasAgentToolCapability(toolCall.tool, "generated_image_artifact") &&
+      !renderedImageToolCallIds.has(toolCall.id),
   );
 }
 
@@ -454,7 +474,13 @@ function AssistantMessageBody({
   workspaceId?: string | null;
 }) {
   const version = renderState.raw;
-  const renderBlocks = renderState.bodyBlocks;
+  const renderBlocks = includeGeneratedImageToolInvocationBlocks(
+    renderState.bodyBlocks,
+  );
+  const fallbackGeneratedImageToolCalls = getFallbackGeneratedImageToolCalls({
+    renderBlocks,
+    toolCalls: version.toolCalls,
+  });
   const cancelledNotice =
     renderState.status === "cancelled" ? "已由用户停止生成。" : null;
   const isWorkflowRunning = renderState.status === "running";
@@ -733,6 +759,18 @@ function AssistantMessageBody({
           onCitationClick={onCitationClick}
           toolCalls={version.toolCalls}
         />
+      ) : null}
+      {fallbackGeneratedImageToolCalls.length > 0 ? (
+        <div className="mt-2 max-w-3xl space-y-3">
+          {fallbackGeneratedImageToolCalls.map((toolCall) => (
+            <GeneratedImageArtifactBlock
+              key={toolCall.id}
+              onArtifactPreview={onArtifactPreview}
+              toolCall={toolCall}
+              workspaceId={workspaceId}
+            />
+          ))}
+        </div>
       ) : null}
       {shouldShowBottomLoading ? <LoadingDots className="ml-1" /> : null}
       {cancelledNotice ? (

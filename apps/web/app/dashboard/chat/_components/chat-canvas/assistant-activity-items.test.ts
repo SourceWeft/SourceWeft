@@ -1,11 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import { buildAssistantActivityItems } from "./assistant-activity-items";
 import type {
   ThinkingStepRecord,
   ToolCallRecord,
   TracePartRecord,
 } from "./types";
+
+const testGeneratedImageArtifactTool = defineAgentTool({
+  id: "testGeneratedImageArtifact",
+  name: "test_generated_image_artifact",
+  domain: "artifact",
+  capabilities: ["artifact", "generated_image_artifact"],
+  activation: {
+    default: "off",
+    userControl: "none",
+    skill: {
+      declarable: false,
+      activates: false,
+    },
+  },
+  slash: {
+    displayName: "Test generated image artifact",
+  },
+});
+
+registerAgentTools([testGeneratedImageArtifactTool]);
 
 test("buildAssistantActivityItems sorts trace parts by order", () => {
   const traceParts: TracePartRecord[] = [
@@ -63,6 +85,36 @@ test("buildAssistantActivityItems links tool parts with thinking steps", () => {
 
   assert.equal(item?.type, "tool");
   assert.equal(item?.type === "tool" ? item.toolStep?.id : null, "search-step");
+});
+
+test("buildAssistantActivityItems keeps generated image artifact tool invocations", () => {
+  const traceParts: TracePartRecord[] = [
+    {
+      createdAt: "2026-06-01T00:00:00.000Z",
+      id: "image-tool-part",
+      input: { prompt: "draw it" },
+      kind: "tool",
+      order: 1,
+      output:
+        "Image artifact created.\nartifact_id: artifact-1\nartifact_url: /artifact-preview?artifactId=artifact-1",
+      status: "completed",
+      tool: "test_generated_image_artifact",
+      toolCallId: "image-tool-1",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
+  ];
+
+  const [item] = buildAssistantActivityItems({ traceParts });
+
+  assert.equal(item?.type, "tool");
+  assert.equal(
+    item?.type === "tool" ? item.toolCall.tool : null,
+    "test_generated_image_artifact",
+  );
+  assert.equal(
+    item?.type === "tool" ? item.toolCall.id : null,
+    "image-tool-1",
+  );
 });
 
 test("buildAssistantActivityItems prefers trace part status over duplicate tool calls", () => {

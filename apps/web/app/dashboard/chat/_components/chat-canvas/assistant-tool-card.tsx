@@ -41,6 +41,8 @@ import {
   type ReadFileBinaryUnsupported,
   type ReadFilePreview,
 } from "./read-file-preview";
+import { WorkfileMutationPreview } from "./workfile-mutation-preview";
+import { resolveWorkfileMutationPreview } from "./workfile-mutation-state";
 import {
   getSandboxCollectedWorkfilePaths,
   getSandboxToolOperationTimeline,
@@ -295,6 +297,9 @@ export function AssistantToolCard({
   const readFileBinaryUnsupported = isRedactedSkillRead
     ? null
     : getReadFileBinaryUnsupported(toolCall);
+  const workfileMutationPreview = isRedactedSkillRead
+    ? null
+    : resolveWorkfileMutationPreview(toolCall);
   const detailParts = isRedactedSkillRead
     ? []
     : getToolCallDetailParts(toolCall, toolStep, confirmationResolution);
@@ -340,6 +345,7 @@ export function AssistantToolCard({
     Boolean(skillReadFileLabel) ||
     Boolean(readFilePreview) ||
     Boolean(readFileBinaryUnsupported) ||
+    Boolean(workfileMutationPreview) ||
     Boolean(outputSummary) ||
     sandboxDetails.length > 0 ||
     sandboxTimeline.length > 0 ||
@@ -408,6 +414,12 @@ export function AssistantToolCard({
           {hasDetails && readFileBinaryUnsupported ? (
             <ReadFileBinaryUnsupportedDetails
               unsupported={readFileBinaryUnsupported}
+            />
+          ) : null}
+          {hasDetails && workfileMutationPreview ? (
+            <WorkfileMutationPreview
+              onWorkfileClick={onWorkfileClick}
+              preview={workfileMutationPreview}
             />
           ) : null}
           {hasDetails && toolStep?.detail ? (

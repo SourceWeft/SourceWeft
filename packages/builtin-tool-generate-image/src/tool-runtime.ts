@@ -130,9 +130,26 @@ export function buildImageRuntimePromptLines(input: {
 }
 
 export const imageRuntimePromptProvider = {
-  buildLines(context: { artifactIntent?: { kind: string; config: ArtifactImageConfig } }) {
+  buildLines(context: {
+    artifactIntent?: {
+      kind: string;
+      shouldInjectTool?: boolean;
+      config: ArtifactImageConfig;
+      warnings?: readonly string[];
+    };
+  }) {
     if (context.artifactIntent?.kind !== "image") {
       return [];
+    }
+    if (context.artifactIntent.shouldInjectTool !== true) {
+      const warnings = context.artifactIntent.warnings ?? [];
+      return [
+        "Image generation was requested or made available by a selected image skill, but generate_image is not available for this turn.",
+        warnings.length > 0
+          ? `Image generation availability warnings: ${warnings.join(", ")}.`
+          : null,
+        "Briefly tell the user that image generation is unavailable.",
+      ].filter((line): line is string => line !== null);
     }
     return buildImageRuntimePromptLines({
       config: context.artifactIntent.config,
@@ -440,7 +457,7 @@ export function createGenerateImageTool(
     {
       name: GENERATE_IMAGE_TOOL_NAME,
       description:
-        "Generate one persisted SourceWeft image artifact from a visual prompt. Use this when the user's goal is to create a new visual artifact or deliverable, not when they only want to discuss, analyze, or summarize an existing image. Expand vague visual requests into a concise, concrete prompt with subject, composition, style, and mood. The tool returns a stable backend artifact URL.",
+        "Internal SourceWeft image artifact executor. Call only when an image skill runtime or compatibility command explicitly enables this tool. Generate one persisted image artifact from a concise visual prompt; do not use this tool for ordinary chat or passive analysis. The tool publishes the image artifact and returns artifact metadata for the application to display.",
       schema: generateImageSchema,
     },
   );

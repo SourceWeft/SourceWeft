@@ -121,6 +121,7 @@ export function GeneratedImagePreview({
   downloadUrl,
   imageUrl,
   onClick,
+  onImageError,
   onImageLoad,
   title,
 }: {
@@ -128,6 +129,7 @@ export function GeneratedImagePreview({
   downloadUrl?: string | null;
   imageUrl: string;
   onClick?: () => void;
+  onImageError?: () => void;
   onImageLoad?: () => void;
   title: string;
 }) {
@@ -230,7 +232,8 @@ export function GeneratedImagePreview({
                 "max-h-[520px] max-w-full rounded-lg object-contain transition duration-150 group-hover:shadow-md",
                 previewLoaded ? "opacity-100" : "opacity-0",
               )}
-              loading="lazy"
+              loading="eager"
+              onError={onImageError}
               onLoad={handlePreviewLoad}
               src={imageUrl}
             />

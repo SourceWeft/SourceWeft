@@ -141,6 +141,23 @@ test("does not add legacy skill activation when a capability command exists", ()
   );
 });
 
+test("only builds slash families for effective selected skills", () => {
+  const items = buildSkillSlashCommandFamilies({
+    commands: [
+      command({
+        action: { kind: "skill", targetId: "image-generate" },
+        aliases: ["image", "generate-image", "picture"],
+        hasWorkflow: true,
+        id: "cap:sourceweft/image-generate:image-generate",
+        title: "Image Generate",
+      }),
+    ],
+    skills: [],
+  });
+
+  assert.deepEqual(items, []);
+});
+
 test("hides invisible and unsupported capability commands", () => {
   assert.equal(
     isCapabilityCatalogSlashCommand(command({ visible: false })),

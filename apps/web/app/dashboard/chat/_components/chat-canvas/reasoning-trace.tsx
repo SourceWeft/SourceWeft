@@ -53,6 +53,7 @@ import {
   getToolOutputContent,
   normalizeAssetUrl,
   resolveArtifactDownloadUrl,
+  resolveArtifactFileUrl,
   resolveArtifactUrl,
   resolveGeneratedImageArtifact,
   resolveGeneratedPresentationArtifact,
@@ -1510,38 +1511,43 @@ function GeneratedImageLoadingMask({
 
 function GeneratedImageArtifactItem({
   aspectRatio,
+  artifactPageUrl,
   downloadUrl,
-  imageUrl,
-  onArtifactPreview,
+  imageFileUrl,
   stageLabel,
   stageProgress,
   status,
   title,
 }: {
   aspectRatio: string;
+  artifactPageUrl?: string | null;
   downloadUrl?: string | null;
-  imageUrl?: string | null;
-  onArtifactPreview?: () => void;
+  imageFileUrl?: string | null;
   stageLabel: string;
   stageProgress: number | null;
   status: ToolCallRecord["status"];
   title: string;
 }) {
+  const [hasImageError, setHasImageError] = useState(false);
   const [isImageLoaded, setIsImageLoaded] = useState(false);
-  const showMask = status === "running" || Boolean(imageUrl && !isImageLoaded);
+  const isPending = status === "running" || status === "approval_requested";
+  const showMask = imageFileUrl
+    ? !isImageLoaded && !hasImageError
+    : isPending;
 
   useEffect(() => {
+    setHasImageError(false);
     setIsImageLoaded(false);
-  }, [imageUrl]);
+  }, [imageFileUrl]);
 
-  if (!imageUrl) {
+  if (!imageFileUrl) {
     return (
       <div
-        className="relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg border border-dashed border-border bg-muted"
+        className="relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg bg-muted/60"
         style={{ aspectRatio }}
       >
         <GeneratedImageLoadingMask
-          isVisible={status === "running"}
+          isVisible={isPending}
           stageIndex={stageProgress}
           stageLabel={stageLabel}
           title={title}
@@ -1553,7 +1559,7 @@ function GeneratedImageArtifactItem({
   return (
     <div
       className={cn(
-        "relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg bg-muted",
+        "relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg bg-muted/40",
         isImageLoaded && "bg-transparent",
       )}
       style={{ aspectRatio }}
@@ -1561,14 +1567,49 @@ function GeneratedImageArtifactItem({
       <GeneratedImagePreview
         className={cn(
           "size-full transition-opacity duration-200 [&>span]:size-full [&>span]:min-h-0 [&>span]:min-w-0 [&>span>img]:h-full [&>span>img]:w-full [&>span>img]:object-contain",
-          isImageLoaded ? "opacity-100" : "opacity-0",
+          isImageLoaded && !hasImageError ? "opacity-100" : "opacity-0",
         )}
-        downloadUrl={downloadUrl ?? imageUrl}
-        imageUrl={imageUrl}
-        onClick={onArtifactPreview}
+        downloadUrl={downloadUrl ?? imageFileUrl}
+        imageUrl={imageFileUrl}
+        onImageError={() => setHasImageError(true)}
         onImageLoad={() => setIsImageLoaded(true)}
         title={title}
       />
+      {hasImageError ? (
+        <div className="absolute inset-0 z-20 grid place-items-center rounded-lg border border-border/70 bg-background/90 p-4 text-center shadow-sm">
+          <div className="max-w-64">
+            <ImageIcon className="mx-auto mb-2 size-5 text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">
+              Image preview could not load
+            </p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Open or download the artifact to view the generated image.
+            </p>
+            <div className="mt-3 flex justify-center gap-2">
+              {artifactPageUrl ? (
+                <a
+                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  href={artifactPageUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Open
+                </a>
+              ) : null}
+              {downloadUrl ? (
+                <a
+                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  href={downloadUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Download
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <GeneratedImageLoadingMask
         isVisible={showMask}
         stageIndex={stageProgress}
@@ -1580,11 +1621,9 @@ function GeneratedImageArtifactItem({
 }
 
 export function GeneratedImageArtifacts({
-  onArtifactPreview,
   toolCalls,
   workspaceId,
 }: {
-  onArtifactPreview?: (artifact: ArtifactPreviewRecord) => void;
   toolCalls: ToolCallRecord[] | undefined;
   workspaceId?: string | null;
 }) {
@@ -1592,8 +1631,11 @@ export function GeneratedImageArtifacts({
     .filter((toolCall) => hasAgentToolCapability(toolCall.tool, "generated_image_artifact"))
     .map((toolCall) => {
       const artifact = resolveGeneratedImageArtifact(toolCall);
-      const imageUrl = artifact
+      const artifactPageUrl = artifact
         ? resolveArtifactUrl({ artifact, workspaceId })
+        : null;
+      const imageFileUrl = artifact
+        ? resolveArtifactFileUrl({ artifact, workspaceId })
         : null;
       const downloadUrl = artifact
         ? resolveArtifactDownloadUrl({ artifact, workspaceId })
@@ -1602,42 +1644,15 @@ export function GeneratedImageArtifacts({
         artifact?.title ||
         getGeneratedImageTitle(toolCall) ||
         "Generated image";
-      const prompt = getGeneratedImagePrompt(toolCall);
-      const previewArtifact =
-        artifact?.artifactId && workspaceId && imageUrl
-          ? ({
-              id: artifact.artifactId,
-              teamId: "",
-              workspaceId,
-              threadId: null,
-              artifactType: "image",
-              status: "ready",
-              title,
-              promptText: prompt,
-              payloadJson: {},
-              storageBucket: null,
-              storageKey: artifact.artifactId,
-              previewStorageKey: null,
-              previewMetadataJson: {},
-              errorCode: null,
-              errorMessage: null,
-              createdBy: null,
-              completedAt: new Date().toISOString(),
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              previewUrl: imageUrl,
-              capabilities: artifactPreviewCapabilities({ fileBacked: true }),
-            } satisfies ArtifactPreviewRecord)
-          : null;
       return {
+        artifactPageUrl,
         downloadUrl,
-        imageUrl,
-        previewArtifact,
+        imageFileUrl,
         title,
         toolCall,
       };
     })
-    .filter(({ imageUrl, toolCall }) => {
+    .filter(({ imageFileUrl, toolCall }) => {
       if (
         toolCall.status === "running" ||
         toolCall.status === "approval_requested" ||
@@ -1645,7 +1660,7 @@ export function GeneratedImageArtifacts({
       ) {
         return true;
       }
-      return Boolean(imageUrl);
+      return Boolean(imageFileUrl);
     });
 
   if (imageItems.length === 0) {
@@ -1655,7 +1670,13 @@ export function GeneratedImageArtifacts({
   return (
     <div className="space-y-3">
       {imageItems.map(
-        ({ downloadUrl, imageUrl, previewArtifact, title, toolCall }) => {
+        ({
+          artifactPageUrl,
+          downloadUrl,
+          imageFileUrl,
+          title,
+          toolCall,
+        }) => {
           const imageStatus = getGeneratedImageStatus(toolCall);
           const stageLabel = imageStatus.label ?? "Rendering";
 
@@ -1673,14 +1694,10 @@ export function GeneratedImageArtifacts({
           return (
             <GeneratedImageArtifactItem
               aspectRatio={imageStatus.aspectRatio}
-              downloadUrl={downloadUrl ?? imageUrl}
-              imageUrl={imageUrl}
+              artifactPageUrl={artifactPageUrl}
+              downloadUrl={downloadUrl ?? imageFileUrl}
+              imageFileUrl={imageFileUrl}
               key={toolCall.id}
-              onArtifactPreview={
-                previewArtifact && onArtifactPreview
-                  ? () => onArtifactPreview(previewArtifact)
-                  : undefined
-              }
               stageLabel={stageLabel}
               stageProgress={imageStatus.progress ?? null}
               status={toolCall.status}
@@ -1694,7 +1711,6 @@ export function GeneratedImageArtifacts({
 }
 
 export function GeneratedImageArtifactBlock({
-  onArtifactPreview,
   toolCall,
   workspaceId,
 }: {
@@ -1704,7 +1720,6 @@ export function GeneratedImageArtifactBlock({
 }) {
   return (
     <GeneratedImageArtifacts
-      onArtifactPreview={onArtifactPreview}
       toolCalls={toolCall ? [toolCall] : []}
       workspaceId={workspaceId}
     />
@@ -1838,9 +1853,9 @@ function GeneratedPresentationArtifactItem({
     <div
       aria-label={canPreview ? `Open artifact preview for ${title}` : undefined}
       className={cn(
-        "w-full max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-sm transition-colors",
+        "relative isolate w-full max-w-xl rounded-lg border border-border bg-background shadow-sm outline-none transition-[background-color,border-color,box-shadow]",
         canPreview &&
-          "cursor-pointer hover:border-foreground/25 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          "cursor-pointer hover:border-foreground/25 hover:bg-accent/40 hover:shadow-md hover:shadow-foreground/5 focus-visible:border-primary/45 focus-visible:bg-accent/30 focus-visible:shadow-[0_10px_30px_-22px_hsl(var(--foreground)/0.5),0_0_0_1px_hsl(var(--primary)/0.18)] focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:rounded-[inherit] focus-visible:after:shadow-[inset_0_0_0_2px_hsl(var(--ring)/0.55)] focus-visible:after:content-['']",
       )}
       onClick={canPreview ? handlePreview : undefined}
       onKeyDown={canPreview ? handlePreviewKeyDown : undefined}

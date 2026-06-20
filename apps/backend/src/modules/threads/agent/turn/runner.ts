@@ -85,10 +85,6 @@ import {
   shouldSilenceEmptyApprovalResume,
 } from "./hitl-handler";
 import {
-  resolveDirectToolCommand,
-  runDirectToolCommand,
-} from "./direct-tool-executor";
-import {
   buildPresentationGenerationStep,
   buildPresentationProgressThinkingEvent,
   buildPresentationProgressThinkingStep,
@@ -144,7 +140,6 @@ export const testExports = {
   resolveFinalAssistantText,
   shouldSilenceEmptyApprovalResume,
   createTraceSequenceAllocator,
-  resolveDirectToolCommand,
   buildAutoApprovedHitlResume,
   buildAutoApprovedHitlResumeDecisions,
   buildFinalOutcome,
@@ -180,33 +175,6 @@ export async function* invokeDeepAgentTurn(input: {
     null;
 
   try {
-    const toolCommand = resolveDirectToolCommand(input.prepared);
-    if (toolCommand) {
-      const toolCollection = await buildToolCollection({
-        prepared: input.prepared,
-        billing: input.billing,
-        llm: input.llm,
-        traceContext: input.traceContext,
-        runtime,
-        sandboxRuntime: null,
-      });
-      mcpToolRuntime = toolCollection.mcpToolRuntime;
-      yield* runDirectToolCommand({
-        commandSuccessFailureText,
-        artifactTools: toolCollection.artifactTools,
-        normalizeGeneratedImageProgressEvent,
-        prepared: input.prepared,
-        reasoningSegments,
-        resolveToolCallSequence,
-        isCommandSuccessSatisfied,
-        toolCommand,
-        traceContext: input.traceContext,
-        usage: runtime.usage,
-      });
-      return;
-    }
-
-    // Build remaining assembly only for non-direct-command turns
     const filesystemBackend = buildFilesystemBackend({
       prepared: input.prepared,
       runtime,

@@ -70,7 +70,7 @@ import {
 } from "./thread-command";
 import {
   applyCapabilityToolOptionDefaults,
-  mergeActiveSkillRuntimeTools,
+  mergeSelectedSkillRuntimeTools,
   mergeCommandTools,
   mergeInvocationTools,
   resolveMarkerToolSelection,
@@ -127,7 +127,9 @@ import {
   resolveCapabilityCommand,
   resolveCapabilitySkillRuntimeWorkflow,
 } from "./capability-command-workflows";
-import { resolveActiveSkillRuntimeContract } from "./active-skill-runtime";
+import { resolveSelectedSkillRuntimeContract } from "./active-skill-runtime";
+import { normalizeInvokedSkillIds } from "./invoked-skills";
+import { shouldApplyLegacySlashSkillSelection } from "./skill-selection-policy";
 
 const CHAT_IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -143,6 +145,19 @@ const VISION_FALLBACK_DESCRIPTION_OPERATION = "vision.describe";
 const VISION_FALLBACK_IDEMPOTENCY_PREFIX = "vision-fallback";
 const PREFLIGHT_VISION_CAPABILITY_SEQUENCE = -2;
 const PREFLIGHT_VISION_FALLBACK_SEQUENCE = -1;
+
+function resolveInvocationSkillId(input: {
+  enabledSkills: readonly EnabledSkillDescriptor[];
+  invocation: ReturnType<typeof resolveThreadInvocation>;
+}) {
+  const sourceRef = input.invocation?.sourceRef;
+  if (sourceRef?.kind !== "skill_command") {
+    return undefined;
+  }
+  return input.enabledSkills.find(
+    (skill) => skill.name === sourceRef.skillSlug,
+  )?.workspaceSkillId;
+}
 
 async function resolveExistingOverrideUserMessage(input: {
   createdBy: string;
@@ -1408,17 +1423,20 @@ export async function prepareThreadTurn(
     requestedCommand && requestedCommand.kind !== "tool"
       ? await resolveCapabilityCommand(requestedCommand.name)
       : null;
-  const selectedSkillIds = await resolveSkillIdsWithSlashCommand({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    skillIds: normalizeSkillIds(input.tools?.skillIds),
-    commandName:
-      requestedSkillCommand?.action.kind === "skill"
-        ? requestedSkillCommand.action.targetId
-        : requestedCommand?.kind !== "tool"
-          ? requestedCommand?.name
-          : undefined,
-  });
+  const requestedSkillIds = normalizeSkillIds(input.tools?.skillIds);
+  const selectedSkillIds = shouldApplyLegacySlashSkillSelection(input.tools)
+    ? await resolveSkillIdsWithSlashCommand({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        skillIds: requestedSkillIds,
+        commandName:
+          requestedSkillCommand?.action.kind === "skill"
+            ? requestedSkillCommand.action.targetId
+            : requestedCommand?.kind !== "tool"
+              ? requestedCommand?.name
+              : undefined,
+      })
+    : requestedSkillIds;
   const timezone = normalizeTimezone(input.timezone);
   let enabledSkills: EnabledSkillDescriptor[] = await resolveSelectedSkills({
     teamId: workspace.organizationId,
@@ -1452,10 +1470,18 @@ export async function prepareThreadTurn(
               resolvedCommand.name.replace(/^\//, "")),
         )?.workspaceSkillId
       : undefined;
-  const activeSkillIds = Array.from(
+  const invocationSkillId = resolveInvocationSkillId({
+    enabledSkills,
+    invocation: resolvedInvocation,
+  });
+  const invokedSkillIds = Array.from(
     new Set([
-      ...enabledSkills.map((skill) => skill.workspaceSkillId),
+      ...normalizeInvokedSkillIds({
+        enabledSkills,
+        requestedSkillIds: input.tools?.invokedSkillIds,
+      }),
       ...(commandSkillId ? [commandSkillId] : []),
+      ...(invocationSkillId ? [invocationSkillId] : []),
     ]),
   );
   const skillRuntimeWorkflows = new Map(
@@ -1474,18 +1500,18 @@ export async function prepareThreadTurn(
         entry[1] !== null,
     ),
   );
-  const activeSkillRuntime = resolveActiveSkillRuntimeContract({
-    activeSkills: enabledSkills,
+  const selectedSkillRuntime = resolveSelectedSkillRuntimeContract({
+    selectedSkills: enabledSkills,
     command: resolvedCommand,
     skillRuntimeWorkflows,
   });
   const toolsWithCommand = mergeCommandTools(toolsWithMarkers, resolvedCommand);
-  const toolsWithActiveSkillRuntime = mergeActiveSkillRuntimeTools(
+  const toolsWithSelectedSkillRuntime = mergeSelectedSkillRuntimeTools(
     toolsWithCommand,
-    activeSkillRuntime,
+    selectedSkillRuntime,
   );
   const toolsWithInvocation = mergeInvocationTools(
-    toolsWithActiveSkillRuntime,
+    toolsWithSelectedSkillRuntime,
     resolvedInvocation,
   );
   const toolsWithCapabilityDefaults = applyCapabilityToolOptionDefaults(
@@ -1533,7 +1559,7 @@ export async function prepareThreadTurn(
   const effectiveTools = buildEffectiveToolsSelection({
     baseTools: toolsWithCapabilityDefaults,
     skillIds: selectedSkillIds,
-    ...(activeSkillIds.length > 0 ? { invokedSkillIds: activeSkillIds } : {}),
+    ...(invokedSkillIds.length > 0 ? { invokedSkillIds } : {}),
     webAccessEnabled: webSearchEnabled,
     ...(effectiveGenerateImageTool
       ? {
@@ -1545,7 +1571,7 @@ export async function prepareThreadTurn(
   });
   const toolPermissions = resolveToolPermissions({
     command: resolvedCommand,
-    activeSkillRuntime,
+    selectedSkillRuntime,
     tools: effectiveTools,
   });
   const runtimeTools = buildRuntimeTools({
@@ -1730,9 +1756,7 @@ export async function prepareThreadTurn(
         sourceIds: selectedSourceIds,
         effectiveSourceIds: sourceIds,
         skillIds: selectedSkillIds,
-        ...(activeSkillIds.length > 0
-          ? { invokedSkillIds: activeSkillIds }
-          : {}),
+        ...(invokedSkillIds.length > 0 ? { invokedSkillIds } : {}),
         ...(resolvedCommand
           ? {
               command: buildThreadCommandMetadata(resolvedCommand),
@@ -1885,7 +1909,7 @@ export async function prepareThreadTurn(
     failurePersistence: input.failurePersistence ?? "persist-error-turn",
     mcpInstallIds: input.mcpInstallIds ?? [],
     enabledSkills,
-    invokedSkillIds: activeSkillIds,
+    invokedSkillIds,
   };
 }
 

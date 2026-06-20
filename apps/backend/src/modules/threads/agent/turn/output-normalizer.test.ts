@@ -57,13 +57,13 @@ test("filesystem tool metadata marks skills reads as internal instructions", () 
     getFilesystemToolStartTitle("read_file", {
       file_path: "/skills/feynman/SKILL.md",
     }),
-    "Reading Feynman skill instructions",
+    "Loading Feynman skill instructions",
   );
   assert.equal(
     getFilesystemToolEndTitle("read_file", {
       file_path: "/skills/feynman/SKILL.md",
     }),
-    "Read Feynman skill instructions",
+    "Load Feynman skill instructions",
   );
   assert.deepEqual(
     getSkillInstructionDisplayMetadata({
@@ -117,13 +117,13 @@ test("filesystem skill read titles fall back when no skill name is available", (
     getFilesystemToolStartTitle("read_file", {
       path: "/skills",
     }),
-    "Reading skill instructions",
+    "Loading skill instructions",
   );
   assert.equal(
     getFilesystemToolEndTitle("read_file", {
       path: "/skills",
     }),
-    "Read skill instructions",
+    "Load skill instructions",
   );
   assert.deepEqual(
     sanitizeFilesystemToolInputForClient("read_file", {
@@ -150,7 +150,7 @@ test("filesystem skill read titles prefer selected skill display names", () => {
       },
       options,
     ),
-    "Reading PPT Deck skill instructions",
+    "Loading PPT Deck skill instructions",
   );
   assert.equal(
     getFilesystemToolEndTitle(
@@ -161,7 +161,7 @@ test("filesystem skill read titles prefer selected skill display names", () => {
       undefined,
       options,
     ),
-    "Read PPT Deck skill instructions",
+    "Load PPT Deck skill instructions",
   );
   assert.deepEqual(
     sanitizeFilesystemToolInputForClient(
@@ -376,7 +376,7 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
         skillPath: "/skills/feynman/SKILL.md",
       },
       status: "completed",
-      title: "Read Feynman skill instructions",
+      title: "Load Feynman skill instructions",
       tool: "read_file",
     },
     {
@@ -407,7 +407,7 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
         skillPath: "/skills/feynman/SKILL.md",
       },
       status: "completed",
-      title: "Read Feynman skill instructions",
+      title: "Load Feynman skill instructions",
       tool: "read_file",
       toolCallId: "call-skill",
     },
@@ -428,7 +428,7 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
         visibility: "internal_instruction",
       },
       status: "completed",
-      title: "Read Feynman skill instructions",
+      title: "Load Feynman skill instructions",
     },
   ]);
 });

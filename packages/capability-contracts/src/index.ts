@@ -121,7 +121,9 @@ export const capabilityCommandSchema = z.object({
     .regex(/^[a-z0-9-]+$/u)
     .optional(),
   iconTone: z.enum(["brand", "mono"]).optional(),
-  visibleWhen: z.enum(["enabled", "always", "configured"]).default("enabled"),
+  visibleWhen: z
+    .enum(["enabled", "always", "configured", "hidden"])
+    .default("enabled"),
   workflow: capabilityCommandWorkflowSchema.optional(),
 });
 

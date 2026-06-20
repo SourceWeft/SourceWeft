@@ -1,7 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import { buildMessageRenderState } from "./message-render-state";
 import type { CitationRecord, MessageVersion } from "./types";
+
+const testRenderImageArtifactTool = defineAgentTool({
+  id: "testRenderImageArtifact",
+  name: "test_render_image_artifact",
+  domain: "artifact",
+  capabilities: ["artifact", "generated_image_artifact"],
+  activation: {
+    default: "off",
+    userControl: "none",
+    skill: {
+      declarable: false,
+      activates: false,
+    },
+  },
+  slash: {
+    displayName: "Test render image artifact",
+  },
+});
+
+registerAgentTools([testRenderImageArtifactTool]);
 
 function citation(overrides: Partial<CitationRecord> = {}): CitationRecord {
   return {
@@ -98,7 +120,7 @@ test("buildMessageRenderState revision changes when citation content changes", (
   assert.notEqual(base.renderRevision, next.renderRevision);
 });
 
-test("buildMessageRenderState keeps generated artifact blocks as body input", () => {
+test("buildMessageRenderState keeps generated artifact blocks and activity tool calls separate", () => {
   const state = buildMessageRenderState({
     isAssistantStreaming: false,
     role: "assistant",
@@ -110,12 +132,25 @@ test("buildMessageRenderState keeps generated artifact blocks as body input", ()
       toolCalls: [
         {
           id: "tool_1",
-          tool: "generate_image",
+          tool: "test_render_image_artifact",
           input: {},
           output: null,
           latencyMs: 100,
           status: "completed",
           error: null,
+        },
+      ],
+      traceParts: [
+        {
+          createdAt: "2026-06-01T00:00:00.000Z",
+          id: "trace_tool_1",
+          input: { prompt: "draw it" },
+          kind: "tool",
+          order: 1,
+          status: "completed",
+          tool: "test_render_image_artifact",
+          toolCallId: "tool_1",
+          updatedAt: "2026-06-01T00:00:00.000Z",
         },
       ],
     }),
@@ -124,4 +159,11 @@ test("buildMessageRenderState keeps generated artifact blocks as body input", ()
   assert.deepEqual(state.bodyBlocks, [
     { id: "block_tool_1", toolCallId: "tool_1", type: "generated_image" },
   ]);
+  assert.equal(state.activityItems[0]?.type, "tool");
+  assert.equal(
+    state.activityItems[0]?.type === "tool"
+      ? state.activityItems[0].toolCall.id
+      : null,
+    "tool_1",
+  );
 });

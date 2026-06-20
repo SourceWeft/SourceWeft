@@ -410,7 +410,7 @@ export function getSkillInstructionDisplayMetadata(
 }
 
 function getSkillInstructionTitle(
-  action: "Reading" | "Read",
+  action: "Loading" | "Load",
   input: Record<string, unknown>,
   options: SkillInstructionDisplayOptions = {},
 ) {
@@ -510,7 +510,7 @@ function sanitizeFilesystemToolTraceRecordForClient(value: unknown) {
     input: sanitizeFilesystemToolInputForClient(tool, input),
     output: redactFilesystemToolOutputForClient(tool, input, record.output),
     ...(shouldRedactFilesystemToolForClient(tool, input)
-      ? { title: getSkillInstructionTitle("Read", input) }
+      ? { title: getSkillInstructionTitle("Load", input) }
       : {}),
   };
 }
@@ -533,8 +533,8 @@ function sanitizeThinkingStepForClient(value: unknown) {
     ...record,
     items: [],
     title: skillMetadata
-      ? `Read ${skillMetadata.skillDisplayName} skill instructions`
-      : "Read skill instructions",
+      ? `Load ${skillMetadata.skillDisplayName} skill instructions`
+      : "Load skill instructions",
     metadata: {
       ...metadata,
       filesystemScope: "skills",
@@ -683,12 +683,12 @@ export const FILESYSTEM_TOOL_PRESENTERS = {
   [AGENT_TOOL_NAMES.readFile]: {
     start: {
       work: "Reading Workfile",
-      skills: "Reading skill instructions",
+      skills: "Loading skill instructions",
       sources: "Reading source content",
     },
     end: {
       work: "Read Workfile",
-      skills: "Read skill instructions",
+      skills: "Load skill instructions",
       sources: "Read source content",
     },
     describe: (input: {
@@ -736,7 +736,7 @@ export function getFilesystemToolStartTitle(
   }
   const scope = filesystemScope(input, toolName);
   if (scope === "skills" && toolName === AGENT_TOOL_NAMES.readFile) {
-    return getSkillInstructionTitle("Reading", input, options);
+    return getSkillInstructionTitle("Loading", input, options);
   }
   return getFilesystemToolPresenter(toolName)?.start[scope] ?? null;
 }
@@ -761,7 +761,7 @@ export function getFilesystemToolEndTitle(
   }
   const scope = filesystemScope(input, toolName);
   if (scope === "skills" && toolName === AGENT_TOOL_NAMES.readFile) {
-    return getSkillInstructionTitle("Read", input, options);
+    return getSkillInstructionTitle("Load", input, options);
   }
   return getFilesystemToolPresenter(toolName)?.end[scope] ?? null;
 }

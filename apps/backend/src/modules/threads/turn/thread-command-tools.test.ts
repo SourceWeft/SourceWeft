@@ -3,9 +3,9 @@ import { test } from "vitest";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import {
   applyCapabilityToolOptionDefaults,
-  mergeActiveSkillRuntimeTools,
   mergeCommandTools,
   mergeInvocationTools,
+  mergeSelectedSkillRuntimeTools,
   resolveToolPermissions,
 } from "./thread-command-tools";
 import type { ResolvedThreadCommand, ResolvedThreadInvocation } from "./types";
@@ -53,11 +53,50 @@ test("mergeCommandTools enables ppt skill sandbox tools and publisher tool", () 
     enabled: true,
   });
   const permissions = resolveToolPermissions({ command: null, tools });
-  assert.equal(permissions[AGENT_TOOL_NAMES.generateImage], "allow");
+  assert.equal(permissions[AGENT_TOOL_NAMES.generateImage], undefined);
   assert.equal(permissions[AGENT_TOOL_NAMES.publishArtifact], "ask");
 });
 
-test("mergeActiveSkillRuntimeTools enables skill tools without command and respects disabled tools", () => {
+function imageSkillCommand(): ResolvedThreadCommand {
+  return {
+    name: "/image",
+    canonicalName: "/image-generate",
+    arguments: "draw it",
+    kind: "skill",
+    displayName: "Image Generate",
+    description: "Generate an image",
+    workflow: {
+      name: "/image-generate",
+      arguments: "draw it",
+      kind: "skill_workflow",
+      renderedPrompt: "prompt",
+      defaultTools: [AGENT_TOOL_NAMES.generateImage],
+      permissionOverrides: { [AGENT_TOOL_NAMES.generateImage]: "allow" },
+      successCriteria: {
+        kind: "artifact",
+        artifactType: "image",
+        toolName: AGENT_TOOL_NAMES.generateImage,
+      },
+      execution: "agent",
+    },
+  };
+}
+
+test("mergeCommandTools enables image skill without direct generate mode", () => {
+  const tools = mergeCommandTools(undefined, imageSkillCommand());
+
+  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateImage], {
+    enabled: true,
+  });
+  assert.equal(
+    resolveToolPermissions({ command: imageSkillCommand(), tools })[
+      AGENT_TOOL_NAMES.generateImage
+    ],
+    "allow",
+  );
+});
+
+test("mergeSelectedSkillRuntimeTools enables skill tools without command and respects disabled tools", () => {
   const runtime = {
     defaultTools: [
       AGENT_TOOL_NAMES.prepareSandboxWorkspace,
@@ -67,14 +106,14 @@ test("mergeActiveSkillRuntimeTools enables skill tools without command and respe
     permissionOverrides: {},
   } as const;
 
-  assert.deepEqual(mergeActiveSkillRuntimeTools(undefined, runtime), {
+  assert.deepEqual(mergeSelectedSkillRuntimeTools(undefined, runtime), {
     [AGENT_TOOL_NAMES.prepareSandboxWorkspace]: { enabled: true },
     [AGENT_TOOL_NAMES.execute]: { enabled: true },
     [AGENT_TOOL_NAMES.publishArtifact]: { enabled: true },
   });
 
   assert.deepEqual(
-    mergeActiveSkillRuntimeTools(
+    mergeSelectedSkillRuntimeTools(
       {
         [AGENT_TOOL_NAMES.publishArtifact]: { enabled: false },
       },

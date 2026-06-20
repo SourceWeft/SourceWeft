@@ -9,7 +9,7 @@ import type { ResolvedThreadInvocation } from "./types";
 import type { ToolPermission } from "./command-registry";
 import type { ParsedPromptMarker } from "./thread-command-markers";
 import { resolveToolCommandName } from "./thread-command";
-import type { ActiveSkillRuntimeContract } from "./active-skill-runtime";
+import type { SelectedSkillRuntimeContract } from "./active-skill-runtime";
 
 type ToolSelectionOptions = {
   readonly forceGenerateImage?: boolean;
@@ -71,9 +71,9 @@ export function mergeCommandTools(
       });
 }
 
-export function mergeActiveSkillRuntimeTools(
+export function mergeSelectedSkillRuntimeTools(
   tools: StreamThreadEventInput["tools"],
-  runtime: ActiveSkillRuntimeContract,
+  runtime: SelectedSkillRuntimeContract,
 ): StreamThreadEventInput["tools"] {
   let next = tools;
   for (const toolName of runtime.defaultTools) {
@@ -244,7 +244,7 @@ function selectedToolEnabled(
 
 export function resolveToolPermissions(input: {
   readonly command: ResolvedThreadCommand | null;
-  readonly activeSkillRuntime?: ActiveSkillRuntimeContract;
+  readonly selectedSkillRuntime?: SelectedSkillRuntimeContract;
   readonly tools: StreamThreadEventInput["tools"];
 }): Record<string, ToolPermission> {
   const permissions: Record<string, ToolPermission> = {};
@@ -309,7 +309,7 @@ export function resolveToolPermissions(input: {
     ...permissions,
     ...Object.fromEntries(
       Object.entries(
-        input.activeSkillRuntime?.permissionOverrides ?? {},
+        input.selectedSkillRuntime?.permissionOverrides ?? {},
       ).filter(([toolName]) => !isToolDenied(input.tools, toolName)),
     ),
     ...Object.fromEntries(

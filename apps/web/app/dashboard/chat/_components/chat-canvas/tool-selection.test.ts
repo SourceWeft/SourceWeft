@@ -101,12 +101,12 @@ test("buildChatToolsRequest serializes web access as search and fetch selections
   );
 });
 
-test("composer options hide internal web, retrieval, and sandbox tools", () => {
+test("composer options hide internal image, web, retrieval, and sandbox tools", () => {
   assert.equal(
     isCapabilityToolVisibleInComposerOptions({
       toolName: AGENT_TOOL_NAMES.generateImage,
     }),
-    true,
+    false,
   );
   assert.equal(
     isCapabilityToolVisibleInComposerOptions({

@@ -3,6 +3,7 @@ import {
   getConnectorToolDisplayLabel,
   getToolApprovalDisplayLabel,
 } from "./reasoning-trace-state";
+import { getWorkfileMutationToolTitle } from "./workfile-mutation-state";
 import type {
   ThinkingStepRecord,
   ToolCallRecord,
@@ -130,12 +131,17 @@ export function getAssistantToolTitle(
     const skillDisplayName = getSkillInstructionDisplayName(toolCall.input);
     if (skillDisplayName) {
       return toolCall.status === "running"
-        ? `Reading ${skillDisplayName} skill instructions`
-        : `Read ${skillDisplayName} skill instructions`;
+        ? `Loading ${skillDisplayName} skill instructions`
+        : `Load ${skillDisplayName} skill instructions`;
     }
     return toolCall.status === "running"
-      ? "Reading skill instructions"
-      : "Read skill instructions";
+      ? "Loading skill instructions"
+      : "Load skill instructions";
+  }
+
+  const workfileMutationTitle = getWorkfileMutationToolTitle(toolCall);
+  if (workfileMutationTitle) {
+    return workfileMutationTitle;
   }
 
   const stepTitle = getStepDisplayTitle(toolStep);

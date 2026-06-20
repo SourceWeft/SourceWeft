@@ -351,6 +351,33 @@ test("commands.config controls enablement aliases visibility and order", () => {
   assert.deepEqual(commands[1]?.aliases, ["lookup"]);
 });
 
+test("commands.manifest hidden visibility cannot be promoted into command list", () => {
+  const records: DiscoveredCapabilityRecord[] = structuredClone(
+    normalizedFixtureRecords,
+  );
+  const searchCommand = records[0]?.manifest.contributes.tools[0]?.command;
+  assert.ok(searchCommand);
+  searchCommand.visibleWhen = "hidden";
+
+  const commands = buildCapabilityCommandList(records, {
+    packages: {
+      "local/search": {
+        contributions: {
+          search_docs: {
+            visibility: "command-list",
+          },
+        },
+      },
+    },
+  });
+  const search = commands.find(
+    (command) => command.id === "cap:local/search:search_docs",
+  );
+
+  assert.equal(search?.visible, false);
+  assert.equal(search?.workflow?.successCriteria.kind, "tool_call");
+});
+
 test("commands.workflow resolves tool command workflows from manifests", () => {
   const searchWorkflow = findCapabilityToolCommandWorkflow(
     normalizedFixtureRecords,
@@ -383,7 +410,15 @@ test("commands.workflow adds artifact publisher tools to runtime defaults", () =
 
   const reportCommand = findCapabilityCommand(records, "report");
 
+  assert.equal(reportCommand?.workflow?.execution, "agent");
+  assert.equal(
+    reportCommand?.workflow?.promptIntro,
+    "Write a report and publish the final artifact.",
+  );
   assert.deepEqual(reportCommand?.workflow?.defaultTools, ["publish_report"]);
+  assert.deepEqual(reportCommand?.workflow?.permissionOverrides, {
+    publish_report: "allow",
+  });
   assert.deepEqual(reportCommand?.workflow?.successCriteria, {
     kind: "artifact",
     artifactType: "report",

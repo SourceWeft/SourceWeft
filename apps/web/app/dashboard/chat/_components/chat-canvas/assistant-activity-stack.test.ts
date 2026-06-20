@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import { groupConsecutiveToolItems } from "./assistant-activity-groups";
 import { buildAssistantActivityItems } from "./assistant-activity-items";
 import {
@@ -15,6 +17,26 @@ import {
   isRedactedSkillInstructionRead,
 } from "./assistant-tool-display";
 import type { TracePartRecord } from "./types";
+
+const testDisplayImageArtifactTool = defineAgentTool({
+  id: "testDisplayImageArtifact",
+  name: "test_display_image_artifact",
+  domain: "artifact",
+  capabilities: ["artifact", "generated_image_artifact"],
+  activation: {
+    default: "off",
+    userControl: "none",
+    skill: {
+      declarable: false,
+      activates: false,
+    },
+  },
+  slash: {
+    displayName: "Test display image artifact",
+  },
+});
+
+registerAgentTools([testDisplayImageArtifactTool]);
 
 function completedToolPart(input: {
   id: string;
@@ -148,7 +170,7 @@ test("redacted skill read tools render private skill instruction title", () => {
   assert.equal(isRedactedSkillInstructionRead(toolCall), true);
   assert.equal(
     getAssistantToolTitle(toolCall),
-    "Read Feynman skill instructions",
+    "Load Feynman skill instructions",
   );
   assert.equal(getSkillInstructionReadFileLabel(toolCall), "SKILL.md");
 });
@@ -178,7 +200,7 @@ test("running redacted skill read tools render named skill instruction title", (
   assert.equal(isRedactedSkillInstructionRead(toolCall), true);
   assert.equal(
     getAssistantToolTitle(toolCall),
-    "Reading Frontend Design skill instructions",
+    "Loading Frontend Design skill instructions",
   );
   assert.equal(getSkillInstructionReadFileLabel(toolCall), "SKILL.md");
 });
@@ -201,11 +223,81 @@ test("legacy skill read tool inputs are treated as private instruction reads", (
   assert.equal(isRedactedSkillInstructionRead(toolCall), true);
   assert.equal(
     getAssistantToolTitle(toolCall),
-    "Read Feynman skill instructions",
+    "Load Feynman skill instructions",
   );
   assert.equal(
     getSkillInstructionReadFileLabel(toolCall),
     "/skills/feynman/SKILL.md",
+  );
+});
+
+test("tool cards use registry display names for image artifact tools", () => {
+  assert.equal(
+    getAssistantToolTitle({
+      error: null,
+      id: "call-image",
+      input: { prompt: "draw it" },
+      latencyMs: 1200,
+      output: null,
+      status: "completed" as const,
+      tool: "test_display_image_artifact",
+    }),
+    "Test display image artifact",
+  );
+});
+
+test("tool cards title workfile writes by basename", () => {
+  assert.equal(
+    getAssistantToolTitle({
+      error: null,
+      id: "call-write-workfile",
+      input: {
+        content: "console.log('deck');",
+        path: "/workfiles/ppt/deck.js",
+      },
+      latencyMs: 1200,
+      output: { path: "/workfiles/ppt/deck.js" },
+      status: "completed" as const,
+      tool: "write_file",
+    }),
+    "Wrote Workfile: deck.js",
+  );
+});
+
+test("tool cards title workfile edits by basename", () => {
+  assert.equal(
+    getAssistantToolTitle({
+      error: null,
+      id: "call-edit-workfile",
+      input: {
+        newString: "new",
+        oldString: "old",
+        path: "/workfiles/ppt/deck.js",
+      },
+      latencyMs: 1200,
+      output: { occurrences: 1, path: "/workfiles/ppt/deck.js" },
+      status: "completed" as const,
+      tool: "edit_file",
+    }),
+    "Edited Workfile: deck.js",
+  );
+});
+
+test("tool cards keep default titles for non-workfile writes", () => {
+  assert.equal(
+    getAssistantToolTitle({
+      error: null,
+      id: "call-write-other",
+      input: {
+        content: "console.log('deck');",
+        path: "/tmp/deck.js",
+      },
+      latencyMs: 1200,
+      output: { path: "/tmp/deck.js" },
+      status: "completed" as const,
+      tool: "write_file",
+    }),
+    "Write File",
   );
 });
 

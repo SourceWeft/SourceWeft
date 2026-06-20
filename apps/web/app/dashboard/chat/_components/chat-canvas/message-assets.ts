@@ -440,6 +440,19 @@ export function resolveArtifactUrl(input: {
   });
 }
 
+export function resolveArtifactFileUrl(input: {
+  artifact: Pick<GeneratedImageArtifact, "artifactId"> & {
+    artifactUrl?: string | null;
+  };
+  workspaceId?: string | null;
+}) {
+  return resolveArtifactProxyFileUrlFromArtifact({
+    artifactId: input.artifact.artifactId,
+    fallbackUrl: input.artifact.artifactUrl,
+    workspaceId: input.workspaceId,
+  });
+}
+
 export function resolveArtifactDownloadUrl(input: {
   artifact: Pick<GeneratedImageArtifact, "artifactId"> & {
     artifactUrl?: string | null;

@@ -566,12 +566,7 @@ export function Composer({
   );
   const activeSlashSkills = useMemo(
     () =>
-      availableSkills.filter(
-        (skill) =>
-          (skill.sourceType === "builtin" &&
-            effectiveSelectedSkillIdSet.has(skill.id)) ||
-          skill.sourceType !== "builtin",
-      ),
+      availableSkills.filter((skill) => effectiveSelectedSkillIdSet.has(skill.id)),
     [availableSkills, effectiveSelectedSkillIdSet],
   );
   const capabilityCatalogTools = useMemo(

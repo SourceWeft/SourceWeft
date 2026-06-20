@@ -176,6 +176,7 @@ export function renderSkillCommandWorkflow(input: {
 
   const renderedPrompt = [
     `<sourceweft_command name="${input.canonicalName}" kind="skill_workflow" skill="${input.skillSlug}">`,
+    workflow.promptIntro ?? null,
     "This slash command explicitly invokes the selected skill for the user request. Rely on the DeepAgents skills middleware for skill discovery, then follow the skill instructions and satisfy the command success criteria.",
     ...workflow.additionalPromptLines,
     `Success criteria: ${describeSuccessCriteria(successCriteria)}.`,
@@ -184,7 +185,9 @@ export function renderSkillCommandWorkflow(input: {
     "<user_request>",
     args,
     "</user_request>",
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 
   return {
     name: input.canonicalName,

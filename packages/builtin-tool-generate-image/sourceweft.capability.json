@@ -9,7 +9,7 @@
     {
       "id": "generate_image",
       "title": "Generate Image",
-      "description": "Generate a persisted SourceWeft image artifact.",
+      "description": "Internal SourceWeft image artifact executor for image skills and compatibility commands.",
       "inputSchema": {
         "type": "object"
       },
@@ -156,8 +156,8 @@
         }
       ],
       "runtime": {
-        "execution": "direct",
-        "promptIntro": "Create an image artifact from the user's request. The command is complete only when an image artifact is created.",
+        "execution": "agent",
+        "promptIntro": "Create a persisted image artifact only when this internal tool is explicitly enabled by an image skill runtime or compatibility command. The command is complete only when a published image artifact is created.",
         "tools": ["generate_image"],
         "permissionOverrides": { "generate_image": "allow" },
         "output": {
@@ -167,8 +167,9 @@
         }
       },
       "command": {
-        "aliases": ["image"],
-        "category": "Artifacts"
+        "aliases": ["generate_image"],
+        "category": "Artifacts",
+        "visibleWhen": "hidden"
       }
     }
   ]

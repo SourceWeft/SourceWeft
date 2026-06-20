@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
-import { resolveActiveSkillRuntimeContract } from "./active-skill-runtime";
+import { resolveSelectedSkillRuntimeContract } from "./active-skill-runtime";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import type { CapabilityCommandWorkflow } from "@sourceweft/capability-runtime";
 
@@ -21,7 +21,7 @@ function pptDeckSkill(
   };
 }
 
-test("ppt-deck active skill enables sandbox tools without requiring slides output", () => {
+test("ppt-deck selected skill enables sandbox tools without requiring slides output", () => {
   const pptWorkflow: CapabilityCommandWorkflow = {
     execution: "agent",
     defaultTools: [
@@ -37,8 +37,8 @@ test("ppt-deck active skill enables sandbox tools without requiring slides outpu
       toolName: AGENT_TOOL_NAMES.publishArtifact,
     },
   };
-  const runtime = resolveActiveSkillRuntimeContract({
-    activeSkills: [pptDeckSkill()],
+  const runtime = resolveSelectedSkillRuntimeContract({
+    selectedSkills: [pptDeckSkill()],
     command: null,
     skillRuntimeWorkflows: new Map([["ppt-deck", pptWorkflow]]),
   });
@@ -52,8 +52,8 @@ test("ppt-deck active skill enables sandbox tools without requiring slides outpu
 });
 
 test("non-ppt custom skills only activate declared skill tools", () => {
-  const runtime = resolveActiveSkillRuntimeContract({
-    activeSkills: [
+  const runtime = resolveSelectedSkillRuntimeContract({
+    selectedSkills: [
       pptDeckSkill({
         workspaceSkillId: "skill-search",
         selectionId: "skill-search",

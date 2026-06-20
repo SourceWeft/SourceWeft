@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import {
   Dialog,
   DialogContent,
@@ -18,14 +17,13 @@ import type {
   ByokSavedModelItem,
 } from "../../_components/byok-state";
 import type { ByokModelConfigDefaults } from "../../_components/byok-model-config-dialog";
-import type {
-  CitationRecord,
-} from "../../_components/chat-canvas";
+import type { CitationRecord } from "../../_components/chat-canvas";
 import type {
   ModelItem,
   ModelType,
 } from "../../_components/model-catalog-utils";
 import type { SourceItem } from "../../_components/source-types";
+import { WorkfileContentViewer } from "../../_components/workfile-content-viewer";
 import {
   basename,
   formatBytes,
@@ -119,7 +117,10 @@ export function ThreadDialogs({
         workspaceId={workspaceId}
       />
 
-      <Dialog onOpenChange={onPreviewWorkfileOpenChange} open={Boolean(previewWorkfile)}>
+      <Dialog
+        onOpenChange={onPreviewWorkfileOpenChange}
+        open={Boolean(previewWorkfile)}
+      >
         <DialogContent
           className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
           constrainWidth={false}
@@ -136,9 +137,12 @@ export function ThreadDialogs({
           </DialogHeader>
           <div className="min-h-0 overflow-y-auto px-5 py-5">
             {previewWorkfile ? (
-              <MessageResponse className="text-sm leading-7 text-foreground [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted/30 [&_pre]:p-3">
-                {previewWorkfile.contentText}
-              </MessageResponse>
+              <WorkfileContentViewer
+                className="h-full min-h-[360px]"
+                contentText={previewWorkfile.contentText}
+                mimeType={previewWorkfile.mimeType}
+                path={previewWorkfile.path}
+              />
             ) : null}
           </div>
         </DialogContent>

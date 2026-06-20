@@ -9,8 +9,8 @@ export const generateImageAgentTool = defineAgentTool({
     modelKind: "image",
   },
   activation: {
-    default: "always",
-    userControl: "disable",
+    default: "off",
+    userControl: "none",
     skill: {
       declarable: true,
       activates: true,
@@ -23,7 +23,8 @@ export const generateImageAgentTool = defineAgentTool({
   defaultPermission: "allow",
   riskLevel: "low",
   slash: {
-    description: "Generate an image directly from your prompt",
+    description:
+      "Internal SourceWeft image artifact generator. It is callable only when an image skill runtime or compatibility command explicitly enables it.",
     displayName: "Generate image",
     iconName: "image",
     supportsCommand: true,

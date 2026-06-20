@@ -139,6 +139,7 @@ import { SkillsGallery } from "../../../skills/_components/skills-gallery";
 import type { CitationRecord } from "../chat-canvas";
 import { SourcePreviewPanel } from "../source-preview-panel";
 import { expandSelectedSources, type SourceItem } from "../source-types";
+import { WorkfileContentViewer } from "../workfile-content-viewer";
 import {
   artifactMatchesQuery,
   artifactPreviewImageMetadata,
@@ -1824,7 +1825,7 @@ const ArtifactsTab = memoComponent(function ArtifactsTab({
 
         return (
           <button
-            className="group flex w-full items-start gap-3 rounded-lg border border-border/70 bg-background p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-accent/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="group relative isolate flex w-full items-start gap-3 rounded-lg border border-border/70 bg-background p-2.5 text-left shadow-xs outline-none transition-[background-color,border-color,box-shadow] hover:border-foreground/25 hover:bg-accent/35 hover:shadow-sm hover:shadow-foreground/5 focus-visible:border-primary/45 focus-visible:bg-accent/30 focus-visible:shadow-[0_8px_24px_-18px_hsl(var(--foreground)/0.45),0_0_0_1px_hsl(var(--primary)/0.18)] focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-0 focus-visible:after:rounded-[inherit] focus-visible:after:shadow-[inset_0_0_0_2px_hsl(var(--ring)/0.55)] focus-visible:after:content-['']"
             key={artifact.id}
             onClick={() => onPreview(artifact)}
             title={`Preview ${artifactTitle(artifact)}`}
@@ -2815,9 +2816,12 @@ function WorkfilePreviewDialog({
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto px-5 py-5">
           {previewWorkfile ? (
-            <MessageResponse className="text-sm leading-7 text-foreground [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted/30 [&_pre]:p-3">
-              {previewWorkfile.contentText}
-            </MessageResponse>
+            <WorkfileContentViewer
+              className="h-full min-h-[360px]"
+              contentText={previewWorkfile.contentText}
+              mimeType={previewWorkfile.mimeType}
+              path={previewWorkfile.path}
+            />
           ) : null}
         </div>
       </DialogContent>

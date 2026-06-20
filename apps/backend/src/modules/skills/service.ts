@@ -37,6 +37,13 @@ function displayNameFromName(name: string) {
     .join(" ");
 }
 
+function isBuiltinSkillDefaultEnabled(skill: {
+  slug: string;
+  visibility: string;
+}) {
+  return skill.visibility === "restricted";
+}
+
 export class ContentSkillsService {
   async syncBuiltinCatalog() {
     await validateBuiltinSkills();
@@ -117,7 +124,7 @@ export class ContentSkillsService {
         enabledWorkspaceSkillId: null,
         enabled: true,
         installable: false,
-        defaultEnabled: skill.visibility === "restricted" ? true : undefined,
+        defaultEnabled: isBuiltinSkillDefaultEnabled(skill) ? true : undefined,
         hasReadme: false,
         capabilities: skill.manifestJson.capabilities,
         models: skill.manifestJson.models,
@@ -393,3 +400,7 @@ export class ContentSkillsService {
 }
 
 export const contentSkillsService = new ContentSkillsService();
+
+export const testExports = {
+  isBuiltinSkillDefaultEnabled,
+};

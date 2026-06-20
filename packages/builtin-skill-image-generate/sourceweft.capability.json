@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/image-generate",
+  "kind": "skill",
+  "name": "Image Generate",
+  "description": "Generate persisted image artifacts from text prompts with SourceWeft's image generation runtime.",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "skills": [
+    {
+      "id": "image-generate",
+      "visibility": "restricted",
+      "categories": ["create", "visual"],
+      "slashConfig": {
+        "enabled": true
+      },
+      "options": [
+        {
+          "id": "aspectRatio",
+          "title": "Aspect Ratio",
+          "description": "Default aspect ratio for generated images.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": {
+            "toolName": "generate_image",
+            "path": "config.aspectRatio"
+          },
+          "values": [
+            { "value": "auto", "label": "auto" },
+            { "value": "1:1", "label": "1:1" },
+            { "value": "2:3", "label": "2:3" },
+            { "value": "3:2", "label": "3:2" },
+            { "value": "3:4", "label": "3:4" },
+            { "value": "4:3", "label": "4:3" },
+            { "value": "4:5", "label": "4:5" },
+            { "value": "5:4", "label": "5:4" },
+            { "value": "9:16", "label": "9:16" },
+            { "value": "16:9", "label": "16:9" },
+            { "value": "21:9", "label": "21:9" },
+            { "value": "1:4", "label": "1:4" },
+            { "value": "4:1", "label": "4:1" },
+            { "value": "1:8", "label": "1:8" },
+            { "value": "8:1", "label": "8:1" }
+          ]
+        },
+        {
+          "id": "quality",
+          "title": "Quality",
+          "description": "Default quality level for generated images.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": {
+            "toolName": "generate_image",
+            "path": "config.quality"
+          },
+          "values": [
+            { "value": "auto", "label": "auto" },
+            { "value": "low", "label": "low" },
+            { "value": "standard", "label": "standard" },
+            { "value": "higher", "label": "higher" },
+            { "value": "highest", "label": "highest" }
+          ]
+        },
+        {
+          "id": "style",
+          "title": "Style",
+          "description": "Default visual style for generated images.",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": {
+            "toolName": "generate_image",
+            "path": "config.style"
+          },
+          "values": [
+            { "value": "auto", "label": "auto" },
+            { "value": "ghibli", "label": "ghibli" },
+            { "value": "pixar", "label": "pixar" },
+            { "value": "cartoon", "label": "cartoon" },
+            { "value": "pixel", "label": "pixel" }
+          ]
+        }
+      ],
+      "runtime": {
+        "execution": "agent",
+        "tools": ["generate_image"],
+        "permissionOverrides": {
+          "generate_image": "allow"
+        },
+        "output": {
+          "kind": "artifact",
+          "artifactType": "image",
+          "publisherTool": "generate_image"
+        },
+        "requiredArguments": {
+          "description": "image prompt",
+          "clarificationPrompt": "Describe the image you want to create."
+        },
+        "promptIntro": "Create a persisted SourceWeft image artifact from the user's request. The command is complete only when an image artifact is created.",
+        "additionalPromptLines": [
+          "Use generate_image only as the image-generate skill runtime dependency.",
+          "Follow the image-generate skill instructions before calling generate_image."
+        ]
+      },
+      "command": {
+        "aliases": ["image", "generate-image", "picture"],
+        "category": "Artifacts",
+        "iconName": "image"
+      }
+    }
+  ]
+}

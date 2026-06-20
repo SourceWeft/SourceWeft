@@ -7,6 +7,7 @@ import {
   listBuiltinSkills,
   loadBuiltinSkillBundle,
 } from "./builtin";
+import { testExports as skillServiceTestExports } from "./service";
 
 const legacyBuiltinSkillsDir = resolve(import.meta.dirname, "builtin");
 
@@ -15,11 +16,18 @@ test("builtin skills load from standalone capability packages", async () => {
   const bySlug = new Map(skills.map((skill) => [skill.slug, skill]));
 
   assert.deepEqual(
-    ["feynman", "meeting-summary", "ppt-deck"].map((slug) => bySlug.has(slug)),
-    [true, true, true],
+    ["feynman", "image-generate", "meeting-summary", "ppt-deck"].map((slug) =>
+      bySlug.has(slug),
+    ),
+    [true, true, true, true],
   );
 
-  for (const slug of ["feynman", "meeting-summary", "ppt-deck"]) {
+  for (const slug of [
+    "feynman",
+    "image-generate",
+    "meeting-summary",
+    "ppt-deck",
+  ]) {
     assert.match(
       bySlug.get(slug)?.storagePointer ?? "",
       /^capability-package:sourceweft\//,
@@ -33,6 +41,70 @@ test("builtin skills load from standalone capability packages", async () => {
   assert.equal(bySlug.get("feynman")?.manifestJson.commands, undefined);
   assert.equal(bySlug.get("feynman")?.manifestJson.slash, true);
   assert.equal(existsSync(legacyBuiltinSkillsDir), false);
+});
+
+test("image-generate builtin skill exposes agent image artifact workflow without sandbox", async () => {
+  const skill = await getBuiltinSkillBySlug("image-generate");
+
+  assert.ok(skill);
+  assert.equal(skill.visibility, "restricted");
+  assert.equal(skill.manifestJson.visibility, "restricted");
+  assert.equal(skill.manifestJson.slash, false);
+  assert.deepEqual(skill.manifestJson.tools, ["generate_image"]);
+  assert.deepEqual(
+    skill.manifestJson.options?.map((option) => ({
+      id: option.id,
+      target: option.target,
+    })),
+    [
+      {
+        id: "aspectRatio",
+        target: { toolName: "generate_image", path: "config.aspectRatio" },
+      },
+      {
+        id: "quality",
+        target: { toolName: "generate_image", path: "config.quality" },
+      },
+      {
+        id: "style",
+        target: { toolName: "generate_image", path: "config.style" },
+      },
+    ],
+  );
+
+  const bundle = await loadBuiltinSkillBundle(skill.storagePointer);
+  const content = bundle?.files.find(
+    (file) => file.path === "SKILL.md",
+  )?.contentText;
+  assert.match(content ?? "", /generate/i);
+  assert.match(content ?? "", /image artifact/i);
+  assert.match(content ?? "", /generate_image/);
+  assert.doesNotMatch(content ?? "", /费曼|Feynman/);
+  assert.doesNotMatch(content ?? "", /For requests like|例如|比如/);
+  assert.doesNotMatch(content ?? "", /\/workspace/);
+  assert.doesNotMatch(content ?? "", /PIL|Pillow|Canvas/);
+  assert.doesNotMatch(content ?? "", /HTML, SVG/);
+  assert.doesNotMatch(content ?? "", /filesystem scripts/);
+  assert.doesNotMatch(content ?? "", /code drawing as a substitute/);
+  assert.doesNotMatch(content ?? "", /prepare_sandbox_workspace/);
+  assert.doesNotMatch(content ?? "", /publish_artifact/);
+});
+
+test("restricted builtin artifact skills are default enabled", async () => {
+  assert.equal(
+    skillServiceTestExports.isBuiltinSkillDefaultEnabled({
+      slug: "image-generate",
+      visibility: "restricted",
+    }),
+    true,
+  );
+  assert.equal(
+    skillServiceTestExports.isBuiltinSkillDefaultEnabled({
+      slug: "ppt-deck",
+      visibility: "restricted",
+    }),
+    true,
+  );
 });
 
 test("ppt-deck builtin skill stays hidden from the public gallery", async () => {

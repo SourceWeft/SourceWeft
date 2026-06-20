@@ -37,7 +37,10 @@ export function isCommandSuccessSatisfied(input: {
         if (criteria.artifactType !== "image") {
           return true;
         }
-        return Boolean(extractToolOutputField(call.output, "artifact_url"));
+        return Boolean(
+          extractToolOutputField(call.output, "artifact_id") &&
+            extractToolOutputField(call.output, "artifact_url"),
+        );
       });
     case "tool_call":
       return input.toolCalls.some(

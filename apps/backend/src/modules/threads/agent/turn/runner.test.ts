@@ -273,7 +273,7 @@ test("skill instruction read stream labels use selected skill display name", asy
   );
   assert.equal(
     startStep?.type === "thinking-step" ? startStep.step.title : null,
-    "Reading PPT Deck skill instructions",
+    "Loading PPT Deck skill instructions",
   );
 
   const endEvents = await collectToolStreamEvents(
@@ -333,7 +333,7 @@ test("skill instruction read stream labels use selected skill display name", asy
   );
   assert.equal(
     endStep?.type === "thinking-step" ? endStep.step.title : null,
-    "Read PPT Deck skill instructions",
+    "Load PPT Deck skill instructions",
   );
 });
 
@@ -3160,117 +3160,6 @@ test("normalizes all-failed web_fetch outputs to display-safe metadata", () => {
   });
 });
 
-test("resolveDirectToolCommand uses clean message content when display content has markers", () => {
-  const command = testExports.resolveDirectToolCommand({
-    artifactIntent: {
-      kind: "image",
-      shouldInjectTool: true,
-      source: "explicit_tool",
-      confidence: 1,
-      reason: "explicit tool",
-      config: {
-        aspectRatio: "auto",
-        quality: "auto",
-        style: "auto",
-      },
-      warnings: [],
-    },
-    command: {
-      arguments: "",
-      canonicalName: "/generate_image",
-      description: "Generate image",
-      displayName: "Generate image",
-      kind: "tool",
-      name: "/generate_image",
-      skillSlug: "",
-      toolName: "generate_image",
-      workflow: {
-        arguments: "",
-        defaultTools: ["generate_image"],
-        execution: "direct",
-        kind: "tool_workflow",
-        name: "/generate_image",
-        permissionOverrides: {
-          generate_image: "allow",
-        },
-        renderedPrompt: "",
-        successCriteria: {
-          artifactType: "image",
-          kind: "artifact",
-          toolName: "generate_image",
-        },
-      },
-    },
-    generateImageTool: {
-      enabled: true,
-      mode: "generate",
-    },
-    imageProfile: {
-      capabilities: {
-        controls: {},
-        supported: true,
-      },
-      profile: {
-        id: "profile-1",
-        kind: "image",
-        gatewayConfigId: "gateway-1",
-        profileAlias: "image-default",
-        modelAlias: "image-model",
-        requestedDimensions: null,
-        vectorStrategy: "disabled",
-        isDefault: true,
-        isActive: true,
-        configJson: {},
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-      },
-    },
-    messageContent: "draw a dashboard",
-    userMessage: {
-      content: "[tool:generate_image](Generate image) draw a dashboard",
-    },
-  } as unknown as Parameters<typeof testExports.resolveDirectToolCommand>[0]);
-
-  assert.deepEqual(command, {
-    name: "generate_image",
-    prompt: "draw a dashboard",
-  });
-});
-
-test("resolveDirectToolCommand leaves ppt skill commands on the agent workflow", () => {
-  const command = testExports.resolveDirectToolCommand({
-    command: {
-      arguments: "生成 PPT 介绍费曼学习法",
-      canonicalName: "/ppt-deck",
-      description: "Create a PPT deck",
-      displayName: "PPT Deck",
-      kind: "skill",
-      name: "/ppt",
-      skillSlug: "ppt-deck",
-      workflow: {
-        arguments: "生成 PPT 介绍费曼学习法",
-        defaultTools: ["prepare_sandbox_workspace", "execute"],
-        execution: "agent",
-        kind: "skill_workflow",
-        name: "/ppt-deck",
-        permissionOverrides: {},
-        renderedPrompt: "",
-        successCriteria: {
-          artifactType: "slides",
-          kind: "artifact",
-          toolName: "publish_artifact",
-        },
-      },
-    },
-    messageContent: "[skill:ppt-deck](PPT Deck) 生成 PPT",
-    userMessage: {
-      content: "[skill:ppt-deck](PPT Deck) 生成 PPT",
-    },
-  } as unknown as Parameters<typeof testExports.resolveDirectToolCommand>[0]);
-
-  assert.equal(command, null);
-});
-
 test("command success requires generated image artifact metadata", () => {
   assert.equal(
     testExports.isCommandSuccessSatisfied({
@@ -3654,6 +3543,36 @@ test("runtime prompt points active skills at SKILL.md without preloading content
   );
 });
 
+test("runtime prompt does not force-read default selected skills", () => {
+  const prompt = testExports.buildAgentRuntimeContext({
+    timezone: "UTC",
+    enabledSkills: [
+      {
+        workspaceSkillId: "builtin:ppt-deck",
+        sourceType: "builtin",
+        name: "ppt-deck",
+        version: "1.0.0",
+        description: "Create PPT decks.",
+        files: [],
+      },
+      {
+        workspaceSkillId: "builtin:image-generate",
+        sourceType: "builtin",
+        name: "image-generate",
+        version: "1.0.0",
+        description: "Generate image artifacts.",
+        files: [],
+      },
+    ],
+    invokedSkillIds: [],
+  });
+
+  assert.doesNotMatch(prompt, /<active_skills>/);
+  assert.doesNotMatch(prompt, /\/skills\/ppt-deck\/SKILL\.md/);
+  assert.doesNotMatch(prompt, /\/skills\/image-generate\/SKILL\.md/);
+  assert.doesNotMatch(prompt, /read_required="true"/);
+});
+
 test("extracts generated image artifacts from completed tool calls", () => {
   const artifacts = testExports.extractGeneratedImageArtifacts([
     {
@@ -3917,6 +3836,37 @@ test("runtime prompt treats image auto mode as available but optional", () => {
   assert.match(prompt, /Never claim an image was created/);
   assert.match(prompt, /do not include image markdown or raw artifact URLs/);
   assert.match(prompt, /otherwise answer normally/);
+});
+
+test("runtime prompt blocks sandbox fallback when image generation is unavailable", () => {
+  const prompt = testExports.buildAgentRuntimeContext({
+    timezone: "UTC",
+    availableArtifactTools: [],
+    artifactToolRuntimePromptProviders: [
+      imageRuntimePromptProvider as ArtifactToolRuntimePromptProvider,
+    ],
+    artifactIntent: {
+      kind: "image",
+      shouldInjectTool: false,
+      source: "skill",
+      confidence: 0.82,
+      reason: "A selected skill declares generate_image.",
+      config: {
+        aspectRatio: "auto",
+        quality: "auto",
+        style: "auto",
+      },
+      warnings: ["image_model_unavailable"],
+    },
+  });
+
+  assert.match(prompt, /generate_image is not available for this turn/);
+  assert.match(prompt, /image_model_unavailable/);
+  assert.match(prompt, /Briefly tell the user that image generation is unavailable/);
+  assert.doesNotMatch(prompt, /sandbox tools/);
+  assert.doesNotMatch(prompt, /filesystem scripts/);
+  assert.doesNotMatch(prompt, /code drawing as a substitute/);
+  assert.doesNotMatch(prompt, /generate_image is available in auto mode/);
 });
 
 test("runtime prompt exposes invoked skill runtime config", () => {
