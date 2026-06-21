@@ -7,7 +7,9 @@ import { loadGlobalModelGatewayConfig } from "./global-config";
 
 function baseConfig(): Record<string, unknown> & {
   chatProfiles: Array<Record<string, unknown>>;
+  embeddingProfiles: Array<Record<string, unknown>>;
   gateways: Array<Record<string, unknown>>;
+  rerankProfiles?: Array<Record<string, unknown>>;
 } {
   return {
     gateways: [
@@ -138,6 +140,138 @@ test("loadGlobalModelGatewayConfig allows missing provider API key env", async (
   }
 });
 
+test("loadGlobalModelGatewayConfig resolves provider base URL env override", async () => {
+  const config = baseConfig();
+  config.gateways = [
+    {
+      ...(config.gateways[0] as Record<string, unknown>),
+      baseUrl: "https://api.deepinfra.com/v1",
+      baseUrlEnv: "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
+      providerKind: "deepinfra",
+      providerName: "deepinfra",
+    },
+  ];
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    providerName: "deepinfra",
+  };
+  config.embeddingProfiles[0] = {
+    ...config.embeddingProfiles[0],
+    providerName: "deepinfra",
+  };
+  config.rerankProfiles![0] = {
+    ...config.rerankProfiles![0],
+    providerName: "deepinfra",
+  };
+  const original = process.env.SOURCEWEFT_TEST_DEEPINFRA_API_BASE;
+  process.env.SOURCEWEFT_TEST_DEEPINFRA_API_BASE =
+    "https://proxy.example.com/deepinfra///";
+
+  try {
+    const loaded = await loadConfig(config);
+
+    assert.equal(
+      loaded?.gateways[0]?.baseUrl,
+      "https://proxy.example.com/deepinfra",
+    );
+    assert.equal(
+      loaded?.gateways[0]?.baseUrlEnv,
+      "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
+    );
+    assert.deepEqual(
+      loaded?.sourceJson._resolvedGatewayBaseUrls,
+      [
+        {
+          baseUrl: "https://proxy.example.com/deepinfra",
+          baseUrlEnv: "SOURCEWEFT_TEST_DEEPINFRA_API_BASE",
+          slug: "test",
+        },
+      ],
+    );
+  } finally {
+    if (original === undefined) {
+      delete process.env.SOURCEWEFT_TEST_DEEPINFRA_API_BASE;
+    } else {
+      process.env.SOURCEWEFT_TEST_DEEPINFRA_API_BASE = original;
+    }
+  }
+});
+
+test("loadGlobalModelGatewayConfig falls back to static base URL when env is empty", async () => {
+  const config = baseConfig();
+  config.gateways = [
+    {
+      ...(config.gateways[0] as Record<string, unknown>),
+      baseUrlEnv: "SOURCEWEFT_TEST_EMPTY_API_BASE",
+    },
+  ];
+  const original = process.env.SOURCEWEFT_TEST_EMPTY_API_BASE;
+  process.env.SOURCEWEFT_TEST_EMPTY_API_BASE = "   ";
+
+  try {
+    const loaded = await loadConfig(config);
+
+    assert.equal(loaded?.gateways[0]?.baseUrl, "https://example.test/v1");
+  } finally {
+    if (original === undefined) {
+      delete process.env.SOURCEWEFT_TEST_EMPTY_API_BASE;
+    } else {
+      process.env.SOURCEWEFT_TEST_EMPTY_API_BASE = original;
+    }
+  }
+});
+
+test("loadGlobalModelGatewayConfig rejects invalid base URL env override", async () => {
+  const config = baseConfig();
+  config.gateways = [
+    {
+      ...(config.gateways[0] as Record<string, unknown>),
+      baseUrlEnv: "SOURCEWEFT_TEST_INVALID_API_BASE",
+    },
+  ];
+  const original = process.env.SOURCEWEFT_TEST_INVALID_API_BASE;
+  process.env.SOURCEWEFT_TEST_INVALID_API_BASE = "not-a-url";
+
+  try {
+    await assert.rejects(
+      () => loadConfig(config),
+      /gateways\[0\]\.baseUrlEnv:SOURCEWEFT_TEST_INVALID_API_BASE/,
+    );
+  } finally {
+    if (original === undefined) {
+      delete process.env.SOURCEWEFT_TEST_INVALID_API_BASE;
+    } else {
+      process.env.SOURCEWEFT_TEST_INVALID_API_BASE = original;
+    }
+  }
+});
+
+test("loadGlobalModelGatewayConfig version hash changes with base URL env override", async () => {
+  const config = baseConfig();
+  config.gateways = [
+    {
+      ...(config.gateways[0] as Record<string, unknown>),
+      baseUrlEnv: "SOURCEWEFT_TEST_HASH_API_BASE",
+    },
+  ];
+  const original = process.env.SOURCEWEFT_TEST_HASH_API_BASE;
+
+  try {
+    process.env.SOURCEWEFT_TEST_HASH_API_BASE = "https://gateway-one.example.com/v1";
+    const first = await loadConfig(config);
+    process.env.SOURCEWEFT_TEST_HASH_API_BASE = "https://gateway-two.example.com/v1";
+    const second = await loadConfig(config);
+
+    assert.notEqual(first?.versionHash, second?.versionHash);
+  } finally {
+    if (original === undefined) {
+      delete process.env.SOURCEWEFT_TEST_HASH_API_BASE;
+    } else {
+      process.env.SOURCEWEFT_TEST_HASH_API_BASE = original;
+    }
+  }
+});
+
 test("loadGlobalModelGatewayConfig allows omitted rerank profiles", async () => {
   const config = baseConfig();
   delete config.rerankProfiles;
@@ -170,6 +304,7 @@ test("default global config is OpenRouter-only with OSS default models", async (
     "X-Title": "SourceWeft",
     "HTTP-Referer": "https://sourceweft.com",
   });
+  assert.equal(openRouterGateway?.baseUrlEnv, "OPENROUTER_API_BASE");
   assert.deepEqual(openRouterGateway?.supports, [
     "chat",
     "embeddings",

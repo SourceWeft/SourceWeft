@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 export type GlobalGatewayEntry = {
   slug: string;
   baseUrl: string;
+  baseUrlEnv?: string;
   apiKey?: string;
   apiKeyEnv?: string;
   defaultHeaders: Record<string, string>;
@@ -108,6 +109,7 @@ export type GlobalModelGatewayConfig = {
 type RawGlobalGatewayEntry = {
   slug?: unknown;
   baseUrl?: unknown;
+  baseUrlEnv?: unknown;
   apiKeyEnv?: unknown;
   defaultHeaders?: unknown;
   providerName?: unknown;
@@ -241,6 +243,27 @@ function asNonEmptyString(value: unknown, fieldName: string): string {
   }
 
   return value.trim();
+}
+
+function asOptionalEnvName(value: unknown, fieldName: string): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeConfigBaseUrl(value: string, fieldName: string) {
+  try {
+    return new URL(value).toString().replace(/\/+$/, "");
+  } catch {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
 }
 
 function asOptionalPositiveNumber(
@@ -490,11 +513,27 @@ function parseGatewayEntry(
   entry: RawGlobalGatewayEntry,
   index: number,
 ): GlobalGatewayEntry {
+  const baseUrlEnv = asOptionalEnvName(
+    entry.baseUrlEnv,
+    `gateways[${index}].baseUrlEnv`,
+  );
   const apiKeyEnv =
-    typeof entry.apiKeyEnv === "string" ? entry.apiKeyEnv.trim() : "";
-  const apiKey = apiKeyEnv.length > 0 ? process.env[apiKeyEnv]?.trim() : "";
+    typeof entry.apiKeyEnv === "string" && entry.apiKeyEnv.trim().length > 0
+      ? entry.apiKeyEnv.trim()
+      : undefined;
+  const baseUrlOverride = baseUrlEnv ? process.env[baseUrlEnv]?.trim() : "";
+  const apiKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : "";
 
   const slug = asNonEmptyString(entry.slug, `gateways[${index}].slug`);
+  const baseUrl = baseUrlOverride
+    ? normalizeConfigBaseUrl(
+        baseUrlOverride,
+        `gateways[${index}].baseUrlEnv:${baseUrlEnv}`,
+      )
+    : normalizeConfigBaseUrl(
+        asNonEmptyString(entry.baseUrl, `gateways[${index}].baseUrl`),
+        `gateways[${index}].baseUrl`,
+      );
 
   const modelCatalog =
     entry.modelCatalog && typeof entry.modelCatalog === "object" &&
@@ -513,9 +552,10 @@ function parseGatewayEntry(
 
   return {
     slug,
-    baseUrl: asNonEmptyString(entry.baseUrl, `gateways[${index}].baseUrl`),
+    baseUrl,
+    baseUrlEnv,
     apiKey: apiKey || undefined,
-    apiKeyEnv: apiKeyEnv || undefined,
+    apiKeyEnv,
     defaultHeaders: asStringRecord(
       entry.defaultHeaders,
       `gateways[${index}].defaultHeaders`,
@@ -714,8 +754,21 @@ function assertSingleDefault<T extends { isDefault: boolean; isActive: boolean }
   }
 }
 
-function createVersionHash(rawContent: string): string {
-  return createHash("sha256").update(rawContent).digest("hex");
+function createVersionHash(input: {
+  rawContent: string;
+  gateways: readonly GlobalGatewayEntry[];
+}): string {
+  const resolvedBaseUrls = input.gateways.map((gateway) => ({
+    baseUrl: gateway.baseUrl,
+    baseUrlEnv: gateway.baseUrlEnv ?? null,
+    slug: gateway.slug,
+  }));
+
+  return createHash("sha256")
+    .update(input.rawContent)
+    .update("\n")
+    .update(JSON.stringify({ resolvedBaseUrls }))
+    .digest("hex");
 }
 
 function parseGlobalModelGatewayConfig(
@@ -878,8 +931,15 @@ function parseGlobalModelGatewayConfig(
   assertSingleDefault(embeddingProfiles, "embeddingProfiles");
 
   return {
-    versionHash: createVersionHash(rawContent),
-    sourceJson: raw as Record<string, unknown>,
+    versionHash: createVersionHash({ rawContent, gateways }),
+    sourceJson: {
+      ...(raw as Record<string, unknown>),
+      _resolvedGatewayBaseUrls: gateways.map((gateway) => ({
+        baseUrl: gateway.baseUrl,
+        baseUrlEnv: gateway.baseUrlEnv ?? null,
+        slug: gateway.slug,
+      })),
+    },
     gateways,
     chatProfiles,
     imageProfiles,
