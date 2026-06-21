@@ -12,9 +12,9 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@langchain/classic": "^1.0.30",
-    "@langchain/community": "^1.1.27",
-    "@langchain/core": "^1.1.39",
+    "@langchain/classic": "^1.0.36",
+    "@langchain/community": "^1.1.29",
+    "@langchain/core": "^1.2.0",
     "@langchain/textsplitters": "^1.0.1",
     "@sourceweft/capability-contracts": "workspace:*",
     "pdfjs-dist": "^5.6.205"
