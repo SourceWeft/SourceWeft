@@ -1,5 +1,5 @@
 {
-  "_comment": "Set modelCatalog.enabled on a gateway to dynamically sync provider models. When kinds is omitted, SourceWeft syncs every reliably classified and supported kind. Static profiles remain available even when catalog sync is disabled.",
+  "_comment": "OSS defaults use OpenRouter only. SaaS and self-hosted deployments can replace this file by setting MODEL_GATEWAY_GLOBAL_CONFIG_PATH to an external config with additional providers.",
   "gateways": [
     {
       "slug": "openrouter-default",
@@ -22,51 +22,16 @@
         "json_schema"
       ],
       "modelCatalog": {
-        "enabled": true
+        "enabled": true,
+        "kinds": [
+          "chat",
+          "vision",
+          "image"
+        ]
       },
       "timeoutMs": 30000,
       "maxRetries": 2,
       "isDefault": true,
-      "isActive": true,
-      "isBYOK": false
-    },
-    {
-      "slug": "deepinfra-default",
-      "providerName": "deepinfra",
-      "providerKind": "deepinfra",
-      "baseUrl": "https://api.deepinfra.com/v1",
-      "apiKeyEnv": "DEEPINFRA_API_KEY",
-      "supports": [
-        "chat",
-        "embeddings",
-        "rerank",
-        "asr",
-        "image"
-      ],
-      "timeoutMs": 30000,
-      "maxRetries": 2,
-      "isDefault": false,
-      "isActive": true,
-      "isBYOK": false
-    },
-    {
-      "slug": "siliconflow-default",
-      "providerName": "SiliconflowCN",
-      "providerKind": "siliconflow-cn",
-      "baseUrl": "https://api.siliconflow.cn/v1",
-      "apiKeyEnv": "SILICONFLOW_API_KEY",
-      "supports": [
-        "chat",
-        "embeddings",
-        "rerank",
-        "asr",
-        "image",
-        "tool_calling",
-        "json_schema"
-      ],
-      "timeoutMs": 30000,
-      "maxRetries": 2,
-      "isDefault": false,
       "isActive": true,
       "isBYOK": false
     }
@@ -146,51 +111,6 @@
           }
         }
       }
-    },
-    {
-      "profileAlias": "image-deepinfra-flux-2-klein-4b",
-      "modelAlias": "black-forest-labs/FLUX-2-klein-4b",
-      "gatewaySlug": "deepinfra-default",
-      "providerName": "deepinfra",
-      "targetModel": "black-forest-labs/FLUX-2-klein-4b",
-      "routingStrategy": "priority",
-      "priority": 10,
-      "weight": 100,
-      "isDefault": false,
-      "isActive": true,
-      "imageGeneration": {
-        "controls": {
-          "aspectRatio": {
-            "values": [
-              "auto",
-              "1:1",
-              "2:3",
-              "3:2",
-              "3:4",
-              "4:3",
-              "4:5",
-              "5:4",
-              "9:16",
-              "16:9",
-              "21:9"
-            ]
-          },
-          "quality": {
-            "values": [
-              "auto"
-            ]
-          },
-          "style": {
-            "values": [
-              "auto",
-              "ghibli",
-              "pixar",
-              "cartoon",
-              "pixel"
-            ]
-          }
-        }
-      }
     }
   ],
   "visionProfiles": [
@@ -207,46 +127,15 @@
       "isActive": true
     }
   ],
-  "rerankProfiles": [
-    {
-      "profileAlias": "rerank-default",
-      "modelAlias": "rerank-default",
-      "gatewaySlug": "deepinfra-default",
-      "providerName": "deepinfra",
-      "targetModel": "Qwen/Qwen3-Reranker-4B",
-      "routingStrategy": "priority",
-      "priority": 1,
-      "weight": 100,
-      "isDefault": true,
-      "isActive": true,
-      "pricing": {
-        "litellmKey": "Qwen/Qwen3-Reranker-4B",
-        "inputCostPerToken": 2.5e-08,
-        "outputCostPerToken": 0
-      }
-    }
-  ],
-  "asrProfiles": [
-    {
-      "profileAlias": "asr-default",
-      "modelAlias": "asr-default",
-      "gatewaySlug": "deepinfra-default",
-      "providerName": "deepinfra",
-      "targetModel": "openai/whisper-large-v3",
-      "routingStrategy": "priority",
-      "priority": 1,
-      "weight": 100,
-      "isDefault": true,
-      "isActive": true
-    }
-  ],
+  "rerankProfiles": [],
+  "asrProfiles": [],
   "ttsProfiles": [
     {
       "profileAlias": "tts-default",
       "modelAlias": "tts-default",
       "gatewaySlug": "openrouter-default",
       "providerName": "openrouter",
-      "targetModel": "openai/gpt-4o-mini-tts-2025-12-15",
+      "targetModel": "microsoft/mai-voice-2",
       "routingStrategy": "priority",
       "priority": 1,
       "weight": 100,
@@ -258,10 +147,10 @@
     {
       "profileId": "global:embedding:bge-m3-1024",
       "profileAlias": "embed-default",
-      "gatewaySlug": "deepinfra-default",
-      "providerName": "deepinfra",
+      "gatewaySlug": "openrouter-default",
+      "providerName": "openrouter",
       "modelAlias": "embed-default",
-      "targetModel": "BAAI/bge-m3",
+      "targetModel": "baai/bge-m3",
       "routingStrategy": "priority",
       "priority": 1,
       "weight": 100,

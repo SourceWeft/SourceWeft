@@ -138,24 +138,59 @@ test("loadGlobalModelGatewayConfig allows missing provider API key env", async (
   }
 });
 
-test("default global config includes tts-default", async () => {
+test("loadGlobalModelGatewayConfig allows omitted rerank profiles", async () => {
+  const config = baseConfig();
+  delete config.rerankProfiles;
+
+  const loaded = await loadConfig(config);
+
+  assert.deepEqual(loaded?.rerankProfiles, []);
+});
+
+test("default global config is OpenRouter-only with OSS default models", async () => {
   const loaded = await loadGlobalModelGatewayConfig(
     resolve("config/model-gateway.global.json"),
   );
   const openRouterGateway = loaded?.gateways.find(
     (entry) => entry.slug === "openrouter-default",
   );
-
   const ttsDefault = loaded?.ttsProfiles.find(
     (entry) => entry.profileAlias === "tts-default",
   );
+  const embeddingDefault = loaded?.embeddingProfiles.find(
+    (entry) => entry.profileAlias === "embed-default",
+  );
 
+  assert.deepEqual(
+    loaded?.gateways.map((entry) => entry.slug),
+    ["openrouter-default"],
+  );
   assert.deepEqual(openRouterGateway?.defaultHeaders, {
     "X-OpenRouter-Title": "SourceWeft",
     "X-Title": "SourceWeft",
     "HTTP-Referer": "https://sourceweft.com",
   });
-  assert.equal(ttsDefault?.targetModel, "openai/gpt-4o-mini-tts-2025-12-15");
+  assert.deepEqual(openRouterGateway?.supports, [
+    "chat",
+    "embeddings",
+    "rerank",
+    "tts",
+    "image",
+    "tool_calling",
+    "json_schema",
+  ]);
+  assert.deepEqual(openRouterGateway?.modelCatalog?.kinds, [
+    "chat",
+    "vision",
+    "image",
+  ]);
+  assert.deepEqual(loaded?.rerankProfiles, []);
+  assert.deepEqual(loaded?.asrProfiles, []);
+  assert.equal(ttsDefault?.targetModel, "microsoft/mai-voice-2");
   assert.equal(ttsDefault?.gatewaySlug, "openrouter-default");
   assert.equal(ttsDefault?.providerName, "openrouter");
+  assert.equal(embeddingDefault?.targetModel, "baai/bge-m3");
+  assert.equal(embeddingDefault?.gatewaySlug, "openrouter-default");
+  assert.equal(embeddingDefault?.providerName, "openrouter");
+  assert.equal(embeddingDefault?.requestedDimensions, 1024);
 });

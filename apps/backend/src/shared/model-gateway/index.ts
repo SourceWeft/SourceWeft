@@ -11,6 +11,7 @@ export {
   ensureModelConfigAvailable,
   getModelGatewayClient,
   requireDefaultModelGatewayProfile,
+  resolveModelGatewayProfile,
 } from "./client";
 export { resolveByokProviderRuntime } from "./runtime";
 export { resolveModelCapabilitiesFromLitellm } from "./pricing";

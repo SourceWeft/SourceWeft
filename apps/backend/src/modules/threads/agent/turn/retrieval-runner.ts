@@ -23,6 +23,7 @@ import {
 import {
   getModelGatewayClient,
   requireDefaultModelGatewayProfile,
+  resolveModelGatewayProfile,
 } from "../../../../shared/model-gateway/index";
 import {
   buildGatewayRequestMetadata,
@@ -71,7 +72,18 @@ async function createRerankGateway(input: {
   userId: string;
   traceContext?: TraceContext;
 }): Promise<RerankGateway> {
-  const rerankProfile = await requireDefaultModelGatewayProfile("rerank");
+  const rerankProfile = await resolveModelGatewayProfile({
+    kind: "rerank",
+    defaultRequired: false,
+  });
+  if (!rerankProfile) {
+    return {
+      async rank() {
+        return [];
+      },
+    };
+  }
+
   const rerankClient = await getModelGatewayClient(
     rerankProfile.gatewayConfigId,
   );

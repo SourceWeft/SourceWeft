@@ -734,12 +734,6 @@ function parseGlobalModelGatewayConfig(
     );
   }
 
-  if (!Array.isArray(raw.rerankProfiles) || raw.rerankProfiles.length === 0) {
-    throw new Error(
-      "Global model gateway config requires a non-empty 'rerankProfiles' array",
-    );
-  }
-
   if (
     !Array.isArray(raw.embeddingProfiles) ||
     raw.embeddingProfiles.length === 0
@@ -794,13 +788,15 @@ function parseGlobalModelGatewayConfig(
         ),
       )
     : [];
-  const rerankProfiles = raw.rerankProfiles.map((entry, index) =>
-    parseModelProfileEntry(
-      entry as RawGlobalModelProfileEntry,
-      index,
-      "rerankProfiles",
-    ),
-  );
+  const rerankProfiles = Array.isArray(raw.rerankProfiles)
+    ? raw.rerankProfiles.map((entry, index) =>
+        parseModelProfileEntry(
+          entry as RawGlobalModelProfileEntry,
+          index,
+          "rerankProfiles",
+        ),
+      )
+    : [];
   const asrProfiles = Array.isArray(raw.asrProfiles)
     ? raw.asrProfiles.map((entry, index) =>
         parseModelProfileEntry(
@@ -870,7 +866,9 @@ function parseGlobalModelGatewayConfig(
   if (visionProfiles.length > 0) {
     assertSingleDefault(visionProfiles, "visionProfiles");
   }
-  assertSingleDefault(rerankProfiles, "rerankProfiles");
+  if (rerankProfiles.length > 0) {
+    assertSingleDefault(rerankProfiles, "rerankProfiles");
+  }
   if (asrProfiles.length > 0) {
     assertSingleDefault(asrProfiles, "asrProfiles");
   }
