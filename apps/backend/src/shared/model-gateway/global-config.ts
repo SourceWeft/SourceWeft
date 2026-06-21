@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import type {
+  ProviderRoutingConfig,
+  ProviderRoutingSort,
+} from "@sourceweft/model-gateway";
 
 export type GlobalGatewayEntry = {
   slug: string;
@@ -68,6 +72,7 @@ export type GlobalModelProfileEntry = {
   pricing?: GlobalProfilePricingEntry | null;
   supportedParameters?: string[];
   supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+  providerRouting?: ProviderRoutingConfig;
   imageGeneration?: Record<string, unknown>;
 };
 
@@ -138,10 +143,13 @@ type RawGlobalModelProfileEntry = {
   pricing?: unknown;
   supportedParameters?: unknown;
   supportedEfforts?: unknown;
+  providerRouting?: unknown;
   imageGeneration?: unknown;
 };
 
 const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const PROVIDER_ROUTING_SORT_BY = ["price", "throughput", "latency"] as const;
+const PROVIDER_ROUTING_SORT_PARTITIONS = ["model", "none"] as const;
 const MODEL_CATALOG_KINDS = [
   "chat",
   "rerank",
@@ -322,6 +330,94 @@ function asOptionalStringArray(value: unknown, fieldName: string) {
     return undefined;
   }
   return asStringArray(value, fieldName);
+}
+
+function asProviderRoutingSort(
+  value: unknown,
+  fieldName: string,
+): ProviderRoutingSort | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (
+      !PROVIDER_ROUTING_SORT_BY.includes(
+        normalized as (typeof PROVIDER_ROUTING_SORT_BY)[number],
+      )
+    ) {
+      throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+    }
+    return normalized as (typeof PROVIDER_ROUTING_SORT_BY)[number];
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
+
+  const record = value as Record<string, unknown>;
+  const by = typeof record.by === "string" ? record.by.trim().toLowerCase() : "";
+  if (
+    !PROVIDER_ROUTING_SORT_BY.includes(
+      by as (typeof PROVIDER_ROUTING_SORT_BY)[number],
+    )
+  ) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}.by`);
+  }
+
+  const partition =
+    record.partition === undefined || record.partition === null
+      ? "model"
+      : typeof record.partition === "string"
+        ? record.partition.trim().toLowerCase()
+        : "";
+  if (
+    !PROVIDER_ROUTING_SORT_PARTITIONS.includes(
+      partition as (typeof PROVIDER_ROUTING_SORT_PARTITIONS)[number],
+    )
+  ) {
+    throw new Error(
+      `Invalid global model gateway config field: ${fieldName}.partition`,
+    );
+  }
+
+  return {
+    by: by as (typeof PROVIDER_ROUTING_SORT_BY)[number],
+    partition: partition as (typeof PROVIDER_ROUTING_SORT_PARTITIONS)[number],
+  };
+}
+
+function asOptionalProviderRouting(
+  value: unknown,
+  fieldName: string,
+): ProviderRoutingConfig | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
+
+  const record = value as Record<string, unknown>;
+  const only =
+    record.only === undefined || record.only === null
+      ? undefined
+      : asStringArray(record.only, `${fieldName}.only`);
+  if (only !== undefined && only.length === 0) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}.only`);
+  }
+
+  const sort = asProviderRoutingSort(record.sort, `${fieldName}.sort`);
+  if (only === undefined && sort === undefined) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
+
+  return {
+    ...(only !== undefined ? { only } : {}),
+    ...(sort !== undefined ? { sort } : {}),
+  };
 }
 
 function asStringRecord(value: unknown, fieldName: string): Record<string, string> {
@@ -609,6 +705,10 @@ function parseModelProfileEntry(
     entry.supportedEfforts,
     `${field}[${index}].supportedEfforts`,
   );
+  const providerRouting = asOptionalProviderRouting(
+    entry.providerRouting,
+    `${field}[${index}].providerRouting`,
+  );
 
   return {
     profileId:
@@ -649,6 +749,7 @@ function parseModelProfileEntry(
     ...(pricing !== undefined ? { pricing } : {}),
     ...(supportedParameters !== undefined ? { supportedParameters } : {}),
     ...(supportedEfforts !== undefined ? { supportedEfforts } : {}),
+    ...(providerRouting !== undefined ? { providerRouting } : {}),
     imageGeneration:
       entry.imageGeneration &&
       typeof entry.imageGeneration === "object" &&

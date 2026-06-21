@@ -2,6 +2,7 @@ import {
   createModelGateway,
   type ModelGateway,
   type ModelGatewayConfig,
+  type ProviderRoutingConfig,
 } from "@sourceweft/model-gateway";
 import { and, eq } from "drizzle-orm";
 import { config } from "../config";
@@ -71,6 +72,22 @@ export function withOpenRouterAttributionHeaders(input: {
     "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
     "X-Title": OPENROUTER_APP_TITLE,
   };
+}
+
+export function normalizeRouteProviderRouting(
+  value: unknown,
+): ProviderRoutingConfig | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const providerRouting = record.providerRouting;
+  if (!providerRouting || typeof providerRouting !== "object" || Array.isArray(providerRouting)) {
+    return undefined;
+  }
+
+  return providerRouting as ProviderRoutingConfig;
 }
 
 export async function resolveByokApiKeyRef(input: {
@@ -267,11 +284,13 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
       strategy: row.strategy,
       targets: [],
     };
+    const providerRouting = normalizeRouteProviderRouting(row.constraintsJson);
     existing.targets.push({
       provider: row.targetProviderName,
       model: row.targetModel,
       priority: row.priority,
       weight: row.weight,
+      ...(providerRouting ? { providerRouting } : {}),
     });
     modelRoutes[row.alias] = existing;
   }

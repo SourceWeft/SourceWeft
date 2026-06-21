@@ -109,6 +109,7 @@ export function mergeGlobalProfileConfigJson(input: {
     badges?: string[];
     supportedParameters?: string[];
     supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+    providerRouting?: GlobalModelProfileEntry["providerRouting"];
     imageGeneration?: Record<string, unknown>;
   };
   existing: boolean;
@@ -149,6 +150,9 @@ export function mergeGlobalProfileConfigJson(input: {
     ...(input.entry.supportedEfforts !== undefined
       ? { supportedEfforts: input.entry.supportedEfforts }
       : {}),
+    ...(input.entry.providerRouting !== undefined
+      ? { providerRouting: input.entry.providerRouting }
+      : {}),
     ...(input.entry.imageGeneration !== undefined
       ? { imageGeneration: input.entry.imageGeneration }
       : {}),
@@ -161,6 +165,9 @@ export function mergeGlobalProfileConfigJson(input: {
   }
   if (input.entry.imageGeneration !== undefined) {
     protectedFields.push("imageGeneration");
+  }
+  if (input.entry.providerRouting !== undefined) {
+    protectedFields.push("providerRouting");
   }
   if (input.entry.supportsImageInput !== undefined) {
     protectedFields.push("supportsImageInput");
@@ -202,6 +209,7 @@ async function upsertModelGatewayProfileFromGlobalConfig(
     badges?: string[];
     supportedParameters?: string[];
     supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
+    providerRouting?: GlobalModelProfileEntry["providerRouting"];
     imageGeneration?: Record<string, unknown>;
   },
   gatewayConfigId: string,
@@ -565,6 +573,7 @@ async function syncProfileKind(input: {
     supportsImageInput?: boolean;
     supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
     supportedParameters?: string[];
+    providerRouting?: GlobalModelProfileEntry["providerRouting"];
     litellmKey?: string;
   }>;
   gatewayIdBySlug: Map<string, string>;
@@ -596,13 +605,21 @@ async function syncProfileKind(input: {
       targetModel: entry.targetModel,
       priority: entry.priority,
       weight: entry.weight,
-      constraintsJson: {},
+      constraintsJson: buildRouteConstraintsJson(entry),
       isDefault: entry.isDefault,
       isActive: entry.isActive,
       createdAt: input.now,
       updatedAt: input.now,
     });
   }
+}
+
+export function buildRouteConstraintsJson(input: {
+  providerRouting?: GlobalModelProfileEntry["providerRouting"];
+}): Record<string, unknown> {
+  return input.providerRouting
+    ? { providerRouting: input.providerRouting }
+    : {};
 }
 
 async function syncGlobalModelGatewayConfigFromFile(

@@ -1324,7 +1324,7 @@ export const modelGatewayRoutes = pgTable(
     priority: integer("priority").notNull().default(1),
     weight: integer("weight").notNull().default(0),
     constraintsJson: jsonb("constraints_json")
-      .$type<Record<string, never>>()
+      .$type<Record<string, unknown>>()
       .notNull()
       .default(emptyJsonObject),
     isDefault: boolean("is_default").notNull().default(false),

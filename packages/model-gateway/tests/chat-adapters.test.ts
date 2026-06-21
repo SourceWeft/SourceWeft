@@ -13,10 +13,19 @@ import type {
 
 const target: ResolvedRequestTarget = {
   provider: "openai",
-  kind: "openai",
+  providerKind: "openai",
   providerModel: "test-model",
   baseUrl: "https://gateway.example.com",
   apiKey: "test-key",
+  defaultHeaders: {},
+  routeDecision: {
+    alias: "chat-default",
+    mode: "GLOBAL",
+    strategy: "priority",
+    provider: "openai",
+    providerKind: "openai",
+  },
+  requestMetadata: {},
 };
 
 const input: ChatCompleteInput = {
@@ -68,4 +77,77 @@ test("chat adapters preserve request maxRetries for LangChain models", () => {
       `${adapter.kind} should honor per-request retry count`,
     );
   }
+});
+
+function modelKwargs(model: unknown) {
+  return (model as { modelKwargs?: unknown }).modelKwargs;
+}
+
+test("OpenRouter chat adapter merges provider routing into model kwargs", () => {
+  const adapter = new OpenRouterChatAdapter();
+  const model = adapter.createModel(
+    {
+      ...target,
+      provider: "openrouter",
+      providerKind: "openrouter",
+      providerRouting: {
+        only: ["deepseek"],
+        sort: "latency",
+      },
+      routeDecision: {
+        ...target.routeDecision,
+        provider: "openrouter",
+        providerKind: "openrouter",
+      },
+    },
+    {
+      ...input,
+      extraBody: {
+        provider: {
+          allow_fallbacks: false,
+          sort: "price",
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(modelKwargs(model), {
+    provider: {
+      allow_fallbacks: false,
+      only: ["deepseek"],
+      sort: "latency",
+    },
+  });
+});
+
+test("OpenRouter chat adapter supports object provider routing sort", () => {
+  const adapter = new OpenRouterChatAdapter();
+  const model = adapter.createModel(
+    {
+      ...target,
+      provider: "openrouter",
+      providerKind: "openrouter",
+      providerRouting: {
+        sort: {
+          by: "throughput",
+          partition: "none",
+        },
+      },
+      routeDecision: {
+        ...target.routeDecision,
+        provider: "openrouter",
+        providerKind: "openrouter",
+      },
+    },
+    input,
+  );
+
+  assert.deepEqual(modelKwargs(model), {
+    provider: {
+      sort: {
+        by: "throughput",
+        partition: "none",
+      },
+    },
+  });
 });

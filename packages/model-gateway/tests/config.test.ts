@@ -118,6 +118,48 @@ test("resolveModelGatewayConfig supports explicit providers and model routes", (
   assert.equal(resolved.routes["chat-default"]?.targets[1]?.provider, "deepinfra");
 });
 
+test("resolveRequestTarget carries provider routing from selected route target", async () => {
+  const resolved = resolveModelGatewayConfig({
+    fetch: fetchStub,
+    providers: {
+      openrouter: {
+        kind: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        apiKey: "or-key",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [
+          {
+            provider: "openrouter",
+            model: "deepseek/deepseek-v4-pro",
+            priority: 1,
+            providerRouting: {
+              only: ["deepseek"],
+              sort: "latency",
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  const target = await resolveRequestTarget(resolved, {
+    model: "chat-default",
+  });
+
+  assert.deepEqual(target.providerRouting, {
+    only: ["deepseek"],
+    sort: "latency",
+  });
+  assert.deepEqual(target.routeDecision.providerRouting, {
+    only: ["deepseek"],
+    sort: "latency",
+  });
+});
+
 
 test("resolveModelGatewayConfig accepts openai and azure-openai providers", () => {
   const resolved = resolveModelGatewayConfig({

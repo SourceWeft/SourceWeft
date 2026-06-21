@@ -1,12 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { mergeGlobalProfileConfigJson } from "./config-sync";
+import {
+  buildRouteConstraintsJson,
+  mergeGlobalProfileConfigJson,
+} from "./config-sync";
 
 const now = new Date("2026-05-21T00:00:00.000Z");
 
 function configValue(config: Record<string, unknown>, key: string) {
   return config[key];
 }
+
+test("buildRouteConstraintsJson writes provider routing to route constraints", () => {
+  assert.deepEqual(
+    buildRouteConstraintsJson({
+      providerRouting: {
+        only: ["deepseek"],
+        sort: "latency",
+      },
+    }),
+    {
+      providerRouting: {
+        only: ["deepseek"],
+        sort: "latency",
+      },
+    },
+  );
+  assert.deepEqual(buildRouteConstraintsJson({}), {});
+});
 
 test("mergeGlobalProfileConfigJson preserves existing pricing when pricing is omitted", () => {
   const merged = mergeGlobalProfileConfigJson({

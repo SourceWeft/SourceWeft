@@ -1,3 +1,5 @@
+import type { ProviderRoutingConfig } from "@sourceweft/model-gateway";
+
 export type ModelGatewayProfileKind =
   | "chat"
   | "rerank"
@@ -64,6 +66,7 @@ export type RoutedGatewayConfig = {
         model: string;
         priority?: number;
         weight?: number;
+        providerRouting?: ProviderRoutingConfig;
       }>;
     }
   >;

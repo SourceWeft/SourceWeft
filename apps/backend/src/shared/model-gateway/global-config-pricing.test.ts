@@ -112,6 +112,83 @@ test("loadGlobalModelGatewayConfig preserves litellm pricing presets", async () 
   });
 });
 
+test("loadGlobalModelGatewayConfig accepts provider routing only", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    providerRouting: {
+      only: ["deepseek"],
+    },
+  };
+
+  const loaded = await loadConfig(config);
+
+  assert.deepEqual(loaded?.chatProfiles[0]?.providerRouting, {
+    only: ["deepseek"],
+  });
+});
+
+test("loadGlobalModelGatewayConfig accepts provider routing string sort", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    providerRouting: {
+      sort: "latency",
+    },
+  };
+
+  const loaded = await loadConfig(config);
+
+  assert.deepEqual(loaded?.chatProfiles[0]?.providerRouting, {
+    sort: "latency",
+  });
+});
+
+test("loadGlobalModelGatewayConfig accepts provider routing object sort", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    providerRouting: {
+      sort: {
+        by: "throughput",
+        partition: "none",
+      },
+    },
+  };
+
+  const loaded = await loadConfig(config);
+
+  assert.deepEqual(loaded?.chatProfiles[0]?.providerRouting, {
+    sort: {
+      by: "throughput",
+      partition: "none",
+    },
+  });
+});
+
+test("loadGlobalModelGatewayConfig rejects invalid provider routing", async () => {
+  for (const providerRouting of [
+    { only: [] },
+    { only: [""] },
+    { only: "deepseek" },
+    { sort: "quality" },
+    { sort: { by: "quality", partition: "none" } },
+    { sort: { by: "latency", partition: "region" } },
+  ]) {
+    const config = baseConfig();
+    config.chatProfiles[0] = {
+      ...config.chatProfiles[0],
+      providerRouting,
+    };
+
+    await assert.rejects(
+      () => loadConfig(config),
+      /providerRouting/,
+      `expected providerRouting ${JSON.stringify(providerRouting)} to be rejected`,
+    );
+  }
+});
+
 test("loadGlobalModelGatewayConfig allows missing provider API key env", async () => {
   const config = baseConfig();
   config.gateways = [
@@ -288,6 +365,9 @@ test("default global config is OpenRouter-only with OSS default models", async (
   const openRouterGateway = loaded?.gateways.find(
     (entry) => entry.slug === "openrouter-default",
   );
+  const chatDefault = loaded?.chatProfiles.find(
+    (entry) => entry.profileAlias === "chat-default",
+  );
   const ttsDefault = loaded?.ttsProfiles.find(
     (entry) => entry.profileAlias === "tts-default",
   );
@@ -321,6 +401,8 @@ test("default global config is OpenRouter-only with OSS default models", async (
   ]);
   assert.deepEqual(loaded?.rerankProfiles, []);
   assert.deepEqual(loaded?.asrProfiles, []);
+  assert.equal(chatDefault?.targetModel, "deepseek/deepseek-v4-pro");
+  assert.equal(chatDefault?.providerRouting, undefined);
   assert.equal(ttsDefault?.targetModel, "microsoft/mai-voice-2");
   assert.equal(ttsDefault?.gatewaySlug, "openrouter-default");
   assert.equal(ttsDefault?.providerName, "openrouter");

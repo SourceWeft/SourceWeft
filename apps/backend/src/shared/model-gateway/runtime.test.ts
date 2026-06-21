@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { withOpenRouterAttributionHeaders } from "./runtime";
+import {
+  normalizeRouteProviderRouting,
+  withOpenRouterAttributionHeaders,
+} from "./runtime";
 
 test("withOpenRouterAttributionHeaders adds current and legacy OpenRouter attribution headers", () => {
   const headers = withOpenRouterAttributionHeaders({
@@ -27,4 +30,26 @@ test("withOpenRouterAttributionHeaders leaves non-OpenRouter headers unchanged",
   assert.deepEqual(headers, {
     "X-Custom": "keep",
   });
+});
+
+test("normalizeRouteProviderRouting reads provider routing from route constraints", () => {
+  assert.deepEqual(
+    normalizeRouteProviderRouting({
+      providerRouting: {
+        only: ["deepseek"],
+        sort: {
+          by: "throughput",
+          partition: "none",
+        },
+      },
+    }),
+    {
+      only: ["deepseek"],
+      sort: {
+        by: "throughput",
+        partition: "none",
+      },
+    },
+  );
+  assert.equal(normalizeRouteProviderRouting({}), undefined);
 });

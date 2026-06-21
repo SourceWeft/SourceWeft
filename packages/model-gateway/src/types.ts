@@ -299,12 +299,27 @@ export interface GatewayProviderConfig {
   enabled?: boolean;
 }
 
+export type ProviderRoutingSortBy = "price" | "throughput" | "latency";
+
+export type ProviderRoutingSort =
+  | ProviderRoutingSortBy
+  | {
+      by: ProviderRoutingSortBy;
+      partition: "model" | "none";
+    };
+
+export interface ProviderRoutingConfig {
+  only?: string[];
+  sort?: ProviderRoutingSort;
+}
+
 export interface ModelRouteTarget {
   provider: string;
   model: string;
   weight?: number;
   priority?: number;
   enabled?: boolean;
+  providerRouting?: ProviderRoutingConfig;
 }
 
 export interface ModelRouteConfig {
@@ -318,6 +333,7 @@ export interface RouteDecision {
   strategy: RoutingStrategy;
   provider: string;
   providerKind: ProviderKind;
+  providerRouting?: ProviderRoutingConfig;
 }
 
 export type GatewayOperation =
@@ -741,6 +757,7 @@ export interface ResolvedModelRouteTarget {
   weight: number;
   priority: number;
   enabled: boolean;
+  providerRouting?: ProviderRoutingConfig;
 }
 
 export interface ResolvedModelRouteConfig {
@@ -779,6 +796,7 @@ export interface ResolvedRequestTarget {
   baseUrl: string;
   apiKey?: string;
   defaultHeaders: Record<string, string>;
+  providerRouting?: ProviderRoutingConfig;
   routeDecision: RouteDecision;
   requestMetadata: Record<string, unknown>;
 }

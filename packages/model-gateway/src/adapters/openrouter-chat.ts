@@ -1,6 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 import { resolveThinkingMode } from "../thinking";
+import type { ProviderRoutingConfig } from "../types";
 
 function buildOpenRouterReasoningModelKwargs(
   input: Parameters<ChatAdapter["createModel"]>[1],
@@ -66,6 +67,29 @@ function buildOpenRouterReasoningModelKwargs(
   return {};
 }
 
+function mergeOpenRouterProviderRouting(
+  extraBody: Record<string, unknown> | undefined,
+  providerRouting: ProviderRoutingConfig | undefined,
+): Record<string, unknown> | undefined {
+  if (!providerRouting) {
+    return extraBody;
+  }
+
+  const existingProvider =
+    extraBody?.provider && typeof extraBody.provider === "object" && !Array.isArray(extraBody.provider)
+      ? (extraBody.provider as Record<string, unknown>)
+      : {};
+
+  return {
+    ...(extraBody ?? {}),
+    provider: {
+      ...existingProvider,
+      ...(providerRouting.only ? { only: providerRouting.only } : {}),
+      ...(providerRouting.sort ? { sort: providerRouting.sort } : {}),
+    },
+  };
+}
+
 export class OpenRouterChatAdapter implements ChatAdapter {
   readonly kind = "openrouter" as const;
 
@@ -85,7 +109,10 @@ export class OpenRouterChatAdapter implements ChatAdapter {
         defaultHeaders: target.defaultHeaders,
       },
       modelKwargs: {
-        ...(input.extraBody ?? {}),
+        ...(mergeOpenRouterProviderRouting(
+          input.extraBody,
+          target.providerRouting,
+        ) ?? {}),
         ...buildOpenRouterReasoningModelKwargs(input),
       },
       __includeRawResponse: true,

@@ -155,6 +155,9 @@ function normalizeRoutes(
             weight: target.weight ?? 0,
             priority: target.priority ?? index + 1,
             enabled: target.enabled ?? true,
+            ...(target.providerRouting
+              ? { providerRouting: target.providerRouting }
+              : {}),
           })),
         },
       ] as const;
@@ -550,12 +553,18 @@ export async function resolveRequestTarget(
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     defaultHeaders: provider.defaultHeaders,
+    ...(selected.providerRouting
+      ? { providerRouting: selected.providerRouting }
+      : {}),
     routeDecision: {
       alias: routeKey,
       mode,
       strategy: route.strategy,
       provider: provider.name,
       providerKind: provider.kind,
+      ...(selected.providerRouting
+        ? { providerRouting: selected.providerRouting }
+        : {}),
     },
     requestMetadata: config.requestMetadata,
   };
