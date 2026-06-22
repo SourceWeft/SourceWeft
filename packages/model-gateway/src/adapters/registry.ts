@@ -8,6 +8,7 @@ import { DeepInfraChatAdapter } from "./deepinfra-chat";
 import { DeepInfraEmbeddingsAdapter } from "./deepinfra-embeddings";
 import { DeepInfraImagesGenerationTransport } from "./deepinfra-images";
 import { DeepInfraRerankTransport } from "./deepinfra-rerank";
+import { DeepInfraTtsTransport } from "./deepinfra-tts";
 import { GeminiEmbeddingsAdapter } from "./gemini-embeddings";
 import { GeminiChatAdapter } from "./gemini-chat";
 import { OpenAICompatibleEmbeddingsAdapter } from "./openai-compatible-embeddings";
@@ -45,6 +46,7 @@ const deepInfraChat = new DeepInfraChatAdapter();
 const deepInfraEmbeddings = new DeepInfraEmbeddingsAdapter();
 const deepInfraRerank = new DeepInfraRerankTransport();
 const deepInfraAsr = new DeepInfraAsrTransport();
+const deepInfraTts = new DeepInfraTtsTransport();
 const siliconflowCNChat = new SiliconflowCNChatAdapter();
 const siliconflowCNEmbeddings = new SiliconflowCNEmbeddingsAdapter();
 const siliconflowCNRerank = new SiliconflowCNRerankTransport();
@@ -89,6 +91,7 @@ const asrTransports = new Map<ProviderKind, AsrTransport>([
 
 const ttsTransports = new Map<ProviderKind, TtsTransport>([
   ["openrouter", openRouterTts],
+  ["deepinfra", deepInfraTts],
 ]);
 
 const imageGenerationTransports = new Map<

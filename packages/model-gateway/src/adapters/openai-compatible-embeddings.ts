@@ -1,10 +1,14 @@
 import { OpenAIEmbeddings } from "@langchain/openai";
+import { buildOpenAICompatibleDefaultHeaders } from "../auth-headers";
 import type { EmbeddingsAdapter } from "./types";
 
 export class OpenAICompatibleEmbeddingsAdapter implements EmbeddingsAdapter {
   readonly kind: EmbeddingsAdapter["kind"] = "openai-compatible";
 
-  createModel(target: Parameters<EmbeddingsAdapter["createModel"]>[0], input: Parameters<EmbeddingsAdapter["createModel"]>[1]) {
+  createModel(
+    target: Parameters<EmbeddingsAdapter["createModel"]>[0],
+    input: Parameters<EmbeddingsAdapter["createModel"]>[1],
+  ) {
     return new OpenAIEmbeddings({
       model: target.providerModel,
       apiKey: target.apiKey,
@@ -12,7 +16,7 @@ export class OpenAICompatibleEmbeddingsAdapter implements EmbeddingsAdapter {
       encodingFormat: input.encodingFormat,
       configuration: {
         baseURL: target.baseUrl,
-        defaultHeaders: target.defaultHeaders,
+        defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
       },
     });
   }

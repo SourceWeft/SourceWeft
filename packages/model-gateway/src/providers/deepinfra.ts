@@ -11,7 +11,14 @@ export function createDeepInfraProvider(input: {
     baseUrl: input.baseUrl ?? "https://api.deepinfra.com/v1",
     apiKey: input.apiKey,
     defaultHeaders: input.defaultHeaders,
-    supports: input.supports ?? ["chat", "embeddings", "rerank", "asr", "image"],
+    supports: input.supports ?? [
+      "chat",
+      "embeddings",
+      "rerank",
+      "asr",
+      "tts",
+      "image",
+    ],
     enabled: true,
   };
 }

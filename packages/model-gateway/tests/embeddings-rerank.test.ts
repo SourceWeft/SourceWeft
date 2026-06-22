@@ -7,6 +7,7 @@ import {
 } from "../src/index";
 import { DeepInfraChatAdapter } from "../src/adapters/deepinfra-chat";
 import { DeepInfraEmbeddingsAdapter } from "../src/adapters/deepinfra-embeddings";
+import { OpenAICompatibleEmbeddingsAdapter } from "../src/adapters/openai-compatible-embeddings";
 import { SiliconflowCNChatAdapter } from "../src/adapters/siliconflow-cn-chat";
 import { SiliconflowCNEmbeddingsAdapter } from "../src/adapters/siliconflow-cn-embeddings";
 import { createJsonResponse } from "./helpers";
@@ -17,7 +18,7 @@ test("createDeepInfraProvider defaults to provider root URL", () => {
     baseUrl: "https://api.deepinfra.com/v1",
     apiKey: "deepinfra-key",
     defaultHeaders: undefined,
-    supports: ["chat", "embeddings", "rerank", "asr", "image"],
+    supports: ["chat", "embeddings", "rerank", "asr", "tts", "image"],
     enabled: true,
   });
 });
@@ -174,6 +175,77 @@ test("embeddings.embedBatch normalizes LangChain embeddings output", async () =>
     [1, 5],
   ]);
   assert.equal(result.provider, "gemini");
+});
+
+function clientConfig(model: unknown) {
+  return (model as { clientConfig?: Record<string, unknown> }).clientConfig;
+}
+
+test("openai-compatible embeddings configure custom API key headers through LangChain", () => {
+  const model = new OpenAICompatibleEmbeddingsAdapter().createModel(
+    {
+      provider: "cloudflare-aig",
+      providerKind: "openai-compatible",
+      providerModel: "text-embedding-3-small",
+      baseUrl: "https://gateway.example.com/compat",
+      apiKey: "cf-token",
+      apiKeyHeaderName: "cf-aig-authorization",
+      apiKeyHeaderPrefix: "Bearer ",
+      defaultHeaders: {
+        "HTTP-Referer": "https://sourceweft.example",
+      },
+      routeDecision: {
+        alias: "embed-default",
+        mode: "GLOBAL",
+        strategy: "priority",
+        provider: "cloudflare-aig",
+        providerKind: "openai-compatible",
+      },
+      requestMetadata: {},
+    },
+    {
+      model: "embed-default",
+      texts: ["hello"],
+      dimensions: 2,
+    },
+  );
+
+  assert.deepEqual(clientConfig(model)?.defaultHeaders, {
+    "HTTP-Referer": "https://sourceweft.example",
+    Authorization: null,
+    "cf-aig-authorization": "Bearer cf-token",
+  });
+});
+
+test("openai-compatible embeddings keep standard SDK auth without custom headers", () => {
+  const model = new OpenAICompatibleEmbeddingsAdapter().createModel(
+    {
+      provider: "openai-proxy",
+      providerKind: "openai-compatible",
+      providerModel: "text-embedding-3-small",
+      baseUrl: "https://gateway.example.com/compat",
+      apiKey: "proxy-token",
+      defaultHeaders: {
+        "HTTP-Referer": "https://sourceweft.example",
+      },
+      routeDecision: {
+        alias: "embed-default",
+        mode: "GLOBAL",
+        strategy: "priority",
+        provider: "openai-proxy",
+        providerKind: "openai-compatible",
+      },
+      requestMetadata: {},
+    },
+    {
+      model: "embed-default",
+      texts: ["hello"],
+    },
+  );
+
+  assert.deepEqual(clientConfig(model)?.defaultHeaders, {
+    "HTTP-Referer": "https://sourceweft.example",
+  });
 });
 
 test("embeddings.embed emits generation observation events", async () => {
@@ -419,4 +491,49 @@ test("rerank.rank supports DeepInfra inference endpoint", async () => {
   assert.equal(result.results[0]?.index, 0);
   assert.equal(result.results[0]?.relevanceScore, 0.82);
   assert.equal(result.provider, "deepinfra");
+});
+
+test("openai-compatible rerank supports custom API key headers", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return createJsonResponse({
+        model: "rerank-model",
+        results: [{ index: 0, score: 0.91 }],
+      });
+    },
+    providers: {
+      "openai-proxy": {
+        kind: "openai-compatible",
+        baseUrl: "https://proxy.example.com/v1",
+        apiKey: "proxy-token",
+        apiKeyHeaderName: "x-proxy-key",
+      },
+    },
+    modelRoutes: {
+      "rerank-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai-proxy", model: "rerank-model", priority: 1 }],
+      },
+    },
+  });
+
+  await gateway.rerank.rank({
+    model: "rerank-default",
+    query: "capital",
+    documents: ["Washington DC"],
+  });
+
+  assert.equal(requests[0]?.url, "https://proxy.example.com/v1/rerank");
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.[
+      "x-proxy-key"
+    ],
+    "proxy-token",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    undefined,
+  );
 });

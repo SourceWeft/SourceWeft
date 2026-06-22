@@ -29,6 +29,7 @@ const target: ResolvedRequestTarget = {
 };
 
 const input: ChatCompleteInput = {
+  model: "test-model",
   messages: [{ role: "user", content: "hello" }],
 };
 
@@ -82,6 +83,62 @@ test("chat adapters preserve request maxRetries for LangChain models", () => {
 function modelKwargs(model: unknown) {
   return (model as { modelKwargs?: unknown }).modelKwargs;
 }
+
+function clientConfig(model: unknown) {
+  return (model as { clientConfig?: Record<string, unknown> }).clientConfig;
+}
+
+test("OpenAI-compatible chat adapter configures custom API key headers through LangChain", () => {
+  const adapter = new OpenAICompatibleChatAdapter();
+  const model = adapter.createModel(
+    {
+      ...target,
+      provider: "cloudflare-aig",
+      providerKind: "openai-compatible",
+      providerModel: "deepseek/deepseek-v4-pro",
+      apiKey: "cf-token",
+      apiKeyHeaderName: "cf-aig-authorization",
+      apiKeyHeaderPrefix: "Bearer ",
+      defaultHeaders: {
+        "HTTP-Referer": "https://sourceweft.example",
+      },
+      routeDecision: {
+        ...target.routeDecision,
+        provider: "cloudflare-aig",
+        providerKind: "openai-compatible",
+      },
+    },
+    input,
+  );
+
+  assert.deepEqual(clientConfig(model)?.defaultHeaders, {
+    "HTTP-Referer": "https://sourceweft.example",
+    Authorization: null,
+    "cf-aig-authorization": "Bearer cf-token",
+  });
+});
+
+test("OpenAI-compatible chat adapter keeps standard SDK auth without custom headers", () => {
+  const adapter = new OpenAICompatibleChatAdapter();
+  const model = adapter.createModel(
+    {
+      ...target,
+      providerKind: "openai-compatible",
+      defaultHeaders: {
+        "HTTP-Referer": "https://sourceweft.example",
+      },
+      routeDecision: {
+        ...target.routeDecision,
+        providerKind: "openai-compatible",
+      },
+    },
+    input,
+  );
+
+  assert.deepEqual(clientConfig(model)?.defaultHeaders, {
+    "HTTP-Referer": "https://sourceweft.example",
+  });
+});
 
 test("OpenRouter chat adapter merges provider routing into model kwargs", () => {
   const adapter = new OpenRouterChatAdapter();

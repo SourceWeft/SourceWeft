@@ -11,6 +11,8 @@ export type GlobalGatewayEntry = {
   baseUrlEnv?: string;
   apiKey?: string;
   apiKeyEnv?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;
   providerName: string;
   providerKind:
@@ -116,6 +118,8 @@ type RawGlobalGatewayEntry = {
   baseUrl?: unknown;
   baseUrlEnv?: unknown;
   apiKeyEnv?: unknown;
+  apiKeyHeaderName?: unknown;
+  apiKeyHeaderPrefix?: unknown;
   defaultHeaders?: unknown;
   providerName?: unknown;
   providerKind?: unknown;
@@ -617,6 +621,15 @@ function parseGatewayEntry(
     typeof entry.apiKeyEnv === "string" && entry.apiKeyEnv.trim().length > 0
       ? entry.apiKeyEnv.trim()
       : undefined;
+  const apiKeyHeaderName =
+    typeof entry.apiKeyHeaderName === "string" &&
+      entry.apiKeyHeaderName.trim().length > 0
+      ? entry.apiKeyHeaderName.trim()
+      : undefined;
+  const apiKeyHeaderPrefix =
+    typeof entry.apiKeyHeaderPrefix === "string"
+      ? entry.apiKeyHeaderPrefix
+      : undefined;
   const baseUrlOverride = baseUrlEnv ? process.env[baseUrlEnv]?.trim() : "";
   const apiKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : "";
 
@@ -652,6 +665,8 @@ function parseGatewayEntry(
     baseUrlEnv,
     apiKey: apiKey || undefined,
     apiKeyEnv,
+    apiKeyHeaderName,
+    apiKeyHeaderPrefix,
     defaultHeaders: asStringRecord(
       entry.defaultHeaders,
       `gateways[${index}].defaultHeaders`,

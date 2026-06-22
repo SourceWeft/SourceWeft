@@ -131,6 +131,52 @@ test("asr.transcribe sends SiliconflowCN multipart request", async () => {
   );
 });
 
+test("openai-compatible ASR supports custom API key headers", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return createJsonResponse({ text: "Hello world" });
+    },
+    providers: {
+      "openai-proxy": {
+        kind: "openai-compatible",
+        baseUrl: "https://proxy.example.com/v1",
+        apiKey: "proxy-token",
+        apiKeyHeaderName: "x-proxy-key",
+      },
+    },
+    modelRoutes: {
+      "asr-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai-proxy", model: "whisper-large", priority: 1 }],
+      },
+    },
+  });
+
+  await gateway.asr.transcribe({
+    model: "asr-default",
+    audio: audioBlob(),
+    fileName: "voice.mp3",
+    mimeType: "audio/mpeg",
+  });
+
+  assert.equal(
+    requests[0]?.url,
+    "https://proxy.example.com/v1/audio/transcriptions",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.[
+      "x-proxy-key"
+    ],
+    "proxy-token",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    undefined,
+  );
+});
+
 test("asr.transcribe supports word timestamp opt-in", async () => {
   const forms: FormData[] = [];
   const gateway = createModelGateway({

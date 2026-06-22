@@ -38,6 +38,8 @@ export type CatalogDiscoveryGateway = {
   providerKind: string;
   baseUrl: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders?: Record<string, string>;
   supports: string[];
 };
@@ -57,6 +59,24 @@ const SUPPORTED_DYNAMIC_KINDS: Record<CatalogModelKind, string[]> = {
 
 function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
+}
+
+function buildAuthHeaders(input: Pick<
+  CatalogDiscoveryGateway,
+  "apiKey" | "apiKeyHeaderName" | "apiKeyHeaderPrefix"
+>) {
+  if (!input.apiKey) {
+    return {};
+  }
+  if (input.apiKeyHeaderName) {
+    return {
+      [input.apiKeyHeaderName]:
+        `${input.apiKeyHeaderPrefix ?? ""}${input.apiKey}`,
+    };
+  }
+  return {
+    Authorization: `Bearer ${input.apiKey}`,
+  };
 }
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
@@ -344,7 +364,7 @@ async function discoverOpenAICompatibleCatalog(input: {
   const response = await fetch(`${normalizeBaseUrl(input.gateway.baseUrl)}/models`, {
     headers: {
       ...(input.gateway.defaultHeaders ?? {}),
-      ...(input.gateway.apiKey ? { Authorization: `Bearer ${input.gateway.apiKey}` } : {}),
+      ...buildAuthHeaders(input.gateway),
     },
   });
   if (!response.ok) {
@@ -398,6 +418,8 @@ export async function discoverByokModelCandidates(input: {
   providerName: string;
   baseUrl: string;
   apiKey: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders?: Record<string, string>;
 }) {
   const gateway: CatalogDiscoveryGateway = {
@@ -406,13 +428,15 @@ export async function discoverByokModelCandidates(input: {
     providerName: input.providerName,
     baseUrl: input.baseUrl,
     apiKey: input.apiKey,
+    apiKeyHeaderName: input.apiKeyHeaderName,
+    apiKeyHeaderPrefix: input.apiKeyHeaderPrefix,
     defaultHeaders: input.defaultHeaders,
     supports: ["chat", "embeddings", "rerank", "asr", "image", "tool_calling"],
   };
   const response = await fetch(`${normalizeBaseUrl(gateway.baseUrl)}/models`, {
     headers: {
       ...(gateway.defaultHeaders ?? {}),
-      Authorization: `Bearer ${gateway.apiKey}`,
+      ...buildAuthHeaders(gateway),
     },
   });
   if (!response.ok) {

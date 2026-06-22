@@ -1,4 +1,5 @@
 import { ModelGatewayError } from "./errors";
+import { buildProviderAuthHeaders } from "./auth-headers";
 import type {
   CustomByokProviderConfig,
   GatewayExecutionInput,
@@ -64,6 +65,8 @@ function normalizeProviderConfigs(
       kind: "openai-compatible",
       baseUrl: config.baseUrl ?? "",
       apiKey: config.apiKey,
+      apiKeyHeaderName: config.apiKeyHeaderName,
+      apiKeyHeaderPrefix: config.apiKeyHeaderPrefix,
       defaultHeaders: config.defaultHeaders,
       enabled: true,
     },
@@ -88,6 +91,8 @@ function normalizeProviderConfigs(
         kind: provider.kind,
         baseUrl,
         apiKey: provider.apiKey,
+        apiKeyHeaderName: provider.apiKeyHeaderName,
+        apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
         defaultHeaders: provider.defaultHeaders ?? {},
         supports: provider.supports ?? [],
         enabled: provider.enabled ?? true,
@@ -197,6 +202,8 @@ export function resolveModelGatewayConfig(
   return {
     baseUrl: defaultProvider?.baseUrl ?? "",
     apiKey: defaultProvider?.apiKey,
+    apiKeyHeaderName: defaultProvider?.apiKeyHeaderName,
+    apiKeyHeaderPrefix: defaultProvider?.apiKeyHeaderPrefix,
     providers,
     routes,
     fetch: fetchFn,
@@ -340,6 +347,8 @@ function resolveInlineByokProvider(input: {
         "openai-compatible",
       baseUrl,
       apiKey: input.apiKey,
+      apiKeyHeaderName: input.execution.byok?.apiKeyHeaderName,
+      apiKeyHeaderPrefix: input.execution.byok?.apiKeyHeaderPrefix,
       defaultHeaders: input.execution.byok?.defaultHeaders,
       supports: input.configuredProvider?.supports,
       enabled: input.configuredProvider?.enabled ?? true,
@@ -361,6 +370,8 @@ function normalizeCustomByokProvider(
     kind: provider.kind,
     baseUrl,
     apiKey: provider.apiKey,
+    apiKeyHeaderName: provider.apiKeyHeaderName,
+    apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
     defaultHeaders: provider.defaultHeaders ?? {},
     supports: provider.supports ?? [],
     enabled: provider.enabled ?? true,
@@ -472,6 +483,8 @@ export async function resolveRequestTarget(
       providerModel: execution.model,
       baseUrl: provider.baseUrl,
       apiKey,
+      apiKeyHeaderName: provider.apiKeyHeaderName,
+      apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
       defaultHeaders: provider.defaultHeaders,
       routeDecision: {
         alias: `${provider.name}:${execution.model}`,
@@ -502,6 +515,8 @@ export async function resolveRequestTarget(
       providerModel: execution.model,
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
+      apiKeyHeaderName: provider.apiKeyHeaderName,
+      apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
       defaultHeaders: provider.defaultHeaders,
       routeDecision: {
         alias: routeKey,
@@ -552,6 +567,8 @@ export async function resolveRequestTarget(
     providerModel: selected.model,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
+    apiKeyHeaderName: provider.apiKeyHeaderName,
+    apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
     defaultHeaders: provider.defaultHeaders,
     ...(selected.providerRouting
       ? { providerRouting: selected.providerRouting }
@@ -577,6 +594,8 @@ export function createRequestConfig(
   return {
     baseUrl: target.baseUrl,
     apiKey: target.apiKey,
+    apiKeyHeaderName: target.apiKeyHeaderName,
+    apiKeyHeaderPrefix: target.apiKeyHeaderPrefix,
     fetch: config.fetch,
     timeoutMs: config.timeoutMs,
     maxRetries: config.maxRetries,
@@ -591,16 +610,17 @@ export function createRequestConfig(
 }
 
 export function buildRequestHeaders(
-  config: Pick<ResolvedRequestConfig, "defaultHeaders" | "apiKey">,
+  config: Pick<
+    ResolvedRequestConfig,
+    "defaultHeaders" | "apiKey" | "apiKeyHeaderName" | "apiKeyHeaderPrefix"
+  >,
   options?: RequestOptions,
 ): Record<string, string> {
   const headers: Record<string, string> = {
     ...config.defaultHeaders,
   };
 
-  if (config.apiKey) {
-    headers.Authorization = `Bearer ${config.apiKey}`;
-  }
+  Object.assign(headers, buildProviderAuthHeaders(config));
 
   if (options?.idempotencyKey) {
     headers["Idempotency-Key"] = options.idempotencyKey;

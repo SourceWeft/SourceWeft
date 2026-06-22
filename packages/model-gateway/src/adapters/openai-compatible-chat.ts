@@ -1,4 +1,5 @@
 import { ChatOpenAI } from "@langchain/openai";
+import { buildOpenAICompatibleDefaultHeaders } from "../auth-headers";
 import type { ChatAdapter } from "./types";
 
 export class OpenAICompatibleChatAdapter implements ChatAdapter {
@@ -17,7 +18,7 @@ export class OpenAICompatibleChatAdapter implements ChatAdapter {
       apiKey: target.apiKey,
       configuration: {
         baseURL: target.baseUrl,
-        defaultHeaders: target.defaultHeaders,
+        defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),

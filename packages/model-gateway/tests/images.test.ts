@@ -100,6 +100,52 @@ test("images.generate sends DeepInfra image requests through OpenAI-compatible U
   );
 });
 
+test("openai-compatible images support custom API key headers", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return createJsonResponse({
+        data: [{ b64_json: "aW1hZ2U=" }],
+      });
+    },
+    providers: {
+      "openai-proxy": {
+        kind: "openai-compatible",
+        baseUrl: "https://proxy.example.com/v1",
+        apiKey: "proxy-token",
+        apiKeyHeaderName: "x-proxy-key",
+      },
+    },
+    modelRoutes: {
+      "image-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai-proxy", model: "image-model", priority: 1 }],
+      },
+    },
+  });
+
+  await gateway.images.generate({
+    model: "image-default",
+    prompt: "draw a small icon",
+  });
+
+  assert.equal(
+    requests[0]?.url,
+    "https://proxy.example.com/v1/images/generations",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.[
+      "x-proxy-key"
+    ],
+    "proxy-token",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    undefined,
+  );
+});
+
 test("images.generate preserves OpenRouter provider cost from usage", async () => {
   const gateway = createModelGateway({
     fetch: async () =>

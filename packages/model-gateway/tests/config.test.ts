@@ -40,6 +40,60 @@ test("resolveModelGatewayConfig normalizes values and applies defaults", () => {
   });
 });
 
+test("buildRequestHeaders supports custom API key headers", () => {
+  const headers = buildRequestHeaders({
+    defaultHeaders: {
+      "Content-Type": "application/json",
+    },
+    apiKey: "cf-token",
+    apiKeyHeaderName: "cf-aig-authorization",
+    apiKeyHeaderPrefix: "Bearer ",
+  });
+
+  assert.deepEqual(headers, {
+    "Content-Type": "application/json",
+    "cf-aig-authorization": "Bearer cf-token",
+  });
+});
+
+test("resolveRequestTarget carries provider custom API key header config", async () => {
+  const resolved = resolveModelGatewayConfig({
+    fetch: fetchStub,
+    providers: {
+      "cloudflare-aig": {
+        kind: "openai-compatible",
+        baseUrl: "https://gateway.ai.cloudflare.com/v1/account/gateway/compat",
+        apiKey: "cf-token",
+        apiKeyHeaderName: "cf-aig-authorization",
+        apiKeyHeaderPrefix: "Bearer ",
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [
+          {
+            provider: "cloudflare-aig",
+            model: "deepseek/deepseek-v4-pro",
+            priority: 1,
+          },
+        ],
+      },
+    },
+  });
+
+  const target = await resolveRequestTarget(resolved, {
+    model: "chat-default",
+  });
+
+  assert.equal(target.provider, "cloudflare-aig");
+  assert.equal(target.providerKind, "openai-compatible");
+  assert.equal(target.providerModel, "deepseek/deepseek-v4-pro");
+  assert.equal(target.apiKey, "cf-token");
+  assert.equal(target.apiKeyHeaderName, "cf-aig-authorization");
+  assert.equal(target.apiKeyHeaderPrefix, "Bearer ");
+});
+
 test("resolveModelGatewayConfig rejects disallowed base URLs", () => {
   assert.throws(
     () =>

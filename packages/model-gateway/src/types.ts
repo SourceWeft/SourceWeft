@@ -67,6 +67,8 @@ export interface ByokCredentialsInput {
   baseUrl?: string;
   apiKey?: string;
   apiKeyRef?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders?: Record<string, string>;
   allowFallback?: boolean;
 }
@@ -294,6 +296,8 @@ export interface GatewayProviderConfig {
   kind: ProviderKind;
   baseUrl: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders?: Record<string, string>;
   supports?: readonly string[];
   enabled?: boolean;
@@ -701,6 +705,8 @@ export interface ModelGateway {
 export interface ModelGatewayConfig {
   baseUrl?: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   providers?: Record<string, GatewayProviderConfig>;
   modelRoutes?: Record<string, ModelRouteConfig>;
   modeDefault?: GatewayExecutionMode;
@@ -737,6 +743,8 @@ export interface ResolvedGatewayProviderConfig {
   kind: ProviderKind;
   baseUrl: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;
   supports: readonly string[];
   enabled: boolean;
@@ -746,6 +754,8 @@ export interface CustomByokProviderConfig {
   kind: ProviderKind;
   baseUrl: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders?: Record<string, string>;
   supports?: readonly string[];
   enabled?: boolean;
@@ -769,6 +779,8 @@ export interface ResolvedModelRouteConfig {
 export interface ResolvedModelGatewayConfig {
   baseUrl: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   providers: Record<string, ResolvedGatewayProviderConfig>;
   routes: Record<string, ResolvedModelRouteConfig>;
   fetch: typeof fetch;
@@ -795,6 +807,8 @@ export interface ResolvedRequestTarget {
   providerModel: string;
   baseUrl: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;
   providerRouting?: ProviderRoutingConfig;
   routeDecision: RouteDecision;
@@ -804,6 +818,8 @@ export interface ResolvedRequestTarget {
 export interface ResolvedRequestConfig {
   baseUrl: string;
   apiKey?: string;
+  apiKeyHeaderName?: string;
+  apiKeyHeaderPrefix?: string;
   fetch: typeof fetch;
   timeoutMs: number;
   maxRetries: number;

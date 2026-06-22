@@ -1,3 +1,4 @@
+import { buildProviderAuthHeaders } from "../auth-headers";
 import type { TtsTransport } from "./types";
 import {
   buildTtsSpeechResult,
@@ -73,9 +74,7 @@ export class OpenRouterTtsTransport implements TtsTransport {
         headers: {
           "Content-Type": "application/json",
           ...input.target.defaultHeaders,
-          ...(input.target.apiKey
-            ? { Authorization: `Bearer ${input.target.apiKey}` }
-            : {}),
+          ...buildProviderAuthHeaders(input.target),
         },
         body: JSON.stringify(this.buildProviderBody(input)),
         signal: input.options?.signal,

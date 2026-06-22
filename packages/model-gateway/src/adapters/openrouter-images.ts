@@ -1,3 +1,4 @@
+import { buildProviderAuthHeaders } from "../auth-headers";
 import type { ImageGenerationTransport } from "./types";
 import {
   applyImageStylePrompt,
@@ -72,9 +73,7 @@ export class OpenRouterImageGenerationTransport
         headers: {
           "Content-Type": "application/json",
           ...input.target.defaultHeaders,
-          ...(input.target.apiKey
-            ? { Authorization: `Bearer ${input.target.apiKey}` }
-            : {}),
+          ...buildProviderAuthHeaders(input.target),
         },
         body: JSON.stringify({
           model: input.target.providerModel,

@@ -1,3 +1,4 @@
+import { buildProviderAuthHeaders } from "../auth-headers";
 import { createHttpGatewayError } from "../errors";
 import { normalizeProviderUsage } from "../normalize/usage";
 import type { RerankTransport } from "./types";
@@ -41,7 +42,7 @@ export class DeepInfraRerankTransport implements RerankTransport {
         headers: {
           "Content-Type": "application/json",
           ...input.target.defaultHeaders,
-          ...(input.target.apiKey ? { Authorization: `Bearer ${input.target.apiKey}` } : {}),
+          ...buildProviderAuthHeaders(input.target),
         },
         body: JSON.stringify({
           queries: [input.payload.query],

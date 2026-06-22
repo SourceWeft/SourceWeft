@@ -90,6 +90,13 @@ export function normalizeRouteProviderRouting(
   return providerRouting as ProviderRoutingConfig;
 }
 
+function normalizeOptionalHeaderValue(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  return value.length > 0 ? value : undefined;
+}
+
 export async function resolveByokApiKeyRef(input: {
   provider: string;
   apiKeyRef: string;
@@ -248,6 +255,10 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
           (value): value is string => typeof value === "string" && value.length > 0,
         )
       : [];
+    const providerConfigJson =
+      row.configJson && typeof row.configJson === "object"
+        ? (row.configJson as Record<string, unknown>)
+        : {};
 
     providers[row.providerName] = {
       gatewayConfigId: row.gatewayConfigId,
@@ -260,6 +271,12 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
               config.modelGatewayEncryptionSecret,
             ) || undefined
           : undefined,
+      apiKeyHeaderName: normalizeOptionalHeaderValue(
+        providerConfigJson.apiKeyHeaderName,
+      ),
+      apiKeyHeaderPrefix: typeof providerConfigJson.apiKeyHeaderPrefix === "string"
+        ? providerConfigJson.apiKeyHeaderPrefix
+        : undefined,
       isBYOK: gatewayRow?.isBYOK ?? false,
       hasGlobalApiKey:
         typeof gatewayRow?.apiKeyEncrypted === "string" &&
@@ -267,9 +284,7 @@ export async function loadRoutedGatewayConfig(): Promise<RoutedGatewayConfig | n
       defaultHeaders: withOpenRouterAttributionHeaders({
         providerKind: row.providerKind,
         defaultHeaders: normalizeDefaultHeaders(
-          row.configJson && typeof row.configJson === "object"
-            ? (row.configJson as Record<string, unknown>).defaultHeaders
-            : undefined,
+          providerConfigJson.defaultHeaders,
         ),
       }),
       supports,
@@ -351,6 +366,8 @@ export function buildRoutedModelGatewayConfig(
           kind: provider.kind,
           baseUrl: provider.baseUrl,
           apiKey: provider.apiKey,
+          apiKeyHeaderName: provider.apiKeyHeaderName,
+          apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
           defaultHeaders: provider.defaultHeaders,
           supports: provider.supports,
         },

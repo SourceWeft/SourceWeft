@@ -1,3 +1,4 @@
+import { buildProviderAuthHeaders } from "../auth-headers";
 import type { ImageGenerationTransport } from "./types";
 import {
   applyImageStylePrompt,
@@ -43,9 +44,7 @@ export class OpenAICompatibleImageGenerationTransport
         headers: {
           "Content-Type": "application/json",
           ...input.target.defaultHeaders,
-          ...(input.target.apiKey
-            ? { Authorization: `Bearer ${input.target.apiKey}` }
-            : {}),
+          ...buildProviderAuthHeaders(input.target),
         },
         body: JSON.stringify(this.buildProviderBody(input)),
         signal: input.options?.signal,

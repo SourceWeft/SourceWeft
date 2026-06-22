@@ -1,3 +1,4 @@
+import { buildProviderAuthHeaders } from "../auth-headers";
 import { createHttpGatewayError } from "../errors";
 import type { AsrTransport } from "./types";
 import {
@@ -56,9 +57,7 @@ export class OpenAICompatibleAsrTransport implements AsrTransport {
         method: "POST",
         headers: {
           ...input.target.defaultHeaders,
-          ...(input.target.apiKey
-            ? { Authorization: `Bearer ${input.target.apiKey}` }
-            : {}),
+          ...buildProviderAuthHeaders(input.target),
         },
         body: form,
         signal: input.options?.signal,

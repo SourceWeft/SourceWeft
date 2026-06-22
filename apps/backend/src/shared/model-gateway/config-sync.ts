@@ -769,6 +769,8 @@ async function syncGlobalModelGatewayConfigFromFile(
         providerKind: entry.providerKind,
         supports: entry.supports,
         apiKeySource: entry.apiKeyEnv ?? null,
+        apiKeyHeaderName: entry.apiKeyHeaderName ?? null,
+        apiKeyHeaderPrefix: entry.apiKeyHeaderPrefix ?? null,
         defaultHeaders: entry.defaultHeaders,
         ...(entry.modelCatalog ? { modelCatalog: entry.modelCatalog } : {}),
       } satisfies Record<string, unknown>;
@@ -840,6 +842,8 @@ async function syncGlobalModelGatewayConfigFromFile(
               providerKind: providerConfig.providerKind,
               defaultHeaders: entry.defaultHeaders,
             }),
+            apiKeyHeaderName: entry.apiKeyHeaderName ?? null,
+            apiKeyHeaderPrefix: entry.apiKeyHeaderPrefix ?? null,
           },
           createdAt: now,
           updatedAt: now,

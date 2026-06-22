@@ -73,6 +73,22 @@ test("loadGlobalModelGatewayConfig preserves omitted pricing as undefined", asyn
   assert.equal(loaded?.chatProfiles[0]?.pricing, undefined);
 });
 
+test("loadGlobalModelGatewayConfig preserves custom API key header config", async () => {
+  const config = baseConfig();
+  config.gateways[0] = {
+    ...config.gateways[0],
+    apiKeyEnv: "CF_AIG_TOKEN",
+    apiKeyHeaderName: "cf-aig-authorization",
+    apiKeyHeaderPrefix: "Bearer ",
+  };
+
+  const loaded = await loadConfig(config);
+
+  assert.equal(loaded?.gateways[0]?.apiKeyEnv, "CF_AIG_TOKEN");
+  assert.equal(loaded?.gateways[0]?.apiKeyHeaderName, "cf-aig-authorization");
+  assert.equal(loaded?.gateways[0]?.apiKeyHeaderPrefix, "Bearer ");
+});
+
 test("loadGlobalModelGatewayConfig preserves explicit null pricing", async () => {
   const config = baseConfig();
   config.chatProfiles[0] = {

@@ -79,14 +79,18 @@ test("tts.speech maps OpenRouter instructions into provider options", async () =
   });
 });
 
-test("tts.speech rejects unsupported non-OpenRouter TTS providers", async () => {
+test("tts.speech sends DeepInfra OpenAI-compatible speech request", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
   const gateway = createModelGateway({
-    fetch: async () => audioResponse(),
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return audioResponse("audio/wav");
+    },
     providers: {
-      openai: {
-        kind: "openai",
-        baseUrl: "https://api.openai.com/v1",
-        apiKey: "openai-key",
+      deepinfra: {
+        kind: "deepinfra",
+        baseUrl: "https://api.deepinfra.com/v1",
+        apiKey: "deepinfra-key",
       },
     },
     modelRoutes: {
@@ -94,8 +98,8 @@ test("tts.speech rejects unsupported non-OpenRouter TTS providers", async () => 
         strategy: "priority",
         targets: [
           {
-            provider: "openai",
-            model: "gpt-4o-mini-tts",
+            provider: "deepinfra",
+            model: "XiaomiMiMo/MiMo-V2.5-tts",
             priority: 1,
           },
         ],
@@ -103,12 +107,76 @@ test("tts.speech rejects unsupported non-OpenRouter TTS providers", async () => 
     },
   });
 
-  await assert.rejects(
-    () =>
-      gateway.tts.speech({
-        model: "tts-default",
-        input: "Hello from SourceWeft",
-      }),
-    /does not support TTS/,
+  const result = await gateway.tts.speech({
+    model: "tts-default",
+    input: "Hello from SourceWeft",
+    voice: "mimo",
+    instructions: "Use a warm narration voice.",
+    responseFormat: "wav",
+    speed: 1.1,
+    extraBody: {
+      sample_rate: 24000,
+    },
+  });
+
+  assert.equal(
+    requests[0]?.url,
+    "https://api.deepinfra.com/v1/openai/audio/speech",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string>)?.Authorization,
+    "Bearer deepinfra-key",
+  );
+  assert.deepEqual(JSON.parse(String(requests[0]?.init.body)), {
+    model: "XiaomiMiMo/MiMo-V2.5-tts",
+    input: "Hello from SourceWeft",
+    voice: "mimo",
+    response_format: "wav",
+    speed: 1.1,
+    instructions: "Use a warm narration voice.",
+    sample_rate: 24000,
+  });
+  assert.equal(result.provider, "deepinfra");
+  assert.equal(result.providerModel, "XiaomiMiMo/MiMo-V2.5-tts");
+  assert.equal(result.mimeType, "audio/wav");
+});
+
+test("OpenRouter TTS supports custom API key headers", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return audioResponse();
+    },
+    providers: {
+      openrouter: {
+        kind: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        apiKey: "router-token",
+        apiKeyHeaderName: "x-router-key",
+      },
+    },
+    modelRoutes: {
+      "tts-default": {
+        strategy: "priority",
+        targets: [{ provider: "openrouter", model: "tts-model", priority: 1 }],
+      },
+    },
+  });
+
+  await gateway.tts.speech({
+    model: "tts-default",
+    input: "Hello from SourceWeft",
+  });
+
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.[
+      "x-router-key"
+    ],
+    "router-token",
+  );
+  assert.equal(
+    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    undefined,
   );
 });

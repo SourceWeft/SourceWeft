@@ -127,3 +127,33 @@ test("OpenRouter catalog discovery sends attribution headers", async () => {
   assert.equal(headers["X-Title"], "SourceWeft");
   assert.equal(headers["HTTP-Referer"], "https://sourceweft.com");
 });
+
+test("OpenAI-compatible catalog discovery supports custom API key headers", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ data: [] }), {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    }),
+  );
+
+  await discoverGatewayCatalog({
+    gateway: {
+      slug: "cloudflare-aig-default",
+      providerName: "cloudflare-aig",
+      providerKind: "openai-compatible",
+      baseUrl: "https://gateway.example.com/compat",
+      apiKey: "cf-token",
+      apiKeyHeaderName: "cf-aig-authorization",
+      apiKeyHeaderPrefix: "Bearer ",
+      supports: ["chat", "tool_calling"],
+    },
+    litellmData: {},
+  });
+
+  assert.equal(fetchMock.mock.calls.length, 1);
+  const init = fetchMock.mock.calls[0]?.[1];
+  const headers = init?.headers as Record<string, string>;
+
+  assert.equal(headers["cf-aig-authorization"], "Bearer cf-token");
+  assert.equal(headers.Authorization, undefined);
+});
