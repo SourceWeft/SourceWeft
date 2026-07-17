@@ -849,14 +849,48 @@ function normalizeThinkingStepRecord(
   };
 }
 
+function completeRunningThinkingStep(
+  step: ThinkingStepRecord,
+): ThinkingStepRecord {
+  if (step.status !== "in_progress") {
+    return step;
+  }
+  return {
+    ...step,
+    status: "completed",
+  };
+}
+
+function terminalizeThinkingStepRecord(
+  step: ThinkingStepRecord,
+  isTerminal: boolean,
+): ThinkingStepRecord {
+  return isTerminal ? completeRunningThinkingStep(step) : step;
+}
+
+function terminalizeTracePartRecord(
+  part: TracePartRecord,
+  isTerminal: boolean,
+): TracePartRecord {
+  if (!isTerminal || part.kind !== "step" || part.status !== "in_progress") {
+    return part;
+  }
+  return {
+    ...part,
+    status: "completed",
+  };
+}
+
 function resolveThinkingStepsFromMetadata(metadata: Record<string, unknown>) {
   if (!Array.isArray(metadata.thinkingSteps)) {
     return [] as ThinkingStepRecord[];
   }
 
+  const isTerminal = isTerminalMessageMetadata(metadata);
   return metadata.thinkingSteps
     .map((item) => normalizeThinkingStepRecord(item))
-    .filter((item): item is ThinkingStepRecord => item !== null);
+    .filter((item): item is ThinkingStepRecord => item !== null)
+    .map((step) => terminalizeThinkingStepRecord(step, isTerminal));
 }
 
 function resolveModelReasoningFromMetadata(metadata: Record<string, unknown>) {
@@ -978,9 +1012,19 @@ function resolveReasoningTraceEventsFromMetadata(
     return [] as ReasoningTraceEventRecord[];
   }
 
+  const isTerminal = isTerminalMessageMetadata(metadata);
   return metadata.traceEvents
     .map((item) => normalizeReasoningTraceEventRecord(item))
-    .filter((item): item is ReasoningTraceEventRecord => item !== null);
+    .filter((item): item is ReasoningTraceEventRecord => item !== null)
+    .map((event) => {
+      if (!isTerminal || event.type !== "thinking-step") {
+        return event;
+      }
+      return {
+        ...event,
+        step: terminalizeThinkingStepRecord(event.step, true),
+      };
+    });
 }
 
 function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
@@ -1094,9 +1138,11 @@ function resolveTracePartsFromMetadata(metadata: Record<string, unknown>) {
     return [] as TracePartRecord[];
   }
 
+  const isTerminal = isTerminalMessageMetadata(metadata);
   return metadata.traceParts
     .map((item) => normalizeTracePartRecord(item))
     .filter((item): item is TracePartRecord => item !== null)
+    .map((part) => terminalizeTracePartRecord(part, isTerminal))
     .sort((left, right) => left.order - right.order);
 }
 

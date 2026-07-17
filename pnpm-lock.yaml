@@ -415,6 +415,9 @@ importers:
       '@sourceweft/agent-tool-registry':
         specifier: workspace:*
         version: link:../../packages/agent-tool-registry
+      '@sourceweft/builtin-connector-notion':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-notion
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

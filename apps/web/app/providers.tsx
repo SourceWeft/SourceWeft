@@ -18,7 +18,10 @@ import {
   customAuthViewPaths,
   customOrganizationViewPaths,
 } from "../lib/auth-ui-config";
+import { registerBuiltinAgentTools } from "../lib/register-builtin-agent-tools";
 import { userSettingsClient } from "../lib/sdk";
+
+registerBuiltinAgentTools();
 
 function resolveWebBaseUrl() {
   const configuredBaseUrl = process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim();

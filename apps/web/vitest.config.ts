@@ -7,6 +7,7 @@ export default defineConfig({
     },
   },
   test: {
+    setupFiles: ["./vitest.setup.ts"],
     coverage: {
       exclude: [".next/**", "next-env.d.ts"],
       provider: "v8",
