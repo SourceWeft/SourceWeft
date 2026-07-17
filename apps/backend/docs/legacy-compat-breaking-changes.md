@@ -32,7 +32,7 @@ WHERE metadata ? 'tools'
   AND NOT metadata ? 'options';
 ```
 
-**Local dev check (2026-07-17):** `candidates = 0`. No backfill required on the local database.
+**Local dev check (2026-07-18):** `candidates = 0`. No backfill required on the local database.
 
 If `candidates > 0`, apply a one-time backfill before users edit or regenerate those messages:
 

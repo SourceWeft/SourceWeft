@@ -20,6 +20,25 @@ const WEB_ACCESS_TOOL_NAMES = new Set<string>([
   AGENT_TOOL_NAMES.webFetch,
 ]);
 
+export const MAX_SELECTED_SKILL_IDS_PER_TURN = 5;
+
+export function normalizeSkillIdsForRequest(skillIds: readonly string[]) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const skillId of skillIds) {
+    const trimmed = skillId.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    normalized.push(trimmed);
+    if (normalized.length >= MAX_SELECTED_SKILL_IDS_PER_TURN) {
+      break;
+    }
+  }
+  return normalized;
+}
+
 /**
  * Return agent tool names that belong to a connector type.
  * Uses capability tags (e.g. "notion") to discover tools dynamically.
@@ -50,10 +69,15 @@ export function buildChatToolsRequest(input: {
         }
       : {};
 
+  const skillIds = normalizeSkillIdsForRequest(input.skillIds ?? []);
+  const invokedSkillIds = input.invokedSkillIds?.length
+    ? normalizeSkillIdsForRequest(input.invokedSkillIds)
+    : [];
+
   return {
-    skillIds: input.skillIds ?? [],
-    ...(input.invokedSkillIds?.length
-      ? { invokedSkillIds: input.invokedSkillIds }
+    skillIds,
+    ...(invokedSkillIds.length > 0
+      ? { invokedSkillIds }
       : {}),
     ...entries,
     ...webAccessSelection,

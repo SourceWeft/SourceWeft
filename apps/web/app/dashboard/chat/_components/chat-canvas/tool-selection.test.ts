@@ -73,6 +73,43 @@ test("buildChatToolsRequest preserves dynamic tool selections and invoked skills
   });
 });
 
+test("buildChatToolsRequest caps skillIds to the contract maximum", () => {
+  const tools = buildChatToolsRequest({
+    skillIds: [
+      "skill-1",
+      "skill-2",
+      "skill-3",
+      "skill-4",
+      "skill-5",
+      "skill-6",
+      "skill-1",
+    ],
+    invokedSkillIds: [
+      "invoked-1",
+      "invoked-2",
+      "invoked-3",
+      "invoked-4",
+      "invoked-5",
+      "invoked-6",
+    ],
+  });
+
+  assert.deepEqual(tools.skillIds, [
+    "skill-1",
+    "skill-2",
+    "skill-3",
+    "skill-4",
+    "skill-5",
+  ]);
+  assert.deepEqual(tools.invokedSkillIds, [
+    "invoked-1",
+    "invoked-2",
+    "invoked-3",
+    "invoked-4",
+    "invoked-5",
+  ]);
+});
+
 test("buildChatToolsRequest serializes web access as search and fetch selections", () => {
   assert.deepEqual(
     buildChatToolsRequest({
