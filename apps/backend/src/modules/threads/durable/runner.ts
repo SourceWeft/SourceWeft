@@ -88,7 +88,7 @@ function durableUserMessageIdFallback(input: {
   if (input.run.userMessageId) {
     return input.run.userMessageId;
   }
-  if (input.request.mode !== "send" && input.request.mode !== "edit") {
+  if (input.run.mode !== "send" && input.run.mode !== "edit") {
     return null;
   }
   const request = input.request as DurableRunRequestSnapshot & {
@@ -982,6 +982,9 @@ function buildThreadRunMetadata(run: ChatThreadRunRecord) {
       status: run.status,
       mode: run.mode,
       streamKey: run.streamKey,
+      ...(run.assistantMessageId
+        ? { assistantMessageId: run.assistantMessageId }
+        : {}),
       ...(run.startedAt && run.finishedAt
         ? {
             startedAt: run.startedAt,

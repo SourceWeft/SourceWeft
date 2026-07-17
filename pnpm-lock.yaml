@@ -61,7 +61,7 @@ importers:
         version: 1.0.36(@langchain/core@1.2.0(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1)
       '@langchain/community':
         specifier: ^1.1.29
-        version: 1.1.29(ecffb45415a49100afdccc7eae77d942)
+        version: 1.1.29(856e19b08dee5d86b27d363b5d37c93e)
       '@langchain/core':
         specifier: ^1.2.0
         version: 1.2.0(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1)
@@ -176,6 +176,9 @@ importers:
       officeparser:
         specifier: ^6.0.7
         version: 6.0.7
+      pdf-parse:
+        specifier: ^1.1.1
+        version: 1.1.4
       pdfjs-dist:
         specifier: ^5.6.205
         version: 5.6.205
@@ -615,7 +618,7 @@ importers:
         version: 1.0.36(@langchain/core@1.2.0(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1))(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1)
       '@langchain/community':
         specifier: ^1.1.29
-        version: 1.1.29(ecffb45415a49100afdccc7eae77d942)
+        version: 1.1.29(856e19b08dee5d86b27d363b5d37c93e)
       '@langchain/core':
         specifier: ^1.2.0
         version: 1.2.0(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.217.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.0))(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(ws@8.21.1)
@@ -9169,6 +9172,9 @@ packages:
     engines: {node: '>=10.5.0'}
     deprecated: Use your platform's native DOMException instead
 
+  node-ensure@0.0.0:
+    resolution: {integrity: sha512-DRI60hzo2oKN1ma0ckc6nQWlHU69RH6xN0sjQTjMpChPfTYvKZdcQFfdYK2RWbJcKyUizSIy/l8OTGxMAM1QDw==}
+
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
 
@@ -9476,6 +9482,10 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
+
+  pdf-parse@1.1.4:
+    resolution: {integrity: sha512-XRIRcLgk6ZnUbsHsYXExMw+krrPE81hJ6FQPLdBNhhBefqIQKXu/WeTgNBGSwPrfU0v+UCEwn7AoAUOsVKHFvQ==}
+    engines: {node: '>=6.8.1'}
 
   pdfjs-dist@5.6.205:
     resolution: {integrity: sha512-tlUj+2IDa7G1SbvBNN74UHRLJybZDWYom+k6p5KIZl7huBvsA4APi6mKL+zCxd3tLjN5hOOEE9Tv7VdzO88pfg==}
@@ -13147,7 +13157,7 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/community@1.1.29(ecffb45415a49100afdccc7eae77d942)':
+  '@langchain/community@1.1.29(856e19b08dee5d86b27d363b5d37c93e)':
     dependencies:
       '@browserbasehq/stagehand': 1.14.0(@playwright/test@1.59.1)(deepmerge@4.3.1)(dotenv@17.3.1)(openai@6.44.0(ws@8.21.1)(zod@4.3.6))(zod@4.3.6)
       '@ibm-cloud/watsonx-ai': 1.7.11(typescript@5.9.2)
@@ -13184,6 +13194,7 @@ snapshots:
       lodash: 4.18.1
       mammoth: 1.12.0
       officeparser: 6.0.7
+      pdf-parse: 1.1.4
       pg: 8.20.0
       playwright: 1.59.1
       srt-parser-2: 1.2.3
@@ -15902,7 +15913,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.7(@opentelemetry/api@1.9.0)(@types/node@22.18.12)(@vitest/coverage-v8@4.1.7)(jsdom@26.1.0)(msw@2.12.14(@types/node@22.18.12)(typescript@5.9.2))(vite@8.0.2(@types/node@22.18.12)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0))
+      vitest: 4.1.7(@opentelemetry/api@1.9.0)(@types/node@22.18.12)(@vitest/coverage-v8@4.1.7)(jsdom@26.1.0)(msw@2.12.14(@types/node@22.18.12)(typescript@5.9.2))(vite@8.0.2(@types/node@22.18.12)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.3))
 
   '@vitest/expect@4.1.7':
     dependencies:
@@ -19870,6 +19881,8 @@ snapshots:
 
   node-domexception@1.0.0: {}
 
+  node-ensure@0.0.0: {}
+
   node-fetch-native@1.6.7: {}
 
   node-fetch@2.7.0:
@@ -20193,6 +20206,10 @@ snapshots:
   path-type@4.0.0: {}
 
   pathe@2.0.3: {}
+
+  pdf-parse@1.1.4:
+    dependencies:
+      node-ensure: 0.0.0
 
   pdfjs-dist@5.6.205:
     optionalDependencies:

@@ -31,6 +31,9 @@ export function normalizeUserSettings(value: unknown): UserSettings {
   if (hasSecretLikeKey(value)) {
     return DEFAULT_USER_SETTINGS;
   }
+  if (jsonSize(value) > MAX_JSON_BYTES) {
+    return DEFAULT_USER_SETTINGS;
+  }
   const parsed = userSettingsSchema.safeParse(value);
   const next = parsed.success ? parsed.data : DEFAULT_USER_SETTINGS;
   if (jsonSize(next) > MAX_JSON_BYTES) {
