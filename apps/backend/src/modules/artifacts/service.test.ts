@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { testExports } from "./service";
+
+vi.mock("../workspace/guards", () => ({
+  requireContentWorkspace: vi.fn(),
+}));
+
+vi.mock("../sources/storage", () => ({
+  downloadArtifactObject: vi.fn(),
+}));
+
+vi.mock("./repository", () => ({
+  findArtifactRecord: vi.fn(),
+  listArtifactRecords: vi.fn(),
+}));
 
 test("slides artifact downloads use artifact title over legacy payload file name", () => {
   const artifact = {
@@ -213,7 +226,7 @@ test("video presentation artifact advertises browser render capability", () => {
       storageKey: null,
     } as never),
     {
-      canOpenFile: false,
+      canOpenFile: true,
       canDownloadFile: false,
       canPreviewInline: false,
       canRenderClientVideo: true,

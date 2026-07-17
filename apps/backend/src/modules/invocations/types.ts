@@ -12,7 +12,6 @@ export type CapabilityToolSourceRef = {
   readonly kind: "capability_tool";
   readonly capabilityId: string;
   readonly contributionId: string;
-  readonly legacyToolName: string;
   readonly sourcePackageName: string | null;
   readonly toolName: string;
 };

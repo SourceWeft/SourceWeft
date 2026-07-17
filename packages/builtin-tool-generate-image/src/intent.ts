@@ -8,7 +8,7 @@ import {
 } from "./image-types";
 import {
   mergeImageArtifactConfig,
-  normalizeArtifactToolSelection,
+  normalizeArtifactImageConfig,
   normalizeGenerateImageToolSelection,
   normalizePartialArtifactImageConfig,
 } from "./image-config";
@@ -40,9 +40,7 @@ export type GenerateImageIntentDecisionResult<TProfile> = {
 };
 
 export type GenerateImageIntentDecisionInput<TContext, TProfile> = {
-  readonly tools?: Readonly<Record<string, unknown>> & {
-    readonly artifact?: unknown;
-  };
+  readonly tools?: Readonly<Record<string, unknown>>;
   readonly enabledSkills: readonly GenerateImageEnabledSkillDescriptor[];
   readonly profileContext?: TContext;
   readonly defaultToolEnabled?: boolean;
@@ -120,16 +118,13 @@ export async function resolveGenerateImageIntentDecision<TContext = unknown, TPr
   input: GenerateImageIntentDecisionInput<TContext, TProfile>,
 ): Promise<GenerateImageIntentDecisionResult<TProfile>> {
   const toolName = input.toolName ?? GENERATE_IMAGE_TOOL_ID;
-  const legacySelection = normalizeArtifactToolSelection(input.tools?.artifact);
   const generateImageSelection = normalizeGenerateImageToolSelection(
     input.tools?.[toolName],
   );
-  const explicit =
-    Boolean(generateImageSelection) || legacySelection?.kind === "image";
+  const explicit = Boolean(generateImageSelection);
   const disabled = generateImageSelection?.enabled === false;
   const requestedImageModelAlias =
     generateImageSelection?.modelAlias ??
-    legacySelection?.modelAlias ??
     modelAliasFromSkills(input.enabledSkills, toolName);
   const skillTriggered = input.enabledSkills.some((skill) =>
     skillHasImageCapability(skill, toolName),
@@ -155,8 +150,7 @@ export async function resolveGenerateImageIntentDecision<TContext = unknown, TPr
         })
       : null;
   const skillConfig = defaultConfigFromSkills(input.enabledSkills, toolName);
-  const requestedConfig =
-    generateImageSelection?.config ?? legacySelection?.image;
+  const requestedConfig = generateImageSelection?.config;
   const rawConfig = mergeImageArtifactConfig(skillConfig, requestedConfig);
   const config = clampConfigToCapabilities({
     config: rawConfig,

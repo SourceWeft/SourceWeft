@@ -21,6 +21,11 @@ Team subscription notes (current phase):
 - `src/modules`: business modules
 - `src/shared`: shared backend utilities
 
+Legacy compatibility cleanup notes:
+
+- [docs/legacy-compat-breaking-changes.md](./docs/legacy-compat-breaking-changes.md)
+- [docs/legacy-compat-pr-split.md](./docs/legacy-compat-pr-split.md)
+
 The backend is one codebase with three runtime entry points.
 
 Use `pnpm run dev` in this directory to start all three processes.

@@ -194,6 +194,7 @@ test("openai-compatible embeddings configure custom API key headers through Lang
       defaultHeaders: {
         "HTTP-Referer": "https://sourceweft.example",
       },
+      supports: ["embeddings"],
       routeDecision: {
         alias: "embed-default",
         mode: "GLOBAL",
@@ -228,6 +229,7 @@ test("openai-compatible embeddings keep standard SDK auth without custom headers
       defaultHeaders: {
         "HTTP-Referer": "https://sourceweft.example",
       },
+      supports: ["rerank"],
       routeDecision: {
         alias: "embed-default",
         mode: "GLOBAL",

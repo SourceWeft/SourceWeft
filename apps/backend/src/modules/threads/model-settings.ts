@@ -39,6 +39,19 @@ export const THREAD_KIND_BY_MODEL_KIND: Record<
   vision: "vision",
 };
 
+const DEFAULT_PROFILE_ALIAS_BY_THREAD_KIND: Record<ThreadModelKind, string> = {
+  llm: "chat-default",
+  image: "image-default",
+  vision: "vision-default",
+};
+
+function isDefaultThreadAlias(threadKind: ThreadModelKind, alias: string) {
+  return (
+    alias.trim().toLowerCase() ===
+    DEFAULT_PROFILE_ALIAS_BY_THREAD_KIND[threadKind]
+  );
+}
+
 export function normalizeThreadModelSettings(
   input:
     | Partial<ThreadModelSettings>
@@ -70,14 +83,34 @@ export function normalizeThreadModelSettings(
     }
     return trimmed;
   };
+  const normalizeProfileAlias = (
+    threadKind: ThreadModelKind,
+    value: string | null | undefined,
+  ) => {
+    const alias = normalizeAlias(value);
+    if (!alias || isDefaultThreadAlias(threadKind, alias)) {
+      return null;
+    }
+    return alias;
+  };
+  const normalizeModelAlias = (
+    threadKind: ThreadModelKind,
+    value: string | null | undefined,
+  ) => {
+    const alias = normalizeAlias(value);
+    if (!alias || isDefaultThreadAlias(threadKind, alias)) {
+      return null;
+    }
+    return alias;
+  };
 
   return {
-    llmProfileAlias: normalizeAlias(input?.llmProfileAlias),
-    imageProfileAlias: normalizeAlias(input?.imageProfileAlias),
-    visionProfileAlias: normalizeAlias(input?.visionProfileAlias),
-    llmModelAlias: normalizeAlias(input?.llmModelAlias),
-    imageModelAlias: normalizeAlias(input?.imageModelAlias),
-    visionModelAlias: normalizeAlias(input?.visionModelAlias),
+    llmProfileAlias: normalizeProfileAlias("llm", input?.llmProfileAlias),
+    imageProfileAlias: normalizeProfileAlias("image", input?.imageProfileAlias),
+    visionProfileAlias: normalizeProfileAlias("vision", input?.visionProfileAlias),
+    llmModelAlias: normalizeModelAlias("llm", input?.llmModelAlias),
+    imageModelAlias: normalizeModelAlias("image", input?.imageModelAlias),
+    visionModelAlias: normalizeModelAlias("vision", input?.visionModelAlias),
   };
 }
 
@@ -368,15 +401,10 @@ export async function hasActiveModelAlias(input: {
 
 export async function pruneUnavailableThreadModelAliases(
   settings: ThreadModelSettings,
-  patch: {
-    llmProfileAlias?: string | null;
-    imageProfileAlias?: string | null;
-    visionProfileAlias?: string | null;
-  },
 ): Promise<ThreadModelSettings> {
   const next = { ...settings };
 
-  if (patch.llmProfileAlias === undefined && next.llmProfileAlias) {
+  if (next.llmProfileAlias) {
     const valid = await hasActiveProfileAlias({
       profileKind: "chat",
       profileAlias: next.llmProfileAlias,
@@ -387,7 +415,7 @@ export async function pruneUnavailableThreadModelAliases(
     }
   }
 
-  if (patch.imageProfileAlias === undefined && next.imageProfileAlias) {
+  if (next.imageProfileAlias) {
     const valid = await hasActiveProfileAlias({
       profileKind: "image",
       profileAlias: next.imageProfileAlias,
@@ -398,7 +426,7 @@ export async function pruneUnavailableThreadModelAliases(
     }
   }
 
-  if (patch.visionProfileAlias === undefined && next.visionProfileAlias) {
+  if (next.visionProfileAlias) {
     const valid = await hasActiveProfileAlias({
       profileKind: "vision",
       profileAlias: next.visionProfileAlias,

@@ -1,12 +1,20 @@
 import type { Job } from "bullmq";
-import { jobsQueue } from "../../shared/queue";
+import { config } from "../../shared/config";
+import {
+  deliverablesQueue,
+  enqueueWithAudit,
+  jobsQueue,
+} from "../../shared/queue";
+import type { LlmExecutionConfig } from "./model-gateway-audit";
 
 export const SOURCE_PARSE_JOB = "source-parse";
 export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
 export const CONNECTOR_SYNC_JOB = "connector-sync";
 export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
 export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
+export const VIDEO_PRESENTATION_GENERATE_JOB = "video-presentation-generate";
 export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
+export const VIDEO_PRESENTATION_JOB_ATTEMPTS = 2;
 const SOURCE_PARSE_JOB_BACKOFF_MS = 5_000;
 
 export type SourceParseJobPayload = {
@@ -84,6 +92,24 @@ export type ConnectorSyncJobPayload = {
   targetExternalIds?: string[];
 };
 
+export type VideoPresentationGenerateJobPayload = {
+  artifactId: string;
+  jobId: string;
+  requestKey: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  userMessageId: string;
+  title: string;
+  request: Record<string, unknown>;
+  narrationEnabled: boolean;
+  traceId?: string;
+  parentSpanId?: string;
+  toolCallId?: string;
+  llm?: LlmExecutionConfig;
+};
+
 export type ThreadChatRunJobResult =
   | {
       status: "completed" | "waiting_for_approval";
@@ -148,7 +174,9 @@ export async function enqueueThreadTitleGenerateJob(
   }
 }
 
-export async function enqueueThreadChatRunJob(payload: ThreadChatRunJobPayload) {
+export async function enqueueThreadChatRunJob(
+  payload: ThreadChatRunJobPayload,
+) {
   const jobId = `${THREAD_CHAT_RUN_JOB}_${payload.runId}`;
   const existing = await jobsQueue.getJob(jobId);
   if (existing) {
@@ -171,7 +199,9 @@ export async function enqueueThreadChatRunJob(payload: ThreadChatRunJobPayload) 
   }
 }
 
-export async function enqueueConnectorSyncJob(payload: ConnectorSyncJobPayload) {
+export async function enqueueConnectorSyncJob(
+  payload: ConnectorSyncJobPayload,
+) {
   const jobId = `connector_sync_${payload.connectorId}_${payload.runId}`;
   const existing = await jobsQueue.getJob(jobId);
   if (existing) {
@@ -194,6 +224,49 @@ export async function enqueueConnectorSyncJob(payload: ConnectorSyncJobPayload) 
   }
 }
 
-export function isSourceParseJob(job: Job<Record<string, unknown>>): job is Job<SourceParseJobPayload> {
+export async function enqueueVideoPresentationGenerateJob(
+  payload: VideoPresentationGenerateJobPayload,
+) {
+  const existing = await deliverablesQueue.getJob(payload.jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state !== "failed") {
+      return existing;
+    }
+    await existing.retry("failed", {
+      resetAttemptsMade: true,
+      resetAttemptsStarted: true,
+    });
+    return existing;
+  }
+
+  try {
+    return await enqueueWithAudit(
+      VIDEO_PRESENTATION_GENERATE_JOB,
+      payload,
+      {
+        jobId: payload.jobId,
+        attempts: VIDEO_PRESENTATION_JOB_ATTEMPTS,
+        backoff: { type: "exponential", delay: 2_000 },
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+      {
+        queue: deliverablesQueue,
+        queueName: config.deliverablesQueueName,
+      },
+    );
+  } catch (error) {
+    const duplicate = await deliverablesQueue.getJob(payload.jobId);
+    if (duplicate) {
+      return duplicate;
+    }
+    throw error;
+  }
+}
+
+export function isSourceParseJob(
+  job: Job<Record<string, unknown>>,
+): job is Job<SourceParseJobPayload> {
   return job.name === SOURCE_PARSE_JOB;
 }

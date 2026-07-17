@@ -179,7 +179,6 @@ test("mergeInvocationTools enables fixed capability tool choices", () => {
       kind: "capability_tool",
       capabilityId: "sourceweft/generate-image",
       contributionId: "generate_image",
-      legacyToolName: AGENT_TOOL_NAMES.generateImage,
       sourcePackageName: null,
       toolName: AGENT_TOOL_NAMES.generateImage,
     },

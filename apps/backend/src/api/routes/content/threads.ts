@@ -48,6 +48,21 @@ type ResumeRequestData = StreamThreadRequestData & {
   toolApprovalResume: ResumeThreadInput["toolApprovalResume"];
 };
 
+function legacyStreamModelSettings(input: StreamThreadRequestData): {
+  imageProfileAlias?: string | null;
+  visionProfileAlias?: string | null;
+} {
+  const settings = input.modelSettings;
+  return {
+    ...(settings && "imageProfileAlias" in settings
+      ? { imageProfileAlias: settings.imageProfileAlias }
+      : {}),
+    ...(settings && "visionProfileAlias" in settings
+      ? { visionProfileAlias: settings.visionProfileAlias }
+      : {}),
+  };
+}
+
 function assertResumeRequestData(
   data: StreamThreadRequestData,
 ): asserts data is ResumeRequestData {
@@ -84,8 +99,7 @@ function buildResumeThreadInput(input: {
     llm: input.data.llm,
     image: input.data.image,
     vision: input.data.vision,
-    visionProfileAlias:
-      input.data.modelSettings?.visionProfileAlias ?? undefined,
+    ...legacyStreamModelSettings(input.data),
     toolApprovalResume: input.data.toolApprovalResume,
     mcpInstallIds: input.data.mcpInstallIds,
   };
@@ -240,8 +254,7 @@ export function registerThreadRoutes(app: Hono) {
       llm: parsed.data.llm,
       image: parsed.data.image,
       vision: parsed.data.vision,
-      visionProfileAlias:
-        parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+      ...legacyStreamModelSettings(parsed.data),
     });
 
     return ApiResponse.success(
@@ -592,8 +605,7 @@ export function registerThreadRoutes(app: Hono) {
                 llm: parsed.data.llm,
                 image: parsed.data.image,
                 vision: parsed.data.vision,
-                visionProfileAlias:
-                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                ...legacyStreamModelSettings(parsed.data),
               }
             : mode === "edit"
               ? {
@@ -615,8 +627,7 @@ export function registerThreadRoutes(app: Hono) {
                   llm: parsed.data.llm,
                   image: parsed.data.image,
                   vision: parsed.data.vision,
-                  visionProfileAlias:
-                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                  ...legacyStreamModelSettings(parsed.data),
                 }
               : {
                   workspaceId,
@@ -634,8 +645,7 @@ export function registerThreadRoutes(app: Hono) {
                   llm: parsed.data.llm,
                   image: parsed.data.image,
                   vision: parsed.data.vision,
-                  visionProfileAlias:
-                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                  ...legacyStreamModelSettings(parsed.data),
                 };
       await durableChatRunService.getOrCreateRun({
         workspaceId,
@@ -697,8 +707,7 @@ export function registerThreadRoutes(app: Hono) {
                 llm: parsed.data.llm,
                 image: parsed.data.image,
                 vision: parsed.data.vision,
-                visionProfileAlias:
-                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                ...legacyStreamModelSettings(parsed.data),
               } satisfies RefreshThreadInput)
             : mode === "edit"
               ? await contentThreadStreamService.editThread({
@@ -720,8 +729,7 @@ export function registerThreadRoutes(app: Hono) {
                   llm: parsed.data.llm,
                   image: parsed.data.image,
                   vision: parsed.data.vision,
-                  visionProfileAlias:
-                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                  ...legacyStreamModelSettings(parsed.data),
                   mcpInstallIds: parsed.data.mcpInstallIds,
                 } satisfies EditThreadInput)
               : await contentThreadStreamService.streamThread({
@@ -740,8 +748,7 @@ export function registerThreadRoutes(app: Hono) {
                   llm: parsed.data.llm,
                   image: parsed.data.image,
                   vision: parsed.data.vision,
-                  visionProfileAlias:
-                    parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                  ...legacyStreamModelSettings(parsed.data),
                   mcpInstallIds: parsed.data.mcpInstallIds,
                 });
 
@@ -775,8 +782,7 @@ export function registerThreadRoutes(app: Hono) {
               llm: parsed.data.llm,
               image: parsed.data.image,
               vision: parsed.data.vision,
-              visionProfileAlias:
-                parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+              ...legacyStreamModelSettings(parsed.data),
               mcpInstallIds: parsed.data.mcpInstallIds,
             } satisfies RefreshThreadInput)
           : mode === "edit"
@@ -799,8 +805,7 @@ export function registerThreadRoutes(app: Hono) {
                 llm: parsed.data.llm,
                 image: parsed.data.image,
                 vision: parsed.data.vision,
-                visionProfileAlias:
-                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                ...legacyStreamModelSettings(parsed.data),
                 mcpInstallIds: parsed.data.mcpInstallIds,
               } satisfies EditThreadInput)
             : contentThreadStreamService.streamThreadEvents({
@@ -819,8 +824,7 @@ export function registerThreadRoutes(app: Hono) {
                 llm: parsed.data.llm,
                 image: parsed.data.image,
                 vision: parsed.data.vision,
-                visionProfileAlias:
-                  parsed.data.modelSettings?.visionProfileAlias ?? undefined,
+                ...legacyStreamModelSettings(parsed.data),
                 mcpInstallIds: parsed.data.mcpInstallIds,
               });
 

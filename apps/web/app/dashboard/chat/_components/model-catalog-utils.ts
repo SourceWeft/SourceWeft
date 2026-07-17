@@ -136,6 +136,11 @@ const GLOBAL_AUTO_MODEL_ALIASES = new Set([
 
 const SOURCEWEFT_LOGO_SRC = "/logo.svg";
 
+export function isDefaultCatalogModel(model: ModelItem | null | undefined) {
+  const profileAlias = model?.profileAlias?.trim();
+  return Boolean(profileAlias && GLOBAL_AUTO_MODEL_ALIASES.has(profileAlias));
+}
+
 function isInternalOpenRouterAlias(alias: string) {
   return alias.startsWith("global-openrouter-");
 }

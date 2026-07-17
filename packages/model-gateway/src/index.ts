@@ -89,6 +89,7 @@ export type {
   RouteDecision,
   RoutingStrategy,
   StructuredOutputConfig,
+  ThinkingConfig,
   ToolBindingOptions,
   ToolCall,
   ToolChoice,

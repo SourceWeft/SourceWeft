@@ -30,23 +30,15 @@ test("capability workflow discovery exposes manifest artifact tool commands from
         iconName: command.iconName,
         targetId: command.action.targetId,
         visible: command.visible,
-      }));
+      }))
+      .sort((left, right) => {
+        if (left.visible !== right.visible) {
+          return Number(left.visible) - Number(right.visible);
+        }
+        return left.targetId.localeCompare(right.targetId);
+      });
 
     assert.deepEqual(artifactTools, [
-      {
-        actionKind: "tool",
-        aliases: ["generate_image"],
-        iconName: undefined,
-        targetId: "generate_image",
-        visible: false,
-      },
-      {
-        actionKind: "tool",
-        aliases: ["video-presentation", "video"],
-        iconName: undefined,
-        targetId: "generate_video_presentation",
-        visible: true,
-      },
       {
         actionKind: "skill",
         aliases: ["image", "generate-image", "picture"],
@@ -61,12 +53,19 @@ test("capability workflow discovery exposes manifest artifact tool commands from
         targetId: "ppt-deck",
         visible: true,
       },
+      {
+        actionKind: "skill",
+        aliases: ["video-presentation", "video"],
+        iconName: "video-presentation",
+        targetId: "video-presentation",
+        visible: true,
+      },
     ]);
     assert.deepEqual(
       artifactTools
         .filter((command) => command.visible)
         .map((command) => command.targetId),
-      ["generate_video_presentation", "image-generate", "ppt-deck"],
+      ["image-generate", "ppt-deck", "video-presentation"],
     );
   } finally {
     if (previousRoot === undefined) {
@@ -105,148 +104,111 @@ test("capability workflow discovery fails when configured packages root is missi
   }
 });
 
-test("resolveThreadCommand renders manifest workflow metadata for artifact tool commands", async () => {
-  const cases = [
-    {
-      toolName: "generate_image",
-      expectedExecution: "agent",
-      expectedArtifactType: "image",
-      expectedPromptText:
-        "Create a persisted image artifact only when this internal tool is explicitly enabled by an image skill runtime or compatibility command.",
-      request: "draw a dashboard",
-    },
-    {
-      toolName: "generate_video_presentation",
-      expectedExecution: "agent",
-      expectedSuccessCriteria: {
-        kind: "tool_call",
-        toolName: "generate_video_presentation",
-      },
-      expectedPromptText:
-        "Create a narrated video presentation artifact from the user's request.",
-      request: "make an onboarding video",
-    },
-  ] as const;
+test("resolveThreadCommand rejects hidden artifact tool slash commands", async () => {
+  const cases = ["/generate_image", "/generate_video_presentation"] as const;
 
-  for (const item of cases) {
-    const command = await resolveThreadCommand({
-      command: {
-        arguments: item.request,
-        kind: "tool",
-        name: `/${item.toolName}`,
-      },
-      enabledSkills: [],
-    });
-
-    assert.equal(command?.canonicalName, `/${item.toolName}`);
-    assert.equal(command?.workflow?.execution, item.expectedExecution);
-    assert.equal(command?.workflow?.kind, "tool_workflow");
-    assert.deepEqual(command?.workflow?.defaultTools, [item.toolName]);
-    assert.deepEqual(command?.workflow?.permissionOverrides, {
-      [item.toolName]: "allow",
-    });
-    assert.deepEqual(
-      command?.workflow?.successCriteria,
-      "expectedSuccessCriteria" in item
-        ? item.expectedSuccessCriteria
-        : {
-            kind: "artifact",
-            artifactType: "image",
-            toolName: item.toolName,
-          },
-    );
-    assert.match(
-      command?.workflow?.renderedPrompt ?? "",
-      /kind="tool_workflow"/,
-    );
-    assert.equal(
-      command?.workflow?.renderedPrompt.includes(item.expectedPromptText),
-      true,
-    );
-    assert.match(
-      command?.workflow?.renderedPrompt ?? "",
-      new RegExp(`<user_request>\\n${item.request}\\n</user_request>`),
+  for (const alias of cases) {
+    await assert.rejects(
+      resolveThreadCommand({
+        command: {
+          arguments: "make the artifact",
+          kind: "tool",
+          name: alias,
+        },
+        enabledSkills: [],
+      }),
+      (error) =>
+        error instanceof ContentError &&
+        error.code === "COMMAND_NOT_FOUND" &&
+        error.statusCode === 404,
     );
   }
 });
 
-test("resolveThreadCommand resolves manifest aliases to visible artifact tool workflows", async () => {
-  const cases = [
-    {
-      alias: "/video",
-      expectedCanonicalName: "/generate_video_presentation",
-      expectedToolName: "generate_video_presentation",
-    },
-  ] as const;
-
-  for (const item of cases) {
-    const command = await resolveThreadCommand({
-      command: {
-        arguments: "make the artifact",
-        kind: "tool",
-        name: item.alias,
-      },
-      enabledSkills: [],
-    });
-
-    assert.equal(command?.name, item.alias);
-    assert.equal(command?.canonicalName, item.expectedCanonicalName);
-    assert.equal(command?.toolName, item.expectedToolName);
-    assert.equal(command?.workflow?.name, item.expectedCanonicalName);
-    assert.equal(command?.workflow?.kind, "tool_workflow");
-    assert.deepEqual(command?.workflow?.defaultTools, [item.expectedToolName]);
-  }
-});
-
-test("resolveThreadCommand keeps legacy generate_image compatibility command hidden from image alias", async () => {
+test("resolveThreadCommand resolves video skill alias to agent generate_video_presentation workflow", async () => {
   const command = await resolveThreadCommand({
     command: {
-      arguments: "draw a dashboard",
-      kind: "tool",
-      name: "/generate_image",
-    },
-    enabledSkills: [],
-  });
-
-  assert.equal(command?.name, "/generate_image");
-  assert.equal(command?.canonicalName, "/generate_image");
-  assert.equal(command?.kind, "tool");
-  assert.equal(command?.toolName, "generate_image");
-  assert.equal(command?.workflow?.kind, "tool_workflow");
-  assert.equal(command?.workflow?.execution, "agent");
-  assert.deepEqual(command?.workflow?.defaultTools, ["generate_image"]);
-});
-
-test("resolveThreadCommand maps legacy generate_image command to enabled image skill workflow", async () => {
-  const command = await resolveThreadCommand({
-    command: {
-      arguments: "draw a dashboard",
-      kind: "tool",
-      name: "/generate_image",
+      arguments: "make an onboarding video",
+      kind: "skill",
+      name: "/video",
     },
     enabledSkills: [
       {
-        workspaceSkillId: "builtin:image-generate",
-        selectionId: "builtin:image-generate",
+        workspaceSkillId: "builtin:video-presentation",
+        selectionId: "builtin:video-presentation",
         sourceType: "builtin",
-        name: "image-generate",
-        displayName: "Image Generate",
+        name: "video-presentation",
+        displayName: "Video Presentation",
         version: "1.0.0",
-        description: "Generate image artifacts",
+        description: "Create video presentation artifacts",
         files: [],
         slash: false,
-        tools: ["generate_image"],
+        tools: ["generate_video_presentation"],
       },
     ],
   });
 
-  assert.equal(command?.name, "/generate_image");
-  assert.equal(command?.canonicalName, "/image-generate");
+  assert.equal(command?.name, "/video");
+  assert.equal(command?.canonicalName, "/video-presentation");
   assert.equal(command?.kind, "skill");
-  assert.equal(command?.skillSlug, "image-generate");
+  assert.equal(command?.skillSlug, "video-presentation");
+  assert.equal(command?.displayName, "Video Presentation");
   assert.equal(command?.workflow?.kind, "skill_workflow");
   assert.equal(command?.workflow?.execution, "agent");
-  assert.deepEqual(command?.workflow?.defaultTools, ["generate_image"]);
+  assert.deepEqual(command?.workflow?.defaultTools, [
+    "generate_video_presentation",
+  ]);
+  assert.deepEqual(command?.workflow?.permissionOverrides, {
+    generate_video_presentation: "allow",
+  });
+  assert.deepEqual(command?.workflow?.successCriteria, {
+    kind: "artifact",
+    artifactType: "video_presentation",
+    toolName: "generate_video_presentation",
+  });
+  assert.match(
+    command?.workflow?.renderedPrompt ?? "",
+    /kind="skill_workflow"/,
+  );
+  assert.match(
+    command?.workflow?.renderedPrompt ?? "",
+    /video-presentation skill workflow/,
+  );
+  assert.match(
+    command?.workflow?.renderedPrompt ?? "",
+    /\/skills\/video-presentation\/SKILL\.md/,
+  );
+  assert.match(command?.workflow?.renderedPrompt ?? "", /generate_video_presentation/);
+});
+
+test("resolveThreadCommand rejects legacy generate_image tool alias", async () => {
+  await assert.rejects(
+    resolveThreadCommand({
+      command: {
+        arguments: "draw a dashboard",
+        kind: "tool",
+        name: "/generate_image",
+      },
+      enabledSkills: [
+        {
+          workspaceSkillId: "builtin:image-generate",
+          selectionId: "builtin:image-generate",
+          sourceType: "builtin",
+          name: "image-generate",
+          displayName: "Image Generate",
+          version: "1.0.0",
+          description: "Generate image artifacts",
+          files: [],
+          slash: false,
+          tools: ["generate_image"],
+        },
+      ],
+    }),
+    (error) =>
+      error instanceof ContentError &&
+      error.code === "COMMAND_NOT_FOUND" &&
+      error.statusCode === 404,
+  );
 });
 
 test("resolveThreadCommand resolves manifest skill aliases to enabled skills", async () => {

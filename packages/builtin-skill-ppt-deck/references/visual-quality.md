@@ -31,7 +31,13 @@ Fix before publishing:
 - A slide promises an image, chart, screenshot, blackboard, notebook, logo, or
   diagram that is not visible in the render.
 - Text overlaps, clips, collides with footers, or falls below readable contrast.
+- Decorative title underlines, color bars, sidebar stripes, or card edge stripes
+  are used as the main visual system.
+- The deck defaults to cream/beige backgrounds without an intentional theme
+  preset that calls for those surfaces.
+- Body text defaults to Aptos or another QA-unreliable font without user request.
 - The rendered contact sheet looks like a document rather than a presentation.
+- File QA (`validate_pptx.py`) reports package or chart structure errors.
 
 ## Visual Thresholds
 

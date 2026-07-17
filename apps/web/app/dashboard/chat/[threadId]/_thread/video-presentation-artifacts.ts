@@ -1,5 +1,5 @@
 import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
-import { resolveGeneratedPresentationArtifact } from "../../_components/chat-canvas/message-assets";
+import { getToolOutputField } from "../../_components/chat-canvas/message-assets";
 import type { ArtifactStatusSnapshot } from "../../_components/chat-canvas";
 import type { contentClient } from "../../../../../lib/sdk";
 import { resolveToolCallsFromMetadata } from "./message-normalizers";
@@ -39,12 +39,22 @@ export function collectPendingVideoPresentationArtifactIds(
 
   for (const message of messages) {
     for (const toolCall of resolveToolCallsFromMetadata(message.metadata)) {
-      if (!hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")) {
+      if (
+        !hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")
+      ) {
         continue;
       }
-      const artifact = resolveGeneratedPresentationArtifact(toolCall);
-      if (artifact?.artifactId) {
-        ids.add(artifact.artifactId);
+      const outputType = getToolOutputField(toolCall.output, "type");
+      if (
+        outputType !== "video_presentation_artifact_result" &&
+        outputType !== "video_presentation_processing_result" &&
+        outputType !== "generate_video_presentation_progress"
+      ) {
+        continue;
+      }
+      const artifactId = getToolOutputField(toolCall.output, "artifact_id");
+      if (artifactId) {
+        ids.add(artifactId);
       }
     }
   }

@@ -21,15 +21,30 @@ import type {
 export class ModelGatewayChatEndpoint {
   constructor(private readonly config: ResolvedModelGatewayConfig) {}
 
+  private resolveRequestOptions(options?: RequestOptions): RequestOptions {
+    const timeoutMs = options?.timeoutMs ?? this.config.timeoutMs;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, timeoutSignal])
+      : timeoutSignal;
+    return {
+      ...options,
+      timeoutMs,
+      maxRetries: options?.maxRetries ?? this.config.maxRetries,
+      signal,
+    };
+  }
+
   async complete(
     input: ChatCompleteInput,
     options?: RequestOptions,
   ): Promise<ChatCompleteResult> {
+    const requestOptions = this.resolveRequestOptions(options);
     const target = await resolveRequestTarget(this.config, input);
     const generation = createGenerationObservation({
       operation: "chat.complete",
       payload: input,
-      options,
+      options: requestOptions,
       target,
     });
     await emitGenerationStart(this.config, generation.start);
@@ -38,7 +53,10 @@ export class ModelGatewayChatEndpoint {
         config: this.config,
         target,
         payload: input,
-        options: { ...options, suppressLangChainObservation: true },
+        options: {
+          ...requestOptions,
+          suppressLangChainObservation: true,
+        },
       });
       await emitGenerationEnd(this.config, {
         traceId: generation.start.traceId,
@@ -83,11 +101,12 @@ export class ModelGatewayChatEndpoint {
     input: ChatStreamInput,
     options?: RequestOptions,
   ): AsyncGenerator<ChatStreamEvent> {
+    const requestOptions = this.resolveRequestOptions(options);
     const target = await resolveRequestTarget(this.config, input);
     const generation = createGenerationObservation({
       operation: "chat.stream",
       payload: input,
-      options,
+      options: requestOptions,
       target,
     });
     await emitGenerationStart(this.config, generation.start);
@@ -99,7 +118,10 @@ export class ModelGatewayChatEndpoint {
         config: this.config,
         target,
         payload: input,
-        options: { ...options, suppressLangChainObservation: true },
+        options: {
+          ...requestOptions,
+          suppressLangChainObservation: true,
+        },
       })) {
         if (event.type === "metadata") {
           completed = true;

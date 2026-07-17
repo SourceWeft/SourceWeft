@@ -29,13 +29,6 @@ export type ArtifactImageConfig = {
   readonly style: ImageStyle;
 };
 
-export type ArtifactToolSelection = {
-  readonly kind: ArtifactGenerationKind;
-  readonly mode?: "auto" | "generate";
-  readonly modelAlias?: string;
-  readonly image?: Partial<ArtifactImageConfig>;
-};
-
 export type GenerateImageToolSelection = {
   readonly enabled?: boolean;
   readonly mode?: "auto" | "generate";

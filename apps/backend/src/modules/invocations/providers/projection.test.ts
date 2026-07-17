@@ -3,10 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "vitest";
 import { createSelectableInvocationRegistry } from "../registry";
-import {
-  createCapabilityToolInvocationProvider,
-  legacyCapabilityToolSelectableId,
-} from "./capability-tools";
+import { createCapabilityToolInvocationProvider } from "./capability-tools";
 import { capabilityCommand } from "./capability-tool-fixtures";
 import { createSkillCommandInvocationProvider } from "./skills";
 import { createWorkspaceMcpInvocationProvider } from "./workspace-mcp";
@@ -24,53 +21,20 @@ test("obsolete builtin tool compatibility provider is deleted", async () => {
   );
 });
 
-test("obsolete builtin tool terminology is restricted to documented compatibility", async () => {
+test("legacy builtin_tool selectable ids are documented as removed", async () => {
   const repositoryRoot = join(process.cwd(), "../..");
-  const searchedFiles = [
-    "apps/backend/src/modules/invocations/providers/capability-tools.ts",
-    "apps/backend/src/modules/invocations/providers/projection.test.ts",
-    "docs/architecture/backend-module-ownership.md",
-  ] as const;
-  const files = await Promise.all(
-    searchedFiles.map(async (path) => ({
-      path,
-      source: await readFile(join(repositoryRoot, path), "utf8"),
-    })),
-  );
-  const occurrences = files.flatMap((file) =>
-    [...file.source.matchAll(/builtin_tool/gu)].map(() => ({
-      path: file.path,
-    })),
+  const capabilityBindingDoc = await readFile(
+    join(repositoryRoot, "docs/architecture/capability-binding.md"),
+    "utf8",
   );
 
-  assert.equal(
-    occurrences.every((occurrence) => searchedFiles.includes(occurrence.path)),
-    true,
-  );
-  assert.equal(
-    occurrences.some(
-      (occurrence) =>
-        occurrence.path ===
-        "apps/backend/src/modules/invocations/providers/capability-tools.ts",
-    ),
-    true,
-  );
-  assert.equal(
-    occurrences.some(
-      (occurrence) =>
-        occurrence.path === "docs/architecture/backend-module-ownership.md",
-    ),
-    true,
-  );
   assert.match(
-    files.find(
-      (file) => file.path === "docs/architecture/backend-module-ownership.md",
-    )?.source ?? "",
-    /delete the `legacyIds` mapping for `builtin_tool\.\*` only\s+after web request payload tests cover the capability ID migration/u,
+    capabilityBindingDoc,
+    /Legacy `builtin_tool\.\*` selectable IDs and `legacyIds` aliases were removed/u,
   );
 });
 
-test("documented legacy tool ids resolve to capability-owned invocation definitions", () => {
+test("legacy builtin_tool selectable ids do not resolve", () => {
   const registry = createSelectableInvocationRegistry({
     providers: [
       createCapabilityToolInvocationProvider({
@@ -87,19 +51,8 @@ test("documented legacy tool ids resolve to capability-owned invocation definiti
     ],
   });
 
-  const definition = registry.resolve(
-    legacyCapabilityToolSelectableId("generate_image"),
-  );
-
-  assert.ok(definition);
-  assert.equal(definition.sourceRef.kind, "capability_tool");
-  assert.equal(
-    definition.semantics.kind === "fixed_tool_choice"
-      ? definition.semantics.target
-      : null,
-    "capability_tool",
-  );
-  assert.equal(definition.id, "cap:sourceweft/generate-image:generate_image");
+  assert.equal(registry.resolve("cap:sourceweft/generate-image:generate_image")?.id, "cap:sourceweft/generate-image:generate_image");
+  assert.equal(registry.resolve("builtin_tool.generate_image"), null);
 });
 
 test("skill command provider projects commands as workflow context injection only", () => {

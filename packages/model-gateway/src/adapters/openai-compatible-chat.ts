@@ -1,5 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { buildOpenAICompatibleDefaultHeaders } from "../auth-headers";
+import { buildOpenAIReasoningModelKwargs } from "./openai-reasoning";
 import type { ChatAdapter } from "./types";
 
 export class OpenAICompatibleChatAdapter implements ChatAdapter {
@@ -15,6 +16,7 @@ export class OpenAICompatibleChatAdapter implements ChatAdapter {
       temperature: input.temperature,
       topP: input.topP,
       maxRetries: options?.maxRetries ?? 2,
+      timeout: options?.timeoutMs,
       apiKey: target.apiKey,
       configuration: {
         baseURL: target.baseUrl,
@@ -22,6 +24,7 @@ export class OpenAICompatibleChatAdapter implements ChatAdapter {
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),
+        ...buildOpenAIReasoningModelKwargs(input),
       },
       __includeRawResponse: true,
       maxTokens: input.maxTokens,

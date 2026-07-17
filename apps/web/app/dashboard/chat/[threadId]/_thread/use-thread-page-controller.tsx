@@ -77,7 +77,6 @@ type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
-const VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES = 3;
 
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(false);
@@ -134,7 +133,7 @@ export function useThreadPageController({
   const [artifactStatuses, setArtifactStatuses] = useState<
     ReadonlyMap<string, ArtifactStatusSnapshot>
   >(new Map());
-  const videoPresentationPollFailuresRef = useRef(new Map<string, number>());
+  const videoPresentationPollInFlightRef = useRef(false);
   const [composerInitialInput, setComposerInitialInput] = useState("");
   const [composerInitialCommand, setComposerInitialCommand] = useState<
     ChatSendInput["command"] | null
@@ -327,70 +326,52 @@ export function useThreadPageController({
   );
 
   const refreshVideoPresentationArtifactStatuses = useCallback(async () => {
-    if (!workspaceId || pendingVideoPresentationArtifactIds.length === 0) {
+    if (
+      !workspaceId ||
+      pendingVideoPresentationArtifactIds.length === 0 ||
+      videoPresentationPollInFlightRef.current
+    ) {
       return;
     }
 
+    videoPresentationPollInFlightRef.current = true;
     const activeWorkspaceId = workspaceId;
-    const results = await Promise.allSettled(
-      pendingVideoPresentationArtifactIds.map(async (artifactId) => {
-        const result = await contentClient.getArtifact(
-          activeWorkspaceId,
-          artifactId,
-        );
-        return {
-          artifactId,
-          snapshot: mapArtifactStatusSnapshot(result.artifact),
-        };
-      }),
-    );
+    try {
+      const results = await Promise.allSettled(
+        pendingVideoPresentationArtifactIds.map(async (artifactId) => {
+          const result = await contentClient.getArtifact(
+            activeWorkspaceId,
+            artifactId,
+          );
+          return {
+            artifactId,
+            snapshot: mapArtifactStatusSnapshot(result.artifact),
+          };
+        }),
+      );
 
-    setArtifactStatuses((current) => {
-      const next = new Map(current);
-      results.forEach((result, index) => {
-        const artifactId = pendingVideoPresentationArtifactIds[index];
-        if (!artifactId) {
-          return;
-        }
-        if (result.status === "fulfilled") {
-          videoPresentationPollFailuresRef.current.delete(artifactId);
-          next.set(result.value.snapshot.id, result.value.snapshot);
-          return;
-        }
-
-        const failureCount =
-          (videoPresentationPollFailuresRef.current.get(artifactId) ?? 0) + 1;
-        videoPresentationPollFailuresRef.current.set(artifactId, failureCount);
-        if (failureCount < VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES) {
-          return;
-        }
-
-        const currentSnapshot = next.get(artifactId);
-        if (!currentSnapshot) {
-          return;
-        }
-        next.set(artifactId, {
-          ...currentSnapshot,
-          errorMessage:
-            result.reason instanceof Error
-              ? result.reason.message
-              : "Could not refresh this video presentation status.",
-          status: "failed",
-          updatedAt: new Date().toISOString(),
+      setArtifactStatuses((current) => {
+        const next = new Map(current);
+        results.forEach((result) => {
+          if (result.status === "fulfilled") {
+            next.set(result.value.snapshot.id, result.value.snapshot);
+          }
         });
+        return next;
       });
-      return next;
-    });
 
-    if (
-      results.some(
-        (result) =>
-          result.status === "fulfilled" &&
-          (result.value.snapshot.status === "ready" ||
-            result.value.snapshot.status === "failed"),
-      )
-    ) {
-      setArtifactsRefreshKey((value) => value + 1);
+      if (
+        results.some(
+          (result) =>
+            result.status === "fulfilled" &&
+            (result.value.snapshot.status === "ready" ||
+              result.value.snapshot.status === "failed"),
+        )
+      ) {
+        setArtifactsRefreshKey((value) => value + 1);
+      }
+    } finally {
+      videoPresentationPollInFlightRef.current = false;
     }
   }, [pendingVideoPresentationArtifactIds, workspaceId]);
 

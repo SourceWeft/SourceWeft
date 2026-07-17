@@ -23,6 +23,7 @@ export type RefreshThreadInput = {
   llm?: LlmExecutionConfig;
   image?: LlmExecutionConfig;
   vision?: LlmExecutionConfig;
+  imageProfileAlias?: string | null;
   visionProfileAlias?: string | null;
   toolApprovalResume?: ToolApprovalResume | null;
   mcpInstallIds?: string[];

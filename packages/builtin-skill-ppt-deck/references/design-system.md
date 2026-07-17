@@ -41,7 +41,7 @@ Choose the closest preset, then adapt details to the topic.
 - Good for: business strategy, board updates, finance, consulting, operating plans.
 - Palette: `111827` executive charcoal, `1E2761` midnight navy, `CADCFC` ice blue, `FFFFFF` white, `D4AF37` gold accent.
 - Dominant: charcoal/navy. Accent: gold or ice blue, used sparingly.
-- Fonts: Aptos/Calibri body; Georgia or Arial Black only for short headings.
+- Fonts: Calibri or Arial body; Georgia or Arial Black only for short headings with ~10% size slack.
 - Motif: decision map, scorecard, dashboard tiles, portfolio grid, strategic axis.
 - Backgrounds: dark cover/closing; light report surfaces; split fields for tradeoffs.
 - Layout mix: framework canvas, comparison, KPI callout, roadmap, dashboard grid.
@@ -63,7 +63,7 @@ Choose the closest preset, then adapt details to the topic.
 - Good for: analytics, market reports, experiment results, research summaries.
 - Palette: `1F2937` charcoal, `F2F2F2` off-white, `0D9488` teal, `EAB308` amber, `111827` black.
 - Dominant: off-white or charcoal. Accent: teal for signal, amber for caution.
-- Fonts: Calibri/Aptos; tabular numbers should be large and clean.
+- Fonts: Calibri or Arial; tabular numbers should be large and clean.
 - Motif: data cards, chart surfaces, insight callouts, evidence strips, benchmark bars.
 - Backgrounds: canvas surfaces, dark insight pages, split field for key findings.
 - Layout mix: data insight, chart + takeaway, KPI callout, comparison, recap matrix.
@@ -74,7 +74,7 @@ Choose the closest preset, then adapt details to the topic.
 - Good for: science, research, history, medicine, public knowledge, conceptual talks.
 - Palette: `003049` deep teal/navy, `FDF0D5` warm cream, `669BBC` muted blue, `C1121F` red accent, `2B2D42` ink.
 - Dominant: warm cream or deep teal. Accent: red for warnings or key distinctions.
-- Fonts: Cambria/Georgia for headings when mostly English; Microsoft YaHei for Chinese.
+- Fonts: Cambria for English headings (QA-safe); Georgia only for short display titles with slack; Microsoft YaHei for Chinese.
 - Motif: annotated diagram, field notes, citation margin, evidence board, cause-effect arrows.
 - Backgrounds: cream note surface, dark section pages, diagram fields, annotated examples.
 - Layout mix: concept map, annotated diagram, timeline/process, case/example, principle poster.
@@ -85,7 +85,7 @@ Choose the closest preset, then adapt details to the topic.
 - Good for: AI, security, cloud, infrastructure, astronomy, high-end technical decks.
 - Palette: `000814` near-black, `001D3D` deep navy, `003566` blue, `FFC300` amber, `CAF0F8` pale cyan.
 - Dominant: near-black/deep navy. Accent: amber or cyan, never both everywhere.
-- Fonts: Consolas for small code labels; Calibri/Aptos for body.
+- Fonts: Consolas for small code labels; Calibri or Arial for body.
 - Motif: graph nodes, pipeline layers, console fragments, orbit paths, model cards.
 - Backgrounds: dark fields, network diagrams, low-contrast grids, glowing data moments.
 - Layout mix: architecture diagram, process pipeline, concept map, data callout, comparison.
@@ -113,6 +113,21 @@ Choose the closest preset, then adapt details to the topic.
 | Caption/source | 9-12 pt | Muted but readable |
 | Hero number | 54-84 pt | Data and KPI slides |
 
+### Font safety (LibreOffice QA vs Office)
+
+Font names written into the PPTX are rendered by the user's PowerPoint, but
+visual QA uses LibreOffice. Prefer fonts that keep trustworthy overflow checks:
+
+- **QA-safe body / fit-critical text**: Arial, Calibri, Cambria, Times New Roman,
+  Courier New, Bookman Old Style, Century Schoolbook.
+- **CJK**: Microsoft YaHei.
+- **Never default to Aptos** — missing or substituted in many QA and older Office
+  environments, so both preview and delivery are unreliable.
+- **Personality fonts with slack** (Georgia, Trebuchet MS, Impact, Arial Black,
+  Garamond, Consolas, Palatino): fine for short titles/accents if containers leave
+  ~10% extra width; do not trust QA text-fit on those runs.
+- If the user requests a non-safe font, use it where asked and size with slack.
+
 Chinese or mixed Chinese-English decks:
 
 - Use `Microsoft YaHei` as the safe CJK font.
@@ -137,8 +152,12 @@ Every slide needs an intentional background treatment:
 - notebook/blackboard/topic texture
 - full-bleed or half-bleed image/visual
 
-Plain white is acceptable only when the foreground composition is strong and not
-a title-and-bullet page.
+Plain white (`FFFFFF`) is the preferred default reading surface when no brand
+palette is specified and the foreground composition is strong. Do not default to
+cream or beige (`F5F5DC`, `FAF0E6`, `FAEBD7`, `FFF8E1`, and similar). Cream note
+surfaces are allowed only inside intentional presets such as Learning Studio or
+Academic Explainer, and must sit under a clear dominant color — never as a
+beige-only deck.
 
 ## Layout Families
 
@@ -173,12 +192,18 @@ Do not repeat the same layout key on three consecutive slides.
 - Plain title + bullets unless the user explicitly asks for an outline.
 - Styling only the cover while content slides remain plain.
 - Title underline accents; use composition, whitespace, or background fields.
+- Decorative color bars, header/footer stripes, sidebar stripes, or card edge
+  stripes; use tint, shadow, icon badges, or split fields instead.
+- Cream/beige as a default background when no brand or intentional theme asks
+  for it.
+- Defaulting to Aptos or other QA-unreliable fonts for body text.
 - Generic blue when the topic suggests a stronger palette.
 - Tiny icons beside paragraphs as the only visual.
 - Center-aligned body paragraphs.
 - Low-contrast gray text on cream, pale blue, or dark backgrounds.
 - One-note palettes dominated by near-identical shades.
 - Fake screenshots, fake logos, fake metrics, or promised assets that are not present.
+- Stacked chart `dataLabelPosition: "outEnd"` (corrupts PowerPoint files).
 
 ## Final Visual Checklist
 

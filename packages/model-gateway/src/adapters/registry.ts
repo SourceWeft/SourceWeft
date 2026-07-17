@@ -3,6 +3,7 @@ import type { ProviderKind } from "../types";
 import { AnthropicChatAdapter } from "./anthropic-chat";
 import { AzureEmbeddingsAdapter } from "./azure-embeddings";
 import { AzureChatAdapter } from "./azure-chat";
+import { CloudflareAIGChatAdapter } from "./cloudflare-aig-chat";
 import { DeepInfraAsrTransport } from "./deepinfra-asr";
 import { DeepInfraChatAdapter } from "./deepinfra-chat";
 import { DeepInfraEmbeddingsAdapter } from "./deepinfra-embeddings";
@@ -34,6 +35,7 @@ import type {
 } from "./types";
 
 const openAICompatibleChat = new OpenAICompatibleChatAdapter();
+const cloudflareAIGChat = new CloudflareAIGChatAdapter();
 const openRouterChat = new OpenRouterChatAdapter();
 const openAICompatibleEmbeddings = new OpenAICompatibleEmbeddingsAdapter();
 const openAICompatibleRerank = new OpenAICompatibleRerankTransport();
@@ -55,6 +57,7 @@ const siliconflowCNImages = new SiliconflowCNImageGenerationTransport();
 
 const chatAdapters = new Map<ProviderKind, ChatAdapter>([
   ["openai-compatible", openAICompatibleChat],
+  ["cloudflare-aig", cloudflareAIGChat],
   ["openrouter", openRouterChat],
   ["deepinfra", deepInfraChat],
   ["siliconflow-cn", siliconflowCNChat],

@@ -1,4 +1,5 @@
 import { createMiddleware } from "langchain";
+import { GENERATE_VIDEO_PRESENTATION_TOOL_NAME } from "@sourceweft/contracts";
 
 export type CommandExecutionPolicy = {
   targetToolName: string;
@@ -80,12 +81,22 @@ export function createCommandToolChoiceMiddleware(
         request.state.messages,
         policy.targetToolName,
       );
+      const commandRequest =
+        policy.targetToolName === GENERATE_VIDEO_PRESENTATION_TOOL_NAME
+          ? {
+              ...request,
+              modelSettings: {
+                ...request.modelSettings,
+                parallel_tool_calls: false,
+              },
+            }
+          : request;
       if (priorTargetCalled) {
-        return handler(request);
+        return handler(commandRequest);
       }
 
       const response = await handler({
-        ...request,
+        ...commandRequest,
         tools: [targetTool],
         toolChoice: forcedToolChoice(policy.targetToolName),
       });
@@ -95,7 +106,7 @@ export function createCommandToolChoiceMiddleware(
       }
 
       return handler({
-        ...request,
+        ...commandRequest,
         tools: [targetTool],
         toolChoice: forcedToolChoice(policy.targetToolName),
       });

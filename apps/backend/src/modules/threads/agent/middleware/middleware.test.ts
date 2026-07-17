@@ -303,7 +303,7 @@ test("filesystem description middleware rewrites mounted filesystem tool descrip
   assert.equal(requestTools[1]?.description, "custom description");
 });
 
-test("command tool choice forces the target tool on the first model call", async () => {
+test("command tool choice forces non-video targets without changing parallel tool calls", async () => {
   const middleware = createCommandToolChoiceMiddleware({
     targetToolName: "target_tool",
   });
@@ -315,7 +315,11 @@ test("command tool choice forces the target tool on the first model call", async
     name: "other_tool",
     description: "Other",
   });
-  const requests: Array<{ toolChoice?: unknown; tools: unknown[] }> = [];
+  const requests: Array<{
+    modelSettings?: Record<string, unknown>;
+    toolChoice?: unknown;
+    tools: unknown[];
+  }> = [];
 
   await wrapModelCallHook(middleware)(
     {
@@ -342,6 +346,44 @@ test("command tool choice forces the target tool on the first model call", async
     ["target_tool"],
   );
   assert.deepEqual(requests[0]?.toolChoice, forcedToolChoice("target_tool"));
+  assert.equal(requests[0]?.modelSettings, undefined);
+});
+
+test("command tool choice disables parallel calls only for explicit video presentation commands", async () => {
+  const middleware = createCommandToolChoiceMiddleware({
+    targetToolName: "generate_video_presentation",
+  });
+  const targetTool = tool(async () => "ok", {
+    name: "generate_video_presentation",
+    description: "Generate video presentation",
+  });
+  const requests: Array<Record<string, unknown>> = [];
+
+  await wrapModelCallHook(middleware)(
+    {
+      modelSettings: { headers: { "x-test": "preserved" } },
+      state: { messages: [] },
+      tools: [targetTool],
+    },
+    async (request) => {
+      requests.push(request);
+      return {
+        tool_calls: [
+          {
+            id: "call-video",
+            name: "generate_video_presentation",
+            args: {},
+          },
+        ],
+      } as never;
+    },
+  );
+
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0]?.modelSettings, {
+    headers: { "x-test": "preserved" },
+    parallel_tool_calls: false,
+  });
 });
 
 test("tool observability logs start and completion", async () => {

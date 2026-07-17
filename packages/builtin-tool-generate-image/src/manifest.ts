@@ -13,7 +13,7 @@ export const builtinGenerateImageCapabilityManifest: CapabilityManifestInput = {
         id: "generate_image",
         title: "Generate Image",
         description:
-          "Internal SourceWeft image artifact executor for image skills and compatibility commands.",
+          "Internal SourceWeft image artifact executor for image skills.",
         inputSchema: { type: "object" },
         outputSchema: { type: "object" },
         risk: "write",
@@ -32,7 +32,7 @@ export const builtinGenerateImageCapabilityManifest: CapabilityManifestInput = {
         runtime: {
           execution: "agent",
           promptIntro:
-            "Create a persisted image artifact only when this internal tool is explicitly enabled by an image skill runtime or compatibility command. The command is complete only when a published image artifact is created.",
+            "Create a persisted image artifact only when this internal tool is explicitly enabled by an image skill runtime. The command is complete only when a published image artifact is created.",
           tools: ["generate_image"],
           permissionOverrides: { generate_image: "allow" },
           output: {
@@ -40,11 +40,6 @@ export const builtinGenerateImageCapabilityManifest: CapabilityManifestInput = {
             artifactType: "image",
             publisherTool: "generate_image",
           },
-        },
-        command: {
-          aliases: ["generate_image"],
-          category: "Artifacts",
-          visibleWhen: "hidden",
         },
       },
   ],

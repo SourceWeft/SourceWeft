@@ -174,6 +174,139 @@ export async function createFileArtifactRecord(input: {
   };
 }
 
+export async function createPendingVideoPresentationArtifactRecord(input: {
+  artifactId: string;
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+  title: string;
+  prompt: string;
+  payload: Record<string, unknown>;
+}) {
+  await db.insert(artifacts).values({
+    id: input.artifactId,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadId: input.threadId,
+    artifactType: "video_presentation",
+    status: "pending",
+    title: input.title,
+    promptText: input.prompt,
+    payloadJson: input.payload,
+    createdBy: input.userId,
+  });
+}
+
+export async function findReusableVideoPresentationArtifactRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  requestKey: string;
+}) {
+  const rows = await db
+    .select()
+    .from(artifacts)
+    .where(
+      and(
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+        eq(artifacts.threadId, input.threadId),
+        eq(artifacts.artifactType, "video_presentation"),
+      ),
+    )
+    .orderBy(desc(artifacts.createdAt))
+    .limit(20);
+
+  const row = rows.find((candidate) => {
+    if (
+      candidate.status !== "pending" &&
+      candidate.status !== "running" &&
+      candidate.status !== "ready"
+    ) {
+      return false;
+    }
+    const payload = candidate.payloadJson;
+    return (
+      payload &&
+      typeof payload === "object" &&
+      !Array.isArray(payload) &&
+      (payload as Record<string, unknown>).requestKey === input.requestKey
+    );
+  });
+  return row ? mapArtifact(row) : null;
+}
+
+export async function markArtifactReady(input: {
+  artifactId: string;
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  payload: Record<string, unknown>;
+}) {
+  const [current] = await db
+    .select({
+      storageBucket: artifacts.storageBucket,
+      storageKey: artifacts.storageKey,
+      previewMetadataJson: artifacts.previewMetadataJson,
+      previewStorageKey: artifacts.previewStorageKey,
+    })
+    .from(artifacts)
+    .where(
+      and(
+        eq(artifacts.id, input.artifactId),
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+
+  const [latestVersion] = await db
+    .select({
+      versionNo: artifactVersions.versionNo,
+    })
+    .from(artifactVersions)
+    .where(eq(artifactVersions.artifactId, input.artifactId))
+    .orderBy(desc(artifactVersions.versionNo))
+    .limit(1);
+
+  const versionId = randomUUID();
+
+  await db
+    .update(artifacts)
+    .set({
+      status: "ready",
+      payloadJson: input.payload,
+      errorCode: null,
+      errorMessage: null,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+      storageBucket: current?.storageBucket ?? null,
+      storageKey: current?.storageKey ?? null,
+      previewStorageKey: current?.previewStorageKey ?? null,
+      previewMetadataJson: current?.previewMetadataJson ?? {},
+    })
+    .where(
+      and(
+        eq(artifacts.id, input.artifactId),
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+      ),
+    );
+
+  await db.insert(artifactVersions).values({
+    id: versionId,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    artifactId: input.artifactId,
+    versionNo: (latestVersion?.versionNo ?? 0) + 1,
+    contentJson: input.payload,
+    createdBy: input.userId,
+  });
+
+  return { artifactId: input.artifactId, versionId };
+}
+
 export async function markArtifactRunning(input: {
   artifactId: string;
   teamId?: string;
@@ -201,6 +334,9 @@ export async function markArtifactRunning(input: {
     .update(artifacts)
     .set({
       status: "running",
+      completedAt: null,
+      errorCode: null,
+      errorMessage: null,
       ...(input.payload ? { payloadJson: input.payload } : {}),
       updatedAt: new Date(),
     })

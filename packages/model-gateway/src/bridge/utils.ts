@@ -216,7 +216,7 @@ function createObservedLangChainChatModel(input: {
         : input.model,
     });
   };
-  observed.invoke = async (messages) => {
+  observed.invoke = async (messages, callOptions) => {
       const generation = createGenerationObservation({
         operation: "chat.complete",
         payload: { ...input.payload, messages: normalizeObservedMessages(messages) },
@@ -225,7 +225,7 @@ function createObservedLangChainChatModel(input: {
       });
       await emitGenerationStart(input.config, generation.start);
       try {
-        const result = await input.model.invoke(messages);
+        const result = await input.model.invoke(messages, callOptions);
         const responseMetadata = extractResponseMetadata(result as { response_metadata?: unknown });
         const reasoning = extractReasoning(result as Parameters<typeof extractReasoning>[0]);
         await emitGenerationEnd(input.config, {
@@ -267,7 +267,7 @@ function createObservedLangChainChatModel(input: {
         throw error;
       }
     };
-  observed.stream = async (messages) => {
+  observed.stream = async (messages, callOptions) => {
       const generation = createGenerationObservation({
         operation: "chat.stream",
         payload: { ...input.payload, messages: normalizeObservedMessages(messages), stream: true },
@@ -275,7 +275,7 @@ function createObservedLangChainChatModel(input: {
         target: input.target,
       });
       await emitGenerationStart(input.config, generation.start);
-      const stream = await input.model.stream(messages);
+      const stream = await input.model.stream(messages, callOptions);
       return observeStream({
         config: input.config,
         generation,

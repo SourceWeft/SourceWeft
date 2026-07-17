@@ -115,7 +115,7 @@ function createPreparedTurn(
     skillIds: [],
     invokedSkillIds: [],
     selectedSkillIds: [],
-    webSearchEnabled: false,
+    webAccessEnabled: false,
     notionTools: {},
     mcpTools: {},
     command: null,

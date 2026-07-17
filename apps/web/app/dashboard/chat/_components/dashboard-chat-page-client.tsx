@@ -31,6 +31,7 @@ import {
 } from "../../_components/dashboard-shortcuts";
 import {
   emptyModelCatalog,
+  isDefaultCatalogModel,
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
   resolveSelectedModelsWithByok,
@@ -80,10 +81,6 @@ import {
   readStoredSourceSelection,
   writeStoredSourceSelection,
 } from "./source-selection-storage";
-import {
-  readStoredModelSelection,
-  writeStoredModelSelection,
-} from "./model-selection-storage";
 import {
   setPendingThreadTurn,
   writePendingThreadTurnFallback,
@@ -651,13 +648,8 @@ export function DashboardChatPageClient() {
 
       setCatalogKindEnabled(kindEnabled);
       setAvailableModels(catalogModels);
-      const storedModelSelection = readStoredModelSelection(
-        activeWorkspaceId,
-        "current",
-      );
       const resolvedModels = resolveSelectedModels({
         availableModels: catalogModels,
-        threadAliases: storedModelSelection ?? undefined,
         fallbackAliases: catalog.defaults,
       });
       setSelectedModels(
@@ -897,43 +889,6 @@ export function DashboardChatPageClient() {
       visionByok: selectedByokModels.vision ?? null,
     });
   }, [loadedByokStorageKey, selectedByokModels, workspaceId]);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      return;
-    }
-    if (
-      !selectedModels.llm &&
-      !selectedModels.image &&
-      !selectedModels.vision &&
-      !selectedByokModels.llm &&
-      !selectedByokModels.image &&
-      !selectedByokModels.vision
-    ) {
-      return;
-    }
-
-    writeStoredModelSelection(workspaceId, "current", {
-      llmProfileAlias:
-        selectedByokModels.llm?.mode === "byok"
-          ? null
-          : (selectedModels.llm?.profileAlias ??
-            selectedModels.llm?.id ??
-            null),
-      imageProfileAlias:
-        selectedByokModels.image?.mode === "byok"
-          ? null
-          : (selectedModels.image?.profileAlias ??
-            selectedModels.image?.id ??
-            null),
-      visionProfileAlias:
-        selectedByokModels.vision?.mode === "byok"
-          ? null
-          : (selectedModels.vision?.profileAlias ??
-            selectedModels.vision?.id ??
-            null),
-    });
-  }, [selectedByokModels, selectedModels, workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -1209,17 +1164,23 @@ export function DashboardChatPageClient() {
       const resolvedThreadModelSettings = buildThreadCreateModelSettings({
         byokSelection: selectedByokModels.llm,
         globalProfileAlias:
-          catalogKindEnabled.llm && selectedModels.llm?.profileAlias
+          catalogKindEnabled.llm &&
+          selectedModels.llm?.profileAlias &&
+          !isDefaultCatalogModel(selectedModels.llm)
             ? selectedModels.llm.profileAlias
             : null,
         imageByokSelection: selectedByokModels.image,
         imageProfileAlias:
-          catalogKindEnabled.image && selectedModels.image?.profileAlias
+          catalogKindEnabled.image &&
+          selectedModels.image?.profileAlias &&
+          !isDefaultCatalogModel(selectedModels.image)
             ? selectedModels.image.profileAlias
             : null,
         visionByokSelection: selectedByokModels.vision,
         visionProfileAlias:
-          catalogKindEnabled.vision && selectedModels.vision?.profileAlias
+          catalogKindEnabled.vision &&
+          selectedModels.vision?.profileAlias &&
+          !isDefaultCatalogModel(selectedModels.vision)
             ? selectedModels.vision.profileAlias
             : null,
       });

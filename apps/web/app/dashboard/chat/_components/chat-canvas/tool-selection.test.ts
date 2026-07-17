@@ -234,12 +234,45 @@ test("resolveDefaultActiveSkillIds keeps default-enabled skills active", () => {
   assert.deepEqual(
     resolveDefaultActiveSkillIds({
       availableSkills: [
-        { id: "ppt-skill", defaultEnabled: true },
+        { id: "builtin:image-generate", defaultEnabled: true },
+        { id: "builtin:ppt-deck", defaultEnabled: true },
+        { id: "builtin:video-presentation", defaultEnabled: true },
         { id: "manual-skill", defaultEnabled: false },
       ],
       currentSkillIds: ["missing-skill", "manual-skill"],
     }),
-    ["ppt-skill", "manual-skill"],
+    [
+      "builtin:image-generate",
+      "builtin:ppt-deck",
+      "builtin:video-presentation",
+      "manual-skill",
+    ],
+  );
+});
+
+test("resolveDefaultActiveSkillIds does not truncate default-enabled skills", () => {
+  assert.deepEqual(
+    resolveDefaultActiveSkillIds({
+      availableSkills: [
+        { id: "builtin:image-generate", defaultEnabled: true },
+        { id: "builtin:ppt-deck", defaultEnabled: true },
+        { id: "builtin:video-presentation", defaultEnabled: true },
+        { id: "builtin:default-4", defaultEnabled: true },
+        { id: "builtin:default-5", defaultEnabled: true },
+        { id: "builtin:default-6", defaultEnabled: true },
+        { id: "manual-skill", defaultEnabled: false },
+      ],
+      currentSkillIds: ["manual-skill"],
+      maxSkills: 5,
+    }),
+    [
+      "builtin:image-generate",
+      "builtin:ppt-deck",
+      "builtin:video-presentation",
+      "builtin:default-4",
+      "builtin:default-5",
+      "builtin:default-6",
+    ],
   );
 });
 
@@ -264,7 +297,7 @@ test("buildSkillOptionToolsSelection maps runtime skill options to skill config"
             valueType: "string",
             defaultValue: "auto",
             target: {
-              path: "runtime.config.stylePreset",
+              path: "config.stylePreset",
             },
             values: [
               { value: "auto", label: "Auto" },
@@ -283,9 +316,7 @@ test("buildSkillOptionToolsSelection maps runtime skill options to skill config"
 
   assert.deepEqual(tools?.skillRuntimeConfig, {
     "ppt-skill": {
-      config: {
-        stylePreset: "executive",
-      },
+      stylePreset: "executive",
     },
   });
 });

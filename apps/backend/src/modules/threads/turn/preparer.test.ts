@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { normalizeInvokedSkillIds } from "./invoked-skills";
 import type { EnabledSkillDescriptor } from "../../skills/types";
-import { shouldApplyLegacySlashSkillSelection } from "./skill-selection-policy";
+import { resolveRequestedThreadProfileAlias } from "./requested-profile-alias";
 
 function skill(input: Partial<EnabledSkillDescriptor>): EnabledSkillDescriptor {
   return {
@@ -53,17 +53,37 @@ test("normalizeInvokedSkillIds does not treat selected skills as invoked", () =>
   );
 });
 
-test("slash skill selection is only auto-applied for legacy clients without skillIds", () => {
-  assert.equal(
-    shouldApplyLegacySlashSkillSelection(undefined),
-    true,
-  );
-  assert.equal(shouldApplyLegacySlashSkillSelection({}), true);
-  assert.equal(shouldApplyLegacySlashSkillSelection({ skillIds: [] }), false);
-  assert.equal(
-    shouldApplyLegacySlashSkillSelection({
-      skillIds: ["builtin:ppt-deck"],
+test("resolveRequestedThreadProfileAlias prefers execution config over legacy stream modelSettings", () => {
+  assert.deepEqual(
+    resolveRequestedThreadProfileAlias({
+      execution: { profileAlias: "global-image-profile" },
+      legacyProfileAlias: "legacy-image-profile",
+      kind: "image",
     }),
-    false,
+    { provided: true, profileAlias: "global-image-profile" },
+  );
+});
+
+test("resolveRequestedThreadProfileAlias normalizes default aliases to inherited defaults", () => {
+  assert.deepEqual(
+    resolveRequestedThreadProfileAlias({
+      execution: { profileAlias: "vision-default" },
+      kind: "vision",
+    }),
+    { provided: true, profileAlias: null },
+  );
+});
+
+test("resolveRequestedThreadProfileAlias ignores BYOK execution profile aliases", () => {
+  assert.deepEqual(
+    resolveRequestedThreadProfileAlias({
+      execution: {
+        executionMode: "BYOK",
+        byokModelId: "byok-image-model",
+        profileAlias: "global-image-profile",
+      },
+      kind: "image",
+    }),
+    { provided: false, profileAlias: undefined },
   );
 });

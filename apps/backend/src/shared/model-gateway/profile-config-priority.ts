@@ -6,6 +6,7 @@ type ProfileConfigMetadata = {
 
 export type ProtectedProfileConfigField =
   | "imageGeneration"
+  | "providerRouting"
   | "supportedEfforts"
   | "supportedParameters"
   | "supportsImageInput";

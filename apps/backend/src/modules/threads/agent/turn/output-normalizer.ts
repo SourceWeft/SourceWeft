@@ -731,6 +731,9 @@ export function getFilesystemToolStartTitle(
   if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
     return "Generating image";
   }
+  if (hasAgentToolCapability(toolName, "video_presentation_artifact")) {
+    return "Building video presentation";
+  }
   if (hasAgentToolCapability(toolName, "presentation_artifact")) {
     return "Publishing deck";
   }
@@ -749,6 +752,18 @@ export function getFilesystemToolEndTitle(
 ) {
   if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
     return "Generated image";
+  }
+  if (hasAgentToolCapability(toolName, "video_presentation_artifact")) {
+    if (output !== undefined && !hasPresentationArtifactUrl(output)) {
+      return "Video presentation not ready";
+    }
+    if (
+      output !== undefined &&
+      extractToolOutputField(output, "status") === "running"
+    ) {
+      return "Video presentation generating";
+    }
+    return "Video presentation ready";
   }
   if (hasAgentToolCapability(toolName, "presentation_artifact")) {
     if (isPresentationArtifactInputRequiredOutput(output)) {
@@ -824,6 +839,13 @@ export function hasPresentationArtifactUrl(output: unknown) {
       extractToolOutputField(output, "pptx_url") ??
       extractToolOutputField(output, "artifactUrl") ??
       extractToolOutputField(output, "pptxUrl"),
+  );
+}
+
+export function isVideoPresentationArtifactReady(output: unknown) {
+  return (
+    hasPresentationArtifactUrl(output) &&
+    extractToolOutputField(output, "status") === "ready"
   );
 }
 

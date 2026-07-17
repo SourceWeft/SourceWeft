@@ -20,6 +20,12 @@ import {
   SAVE_ARTIFACT_TO_NOTION_TOOL_NAME,
   SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME,
 } from "./agent-tools";
+import {
+  videoPresentationBrandSchema,
+  videoPresentationCanvasSchema,
+  videoPresentationMotionSchema,
+  videoPresentationRenderProfileSchema,
+} from "./video-presentation";
 
 export const SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX = "sourceweft-web-run:";
 export const SOURCEWEFT_WEB_RUN_STOP_SUFFIX = ":stop";
@@ -665,15 +671,6 @@ const imageArtifactConfigSchema = z
   })
   .strict();
 
-const artifactToolSelectionSchema = z
-  .object({
-    kind: z.literal("image"),
-    mode: z.enum(["auto", "generate"]).optional(),
-    modelAlias: z.string().trim().min(1).max(512).optional(),
-    image: imageArtifactConfigSchema.optional(),
-  })
-  .strict();
-
 const generateImageToolSelectionSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -693,6 +690,17 @@ const publishArtifactToolSelectionSchema = z
 const generateVideoPresentationToolSelectionSchema = z
   .object({
     enabled: z.boolean().optional(),
+    language: z.string().trim().min(1).max(20).optional(),
+    durationTarget:
+      videoPresentationRenderProfileSchema.shape.durationTarget.optional(),
+    stylePreset:
+      videoPresentationRenderProfileSchema.shape.stylePreset.optional(),
+    renderProfile: videoPresentationRenderProfileSchema.partial().optional(),
+    slideCount: z.number().int().min(1).max(12).optional(),
+    visualDirection: z.string().trim().min(1).max(1000).optional(),
+    brand: videoPresentationBrandSchema.optional(),
+    motion: videoPresentationMotionSchema.optional(),
+    canvas: videoPresentationCanvasSchema.optional(),
     narration: z
       .object({
         enabled: z.boolean().optional(),
@@ -900,16 +908,21 @@ export const listCapabilityCatalogResponseSchema = z.object({
   tools: z.array(capabilityCatalogToolSchema),
 });
 
+const LEGACY_THREAD_TOOLS_KEYS = new Set(["webSearchEnabled", "artifact"]);
+
+const LEGACY_THREAD_TOOLS_ALIASES: Record<string, string> = {
+  webSearchEnabled: "web_search.enabled",
+  artifact: "generate_image",
+};
+
 const threadToolsRequestSchema = z
   .object({
-    skillIds: z.array(z.string().trim().min(1).max(128)).max(5).optional(),
+    skillIds: z.array(z.string().trim().min(1).max(128)).max(5).default([]),
     invokedSkillIds: z
       .array(z.string().trim().min(1).max(128))
       .max(5)
       .optional(),
     skillRuntimeConfig: skillRuntimeConfigSelectionSchema.optional(),
-    webSearchEnabled: z.boolean().optional(),
-    artifact: artifactToolSelectionSchema.optional(),
     [GENERATE_IMAGE_TOOL_NAME]: generateImageToolSelectionSchema.optional(),
     [PUBLISH_ARTIFACT_TOOL_NAME]:
       publishArtifactToolSelectionSchema.optional(),
@@ -928,7 +941,19 @@ const threadToolsRequestSchema = z
     [SAVE_FINAL_ANSWER_TO_NOTION_TOOL_NAME]:
       connectorToolSelectionSchema.optional(),
   })
-  .catchall(z.record(z.string(), z.unknown()));
+  .catchall(z.unknown())
+  .superRefine((value, ctx) => {
+    for (const key of Object.keys(value)) {
+      if (!LEGACY_THREAD_TOOLS_KEYS.has(key)) {
+        continue;
+      }
+      ctx.addIssue({
+        code: "custom",
+        message: `Legacy tool key "${key}" is no longer supported. Use "${LEGACY_THREAD_TOOLS_ALIASES[key]}" instead.`,
+        path: [key],
+      });
+    }
+  });
 
 export const streamThreadRequestSchema = z.object({
   mode: streamThreadModeSchema.optional(),
@@ -1631,7 +1656,6 @@ export type ImageStyle = z.infer<typeof imageStyleSchema>;
 export type ImageAspectRatio = z.infer<typeof imageAspectRatioSchema>;
 export type ImageQuality = z.infer<typeof imageQualitySchema>;
 export type ImageArtifactConfig = z.infer<typeof imageArtifactConfigSchema>;
-export type ArtifactToolSelection = z.infer<typeof artifactToolSelectionSchema>;
 export type GenerateImageToolSelection = z.infer<
   typeof generateImageToolSelectionSchema
 >;

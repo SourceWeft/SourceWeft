@@ -9,6 +9,7 @@ import {
   readWebAccessOverride,
   resolveConnectorToolSelections,
   resolveGenerateImageToolSelection,
+  resolveGenerateVideoPresentationToolSelection,
   resolveWebSearchEnabled,
 } from "./tool-selection";
 import type { EnabledSkillDescriptor } from "../../skills/types";
@@ -28,11 +29,10 @@ function skill(input: Partial<EnabledSkillDescriptor>): EnabledSkillDescriptor {
   };
 }
 
-test("resolveWebSearchEnabled reads tool-name keyed request before legacy flag", () => {
+test("resolveWebSearchEnabled reads tool-name keyed request selections", () => {
   assert.equal(
     resolveWebSearchEnabled({
       tools: {
-        webSearchEnabled: true,
         web_search: { enabled: false },
       },
       enabledSkills: [skill({ name: "search", tools: ["web_search"] })],
@@ -62,18 +62,18 @@ test("readWebAccessOverride reads web fetch fallback", () => {
   assert.equal(readWebAccessOverride({ web_fetch: { enabled: false } }), false);
 });
 
-test("resolveGenerateImageToolSelection maps legacy artifact to generate_image config", () => {
+test("resolveGenerateImageToolSelection reads generate_image selection only", () => {
   assert.deepEqual(
     resolveGenerateImageToolSelection({
-      artifact: {
-        kind: "image",
-        mode: "generate",
-        modelAlias: "legacy-image",
-        image: { aspectRatio: "1:1", quality: "standard" },
+      generate_image: {
+        enabled: true,
+        modelAlias: "image-model",
+        config: { aspectRatio: "1:1", quality: "standard" },
       },
     }),
     {
-      modelAlias: "legacy-image",
+      enabled: true,
+      modelAlias: "image-model",
       config: { aspectRatio: "1:1", quality: "standard" },
     },
   );
@@ -89,13 +89,11 @@ test("buildTurnOptionsSnapshot stores effective canonical tool selections", () =
         enabled: true,
       },
       skillRuntimeConfig: {
-        "ppt-deck": {
-          config: {
-            language: "zh-CN",
-            slideCount: 10,
-            stylePreset: "executive",
-            visualDensity: "dense",
-          },
+        "builtin:ppt-deck": {
+          language: "zh-CN",
+          slideCount: 10,
+          stylePreset: "executive",
+          visualDensity: "dense",
         },
       },
       search_notion_pages: { enabled: true, connectorId: "connector_1" },
@@ -115,13 +113,11 @@ test("buildTurnOptionsSnapshot stores effective canonical tool selections", () =
         enabled: true,
       },
       skillRuntimeConfig: {
-        "ppt-deck": {
-          config: {
-            language: "zh-CN",
-            slideCount: 10,
-            stylePreset: "executive",
-            visualDensity: "dense",
-          },
+        "builtin:ppt-deck": {
+          language: "zh-CN",
+          slideCount: 10,
+          stylePreset: "executive",
+          visualDensity: "dense",
         },
       },
       search_notion_pages: { enabled: true, connectorId: "connector_1" },
@@ -154,6 +150,76 @@ test("buildRuntimeTools exposes generic options without enabled flag", () => {
         options: {
           narration: { enabled: false },
         },
+      },
+    },
+  );
+});
+
+test("video presentation runtime config becomes tool options", () => {
+  const tools: ThreadToolsSelection = {
+    skillRuntimeConfig: {
+      "builtin:video-presentation": {
+        slideCount: 5,
+        stylePreset: "technical",
+        visualDensity: "dense",
+        durationTarget: "short",
+        language: "zh-CN",
+        visualDirection: "chalkboard classroom",
+        motionPacing: "dynamic",
+        canvasFps: 30,
+        narrationEnabled: false,
+      },
+    },
+    generate_video_presentation: {
+      enabled: true,
+    },
+  };
+  const selection = resolveGenerateVideoPresentationToolSelection(tools);
+
+  assert.deepEqual(selection, {
+    enabled: true,
+    slideCount: 5,
+    visualDirection: "chalkboard classroom",
+    renderProfile: {
+      stylePreset: "technical",
+      visualDensity: "dense",
+      durationTarget: "short",
+      language: "zh-CN",
+    },
+    motion: {
+      pacing: "dynamic",
+    },
+    canvas: {
+      fps: 30,
+    },
+    narration: {
+      enabled: false,
+    },
+  });
+  const runtimeTool = buildRuntimeTools({
+    toolPermissions: { generate_video_presentation: "allow" },
+    tools: {
+      generate_video_presentation: selection,
+    },
+  }).generate_video_presentation;
+  assert.ok(runtimeTool);
+  assert.deepEqual(runtimeTool.options, {
+      slideCount: 5,
+      visualDirection: "chalkboard classroom",
+      renderProfile: {
+        stylePreset: "technical",
+        visualDensity: "dense",
+        durationTarget: "short",
+        language: "zh-CN",
+      },
+      motion: {
+        pacing: "dynamic",
+      },
+      canvas: {
+        fps: 30,
+      },
+      narration: {
+        enabled: false,
       },
     },
   );

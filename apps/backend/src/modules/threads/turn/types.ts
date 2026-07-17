@@ -68,8 +68,6 @@ export type MessageContentJson = {
  * Per-turn tool settings input.
  */
 export type ThreadToolsSelection = {
-  webSearchEnabled?: boolean;
-  artifact?: unknown;
   skillRuntimeConfig?: Record<string, Record<string, unknown>>;
   [AGENT_TOOL_NAMES.generateImage]?: GenerateImageToolSelection;
   [AGENT_TOOL_NAMES.publishArtifact]?: PublishArtifactToolSelection;
@@ -168,6 +166,7 @@ export type StreamThreadEventInput = {
   llm?: LlmExecutionConfig;
   image?: LlmExecutionConfig;
   vision?: LlmExecutionConfig;
+  imageProfileAlias?: string | null;
   visionProfileAlias?: string | null;
   userMessageParentId?: string | null;
   assistantMessageParentId?: string | null;
@@ -225,7 +224,7 @@ export type PreparedThreadTurn = {
     selectedDirectoryIds: string[];
     expandedDescendantSourceIds: string[];
   };
-  webSearchEnabled: boolean;
+  webAccessEnabled: boolean;
   command: ResolvedThreadCommand | null;
   invocation: ResolvedThreadInvocation | null;
   commandSuccessCriteria: CommandSuccessCriteria;

@@ -21,7 +21,6 @@ export { resolveInvocationSelection } from "./resolver";
 // Providers
 export {
   createCapabilityToolInvocationProvider,
-  legacyCapabilityToolSelectableId,
   projectCapabilityToolCommands,
 } from "./providers/capability-tools";
 export {

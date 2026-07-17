@@ -13,7 +13,7 @@
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-tool-generate-image": "workspace:*",
-    "@sourceweft/builtin-tool-generate-video-presentation": "workspace:*",
+    "@sourceweft/builtin-tool-video-presentation": "workspace:*",
     "@sourceweft/builtin-tool-publish-artifact": "workspace:*",
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
     "@sourceweft/builtin-tool-web-search": "workspace:*",

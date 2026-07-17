@@ -577,6 +577,37 @@ function hasPresentationArtifactUrl(output: unknown) {
   );
 }
 
+function extractPresentationArtifactStatus(output: unknown) {
+  const directRecord =
+    typeof output === "string" && output.trim().startsWith("{")
+      ? parseJsonObjectString(output)
+      : null;
+  const record = directRecord ?? toObjectRecord(output);
+  if (!record) {
+    return null;
+  }
+  const content =
+    typeof record.content === "string" && record.content.trim().startsWith("{")
+      ? (() => {
+          try {
+            return toObjectRecord(JSON.parse(record.content));
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+  const outputRecord = content ?? record;
+  const status = outputRecord.status;
+  return typeof status === "string" ? status : null;
+}
+
+function isVideoPresentationArtifactReady(output: unknown) {
+  return (
+    hasPresentationArtifactUrl(output) &&
+    extractPresentationArtifactStatus(output) === "ready"
+  );
+}
+
 function normalizeToolCallRecord(
   value: unknown,
   options?: {
@@ -1340,7 +1371,9 @@ function isCompletedPresentationArtifactToolCall(
   return (
     (hasAgentToolCapability(toolCall.tool, "presentation_artifact") ||
       hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")) &&
-    hasPresentationArtifactUrl(toolCall.output) &&
+    (hasAgentToolCapability(toolCall.tool, "video_presentation_artifact")
+      ? isVideoPresentationArtifactReady(toolCall.output)
+      : hasPresentationArtifactUrl(toolCall.output)) &&
     (event.type === "tool-call-result" ||
       (event.type === "tool-call-end" && toolCall.status === "completed"))
   );

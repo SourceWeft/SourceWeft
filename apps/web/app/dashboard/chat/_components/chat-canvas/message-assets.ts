@@ -1,6 +1,4 @@
-import {
-  hasAgentToolCapability,
-} from "@sourceweft/agent-tool-registry";
+import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
 import {
   normalizeWebAssetUrl,
   resolveArtifactPreviewImageUrlFromArtifact,
@@ -222,7 +220,7 @@ function getToolOutputValue(output: unknown, key: string) {
   return null;
 }
 
-function getToolOutputField(output: unknown, key: string) {
+export function getToolOutputField(output: unknown, key: string) {
   const value = getToolOutputValue(output, key);
   if (typeof value === "string" && value.trim().length > 0) {
     return value.trim();
@@ -333,9 +331,20 @@ export function resolveGeneratedPresentationArtifact(
     return null;
   }
 
+  if (toolCall.tool === PUBLISH_ARTIFACT_TOOL_NAME && toolCall.error) {
+    return null;
+  }
+
+  const isVideoPresentation = hasAgentToolCapability(
+    toolCall.tool,
+    "video_presentation_artifact",
+  );
+  const outputType = getToolOutputField(toolCall.output, "type");
   if (
-    toolCall.tool === PUBLISH_ARTIFACT_TOOL_NAME &&
-    toolCall.error
+    isVideoPresentation &&
+    outputType !== "video_presentation_artifact_result" &&
+    outputType !== "video_presentation_processing_result" &&
+    outputType !== "generate_video_presentation_progress"
   ) {
     return null;
   }
@@ -364,10 +373,9 @@ export function resolveGeneratedPresentationArtifact(
     getToolOutputNumberField(toolCall.output, "slide_count") ??
     getToolOutputNumberField(toolCall.output, "slideCount");
   const sourceJsonUrl = getToolOutputField(toolCall.output, "source_json_url");
-  const generationModeValue = getToolOutputField(
-    toolCall.output,
-    "generation_mode",
-  ) ?? getToolOutputField(toolCall.output, "generationMode");
+  const generationModeValue =
+    getToolOutputField(toolCall.output, "generation_mode") ??
+    getToolOutputField(toolCall.output, "generationMode");
   const generationMode =
     generationModeValue === "visual_html" ||
     generationModeValue === "editable_native"

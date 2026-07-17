@@ -16,10 +16,14 @@ test("builtin skills load from standalone capability packages", async () => {
   const bySlug = new Map(skills.map((skill) => [skill.slug, skill]));
 
   assert.deepEqual(
-    ["feynman", "image-generate", "meeting-summary", "ppt-deck"].map((slug) =>
-      bySlug.has(slug),
-    ),
-    [true, true, true, true],
+    [
+      "feynman",
+      "image-generate",
+      "meeting-summary",
+      "ppt-deck",
+      "video-presentation",
+    ].map((slug) => bySlug.has(slug)),
+    [true, true, true, true, true],
   );
 
   for (const slug of [
@@ -27,6 +31,7 @@ test("builtin skills load from standalone capability packages", async () => {
     "image-generate",
     "meeting-summary",
     "ppt-deck",
+    "video-presentation",
   ]) {
     assert.match(
       bySlug.get(slug)?.storagePointer ?? "",
@@ -105,6 +110,99 @@ test("restricted builtin artifact skills are default enabled", async () => {
     }),
     true,
   );
+  assert.equal(
+    skillServiceTestExports.isBuiltinSkillDefaultEnabled({
+      slug: "video-presentation",
+      visibility: "restricted",
+    }),
+    true,
+  );
+});
+
+test("video-presentation builtin skill exposes agent video artifact workflow", async () => {
+  const skill = await getBuiltinSkillBySlug("video-presentation");
+
+  assert.ok(skill);
+  assert.equal(skill.visibility, "restricted");
+  assert.equal(skill.manifestJson.visibility, "restricted");
+  assert.equal(skill.manifestJson.slash, false);
+  assert.deepEqual(skill.manifestJson.tools, ["generate_video_presentation"]);
+  assert.deepEqual(
+    skill.manifestJson.options?.map((option) => ({
+      id: option.id,
+      target: option.target,
+    })),
+    [
+      {
+        id: "stylePreset",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "renderProfile.stylePreset",
+        },
+      },
+      {
+        id: "visualDensity",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "renderProfile.visualDensity",
+        },
+      },
+      {
+        id: "durationTarget",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "renderProfile.durationTarget",
+        },
+      },
+      {
+        id: "slideCount",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "slideCount",
+        },
+      },
+      {
+        id: "motionPacing",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "motion.pacing",
+        },
+      },
+      {
+        id: "canvasFps",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "canvas.fps",
+        },
+      },
+      {
+        id: "language",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "renderProfile.language",
+        },
+      },
+      {
+        id: "narrationEnabled",
+        target: {
+          toolName: "generate_video_presentation",
+          path: "narration.enabled",
+        },
+      },
+    ],
+  );
+
+  const bundle = await loadBuiltinSkillBundle(skill.storagePointer);
+  const content = bundle?.files.find(
+    (file) => file.path === "SKILL.md",
+  )?.contentText;
+  assert.match(content ?? "", /video_presentation/);
+  assert.match(content ?? "", /generate_video_presentation/);
+  assert.match(content ?? "", /brief-first/);
+  assert.match(content ?? "", /browser preview\/export/);
+  assert.match(content ?? "", /Do not call `publish_artifact`/);
+  assert.doesNotMatch(content ?? "", /prepare_sandbox_workspace/);
+  assert.match(content ?? "", /Do not describe it as a completed MP4/);
 });
 
 test("ppt-deck builtin skill stays hidden from the public gallery", async () => {
@@ -124,7 +222,7 @@ test("ppt-deck builtin skill stays hidden from the public gallery", async () => 
     ["stylePreset", "visualDensity", "slideCount", "language"],
   );
   assert.deepEqual(skill.manifestJson.options?.[0]?.target, {
-    path: "runtime.config.stylePreset",
+    path: "config.stylePreset",
   });
 });
 
@@ -192,7 +290,7 @@ test("ppt-deck builtin skill includes sandbox-based generation guidance", async 
   assert.match(content ?? "", /use the\s+discovered slide image paths from `\$QA_DIR\/slide-images\.txt`/);
   assert.doesNotMatch(content ?? "", /\/workspace\/qa/);
   assert.match(content ?? "", /Do not assume a fixed filename such as `slide-01\.jpg`/);
-  assert.match(content ?? "", /text-only content slides/);
+  assert.match(content ?? "", /Every content slide needs a meaningful visual structure/);
   assert.match(content ?? "", /find "<sandbox task directory>" -type f -iname '\*\.pptx'/);
   assert.match(content ?? "", /roughly 12 visible tool calls/);
   assert.match(content ?? "", /roughly 18 visible tool calls/);

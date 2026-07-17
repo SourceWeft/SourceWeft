@@ -267,30 +267,17 @@ export interface ToolBindingOptions {
 }
 
 export interface StructuredOutputConfig {
+  /**
+   * Structured-output method. When omitted, LangChain selects a default per
+   * model. Callers should normally omit this.
+   */
   method?: "json_schema" | "json_mode" | "function_calling";
-  name?: string;
+  name: string;
   description?: string;
-  schema?: Record<string, unknown>;
+  schema: Record<string, unknown>;
+  /** Only forwarded when {@link method} is set explicitly. */
   strict?: boolean;
 }
-
-export type ResponseFormat =
-  | {
-      type: "json_object";
-    }
-  | {
-      type: "json_schema";
-      json_schema: {
-        name: string;
-        schema: Record<string, unknown>;
-        description?: string;
-        strict?: boolean;
-      };
-    }
-  | {
-      type: string;
-      [key: string]: unknown;
-    };
 
 export interface GatewayProviderConfig {
   kind: ProviderKind;
@@ -356,8 +343,26 @@ export interface LangChainChatModelLike {
     tools: unknown[],
     kwargs?: Record<string, unknown>,
   ): LangChainChatModelLike;
-  invoke(input: unknown): Promise<unknown>;
-  stream(input: unknown): Promise<AsyncIterable<unknown>>;
+  withStructuredOutput?(
+    schema: Record<string, unknown>,
+    config: {
+      includeRaw: true;
+      // Optional: when omitted, LangChain selects the best method per model.
+      method?: "jsonSchema" | "functionCalling" | "jsonMode";
+      name: string;
+      strict?: boolean;
+    },
+  ): {
+    invoke(
+      input: unknown,
+      options?: Record<string, unknown>,
+    ): Promise<unknown>;
+  };
+  invoke(input: unknown, options?: Record<string, unknown>): Promise<unknown>;
+  stream(
+    input: unknown,
+    options?: Record<string, unknown>,
+  ): Promise<AsyncIterable<unknown>>;
 }
 
 export interface LangChainEmbeddingsLike {
@@ -409,7 +414,6 @@ export interface ChatCompleteInput extends GatewayExecutionInput {
   tools?: ToolDefinition[];
   toolChoice?: ToolChoice;
   toolBindingOptions?: ToolBindingOptions;
-  responseFormat?: ResponseFormat;
   structuredOutput?: StructuredOutputConfig;
   metadata?: GatewayRequestMetadata;
   thinking?: ThinkingConfig;
@@ -429,6 +433,7 @@ export interface ChatCompleteResult {
   providerModel?: string;
   routeDecision?: RouteDecision;
   traceId?: string;
+  structuredOutput?: Record<string, unknown>;
   raw: AIMessage;
 }
 
@@ -810,6 +815,7 @@ export interface ResolvedRequestTarget {
   apiKeyHeaderName?: string;
   apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;
+  supports: readonly string[];
   providerRouting?: ProviderRoutingConfig;
   routeDecision: RouteDecision;
   requestMetadata: Record<string, unknown>;

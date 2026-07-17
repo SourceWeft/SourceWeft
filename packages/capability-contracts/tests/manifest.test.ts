@@ -37,30 +37,6 @@ test("capability-manifest.valid parses a builtin tool manifest", () => {
   assert.deepEqual(manifest.contributes.tools[0]?.command?.aliases, ["web"]);
 });
 
-test("capability-manifest.compat parses legacy contributes metadata", () => {
-  const manifest = capabilityManifestSchema.parse({
-    schemaVersion: 1,
-    id: "sourceweft/web-search",
-    kind: "tool",
-    name: "Web Search",
-    version: "0.1.0",
-    contributes: {
-      tools: [
-        {
-          id: "web_search",
-          title: "Search Web",
-          description: "Search the web and return cited results.",
-          inputSchema: { type: "object" },
-          outputSchema: { type: "object" },
-          risk: "read",
-        },
-      ],
-    },
-  });
-
-  assert.equal(manifest.contributes.tools[0]?.id, "web_search");
-});
-
 test("capability-manifest.runtime parses artifact tool runtime metadata", () => {
   const manifest = capabilityManifestSchema.parse({
     ...webSearchManifest,
@@ -146,7 +122,7 @@ test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () =>
             valueType: "string",
             defaultValue: "auto",
             target: {
-              path: "runtime.config.stylePreset",
+              path: "config.stylePreset",
             },
             values: [{ value: "auto", label: "Auto" }],
           },
@@ -182,7 +158,7 @@ test("capability-manifest.skill-runtime parses PPT Deck minimal metadata", () =>
     "present",
   ]);
   assert.deepEqual(manifest.contributes.skills[0]?.options[0]?.target, {
-    path: "runtime.config.stylePreset",
+    path: "config.stylePreset",
   });
 });
 
@@ -268,31 +244,6 @@ test("capability-manifest.kind rejects mismatched top-level contributions", () =
         description: "Publish artifacts.",
       },
     ],
-  });
-
-  assert.equal(result.ok, false);
-  assert.deepEqual(
-    result.ok ? [] : result.diagnostics.map((diagnostic) => diagnostic.code),
-    ["manifest.invalid"],
-  );
-});
-
-test("capability-manifest.kind rejects mismatched legacy contributes", () => {
-  const result = parseCapabilityManifest({
-    schemaVersion: 1,
-    id: "sourceweft/ppt-deck",
-    kind: "skill",
-    name: "PPT Deck",
-    version: "1.0.0",
-    contributes: {
-      tools: [
-        {
-          id: "publish_artifact",
-          title: "Publish Artifact",
-          description: "Publish artifacts.",
-        },
-      ],
-    },
   });
 
   assert.equal(result.ok, false);
@@ -404,5 +355,20 @@ test("capability-manifest.invalid returns typed manifest diagnostics", () => {
   assert.deepEqual(
     result.ok ? [] : result.diagnostics.map((diagnostic) => diagnostic.code),
     ["manifest.invalid"],
+  );
+});
+
+test("capability manifest rejects legacy contributes input", () => {
+  const result = parseCapabilityManifest({
+    ...webSearchManifest,
+    contributes: {
+      tools: [],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(
+    result.ok ? "" : result.diagnostics[0]?.message ?? "",
+    /Legacy "contributes" field is not accepted/u,
   );
 });

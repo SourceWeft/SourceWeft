@@ -478,7 +478,7 @@ const prepared: PreparedThreadTurn = {
     expandedDescendantSourceIds: [],
   },
 
-  webSearchEnabled: false,
+  webAccessEnabled: false,
   command: null,
   invocation: null,
   commandSuccessCriteria: { kind: "none" },

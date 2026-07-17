@@ -145,7 +145,8 @@ export type StartThreadTurnInput = {
   llm?: StreamThreadEventInput["llm"];
   image?: StreamThreadEventInput["image"];
   vision?: StreamThreadEventInput["vision"];
-  visionProfileAlias?: string;
+  imageProfileAlias?: string | null;
+  visionProfileAlias?: string | null;
 };
 
 class ContentThreadService {
@@ -278,12 +279,13 @@ class ContentThreadService {
     const currentSettings = normalizeThreadModelSettings(thread.modelSettings);
     const sanitizedCurrentSettings = await pruneUnavailableThreadModelAliases(
       currentSettings,
-      patch,
     );
 
-    const nextSettings = mergeThreadModelSettings(
-      sanitizedCurrentSettings,
-      patch,
+    const nextSettings = await pruneUnavailableThreadModelAliases(
+      mergeThreadModelSettings(
+        sanitizedCurrentSettings,
+        patch,
+      ),
     );
 
     await validateThreadModelSettings(nextSettings);
@@ -389,7 +391,9 @@ class ContentThreadService {
       userId: input.userId,
     });
 
-    const modelSettings = normalizeThreadModelSettings(input.modelSettings);
+    const modelSettings = await pruneUnavailableThreadModelAliases(
+      normalizeThreadModelSettings(input.modelSettings),
+    );
     await validateThreadModelSettings(modelSettings);
     const resolvedModelSettings =
       await resolveThreadModelSettingsSnapshots(modelSettings);
@@ -432,7 +436,9 @@ class ContentThreadService {
       return { thread: existingThread, run: existingRun };
     }
 
-    const modelSettings = normalizeThreadModelSettings(input.modelSettings);
+    const modelSettings = await pruneUnavailableThreadModelAliases(
+      normalizeThreadModelSettings(input.modelSettings),
+    );
     await validateThreadModelSettings(modelSettings);
     const resolvedModelSettings =
       await resolveThreadModelSettingsSnapshots(modelSettings);
@@ -463,6 +469,7 @@ class ContentThreadService {
       llm: input.llm,
       image: input.image,
       vision: input.vision,
+      imageProfileAlias: input.imageProfileAlias,
       visionProfileAlias: input.visionProfileAlias,
     };
 

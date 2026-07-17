@@ -11,9 +11,14 @@ import type { PreparedThreadTurn } from "..";
 import {
   createFileArtifactRecord,
   createImageArtifactRecord,
+  createPendingVideoPresentationArtifactRecord,
+  findArtifactRecord,
+  findReusableVideoPresentationArtifactRecord,
+  markArtifactReady,
   createSlidesArtifactRecord,
 } from "../../artifacts/repository";
 import { meterBillableModelUsage } from "../../content/model-billing";
+import { enqueueVideoPresentationGenerateJob } from "../../content/queue";
 import {
   buildArtifactStorageKey,
   getContentStorageBucketName,
@@ -168,7 +173,7 @@ function createCapabilityAgentToolTurnContext(
     traceId: traceContext?.traceId,
     userId: prepared.userId,
     userMessageId: prepared.userMessage.id,
-    webSearchEnabled: prepared.webSearchEnabled,
+    webAccessEnabled: prepared.webAccessEnabled,
     workspaceId: prepared.workspace.id,
   };
 }
@@ -191,6 +196,10 @@ function createCapabilityAgentToolHostServices(
     artifacts: {
       createFileArtifactRecord,
       createImageArtifactRecord,
+      createPendingVideoPresentationArtifactRecord,
+      findVideoPresentationArtifactRecord: findArtifactRecord,
+      findReusableVideoPresentationArtifactRecord,
+      markArtifactReady,
       createSlidesArtifactRecord,
     },
     billing: {
@@ -208,10 +217,13 @@ function createCapabilityAgentToolHostServices(
         }
       : undefined,
     logger,
+    llm,
     modelGateway: {
       getClient: getModelGatewayClient,
     },
-    queue: {},
+    queue: {
+      enqueueVideoPresentationRenderJob: enqueueVideoPresentationGenerateJob,
+    },
     retrieval: {
       searchSources: async (
         query: string,

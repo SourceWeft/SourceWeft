@@ -53,6 +53,20 @@ export type PendingByokModelState = {
 
 export const DEFAULT_BYOK_PROVIDER_KIND = "openai-compatible";
 
+const DEFAULT_PROFILE_ALIASES = new Set([
+  "chat-default",
+  "image-default",
+  "vision-default",
+]);
+
+function normalizeExplicitProfileAlias(alias: string | null | undefined) {
+  const trimmed = alias?.trim();
+  if (!trimmed || DEFAULT_PROFILE_ALIASES.has(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
 export function normalizeByokProviderOptions(
   input: unknown,
   credentials: ByokCredentialItem[],
@@ -218,15 +232,21 @@ export function buildThreadCreateModelSettings(input: {
   } = {};
 
   const llmProfileAlias =
-    input.byokSelection?.mode === "byok" ? null : input.globalProfileAlias;
+    input.byokSelection?.mode === "byok"
+      ? null
+      : normalizeExplicitProfileAlias(input.globalProfileAlias);
 
   if (llmProfileAlias) {
     modelSettings.llmProfileAlias = llmProfileAlias;
   }
   const imageProfileAlias =
-    input.imageByokSelection?.mode === "byok" ? null : input.imageProfileAlias;
+    input.imageByokSelection?.mode === "byok"
+      ? null
+      : normalizeExplicitProfileAlias(input.imageProfileAlias);
   const visionProfileAlias =
-    input.visionByokSelection?.mode === "byok" ? null : input.visionProfileAlias;
+    input.visionByokSelection?.mode === "byok"
+      ? null
+      : normalizeExplicitProfileAlias(input.visionProfileAlias);
 
   if (imageProfileAlias) {
     modelSettings.imageProfileAlias = imageProfileAlias;

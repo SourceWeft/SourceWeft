@@ -228,11 +228,11 @@ export function buildSkillOptionToolsSelection(input: {
       }
       const toolName = option.target.toolName;
       if (!toolName) {
-        if (option.target.path.startsWith("runtime.config.")) {
-          const runtimeConfig = { ...(skillRuntimeConfig[skill.id] ?? {}) };
-          const configPath = option.target.path.slice("runtime.".length);
-          if (setValueAtSelectionPath(runtimeConfig, configPath, value)) {
-            skillRuntimeConfig[skill.id] = runtimeConfig;
+        if (option.target.path.startsWith("config.")) {
+          const skillConfig = { ...(skillRuntimeConfig[skill.id] ?? {}) };
+          const configPath = option.target.path.slice("config.".length);
+          if (setValueAtSelectionPath(skillConfig, configPath, value)) {
+            skillRuntimeConfig[skill.id] = skillConfig;
           }
         }
         continue;
@@ -304,12 +304,26 @@ export function resolveDefaultActiveSkillIds(input: {
   const defaultSkillIds = input.availableSkills
     .filter((skill) => skill.defaultEnabled)
     .map((skill) => skill.id);
-  return Array.from(
+  const defaultAndCurrentSkillIds = Array.from(
     new Set([
       ...defaultSkillIds,
       ...input.currentSkillIds.filter((id) => availableIds.has(id)),
     ]),
-  ).slice(0, input.maxSkills ?? 5);
+  );
+  const maxSkills = input.maxSkills ?? 5;
+  if (defaultSkillIds.length >= maxSkills) {
+    return defaultAndCurrentSkillIds.filter((id) =>
+      defaultSkillIds.includes(id),
+    );
+  }
+  const extraSlots = maxSkills - defaultSkillIds.length;
+  const currentSkillIds = defaultAndCurrentSkillIds.filter(
+    (id) => !defaultSkillIds.includes(id),
+  );
+  return [
+    ...defaultSkillIds,
+    ...currentSkillIds.slice(0, extraSlots),
+  ];
 }
 
 export function skillSupportsConnector(

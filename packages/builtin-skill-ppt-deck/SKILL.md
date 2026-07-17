@@ -2,9 +2,9 @@
 name: ppt-deck
 description: >
   Generate, edit, and read PowerPoint presentations. Create polished decks from
-  scratch with PptxGenJS, edit existing PPTX via XML workflows, or extract text
-  with markitdown. Triggers: PPT, PPTX, PowerPoint, presentation, slide, deck,
-  slides.
+  scratch with PptxGenJS, edit existing PPTX/POTX via XML workflows, or extract
+  text with markitdown. Triggers: PPT, PPTX, POTX, PowerPoint, presentation,
+  slide, deck, slides.
 argument-hint: "[topic, audience, template, or instructions]"
 user-invocable: true
 disable-model-invocation: false
@@ -66,11 +66,12 @@ only when the request or a concrete failure requires them:
    sandbox workspace according to the sandbox runtime rules.
 4. Run one generation `execute`: confirm the prepared builder exists, run
    `node --check`, then run the builder.
-5. Run one QA `execute`: extract content with `markitdown`, convert the PPTX to
-   PDF with LibreOffice, render images with `pdftoppm`, create the preview image
-   contract from the first rendered slide, then print explicit stage markers,
-   `QA_IMAGE_COUNT`, `PREVIEW_IMAGE_PATH`, the discovered slide image paths, and
-   a visible visual QA summary.
+5. Run one QA `execute`: extract content with `markitdown`, run File QA with
+   `scripts/validate_pptx.py`, convert the PPTX to PDF with LibreOffice, render
+   images with `pdftoppm`, create the preview image contract from the first
+   rendered slide, then print explicit stage markers, `QA_IMAGE_COUNT`,
+   `PREVIEW_IMAGE_PATH`, the discovered slide image paths, and a visible visual
+   QA summary.
 6. Use the actual generated PPTX path for QA and publishing.
 7. Fix concrete issues only. If QA passes, publish without an extra repair loop.
 8. Publish with the configured artifact publisher using the actual generated
@@ -89,11 +90,28 @@ title-and-bullet pages.
 4. Preserve useful formatting, images, and layout logic unless the user asks for
    a redesign.
 5. Make the smallest reliable edit that satisfies the request.
-6. Run content QA and visual QA on the final file.
+6. Run content QA, File QA, and visual QA on the final file. For template-derived
+   decks, pass `--original` to `validate_pptx.py`.
 7. Publish only the final edited PPTX.
 
 For source-grounded decks, use the available source tools first and keep factual
 claims traceable to the user's provided material.
+
+## Hard Gotchas
+
+These corrupt files or make PowerPoint refuse the deck. Follow them even if you
+only read this SKILL.md:
+
+- Hex colors: 6 digits, no `#`, no 8-digit alpha in the hex string.
+- Shadows: `opacity` 0-1, never bake alpha into `color`; `offset` must be >= 0.
+- Do not reuse PptxGenJS option objects across `add*` calls; clone fresh ones.
+- Keep charts native with `addChart`. On stacked/percentStacked bar or column
+  charts, never use `dataLabelPosition: "outEnd"` — use `ctr`, `inEnd`, or
+  `inBase`. Combo/secondary-axis charts need matching `valAxes` and `catAxes`.
+- Put long or quoted natural-language text in a `DATA` object and pass
+  `txt(DATA.key)` into drawing calls.
+- Prefer QA-safe fonts for body text: Arial, Calibri, Cambria, Times New Roman,
+  Courier New, plus Microsoft YaHei for Chinese. Do not default to Aptos.
 
 ## Design Guardrails
 
@@ -102,6 +120,13 @@ claims traceable to the user's provided material.
 - Do not default to generic blue unless it fits the topic.
 - Do not repeat title-and-bullet layouts across the deck.
 - Do not use title underline accents as the main visual system.
+- Do not use decorative color bars, header/footer stripes, sidebar stripes, or
+  card edge stripes. Separate regions with background tint, shadow, icon badges,
+  or split fields instead.
+- Do not default to cream/beige backgrounds. When no brand palette is given, use
+  white (`FFFFFF`) or a topic-specific dominant color. Cream is allowed only as
+  an intentional theme surface (for example Learning Studio or Academic
+  Explainer), never as a lazy default.
 - Every content slide needs a meaningful visual structure: native diagram,
   comparison, timeline, process, chart, image, icon system, or shaped layout.
 - Use strong contrast, comfortable margins, and varied but coherent layouts.
@@ -127,11 +152,15 @@ QA phase:
 set -e
 PPTX_ARTIFACT_PATH="<path printed by deck.js>"
 QA_DIR="<sandbox QA directory>"
+VALIDATE_PPTX="/skills/ppt-deck/scripts/validate_pptx.py"
 mkdir -p "$QA_DIR"
 
 echo "===CONTENT_QA==="
 python3 -m markitdown "$PPTX_ARTIFACT_PATH" > "$QA_DIR/content.txt"
-python3 -m markitdown "$PPTX_ARTIFACT_PATH" | grep -iE "xxxx|lorem|ipsum|placeholder" || true
+python3 -m markitdown "$PPTX_ARTIFACT_PATH" | grep -iE '\bx{3,}\b|lorem|ipsum|placeholder|\bTODO\b|\[insert|this.*(page|slide).*layout' || true
+
+echo "===FILE_QA==="
+python3 "$VALIDATE_PPTX" "$PPTX_ARTIFACT_PATH"
 
 echo "===PPTX_TO_PDF==="
 soffice --headless --convert-to pdf --outdir "$QA_DIR" "$PPTX_ARTIFACT_PATH"
@@ -152,7 +181,7 @@ cp "$PREVIEW_SOURCE_PATH" "$QA_DIR/preview.jpg"
 echo "PREVIEW_IMAGE_PATH=$QA_DIR/preview.jpg"
 
 echo "===VISUAL_QA_SUMMARY==="
-echo "Inspect the rendered slide JPG files listed above for overlap, clipping, odd wraps, decorative lines through text, low contrast, cramped margins, and missing promised visuals before publishing."
+echo "Inspect the rendered slide JPG files listed above for text overflow/clipping first, then overlap, gaps/margins/alignment, low contrast, missing promised visuals, AI-filler stripes/underlines, and cream-default backgrounds before publishing."
 ```
 
 The slides preview image is the first slide image rendered from the final PPTX
@@ -160,15 +189,22 @@ during final QA. Always provide the printed `PREVIEW_IMAGE_PATH` to the
 configured artifact publisher; do not use a preview image from an earlier render
 or an unverified intermediate PPTX.
 
-Inspect the rendered slide images or a contact sheet for clipping, overlap, low
-contrast, repeated layouts, missing promised visuals, text-only content slides,
-weak backgrounds, placeholder content, cramped edges, and unreadable charts or
-screenshots. Do not assume a fixed filename such as `slide-01.jpg`; use the
-files returned by `find`. The QA log must make the conversion visible with
-`===PPTX_TO_PDF===`, `===PDF_TO_JPG===`, `QA_IMAGE_COUNT=<n>`,
+Inspect the rendered slide images or a contact sheet in this order:
+
+1. Text overflow or clipping at box/slide edges
+2. Overlapping or colliding elements
+3. Gaps, margins, and alignment
+4. Low contrast
+5. Missing promised visuals
+6. AI filler: title underlines, decorative stripes, cream-as-default backgrounds,
+   repeated title-and-bullet pages
+
+Do not assume a fixed filename such as `slide-01.jpg`; use the files returned by
+`find`. The QA log must make the conversion visible with `===CONTENT_QA===`,
+`===FILE_QA===`, `===PPTX_TO_PDF===`, `===PDF_TO_JPG===`, `QA_IMAGE_COUNT=<n>`,
 `PREVIEW_IMAGE_PATH=<path>`, and `===VISUAL_QA_SUMMARY===`; do not publish when
-`QA_IMAGE_COUNT` is zero, `PREVIEW_IMAGE_PATH` is missing, or the visual QA
-summary is missing.
+File QA fails, `QA_IMAGE_COUNT` is zero, `PREVIEW_IMAGE_PATH` is missing, or the
+visual QA summary is missing.
 
 Do not run `file` against slide JPGs on the happy path. If a concrete debugging
 failure needs MIME diagnostics, make that optional and non-blocking, and use the
@@ -203,14 +239,17 @@ rerun the deck program with the required stdout protocol instead of guessing.
   generation phase once.
 - Runtime failure: read [pitfalls.md](references/pitfalls.md) only after a
   concrete generation failure.
+- File QA failure: fix chart options or package structure in the generator, then
+  regenerate; do not hand-edit packed XML to silence validate.
 - QA failure: patch only affected slides/layouts, then rerun QA once.
-- If visual QA finds overlap, odd wrapping, decorative lines through text, or
-  clipped content, fix the deck builder first and rerender the affected slides
-  or the full deck before publishing.
+- If visual QA finds overflow, overlap, odd wrapping, decorative stripes through
+  text, or clipped content, fix the deck builder first and rerender the affected
+  slides or the full deck before publishing.
 - Optional inspection tool missing: record a warning; do not probe repeatedly.
 - Do not redesign slides while repairing syntax or sandbox path problems.
 
 ## Dependencies
 
 The sandbox image preinstalls Node.js, npm, Python 3, LibreOffice, poppler-utils,
-CJK fonts, `pptxgenjs`, and `sharp`.
+CJK fonts, `pptxgenjs`, `sharp`, `react`, `react-dom`, and `react-icons`. File QA
+uses `/skills/ppt-deck/scripts/validate_pptx.py` from this skill bundle.

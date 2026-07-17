@@ -21,13 +21,16 @@ export async function resolveThreadChatProfile(input: {
       ? input.requestedProfileAlias.trim()
       : "";
   if (requestedProfileAlias.length > 0) {
-    const profile = await resolveActiveChatProfileByAlias(requestedProfileAlias);
-    return {
-      profileAlias: profile.profileAlias,
-      modelAlias: profile.modelAlias,
-      persistedProfileAlias: profile.profileAlias,
-      persistedModelAlias: profile.modelAlias,
-    };
+    const profile = await findActiveChatProfileByAlias(requestedProfileAlias);
+    if (profile) {
+      return {
+        profileAlias: profile.profileAlias,
+        modelAlias: profile.modelAlias,
+        persistedProfileAlias: profile.profileAlias,
+        persistedModelAlias: profile.modelAlias,
+      };
+    }
+    return resolveDefaultChatProfile();
   }
   const requestedModelAlias =
     typeof input.requestedModelAlias === "string"
@@ -70,9 +73,15 @@ export async function resolveThreadChatProfile(input: {
     }
   }
 
+  return resolveDefaultChatProfile();
+}
+
+async function resolveDefaultChatProfile() {
   const defaultChatProfile = await requireDefaultModelGatewayProfile("chat");
-  const fallbackProfileAlias = defaultChatProfile.profileAlias || config.chat.defaultModelAlias;
-  const fallbackModelAlias = defaultChatProfile.modelAlias || config.chat.defaultModelAlias;
+  const fallbackProfileAlias =
+    defaultChatProfile.profileAlias || config.chat.defaultModelAlias;
+  const fallbackModelAlias =
+    defaultChatProfile.modelAlias || config.chat.defaultModelAlias;
 
   return {
     profileAlias: fallbackProfileAlias,
@@ -118,6 +127,20 @@ export async function resolveActiveChatProfileByModelAlias(modelAlias: string) {
 }
 
 export async function resolveActiveChatProfileByAlias(profileAlias: string) {
+  const row = await findActiveChatProfileByAlias(profileAlias);
+
+  if (!row) {
+    throw new ContentError(
+      400,
+      "MODEL_PROFILE_ALIAS_INVALID",
+      `Model profile alias '${profileAlias}' is not available for chat`,
+    );
+  }
+
+  return row;
+}
+
+async function findActiveChatProfileByAlias(profileAlias: string) {
   const [row] = await db
     .select({
       configJson: modelGatewayProfiles.configJson,
@@ -141,13 +164,5 @@ export async function resolveActiveChatProfileByAlias(profileAlias: string) {
     )
     .limit(1);
 
-  if (!row) {
-    throw new ContentError(
-      400,
-      "MODEL_PROFILE_ALIAS_INVALID",
-      `Model profile alias '${profileAlias}' is not available for chat`,
-    );
-  }
-
-  return row;
+  return row ?? null;
 }

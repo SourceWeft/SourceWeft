@@ -486,6 +486,7 @@ export async function resolveRequestTarget(
       apiKeyHeaderName: provider.apiKeyHeaderName,
       apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
       defaultHeaders: provider.defaultHeaders,
+      supports: provider.supports,
       routeDecision: {
         alias: `${provider.name}:${execution.model}`,
         mode,
@@ -518,6 +519,7 @@ export async function resolveRequestTarget(
       apiKeyHeaderName: provider.apiKeyHeaderName,
       apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
       defaultHeaders: provider.defaultHeaders,
+      supports: provider.supports,
       routeDecision: {
         alias: routeKey,
         mode,
@@ -570,6 +572,7 @@ export async function resolveRequestTarget(
     apiKeyHeaderName: provider.apiKeyHeaderName,
     apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
     defaultHeaders: provider.defaultHeaders,
+    supports: provider.supports,
     ...(selected.providerRouting
       ? { providerRouting: selected.providerRouting }
       : {}),

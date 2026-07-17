@@ -18,53 +18,43 @@ const fixtureRecords = [
       name: "Search Fixture",
       version: "0.0.0",
       activation: { onStartup: false, autoEnableWhenConfigured: false },
-      contributes: {
-        commands: [],
-        skills: [],
-        tools: [
-          {
-            id: "search_docs",
-            title: "Search Docs",
-            description: "Search documents and return cited results.",
-            inputSchema: { type: "object" },
-            outputSchema: { type: "object" },
-            risk: "read",
-            options: [
-              {
-                id: "source",
-                title: "Source",
-                valueType: "string",
-                defaultValue: "all",
-                target: { path: "config.source" },
-                values: [
-                  { value: "all", label: "All" },
-                  { value: "internal", label: "Internal" },
-                ],
-              },
-            ],
-            command: {
-              aliases: ["search"],
-              category: "Research",
+      tools: [
+        {
+          id: "search_docs",
+          title: "Search Docs",
+          description: "Search documents and return cited results.",
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+          risk: "read",
+          options: [
+            {
+              id: "source",
+              title: "Source",
+              valueType: "string",
+              defaultValue: "all",
+              target: { path: "config.source" },
+              values: [
+                { value: "all", label: "All" },
+                { value: "internal", label: "Internal" },
+              ],
             },
-            runtime: {
-              execution: "direct",
-              promptIntro: "Search documents for the user's request.",
-              tools: ["search_docs"],
-              permissionOverrides: { search_docs: "allow" },
-              output: {
-                kind: "tool_call",
-                toolName: "search_docs",
-              },
+          ],
+          command: {
+            aliases: ["search"],
+            category: "Research",
+          },
+          runtime: {
+            execution: "direct",
+            promptIntro: "Search documents for the user's request.",
+            tools: ["search_docs"],
+            permissionOverrides: { search_docs: "allow" },
+            output: {
+              kind: "tool_call",
+              toolName: "search_docs",
             },
           },
-        ],
-        vfs: [],
-        artifacts: [],
-        retrieval: [],
-        documentParsers: [],
-        mcp: [],
-        connectors: [],
-      },
+        },
+      ],
       configSchema: {},
     },
     rootDir: "/fixtures/search",
@@ -79,71 +69,62 @@ const fixtureRecords = [
       name: "Report Fixture",
       version: "0.0.0",
       activation: { onStartup: false, autoEnableWhenConfigured: false },
-      contributes: {
-        commands: [],
-        skills: [
-          {
-            id: "report_writer",
-            title: "Write Report",
-            resources: [],
-            command: {
-              title: "Draft",
-              aliases: ["report"],
-              category: "Artifacts",
-              iconName: "fixture-report",
-              iconTone: "mono",
-            },
-            runtime: {
-              execution: "agent",
-              promptIntro: "Write a report and publish the final artifact.",
-              tools: ["publish_report"],
-              permissionOverrides: { publish_report: "allow" },
-              output: {
-                kind: "artifact",
-                artifactType: "report",
-                publisherTool: "publish_report",
-              },
+      skills: [
+        {
+          id: "report_writer",
+          title: "Write Report",
+          resources: [],
+          command: {
+            title: "Draft",
+            aliases: ["report"],
+            category: "Artifacts",
+            iconName: "fixture-report",
+            iconTone: "mono",
+          },
+          runtime: {
+            execution: "agent",
+            promptIntro: "Write a report and publish the final artifact.",
+            tools: ["publish_report"],
+            permissionOverrides: { publish_report: "allow" },
+            output: {
+              kind: "artifact",
+              artifactType: "report",
+              publisherTool: "publish_report",
             },
           },
-        ],
-        tools: [
-          {
-            id: "publish_report",
-            title: "Publish Report",
-            description: "Publish the final report artifact.",
-            inputSchema: { type: "object" },
-            outputSchema: { type: "object" },
-            risk: "write",
-            options: [
-              {
-                id: "style",
-                title: "Style",
-                valueType: "string",
-                defaultValue: "concise",
-                target: { path: "config.style" },
-                values: [
-                  { value: "concise", label: "Concise" },
-                  { value: "detailed", label: "Detailed" },
-                ],
-              },
-              {
-                id: "maxSections",
-                title: "Max Sections",
-                valueType: "number",
-                defaultValue: 5,
-                target: { path: "config.maxSections" },
-                values: [],
-              },
-            ],
-          },
-        ],
-        vfs: [],
-        artifacts: [],
-        retrieval: [],
-        documentParsers: [],
-        mcp: [],
-        connectors: [],
-      },
+        },
+      ],
+      tools: [
+        {
+          id: "publish_report",
+          title: "Publish Report",
+          description: "Publish the final report artifact.",
+          inputSchema: { type: "object" },
+          outputSchema: { type: "object" },
+          risk: "write",
+          options: [
+            {
+              id: "style",
+              title: "Style",
+              valueType: "string",
+              defaultValue: "concise",
+              target: { path: "config.style" },
+              values: [
+                { value: "concise", label: "Concise" },
+                { value: "detailed", label: "Detailed" },
+              ],
+            },
+            {
+              id: "maxSections",
+              title: "Max Sections",
+              valueType: "number",
+              defaultValue: 5,
+              target: { path: "config.maxSections" },
+              values: [],
+            },
+          ],
+        },
+      ],
       configSchema: {},
     },
     rootDir: "/fixtures/report",
@@ -158,27 +139,17 @@ const fixtureRecords = [
       name: "Meeting Fixture",
       version: "0.0.0",
       activation: { onStartup: false, autoEnableWhenConfigured: false },
-      contributes: {
-        commands: [],
-        skills: [
-          {
-            id: "meeting_notes",
-            resources: [],
-            command: {
-              aliases: ["notes"],
-              category: "Writing",
-              visibleWhen: "enabled",
-            },
+      skills: [
+        {
+          id: "meeting_notes",
+          resources: [],
+          command: {
+            aliases: ["notes"],
+            category: "Writing",
+            visibleWhen: "enabled",
           },
-        ],
-        tools: [],
-        vfs: [],
-        artifacts: [],
-        retrieval: [],
-        documentParsers: [],
-        mcp: [],
-        connectors: [],
-      },
+        },
+      ],
       configSchema: {},
     },
     rootDir: "/fixtures/meeting",
@@ -193,28 +164,18 @@ const fixtureRecords = [
       name: "Disabled Fixture",
       version: "0.0.0",
       activation: { onStartup: false, autoEnableWhenConfigured: false },
-      contributes: {
-        commands: [],
-        skills: [
-          {
-            id: "disabled_skill",
+      skills: [
+        {
+          id: "disabled_skill",
+          title: "Disabled Skill",
+          resources: [],
+          command: {
             title: "Disabled Skill",
-            resources: [],
-            command: {
-              title: "Disabled Skill",
-              aliases: ["disabled"],
-              visibleWhen: "enabled",
-            },
+            aliases: ["disabled"],
+            visibleWhen: "enabled",
           },
-        ],
-        tools: [],
-        vfs: [],
-        artifacts: [],
-        retrieval: [],
-        documentParsers: [],
-        mcp: [],
-        connectors: [],
-      },
+        },
+      ],
       configSchema: {},
     },
     rootDir: "/fixtures/disabled",

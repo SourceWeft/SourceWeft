@@ -5,6 +5,7 @@ import {
 } from "../_components/chat-canvas";
 import type { ToolApprovalResume } from "@sourceweft/sdk";
 import {
+  isDefaultCatalogModel,
   type ModelItem,
   type ModelType,
   type SelectedModels,
@@ -120,7 +121,10 @@ export function buildStreamingThreadRequestBody(
 
   const selectedLlmProfileAlias =
     input.streamWithSelectedLlm && input.catalogKindEnabled.llm
-      ? (input.selectedModels.llm?.profileAlias ?? input.selectedModels.llm?.id)
+      ? input.selectedModels.llm &&
+        !isDefaultCatalogModel(input.selectedModels.llm)
+        ? (input.selectedModels.llm.profileAlias ?? input.selectedModels.llm.id)
+        : undefined
       : undefined;
   const requestThinking =
     input.thinking ??
@@ -155,16 +159,19 @@ export function buildStreamingThreadRequestBody(
     }
   }
 
-  const modelSettings: Record<string, string> = {};
   const byokVisionRequest = buildByokModelExecution({
     selection: effectiveByokSelections.vision,
   });
   if (effectiveByokSelections.vision?.mode === "byok") {
     requestBody.vision = byokVisionRequest;
   } else if (input.catalogKindEnabled.vision && input.selectedModels.vision) {
-    modelSettings.visionProfileAlias =
-      input.selectedModels.vision.profileAlias ??
-      input.selectedModels.vision.id;
+    if (!isDefaultCatalogModel(input.selectedModels.vision)) {
+      requestBody.vision = {
+        profileAlias:
+          input.selectedModels.vision.profileAlias ??
+          input.selectedModels.vision.id,
+      };
+    }
   }
   if (effectiveByokSelections.image?.mode === "byok") {
     requestBody.image = buildByokModelExecution({
@@ -174,10 +181,11 @@ export function buildStreamingThreadRequestBody(
     input.catalogKindEnabled.image &&
     input.selectedModels.image?.profileAlias
   ) {
-    modelSettings.imageProfileAlias = input.selectedModels.image.profileAlias;
-  }
-  if (Object.keys(modelSettings).length > 0) {
-    requestBody.modelSettings = modelSettings;
+    if (!isDefaultCatalogModel(input.selectedModels.image)) {
+      requestBody.image = {
+        profileAlias: input.selectedModels.image.profileAlias,
+      };
+    }
   }
 
   if (

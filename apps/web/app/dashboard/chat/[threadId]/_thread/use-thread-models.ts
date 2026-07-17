@@ -15,6 +15,7 @@ import {
 import type { ByokModelConfigDefaults } from "../../_components/byok-model-config-dialog";
 import {
   emptyModelCatalog,
+  isDefaultCatalogModel,
   mapCatalogKindsToModelItems,
   resolveSelectedModels,
   resolveSelectedModelsWithByok,
@@ -23,7 +24,6 @@ import {
   type ModelType,
   type SelectedModels,
 } from "../../_components/model-catalog-utils";
-import { writeStoredModelSelection } from "../../_components/model-selection-storage";
 import {
   applySkillModelPresetState,
   DEFAULT_MODEL_SELECTION_SOURCES,
@@ -143,43 +143,6 @@ export function useThreadModels({
       threadId,
     );
   }, [loadedByokStorageKey, selectedByokModels, threadId, workspaceId]);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      return;
-    }
-    if (
-      !selectedModels.llm &&
-      !selectedModels.image &&
-      !selectedModels.vision &&
-      !selectedByokModels.llm &&
-      !selectedByokModels.image &&
-      !selectedByokModels.vision
-    ) {
-      return;
-    }
-
-    writeStoredModelSelection(workspaceId, threadId, {
-      llmProfileAlias:
-        selectedByokModels.llm?.mode === "byok"
-          ? null
-          : (selectedModels.llm?.profileAlias ??
-            selectedModels.llm?.id ??
-            null),
-      imageProfileAlias:
-        selectedByokModels.image?.mode === "byok"
-          ? null
-          : (selectedModels.image?.profileAlias ??
-            selectedModels.image?.id ??
-            null),
-      visionProfileAlias:
-        selectedByokModels.vision?.mode === "byok"
-          ? null
-          : (selectedModels.vision?.profileAlias ??
-            selectedModels.vision?.id ??
-            null),
-    });
-  }, [selectedByokModels, selectedModels, threadId, workspaceId]);
 
   useEffect(() => {
     if (selectedByokModels.llm?.mode === "byok") {
@@ -427,11 +390,21 @@ export function useThreadModels({
 
       const patch: ModelAliasSettings =
         input.type === "llm"
-          ? { llmProfileAlias: input.model.profileAlias ?? input.model.id }
+          ? {
+              llmProfileAlias: isDefaultCatalogModel(input.model)
+                ? null
+                : (input.model.profileAlias ?? input.model.id),
+            }
           : input.type === "image"
-            ? { imageProfileAlias: input.model.profileAlias ?? input.model.id }
+            ? {
+                imageProfileAlias: isDefaultCatalogModel(input.model)
+                  ? null
+                  : (input.model.profileAlias ?? input.model.id),
+              }
             : {
-                visionProfileAlias: input.model.profileAlias ?? input.model.id,
+                visionProfileAlias: isDefaultCatalogModel(input.model)
+                  ? null
+                  : (input.model.profileAlias ?? input.model.id),
               };
 
       try {

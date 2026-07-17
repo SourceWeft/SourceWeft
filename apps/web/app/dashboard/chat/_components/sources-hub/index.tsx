@@ -205,7 +205,7 @@ import {
 } from "./workspace-hub-cache";
 import { resolveWorkspaceSourceHydration } from "./source-refresh-state";
 
-export { ArtifactPreviewPanel } from "./artifact-preview-panel";
+export { ArtifactPreviewPanel } from "../artifact-preview/artifact-preview-panel";
 export type { ArtifactListItem } from "./types";
 
 const tabs = [

@@ -119,15 +119,16 @@ function buildArtifactCapabilities(
     artifact?.status === "ready" &&
       artifact.storageKey,
   );
+  const canRenderClientVideo = Boolean(
+    artifact &&
+      artifact.artifactType === "video_presentation" &&
+      artifact.status !== "failed",
+  );
   return {
-    canOpenFile: hasFile,
+    canOpenFile: hasFile || canRenderClientVideo,
     canDownloadFile: hasFile,
     canPreviewInline: hasArtifactPreviewFile(artifact),
-    canRenderClientVideo: Boolean(
-      artifact &&
-        artifact.artifactType === "video_presentation" &&
-        artifact.status !== "failed",
-    ),
+    canRenderClientVideo,
   };
 }
 
@@ -182,6 +183,60 @@ function resolveArtifactAsset(
       storageBucket: artifact.storageBucket,
       storageKey: artifact.storageKey,
     };
+  }
+
+  if (artifact.artifactType === "video_presentation") {
+    const audioTracks = Array.isArray(payload.audioTracks)
+      ? payload.audioTracks
+      : [];
+    for (const track of audioTracks) {
+      const record = toObjectRecord(track);
+      if (
+        record &&
+        record.fileName === decodedFileName &&
+        typeof record.storageKey === "string"
+      ) {
+        return {
+          contentType:
+            typeof record.mimeType === "string"
+              ? record.mimeType
+              : ARTIFACT_MIME_TYPES.binary,
+          fileName: decodedFileName,
+          storageBucket:
+            typeof record.storageBucket === "string"
+              ? record.storageBucket
+              : artifact.storageBucket,
+          storageKey: record.storageKey,
+        };
+      }
+    }
+
+    const assets = Array.isArray(payload.assets) ? payload.assets : [];
+    for (const asset of assets) {
+      const record = toObjectRecord(asset);
+      const candidateFileName =
+        typeof record?.fileName === "string"
+          ? record.fileName
+          : typeof record?.storageKey === "string"
+            ? record.storageKey.split("/").pop()
+            : null;
+      if (
+        record &&
+        candidateFileName === decodedFileName &&
+        typeof record.storageKey === "string" &&
+        !record.storageKey.startsWith("external:")
+      ) {
+        return {
+          contentType: ARTIFACT_MIME_TYPES.binary,
+          fileName: decodedFileName,
+          storageBucket:
+            typeof record.storageBucket === "string"
+              ? record.storageBucket
+              : artifact.storageBucket,
+          storageKey: record.storageKey,
+        };
+      }
+    }
   }
 
   return null;

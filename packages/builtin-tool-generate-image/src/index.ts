@@ -18,7 +18,6 @@ export {
 export {
   mergeImageArtifactConfig,
   normalizeArtifactImageConfig,
-  normalizeArtifactToolSelection,
   normalizeGenerateImageToolSelection,
   normalizePartialArtifactImageConfig,
 } from "./image-config";
@@ -35,7 +34,6 @@ export type {
   ArtifactGenerationKind,
   ArtifactImageConfig,
   ArtifactIntentDecision,
-  ArtifactToolSelection,
   GenerateImageToolSelection,
   ImageAspectRatio,
   ImageModelCapabilities,

@@ -18,7 +18,7 @@ export {
   type GenerateImageToolSelection,
   type ImageModelCapabilities,
 } from "./image-types";
-export { normalizeArtifactToolSelection, normalizeGenerateImageToolSelection } from "./image-config";
+export { normalizeGenerateImageToolSelection } from "./image-config";
 export { resolveGenerateImageIntentDecision } from "./intent";
 export { resolveImageModelCapabilities } from "./image-capabilities";
 

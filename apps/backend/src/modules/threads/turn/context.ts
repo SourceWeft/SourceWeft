@@ -157,16 +157,7 @@ export function resolveTurnOptionsToolsFromMessage(
         })
       : undefined;
   const optionsTools = readTurnOptionsSnapshotTools(metadata?.options);
-  if (optionsTools) {
-    return optionsTools;
-  }
-  const legacyTools =
-    metadata?.tools &&
-    typeof metadata.tools === "object" &&
-    !Array.isArray(metadata.tools)
-      ? (metadata.tools as ThreadToolsSelection)
-      : undefined;
-  return legacyTools;
+  return optionsTools;
 }
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {

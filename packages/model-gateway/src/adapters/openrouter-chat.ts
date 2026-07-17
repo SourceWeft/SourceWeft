@@ -1,71 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
-import { resolveThinkingMode } from "../thinking";
 import type { ProviderRoutingConfig } from "../types";
-
-function buildOpenRouterReasoningModelKwargs(
-  input: Parameters<ChatAdapter["createModel"]>[1],
-) {
-  const thinking = input.thinking;
-  if (!thinking) {
-    return {};
-  }
-
-  const supportedParameters = new Set(
-    (thinking?.supportedParameters ?? []).map((parameter) =>
-      parameter.trim().toLowerCase()
-    ),
-  );
-  const supportedEfforts = new Set(thinking.supportedEfforts ?? []);
-
-  const mode = resolveThinkingMode(thinking);
-  if (mode === "auto") {
-    return {};
-  }
-
-  if (mode === "off") {
-    if (supportedParameters.has("reasoning")) {
-      return {
-        reasoning: {
-          exclude: true,
-        },
-      };
-    }
-
-    return supportedParameters.has("include_reasoning")
-      ? { include_reasoning: false }
-      : {};
-  }
-
-  const effort = thinking.effort ?? "medium";
-  if (!supportedEfforts.has(effort)) {
-    return {};
-  }
-
-  if (supportedParameters.has("reasoning")) {
-    return {
-      ...(thinking.includeReasoning === true && supportedParameters.has("include_reasoning")
-        ? { include_reasoning: true }
-        : {}),
-      reasoning: {
-        enabled: true,
-        effort,
-        exclude: thinking.includeReasoning !== true,
-      },
-    };
-  }
-
-  if (supportedParameters.has("reasoning_effort")) {
-    return {
-      ...(thinking.includeReasoning === true && supportedParameters.has("include_reasoning")
-        ? { include_reasoning: true }
-        : {}),
-      reasoning_effort: effort,
-    };
-  }
-
-  return {};
-}
+import { buildOpenAIReasoningModelKwargs } from "./openai-reasoning";
 
 function mergeOpenRouterProviderRouting(
   extraBody: Record<string, unknown> | undefined,
@@ -103,6 +39,7 @@ export class OpenRouterChatAdapter implements ChatAdapter {
       temperature: input.temperature,
       topP: input.topP,
       maxRetries: options?.maxRetries ?? 2,
+      timeout: options?.timeoutMs,
       apiKey: target.apiKey,
       configuration: {
         baseURL: target.baseUrl,
@@ -113,7 +50,7 @@ export class OpenRouterChatAdapter implements ChatAdapter {
           input.extraBody,
           target.providerRouting,
         ) ?? {}),
-        ...buildOpenRouterReasoningModelKwargs(input),
+        ...buildOpenAIReasoningModelKwargs(input),
       },
       __includeRawResponse: true,
       maxTokens: input.maxTokens,

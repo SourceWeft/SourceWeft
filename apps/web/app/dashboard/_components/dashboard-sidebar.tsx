@@ -20,7 +20,6 @@ import { useDashboardChatState } from "./dashboard-chat-state";
 import { McpIcon, SkillIcon } from "./dashboard-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 import { copyStoredByokState } from "../chat/_components/byok-state";
-import { copyStoredModelSelection } from "../chat/_components/model-selection-storage";
 
 type NavItem = {
   title: string;
@@ -217,11 +216,6 @@ export function DashboardSidebar() {
 
   const handleStartNewChat = () => {
     if (workspaceId && activeThreadId) {
-      copyStoredModelSelection({
-        workspaceId,
-        fromBucket: activeThreadId,
-        toBucket: "current",
-      });
       copyStoredByokState({
         workspaceId,
         fromBucket: activeThreadId,

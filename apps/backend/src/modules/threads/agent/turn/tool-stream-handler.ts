@@ -9,6 +9,7 @@ import type { DeepAgentTurnEvent } from "./events";
 import {
   buildGeneratedArtifactProgressToolCallEvent,
   buildPresentationGenerationStep,
+  buildVideoPresentationGenerationStep,
   buildPresentationProgressThinkingEvent,
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
@@ -47,8 +48,10 @@ import {
   getWebToolMetadata,
   getWebToolOutputError,
   getWebToolStartTitle,
+  extractToolOutputField,
   hasPresentationArtifactUrl,
   isPresentationArtifactInputRequiredOutput,
+  isVideoPresentationArtifactReady,
   normalizeToolOutputForObservability,
   redactFilesystemToolOutputForClient,
   sanitizeFilesystemToolInputForClient,
@@ -123,9 +126,14 @@ export async function* handleToolStartStreamChunk(input: {
       }
     }
   }
-  if (hasAgentToolCapability(toolName, "presentation_artifact")) {
+  if (
+    hasAgentToolCapability(toolName, "presentation_artifact") ||
+    hasAgentToolCapability(toolName, "video_presentation_artifact")
+  ) {
     const progressEvent = normalizeGeneratedPresentationProgressEvent({
-      type: PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE,
+      type: hasAgentToolCapability(toolName, "video_presentation_artifact")
+        ? "generate_video_presentation_progress"
+        : PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE,
       toolCallId,
       tool: toolName,
       stage: "planning",
@@ -173,7 +181,8 @@ export async function* handleToolStartStreamChunk(input: {
   if (
     shouldStreamVisibleToolCall &&
     !hasAgentToolCapability(toolName, "generated_image_artifact") &&
-    !hasAgentToolCapability(toolName, "presentation_artifact")
+    !hasAgentToolCapability(toolName, "presentation_artifact") &&
+    !hasAgentToolCapability(toolName, "video_presentation_artifact")
   ) {
     runtime.renderBlocks.appendTool(toolCallId);
   }
@@ -186,15 +195,28 @@ export async function* handleToolStartStreamChunk(input: {
       toolCall: nextToolCall,
     };
   }
-  if (hasAgentToolCapability(toolName, "presentation_artifact")) {
+  if (
+    hasAgentToolCapability(toolName, "presentation_artifact") ||
+    hasAgentToolCapability(toolName, "video_presentation_artifact")
+  ) {
+    const isVideoPresentation = hasAgentToolCapability(
+      toolName,
+      "video_presentation_artifact",
+    );
     yield {
       type: "thinking-step",
       step: runtime.setThinkingStep(
-        buildPresentationGenerationStep({
-          phase: "generating",
-          tool: toolName,
-          toolCallId,
-        }),
+        isVideoPresentation
+          ? buildVideoPresentationGenerationStep({
+              phase: "generating",
+              tool: toolName,
+              toolCallId,
+            })
+          : buildPresentationGenerationStep({
+              phase: "generating",
+              tool: toolName,
+              toolCallId,
+            }),
       ),
     };
   }
@@ -444,25 +466,54 @@ export async function* handleToolEndStreamChunk(input: {
     status: toolStatus,
     toolCall: nextToolCall,
   };
-  if (hasAgentToolCapability(toolName, "presentation_artifact")) {
+  if (
+    hasAgentToolCapability(toolName, "presentation_artifact") ||
+    hasAgentToolCapability(toolName, "video_presentation_artifact")
+  ) {
+    const isVideoPresentation = hasAgentToolCapability(
+      toolName,
+      "video_presentation_artifact",
+    );
     const completed = toolStatus === "completed";
-    const hasArtifact = completed && hasPresentationArtifactUrl(output);
+    const hasArtifact = isVideoPresentation
+      ? isVideoPresentationArtifactReady(output)
+      : completed && hasPresentationArtifactUrl(output);
     const needsContent =
       completed && isPresentationArtifactInputRequiredOutput(output);
+    const isRunningVideo =
+      isVideoPresentation &&
+      completed &&
+      hasPresentationArtifactUrl(output) &&
+      !hasArtifact &&
+      extractToolOutputField(output, "status") === "running";
     yield {
       type: "thinking-step",
       step: runtime.setThinkingStep(
-        buildPresentationGenerationStep({
-          error: outputError,
-          latencyMs,
-          phase: hasArtifact
-            ? "completed"
-            : needsContent
-              ? "repairing"
-              : "failed",
-          tool: toolName,
-          toolCallId,
-        }),
+        isVideoPresentation
+          ? buildVideoPresentationGenerationStep({
+              error: outputError,
+              latencyMs,
+              phase: hasArtifact
+                ? "completed"
+                : needsContent
+                  ? "repairing"
+                  : isRunningVideo
+                    ? "saving"
+                    : "failed",
+              tool: toolName,
+              toolCallId,
+            })
+          : buildPresentationGenerationStep({
+              error: outputError,
+              latencyMs,
+              phase: hasArtifact
+                ? "completed"
+                : needsContent
+                  ? "repairing"
+                  : "failed",
+              tool: toolName,
+              toolCallId,
+            }),
       ),
     };
   }

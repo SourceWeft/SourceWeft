@@ -60,11 +60,15 @@ the program:
 set -e
 PPTX_ARTIFACT_PATH="<path printed by deck.js>"
 QA_DIR="<sandbox QA directory>"
+VALIDATE_PPTX="/skills/ppt-deck/scripts/validate_pptx.py"
 mkdir -p "$QA_DIR"
 
 echo "===CONTENT_QA==="
 python3 -m markitdown "$PPTX_ARTIFACT_PATH" > "$QA_DIR/content.txt"
-python3 -m markitdown "$PPTX_ARTIFACT_PATH" | grep -iE "xxxx|lorem|ipsum|placeholder" || true
+python3 -m markitdown "$PPTX_ARTIFACT_PATH" | grep -iE '\bx{3,}\b|lorem|ipsum|placeholder|\bTODO\b|\[insert|this.*(page|slide).*layout' || true
+
+echo "===FILE_QA==="
+python3 "$VALIDATE_PPTX" "$PPTX_ARTIFACT_PATH"
 
 echo "===PPTX_TO_PDF==="
 soffice --headless --convert-to pdf --outdir "$QA_DIR" "$PPTX_ARTIFACT_PATH"
@@ -85,7 +89,7 @@ cp "$PREVIEW_SOURCE_PATH" "$QA_DIR/preview.jpg"
 echo "PREVIEW_IMAGE_PATH=$QA_DIR/preview.jpg"
 
 echo "===VISUAL_QA_SUMMARY==="
-echo "Inspect the rendered slide JPG files listed above for overlap, clipping, odd wraps, decorative lines through text, low contrast, cramped margins, and missing promised visuals before publishing."
+echo "Inspect the rendered slide JPG files listed above for text overflow/clipping first, then overlap, gaps/margins/alignment, low contrast, missing promised visuals, and AI-filler stripes/underlines before publishing."
 ```
 
 The slides preview image is the first rendered slide from the final PPTX QA
@@ -254,10 +258,11 @@ slide.addShape(pres.shapes.RECTANGLE, {
 });
 
 // Rounded rectangle (rectRadius only works with ROUNDED_RECTANGLE, not RECTANGLE)
-// Don't pair with rectangular accent overlays -- they won't cover rounded corners. Use RECTANGLE instead.
+// Prefer tinted fills or subtle shadows to separate cards — do not add decorative
+// edge stripes or accent bars (they read as AI filler).
 slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
   x: 1, y: 1, w: 3, h: 2,
-  fill: { color: "FFFFFF" }, rectRadius: 0.1
+  fill: { color: "F8FAFC" }, rectRadius: 0.1
 });
 
 // With shadow
@@ -459,7 +464,8 @@ slide.addChart(pres.charts.PIE, [{
 
 ### Better-Looking Charts
 
-Default charts look dated. Apply these options for a modern, clean appearance:
+Default charts look dated. Apply these options for a modern, clean appearance.
+Keep charts native with `addChart` whenever PowerPoint supports the chart type.
 
 ```javascript
 slide.addChart(pres.charts.BAR, chartData, {
@@ -479,7 +485,7 @@ slide.addChart(pres.charts.BAR, chartData, {
   valGridLine: { color: "E2E8F0", size: 0.5 },
   catGridLine: { style: "none" },
 
-  // Data labels on bars
+  // Data labels on non-stacked bars/columns
   showValue: true,
   dataLabelPosition: "outEnd",
   dataLabelColor: "1E293B",
@@ -489,12 +495,39 @@ slide.addChart(pres.charts.BAR, chartData, {
 });
 ```
 
+### Chart Corruption Gotchas
+
+These options can produce files LibreOffice still renders but PowerPoint refuses:
+
+- **Stacked or percent-stacked bar/column**: never use `dataLabelPosition: "outEnd"`.
+  Use `ctr`, `inEnd`, or `inBase` only.
+- **Combo / secondary axis charts**: if any series uses `secondaryValAxis` or
+  `secondaryCatAxis`, provide both `valAxes` and `catAxes` with two entries each.
+  Supplying only `valAxes` writes undeclared axis ids and PowerPoint drops the chart.
+- Prefer native charts for bar/line/pie/combo. Render as images only for chart
+  types PowerPoint cannot express natively (Sankey, network, chord).
+
+```javascript
+// Stacked column — safe label positions only
+slide.addChart(pres.charts.BAR, stackedSeries, {
+  x: 0.5, y: 1, w: 9, h: 4,
+  barDir: "col",
+  barGrouping: "stacked",
+  showValue: true,
+  dataLabelPosition: "ctr", // NOT outEnd
+  chartColors: ["0D9488", "14B8A6", "5EEAD4"],
+  showLegend: true,
+  legendPos: "b",
+});
+```
+
 **Key styling options:**
 - `chartColors: [...]` - hex colors for series/segments
 - `chartArea: { fill, border, roundedCorners }` - chart background
 - `catGridLine/valGridLine: { color, style, size }` - grid lines (`style: "none"` to hide)
 - `lineSmooth: true` - curved lines (line charts)
 - `legendPos: "r"` - legend position: "b", "t", "l", "r", "tr"
+- `dataLabelPosition` - non-stacked: `outEnd` / `inEnd` / `ctr`; stacked: `ctr` / `inEnd` / `inBase` only
 
 ---
 
@@ -563,16 +596,25 @@ These issues cause file corruption, visual bugs, or broken output. Avoid them.
    slide.addShape(pres.shapes.RECTANGLE, { shadow: makeShadow(), ... });
    ```
 
-8. **Don't use `ROUNDED_RECTANGLE` with accent borders** - rectangular overlay bars won't cover rounded corners. Use `RECTANGLE` instead.
+8. **Never add decorative accent bars or edge stripes** - header/footer bars,
+   sidebar stripes, and card edge strips read as AI filler. Separate cards with a
+   subtle background tint, shadow, or icon badge instead.
    ```javascript
-   // WRONG: Accent bar doesn't cover rounded corners
-   slide.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 1, y: 1, w: 3, h: 1.5, fill: { color: "FFFFFF" } });
-   slide.addShape(pres.shapes.RECTANGLE, { x: 1, y: 1, w: 0.08, h: 1.5, fill: { color: "0891B2" } });
-
-   // CORRECT: Use RECTANGLE for clean alignment
+   // WRONG: decorative edge stripe
    slide.addShape(pres.shapes.RECTANGLE, { x: 1, y: 1, w: 3, h: 1.5, fill: { color: "FFFFFF" } });
    slide.addShape(pres.shapes.RECTANGLE, { x: 1, y: 1, w: 0.08, h: 1.5, fill: { color: "0891B2" } });
+
+   // CORRECT: tinted card surface
+   slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+     x: 1, y: 1, w: 3, h: 1.5,
+     fill: { color: "F8FAFC" },
+     rectRadius: 0.08,
+     shadow: { type: "outer", color: "000000", blur: 6, offset: 2, angle: 135, opacity: 0.08 },
+   });
    ```
+
+9. **Stacked chart labels** - on `barGrouping: "stacked"` or `"percentStacked"`,
+   never use `dataLabelPosition: "outEnd"` (corrupts the file in PowerPoint).
 
 ---
 
@@ -583,4 +625,6 @@ These issues cause file corruption, visual bugs, or broken output. Avoid them.
 - **Layouts**: LAYOUT_16x9 (10"x5.625"), LAYOUT_16x10, LAYOUT_4x3, LAYOUT_WIDE
 - **Text**: `addText(string, opts)` or `addText([{ text, options? }], opts)` only
 - **Alignment**: "left", "center", "right"
-- **Chart data labels**: "outEnd", "inEnd", "center"
+- **Fonts (QA-safe body)**: Arial, Calibri, Cambria, Times New Roman, Courier New, Microsoft YaHei
+- **Chart data labels**: non-stacked `outEnd`/`inEnd`/`ctr`; stacked `ctr`/`inEnd`/`inBase` only
+- **File QA**: `python3 /skills/ppt-deck/scripts/validate_pptx.py deck.pptx`

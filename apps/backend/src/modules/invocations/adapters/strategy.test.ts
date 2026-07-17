@@ -33,8 +33,6 @@ function capabilityToolPlan(): Extract<InvocationPlan, { kind: "bind_tool_choice
       kind: "capability_tool",
       capabilityId: "sourceweft/generate-image",
       contributionId: "generate_image",
-      legacyToolName: "generate_image",
-      sourcePackageName: null,
       toolName: "generate_image",
     },
     semantics: {

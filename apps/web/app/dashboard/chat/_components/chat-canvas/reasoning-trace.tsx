@@ -208,11 +208,7 @@ function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return count === 1 ? singular : plural;
 }
 
-function TodoStatusIcon({
-  status,
-}: {
-  status: TodoListTraceItem["status"];
-}) {
+function TodoStatusIcon({ status }: { status: TodoListTraceItem["status"] }) {
   if (status === "completed") {
     return <CheckIcon className="size-3 text-muted-foreground/60" />;
   }
@@ -255,8 +251,7 @@ function DeepAgentTodoTrace({
             {isActive ? <Shimmer duration={1}>{title}</Shimmer> : title}
           </span>
           <span className="text-muted-foreground/80 text-xs">
-            {completedCount}/{todos.length}{" "}
-            {pluralize(todos.length, "item")}
+            {completedCount}/{todos.length} {pluralize(todos.length, "item")}
           </span>
           <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
         </div>
@@ -580,19 +575,72 @@ function getVideoProjectStageLabel(
   if (stage === "planning") {
     return "Planning video scenes...";
   }
-  if (stage === "generating_audio") {
+  if (stage === "generating_project_code") {
+    return "Generating Remotion project code...";
+  }
+  if (stage === "installing_project") {
+    return "Installing project dependencies...";
+  }
+  if (stage === "typechecking_project") {
+    return "Typechecking generated project...";
+  }
+  if (stage === "rendering_smoke_preview") {
+    return "Rendering smoke preview...";
+  }
+  if (stage === "planning_storyboard" || stage === "normalizing_blueprint") {
+    return "Planning storyboard...";
+  }
+  if (stage === "materializing_assets") {
+    return "Preparing visual assets...";
+  }
+  if (stage === "generating_audio_tracks") {
     return "Generating narration audio...";
   }
-  if (stage === "finalizing_project") {
+  if (stage === "assigning_slide_themes") {
+    return "Assigning visual themes...";
+  }
+  if (stage === "generating_scene_modules") {
+    return "Generating Remotion scene code...";
+  }
+  if (stage === "repairing_scene_modules") {
+    return "Repairing scene code...";
+  }
+  if (stage === "publishing_video_project") {
     return "Finalizing video project...";
   }
-  if (stage === "project_ready") {
+  if (stage === "ready") {
     return "Ready for browser video export.";
   }
   if (stage === "failed") {
     return "Video project failed.";
   }
   return null;
+}
+
+function getVideoProjectProgressLabel(
+  payload: Record<string, unknown> | undefined,
+) {
+  const generation =
+    payload?.generation &&
+    typeof payload.generation === "object" &&
+    !Array.isArray(payload.generation)
+      ? (payload.generation as Record<string, unknown>)
+      : null;
+  const stageLabel = getVideoProjectStageLabel(payload);
+  const progress =
+    typeof generation?.progress === "number" &&
+    Number.isFinite(generation.progress)
+      ? Math.max(0, Math.min(100, Math.round(generation.progress)))
+      : null;
+  const attempt =
+    typeof generation?.attempt === "number" ? generation.attempt : null;
+  const maxAttempts =
+    typeof generation?.maxAttempts === "number" ? generation.maxAttempts : null;
+  const label =
+    generation?.retrying === true
+      ? "Retrying video generation..."
+      : (stageLabel ?? "Video project preparing...");
+  return `${label}${progress === null ? "" : ` ${progress}%`}${attempt && maxAttempts ? ` · attempt ${attempt}/${maxAttempts}` : ""}`;
 }
 
 function buildGeneratedPresentationPreviewArtifact(input: {
@@ -1148,7 +1196,9 @@ function ToolCallDetails({
   workspaceId?: string | null;
 }) {
   const query = getToolQuery(toolCall, toolStep);
-  const shouldShowQuery = Boolean(query && !isAgentToolDomain(toolCall.tool, "retrieval"));
+  const shouldShowQuery = Boolean(
+    query && !isAgentToolDomain(toolCall.tool, "retrieval"),
+  );
   const fetchUrls = getToolFetchUrls(toolCall);
   const outputSummary = summarizeToolOutput(toolCall.output);
   const toolConfirmation = getToolConfirmationOutput(toolCall.output);
@@ -1171,10 +1221,16 @@ function ToolCallDetails({
     toolCall,
     toolStep,
   );
-  const imageStatus = hasAgentToolCapability(toolCall.tool, "generated_image_artifact")
+  const imageStatus = hasAgentToolCapability(
+    toolCall.tool,
+    "generated_image_artifact",
+  )
     ? getGeneratedImageStatus(toolCall)
     : null;
-  const imagePrompt = hasAgentToolCapability(toolCall.tool, "generated_image_artifact")
+  const imagePrompt = hasAgentToolCapability(
+    toolCall.tool,
+    "generated_image_artifact",
+  )
     ? getGeneratedImagePrompt(toolCall)
     : null;
   const imageUrl = imageArtifact
@@ -1189,7 +1245,10 @@ function ToolCallDetails({
     ? getGeneratedPresentationFileName({
         artifactFileName: presentationArtifact.fileName,
         title: presentationTitle,
-        videoPresentation: hasAgentToolCapability(toolCall.tool, "video_presentation_artifact"),
+        videoPresentation: hasAgentToolCapability(
+          toolCall.tool,
+          "video_presentation_artifact",
+        ),
       })
     : null;
   const isVideoPresentationTool = hasAgentToolCapability(
@@ -1206,6 +1265,11 @@ function ToolCallDetails({
   const presentationArtifactStatusSnapshot = presentationArtifact?.artifactId
     ? artifactStatuses?.get(presentationArtifact.artifactId)
     : undefined;
+  const videoProjectProgressLabel = isVideoPresentationTool
+    ? getVideoProjectProgressLabel(
+        presentationArtifactStatusSnapshot?.payloadJson,
+      )
+    : null;
   const previewArtifact =
     imageArtifact?.artifactId && workspaceId && imageUrl
       ? ({
@@ -1373,7 +1437,7 @@ function ToolCallDetails({
               (
               {presentationArtifactStatus === "failed"
                 ? "project failed"
-                : "project preparing"}
+                : (videoProjectProgressLabel ?? "project preparing")}
               )
             </span>
           ) : null}
@@ -1452,13 +1516,9 @@ function ToolCallDetails({
 
 function GeneratedImageLoadingMask({
   isVisible,
-  stageIndex,
-  stageLabel,
   title,
 }: {
   isVisible: boolean;
-  stageIndex: number | null;
-  stageLabel: string;
   title: string;
 }) {
   return (
@@ -1484,24 +1544,13 @@ function GeneratedImageLoadingMask({
               <p className="truncate text-xs font-medium text-foreground">
                 {title}
               </p>
-              <p className="text-[11px] text-muted-foreground">{stageLabel}</p>
+              <p className="text-[11px] text-muted-foreground">
+                Generating image
+              </p>
             </div>
             <div className="grid size-6 shrink-0 place-items-center rounded-full border border-border/70 bg-background/70">
               <div className="size-2 rounded-full bg-primary shadow-[0_0_18px_hsl(var(--primary)/0.55)]" />
             </div>
-          </div>
-          <div className="mt-2 grid grid-cols-5 gap-1">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <div
-                className={cn(
-                  "h-1 rounded-full transition-colors duration-300",
-                  stageIndex !== null && index <= stageIndex
-                    ? "bg-primary"
-                    : "bg-muted-foreground/20",
-                )}
-                key={index}
-              />
-            ))}
           </div>
         </div>
       </div>
@@ -1514,8 +1563,6 @@ function GeneratedImageArtifactItem({
   artifactPageUrl,
   downloadUrl,
   imageFileUrl,
-  stageLabel,
-  stageProgress,
   status,
   title,
 }: {
@@ -1523,17 +1570,13 @@ function GeneratedImageArtifactItem({
   artifactPageUrl?: string | null;
   downloadUrl?: string | null;
   imageFileUrl?: string | null;
-  stageLabel: string;
-  stageProgress: number | null;
   status: ToolCallRecord["status"];
   title: string;
 }) {
   const [hasImageError, setHasImageError] = useState(false);
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const isPending = status === "running" || status === "approval_requested";
-  const showMask = imageFileUrl
-    ? !isImageLoaded && !hasImageError
-    : isPending;
+  const showMask = imageFileUrl ? !isImageLoaded && !hasImageError : isPending;
 
   useEffect(() => {
     setHasImageError(false);
@@ -1546,12 +1589,7 @@ function GeneratedImageArtifactItem({
         className="relative isolate max-h-[520px] w-full max-w-xl overflow-hidden rounded-lg bg-muted/60"
         style={{ aspectRatio }}
       >
-        <GeneratedImageLoadingMask
-          isVisible={isPending}
-          stageIndex={stageProgress}
-          stageLabel={stageLabel}
-          title={title}
-        />
+        <GeneratedImageLoadingMask isVisible={isPending} title={title} />
       </div>
     );
   }
@@ -1610,12 +1648,7 @@ function GeneratedImageArtifactItem({
           </div>
         </div>
       ) : null}
-      <GeneratedImageLoadingMask
-        isVisible={showMask}
-        stageIndex={stageProgress}
-        stageLabel={stageLabel}
-        title={title}
-      />
+      <GeneratedImageLoadingMask isVisible={showMask} title={title} />
     </div>
   );
 }
@@ -1628,7 +1661,9 @@ export function GeneratedImageArtifacts({
   workspaceId?: string | null;
 }) {
   const imageItems = (toolCalls ?? [])
-    .filter((toolCall) => hasAgentToolCapability(toolCall.tool, "generated_image_artifact"))
+    .filter((toolCall) =>
+      hasAgentToolCapability(toolCall.tool, "generated_image_artifact"),
+    )
     .map((toolCall) => {
       const artifact = resolveGeneratedImageArtifact(toolCall);
       const artifactPageUrl = artifact
@@ -1670,15 +1705,8 @@ export function GeneratedImageArtifacts({
   return (
     <div className="space-y-3">
       {imageItems.map(
-        ({
-          artifactPageUrl,
-          downloadUrl,
-          imageFileUrl,
-          title,
-          toolCall,
-        }) => {
+        ({ artifactPageUrl, downloadUrl, imageFileUrl, title, toolCall }) => {
           const imageStatus = getGeneratedImageStatus(toolCall);
-          const stageLabel = imageStatus.label ?? "Rendering";
 
           if (toolCall.status === "error") {
             return (
@@ -1698,8 +1726,6 @@ export function GeneratedImageArtifacts({
               downloadUrl={downloadUrl ?? imageFileUrl}
               imageFileUrl={imageFileUrl}
               key={toolCall.id}
-              stageLabel={stageLabel}
-              stageProgress={imageStatus.progress ?? null}
               status={toolCall.status}
               title={title}
             />
@@ -1769,7 +1795,8 @@ function GeneratedPresentationArtifactItem({
           payloadJson:
             artifactStatusSnapshot?.payloadJson ?? artifactPreview.payloadJson,
           capabilities:
-            artifactStatusSnapshot?.capabilities ?? artifactPreview.capabilities,
+            artifactStatusSnapshot?.capabilities ??
+            artifactPreview.capabilities,
           previewUrl:
             artifactStatusSnapshot?.previewUrl ?? artifactPreview.previewUrl,
           status: previewStatus,
@@ -1914,7 +1941,7 @@ function GeneratedPresentationArtifactItem({
               type="button"
             >
               <Download className="size-3.5" />
-              {isVideoPresentation ? "Download Video" : "Download"}
+              {isVideoPresentation ? "Open Video" : "Download"}
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -2007,8 +2034,8 @@ export function GeneratedPresentationArtifacts({
         (isArtifactPublisher
           ? "Published presentation"
           : isVideoPresentation
-          ? "Generated video presentation"
-          : "Generated presentation");
+            ? "Generated video presentation"
+            : "Generated presentation");
       const description = getGeneratedPresentationPrompt(toolCall);
       const generationMode =
         artifact?.generationMode ??
@@ -2017,9 +2044,9 @@ export function GeneratedPresentationArtifacts({
         ? "Video presentation"
         : isArtifactPublisher
           ? "PowerPoint presentation"
-        : generationMode === "editable_native"
-          ? "Editable PowerPoint"
-          : "Visual deck";
+          : generationMode === "editable_native"
+            ? "Editable PowerPoint"
+            : "Visual deck";
       const artifactStatus = getPresentationArtifactPreviewStatus({
         isVideoPresentation,
         status:

@@ -1,0 +1,25 @@
+{
+  "name": "@sourceweft/builtin-tool-video-presentation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@sourceweft/capability-contracts": "workspace:*",
+    "@sourceweft/contracts": "workspace:*",
+    "langchain": "^1.5.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@sourceweft/capability-runtime": "workspace:*",
+    "@types/node": "^22.15.30",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.2"
+  }
+}

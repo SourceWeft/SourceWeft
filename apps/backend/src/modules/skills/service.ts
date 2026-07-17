@@ -41,6 +41,8 @@ function isBuiltinSkillDefaultEnabled(skill: {
   slug: string;
   visibility: string;
 }) {
+  // `restricted` builtin skills are internal capabilities (e.g. ppt-deck) that
+  // stay enabled by default without appearing in the public gallery.
   return skill.visibility === "restricted";
 }
 

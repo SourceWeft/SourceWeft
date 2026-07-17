@@ -30,8 +30,9 @@ import {
   updateMessageMetadataRecord,
 } from "../message-repository";
 import {
-  applyResolvedThreadModelSettings,
   normalizeThreadModelSettings,
+  applyResolvedThreadModelSettings,
+  pruneUnavailableThreadModelAliases,
   resolveThreadModelSettingsSnapshots,
   validateThreadModelSettings,
 } from "../model-settings";
@@ -57,6 +58,7 @@ import {
   buildCommandAugmentedText,
   buildThreadCommandMetadata,
 } from "./thread-command-render";
+import { resolveRequestedThreadProfileAlias } from "./requested-profile-alias";
 import {
   buildDefaultTurnInvocationRegistry,
   buildInvocationAugmentedText,
@@ -90,7 +92,6 @@ import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import {
   resolveSelectedSkills,
   normalizeSkillIds,
-  resolveSkillIdsWithSlashCommand,
 } from "../../skills/selection";
 import { isAgentToolEnabledByDefault } from "@sourceweft/agent-tool-registry";
 import {
@@ -110,6 +111,7 @@ import {
   buildTurnOptionsSnapshot,
   readSkillRuntimeConfig,
   resolveGenerateImageToolSelection,
+  resolveGenerateVideoPresentationToolSelection,
   resolveWebSearchEnabled,
 } from "./tool-selection";
 import type {
@@ -124,12 +126,10 @@ import type {
 import { normalizeTraceParts } from "./trace-parts";
 import {
   listCapabilityTools,
-  resolveCapabilityCommand,
   resolveCapabilitySkillRuntimeWorkflow,
 } from "./capability-command-workflows";
 import { resolveSelectedSkillRuntimeContract } from "./active-skill-runtime";
 import { normalizeInvokedSkillIds } from "./invoked-skills";
-import { shouldApplyLegacySlashSkillSelection } from "./skill-selection-policy";
 
 const CHAT_IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -202,8 +202,7 @@ function mergeSkillRuntimeConfig(input: {
   return input.enabledSkills.map((skill) => {
     const config =
       runtimeConfig[skill.workspaceSkillId] ??
-      runtimeConfig[skill.selectionId ?? ""] ??
-      runtimeConfig[skill.name];
+      runtimeConfig[skill.selectionId ?? ""];
     if (!config) {
       return skill;
     }
@@ -211,28 +210,19 @@ function mergeSkillRuntimeConfig(input: {
       skill.defaultConfig && typeof skill.defaultConfig === "object"
         ? skill.defaultConfig
         : {};
-    const currentRuntime =
-      defaultConfig.runtime &&
-      typeof defaultConfig.runtime === "object" &&
-      !Array.isArray(defaultConfig.runtime)
-        ? (defaultConfig.runtime as Record<string, unknown>)
-        : {};
-    const currentRuntimeConfig =
-      currentRuntime.config &&
-      typeof currentRuntime.config === "object" &&
-      !Array.isArray(currentRuntime.config)
-        ? (currentRuntime.config as Record<string, unknown>)
+    const currentConfig =
+      defaultConfig.config &&
+      typeof defaultConfig.config === "object" &&
+      !Array.isArray(defaultConfig.config)
+        ? (defaultConfig.config as Record<string, unknown>)
         : {};
     return {
       ...skill,
       defaultConfig: {
         ...defaultConfig,
-        runtime: {
-          ...currentRuntime,
-          config: {
-            ...currentRuntimeConfig,
-            ...config,
-          },
+        config: {
+          ...currentConfig,
+          ...config,
         },
       },
     };
@@ -260,6 +250,7 @@ async function resolveGenerateImageProfile(input: {
   readonly byokExecution?: GenerateImageToolSelection["execution"];
   readonly explicit: boolean;
   readonly hasByokExecution?: boolean;
+  readonly requestedProfileAlias?: string | null;
   readonly requestedModelAlias?: string | null;
   readonly threadModelSettings: Awaited<
     ReturnType<typeof resolveThreadModelSettingsSnapshots>
@@ -270,12 +261,24 @@ async function resolveGenerateImageProfile(input: {
     requestedProfileAlias:
       input.requestedModelAlias || input.hasByokExecution
         ? undefined
-        : input.threadModelSettings.imageProfileAlias,
+        : input.requestedProfileAlias === null
+          ? undefined
+          : input.requestedProfileAlias ??
+            input.threadModelSettings.imageProfileAlias,
     requestedModelAlias: input.hasByokExecution
       ? undefined
       : input.requestedModelAlias,
-    defaultRequired: input.explicit && !input.hasByokExecution,
+    defaultRequired:
+      input.requestedProfileAlias || input.requestedModelAlias
+        ? false
+        : input.explicit && !input.hasByokExecution,
   });
+  if (!profile && input.requestedProfileAlias && !input.requestedModelAlias) {
+    profile = await resolveModelGatewayProfile({
+      kind: "image",
+      defaultRequired: input.explicit && !input.hasByokExecution,
+    });
+  }
   if (!profile && input.hasByokExecution) {
     profile = await resolveModelGatewayProfile({
       kind: "image",
@@ -917,13 +920,27 @@ async function buildVisionFallback(input: {
   visionExecution?: LlmExecutionConfig;
 }): Promise<VisionFallbackResult> {
   let visionProfile;
+  const shouldUseDefaultVisionProfile =
+    input.requestedVisionProfileAlias === null ||
+    (!input.requestedVisionProfileAlias && !input.threadVisionProfileAlias);
   try {
     visionProfile = await resolveModelGatewayProfile({
       kind: "vision",
       requestedProfileAlias:
-        input.requestedVisionProfileAlias || input.threadVisionProfileAlias,
-      defaultRequired: true,
+        input.requestedVisionProfileAlias === null
+          ? undefined
+          : input.requestedVisionProfileAlias || input.threadVisionProfileAlias,
+      defaultRequired: shouldUseDefaultVisionProfile,
     });
+    if (
+      !visionProfile &&
+      (input.requestedVisionProfileAlias || input.threadVisionProfileAlias)
+    ) {
+      visionProfile = await resolveModelGatewayProfile({
+        kind: "vision",
+        defaultRequired: true,
+      });
+    }
   } catch (error) {
     throw new ContentError(
       400,
@@ -1331,6 +1348,12 @@ export async function prepareThreadTurn(
     throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
   }
 
+  const originalThreadSettings = normalizeThreadModelSettings(
+    thread.modelSettings,
+  );
+  const persistedThreadSettings = await pruneUnavailableThreadModelAliases(
+    originalThreadSettings,
+  );
   const requestedProfileAlias =
     typeof input.llm?.profileAlias === "string"
       ? input.llm.profileAlias.trim()
@@ -1342,7 +1365,7 @@ export async function prepareThreadTurn(
   const requestedExecutionMode = input.llm?.executionMode;
 
   const resolvedChatModel = await resolveThreadChatProfile({
-    threadModelSettings: normalizeThreadModelSettings(thread.modelSettings),
+    threadModelSettings: persistedThreadSettings,
     requestedProfileAlias:
       requestedExecutionMode === "BYOK"
         ? undefined
@@ -1419,24 +1442,7 @@ export async function prepareThreadTurn(
     parsedPrompt.markers,
     input.tools,
   );
-  const requestedSkillCommand =
-    requestedCommand && requestedCommand.kind !== "tool"
-      ? await resolveCapabilityCommand(requestedCommand.name)
-      : null;
-  const requestedSkillIds = normalizeSkillIds(input.tools?.skillIds);
-  const selectedSkillIds = shouldApplyLegacySlashSkillSelection(input.tools)
-    ? await resolveSkillIdsWithSlashCommand({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        skillIds: requestedSkillIds,
-        commandName:
-          requestedSkillCommand?.action.kind === "skill"
-            ? requestedSkillCommand.action.targetId
-            : requestedCommand?.kind !== "tool"
-              ? requestedCommand?.name
-              : undefined,
-      })
-    : requestedSkillIds;
+  const selectedSkillIds = normalizeSkillIds(input.tools?.skillIds ?? []);
   const timezone = normalizeTimezone(input.timezone);
   let enabledSkills: EnabledSkillDescriptor[] = await resolveSelectedSkills({
     teamId: workspace.organizationId,
@@ -1521,6 +1527,8 @@ export async function prepareThreadTurn(
   const generateImageTool = resolveGenerateImageToolSelection(
     toolsWithCapabilityDefaults,
   );
+  const generateVideoPresentationTool =
+    resolveGenerateVideoPresentationToolSelection(toolsWithCapabilityDefaults);
   const imageExecution =
     input.image?.executionMode === "BYOK"
       ? await resolvePreparedByokExecution({
@@ -1552,22 +1560,24 @@ export async function prepareThreadTurn(
               : {}),
         }
       : generateImageTool;
-  const webSearchEnabled = resolveWebSearchEnabled({
+  const webAccessEnabled = resolveWebSearchEnabled({
     tools: toolsWithCapabilityDefaults,
     enabledSkills,
   });
+  const toolOverrides: Record<string, unknown> = {};
+  if (effectiveGenerateImageTool) {
+    toolOverrides[AGENT_TOOL_NAMES.generateImage] = effectiveGenerateImageTool;
+  }
+  if (generateVideoPresentationTool) {
+    toolOverrides[AGENT_TOOL_NAMES.generateVideoPresentation] =
+      generateVideoPresentationTool;
+  }
   const effectiveTools = buildEffectiveToolsSelection({
     baseTools: toolsWithCapabilityDefaults,
     skillIds: selectedSkillIds,
     ...(invokedSkillIds.length > 0 ? { invokedSkillIds } : {}),
-    webAccessEnabled: webSearchEnabled,
-    ...(effectiveGenerateImageTool
-      ? {
-          toolOverrides: {
-            [AGENT_TOOL_NAMES.generateImage]: effectiveGenerateImageTool,
-          },
-        }
-      : {}),
+    webAccessEnabled,
+    ...(Object.keys(toolOverrides).length > 0 ? { toolOverrides } : {}),
   });
   const toolPermissions = resolveToolPermissions({
     command: resolvedCommand,
@@ -1589,12 +1599,29 @@ export async function prepareThreadTurn(
     ),
   });
 
-  const normalizedThreadSettings = normalizeThreadModelSettings({
-    ...normalizeThreadModelSettings(thread.modelSettings),
-    ...(input.visionProfileAlias !== undefined
-      ? { visionProfileAlias: input.visionProfileAlias }
-      : {}),
+  const requestedImageProfile = resolveRequestedThreadProfileAlias({
+    execution: input.image,
+    legacyProfileAlias: input.imageProfileAlias,
+    kind: "image",
   });
+  const requestedVisionProfile = resolveRequestedThreadProfileAlias({
+    execution: input.vision,
+    legacyProfileAlias: input.visionProfileAlias,
+    kind: "vision",
+  });
+  const persistedThreadSettingsWithSnapshots =
+    await resolveThreadModelSettingsSnapshots(persistedThreadSettings);
+  const normalizedThreadSettings = await pruneUnavailableThreadModelAliases(
+    normalizeThreadModelSettings({
+      ...persistedThreadSettingsWithSnapshots,
+      ...(requestedImageProfile.provided
+        ? { imageProfileAlias: requestedImageProfile.profileAlias }
+        : {}),
+      ...(requestedVisionProfile.provided
+        ? { visionProfileAlias: requestedVisionProfile.profileAlias }
+        : {}),
+    }),
+  );
   await validateThreadModelSettings(normalizedThreadSettings);
   const normalizedThreadSettingsWithSnapshots =
     await resolveThreadModelSettingsSnapshots(normalizedThreadSettings);
@@ -1620,13 +1647,12 @@ export async function prepareThreadTurn(
         explicit: request.explicit,
         hasByokExecution: request.hasByokExecution,
         byokExecution: request.byokExecution,
+        requestedProfileAlias: requestedImageProfile.provided
+          ? requestedImageProfile.profileAlias
+          : undefined,
         requestedModelAlias: request.requestedModelAlias,
       }),
   });
-  const persistedThreadSettings = normalizeThreadModelSettings(
-    thread.modelSettings,
-  );
-
   const profileAlias = resolvedChatModel.profileAlias;
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);
@@ -1717,6 +1743,9 @@ export async function prepareThreadTurn(
           text: agentText,
           images: savedImages,
           onThinkingStep: input.onPreflightThinkingStep,
+          requestedVisionProfileAlias: requestedVisionProfile.provided
+            ? requestedVisionProfile.profileAlias
+            : undefined,
           threadVisionProfileAlias: normalizedThreadSettings.visionProfileAlias,
           visionExecution,
         }));
@@ -1777,25 +1806,38 @@ export async function prepareThreadTurn(
     (message) => message.role === "assistant",
   );
   const initialTitle = thread.title;
+  const persistedResolvedThreadSettings = applyResolvedThreadModelSettings(
+    normalizedThreadSettingsWithSnapshots,
+    requestedExecutionMode !== "BYOK" &&
+    (requestedProfileAlias || requestedModelAlias)
+      ? {
+          llm: {
+            profileAlias,
+            modelAlias,
+          },
+        }
+      : {},
+  );
 
   if (
-    normalizedThreadSettingsWithSnapshots.llmProfileAlias !== profileAlias ||
-    normalizedThreadSettingsWithSnapshots.llmModelAlias !== modelAlias ||
-    normalizedThreadSettingsWithSnapshots.visionProfileAlias !==
-      persistedThreadSettings.visionProfileAlias ||
-    normalizedThreadSettingsWithSnapshots.visionModelAlias !==
-      persistedThreadSettings.visionModelAlias
+    persistedResolvedThreadSettings.llmProfileAlias !==
+      originalThreadSettings.llmProfileAlias ||
+    persistedResolvedThreadSettings.llmModelAlias !==
+      originalThreadSettings.llmModelAlias ||
+    persistedResolvedThreadSettings.imageProfileAlias !==
+      originalThreadSettings.imageProfileAlias ||
+    persistedResolvedThreadSettings.imageModelAlias !==
+      originalThreadSettings.imageModelAlias ||
+    persistedResolvedThreadSettings.visionProfileAlias !==
+      originalThreadSettings.visionProfileAlias ||
+    persistedResolvedThreadSettings.visionModelAlias !==
+      originalThreadSettings.visionModelAlias
   ) {
     const updatedThread = await updateThreadModelSettingsRecord({
       threadId: thread.id,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
-      modelSettings: applyResolvedThreadModelSettings(
-        normalizedThreadSettingsWithSnapshots,
-        {
-          llm: { profileAlias, modelAlias },
-        },
-      ),
+      modelSettings: persistedResolvedThreadSettings,
     });
     if (updatedThread) {
       thread = updatedThread;
@@ -1875,7 +1917,7 @@ export async function prepareThreadTurn(
     selectedSourceIds,
     sourceIds,
     sourceScope,
-    webSearchEnabled,
+    webAccessEnabled,
     command: resolvedCommand,
     invocation: resolvedInvocation,
     commandSuccessCriteria: commandSuccessCriteria ?? { kind: "none" },

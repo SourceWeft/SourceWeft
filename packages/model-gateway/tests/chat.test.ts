@@ -1,20 +1,31 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
-import { createLangChainChatModel, createModelGateway } from "../src/index";
+import {
+  createLangChainChatModel,
+  createModelGateway,
+  ModelGatewayError,
+} from "../src/index";
 import type {
   ChatStreamEvent,
   LangChainChatModelLike,
   ModelGatewayConfig,
+  RequestOptions,
 } from "../src/types";
 
 function createFakeChatModel(input: {
   invokeResult: Record<string, unknown>;
+  structuredResult?: Record<string, unknown>;
   streamChunks?: Record<string, unknown>[];
   omitBindTools?: boolean;
+  omitStructuredOutput?: boolean;
   capture?: {
     bindKwargs?: Record<string, unknown>;
     boundTools?: unknown[];
+    invokeOptions?: Record<string, unknown>;
     messages?: unknown;
+    structuredConfig?: Record<string, unknown>;
+    structuredSchema?: Record<string, unknown>;
   };
 }) {
   const model = {
@@ -31,15 +42,38 @@ function createFakeChatModel(input: {
       }
       return this;
     },
-    async invoke(messages: unknown) {
+    withStructuredOutput(
+      schema: Record<string, unknown>,
+      config: Record<string, unknown>,
+    ) {
+      if (input.capture) {
+        input.capture.structuredSchema = schema;
+        input.capture.structuredConfig = config;
+      }
+      return {
+        invoke: async (
+          messages: unknown,
+          options?: Record<string, unknown>,
+        ) => {
+          if (input.capture) {
+            input.capture.messages = messages;
+            input.capture.invokeOptions = options;
+          }
+          return input.structuredResult ?? input.invokeResult;
+        },
+      };
+    },
+    async invoke(messages: unknown, options?: Record<string, unknown>) {
       if (input.capture) {
         input.capture.messages = messages;
+        input.capture.invokeOptions = options;
       }
       return input.invokeResult;
     },
-    async stream(messages: unknown) {
+    async stream(messages: unknown, options?: Record<string, unknown>) {
       if (input.capture) {
         input.capture.messages = messages;
+        input.capture.invokeOptions = options;
       }
       const chunks = input.streamChunks ?? [];
       return (async function* () {
@@ -52,6 +86,9 @@ function createFakeChatModel(input: {
 
   if (input.omitBindTools) {
     delete (model as Partial<typeof model>).bindTools;
+  }
+  if (input.omitStructuredOutput) {
+    delete (model as Partial<typeof model>).withStructuredOutput;
   }
 
   return model;
@@ -137,6 +174,372 @@ test("chat.complete normalizes LangChain message output into gateway result", as
   ]);
   assert.equal(Array.isArray(capture.boundTools), true);
   assert.deepEqual(capture.bindKwargs, { tool_choice: "auto" });
+});
+
+test("chat.complete delegates structured output to LangChain and preserves raw metadata", async () => {
+  const capture: {
+    invokeOptions?: Record<string, unknown>;
+    structuredConfig?: Record<string, unknown>;
+    structuredSchema?: Record<string, unknown>;
+  } = {};
+  let resolvedOptions: RequestOptions | undefined;
+  const gateway = createModelGateway({
+    baseUrl: "https://gateway.example.com",
+    timeoutMs: 2_500,
+    maxRetries: 1,
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+        supports: ["chat", "json_schema"],
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: ({ options }) => {
+        resolvedOptions = options;
+        return createFakeChatModel({
+          capture,
+          invokeResult: { content: "unused" },
+          structuredResult: {
+            raw: {
+              id: "msg_structured",
+              content: '{"slides":[{"title":"One"}]}',
+              usage_metadata: {
+                input_tokens: 10,
+                output_tokens: 7,
+                total_tokens: 17,
+              },
+              response_metadata: {
+                finish_reason: "stop",
+                model: "gpt-4o-mini",
+              },
+            },
+            parsed: { slides: [{ title: "One" }] },
+          },
+        });
+      },
+    },
+  });
+
+  const result = await gateway.chat.complete({
+    model: "chat-default",
+    messages: [{ role: "user", content: "Plan one slide" }],
+    structuredOutput: {
+      method: "json_schema",
+      name: "storyboard",
+      description: "A slide storyboard",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: { slides: { type: "array" } },
+        required: ["slides"],
+        additionalProperties: false,
+      },
+    },
+  });
+
+  assert.deepEqual(capture.structuredConfig, {
+    includeRaw: true,
+    method: "jsonSchema",
+    name: "storyboard",
+    strict: true,
+  });
+  assert.equal(capture.structuredSchema?.description, "A slide storyboard");
+  assert.ok(capture.invokeOptions?.signal instanceof AbortSignal);
+  assert.equal(resolvedOptions?.timeoutMs, 2_500);
+  assert.equal(resolvedOptions?.maxRetries, 1);
+  assert.deepEqual(result.structuredOutput, {
+    slides: [{ title: "One" }],
+  });
+  assert.equal(result.raw.content, '{"slides":[{"title":"One"}]}');
+  assert.equal(result.finishReason, "stop");
+  assert.equal(result.usage?.totalTokens, 17);
+});
+
+test("chat.complete omits method/strict when structured method is not pinned", async () => {
+  const capture: {
+    structuredConfig?: Record<string, unknown>;
+  } = {};
+  const gateway = createModelGateway({
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+        supports: ["chat"],
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({
+          capture,
+          invokeResult: { content: "unused" },
+          structuredResult: {
+            raw: { id: "msg_structured", content: '{"slides":[]}' },
+            parsed: { slides: [] },
+          },
+        }),
+    },
+  });
+
+  const result = await gateway.chat.complete({
+    model: "chat-default",
+    messages: [{ role: "user", content: "Plan" }],
+    structuredOutput: {
+      name: "storyboard",
+      schema: { type: "object", properties: { slides: { type: "array" } } },
+    },
+  });
+
+  assert.deepEqual(capture.structuredConfig, {
+    includeRaw: true,
+    name: "storyboard",
+  });
+  assert.deepEqual(result.structuredOutput, { slides: [] });
+});
+
+test("chat.complete surfaces bounded diagnostics when structured parsing fails", async () => {
+  const gateway = createModelGateway({
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+        supports: ["chat", "json_schema"],
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({
+          invokeResult: { content: "unused" },
+          structuredResult: {
+            raw: { content: "not valid json\nwith controls\u0000" },
+            parsed: null,
+          },
+        }),
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      gateway.chat.complete({
+        model: "chat-default",
+        messages: [{ role: "user", content: "Plan" }],
+        structuredOutput: {
+          method: "json_schema",
+          name: "storyboard",
+          schema: { type: "object" },
+        },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof ModelGatewayError);
+      assert.equal(error.code, "UPSTREAM");
+      const diagnostics = error.metadata?.structuredOutputDiagnostics as Record<
+        string,
+        unknown
+      >;
+      assert.equal(diagnostics.contentLength, 29);
+      assert.match(String(diagnostics.contentSha256), /^[a-f0-9]{64}$/u);
+      assert.equal(diagnostics.contentPreview, "not valid json with controls");
+      return true;
+    },
+  );
+});
+
+test("chat.complete sanitizes invalid JSON errors from the real OpenAI-compatible adapter", async () => {
+  const leakedContent = "LEAKME-provider-content-not-json";
+  let requestBody: Record<string, unknown> | undefined;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({
+        id: "chatcmpl_invalid_json",
+        object: "chat.completion",
+        created: 1,
+        model: "test-model",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: leakedContent,
+              refusal: null,
+            },
+            finish_reason: "stop",
+            logprobs: null,
+          },
+        ],
+        usage: {
+          prompt_tokens: 3,
+          completion_tokens: 4,
+          total_tokens: 7,
+        },
+      }),
+    );
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const gateway = createModelGateway({
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      apiKey: "test-key",
+      timeoutMs: 2_000,
+      maxRetries: 0,
+      allowedModelAliases: ["chat-default"],
+      providers: {
+        local: {
+          kind: "openai-compatible",
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          apiKey: "test-key",
+          supports: ["chat", "json_schema"],
+        },
+      },
+      modelRoutes: {
+        "chat-default": {
+          strategy: "priority",
+          targets: [{ provider: "local", model: "test-model", priority: 1 }],
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        gateway.chat.complete({
+          model: "chat-default",
+          messages: [{ role: "user", content: "Return a storyboard" }],
+          structuredOutput: {
+            method: "json_schema",
+            name: "storyboard",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: { slides: { type: "array" } },
+              required: ["slides"],
+              additionalProperties: false,
+            },
+          },
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof ModelGatewayError);
+        assert.equal(error.code, "UPSTREAM");
+        assert.equal(error.retryable, true);
+        assert.equal(
+          error.message,
+          "Provider returned invalid structured output",
+        );
+        assert.doesNotMatch(error.message, /LEAKME/u);
+        assert.doesNotMatch(error.stack ?? "", /LEAKME/u);
+        assert.deepEqual(error.metadata?.structuredOutputDiagnostics, {
+          contentAvailable: false,
+        });
+        return true;
+      },
+    );
+
+    assert.deepEqual(requestBody?.response_format, {
+      type: "json_schema",
+      json_schema: {
+        name: "storyboard",
+        schema: {
+          type: "object",
+          properties: { slides: { type: "array" } },
+          required: ["slides"],
+          additionalProperties: false,
+        },
+        strict: true,
+      },
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test("chat.stream rejects structured output without falling back", async () => {
+  const gateway = createModelGateway({
+    baseUrl: "https://gateway.example.com",
+    allowedModelAliases: ["chat-default"],
+    providers: {
+      openai: {
+        kind: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "openai-key",
+        supports: ["chat", "json_schema"],
+      },
+    },
+    modelRoutes: {
+      "chat-default": {
+        strategy: "priority",
+        targets: [{ provider: "openai", model: "gpt-4o-mini", priority: 1 }],
+      },
+    },
+    langchainFactories: {
+      createChatModel: () =>
+        createFakeChatModel({ invokeResult: { content: "unused" } }),
+    },
+  });
+
+  const events = [];
+  for await (const event of gateway.chat.stream({
+    model: "chat-default",
+    messages: [{ role: "user", content: "Plan" }],
+    structuredOutput: {
+      method: "json_schema",
+      name: "storyboard",
+      schema: { type: "object" },
+    },
+  })) {
+    events.push(event);
+  }
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.type, "error");
+  if (events[0]?.type === "error") {
+    assert.equal(events[0].error.code, "BAD_REQUEST");
+    assert.equal(events[0].error.retryable, false);
+  }
 });
 
 test("createLangChainChatModel forwards execution toolChoice to bindTools", async () => {
@@ -617,7 +1020,10 @@ test("observed LangChain chat model reads trace context from execution metadata"
 });
 
 test("observed LangChain chat model summarizes tool call loop inputs", async () => {
-  const events: Array<{ type: "start" | "end"; event: Record<string, unknown> }> = [];
+  const events: Array<{
+    type: "start" | "end";
+    event: Record<string, unknown>;
+  }> = [];
   const config: ModelGatewayConfig = {
     baseUrl: "https://gateway.example.com",
     allowedModelAliases: ["chat-default"],

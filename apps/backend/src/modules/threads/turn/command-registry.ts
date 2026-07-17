@@ -13,7 +13,7 @@ export type CommandSuccessCriteria =
     }
   | {
       kind: "artifact";
-      artifactType: "image" | "slides";
+      artifactType: "image" | "slides" | "video_presentation";
       toolName: string;
     };
 
@@ -39,7 +39,11 @@ function normalizeSuccessCriteria(
     return criteria;
   }
   const artifactType = criteria.artifactType;
-  if (artifactType === "image" || artifactType === "slides") {
+  if (
+    artifactType === "image" ||
+    artifactType === "slides" ||
+    artifactType === "video_presentation"
+  ) {
     return {
       kind: "artifact",
       artifactType,

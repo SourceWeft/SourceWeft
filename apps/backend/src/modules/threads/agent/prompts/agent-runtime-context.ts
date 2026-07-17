@@ -126,17 +126,11 @@ function buildActiveSkillsRuntimePrompt(input: {
 }
 
 function readSkillRuntimeConfig(skill: EnabledSkillDescriptor) {
-  const runtime =
-    skill.defaultConfig?.runtime &&
-    typeof skill.defaultConfig.runtime === "object" &&
-    !Array.isArray(skill.defaultConfig.runtime)
-      ? (skill.defaultConfig.runtime as Record<string, unknown>)
-      : null;
   const config =
-    runtime?.config &&
-    typeof runtime.config === "object" &&
-    !Array.isArray(runtime.config)
-      ? (runtime.config as Record<string, unknown>)
+    skill.defaultConfig?.config &&
+    typeof skill.defaultConfig.config === "object" &&
+    !Array.isArray(skill.defaultConfig.config)
+      ? (skill.defaultConfig.config as Record<string, unknown>)
       : null;
   return config && Object.keys(config).length > 0 ? config : null;
 }

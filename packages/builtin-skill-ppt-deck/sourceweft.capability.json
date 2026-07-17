@@ -18,7 +18,7 @@
           "description": "Visual style direction for the deck.",
           "valueType": "string",
           "defaultValue": "auto",
-          "target": { "path": "runtime.config.stylePreset" },
+          "target": { "path": "config.stylePreset" },
           "values": [
             { "value": "auto", "label": "Auto" },
             { "value": "executive", "label": "Executive" },
@@ -35,7 +35,7 @@
           "description": "How much information to place on each slide.",
           "valueType": "string",
           "defaultValue": "balanced",
-          "target": { "path": "runtime.config.visualDensity" },
+          "target": { "path": "config.visualDensity" },
           "values": [
             { "value": "light", "label": "Light" },
             { "value": "balanced", "label": "Balanced" },
@@ -47,7 +47,7 @@
           "title": "Slides",
           "description": "Target number of slides.",
           "valueType": "number",
-          "target": { "path": "runtime.config.slideCount" },
+          "target": { "path": "config.slideCount" },
           "values": [
             { "value": 6, "label": "6" },
             { "value": 10, "label": "10" },
@@ -61,7 +61,7 @@
           "description": "Deck language.",
           "valueType": "string",
           "defaultValue": "auto",
-          "target": { "path": "runtime.config.language" },
+          "target": { "path": "config.language" },
           "values": [
             { "value": "auto", "label": "Auto" },
             { "value": "zh-CN", "label": "Chinese" },

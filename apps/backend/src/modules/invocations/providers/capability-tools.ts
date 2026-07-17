@@ -4,10 +4,6 @@ import type {
   SelectableInvocationProvider,
 } from "../registry";
 
-export function legacyCapabilityToolSelectableId(toolName: string) {
-  return `builtin_tool.${toolName}`;
-}
-
 export function createCapabilityToolInvocationProvider(input: {
   readonly commands: readonly CapabilityCommandListItem[];
 }): SelectableInvocationProvider {
@@ -40,7 +36,6 @@ function projectCapabilityToolCommand(
     enabled: true,
     ...(slashAlias ? { slashAlias } : {}),
     alternateSlashAliases: slashAliases.slice(1),
-    legacyIds: [legacyCapabilityToolSelectableId(command.action.targetId)],
     metadata: {
       capabilityId: command.capabilityId,
       contributionId: command.contributionId,
@@ -50,7 +45,6 @@ function projectCapabilityToolCommand(
       kind: "capability_tool",
       capabilityId: command.capabilityId,
       contributionId: command.contributionId,
-      legacyToolName: command.action.targetId,
       sourcePackageName: command.sourcePackageName,
       toolName: command.action.targetId,
     },

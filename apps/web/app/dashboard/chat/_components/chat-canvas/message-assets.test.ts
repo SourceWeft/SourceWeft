@@ -44,8 +44,7 @@ test("resolves presentation artifacts from JSON tool message content", () => {
     editable: false,
     fileName: "feynman.pptx",
     generationMode: "visual_html",
-    htmlUrl:
-      "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    htmlUrl: "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
     pptxUrl: null,
     previewImageUrl: null,
     previewRenderer: "html_iframe",
@@ -187,8 +186,7 @@ test("resolves published sandbox presentation artifact output", () => {
     fileName: "费曼学习法介绍.pptx",
     generationMode: "editable_native",
     htmlUrl: null,
-    pptxUrl:
-      "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    pptxUrl: "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
     previewImageUrl:
       "/api/artifact-file?artifactId=artifact-1&workspaceId=workspace-1&asset=previewImage",
     previewRenderer: null,
@@ -253,7 +251,7 @@ test("resolves video presentation artifacts from tool output", () => {
         "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
       file_name: "launch.mp4",
       render_strategy: "frontend_remotion_project_to_video",
-      status: "pending",
+      status: "ready",
       title: "Launch plan",
     },
     latencyMs: 10,
@@ -275,9 +273,75 @@ test("resolves video presentation artifacts from tool output", () => {
     renderStrategy: "frontend_remotion_project_to_video",
     slideCount: null,
     sourceJsonUrl: null,
-    status: "pending",
+    status: "ready",
     title: "Launch plan",
   });
+});
+
+test("resolves running video presentation outputs into artifact cards", () => {
+  const toolCall: ToolCallRecord = {
+    id: "tool-1",
+    tool: "generate_video_presentation",
+    input: {},
+    output: {
+      type: "video_presentation_processing_result",
+      artifact_id: "artifact-1",
+      artifact_url:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      file_name: "launch.video-presentation.json",
+      render_strategy: "frontend_remotion_project_to_video",
+      status: "running",
+      title: "Launch plan",
+    },
+    latencyMs: 10,
+    status: "completed",
+    error: null,
+  };
+
+  assert.deepEqual(resolveGeneratedPresentationArtifact(toolCall), {
+    artifactId: "artifact-1",
+    artifactUrl:
+      "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+    editable: null,
+    fileName: "launch.video-presentation.json",
+    generationMode: null,
+    htmlUrl: null,
+    pptxUrl: null,
+    previewImageUrl: null,
+    previewRenderer: null,
+    renderStrategy: "frontend_remotion_project_to_video",
+    slideCount: null,
+    sourceJsonUrl: null,
+    status: "running",
+    title: "Launch plan",
+  });
+});
+
+test("resolves streamed video presentation progress into artifact cards", () => {
+  const toolCall: ToolCallRecord = {
+    id: "tool-1",
+    tool: "generate_video_presentation",
+    input: {},
+    output: {
+      type: "generate_video_presentation_progress",
+      artifact_id: "artifact-1",
+      artifact_url:
+        "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+      file_name: "launch.video-presentation.json",
+      progress: 64,
+      stage: "generating_scene_modules",
+      status: "running",
+      title: "Launch plan",
+    },
+    latencyMs: null,
+    status: "running",
+    error: null,
+  };
+
+  const artifact = resolveGeneratedPresentationArtifact(toolCall);
+  assert.equal(artifact?.artifactId, "artifact-1");
+  assert.equal(artifact?.status, "running");
+  assert.equal(artifact?.title, "Launch plan");
 });
 
 test("resolveArtifactUrl maps generated artifact files through the web preview proxy", () => {

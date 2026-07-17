@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { apiBaseUrl } from "../../../lib/api-base-url";
+import { stripExecutableVisualDeckHtmlForExport } from "../../../lib/visual-deck/export/html-sanitize";
 
 const VISUAL_DECK_HTML_CSP = [
   "sandbox allow-scripts allow-downloads allow-forms allow-popups",

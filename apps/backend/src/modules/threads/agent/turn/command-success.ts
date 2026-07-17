@@ -34,6 +34,16 @@ export function isCommandSuccessSatisfied(input: {
               extractToolOutputField(call.output, "artifact_url"),
           );
         }
+        if (criteria.artifactType === "video_presentation") {
+          return Boolean(
+            extractToolOutputField(call.output, "artifact_id") &&
+              extractToolOutputField(call.output, "artifact_url") &&
+              extractToolOutputField(call.output, "job_id") &&
+              extractToolOutputField(call.output, "status") === "ready" &&
+              extractToolOutputField(call.output, "type") ===
+                "video_presentation_artifact_result",
+          );
+        }
         if (criteria.artifactType !== "image") {
           return true;
         }
@@ -91,7 +101,12 @@ export function commandSuccessFailureText(
 function latestToolFailureMessage(toolCalls: ToolCallTrace[]) {
   return [...toolCalls]
     .reverse()
-    .map((call) => extractToolOutputField(call.output, "message") ?? call.error)
+    .map(
+      (call) =>
+        extractToolOutputField(call.output, "message") ??
+        extractToolOutputField(call.output, "error") ??
+        call.error,
+    )
     .find((message): message is string => Boolean(message));
 }
 

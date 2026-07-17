@@ -3,7 +3,6 @@ import type { SelectableInvocationDefinition } from "./types";
 export type SelectableInvocationDefinitionWithAlias =
   SelectableInvocationDefinition & {
     alternateSlashAliases?: readonly string[];
-    legacyIds?: readonly string[];
     slashAlias?: string;
   };
 
@@ -48,10 +47,7 @@ export function createSelectableInvocationRegistry(input: {
         continue;
       }
       for (const definition of provider.list()) {
-        registerId(idMap, definition.id, definition, "id");
-        for (const legacyId of definition.legacyIds ?? []) {
-          registerId(idMap, legacyId, definition, "legacy id");
-        }
+        registerId(idMap, definition.id, definition);
 
         const slashAliases = [
           ...(definition.slashAlias ? [definition.slashAlias] : []),
@@ -81,17 +77,11 @@ export function createSelectableInvocationRegistry(input: {
     idMap: Map<string, SelectableInvocationDefinitionWithAlias>,
     id: string,
     definition: SelectableInvocationDefinitionWithAlias,
-    label: "id" | "legacy id",
   ) {
     const existing = idMap.get(id);
     if (existing && existing !== definition) {
-      if (label === "id") {
-        throw new Error(
-          `SCHEMA_MISMATCH: Duplicate selectable invocation id: ${definition.id}`,
-        );
-      }
       throw new Error(
-        `SCHEMA_MISMATCH: Duplicate selectable invocation legacy id: ${id}`,
+        `SCHEMA_MISMATCH: Duplicate selectable invocation id: ${definition.id}`,
       );
     }
     idMap.set(id, definition);

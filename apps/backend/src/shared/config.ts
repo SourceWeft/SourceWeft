@@ -173,7 +173,10 @@ function parseAlertLevel(value: string | undefined, fallback: AlertLevel) {
   return fallback;
 }
 
-function parseDocumentParseProvider(value: string | undefined, fallback: string) {
+function parseDocumentParseProvider(
+  value: string | undefined,
+  fallback: string,
+) {
   if (!value) {
     return fallback;
   }
@@ -182,7 +185,10 @@ function parseDocumentParseProvider(value: string | undefined, fallback: string)
   return documentParseProviders.has(normalized) ? normalized : fallback;
 }
 
-function parseDocumentParseStrategy(value: string | undefined, fallback: string) {
+function parseDocumentParseStrategy(
+  value: string | undefined,
+  fallback: string,
+) {
   if (!value) {
     return fallback;
   }
@@ -369,6 +375,7 @@ const requestedBillingProvider = parseBillingProvider(
 // provider-backed checkout path in this release.
 const effectiveBillingProvider: BillingProvider =
   saasEnabled && requestedBillingProvider === "creem" ? "creem" : "none";
+const queueName = process.env.JOB_QUEUE_NAME || "sourceweft-jobs";
 
 export const config = {
   apiHost: process.env.BACKEND_API_HOST || "0.0.0.0",
@@ -388,11 +395,17 @@ export const config = {
     "postgres://postgres:postgres@127.0.0.1:5432/sourceweft",
   ),
   redisUrl: requireEnvInProduction("REDIS_URL", "redis://127.0.0.1:6379"),
-  queueName: process.env.JOB_QUEUE_NAME || "sourceweft-jobs",
+  queueName,
+  deliverablesQueueName: `${queueName}-deliverables`,
+  deliverablesWorkerConcurrency: parsePositiveInteger(
+    process.env.DELIVERABLE_WORKER_CONCURRENCY,
+    1,
+  ),
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 2),
   schedulerIntervalMs: Number(process.env.SCHEDULER_INTERVAL_MS || 60000),
   chat: {
-    defaultModelAlias: process.env.CHAT_DEFAULT_MODEL_ALIAS?.trim() || "chat-default",
+    defaultModelAlias:
+      process.env.CHAT_DEFAULT_MODEL_ALIAS?.trim() || "chat-default",
     toolApprovalTtlMs: parsePositiveNumber(
       process.env.CHAT_TOOL_APPROVAL_TTL_MS,
       30 * 60 * 1000,
@@ -470,9 +483,12 @@ export const config = {
     region: process.env.S3_REGION || process.env.AWS_REGION || "us-east-1",
     bucket: process.env.S3_BUCKET || "",
     endpoint: process.env.S3_ENDPOINT || "",
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.S3_ACCESS_KEY_ID || "",
+    accessKeyId:
+      process.env.AWS_ACCESS_KEY_ID || process.env.S3_ACCESS_KEY_ID || "",
     secretAccessKey:
-      process.env.AWS_SECRET_ACCESS_KEY || process.env.S3_SECRET_ACCESS_KEY || "",
+      process.env.AWS_SECRET_ACCESS_KEY ||
+      process.env.S3_SECRET_ACCESS_KEY ||
+      "",
     forcePathStyle: parseBoolean(process.env.S3_FORCE_PATH_STYLE, false),
   },
   publicS3: {

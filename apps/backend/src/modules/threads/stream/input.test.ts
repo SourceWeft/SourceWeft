@@ -120,6 +120,28 @@ test("refresh uses current request tools before the original turn snapshot", asy
   });
 });
 
+test("refresh forwards request image and vision profile overrides", async () => {
+  setThreadMessages([
+    message("user", { id: "user-1" }),
+    message("assistant", { id: "assistant-1" }),
+  ]);
+
+  const input = await resolveRefreshThreadStreamInput({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    image: { profileAlias: "global-image-profile" },
+    imageProfileAlias: "legacy-image-profile",
+    vision: { profileAlias: "global-vision-profile" },
+    visionProfileAlias: "legacy-vision-profile",
+  });
+
+  assert.deepEqual(input.image, { profileAlias: "global-image-profile" });
+  assert.equal(input.imageProfileAlias, "legacy-image-profile");
+  assert.deepEqual(input.vision, { profileAlias: "global-vision-profile" });
+  assert.equal(input.visionProfileAlias, "legacy-vision-profile");
+});
+
 test("resume restores the original turn options snapshot", async () => {
   setThreadMessages([
     message("user", {
@@ -145,7 +167,7 @@ test("resume restores the original turn options snapshot", async () => {
     threadId: "thread-1",
     userId: "user-1",
     assistantMessageId: "assistant-1",
-    toolApprovalResume: {},
+    toolApprovalResume: { decisions: [] },
     tools: {
       skillIds: ["request-skill"],
       web_search: { enabled: false },

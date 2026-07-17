@@ -9,7 +9,7 @@
     {
       "id": "prepare_sandbox_workspace",
       "title": "Prepare Sandbox Workspace",
-      "description": "Materialize selected SourceWeft DB-backed /workfiles Workfile content as ordinary provider sandbox files.",
+      "description": "Materialize explicitly selected SourceWeft DB-backed VFS /workfiles Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in /workfiles first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources.",
       "inputSchema": {
         "type": "object"
       },
@@ -22,7 +22,7 @@
     {
       "id": "execute",
       "title": "Execute Sandbox Command",
-      "description": "Execute a shell command in the provider sandbox filesystem.",
+      "description": "Execute a shell command in the provider sandbox filesystem. Never include SourceWeft DB-backed VFS logical paths such as /workfiles, /kb, or /skills in an execute command; they are not sandbox paths even for mkdir, ls, cat, test, node, python, or shell redirection. Use prepare_sandbox_workspace to materialize selected Workfiles under provider sandbox paths before execution. Files that SourceWeft must later read, inspect, collect, or publish must be written under the current provider read/write roots.",
       "inputSchema": {
         "type": "object"
       },
@@ -35,7 +35,7 @@
     {
       "id": "collect_sandbox_outputs",
       "title": "Collect Sandbox Outputs",
-      "description": "Persist selected provider sandbox text outputs into SourceWeft DB-backed /workfiles Workfiles.",
+      "description": "Persist explicitly selected provider sandbox text outputs from provider-allowed collect source roots into SourceWeft DB-backed VFS /workfiles Workfiles. Do not use this tool for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.",
       "inputSchema": {
         "type": "object"
       },

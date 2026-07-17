@@ -313,7 +313,6 @@ const baseCapabilityManifestSchema = z.object({
       autoEnableWhenConfigured: z.boolean().default(false),
     })
     .default({ onStartup: false, autoEnableWhenConfigured: false }),
-  contributes: capabilityContributesSchema.optional(),
   skills: z.array(skillContributionSchema).optional(),
   tools: z.array(toolContributionSchema).optional(),
   vfs: z.array(vfsContributionSchema).optional(),
@@ -347,54 +346,65 @@ const topLevelContributionFields = [
   "connectors",
 ] as const;
 
-export const capabilityManifestSchema = baseCapabilityManifestSchema
-  .superRefine((manifest, context) => {
-    if (manifest.kind === "composite") {
-      return;
-    }
-    const allowedField = contributionFieldByKind[manifest.kind];
-    for (const field of topLevelContributionFields) {
-      const contributions = manifest[field];
-      if (
-        field !== allowedField &&
-        Array.isArray(contributions) &&
-        contributions.length > 0
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Capability kind '${manifest.kind}' cannot declare top-level '${field}' contributions`,
-          path: [field],
-        });
-      }
-      const legacyContributions = manifest.contributes?.[field];
-      if (
-        field !== allowedField &&
-        Array.isArray(legacyContributions) &&
-        legacyContributions.length > 0
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Capability kind '${manifest.kind}' cannot declare legacy 'contributes.${field}' contributions`,
-          path: ["contributes", field],
-        });
-      }
-    }
-  })
-  .transform((manifest) => ({
-    ...manifest,
-    contributes: {
-      commands: manifest.contributes?.commands ?? [],
-      skills: manifest.skills ?? manifest.contributes?.skills ?? [],
-      tools: manifest.tools ?? manifest.contributes?.tools ?? [],
-      vfs: manifest.vfs ?? manifest.contributes?.vfs ?? [],
-      artifacts: manifest.artifacts ?? manifest.contributes?.artifacts ?? [],
-      retrieval: manifest.retrieval ?? manifest.contributes?.retrieval ?? [],
-      documentParsers:
-        manifest.documentParsers ?? manifest.contributes?.documentParsers ?? [],
-      mcp: manifest.mcp ?? manifest.contributes?.mcp ?? [],
-      connectors: manifest.connectors ?? manifest.contributes?.connectors ?? [],
-    },
-  }));
+function rejectLegacyContributesInput(
+  input: unknown,
+  context: z.RefinementCtx,
+) {
+  if (
+    input &&
+    typeof input === "object" &&
+    !Array.isArray(input) &&
+    "contributes" in input
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'Legacy "contributes" field is not accepted; declare contribution arrays at the top level',
+      path: ["contributes"],
+    });
+  }
+}
+
+export const capabilityManifestSchema = z
+  .unknown()
+  .superRefine(rejectLegacyContributesInput)
+  .pipe(
+    baseCapabilityManifestSchema
+      .superRefine((manifest, context) => {
+        if (manifest.kind === "composite") {
+          return;
+        }
+        const allowedField = contributionFieldByKind[manifest.kind];
+        for (const field of topLevelContributionFields) {
+          const contributions = manifest[field];
+          if (
+            field !== allowedField &&
+            Array.isArray(contributions) &&
+            contributions.length > 0
+          ) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Capability kind '${manifest.kind}' cannot declare top-level '${field}' contributions`,
+              path: [field],
+            });
+          }
+        }
+      })
+      .transform((manifest) => ({
+        ...manifest,
+        contributes: {
+          commands: [],
+          skills: manifest.skills ?? [],
+          tools: manifest.tools ?? [],
+          vfs: manifest.vfs ?? [],
+          artifacts: manifest.artifacts ?? [],
+          retrieval: manifest.retrieval ?? [],
+          documentParsers: manifest.documentParsers ?? [],
+          mcp: manifest.mcp ?? [],
+          connectors: manifest.connectors ?? [],
+        },
+      })),
+  );
 
 export const capabilityDiagnosticSchema = z.object({
   level: capabilityDiagnosticLevelSchema,

@@ -25,15 +25,14 @@ export function getCapabilityContributions(
   manifest: CapabilityManifest,
 ): CapabilityContributions {
   return {
-    artifacts: manifest.artifacts ?? manifest.contributes.artifacts,
-    connectors: manifest.connectors ?? manifest.contributes.connectors,
-    documentParsers:
-      manifest.documentParsers ?? manifest.contributes.documentParsers,
-    mcp: manifest.mcp ?? manifest.contributes.mcp,
-    retrieval: manifest.retrieval ?? manifest.contributes.retrieval,
-    skills: manifest.skills ?? manifest.contributes.skills,
-    tools: manifest.tools ?? manifest.contributes.tools,
-    vfs: manifest.vfs ?? manifest.contributes.vfs,
+    artifacts: manifest.contributes.artifacts,
+    connectors: manifest.contributes.connectors,
+    documentParsers: manifest.contributes.documentParsers,
+    mcp: manifest.contributes.mcp,
+    retrieval: manifest.contributes.retrieval,
+    skills: manifest.contributes.skills,
+    tools: manifest.contributes.tools,
+    vfs: manifest.contributes.vfs,
   };
 }
 

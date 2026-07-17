@@ -5,7 +5,6 @@ import {
   type SelectableInvocationDefinitionWithAlias,
   type SelectableInvocationProvider,
 } from "./registry";
-import { legacyCapabilityToolSelectableId } from "./providers/capability-tools";
 
 function definition(
   input: Partial<SelectableInvocationDefinitionWithAlias> & { id: string },
@@ -16,7 +15,6 @@ function definition(
       kind: "capability_tool",
       capabilityId: `sourceweft/${input.id}`,
       contributionId: input.id,
-      legacyToolName: input.id,
       sourcePackageName: null,
       toolName: input.id,
     },
@@ -66,74 +64,6 @@ test("registry rejects duplicate selectable ids deterministically", () => {
   });
 
   assert.throws(() => registry.list(), /Duplicate selectable invocation id: duplicate/);
-});
-
-test("registry rejects duplicate legacy selectable ids deterministically", () => {
-  const duplicatedLegacyId = legacyCapabilityToolSelectableId("same");
-  const registry = createSelectableInvocationRegistry({
-    providers: [
-      provider({
-        id: "one",
-        definitions: [
-          definition({ id: "cap:one:tool", legacyIds: [duplicatedLegacyId] }),
-        ],
-      }),
-      provider({
-        id: "two",
-        definitions: [
-          definition({ id: "cap:two:tool", legacyIds: [duplicatedLegacyId] }),
-        ],
-      }),
-    ],
-  });
-
-  assert.throws(
-    () => registry.list(),
-    new RegExp(
-      `Duplicate selectable invocation legacy id: ${duplicatedLegacyId.replace(
-        ".",
-        "\\.",
-      )}`,
-    ),
-  );
-});
-
-test("registry allows a definition to resolve through its primary and legacy ids", () => {
-  const legacyId = legacyCapabilityToolSelectableId("generate_image");
-  const registry = createSelectableInvocationRegistry({
-    providers: [
-      provider({
-        id: "capabilities",
-        definitions: [
-          definition({
-            id: "cap:sourceweft/generate-image:generate_image",
-            legacyIds: [legacyId],
-          }),
-        ],
-      }),
-    ],
-  });
-
-  const current = registry.resolve("cap:sourceweft/generate-image:generate_image");
-  assert.ok(current);
-  assert.equal(registry.resolve(legacyId), current);
-});
-
-test("registry rejects slash alias collisions deterministically", () => {
-  const registry = createSelectableInvocationRegistry({
-    providers: [
-      provider({
-        id: "one",
-        definitions: [definition({ id: "one.image", slashAlias: "/image" })],
-      }),
-      provider({
-        id: "two",
-        definitions: [definition({ id: "two.image", slashAlias: "/image" })],
-      }),
-    ],
-  });
-
-  assert.throws(() => registry.list(), /Duplicate selectable invocation slash alias: \/image/);
 });
 
 test("registry excludes disabled providers and consistently resolves unavailable definitions", () => {

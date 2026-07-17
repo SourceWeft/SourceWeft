@@ -14,16 +14,30 @@ test("collects video presentation artifact ids from assistant tool metadata", ()
               input: {},
               output: {
                 content: JSON.stringify({
-                  type: "video_presentation_artifact_result",
+                  type: "video_presentation_processing_result",
                   artifact_id: "artifact-1",
                   artifact_url:
                     "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
                   file_name: "feynman.mp4",
-                  status: "pending",
+                  status: "running",
                 }),
               },
               status: "completed",
               latencyMs: 10,
+              error: null,
+            },
+            {
+              id: "tool-3",
+              tool: "generate_video_presentation",
+              input: {},
+              output: {
+                type: "generate_video_presentation_progress",
+                artifact_id: "artifact-progress-1",
+                status: "running",
+                stage: "generating_scene_modules",
+              },
+              status: "running",
+              latencyMs: null,
               error: null,
             },
             {
@@ -41,6 +55,6 @@ test("collects video presentation artifact ids from assistant tool metadata", ()
         },
       },
     ]),
-    ["artifact-1"],
+    ["artifact-1", "artifact-progress-1"],
   );
 });

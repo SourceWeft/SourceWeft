@@ -86,7 +86,7 @@ test("resolveMentionedSourceIdsFromMessage filters invalid values", () => {
   );
 });
 
-test("resolveTurnOptionsToolsFromMessage reads options snapshot before legacy tools", () => {
+test("resolveTurnOptionsToolsFromMessage reads options snapshot only", () => {
   assert.deepEqual(
     resolveTurnOptionsToolsFromMessage(
       message({
@@ -99,6 +99,12 @@ test("resolveTurnOptionsToolsFromMessage reads options snapshot before legacy to
     ),
     { web_search: { enabled: true } },
   );
+  assert.equal(
+    resolveTurnOptionsToolsFromMessage(
+      message({ tools: { web_search: { enabled: true } } }),
+    ),
+    undefined,
+  );
 });
 
 test("turn options snapshot can be interpreted as request-shaped web tools", () => {
@@ -110,7 +116,6 @@ test("turn options snapshot can be interpreted as request-shaped web tools", () 
             version: 1,
             tools: { web_search: { enabled: true } },
           },
-          tools: { web_search: { enabled: false } },
         }),
       ),
     ),
@@ -119,23 +124,12 @@ test("turn options snapshot can be interpreted as request-shaped web tools", () 
   assert.equal(
     readWebAccessOverride(
       resolveTurnOptionsToolsFromMessage(
-        message({ tools: { web_search: { enabled: true } } }),
-      ),
-    ),
-    true,
-  );
-  assert.equal(
-    readWebAccessOverride(
-      resolveTurnOptionsToolsFromMessage(
-        message({ tools: { webSearchEnabled: true } }),
-      ),
-    ),
-    true,
-  );
-  assert.equal(
-    readWebAccessOverride(
-      resolveTurnOptionsToolsFromMessage(
-        message({ tools: { web_fetch: { enabled: true } } }),
+        message({
+          options: {
+            version: 1,
+            tools: { web_fetch: { enabled: true } },
+          },
+        }),
       ),
     ),
     true,
@@ -161,57 +155,12 @@ test("turn options snapshot can be interpreted as request-shaped image tools", (
               },
             },
           },
-          tools: {
-            generate_image: {
-              enabled: true,
-              modelAlias: "legacy-image-model",
-            },
-          },
         }),
       ),
     ),
     {
       enabled: false,
       modelAlias: "snapshot-image-model",
-      config: { style: "cartoon" },
-    },
-  );
-  assert.deepEqual(
-    resolveGenerateImageToolSelection(
-      resolveTurnOptionsToolsFromMessage(
-        message({
-          tools: {
-            generate_image: {
-              enabled: false,
-              modelAlias: "image-model",
-              config: { aspectRatio: "1:1", quality: "standard" },
-            },
-          },
-        }),
-      ),
-    ),
-    {
-      enabled: false,
-      modelAlias: "image-model",
-      config: { aspectRatio: "1:1", quality: "standard" },
-    },
-  );
-  assert.deepEqual(
-    resolveGenerateImageToolSelection(
-      resolveTurnOptionsToolsFromMessage(
-        message({
-          tools: {
-            artifact: {
-              kind: "image",
-              modelAlias: "legacy-image",
-              image: { style: "cartoon" },
-            },
-          },
-        }),
-      ),
-    ),
-    {
-      modelAlias: "legacy-image",
       config: { style: "cartoon" },
     },
   );

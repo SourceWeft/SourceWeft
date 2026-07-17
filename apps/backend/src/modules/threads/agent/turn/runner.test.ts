@@ -2793,6 +2793,45 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   assert.equal(ready?.metadata?.toolCallId, "call-1");
 });
 
+test("video presentation progress events map to background build steps", () => {
+  const progressEvent = normalizeGeneratedPresentationProgressEvent({
+    type: "generate_video_presentation_progress",
+    toolCallId: "call-video",
+    tool: "generate_video_presentation",
+    stage: "planning",
+    title: "Feynman Method",
+  });
+  assert.ok(progressEvent);
+
+  const planning = testExports.buildPresentationProgressThinkingStep({
+    data: progressEvent.data,
+    toolCallId: "call-video",
+  });
+  const generating = testExports.buildPresentationProgressThinkingStep({
+    data: {
+      ...progressEvent.data,
+      stage: "generating",
+    },
+    toolCallId: "call-video",
+  });
+  const ready = testExports.buildPresentationProgressThinkingStep({
+    data: {
+      ...progressEvent.data,
+      stage: "ready",
+    },
+    toolCallId: "call-video",
+  });
+
+  assert.equal(progressEvent.tool, "generate_video_presentation");
+  assert.equal(planning?.id, "video-presentation-generation");
+  assert.equal(planning?.title, "Building video presentation");
+  assert.deepEqual(planning?.items, ["Planning video presentation artifact"]);
+  assert.deepEqual(generating?.items, ["Building video project"]);
+  assert.equal(ready?.title, "Video presentation ready");
+  assert.deepEqual(ready?.items, ["Video project ready"]);
+  assert.equal(ready?.metadata?.artifactType, "video_presentation");
+});
+
 test("unknown presentation progress stages do not create CoT steps", () => {
   assert.equal(
     testExports.buildPresentationProgressThinkingStep({
@@ -3882,13 +3921,11 @@ test("runtime prompt exposes invoked skill runtime config", () => {
         version: "1.0.0",
         description: "Create PPT decks.",
         defaultConfig: {
-          runtime: {
-            config: {
-              language: "zh-CN",
-              slideCount: 10,
-              stylePreset: "editorial",
-              visualDensity: "dense",
-            },
+          config: {
+            language: "zh-CN",
+            slideCount: 10,
+            stylePreset: "editorial",
+            visualDensity: "dense",
           },
         },
         files: [],

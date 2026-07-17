@@ -4,7 +4,6 @@ import {
   IMAGE_QUALITY_SET,
   IMAGE_STYLE_SET,
   type ArtifactImageConfig,
-  type ArtifactToolSelection,
   type GenerateImageToolSelection,
   type ImageAspectRatio,
   type ImageQuality,
@@ -135,24 +134,6 @@ export function normalizePartialArtifactImageConfig(
     config.style = style;
   }
   return Object.keys(config).length > 0 ? config : undefined;
-}
-
-export function normalizeArtifactToolSelection(
-  input: unknown,
-): ArtifactToolSelection | undefined {
-  const record = toRecord(input);
-  if (!record || record.kind !== "image") {
-    return undefined;
-  }
-  const modelAlias = normalizeOptionalString(record.modelAlias);
-  return {
-    kind: "image",
-    mode: record.mode === "generate" ? "generate" : "auto",
-    ...(modelAlias ? { modelAlias } : {}),
-    ...(record.image !== undefined
-      ? { image: normalizePartialArtifactImageConfig(record.image) }
-      : {}),
-  };
 }
 
 function normalizeGenerateImageExecution(

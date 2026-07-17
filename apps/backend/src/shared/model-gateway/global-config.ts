@@ -424,6 +424,22 @@ function asOptionalProviderRouting(
   };
 }
 
+// Resolve `${ENV_NAME}` references in a header value from process.env. This
+// keeps deployment-specific header values (e.g. the AI Gateway id) out of the
+// committed config, mirroring how `baseUrlEnv` sources the base URL. A literal
+// value with no `${...}` reference is returned unchanged.
+function resolveHeaderValueEnv(rawValue: string, fieldName: string): string {
+  return rawValue.replace(/\$\{([A-Z0-9_]+)\}/gu, (_match, envName: string) => {
+    const resolved = process.env[envName]?.trim();
+    if (!resolved) {
+      throw new Error(
+        `Missing environment variable '${envName}' referenced by ${fieldName}`,
+      );
+    }
+    return resolved;
+  });
+}
+
 function asStringRecord(value: unknown, fieldName: string): Record<string, string> {
   if (value === undefined || value === null) {
     return {};
@@ -439,7 +455,10 @@ function asStringRecord(value: unknown, fieldName: string): Record<string, strin
       }
 
       const headerName = key.trim();
-      const normalizedValue = headerValue.trim();
+      const normalizedValue = resolveHeaderValueEnv(
+        headerValue.trim(),
+        `${fieldName}.${key}`,
+      );
       if (!headerName || !normalizedValue) {
         throw new Error(`Invalid global model gateway config field: ${fieldName}.${key}`);
       }

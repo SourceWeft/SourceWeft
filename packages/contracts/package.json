@@ -20,13 +20,16 @@
     "./api-response": "./src/api-response.ts"
   },
   "scripts": {
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@sourceweft/market-contracts": "workspace:*",
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsx": "^4.20.6",
     "typescript": "5.9.2"
   }
 }

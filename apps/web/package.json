@@ -45,6 +45,7 @@
     "@sourceweft/market-contracts": "workspace:*",
     "@sourceweft/market-sdk": "workspace:*",
     "@sourceweft/sdk": "workspace:*",
+    "@sourceweft/video-presentation-runtime": "workspace:*",
     "@sourceweft/ui-web": "workspace:*",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",

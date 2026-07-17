@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import type { CapabilityCommandListItem } from "@sourceweft/capability-runtime";
 import { test } from "vitest";
 import { createSelectableInvocationRegistry } from "../registry";
-import {
-  createCapabilityToolInvocationProvider,
-  legacyCapabilityToolSelectableId,
-} from "./capability-tools";
+import { createCapabilityToolInvocationProvider } from "./capability-tools";
 
 function capabilityCommand(
   input: Partial<CapabilityCommandListItem> & {
@@ -44,9 +41,9 @@ test("capability tool provider projects tool contributions as fixed tool choice"
       capabilityCommand({
         action: { kind: "tool", targetId: "generate_video_presentation" },
         aliases: ["video", "slides"],
-        capabilityId: "sourceweft/generate-video-presentation",
+        capabilityId: "sourceweft/video-presentation-tool",
         contributionId: "generate_video_presentation",
-        id: "cap:sourceweft/generate-video-presentation:generate_video_presentation",
+        id: "cap:sourceweft/video-presentation-tool:generate_video_presentation",
         title: "Generate Video Presentation",
       }),
       capabilityCommand({
@@ -65,13 +62,13 @@ test("capability tool provider projects tool contributions as fixed tool choice"
     definitions.map((definition) => definition.id),
     [
       "cap:sourceweft/generate-image:generate_image",
-      "cap:sourceweft/generate-video-presentation:generate_video_presentation",
+      "cap:sourceweft/video-presentation-tool:generate_video_presentation",
     ],
   );
   assert.equal(definitions[0]?.sourceRef.kind, "capability_tool");
   assert.equal(
     definitions[0]?.sourceRef.kind === "capability_tool"
-      ? definitions[0].sourceRef.legacyToolName
+      ? definitions[0].sourceRef.toolName
       : null,
     "generate_image",
   );
@@ -84,9 +81,6 @@ test("capability tool provider projects tool contributions as fixed tool choice"
   assert.equal(definitions[0]?.slashAlias, "/image");
   assert.deepEqual(definitions[0]?.alternateSlashAliases, []);
   assert.deepEqual(definitions[1]?.alternateSlashAliases, ["/slides"]);
-  assert.deepEqual(definitions[0]?.legacyIds, [
-    legacyCapabilityToolSelectableId("generate_image"),
-  ]);
 });
 
 test("capability tool provider derives projection from arbitrary tool command records", () => {
@@ -114,9 +108,6 @@ test("capability tool provider derives projection from arbitrary tool command re
       : null,
     "future_chart_tool",
   );
-  assert.deepEqual(definition.legacyIds, [
-    legacyCapabilityToolSelectableId("future_chart_tool"),
-  ]);
   assert.equal(definition.slashAlias, "/chart");
   assert.deepEqual(definition.alternateSlashAliases, ["/visualize"]);
   assert.equal(
@@ -127,7 +118,7 @@ test("capability tool provider derives projection from arbitrary tool command re
   );
 });
 
-test("capability tool provider preserves documented legacy ids as aliases", () => {
+test("capability tool provider resolves capability ids and slash aliases only", () => {
   const registry = createSelectableInvocationRegistry({
     providers: [
       createCapabilityToolInvocationProvider({
@@ -146,12 +137,9 @@ test("capability tool provider preserves documented legacy ids as aliases", () =
   });
 
   const current = registry.resolve("cap:sourceweft/generate-image:generate_image");
-  const legacy = registry.resolve(
-    legacyCapabilityToolSelectableId("generate_image"),
-  );
 
   assert.ok(current);
-  assert.equal(legacy, current);
+  assert.equal(registry.resolve("builtin_tool.generate_image"), null);
   assert.equal(registry.resolveAlias("/image"), current);
 });
 

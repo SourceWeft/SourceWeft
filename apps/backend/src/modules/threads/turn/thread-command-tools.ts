@@ -277,7 +277,6 @@ export function resolveToolPermissions(input: {
   }
   const explicitWebAccessEnabled =
     input.tools?.[AGENT_TOOL_NAMES.webSearch]?.enabled ??
-    input.tools?.webSearchEnabled ??
     input.tools?.[AGENT_TOOL_NAMES.webFetch]?.enabled;
   if (typeof explicitWebAccessEnabled === "boolean") {
     setPermission(

@@ -5,7 +5,7 @@ type CapabilityAgentToolFactoryInput = {
   readonly toolIds?: readonly string[];
   readonly context?: {
     readonly isToolDenied?: (toolName: string) => boolean;
-    readonly webSearchEnabled?: boolean;
+    readonly webAccessEnabled?: boolean;
   };
   readonly services?: {
     readonly citationRegistry?: WebCitationRegistry;
@@ -37,7 +37,7 @@ export function createCapabilityAgentTools(
     provider,
     citationRegistry,
     searchEnabled:
-      input.context?.webSearchEnabled === true &&
+      input.context?.webAccessEnabled === true &&
       includesTool(input, WEB_SEARCH_TOOL_ID) &&
       !isDenied(input, WEB_SEARCH_TOOL_ID),
   }).filter(

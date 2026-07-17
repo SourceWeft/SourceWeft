@@ -125,7 +125,7 @@ export function normalizeGatewayError(error: unknown): ModelGatewayError {
 
   if (
     isRecord(error) &&
-    error.name === "AbortError" &&
+    (error.name === "AbortError" || error.name === "TimeoutError") &&
     typeof error.message === "string"
   ) {
     return new ModelGatewayError({

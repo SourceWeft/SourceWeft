@@ -6,10 +6,10 @@ import {
   isSkillActivatedAgentTool,
 } from "@sourceweft/agent-tool-registry";
 import {
-  normalizeArtifactToolSelection,
   normalizeGenerateImageToolSelection,
   type GenerateImageToolSelection,
 } from "@sourceweft/builtin-tool-generate-image";
+import { normalizeGenerateVideoPresentationToolSelection } from "../../artifacts/types";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import type {
   ConnectorToolSelection,
@@ -26,11 +26,9 @@ function toRecord(value: unknown): Record<string, unknown> | null {
 }
 
 const RESERVED_TOOL_SELECTION_KEYS = new Set([
-  "artifact",
   "invokedSkillIds",
   "skillRuntimeConfig",
   "skillIds",
-  "webSearchEnabled",
 ]);
 
 function cloneToolSelection(
@@ -104,9 +102,6 @@ export function readWebAccessOverride(
   if (typeof webSearch?.enabled === "boolean") {
     return webSearch.enabled;
   }
-  if (typeof tools?.webSearchEnabled === "boolean") {
-    return tools.webSearchEnabled;
-  }
   const webFetch = toRecord(tools?.[AGENT_TOOL_NAMES.webFetch]);
   return typeof webFetch?.enabled === "boolean" ? webFetch.enabled : undefined;
 }
@@ -129,23 +124,124 @@ export function readSkillRuntimeConfig(
 export function resolveGenerateImageToolSelection(
   tools?: ThreadToolsSelection,
 ): GenerateImageToolSelection | undefined {
-  const selection = normalizeGenerateImageToolSelection(
+  return normalizeGenerateImageToolSelection(
     tools?.[AGENT_TOOL_NAMES.generateImage],
   );
-  const legacySelection = normalizeArtifactToolSelection(tools?.artifact);
-  if (!legacySelection) {
-    return selection;
-  }
+}
 
+function setSelectionPath(
+  target: Record<string, unknown>,
+  path: string,
+  value: unknown,
+) {
+  const segments = path.split(".");
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) =>
+        !segment ||
+        segment === "__proto__" ||
+        segment === "constructor" ||
+        segment === "prototype",
+    )
+  ) {
+    return;
+  }
+  let current = target;
+  for (const segment of segments.slice(0, -1)) {
+    const child = current[segment];
+    if (!child || typeof child !== "object" || Array.isArray(child)) {
+      const next: Record<string, unknown> = {};
+      current[segment] = next;
+      current = next;
+      continue;
+    }
+    current = child as Record<string, unknown>;
+  }
+  const leaf = segments.at(-1);
+  if (leaf) {
+    current[leaf] = value;
+  }
+}
+
+function videoSelectionFromRuntimeConfig(config: Record<string, unknown>) {
+  const nestedConfig = toRecord(config.config);
+  const source = nestedConfig ? { ...nestedConfig, ...config } : config;
+  const selection: Record<string, unknown> = {};
+  const directPaths: Record<string, string> = {
+    canvasFps: "canvas.fps",
+    durationTarget: "renderProfile.durationTarget",
+    language: "renderProfile.language",
+    motionPacing: "motion.pacing",
+    narrationEnabled: "narration.enabled",
+    slideCount: "slideCount",
+    stylePreset: "renderProfile.stylePreset",
+    visualDensity: "renderProfile.visualDensity",
+    visualDirection: "visualDirection",
+  };
+  for (const [key, path] of Object.entries(directPaths)) {
+    if (source[key] !== undefined) {
+      setSelectionPath(selection, path, source[key]);
+    }
+  }
+  for (const key of ["brand", "canvas", "motion", "renderProfile"]) {
+    if (source[key] !== undefined) {
+      selection[key] = source[key];
+    }
+  }
+  return normalizeGenerateVideoPresentationToolSelection(selection);
+}
+
+function mergeOptionalRecord(
+  first: Record<string, unknown> | undefined,
+  second: Record<string, unknown> | undefined,
+) {
+  const merged = { ...(first ?? {}), ...(second ?? {}) };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+export function resolveGenerateVideoPresentationToolSelection(
+  tools?: ThreadToolsSelection,
+): ThreadToolsSelection[typeof AGENT_TOOL_NAMES.generateVideoPresentation] {
+  const explicit = normalizeGenerateVideoPresentationToolSelection(
+    tools?.[AGENT_TOOL_NAMES.generateVideoPresentation],
+  );
+  const runtimeConfig = readSkillRuntimeConfig(tools);
+  const runtimeSelection = videoSelectionFromRuntimeConfig(
+    runtimeConfig["builtin:video-presentation"] ?? {},
+  );
+  if (!explicit && !runtimeSelection) {
+    return undefined;
+  }
   return {
-    ...(selection ?? {}),
-    ...(legacySelection.modelAlias && !selection?.modelAlias
-      ? { modelAlias: legacySelection.modelAlias }
-      : {}),
-    ...(selection?.execution ? { execution: selection.execution } : {}),
-    ...(legacySelection.image && !selection?.config
-      ? { config: legacySelection.image }
-      : {}),
+    ...(runtimeSelection ?? {}),
+    ...(explicit ?? {}),
+    ...(() => {
+      const renderProfile = mergeOptionalRecord(
+        runtimeSelection?.renderProfile,
+        explicit?.renderProfile,
+      );
+      return renderProfile ? { renderProfile } : {};
+    })(),
+    ...(() => {
+      const brand = mergeOptionalRecord(runtimeSelection?.brand, explicit?.brand);
+      return brand ? { brand } : {};
+    })(),
+    ...(() => {
+      const motion = mergeOptionalRecord(runtimeSelection?.motion, explicit?.motion);
+      return motion ? { motion } : {};
+    })(),
+    ...(() => {
+      const canvas = mergeOptionalRecord(runtimeSelection?.canvas, explicit?.canvas);
+      return canvas ? { canvas } : {};
+    })(),
+    ...(() => {
+      const narration = mergeOptionalRecord(
+        runtimeSelection?.narration,
+        explicit?.narration,
+      );
+      return narration ? { narration } : {};
+    })(),
   };
 }
 
@@ -157,7 +253,6 @@ export function buildEffectiveToolsSelection(input: {
   webAccessEnabled: boolean;
 }): ThreadToolsSelection {
   const tools = cloneToolSelection(input.baseTools);
-  delete tools.webSearchEnabled;
 
   for (const [toolName, value] of Object.entries(tools)) {
     if (RESERVED_TOOL_SELECTION_KEYS.has(toolName)) {

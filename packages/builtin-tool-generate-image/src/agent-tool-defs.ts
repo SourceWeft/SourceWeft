@@ -22,13 +22,6 @@ export const generateImageAgentTool = defineAgentTool({
   },
   defaultPermission: "allow",
   riskLevel: "low",
-  slash: {
-    description:
-      "Internal SourceWeft image artifact generator. It is callable only when an image skill runtime or compatibility command explicitly enables it.",
-    displayName: "Generate image",
-    iconName: "image",
-    supportsCommand: true,
-  },
 });
 
 /** Tool name constants — use these instead of AGENT_TOOL_NAMES */

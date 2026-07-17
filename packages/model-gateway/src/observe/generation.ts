@@ -509,6 +509,9 @@ export function buildGenerationErrorEvent(input: {
   attributes?: Record<string, unknown>;
 }): ObserveGenerationError {
   const normalized = normalizeGatewayError(input.error);
+  const structuredOutputDiagnostics = toRecord(
+    normalized.metadata?.structuredOutputDiagnostics,
+  );
   return {
     traceId: input.traceId,
     spanId: input.spanId,
@@ -516,6 +519,13 @@ export function buildGenerationErrorEvent(input: {
     latencyMs: Date.now() - input.startedAtMs,
     errorCode: normalized.code,
     errorMessage: normalized.message,
+    ...(structuredOutputDiagnostics
+      ? {
+          providerResponse: {
+            structuredOutput: structuredOutputDiagnostics,
+          },
+        }
+      : {}),
     providerStatusCode: normalized.statusCode,
     providerRequestId: normalized.requestId,
     attributes: input.attributes,

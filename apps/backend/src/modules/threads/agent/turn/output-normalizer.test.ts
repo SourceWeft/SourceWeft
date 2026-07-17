@@ -9,10 +9,49 @@ import {
   getFilesystemToolOutputError,
   getFilesystemToolStartTitle,
   getSkillInstructionDisplayMetadata,
+  isVideoPresentationArtifactReady,
   normalizeToolOutputForObservability,
   sanitizeThreadMessageMetadataForClient,
   sanitizeFilesystemToolInputForClient,
 } from "./output-normalizer";
+import { buildVideoPresentationProcessingResult } from "@sourceweft/builtin-tool-video-presentation";
+
+test("video presentation running output with artifact_url is not ready", () => {
+  const runningOutput = buildVideoPresentationProcessingResult({
+    artifactId: "artifact-1",
+    artifactUrl: "/artifact-preview?artifactId=artifact-1",
+    fileName: "demo.video-presentation.json",
+    narrationEnabled: true,
+    title: "Demo",
+  });
+
+  assert.equal(isVideoPresentationArtifactReady(runningOutput), false);
+  assert.equal(
+    getFilesystemToolEndTitle(
+      "generate_video_presentation",
+      {},
+      runningOutput,
+    ),
+    "Video presentation generating",
+  );
+});
+
+test("video presentation ready output is marked ready", () => {
+  const readyOutput = {
+    artifact_url: "/artifact-preview?artifactId=artifact-1",
+    status: "ready",
+  };
+
+  assert.equal(isVideoPresentationArtifactReady(readyOutput), true);
+  assert.equal(
+    getFilesystemToolEndTitle(
+      "generate_video_presentation",
+      {},
+      readyOutput,
+    ),
+    "Video presentation ready",
+  );
+});
 
 test("redacts skills read_file output for client observability", () => {
   const output = normalizeToolOutputForObservability(

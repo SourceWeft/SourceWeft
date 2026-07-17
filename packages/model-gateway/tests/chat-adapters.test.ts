@@ -18,6 +18,7 @@ const target: ResolvedRequestTarget = {
   baseUrl: "https://gateway.example.com",
   apiKey: "test-key",
   defaultHeaders: {},
+  supports: ["chat", "tool_calling", "json_schema"],
   routeDecision: {
     alias: "chat-default",
     mode: "GLOBAL",
@@ -115,6 +116,43 @@ test("OpenAI-compatible chat adapter configures custom API key headers through L
     "HTTP-Referer": "https://sourceweft.example",
     Authorization: null,
     "cf-aig-authorization": "Bearer cf-token",
+  });
+});
+
+test("OpenAI-compatible chat adapter forwards timeout and disables supported reasoning", () => {
+  const adapter = new OpenAICompatibleChatAdapter();
+  const model = adapter.createModel(
+    {
+      ...target,
+      provider: "cloudflare-aig",
+      providerKind: "openai-compatible",
+      providerModel: "deepseek/deepseek-v4-pro",
+      supports: ["chat", "json_schema"],
+      routeDecision: {
+        ...target.routeDecision,
+        provider: "cloudflare-aig",
+        providerKind: "openai-compatible",
+      },
+    },
+    {
+      ...input,
+      thinking: {
+        mode: "off",
+        supportedParameters: ["reasoning", "include_reasoning"],
+      },
+    },
+    {
+      maxRetries: 0,
+      timeoutMs: 12_345,
+    },
+  );
+
+  assert.equal(modelRetryCount(model), 0);
+  assert.equal((model as { timeout?: unknown }).timeout, 12_345);
+  assert.deepEqual(modelKwargs(model), {
+    reasoning: {
+      exclude: true,
+    },
   });
 });
 
