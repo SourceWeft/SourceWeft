@@ -113,7 +113,3 @@ Legacy paths that may stop applying:
 ## Tool executor slash metadata
 
 Internal artifact executors (`generate_image`, `generate_video_presentation`) no longer expose tool-level slash command metadata. Slash entry is skill-only where applicable.
-
-## Related docs
-
-- [legacy-compat-pr-split.md](./legacy-compat-pr-split.md) — merge record for this work on `main`
