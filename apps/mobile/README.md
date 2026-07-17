@@ -29,6 +29,14 @@ For authenticated local testing on a physical device, also expose the backend on
 example `http://192.168.1.20:3000`. The web client falls back to the same host
 on port `3001` when it is loaded through a non-localhost development URL.
 
+## API base URL
+
+The mobile shell is a Tauri WebView around the web app. It does **not** own an
+API client or `VITE_API_BASE_URL`. Runtime API calls use the web app's
+`NEXT_PUBLIC_API_BASE_URL` (see `apps/web/lib/api-base-url.ts`). Configure that
+on the web package / deployment that the shell loads; do not hardcode API hosts
+in `apps/mobile`.
+
 The mobile host identifies itself through the same native bridge shape as the desktop host: `window.__SOURCEWEFT_NATIVE__`. Check `bridge.kind === "mobile"` or a named capability such as `externalUrl`; avoid branching on browser platform strings for native behavior.
 
 ## iOS Generated Project

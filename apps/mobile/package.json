@@ -11,9 +11,6 @@
     "ios:build": "tauri ios build",
     "check-types": "tsc --noEmit"
   },
-  "dependencies": {
-    "@sourceweft/sdk": "workspace:*"
-  },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.1",
     "typescript": "5.9.2"
