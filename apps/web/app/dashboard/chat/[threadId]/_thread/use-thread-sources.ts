@@ -27,7 +27,13 @@ import type {
   ListWorkspaceSkillsResponse,
 } from "@sourceweft/contracts";
 import { removeDisabledToolSkills } from "./thread-utils";
-import { resolveDefaultActiveSkillIds } from "../../_components/chat-canvas/tool-selection";
+import {
+  coerceSkillIdsSelection,
+  normalizeSkillIdsForRequest,
+  resolveDefaultActiveSkillIds,
+  SKILL_SELECTION_LIMIT_MESSAGE,
+} from "../../_components/chat-canvas/tool-selection";
+import { toast } from "sonner";
 
 type UseThreadSourcesInput = {
   threadId: string;
@@ -103,6 +109,14 @@ export function useThreadSources({
   const [capabilityCatalog, setCapabilityCatalog] =
     useState<ListCapabilityCatalogResponse | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const handleSkillSelectionChange = useCallback((skillIds: string[]) => {
+    const { skillIds: nextSkillIds, wasLimited } =
+      coerceSkillIdsSelection(skillIds);
+    if (wasLimited) {
+      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+    }
+    setActiveSkillIds(nextSkillIds);
+  }, []);
   const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
   const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>(
@@ -329,6 +343,7 @@ export function useThreadSources({
     setActiveMcpInstallIds,
     setActiveMcpToolIds,
     setActiveSkillIds,
+    handleSkillSelectionChange,
     setDisabledToolNames,
   };
 }

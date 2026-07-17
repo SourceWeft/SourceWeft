@@ -204,6 +204,10 @@ import {
   setCachedWorkspaceHubValue,
 } from "./workspace-hub-cache";
 import { resolveWorkspaceSourceHydration } from "./source-refresh-state";
+import {
+  SKILL_SELECTION_LIMIT_MESSAGE,
+  toggleSkillSelection,
+} from "../chat-canvas/tool-selection";
 
 export { ArtifactPreviewPanel } from "../artifact-preview/artifact-preview-panel";
 export type { ArtifactListItem } from "./types";
@@ -3312,7 +3316,16 @@ function SkillsTab({
       onSkillSelectionChange(selectedSkillIds.filter((id) => id !== skillId));
       return;
     }
-    onSkillSelectionChange([...selectedSkillIds, skillId].slice(0, 5));
+    const { skillIds, wasLimited } = toggleSkillSelection({
+      currentSkillIds: selectedSkillIds,
+      selected: true,
+      skillId,
+    });
+    if (wasLimited) {
+      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+      return;
+    }
+    onSkillSelectionChange(skillIds);
   }
 
   if (filtered.length === 0) {

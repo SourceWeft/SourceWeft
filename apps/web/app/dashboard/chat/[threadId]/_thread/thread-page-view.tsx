@@ -129,7 +129,7 @@ export function DashboardChatThreadPageView({
   selectedByokModels,
   selectedModels,
   selectedSources,
-  setActiveSkillIds,
+  handleSkillSelectionChange,
   setByokCredentials,
   setByokModelConfig,
   setByokModels,
@@ -182,7 +182,7 @@ export function DashboardChatThreadPageView({
       onConnectorsChange: handleConnectorsChange,
       onMcpSelectionChange: handleMcpSelectionChange,
       onSelectionChange: persistActiveSourceIds,
-      onSkillSelectionChange: setActiveSkillIds,
+      onSkillSelectionChange: handleSkillSelectionChange,
       onSkillsCatalogChange: loadAvailableSkills,
       onSourceLoad: handleLibrarySourcesLoad,
       onSourceMerge: handleLibrarySourcesMerge,
@@ -216,7 +216,7 @@ export function DashboardChatThreadPageView({
       persistActiveSourceIds,
       previewArtifact,
       scrollToMessage,
-      setActiveSkillIds,
+      handleSkillSelectionChange,
       setPreviewArtifact,
       threadCitations,
       threadId,
@@ -302,7 +302,7 @@ export function DashboardChatThreadPageView({
             onResumeToolConfirmation={handleResumeToolConfirmation}
             onRestartFromMessage={handleRestartFromMessage}
             onSendMessage={handleSendMessage}
-            onSkillSelectionChange={setActiveSkillIds}
+            onSkillSelectionChange={handleSkillSelectionChange}
             onStopStreaming={handleStopStreaming}
             searchEnabled={searchEnabled}
             onSearchEnabledChange={setSearchEnabled}
@@ -364,7 +364,7 @@ export function DashboardChatThreadPageView({
         onLibrarySourcesMerge={handleLibrarySourcesMerge}
         onMcpSelectionChange={handleMcpSelectionChange}
         onSelectionChange={persistActiveSourceIds}
-        onSkillSelectionChange={setActiveSkillIds}
+        onSkillSelectionChange={handleSkillSelectionChange}
         previewArtifact={previewArtifact}
         sourcesVisible={sourcesVisible}
         threadCitations={threadCitations}

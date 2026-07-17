@@ -18,6 +18,9 @@ import type {
 } from "../../_components/model-catalog-utils";
 import type { ByokModelSelection } from "../../_components/byok-state";
 import { DEFAULT_MODEL_SELECTION_SOURCES } from "../../_components/skill-model-presets";
+import {
+  normalizeSkillIdsForRequest,
+} from "../../_components/chat-canvas/tool-selection";
 import type { ThreadStreamActionInput } from "./use-thread-stream-action";
 
 const useBrowserLayoutEffect =
@@ -110,11 +113,11 @@ export function useThreadBootstrap({
             )
           : [];
         const pendingSkillIds = Array.isArray(skillIds)
-          ? skillIds
-              .filter(
+          ? normalizeSkillIdsForRequest(
+              skillIds.filter(
                 (skillId): skillId is string => typeof skillId === "string",
-              )
-              .slice(0, 5)
+              ),
+            )
           : [];
         persistActiveSourceIds(pendingSourceIds);
         setActiveSkillIds(pendingSkillIds);

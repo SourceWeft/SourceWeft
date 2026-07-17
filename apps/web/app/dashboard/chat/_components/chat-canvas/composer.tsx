@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import {
   Attachment,
   AttachmentHoverCard,
@@ -99,7 +100,9 @@ import {
   mergeChatToolsSelection,
   skillActivatedToolNames,
   skillSupportsConnector,
+  SKILL_SELECTION_LIMIT_MESSAGE,
   thinkingEffortOptions,
+  toggleSkillSelection,
 } from "./tool-selection";
 import type {
   ChatSendInput,
@@ -956,9 +959,16 @@ export function Composer({
           onDisabledToolNamesChange?.(nextDisabledTools);
         }
       }
-      onSkillSelectionChange?.(
-        Array.from(new Set([...selectedSkillIds, skill.id])).slice(0, 5),
-      );
+      const { skillIds, wasLimited } = toggleSkillSelection({
+        currentSkillIds: selectedSkillIds,
+        selected: true,
+        skillId: skill.id,
+      });
+      if (wasLimited) {
+        toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+        return;
+      }
+      onSkillSelectionChange?.(skillIds);
       return;
     }
 

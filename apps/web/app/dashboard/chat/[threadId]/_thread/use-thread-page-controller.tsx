@@ -23,7 +23,12 @@ import type {
   ArtifactStatusSnapshot,
   ChatSendInput,
   ToolConfirmationInterventionSignal,
+  VersionedMessageGroup,
 } from "../../_components/chat-canvas";
+import {
+  hasLegacyToolOptionsMetadata,
+  LEGACY_TOOL_OPTIONS_WARNING_MESSAGE,
+} from "../../_components/chat-canvas/legacy-tool-options";
 import {
   EMPTY_ACTIVE_CONNECTOR_TOOLS,
   resolveActiveConnectorToolState,
@@ -72,6 +77,27 @@ import {
 } from "./message-groups";
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
+
+function resolveUserMessageMetadata(input: {
+  groups: VersionedMessageGroup[];
+  userMessageId: string | null | undefined;
+}) {
+  if (!input.userMessageId) {
+    return undefined;
+  }
+  return input.groups
+    .filter((group) => group.role === "user")
+    .flatMap((group) => group.versions)
+    .find((version) => version.id === input.userMessageId)?.metadata;
+}
+
+function warnLegacyToolOptionsMetadata(
+  metadata: Record<string, unknown> | undefined,
+) {
+  if (hasLegacyToolOptionsMetadata(metadata)) {
+    toast.info(LEGACY_TOOL_OPTIONS_WARNING_MESSAGE);
+  }
+}
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
@@ -205,6 +231,7 @@ export function useThreadPageController({
     setActiveMcpInstallIds,
     setActiveMcpToolIds,
     setActiveSkillIds,
+    handleSkillSelectionChange,
     setDisabledToolNames,
   } = useThreadSources({ threadId, workspaceId });
   const handleConnectorsChange = useCallback(
@@ -817,6 +844,13 @@ export function useThreadPageController({
         });
         const mergedEditSourceIds = mergeSourceIds(editSourceIds);
 
+        warnLegacyToolOptionsMetadata(
+          resolveUserMessageMetadata({
+            groups: messageGroups,
+            userMessageId: editingMessageId,
+          }),
+        );
+
         await streamThreadAction({
           mode: "edit",
           content: text,
@@ -902,6 +936,17 @@ export function useThreadPageController({
         assistantMessageId: input.assistantMessageId,
         groups: messageGroups,
       });
+      const refreshUserMessageId = messageGroups
+        .flatMap((group) => group.versions)
+        .find((version) => version.id === input.assistantMessageId)
+        ?.sourceUserMessageId;
+
+      warnLegacyToolOptionsMetadata(
+        resolveUserMessageMetadata({
+          groups: messageGroups,
+          userMessageId: refreshUserMessageId,
+        }),
+      );
 
       await streamThreadAction({
         mode: "refresh",
@@ -1091,7 +1136,7 @@ export function useThreadPageController({
     selectedByokModels,
     selectedModels,
     selectedSources,
-    setActiveSkillIds,
+    handleSkillSelectionChange,
     setArtifactsRefreshKey,
     setByokCredentials,
     setByokModelConfig,

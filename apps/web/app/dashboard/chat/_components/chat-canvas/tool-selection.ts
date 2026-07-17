@@ -22,6 +22,9 @@ const WEB_ACCESS_TOOL_NAMES = new Set<string>([
 
 export const MAX_SELECTED_SKILL_IDS_PER_TURN = 5;
 
+export const SKILL_SELECTION_LIMIT_MESSAGE =
+  "You can enable at most 5 skills per message.";
+
 export function normalizeSkillIdsForRequest(skillIds: readonly string[]) {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -37,6 +40,44 @@ export function normalizeSkillIdsForRequest(skillIds: readonly string[]) {
     }
   }
   return normalized;
+}
+
+export function coerceSkillIdsSelection(skillIds: readonly string[]) {
+  const normalized = normalizeSkillIdsForRequest(skillIds);
+  const uniqueRequested = new Set(
+    skillIds.map((skillId) => skillId.trim()).filter(Boolean),
+  );
+  return {
+    skillIds: normalized,
+    wasLimited: normalized.length < uniqueRequested.size,
+  };
+}
+
+export function toggleSkillSelection(input: {
+  currentSkillIds: readonly string[];
+  selected: boolean;
+  skillId: string;
+}) {
+  if (!input.selected) {
+    return {
+      skillIds: input.currentSkillIds.filter((id) => id !== input.skillId),
+      wasLimited: false,
+    };
+  }
+  if (input.currentSkillIds.includes(input.skillId)) {
+    return {
+      skillIds: [...input.currentSkillIds],
+      wasLimited: false,
+    };
+  }
+  const nextSkillIds = normalizeSkillIdsForRequest([
+    ...input.currentSkillIds,
+    input.skillId,
+  ]);
+  return {
+    skillIds: nextSkillIds,
+    wasLimited: nextSkillIds.length === input.currentSkillIds.length,
+  };
 }
 
 /**
@@ -334,20 +375,20 @@ export function resolveDefaultActiveSkillIds(input: {
       ...input.currentSkillIds.filter((id) => availableIds.has(id)),
     ]),
   );
-  const maxSkills = input.maxSkills ?? 5;
+  const maxSkills = input.maxSkills ?? MAX_SELECTED_SKILL_IDS_PER_TURN;
   if (defaultSkillIds.length >= maxSkills) {
-    return defaultAndCurrentSkillIds.filter((id) =>
-      defaultSkillIds.includes(id),
+    return normalizeSkillIdsForRequest(
+      defaultAndCurrentSkillIds.filter((id) => defaultSkillIds.includes(id)),
     );
   }
   const extraSlots = maxSkills - defaultSkillIds.length;
   const currentSkillIds = defaultAndCurrentSkillIds.filter(
     (id) => !defaultSkillIds.includes(id),
   );
-  return [
+  return normalizeSkillIdsForRequest([
     ...defaultSkillIds,
     ...currentSkillIds.slice(0, extraSlots),
-  ];
+  ]);
 }
 
 export function skillSupportsConnector(

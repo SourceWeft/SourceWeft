@@ -11,6 +11,10 @@ import {
 import type { SourceItem } from "../source-types";
 import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
+import {
+  coerceSkillIdsSelection,
+  SKILL_SELECTION_LIMIT_MESSAGE,
+} from "./tool-selection";
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import { ToolInterventionBar } from "./tool-confirmation";
@@ -556,14 +560,19 @@ export function ChatCanvas({
   }
 
   function handleSkillSelectionChange(skillIds: string[]) {
-    if (
-      skillIds.length > 0 &&
-      skillIds.length !== lastTrackedSkillCountRef.current
-    ) {
-      trackSkillSelected(skillIds.length);
+    const { skillIds: nextSkillIds, wasLimited } =
+      coerceSkillIdsSelection(skillIds);
+    if (wasLimited) {
+      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
     }
-    lastTrackedSkillCountRef.current = skillIds.length;
-    onSkillSelectionChange?.(skillIds);
+    if (
+      nextSkillIds.length > 0 &&
+      nextSkillIds.length !== lastTrackedSkillCountRef.current
+    ) {
+      trackSkillSelected(nextSkillIds.length);
+    }
+    lastTrackedSkillCountRef.current = nextSkillIds.length;
+    onSkillSelectionChange?.(nextSkillIds);
   }
 
   if (mode === "new") {

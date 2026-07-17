@@ -12,6 +12,7 @@ import {
   buildSkillOptionToolsSelection,
   isCapabilityToolVisibleInComposerOptions,
   resolveDefaultActiveSkillIds,
+  toggleSkillSelection,
 } from "./tool-selection";
 
 const TEST_NOTION_TOOL = "test_notion_pages";
@@ -287,7 +288,7 @@ test("resolveDefaultActiveSkillIds keeps default-enabled skills active", () => {
   );
 });
 
-test("resolveDefaultActiveSkillIds does not truncate default-enabled skills", () => {
+test("resolveDefaultActiveSkillIds caps default-enabled skills to the contract maximum", () => {
   assert.deepEqual(
     resolveDefaultActiveSkillIds({
       availableSkills: [
@@ -308,8 +309,27 @@ test("resolveDefaultActiveSkillIds does not truncate default-enabled skills", ()
       "builtin:video-presentation",
       "builtin:default-4",
       "builtin:default-5",
-      "builtin:default-6",
     ],
+  );
+});
+
+test("toggleSkillSelection rejects adding a sixth skill", () => {
+  assert.deepEqual(
+    toggleSkillSelection({
+      currentSkillIds: [
+        "skill-1",
+        "skill-2",
+        "skill-3",
+        "skill-4",
+        "skill-5",
+      ],
+      selected: true,
+      skillId: "skill-6",
+    }),
+    {
+      skillIds: ["skill-1", "skill-2", "skill-3", "skill-4", "skill-5"],
+      wasLimited: true,
+    },
   );
 });
 

@@ -19,11 +19,14 @@ Turn preparation reads tool selections from **`metadata.options.tools` only**.
 
 - New user messages persist `metadata.options = { version: 1, tools: ... }`.
 - Legacy `metadata.tools` on older messages is **not** read during edit, regenerate, or refresh.
-- Edit/regenerate on unmigrated rows may lose prior tool selections (web access, skills, image tool config).
+- Edit/regenerate on legacy rows may lose prior tool selections (web access, skills, image tool config).
+- The web client shows an informational toast when editing or regenerating a message that still has legacy tool metadata.
 
-### Pre-deploy metadata check (production)
+**Historical data policy:** no production backfill is planned. Users can re-select tools in the composer when editing old messages.
 
-Run on the target database before or immediately after deploy:
+### Pre-deploy metadata check (optional)
+
+Run on the target database if you want visibility into legacy rows:
 
 ```sql
 SELECT COUNT(*) AS candidates
@@ -32,9 +35,9 @@ WHERE metadata ? 'tools'
   AND NOT metadata ? 'options';
 ```
 
-**Local dev check (2026-07-18):** `candidates = 0`. No backfill required on the local database.
+**Local dev check (2026-07-18):** `candidates = 0`.
 
-If `candidates > 0`, apply a one-time backfill before users edit or regenerate those messages:
+If `candidates > 0` and you choose to backfill anyway:
 
 ```sql
 UPDATE messages
@@ -48,6 +51,23 @@ WHERE metadata ? 'tools'
 ```
 
 Recommended: run the `COUNT` in a transaction, preview a few rows, then run `UPDATE` during a maintenance window. Back up or snapshot first.
+
+## External API migration checklist
+
+Use this when upgrading custom clients or integrations:
+
+1. Replace `tools.webSearchEnabled` with `tools.web_search.enabled` and `tools.web_fetch.enabled` (or omit and rely on defaults).
+2. Replace `tools.artifact` with a `tools.generate_image` selection object when image generation is intended.
+3. Send explicit `tools.skillIds` (max **5** per turn) and optional `tools.invokedSkillIds` (max **5**). Do not rely on slash commands to auto-inject skills.
+4. Prefer top-level `llm`, `image`, and `vision` execution objects instead of nested stream `modelSettings`.
+5. Use capability invocation IDs (`cap:<capabilityId>:<contributionId>`) instead of `builtin_tool.*` aliases.
+6. Expect HTTP **400** with schema guidance when legacy keys are present; failures are intentional.
+
+Contract tests: `packages/contracts/tests/stream-request.test.ts`.
+
+## Skill selection limits
+
+`tools.skillIds` and `tools.invokedSkillIds` are capped at **5** items in `packages/contracts`. The web client enforces the same limit in the composer and shows a toast when a sixth skill is selected.
 
 ## Slash command skill auto-selection
 
@@ -96,4 +116,4 @@ Internal artifact executors (`generate_image`, `generate_video_presentation`) no
 
 ## Related docs
 
-- [legacy-compat-pr-split.md](./legacy-compat-pr-split.md) — recommended PR boundaries for this branch
+- [legacy-compat-pr-split.md](./legacy-compat-pr-split.md) — merge record for this work on `main`

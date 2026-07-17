@@ -111,7 +111,11 @@ import {
   type ChatHubRegistration,
 } from "./chat-hub-context";
 import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
-import { resolveDefaultActiveSkillIds } from "./chat-canvas/tool-selection";
+import {
+  coerceSkillIdsSelection,
+  resolveDefaultActiveSkillIds,
+  SKILL_SELECTION_LIMIT_MESSAGE,
+} from "./chat-canvas/tool-selection";
 import {
   normalizeComposerOptionsState,
   type ComposerOptionsState,
@@ -413,6 +417,14 @@ export function DashboardChatPageClient() {
   const [capabilityCatalog, setCapabilityCatalog] =
     useState<ListCapabilityCatalogResponse | null>(null);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const handleSkillSelectionChange = useCallback((skillIds: string[]) => {
+    const { skillIds: nextSkillIds, wasLimited } =
+      coerceSkillIdsSelection(skillIds);
+    if (wasLimited) {
+      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+    }
+    setActiveSkillIds(nextSkillIds);
+  }, []);
   const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
   const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>(
@@ -1061,7 +1073,7 @@ export function DashboardChatPageClient() {
       onArtifactPreviewClose: () => setPreviewArtifact(null),
       onMcpSelectionChange: handleMcpSelectionChange,
       onSelectionChange: persistActiveSourceIds,
-      onSkillSelectionChange: setActiveSkillIds,
+      onSkillSelectionChange: handleSkillSelectionChange,
       onSkillsCatalogChange: loadAvailableSkills,
       onSourceLoad: handleLibrarySourcesLoad,
       onSourceMerge: handleLibrarySourcesMerge,
@@ -1395,7 +1407,7 @@ export function DashboardChatPageClient() {
             onRemoveSource={(id) =>
               persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
             }
-            onSkillSelectionChange={setActiveSkillIds}
+            onSkillSelectionChange={handleSkillSelectionChange}
             onSendMessage={handleSendMessage}
             searchEnabled={searchEnabled}
             onSearchEnabledChange={setSearchEnabled}
@@ -1440,7 +1452,7 @@ export function DashboardChatPageClient() {
           selectedMcpToolIds={activeMcpToolIds}
           onMcpSelectionChange={handleMcpSelectionChange}
           onArtifactOpen={setPreviewArtifact}
-          onSkillSelectionChange={setActiveSkillIds}
+          onSkillSelectionChange={handleSkillSelectionChange}
           onSelectionChange={persistActiveSourceIds}
           onSkillsCatalogChange={loadAvailableSkills}
           initialSources={initialSourcesForWorkspace}
@@ -1566,7 +1578,7 @@ export function DashboardChatPageClient() {
               setPreviewArtifact(artifact);
               setHubDrawerOpen(false);
             }}
-            onSkillSelectionChange={setActiveSkillIds}
+            onSkillSelectionChange={handleSkillSelectionChange}
             onSelectionChange={persistActiveSourceIds}
             onSkillsCatalogChange={loadAvailableSkills}
             initialSources={initialSourcesForWorkspace}
