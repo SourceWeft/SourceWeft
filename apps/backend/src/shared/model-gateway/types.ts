@@ -35,6 +35,7 @@ export type RoutedGatewayConfig = {
       gatewayConfigId: string | null;
       kind:
         | "openai-compatible"
+        | "cloudflare-aig"
         | "openrouter"
         | "deepinfra"
         | "siliconflow-cn"

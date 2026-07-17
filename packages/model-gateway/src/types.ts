@@ -45,6 +45,7 @@ export interface ThinkingConfig {
 
 export type ProviderKind =
   | "openai-compatible"
+  | "cloudflare-aig"
   | "openrouter"
   | "deepinfra"
   | "siliconflow-cn"

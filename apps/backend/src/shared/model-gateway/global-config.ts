@@ -17,6 +17,7 @@ export type GlobalGatewayEntry = {
   providerName: string;
   providerKind:
     | "openai-compatible"
+    | "cloudflare-aig"
     | "openrouter"
     | "deepinfra"
     | "siliconflow-cn"
@@ -499,6 +500,7 @@ function asProviderKind(
   fieldName: string,
 ):
   | "openai-compatible"
+  | "cloudflare-aig"
   | "openrouter"
   | "deepinfra"
   | "siliconflow-cn"
@@ -508,6 +510,7 @@ function asProviderKind(
   | "azure-openai" {
   if (
     value === "openai-compatible" ||
+    value === "cloudflare-aig" ||
     value === "openrouter" ||
     value === "deepinfra" ||
     value === "siliconflow-cn" ||

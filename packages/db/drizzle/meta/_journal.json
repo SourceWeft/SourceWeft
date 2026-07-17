@@ -57,6 +57,13 @@
       "when": 1781856000000,
       "tag": "0007_artifact_preview_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784306501967,
+      "tag": "0008_silent_darkstar",
+      "breakpoints": true
     }
   ]
 }
