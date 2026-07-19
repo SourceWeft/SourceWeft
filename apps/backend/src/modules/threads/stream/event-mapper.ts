@@ -69,6 +69,28 @@ function isRedactedSkillInstructionRead(output: unknown) {
   return record?.type === "skill_instruction_read" && record.redacted === true;
 }
 
+function isVideoPresentationToolOutputRecord(record: Record<string, unknown>) {
+  const type = typeof record.type === "string" ? record.type : null;
+  return (
+    type === "video_presentation_processing_result" ||
+    type === "video_presentation_artifact_result" ||
+    type === "generate_video_presentation_progress"
+  );
+}
+
+function parseJsonObjectStringForSse(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    return toObjectRecord(JSON.parse(trimmed) as unknown);
+  } catch {
+    return null;
+  }
+}
+
 export function normalizeToolOutputForSse(output: unknown): unknown {
   if (output === null || output === undefined) {
     return null;
@@ -87,6 +109,10 @@ export function normalizeToolOutputForSse(output: unknown): unknown {
   }
 
   if (typeof output === "string") {
+    const parsedString = parseJsonObjectStringForSse(output);
+    if (parsedString && isVideoPresentationToolOutputRecord(parsedString)) {
+      return parsedString;
+    }
     return truncateTextForSse(output);
   }
 
@@ -105,7 +131,15 @@ export function normalizeToolOutputForSse(output: unknown): unknown {
     return output;
   }
 
+  if (isVideoPresentationToolOutputRecord(record)) {
+    return record;
+  }
+
   if (typeof record.content === "string") {
+    const parsedContent = parseJsonObjectStringForSse(record.content);
+    if (parsedContent && isVideoPresentationToolOutputRecord(parsedContent)) {
+      return parsedContent;
+    }
     return {
       ...record,
       content: truncateTextForSse(record.content),
@@ -168,7 +202,7 @@ function normalizeReasoningSegmentForSse(
 }
 
 export function mapDeepAgentEventToSse(
-  event: Exclude<DeepAgentTurnEvent, { type: "done" } | { type: "billing" }>,
+  event: Exclude<DeepAgentTurnEvent, { type: "done" }>,
   textId: string,
 ) {
   if (event.type === "text-delta") {

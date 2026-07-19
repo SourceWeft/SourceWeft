@@ -76,11 +76,13 @@ export async function* buildFinalOutcome(input: {
   const hasCompletedToolOutput = runtime
     .collectToolCalls()
     .some((call) => call.status === "completed" && !call.error);
+  const toolCalls = runtime.collectToolCalls();
   let assistantText = resolveFinalAssistantText({
     assistantContent: runtime.assistantContent,
     assistantContentFromUpdates: runtime.assistantContentFromUpdates,
     commandSuccessCriteria: input.prepared.commandSuccessCriteria,
     hasCompletedToolOutput,
+    toolCalls,
     allowSilentEmptyResponse: shouldSilenceEmptyApprovalResume({
       assistantMessageId: input.prepared.assistantMessageId,
       hasCompletedToolOutput,
@@ -144,7 +146,6 @@ export async function* buildFinalOutcome(input: {
   };
 
   const retrievalCalls = runtime.collectRetrievalCalls();
-  const toolCalls = runtime.collectToolCalls();
   const commandSatisfied = isCommandSuccessSatisfied({
     criteria: input.prepared.commandSuccessCriteria,
     toolCalls,
@@ -205,7 +206,7 @@ export async function* buildFinalOutcome(input: {
     type: "done",
     outcome: {
       assistantContent: assistantText,
-      usage: runtime.usage,
+      usage: runtime.billingScope?.totalUsage(),
       finishReason: runtime.finishReason,
       reasoning: runtime.modelReasoning,
       retrieval: finalRetrieval,
@@ -213,7 +214,7 @@ export async function* buildFinalOutcome(input: {
       availableCitations: finalCitations,
       retrievalCalls,
       toolCalls,
-      meteredLlmCalls: runtime.collectMeteredLlmCalls(),
+      meteredLlmCalls: [...(runtime.billingScope?.meteredCalls() ?? [])],
       ...(finalRenderBlocks.length > 0
         ? { renderBlocks: finalRenderBlocks }
         : {}),

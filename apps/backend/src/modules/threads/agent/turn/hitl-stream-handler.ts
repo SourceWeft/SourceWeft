@@ -35,7 +35,6 @@ import {
   rememberObservedToolCalls,
 } from "./tool-tracker";
 import type { TurnRuntime } from "./turn-runtime";
-import { flushPendingLlmCallUsage } from "./llm-call-billing";
 
 type Agent = Awaited<ReturnType<typeof createThreadAgent>>;
 
@@ -288,13 +287,6 @@ export async function* handleHitlStreamChunk(input: {
   }
 
   if (input.billing && input.prepared) {
-    yield* flushPendingLlmCallUsage({
-      runtime,
-      billing: input.billing,
-      prepared: input.prepared,
-      llm: input.llm,
-      reason: "hitl_pause",
-    });
   }
 
   const finalText = runtime.assistantContent.trim();
@@ -306,7 +298,7 @@ export async function* handleHitlStreamChunk(input: {
     type: "done",
     outcome: {
       assistantContent: finalText,
-      usage: runtime.usage,
+      usage: runtime.billingScope?.totalUsage(),
       finishReason: "tool_confirmation_requested",
       reasoning: runtime.modelReasoning,
       retrieval: runtime.latestToolRetrieval,
@@ -314,7 +306,7 @@ export async function* handleHitlStreamChunk(input: {
       availableCitations: runtime.citationRegistry.list(),
       retrievalCalls: runtime.collectRetrievalCalls(),
       toolCalls: runtime.collectToolCalls(),
-      meteredLlmCalls: runtime.collectMeteredLlmCalls(),
+      meteredLlmCalls: [...(runtime.billingScope?.meteredCalls() ?? [])],
       ...(finalRenderBlocks.length > 0
         ? { renderBlocks: finalRenderBlocks }
         : {}),

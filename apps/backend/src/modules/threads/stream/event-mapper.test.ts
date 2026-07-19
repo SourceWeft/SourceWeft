@@ -115,6 +115,25 @@ test("normalizeToolOutputForSse preserves structured confirmation payloads", () 
   );
 });
 
+test("normalizeToolOutputForSse preserves structured video presentation outputs", () => {
+  const structured = {
+    type: "video_presentation_processing_result",
+    artifact_id: "artifact-1",
+    status: "running",
+    content: "Video presentation project is still being generated.",
+  };
+
+  assert.deepEqual(normalizeToolOutputForSse(structured), structured);
+  assert.deepEqual(
+    normalizeToolOutputForSse({ content: JSON.stringify(structured) }),
+    structured,
+  );
+  assert.deepEqual(
+    normalizeToolOutputForSse(JSON.stringify(structured)),
+    structured,
+  );
+});
+
 test("mapDeepAgentEventToSse sends displayable tool result output", () => {
   const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
     type: "tool-call-result",

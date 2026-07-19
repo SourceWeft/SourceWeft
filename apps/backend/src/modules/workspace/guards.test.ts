@@ -23,7 +23,6 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     slug: "test-workspace",
     createdBy: "user-test-1",
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
     ...overrides,
   };
 }

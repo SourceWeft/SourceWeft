@@ -29,23 +29,23 @@ test("replaceText preserves existing text segmentation when final text has same 
   ]);
 });
 
-test("marks generated artifact blocks as terminal placement", () => {
+test("marks artifact blocks as terminal placement", () => {
   const builder = createMessageRenderBlockBuilder();
 
-  builder.appendGeneratedImage("image-tool");
-  builder.appendGeneratedPresentation("presentation-tool");
+  builder.appendArtifact("image-tool");
+  builder.appendArtifact("presentation-tool");
 
   assert.deepEqual(builder.list(), [
     {
-      id: "generated-image-image-tool",
+      id: "artifact-image-tool",
       placement: "terminal",
-      type: "generated_image",
+      type: "artifact",
       toolCallId: "image-tool",
     },
     {
-      id: "generated-presentation-presentation-tool",
+      id: "artifact-presentation-tool",
       placement: "terminal",
-      type: "generated_presentation",
+      type: "artifact",
       toolCallId: "presentation-tool",
     },
   ]);

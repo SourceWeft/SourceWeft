@@ -35,13 +35,14 @@ export function isCommandSuccessSatisfied(input: {
           );
         }
         if (criteria.artifactType === "video_presentation") {
+          const outputType = extractToolOutputField(call.output, "type");
           return Boolean(
             extractToolOutputField(call.output, "artifact_id") &&
               extractToolOutputField(call.output, "artifact_url") &&
               extractToolOutputField(call.output, "job_id") &&
-              extractToolOutputField(call.output, "status") === "ready" &&
-              extractToolOutputField(call.output, "type") ===
-                "video_presentation_artifact_result",
+              (outputType === "video_presentation_processing_result" ||
+                (outputType === "video_presentation_artifact_result" &&
+                  extractToolOutputField(call.output, "status") === "ready")),
           );
         }
         if (criteria.artifactType !== "image") {
@@ -184,12 +185,33 @@ export function shouldSuppressLeakedCommandSpecText(input: {
   return false;
 }
 
+function resolveToolOnlyAssistantText(toolCalls: ToolCallTrace[]) {
+  for (const call of [...toolCalls].reverse()) {
+    if (call.status !== "completed" || call.error) {
+      continue;
+    }
+    const outputType = extractToolOutputField(call.output, "type");
+    if (
+      outputType !== "video_presentation_processing_result" &&
+      outputType !== "video_presentation_artifact_result"
+    ) {
+      continue;
+    }
+    const content = extractToolOutputField(call.output, "content");
+    if (content && content.trim().length > 0) {
+      return content.trim();
+    }
+  }
+  return "";
+}
+
 export function resolveFinalAssistantText(input: {
   assistantContent: string;
   assistantContentFromUpdates: string | null;
   commandSuccessCriteria?: CommandSuccessCriteria;
   hasCompletedToolOutput: boolean;
   allowSilentEmptyResponse?: boolean;
+  toolCalls?: ToolCallTrace[];
 }) {
   const assistantContent = input.assistantContent.trim();
   if (assistantContent.length > 0) {
@@ -225,6 +247,13 @@ export function resolveFinalAssistantText(input: {
 
   if (input.allowSilentEmptyResponse) {
     return "";
+  }
+
+  if (input.hasCompletedToolOutput && input.toolCalls?.length) {
+    const toolText = resolveToolOnlyAssistantText(input.toolCalls);
+    if (toolText.length > 0) {
+      return toolText;
+    }
   }
 
   return input.hasCompletedToolOutput

@@ -1,4 +1,7 @@
-import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
+import {
+  getAgentToolRenderAs,
+  hasAgentToolCapability,
+} from "@sourceweft/agent-tool-registry";
 import type { CommandSuccessCriteria } from "../..";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
@@ -25,11 +28,6 @@ import {
 import { sanitizeFilesystemToolInputForClient } from "./output-normalizer";
 import type { TurnRuntime } from "./turn-runtime";
 import { appendReasoningChunk } from "./thinking";
-import {
-  flushPendingLlmCallUsage,
-  isTerminalFinishReason,
-  observeLlmCallUsage,
-} from "./llm-call-billing";
 
 function readString(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
@@ -113,31 +111,6 @@ export async function* handleMessagesStreamChunk(input: {
   runtime.providerFields =
     extractProviderFieldsFromMessageChunk(messageChunk) ??
     runtime.providerFields;
-  if (nextUsage || isTerminalFinishReason(nextFinishReason)) {
-    observeLlmCallUsage({
-      runtime,
-      usage: nextUsage,
-      finishReason: nextFinishReason,
-      operation: input.operation ?? "chat.stream",
-      spanId: input.prepared?.traceContext?.parentSpanId ?? "agent_run",
-      generationId: resolveGenerationId({
-        callIndex:
-          runtime.pendingLlmCallUsage?.callIndex ??
-          runtime.llmCallSequence + 1,
-        messageChunk,
-        messageMetadata,
-      }),
-    });
-  }
-  if (isTerminalFinishReason(nextFinishReason)) {
-    yield* flushPendingLlmCallUsage({
-      runtime,
-      billing: input.billing,
-      prepared: input.prepared,
-      llm: input.llm,
-      reason: `finish:${nextFinishReason}`,
-    });
-  }
   const nextReasoning =
     extractReasoningFromMessageChunk(messageChunk) ??
     extractReasoningFromMessageChunk(messageMetadata) ??
@@ -216,12 +189,12 @@ export function appendPromotedToolRenderBlock(input: {
   if (isDeepAgentsWriteTodosTool(input.toolName)) {
     return;
   }
-  if (hasAgentToolCapability(input.toolName, "generated_image_artifact")) {
-    input.runtime.renderBlocks.appendGeneratedImage(input.toolCallId);
-    return;
-  }
-  if (hasAgentToolCapability(input.toolName, "presentation_artifact")) {
-    return;
-  }
+  // Uniform: every visible tool gets a tool block for its progress; a tool that
+  // produces an artifact also gets a terminal artifact block for the result.
+  // No capability is special-cased — the artifact block's body (resolved from
+  // renderAs on the client) shows nothing until the artifact is ready.
   input.runtime.renderBlocks.appendTool(input.toolCallId);
+  if (getAgentToolRenderAs(input.toolName)) {
+    input.runtime.renderBlocks.appendArtifact(input.toolCallId);
+  }
 }

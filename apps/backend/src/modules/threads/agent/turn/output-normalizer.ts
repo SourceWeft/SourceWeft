@@ -3,6 +3,7 @@ import { ContentError } from "../../../content/errors";
 import {
   AGENT_TOOL_NAMES,
   getAgentToolConnectorType,
+  getAgentToolPresentation,
   hasAgentToolCapability,
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
@@ -166,9 +167,23 @@ export function extractToolOutputText(output: unknown) {
   return null;
 }
 
+function isVideoPresentationToolOutputRecord(record: Record<string, unknown>) {
+  const type =
+    typeof record.type === "string" ? record.type.trim().toLowerCase() : "";
+  return (
+    type === "video_presentation_processing_result" ||
+    type === "video_presentation_artifact_result" ||
+    type === "generate_video_presentation_progress"
+  );
+}
+
 export function extractToolOutputField(output: unknown, key: string) {
   const records = collectToolOutputRecords(output);
-  for (const record of records) {
+  const orderedRecords = [
+    ...records.filter((record) => isVideoPresentationToolOutputRecord(record)),
+    ...records.filter((record) => !isVideoPresentationToolOutputRecord(record)),
+  ];
+  for (const record of orderedRecords) {
     const direct = record[key];
     if (typeof direct === "string" && direct.trim().length > 0) {
       return direct.trim();
@@ -728,14 +743,13 @@ export function getFilesystemToolStartTitle(
   input: Record<string, unknown>,
   options: SkillInstructionDisplayOptions = {},
 ) {
-  if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
-    return "Generating image";
-  }
-  if (hasAgentToolCapability(toolName, "video_presentation_artifact")) {
-    return "Building video presentation";
-  }
-  if (hasAgentToolCapability(toolName, "presentation_artifact")) {
-    return "Publishing deck";
+  const presentation = getAgentToolPresentation(toolName);
+  if (presentation) {
+    return presentation.title({
+      toolInput: input,
+      readOutputField: extractToolOutputField,
+      status: "running",
+    });
   }
   const scope = filesystemScope(input, toolName);
   if (scope === "skills" && toolName === AGENT_TOOL_NAMES.readFile) {
@@ -750,29 +764,14 @@ export function getFilesystemToolEndTitle(
   output?: unknown,
   options: SkillInstructionDisplayOptions = {},
 ) {
-  if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
-    return "Generated image";
-  }
-  if (hasAgentToolCapability(toolName, "video_presentation_artifact")) {
-    if (output !== undefined && !hasPresentationArtifactUrl(output)) {
-      return "Video presentation not ready";
-    }
-    if (
-      output !== undefined &&
-      extractToolOutputField(output, "status") === "running"
-    ) {
-      return "Video presentation generating";
-    }
-    return "Video presentation ready";
-  }
-  if (hasAgentToolCapability(toolName, "presentation_artifact")) {
-    if (isPresentationArtifactInputRequiredOutput(output)) {
-      return "Deck content needed";
-    }
-    if (output !== undefined && !hasPresentationArtifactUrl(output)) {
-      return "Deck publishing incomplete";
-    }
-    return "Published deck";
+  const presentation = getAgentToolPresentation(toolName);
+  if (presentation) {
+    return presentation.title({
+      toolInput: input,
+      toolOutput: output,
+      readOutputField: extractToolOutputField,
+      status: "completed",
+    });
   }
   const scope = filesystemScope(input, toolName);
   if (scope === "skills" && toolName === AGENT_TOOL_NAMES.readFile) {
@@ -849,6 +848,37 @@ export function isVideoPresentationArtifactReady(output: unknown) {
   );
 }
 
+export function getVideoPresentationToolOutputError(output: unknown) {
+  if (output === undefined) {
+    return null;
+  }
+  const type = extractToolOutputField(output, "type")?.toLowerCase().trim();
+  const status = extractToolOutputField(output, "status")?.toLowerCase().trim();
+  if (
+    type !== "video_presentation_artifact_result" ||
+    status !== "failed"
+  ) {
+    return null;
+  }
+  const error =
+    extractToolOutputField(output, "error") ??
+    extractToolOutputField(output, "error_message") ??
+    extractToolOutputField(output, "errorMessage");
+  return error && error.trim().length > 0 ? error.trim() : null;
+}
+
+function normalizeVideoPresentationToolOutputForObservability(
+  output: unknown,
+): unknown {
+  const records = collectToolOutputRecords(output);
+  for (const record of records) {
+    if (isVideoPresentationToolOutputRecord(record)) {
+      return record;
+    }
+  }
+  return output;
+}
+
 export function normalizeToolOutputForObservability(
   toolName: string,
   output: unknown,
@@ -861,6 +891,10 @@ export function normalizeToolOutputForObservability(
   );
   if (redactedOutput !== output) {
     return redactedOutput;
+  }
+
+  if (hasAgentToolCapability(toolName, "video_presentation_artifact")) {
+    return normalizeVideoPresentationToolOutputForObservability(output);
   }
 
   if (isAgentToolDomain(toolName, "web")) {
@@ -1411,20 +1445,13 @@ export function getFilesystemToolDescription(
   input?: Record<string, unknown>,
 ) {
   const scope = input ? filesystemScope(input, toolName) : "sources";
-  if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
-    return "Created an image artifact.";
-  }
-  if (hasAgentToolCapability(toolName, "presentation_artifact")) {
-    if (
-      metadata.resultType === "presentation_artifact_input_required" ||
-      metadata.status === "needs_content"
-    ) {
-      return "The deck tool needs explicit slide content before it can create an artifact.";
-    }
-    if (!metadata.artifactUrl) {
-      return "The deck tool completed without returning an artifact URL.";
-    }
-    return "Created a presentation artifact.";
+  const presentation = getAgentToolPresentation(toolName);
+  if (presentation?.describe) {
+    return presentation.describe({
+      toolInput: input ?? {},
+      metadata,
+      readOutputField: extractToolOutputField,
+    });
   }
   return getFilesystemToolPresenter(toolName)?.describe({
     metadata,

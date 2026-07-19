@@ -103,10 +103,6 @@ export type DeepAgentTurnEvent =
       segment: ModelReasoningSegmentTrace;
     }
   | {
-      type: "billing";
-      meteredLlmCall: MeteredLlmCallTrace;
-    }
-  | {
       type: "done";
       outcome: DeepAgentTurnOutcome;
     };

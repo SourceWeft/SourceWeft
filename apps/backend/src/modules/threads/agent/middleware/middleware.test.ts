@@ -40,10 +40,13 @@ type MiddlewareWithAfterModel = {
 };
 
 type MiddlewareWithWrapToolCall = {
+  // Always awaited by callers, so the hook is typed as returning a promise —
+  // `unknown | Promise<unknown>` collapses to `unknown` and breaks
+  // assert.rejects at the call site.
   wrapToolCall?: (
     request: unknown,
     handler: (request: unknown) => unknown | Promise<unknown>,
-  ) => unknown | Promise<unknown>;
+  ) => Promise<unknown>;
 };
 
 type MiddlewareWithWrapModelCall = {

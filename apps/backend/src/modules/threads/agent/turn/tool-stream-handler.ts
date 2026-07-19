@@ -1,19 +1,18 @@
 import {
+  getAgentToolPresentation,
+  getAgentToolRenderAs,
   hasAgentToolCapability,
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
-import { GENERATED_IMAGE_PROGRESS_EVENT_TYPE } from "@sourceweft/builtin-tool-generate-image";
 import type { TraceContext } from "../../../llm-observability";
 import type { PreparedThreadTurn } from "../..";
 import type { DeepAgentTurnEvent } from "./events";
 import {
   buildGeneratedArtifactProgressToolCallEvent,
-  buildPresentationGenerationStep,
-  buildVideoPresentationGenerationStep,
+  buildArtifactGenerationStep,
   buildPresentationProgressThinkingEvent,
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
-  PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE,
 } from "./progress-events";
 import type { TurnRuntime } from "./turn-runtime";
 import {
@@ -43,6 +42,7 @@ import {
   getFilesystemToolMetadata,
   getFilesystemToolOutputError,
   getFilesystemToolStartTitle,
+  getVideoPresentationToolOutputError,
   getWebToolEndTitle,
   getWebToolInputMetadata,
   getWebToolMetadata,
@@ -98,9 +98,15 @@ export async function* handleToolStartStreamChunk(input: {
     toolCallsById: runtime.toolCallsById,
     toolName,
   });
-  if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
+  const imageProgressEventType = hasAgentToolCapability(
+    toolName,
+    "generated_image_artifact",
+  )
+    ? getAgentToolPresentation(toolName)?.progressEventTypes?.[0]
+    : undefined;
+  if (imageProgressEventType) {
     const progressEvent = normalizeGeneratedImageProgressEvent({
-      type: GENERATED_IMAGE_PROGRESS_EVENT_TYPE,
+      type: imageProgressEventType,
       toolCallId,
       tool: toolName,
       stage: "preparing",
@@ -126,14 +132,13 @@ export async function* handleToolStartStreamChunk(input: {
       }
     }
   }
-  if (
-    hasAgentToolCapability(toolName, "presentation_artifact") ||
-    hasAgentToolCapability(toolName, "video_presentation_artifact")
-  ) {
+  // The capability declares the event type its progress arrives under; the
+  // handler does not need to know which capabilities exist.
+  const progressEventType =
+    getAgentToolPresentation(toolName)?.progressEventTypes?.[0];
+  if (progressEventType) {
     const progressEvent = normalizeGeneratedPresentationProgressEvent({
-      type: hasAgentToolCapability(toolName, "video_presentation_artifact")
-        ? "generate_video_presentation_progress"
-        : PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE,
+      type: progressEventType,
       toolCallId,
       tool: toolName,
       stage: "planning",
@@ -175,16 +180,15 @@ export async function* handleToolStartStreamChunk(input: {
     };
     runtime.hasTextSinceLastToolBoundary = false;
   }
-  if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
-    runtime.renderBlocks.appendGeneratedImage(toolCallId);
-  }
-  if (
-    shouldStreamVisibleToolCall &&
-    !hasAgentToolCapability(toolName, "generated_image_artifact") &&
-    !hasAgentToolCapability(toolName, "presentation_artifact") &&
-    !hasAgentToolCapability(toolName, "video_presentation_artifact")
-  ) {
+  // Uniform: a visible tool gets a tool block for progress; an artifact tool
+  // also gets a terminal artifact block. Artifact tools always get their tool
+  // block (their card renders live progress) even if not otherwise streamed.
+  const artifactRenderAs = getAgentToolRenderAs(toolName);
+  if (shouldStreamVisibleToolCall || artifactRenderAs) {
     runtime.renderBlocks.appendTool(toolCallId);
+  }
+  if (artifactRenderAs) {
+    runtime.renderBlocks.appendArtifact(toolCallId);
   }
   if (shouldStreamVisibleToolCall) {
     yield {
@@ -199,26 +203,17 @@ export async function* handleToolStartStreamChunk(input: {
     hasAgentToolCapability(toolName, "presentation_artifact") ||
     hasAgentToolCapability(toolName, "video_presentation_artifact")
   ) {
-    const isVideoPresentation = hasAgentToolCapability(
+    const step = buildArtifactGenerationStep({
+      phase: "generating",
+      toolCallId,
       toolName,
-      "video_presentation_artifact",
-    );
-    yield {
-      type: "thinking-step",
-      step: runtime.setThinkingStep(
-        isVideoPresentation
-          ? buildVideoPresentationGenerationStep({
-              phase: "generating",
-              tool: toolName,
-              toolCallId,
-            })
-          : buildPresentationGenerationStep({
-              phase: "generating",
-              tool: toolName,
-              toolCallId,
-            }),
-      ),
-    };
+    });
+    if (step) {
+      yield {
+        type: "thinking-step",
+        step: runtime.setThinkingStep(step),
+      };
+    }
   }
   if (isAgentToolDomain(toolName, "retrieval")) {
     const query =
@@ -385,6 +380,7 @@ export async function* handleToolEndStreamChunk(input: {
   const outputError =
     connectorContentError?.message ??
     getConnectorToolOutputError(output) ??
+    getVideoPresentationToolOutputError(output) ??
     getFilesystemToolOutputError(toolName, output) ??
     (isAgentToolDomain(toolName, "web") ? getWebToolOutputError(output) : null);
   const toolStatus: "completed" | "error" = outputError ? "error" : "completed";
@@ -403,13 +399,9 @@ export async function* handleToolEndStreamChunk(input: {
     toolName,
     toolStatus,
   });
-  const completedPresentationArtifact =
-    hasAgentToolCapability(toolName, "presentation_artifact") &&
-    toolStatus === "completed" &&
-    hasPresentationArtifactUrl(output);
-  if (completedPresentationArtifact) {
-    runtime.renderBlocks.appendGeneratedPresentation(toolCallId);
-  }
+  // The artifact block is emitted at tool-start alongside the tool block; no
+  // per-capability append on completion. The block's body reveals the result
+  // once the artifact is ready.
   const deepAgentTodos = isDeepAgentsWriteTodosTool(toolName)
     ? parseDeepAgentTodos(nextToolCall.input)
     : [];
@@ -486,36 +478,25 @@ export async function* handleToolEndStreamChunk(input: {
       hasPresentationArtifactUrl(output) &&
       !hasArtifact &&
       extractToolOutputField(output, "status") === "running";
-    yield {
-      type: "thinking-step",
-      step: runtime.setThinkingStep(
-        isVideoPresentation
-          ? buildVideoPresentationGenerationStep({
-              error: outputError,
-              latencyMs,
-              phase: hasArtifact
-                ? "completed"
-                : needsContent
-                  ? "repairing"
-                  : isRunningVideo
-                    ? "saving"
-                    : "failed",
-              tool: toolName,
-              toolCallId,
-            })
-          : buildPresentationGenerationStep({
-              error: outputError,
-              latencyMs,
-              phase: hasArtifact
-                ? "completed"
-                : needsContent
-                  ? "repairing"
-                  : "failed",
-              tool: toolName,
-              toolCallId,
-            }),
-      ),
-    };
+    const step = buildArtifactGenerationStep({
+      error: outputError,
+      latencyMs,
+      phase: hasArtifact
+        ? "completed"
+        : needsContent
+          ? "repairing"
+          : isRunningVideo
+            ? "saving"
+            : "failed",
+      toolCallId,
+      toolName,
+    });
+    if (step) {
+      yield {
+        type: "thinking-step",
+        step: runtime.setThinkingStep(step),
+      };
+    }
   }
   if (isAgentToolDomain(toolName, "retrieval")) {
     const query = retrievalCall?.query ?? "";

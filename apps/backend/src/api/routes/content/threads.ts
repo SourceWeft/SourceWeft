@@ -5,6 +5,7 @@ import {
   listThreadsRequestSchema,
   startThreadTurnRequestSchema,
   streamThreadRequestSchema,
+  threadRunStatusSchema,
   type StreamThreadRequest,
   type ThreadRunSummary,
   updateThreadChatPreferencesRequestSchema,
@@ -105,7 +106,7 @@ function buildResumeThreadInput(input: {
   };
 }
 
-function presentThreadRunSummary(run: {
+export function presentThreadRunSummary(run: {
   id: string;
   idempotencyKey: string;
   status: string;
@@ -117,12 +118,10 @@ function presentThreadRunSummary(run: {
   const approval = getRunApprovalPauseState({
     snapshotJson: run.snapshotJson ?? {},
   });
-  const status =
-    run.status === "running" ||
-    run.status === "cancel_requested" ||
-    run.status === "waiting_for_approval"
-      ? run.status
-      : "queued";
+  // Report the run's real state. Collapsing unknown values to "queued" used to
+  // make a finished run look like it was still waiting to start.
+  const parsedStatus = threadRunStatusSchema.safeParse(run.status);
+  const status = parsedStatus.success ? parsedStatus.data : "queued";
   return {
     id: run.id,
     idempotencyKey: run.idempotencyKey,

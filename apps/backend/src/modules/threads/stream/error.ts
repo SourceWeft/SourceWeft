@@ -9,6 +9,7 @@ import {
   createMessageRecord,
   deleteMessageRecord,
 } from "../message-repository";
+import { buildErrorTurnBilling } from "../turn/error-turn-billing";
 import { summarizeRetrievalCalls } from "../turn/service";
 import type {
   MessageRenderBlock,
@@ -106,15 +107,10 @@ export async function createThreadStreamErrorMessage(input: {
     input.partialAssistantContent === undefined
       ? clientErrorMessage
       : input.partialAssistantContent.trimEnd();
-  const preflightCreditsConsumed = input.prepared.preflightBilling.reduce(
-    (sum, item) => sum + item.consumedCredits,
-    0,
-  );
-  const meteredLlmCalls = input.partialState?.meteredLlmCalls ?? [];
-  const meteredLlmCreditsConsumed = meteredLlmCalls.reduce(
-    (sum, item) => sum + item.consumedCredits,
-    0,
-  );
+  const errorBilling = buildErrorTurnBilling({
+    meteredLlmCalls: input.partialState?.meteredLlmCalls ?? [],
+    preflightBilling: input.prepared.preflightBilling,
+  });
 
   return createMessageRecord({
     teamId: input.prepared.workspace.organizationId,
@@ -125,7 +121,7 @@ export async function createThreadStreamErrorMessage(input: {
     content: assistantContent,
     createdBy: null,
     model: input.prepared.modelAlias,
-    creditsConsumed: preflightCreditsConsumed + meteredLlmCreditsConsumed,
+    creditsConsumed: errorBilling.creditsConsumed,
     metadata: {
       isError: true,
       excludeFromContext: true,
@@ -139,24 +135,7 @@ export async function createThreadStreamErrorMessage(input: {
       profileAlias: input.prepared.profileAlias,
       agentMode: input.prepared.agentMode,
       versionOf: input.prepared.assistantMessageParentId,
-      billingFinalizerSkipped: true,
-      billingFinalizerSkipReason: "model_error",
-      meteredLlmCalls,
-      meteredLlmCreditsConsumed,
-      billingSkipped:
-        meteredLlmCalls.length === 0 ||
-        meteredLlmCalls.every((call) => call.billingStatus === "skipped"),
-      billingSkipReason:
-        meteredLlmCalls.length === 0
-          ? "model_error_before_llm_usage"
-          : meteredLlmCalls.every((call) => call.billingStatus === "skipped")
-            ? (meteredLlmCalls
-                .map((call) => call.skipReason)
-                .find((reason): reason is string => Boolean(reason)) ??
-              "llm_calls_skipped")
-            : null,
-      preflightBilling: input.prepared.preflightBilling,
-      preflightCreditsConsumed,
+      ...errorBilling.metadata,
       reasoning: input.partialState?.reasoning,
       reasoningSegments: input.partialState?.reasoningSegments,
       toolCalls: input.partialState?.toolCalls,

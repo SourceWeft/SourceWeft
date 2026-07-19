@@ -1,3 +1,4 @@
+import type { MeteredModelCallTrace } from "../../../shared/model-gateway/index";
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { ToolApprovalResume } from "@sourceweft/contracts";
 import type { InvocationEvent, InvocationPlan } from "../../invocations/types";
@@ -278,33 +279,14 @@ export type PreflightBillingTrace = {
   metadata?: Record<string, unknown>;
 };
 
-export type MeteredLlmCallTrace = {
-  id: string;
-  operation: string;
-  modelKind: "chat";
-  modelAlias: string | null;
-  profileAlias: string | null;
-  gatewayConfigId: string;
-  usage?: UsageInfo;
-  billingStatus: "metered" | "skipped" | "meter_failed";
-  consumedCredits: number;
-  billedBy?: "provider_cost" | "minimum_credit" | "skipped";
-  skipReason?: string | null;
-  idempotencyKey: string;
-  referenceId: string;
-  providerCostUsd?: number | null;
-  costSource?: string;
-  missingPriceComponents?: string[];
-  pricingSnapshot?: unknown;
-  billing?: {
-    teamId: string;
-    availableCredits: number;
-    consumedThisCycle: number;
-    idempotencyReplayed: boolean;
-  };
-  error?: string;
-  metadata?: Record<string, unknown>;
-};
+/**
+ * A model call settled by the billing scope.
+ *
+ * Aliases the billing module's trace rather than restating it: the scope is the
+ * only producer, so a second near-identical shape here could only drift. The
+ * name is kept because it is what the turn outcome and message payloads expose.
+ */
+export type MeteredLlmCallTrace = MeteredModelCallTrace;
 
 export type AgentMultimodalContentPart =
   | {
@@ -366,15 +348,13 @@ export type MessageRenderBlock =
       toolCallId: string;
     }
   | {
+      // A tool's finished artifact. One block for every medium; the web
+      // renderer dispatches to a body by the capability's renderAs. There is
+      // deliberately no per-medium block type — image/pptx/video carried no
+      // information beyond toolCallId, which already resolves the capability.
       id: string;
       placement?: "inline" | "terminal";
-      type: "generated_image";
-      toolCallId: string;
-    }
-  | {
-      id: string;
-      placement?: "inline" | "terminal";
-      type: "generated_presentation";
+      type: "artifact";
       toolCallId: string;
     };
 

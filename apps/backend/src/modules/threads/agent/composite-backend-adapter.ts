@@ -60,6 +60,17 @@ export class PrefixedBackendAdapter implements BackendProtocolV2 {
     return stripPrefix(path, this.prefix);
   }
 
+  /**
+   * Rewrites an inner path back to the outer namespace. The backend protocol
+   * leaves `path` optional on success, so an absent path is passed through
+   * untouched rather than being coerced.
+   */
+  private withOuterPath<T extends { path?: string }>(result: T): T {
+    return result.path === undefined
+      ? result
+      : { ...result, path: this.fromInner(result.path) };
+  }
+
   private fileInfo(file: FileInfo): FileInfo {
     const path = this.fromInner(file.path);
     return {
@@ -127,9 +138,7 @@ export class PrefixedBackendAdapter implements BackendProtocolV2 {
 
   async write(filePath: string, content: string): Promise<WriteResult> {
     const result = await this.backend.write(this.toInner(filePath), content);
-    return result.error
-      ? result
-      : { ...result, path: this.fromInner(result.path) };
+    return result.error ? result : this.withOuterPath(result);
   }
 
   async edit(
@@ -144,9 +153,7 @@ export class PrefixedBackendAdapter implements BackendProtocolV2 {
       newString,
       replaceAll,
     );
-    return result.error
-      ? result
-      : { ...result, path: this.fromInner(result.path) };
+    return result.error ? result : this.withOuterPath(result);
   }
 
   async downloadFiles(paths: string[]): Promise<FileDownloadResponse[]> {

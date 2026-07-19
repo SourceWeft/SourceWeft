@@ -11,6 +11,7 @@
 import { createDeepAgent } from "deepagents";
 import type { AnyBackendProtocol, BackendFactory } from "deepagents";
 import type { AgentMiddleware, InterruptOnConfig } from "langchain";
+import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import { buildRuntimeSystemPrompt } from "./prompts";
@@ -29,7 +30,6 @@ import {
   type SourceWeftToolObservabilityContext,
 } from "./middleware";
 import { getChatCheckpointer } from "../../../shared/chat-checkpointer";
-import { createAgentChatModel } from "../../../shared/model-gateway/index";
 import { config } from "../../../shared/config";
 import type { TraceContext } from "../../llm-observability";
 
@@ -55,6 +55,13 @@ export interface CreateThreadAgentParams {
   traceContext?: TraceContext;
   toolObservabilityContext?: SourceWeftToolObservabilityContext;
   interruptOn?: Record<string, boolean | InterruptOnConfig>;
+  /**
+   * The chat model to drive the agent with.
+   *
+   * Required, and supplied by the billed gateway wrapper, so that a thread
+   * agent cannot be created with a model that settles against no billing scope.
+   */
+  model: BaseLanguageModel;
 }
 
 /**
@@ -66,24 +73,12 @@ export interface CreateThreadAgentParams {
  * @param params - Agent creation parameters
  * @returns A configured DeepAgent instance with PostgresSaver checkpointer
  */
-export async function createThreadAgent(
-  params: CreateThreadAgentParams = {},
-): Promise<ReturnType<typeof createDeepAgent>> {
+export async function createThreadAgent(params: CreateThreadAgentParams): Promise<ReturnType<typeof createDeepAgent>> {
   const checkpointer = await getChatCheckpointer();
 
   const modelAlias = params.modelAlias || config.chat.defaultModelAlias;
   const providerModel = params.providerModel || modelAlias;
 
-  const model = await createAgentChatModel({
-    modelAlias: providerModel,
-    gatewayConfigId: params.gatewayConfigId,
-    execution: {
-      ...params.execution,
-      ...(params.execution?.executionMode === "BYOK"
-        ? {}
-        : { profileAlias: params.execution?.profileAlias ?? modelAlias }),
-    },
-  });
   const filesystemMounts =
     params.filesystemMounts ??
     createDefaultFilesystemMounts({
@@ -103,7 +98,7 @@ export async function createThreadAgent(
   });
 
   const agent = createDeepAgent({
-    model,
+    model: params.model,
     tools: params.tools ?? [],
     systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt, {
       mounts: filesystemMounts,

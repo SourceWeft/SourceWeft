@@ -37,10 +37,19 @@ export function createSourceweftOrganizationMetadata(
   return { sourceweft: { kind } };
 }
 
+/**
+ * Returns the metadata unchanged except for `sourceweft.kind`. The explicit
+ * return type is needed because the `?? {}` fallback would otherwise narrow the
+ * inferred type and hide the caller's own top-level keys.
+ */
 export function withSourceweftOrganizationKind(
   metadata: unknown,
   kind: SourceweftOrganizationKind,
-) {
+): Record<string, unknown> & {
+  sourceweft: Record<string, unknown> & {
+    kind: SourceweftOrganizationKind;
+  };
+} {
   const parsed = parseOrganizationMetadataObject(metadata) ?? {};
   const sourceweft = isRecord(parsed.sourceweft) ? parsed.sourceweft : {};
 

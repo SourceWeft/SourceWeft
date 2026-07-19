@@ -2,7 +2,8 @@ import type {
   ThreadChatRunJobPayload,
   ThreadChatRunJobResult,
 } from "../../content/queue";
-import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
+import { buildErrorTurnBilling } from "../turn/error-turn-billing";
+import { getAgentToolRenderAs, hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
 import { type MeterConsumeResponse } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
@@ -22,7 +23,6 @@ import {
   upsertTracePart,
 } from "../turn/trace-parts";
 import type { ToolCallTrace } from "../turn/types";
-import { extractToolOutputField } from "../agent/turn/output-normalizer";
 import {
   isSandboxExecuteToolCallIdRequiredError,
   sandboxExecuteToolCallIdRequiredContentError,
@@ -536,9 +536,7 @@ function normalizeRenderBlock(value: unknown): MessageRenderBlock | null {
   }
 
   if (
-    (record.type === "tool" ||
-      record.type === "generated_image" ||
-      record.type === "generated_presentation") &&
+    (record.type === "tool" || record.type === "artifact") &&
     typeof record.toolCallId === "string"
   ) {
     return {
@@ -676,54 +674,6 @@ function appendReasoningRenderBlock(input: {
   ];
 }
 
-function hasPublishedPresentationArtifact(input: {
-  output: unknown;
-  status: unknown;
-}) {
-  return (
-    input.status === "completed" &&
-    Boolean(
-      extractToolOutputField(input.output, "artifact_url") ??
-        extractToolOutputField(input.output, "pptx_url") ??
-        extractToolOutputField(input.output, "artifactUrl") ??
-        extractToolOutputField(input.output, "pptxUrl"),
-    )
-  );
-}
-
-function getRenderBlockTypeForArtifactTool(input: {
-  output?: unknown;
-  status?: unknown;
-  toolName: string;
-}) {
-  const toolName = input.toolName;
-  if (hasAgentToolCapability(toolName, "generated_image_artifact")) {
-    return "generated_image" as const;
-  }
-  if (
-    hasAgentToolCapability(toolName, "presentation_artifact") &&
-    hasPublishedPresentationArtifact({
-      output: input.output,
-      status: input.status,
-    })
-  ) {
-    return "generated_presentation" as const;
-  }
-  return null;
-}
-
-function getArtifactRenderBlockId(input: {
-  toolCallId: string;
-  type: Extract<
-    MessageRenderBlock["type"],
-    "generated_image" | "generated_presentation"
-  >;
-}) {
-  return input.type === "generated_image"
-    ? `generated-image-${input.toolCallId}`
-    : `generated-presentation-${input.toolCallId}`;
-}
-
 function appendToolRenderBlock(input: {
   blocks: unknown[] | undefined;
   toolCallId: string;
@@ -754,23 +704,18 @@ function appendArtifactRenderBlock(input: {
   output?: unknown;
   status?: unknown;
 }) {
-  if (!input.toolName) {
-    return normalizeRenderBlocks(input.blocks);
-  }
-
-  const type = getRenderBlockTypeForArtifactTool({
-    output: input.output,
-    status: input.status,
-    toolName: input.toolName,
-  });
-  if (!type) {
+  // Any tool that declares an artifact rendering gets one artifact block. The
+  // block's body reveals the result when ready, so there is no output/status
+  // gating and no per-capability block type.
+  if (!input.toolName || !getAgentToolRenderAs(input.toolName)) {
     return normalizeRenderBlocks(input.blocks);
   }
 
   const blocks = normalizeRenderBlocks(input.blocks);
   if (
     blocks.some(
-      (block) => block.type === type && block.toolCallId === input.toolCallId,
+      (block) =>
+        block.type === "artifact" && block.toolCallId === input.toolCallId,
     )
   ) {
     return blocks;
@@ -779,12 +724,9 @@ function appendArtifactRenderBlock(input: {
   return [
     ...blocks,
     {
-      id: getArtifactRenderBlockId({
-        toolCallId: input.toolCallId,
-        type,
-      }),
+      id: `artifact-${input.toolCallId}`,
       placement: "terminal" as const,
-      type,
+      type: "artifact" as const,
       toolCallId: input.toolCallId,
     },
   ];
@@ -897,6 +839,18 @@ function updateSnapshotFromPayload(
       );
     }
   }
+  if (payload.type === "tool-call-start") {
+    const toolCallId = getToolCallIdFromPayload(payload);
+    // Uniform: every tool gets a tool block (its progress card) first. Artifact
+    // tools additionally get a terminal artifact block below — no capability is
+    // singled out.
+    if (toolCallId) {
+      next.renderBlocks = appendToolRenderBlock({
+        blocks: next.renderBlocks,
+        toolCallId,
+      });
+    }
+  }
   if (
     payload.type === "tool-call-start" ||
     payload.type === "tool-call-event" ||
@@ -921,21 +875,6 @@ function updateSnapshotFromPayload(
           payload.status,
         toolCallId,
         toolName,
-      });
-    }
-  }
-  if (payload.type === "tool-call-start") {
-    const toolCallId = getToolCallIdFromPayload(payload);
-    const toolName = getToolNameFromPayload(payload);
-    if (
-      toolCallId &&
-      toolName &&
-      !hasAgentToolCapability(toolName, "generated_image_artifact") &&
-      !hasAgentToolCapability(toolName, "presentation_artifact")
-    ) {
-      next.renderBlocks = appendToolRenderBlock({
-        blocks: next.renderBlocks,
-        toolCallId,
       });
     }
   }
@@ -1368,15 +1307,10 @@ async function createDurableErrorMessage(input: {
     input.createErrorInput.partialState?.meteredLlmCalls ??
     input.snapshot.meteredLlmCalls ??
     [];
-  const meteredLlmCreditsConsumed = meteredLlmCalls.reduce(
-    (sum, item) => sum + item.consumedCredits,
-    0,
-  );
-  const preflightCreditsConsumed =
-    input.createErrorInput.prepared.preflightBilling.reduce(
-      (sum, item) => sum + item.consumedCredits,
-      0,
-    );
+  const errorBilling = buildErrorTurnBilling({
+    meteredLlmCalls,
+    preflightBilling: input.createErrorInput.prepared.preflightBilling,
+  });
   const assistantContent = appendAssistantContinuationContent({
     existingContent: input.snapshot.assistantMessage?.content,
     nextContent:
@@ -1390,7 +1324,7 @@ async function createDurableErrorMessage(input: {
     messageId: input.assistantMessageId,
     content: assistantContent,
     model: input.createErrorInput.prepared.modelAlias,
-    creditsConsumed: preflightCreditsConsumed + meteredLlmCreditsConsumed,
+    creditsConsumed: errorBilling.creditsConsumed,
     metadata: {
       isError: !isClientCancelled,
       isCancelled: isClientCancelled,
@@ -1406,24 +1340,7 @@ async function createDurableErrorMessage(input: {
       profileAlias: input.createErrorInput.prepared.profileAlias,
       agentMode: input.createErrorInput.prepared.agentMode,
       versionOf: input.createErrorInput.prepared.assistantMessageParentId,
-      billingFinalizerSkipped: true,
-      billingFinalizerSkipReason: "model_error",
-      meteredLlmCalls,
-      meteredLlmCreditsConsumed,
-      billingSkipped:
-        meteredLlmCalls.length === 0 ||
-        meteredLlmCalls.every((call) => call.billingStatus === "skipped"),
-      billingSkipReason:
-        meteredLlmCalls.length === 0
-          ? "model_error_before_llm_usage"
-          : meteredLlmCalls.every((call) => call.billingStatus === "skipped")
-            ? (meteredLlmCalls
-                .map((call) => call.skipReason)
-                .find((reason): reason is string => Boolean(reason)) ??
-              "llm_calls_skipped")
-            : null,
-      preflightBilling: input.createErrorInput.prepared.preflightBilling,
-      preflightCreditsConsumed,
+      ...errorBilling.metadata,
       reasoning: input.snapshot.reasoning,
       reasoningSegments: input.snapshot.reasoningSegments ?? [],
       traceParts: input.snapshot.traceParts ?? [],

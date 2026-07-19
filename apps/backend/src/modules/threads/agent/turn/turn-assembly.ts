@@ -14,6 +14,7 @@ import type {
 import { buildConnectorActionApprovalScope } from "../../../connectors/agent-tool-idempotency";
 import type { SandboxActionExecutionCursor } from "./hitl-handler";
 import { mcpService } from "../../../mcp";
+import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { TraceContext } from "../../../llm-observability";
 import { logger } from "../../../../shared/logger";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
@@ -395,6 +396,30 @@ export interface ThreadAgentAssemblyInput {
   filesystemBackend: FilesystemBackend;
   sandboxRuntime: AgentSandboxRuntimeForTurn | null;
   runtimePrompt: string;
+  /** Billed chat model for this turn; see CreateThreadAgentParams.model. */
+  model: BaseLanguageModel;
+}
+
+export interface ThreadAgentAssembly {
+  agent: Awaited<ReturnType<typeof createThreadAgent>>;
+  agentMessages: Array<{ role: "user"; content: unknown }>;
+  baseConfig: AgentRunnableConfig;
+  runConfig: AgentRunnableConfig;
+  runAgentStream: (
+    messages: Array<{ role: "user"; content: unknown }>,
+  ) => Promise<AsyncGenerator<unknown>>;
+}
+
+export interface ThreadAgentAssemblyInput {
+  prepared: PreparedThreadTurn;
+  llm?: LlmExecutionConfig;
+  traceContext?: TraceContext;
+  toolCollection: ToolCollection;
+  filesystemBackend: FilesystemBackend;
+  sandboxRuntime: AgentSandboxRuntimeForTurn | null;
+  runtimePrompt: string;
+  /** Billed chat model for this turn; see CreateThreadAgentParams.model. */
+  model: BaseLanguageModel;
 }
 
 export interface ThreadAgentAssembly {
@@ -451,55 +476,6 @@ export function buildSandboxRuntimeForPreparedTurn(input: {
   return sandboxRuntime;
 }
 
-export async function buildTurnAssembly(
-  input: TurnAssemblyInput,
-): Promise<TurnAssembly> {
-  const { prepared, billing, llm, traceContext, runtime } = input;
-
-  const filesystemBackend = buildFilesystemBackend({
-    prepared,
-    runtime,
-  });
-
-  const sandboxRuntime = buildSandboxRuntimeForPreparedTurn({
-    prepared,
-    filesystemBackend,
-  });
-
-  const toolCollection = await buildToolCollection({
-    prepared,
-    billing,
-    filesystemBackend,
-    llm,
-    traceContext,
-    runtime,
-    sandboxRuntime,
-  });
-
-  const runtimePromptContext = await buildRuntimePromptContext({
-    prepared,
-    toolCollection,
-    sandboxRuntime,
-  });
-
-  const agentAssembly = await buildThreadAgentAssembly({
-    prepared,
-    llm,
-    traceContext,
-    toolCollection,
-    filesystemBackend,
-    sandboxRuntime,
-    runtimePrompt: runtimePromptContext.runtimePrompt,
-  });
-
-  return {
-    toolCollection,
-    runtimePromptContext,
-    filesystemBackend,
-    agentAssembly,
-  };
-}
-
 export async function buildThreadAgentAssembly(
   input: ThreadAgentAssemblyInput,
 ): Promise<ThreadAgentAssembly> {
@@ -511,6 +487,7 @@ export async function buildThreadAgentAssembly(
     filesystemBackend,
     sandboxRuntime,
     runtimePrompt,
+    model,
   } = input;
   const {
     capabilityTools,
@@ -562,6 +539,7 @@ export async function buildThreadAgentAssembly(
   }
 
   const agent = await createThreadAgent({
+    model,
     modelAlias: prepared.modelAlias,
     providerModel: prepared.providerModel,
     gatewayConfigId: prepared.chatProfile.gatewayConfigId,

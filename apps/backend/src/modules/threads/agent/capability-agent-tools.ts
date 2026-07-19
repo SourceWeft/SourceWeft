@@ -17,7 +17,6 @@ import {
   markArtifactReady,
   createSlidesArtifactRecord,
 } from "../../artifacts/repository";
-import { meterBillableModelUsage } from "../../content/model-billing";
 import { enqueueVideoPresentationGenerateJob } from "../../content/queue";
 import {
   buildArtifactStorageKey,
@@ -26,10 +25,16 @@ import {
 } from "../../sources/storage";
 import { createDefaultWebProvider } from "../../sources/web-provider";
 import { listCapabilityRecords } from "../turn/capability-command-workflows";
+import { loadBuiltinCapabilityModule } from "@sourceweft/agent-tool-registry";
 import { config } from "../../../shared/config";
 import { logger } from "../../../shared/logger";
 import type { TraceContext } from "../../llm-observability";
-import { getModelGatewayClient } from "../../../shared/model-gateway/client";
+import {
+  withBilledModelGateway,
+  type BilledModelGateway,
+} from "../../../shared/model-gateway";
+import type { ImageToolGenerateOptions } from "@sourceweft/builtin-tool-generate-image";
+import type { ModelProfileKind } from "../../content/types";
 import type { ArtifactToolRuntimePromptProvider } from "./prompts/tool-prompt-provider";
 import { runToolRetrieval } from "./turn/retrieval-runner";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
@@ -202,10 +207,6 @@ function createCapabilityAgentToolHostServices(
       markArtifactReady,
       createSlidesArtifactRecord,
     },
-    billing: {
-      meterModelUsage: (meterInput: Record<string, unknown>) =>
-        meterBillableModelUsage({ billing, ...meterInput } as never),
-    },
     citationRegistry: runtime.citationRegistry,
     fontAssetBaseUrl,
     filesystem: filesystemBackend
@@ -219,7 +220,54 @@ function createCapabilityAgentToolHostServices(
     logger,
     llm,
     modelGateway: {
-      getClient: getModelGatewayClient,
+      /**
+       * Hands tool runtimes a gateway that bills for itself.
+       *
+       * The runtime supplies the billing identity per call — including an
+       * idempotency key derived from an id it allocates before the call — so
+       * settlement happens with the model call rather than after the artifact
+       * is published. Previously a failure between the two left the tokens
+       * burned and nothing charged.
+       */
+      getClient: async (gatewayConfigId: string) => ({
+        images: {
+          generate: (
+            request: Parameters<BilledModelGateway["images"]["generate"]>[0],
+            options: ImageToolGenerateOptions,
+          ) =>
+            withBilledModelGateway(
+              {
+                billing,
+                gatewayConfigId,
+                context: {
+                  teamId: prepared.workspace.organizationId,
+                  workspaceId: prepared.workspace.id,
+                  actorUserId: prepared.userId,
+                  feature: "artifact.image",
+                  intent: { mode: "billed" },
+                  scopeKind: "thread-turn",
+                  scopeId:
+                    traceContext?.traceId ?? prepared.userMessage.id,
+                  threadId: prepared.thread.id,
+                  messageId: prepared.userMessage.id,
+                },
+              },
+              (gateway) =>
+                gateway.images.generate(request, {
+                  traceId: options.traceId,
+                  operation: options.operation,
+                  modelKind: options.modelKind as ModelProfileKind,
+                  gatewayConfigId: options.gatewayConfigId,
+                  profileAlias: options.profileAlias,
+                  modelAlias: options.modelAlias,
+                  referenceId: options.referenceId,
+                  idempotencyKey: options.idempotencyKey,
+                  llm: options.llm as LlmExecutionConfig | undefined,
+                  billingMetadata: options.billingMetadata,
+                }),
+            ),
+        },
+      }),
     },
     queue: {
       enqueueVideoPresentationRenderJob: enqueueVideoPresentationGenerateJob,
@@ -236,6 +284,7 @@ function createCapabilityAgentToolHostServices(
           prepared,
           query,
           llm,
+          billing,
           traceContext:
             langchainToolCallId && traceContext
               ? {
@@ -307,17 +356,37 @@ function normalizeToolEntry(entry: CapabilityAgentToolEntry): {
 
 function loadCapabilityAgentToolModule(record: DiscoveredCapabilityRecord) {
   const cacheKey = record.packageName ?? record.manifestPath;
-  let promise = entryModuleCache.get(cacheKey);
-  if (!promise) {
-    promise = importCapabilityAgentToolModule(record);
-    entryModuleCache.set(cacheKey, promise);
+  const cached = entryModuleCache.get(cacheKey);
+  if (cached) {
+    return cached;
   }
+  const promise = importCapabilityAgentToolModule(record);
+  // Never let a failure stick: a cached null (or rejection) would disable the
+  // capability for the whole process lifetime on one transient error.
+  promise
+    .then((module) => {
+      if (!module) {
+        entryModuleCache.delete(cacheKey);
+      }
+    })
+    .catch(() => {
+      entryModuleCache.delete(cacheKey);
+    });
+  entryModuleCache.set(cacheKey, promise);
   return promise;
 }
 
 async function importCapabilityAgentToolModule(
   record: DiscoveredCapabilityRecord,
 ): Promise<CapabilityAgentToolModule | null> {
+  const builtin = loadBuiltinCapabilityModule(record.packageName);
+  if (builtin) {
+    // Builtins ship with the backend: a load failure here is a deployment
+    // fault, not a degraded optional capability. Fail loudly rather than
+    // silently serving a turn with no tools bound.
+    return (await builtin()) as CapabilityAgentToolModule;
+  }
+
   try {
     if (record.packageName) {
       return (await import(record.packageName)) as CapabilityAgentToolModule;

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
   ChatCompleteResult,
-  GatewayRequestMetadata,
   RouteDecision,
   UsageInfo,
 } from "@sourceweft/model-gateway";
@@ -9,11 +8,15 @@ import sharp from "sharp";
 import type { LlmExecutionConfig } from "../../content/model-gateway-audit";
 import type { ContentBillingPort } from "../../content/billing-port";
 import type { MessageRecord } from "../../content/types";
-import { meterBillableModelUsage } from "../../content/model-billing";
-import {
-  getModelGatewayClient,
-  resolveModelGatewayProfile,
-} from "../../../shared/model-gateway/client";
+import { resolveModelGatewayProfile } from "../../../shared/model-gateway/client";
+import { openBilledModelGateway } from "../../../shared/model-gateway";
+import type {
+  BilledModelGateway,
+  BilledRequestOptions,
+  MeteredModelCallTrace,
+} from "../../../shared/model-gateway";
+import type { BillingAdmissionPort } from "../../../shared/model-gateway/billing/admission";
+import type { MeterUsageFn } from "../../../shared/model-gateway/billing/settle";
 import { ContentError } from "../../content/errors";
 import { contentByokService } from "../../byok";
 import { dedupeSourceIds } from "../../sources/source-ids";
@@ -239,6 +242,18 @@ type VisionFallbackBillingItem = {
   provider?: string | null;
   providerModel?: string | null;
   routeDecision?: RouteDecision;
+  /**
+   * Ledger metadata known before the describe call is issued. The provider /
+   * route fields above are only known afterwards, so they are folded in when
+   * the preflight trace is assembled rather than sent to the meter.
+   */
+  billingMetadata: Record<string, unknown>;
+  /**
+   * The billed gateway settles each describe call as it completes. The trace is
+   * carried here and mapped into a `PreflightBillingTrace` later in the turn,
+   * which keeps the two-phase shape the turn outcome depends on.
+   */
+  meteredCall: MeteredModelCallTrace | null;
 };
 
 type ResolvedGenerateImageProfile = {
@@ -325,8 +340,6 @@ async function resolveGenerateImageProfile(input: {
     }),
   };
 }
-
-type MeterBillableModelUsageFn = typeof meterBillableModelUsage;
 
 type VisionFallbackResult = {
   agentMessageContent: string;
@@ -712,28 +725,27 @@ function buildVisionFallbackDescriptionPrompt(text: string) {
   );
 }
 
-function buildVisionFallbackGatewayMetadata(input: {
-  workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
+/**
+ * Pinned billing identity for one described image.
+ *
+ * Both strings are load-bearing: they address rows that may already exist in
+ * the ledger. Changing either one re-meters an already-charged reference and
+ * bills every affected user a second time, so they are built here, in one
+ * place, and must never be reworded.
+ */
+function buildVisionFallbackIdempotencyKey(input: {
+  userMessageId: string;
+  imageId: string;
+}) {
+  return `${VISION_FALLBACK_IDEMPOTENCY_PREFIX}:${input.userMessageId}:${input.imageId}`;
+}
+
+function buildVisionFallbackReferenceId(input: {
   threadId: string;
-  userId: string;
-  messageId?: string | null;
-  traceId?: string | null;
-  modelAlias: string;
-  profileAlias: string;
-}): GatewayRequestMetadata {
-  return {
-    teamId: input.workspace.organizationId,
-    workspaceId: input.workspace.id,
-    userId: input.userId,
-    threadId: input.threadId,
-    ...(input.messageId ? { messageId: input.messageId } : {}),
-    feature: "chat",
-    operation: VISION_FALLBACK_DESCRIPTION_OPERATION,
-    modelKind: "vision",
-    modelAlias: input.modelAlias,
-    profileAlias: input.profileAlias,
-    ...(input.traceId ? { traceId: input.traceId } : {}),
-  };
+  userMessageId: string;
+  imageId: string;
+}) {
+  return `thread:${input.threadId}:message:${input.userMessageId}:image:${input.imageId}:vision-fallback`;
 }
 
 function createVisionCapabilityStep(input: {
@@ -869,13 +881,12 @@ function buildExistingVisionFallback(input: {
 }
 
 async function runVisionFallbackDescription(input: {
-  gateway: Awaited<ReturnType<typeof getModelGatewayClient>>;
+  gateway: BilledModelGateway;
   modelAlias: string;
   execution?: LlmExecutionConfig;
   prompt: string;
   dataUrl: string;
-  metadata: GatewayRequestMetadata;
-  traceId: string;
+  options: BilledRequestOptions;
 }): Promise<ChatCompleteResult> {
   return input.gateway.chat.complete(
     {
@@ -899,25 +910,27 @@ async function runVisionFallbackDescription(input: {
         },
       ],
     },
-    {
-      traceId: input.traceId,
-      metadata: input.metadata,
-    },
+    input.options,
   );
 }
 
 async function buildVisionFallback(input: {
   chatModelAlias: string;
   workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
+  billing: ContentBillingPort;
   threadId: string;
   userId: string;
   userMessageId: string;
+  traceId: string;
   text: string;
   images: Array<{ part: ChatMessageImagePart; dataUrl: string }>;
   onThinkingStep?: (step: ThinkingStepTrace) => void;
   requestedVisionProfileAlias?: string | null;
   threadVisionProfileAlias?: string | null;
   visionExecution?: LlmExecutionConfig;
+  /** Injected for tests so metering can be driven without a database. */
+  meterUsage?: MeterUsageFn;
+  admission?: BillingAdmissionPort;
 }): Promise<VisionFallbackResult> {
   let visionProfile;
   const shouldUseDefaultVisionProfile =
@@ -958,7 +971,27 @@ async function buildVisionFallback(input: {
     );
   }
 
-  const gateway = await getModelGatewayClient(visionProfile.gatewayConfigId);
+  // The describe pass genuinely charges the customer, so it opens a billed
+  // scope rather than a raw client. Settlement happens per call inside the
+  // wrapper; the resulting traces are carried forward and turned into
+  // PreflightBillingTrace values once the turn's trace id is known.
+  const { gateway, scope } = await openBilledModelGateway({
+    billing: input.billing,
+    gatewayConfigId: visionProfile.gatewayConfigId,
+    admission: input.admission,
+    meterUsage: input.meterUsage,
+    context: {
+      teamId: input.workspace.organizationId,
+      workspaceId: input.workspace.id,
+      actorUserId: input.userId,
+      feature: "chat",
+      intent: { mode: "billed" },
+      scopeKind: "thread-turn",
+      scopeId: input.traceId,
+      threadId: input.threadId,
+      messageId: input.userMessageId,
+    },
+  });
   const descriptions: Array<{
     imageId: string;
     fileName: string;
@@ -976,21 +1009,41 @@ async function buildVisionFallback(input: {
   input.onThinkingStep?.(startStep);
 
   for (const image of input.images) {
+    const billingMetadata = {
+      traceId: input.traceId,
+      threadId: input.threadId,
+      messageId: input.userMessageId,
+      imageId: image.part.id,
+      imageFileName: image.part.fileName,
+      chatModelAlias: input.chatModelAlias,
+    };
+    // settle() appends at most one trace per call, so the tail beyond this
+    // mark is this image's trace.
+    const meteredBefore = scope.meteredCalls().length;
     const result = await runVisionFallbackDescription({
       gateway,
       modelAlias: visionProfile.modelAlias,
       execution: input.visionExecution,
       prompt: buildVisionFallbackDescriptionPrompt(input.text),
       dataUrl: image.dataUrl,
-      traceId: input.userMessageId,
-      metadata: buildVisionFallbackGatewayMetadata({
-        workspace: input.workspace,
-        threadId: input.threadId,
-        userId: input.userId,
+      options: {
         traceId: input.userMessageId,
-        modelAlias: visionProfile.modelAlias,
+        operation: CHAT_VISION_FALLBACK_OPERATION,
+        modelKind: "vision",
         profileAlias: visionProfile.profileAlias,
-      }),
+        modelAlias: visionProfile.modelAlias,
+        gatewayConfigId: visionProfile.gatewayConfigId,
+        idempotencyKey: buildVisionFallbackIdempotencyKey({
+          userMessageId: input.userMessageId,
+          imageId: image.part.id,
+        }),
+        referenceId: buildVisionFallbackReferenceId({
+          threadId: input.threadId,
+          userMessageId: input.userMessageId,
+          imageId: image.part.id,
+        }),
+        billingMetadata,
+      },
     });
     const description =
       typeof result.raw.content === "string"
@@ -1011,6 +1064,8 @@ async function buildVisionFallback(input: {
       provider: result.provider ?? null,
       providerModel: result.providerModel ?? null,
       ...(result.routeDecision ? { routeDecision: result.routeDecision } : {}),
+      billingMetadata,
+      meteredCall: scope.meteredCalls()[meteredBefore] ?? null,
     });
   }
 
@@ -1061,50 +1116,24 @@ async function buildVisionFallback(input: {
   };
 }
 
-async function meterVisionFallbackBilling(input: {
-  billing?: ContentBillingPort;
-  workspace: Awaited<ReturnType<typeof requireContentWorkspace>>;
-  threadId: string;
-  userId: string;
-  userMessageId: string;
-  traceId: string;
-  chatModelAlias: string;
+/**
+ * Second phase of the vision fallback's billing: turns the traces the billed
+ * gateway settled during the describe pass into the turn's
+ * `PreflightBillingTrace` list.
+ *
+ * The two phases stay separate because the provider and route the gateway
+ * actually chose are only known once each describe call has returned, and the
+ * turn outcome and preflight thinking steps read this shape.
+ */
+function buildVisionFallbackPreflightBilling(input: {
   items: VisionFallbackBillingItem[];
-  meterUsage?: MeterBillableModelUsageFn;
-}): Promise<PreflightBillingTrace[]> {
-  if (!input.billing || input.items.length === 0) {
-    return [];
-  }
-
+}): PreflightBillingTrace[] {
   const traces: PreflightBillingTrace[] = [];
   for (const item of input.items) {
-    const billingMetadata = {
-      traceId: input.traceId,
-      threadId: input.threadId,
-      messageId: input.userMessageId,
-      imageId: item.imageId,
-      imageFileName: item.imageFileName,
-      chatModelAlias: input.chatModelAlias,
-      provider: item.provider ?? null,
-      providerModel: item.providerModel ?? null,
-      routeDecision: item.routeDecision ?? null,
-    };
-    const billedUsage = await (input.meterUsage ?? meterBillableModelUsage)({
-      billing: input.billing,
-      teamId: input.workspace.organizationId,
-      workspaceId: input.workspace.id,
-      actorUserId: input.userId,
-      feature: "chat",
-      operation: CHAT_VISION_FALLBACK_OPERATION,
-      modelKind: "vision",
-      gatewayConfigId: item.gatewayConfigId,
-      profileAlias: item.profileAlias,
-      modelAlias: item.modelAlias,
-      referenceId: `thread:${input.threadId}:message:${input.userMessageId}:image:${item.imageId}:vision-fallback`,
-      idempotencyKey: `${VISION_FALLBACK_IDEMPOTENCY_PREFIX}:${input.userMessageId}:${item.imageId}`,
-      usage: item.usage,
-      metadata: billingMetadata,
-    });
+    const metered = item.meteredCall;
+    if (!metered) {
+      continue;
+    }
 
     traces.push({
       id: item.imageId,
@@ -1112,15 +1141,18 @@ async function meterVisionFallbackBilling(input: {
       modelKind: "vision",
       modelAlias: item.modelAlias,
       profileAlias: item.profileAlias,
-      consumedCredits: billedUsage.billing.consumedCredits,
-      billedBy: billedUsage.billedBy,
-      skipReason: billedUsage.skipReason,
+      consumedCredits: metered.consumedCredits,
+      billedBy: metered.billedBy ?? "skipped",
+      skipReason: metered.skipReason ?? null,
       usage: item.usage,
       metadata: {
-        ...billingMetadata,
-        idempotencyReplayed: billedUsage.billing.idempotencyReplayed,
-        providerCostUsd: billedUsage.cost.providerCostUsd,
-        pricingSnapshot: billedUsage.cost.pricingSnapshot,
+        ...item.billingMetadata,
+        provider: item.provider ?? null,
+        providerModel: item.providerModel ?? null,
+        routeDecision: item.routeDecision ?? null,
+        idempotencyReplayed: metered.billing?.idempotencyReplayed ?? false,
+        providerCostUsd: metered.providerCostUsd,
+        pricingSnapshot: metered.pricingSnapshot,
       },
     });
   }
@@ -1135,11 +1167,12 @@ export const testExports = {
   VISION_FALLBACK_DESCRIPTION_OPERATION,
   buildThreadCommandMetadata,
   buildVisionFallbackDescriptionPrompt,
-  buildVisionFallbackGatewayMetadata,
+  buildVisionFallbackIdempotencyKey,
+  buildVisionFallbackPreflightBilling,
+  buildVisionFallbackReferenceId,
   buildCommandAugmentedText,
   buildInvocationAugmentedText,
   parsePromptMarkers,
-  meterVisionFallbackBilling,
   parseRequestedCommand,
   resolveLatestAssistantFinalCheckpoint,
   resolveLatestSourceIds,
@@ -1312,6 +1345,9 @@ export async function prepareThreadTurn(
   dependencies: {
     billing?: ContentBillingPort;
     invocationRegistry?: SelectableInvocationRegistry;
+    /** Test seams for the vision fallback's billing; production uses defaults. */
+    meterUsage?: MeterUsageFn;
+    billingAdmission?: BillingAdmissionPort;
   } = {},
 ): Promise<PreparedThreadTurn> {
   const displayMessageContent =
@@ -1669,6 +1705,13 @@ export async function prepareThreadTurn(
       : modelAlias);
   const userMessageId =
     existingUserMessage?.id ?? input.userMessageIdOverride ?? randomUUID();
+  // Resolved here rather than after the user message is persisted because the
+  // vision fallback bills against this trace id, and the fallback runs before
+  // the message row exists. `userMessage.id` is `userMessageId` in both
+  // branches, so the value is unchanged.
+  const runTraceId = existingUserMessage
+    ? `thread-run:${randomUUID()}`
+    : userMessageId;
   const hasSubmittedImages = (input.images?.length ?? 0) > 0;
   const savedInputImages =
     existingUserMessage || !hasSubmittedImages
@@ -1732,14 +1775,28 @@ export async function prepareThreadTurn(
         text: agentText,
         images: savedImages,
       });
-      const visionFallback =
-        existingFallback ??
-        (await buildVisionFallback({
+      let visionFallback = existingFallback;
+      if (!visionFallback) {
+        // Describing images costs money, so this path needs a billing port.
+        // Reusing an already-stored description does not.
+        const visionBilling = dependencies.billing;
+        if (!visionBilling) {
+          throw new ContentError(
+            500,
+            "BILLING_UNAVAILABLE",
+            "Billing is required to describe images with a vision model",
+          );
+        }
+        visionFallback = await buildVisionFallback({
           chatModelAlias: modelAlias,
           workspace,
+          billing: visionBilling,
           threadId: thread.id,
           userId: input.userId,
           userMessageId,
+          traceId: runTraceId,
+          meterUsage: dependencies.meterUsage,
+          admission: dependencies.billingAdmission,
           text: agentText,
           images: savedImages,
           onThinkingStep: input.onPreflightThinkingStep,
@@ -1748,7 +1805,8 @@ export async function prepareThreadTurn(
             : undefined,
           threadVisionProfileAlias: normalizedThreadSettings.visionProfileAlias,
           visionExecution,
-        }));
+        });
+      }
       agentMessageContent = visionFallback.agentMessageContent;
       imageParts = visionFallback.imageParts;
       preflightBilling = visionFallback.preflightBilling ?? [];
@@ -1870,9 +1928,6 @@ export async function prepareThreadTurn(
         ) ?? null)
       : null,
   );
-  const runTraceId = existingUserMessage
-    ? `thread-run:${randomUUID()}`
-    : userMessage.id;
   const userMessageWithTraceId = existingUserMessage
     ? userMessage
     : ((await updateMessageMetadataRecord({
@@ -1890,14 +1945,7 @@ export async function prepareThreadTurn(
       });
 
   if (pendingVisionFallbackBilling.length > 0) {
-    preflightBilling = await meterVisionFallbackBilling({
-      billing: dependencies.billing,
-      workspace,
-      threadId: thread.id,
-      userId: input.userId,
-      userMessageId: userMessage.id,
-      traceId: runTraceId,
-      chatModelAlias: modelAlias,
+    preflightBilling = buildVisionFallbackPreflightBilling({
       items: pendingVisionFallbackBilling,
     });
   }

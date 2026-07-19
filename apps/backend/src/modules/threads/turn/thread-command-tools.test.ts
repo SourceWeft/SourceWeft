@@ -104,7 +104,7 @@ test("mergeSelectedSkillRuntimeTools enables skill tools without command and res
       AGENT_TOOL_NAMES.publishArtifact,
     ],
     permissionOverrides: {},
-  } as const;
+  };
 
   assert.deepEqual(mergeSelectedSkillRuntimeTools(undefined, runtime), {
     [AGENT_TOOL_NAMES.prepareSandboxWorkspace]: { enabled: true },

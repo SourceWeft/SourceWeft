@@ -21,14 +21,13 @@ import {
   createRetrievalHits,
 } from "../../../sources/retrieval-repository";
 import {
-  getModelGatewayClient,
   requireDefaultModelGatewayProfile,
   resolveModelGatewayProfile,
+  withBilledModelGateway,
+  type BilledModelGateway,
 } from "../../../../shared/model-gateway/index";
-import {
-  buildGatewayRequestMetadata,
-  recordGatewayOperationEvent,
-} from "../../../content/model-gateway-audit";
+import type { ContentBillingPort } from "../../../content/billing-port";
+import { recordGatewayOperationEvent } from "../../../content/model-gateway-audit";
 import { toContentError } from "../../../content/model-gateway-error";
 import { planRetrievalStrategy } from "../../../sources/retrieval-planner";
 
@@ -49,17 +48,27 @@ function createDataAccess(): RetrievalDataAccess {
   };
 }
 
-function createEmbeddingGateway(): RetrievalEmbeddingGateway {
+function createEmbeddingGateway(
+  gateway: BilledModelGateway,
+): RetrievalEmbeddingGateway {
   return {
     embed: async (input) => {
       const profile = await requireDefaultModelGatewayProfile("embedding");
-      const gateway = await getModelGatewayClient(profile.gatewayConfigId);
-      const result = await gateway.embeddings.embed({
-        model: input.modelAlias || profile.modelAlias,
-        text: input.queryText,
-        dimensions: input.dimensions || undefined,
-        executionMode: "GLOBAL",
-      });
+      const result = await gateway.embeddings.embed(
+        {
+          model: input.modelAlias || profile.modelAlias,
+          text: input.queryText,
+          dimensions: input.dimensions || undefined,
+          executionMode: "GLOBAL",
+        },
+        {
+          operation: "embeddings.embed",
+          modelKind: "embedding",
+          gatewayConfigId: profile.gatewayConfigId,
+          profileAlias: profile.profileAlias,
+          modelAlias: profile.modelAlias,
+        },
+      );
       return result.embedding;
     },
   };
@@ -71,6 +80,7 @@ async function createRerankGateway(input: {
   threadId: string;
   userId: string;
   traceContext?: TraceContext;
+  gateway: BilledModelGateway;
 }): Promise<RerankGateway> {
   const rerankProfile = await resolveModelGatewayProfile({
     kind: "rerank",
@@ -84,28 +94,12 @@ async function createRerankGateway(input: {
     };
   }
 
-  const rerankClient = await getModelGatewayClient(
-    rerankProfile.gatewayConfigId,
-  );
-
   return {
     rank: async (req) => {
       const startedAt = Date.now();
-      const requestMetadata = buildGatewayRequestMetadata({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        userId: input.userId,
-        threadId: input.threadId,
-        feature: "retrieval_rerank",
-        operation: "rerank.rank",
-        modelKind: "rerank",
-        modelAlias: rerankProfile.modelAlias,
-        llm: undefined,
-        parentSpanId: input.traceContext?.parentSpanId,
-      });
 
       try {
-        const rerankResult = await rerankClient.rerank.rank(
+        const rerankResult = await input.gateway.rerank.rank(
           {
             model: rerankProfile.modelAlias,
             query: req.query,
@@ -116,7 +110,11 @@ async function createRerankGateway(input: {
           },
           {
             traceId: input.traceContext?.traceId,
-            metadata: requestMetadata,
+            operation: "rerank.rank",
+            modelKind: "rerank",
+            gatewayConfigId: rerankProfile.gatewayConfigId,
+            profileAlias: rerankProfile.profileAlias,
+            modelAlias: rerankProfile.modelAlias,
           },
         );
 
@@ -182,6 +180,7 @@ export async function runToolRetrieval(input: {
   query: string;
   llm?: LlmExecutionConfig;
   traceContext?: TraceContext;
+  billing: ContentBillingPort;
 }) {
   const spanId = input.traceContext?.parentSpanId
     ? `retrieval:${input.traceContext.parentSpanId}`
@@ -205,31 +204,58 @@ export async function runToolRetrieval(input: {
   }
 
   try {
-    const rerankGateway = await createRerankGateway({
-      teamId: input.prepared.workspace.organizationId,
-      workspaceId: input.prepared.workspace.id,
-      threadId: input.prepared.thread.id,
-      userId: input.prepared.userId,
-      traceContext: input.traceContext,
-    });
-
-    const result = await runRetrieval(
+    // Retrieval embeddings and rerank are deliberately not charged to the
+    // customer, but their cost is now recorded against the generation rather
+    // than being invisible. Declaring the intent is what makes that a decision
+    // rather than an omission.
+    const result = await withBilledModelGateway(
       {
-        workspaceId: input.prepared.workspace.id,
-        teamId: input.prepared.workspace.organizationId,
-        threadId: input.prepared.thread.id,
-        userId: input.prepared.userId,
-        userMessageId: input.prepared.userMessage.id,
-        queryText: input.query,
-        anchorSourceIds: input.prepared.effectiveMentionedSourceIds,
-        sourceIds: input.prepared.sourceIds,
-        idempotencyKey: input.prepared.llmIdempotencyKey,
+        billing: input.billing,
+        context: {
+          teamId: input.prepared.workspace.organizationId,
+          workspaceId: input.prepared.workspace.id,
+          actorUserId: input.prepared.userId,
+          feature: "retrieval",
+          intent: {
+            mode: "covered",
+            coveredBy: "model_kind_not_user_billed",
+          },
+          scopeKind: "thread-turn",
+          scopeId:
+            input.traceContext?.traceId ?? input.prepared.userMessage.id,
+          threadId: input.prepared.thread.id,
+          messageId: input.prepared.userMessage.id,
+        },
       },
-      {
-        dataAccess: createDataAccess(),
-        embeddingGateway: createEmbeddingGateway(),
-        rerankGateway,
-        planStrategy: planRetrievalStrategy,
+      async (gateway) => {
+        const rerankGateway = await createRerankGateway({
+          teamId: input.prepared.workspace.organizationId,
+          workspaceId: input.prepared.workspace.id,
+          threadId: input.prepared.thread.id,
+          userId: input.prepared.userId,
+          traceContext: input.traceContext,
+          gateway,
+        });
+
+        return runRetrieval(
+          {
+            workspaceId: input.prepared.workspace.id,
+            teamId: input.prepared.workspace.organizationId,
+            threadId: input.prepared.thread.id,
+            userId: input.prepared.userId,
+            userMessageId: input.prepared.userMessage.id,
+            queryText: input.query,
+            anchorSourceIds: input.prepared.effectiveMentionedSourceIds,
+            sourceIds: input.prepared.sourceIds,
+            idempotencyKey: input.prepared.llmIdempotencyKey,
+          },
+          {
+            dataAccess: createDataAccess(),
+            embeddingGateway: createEmbeddingGateway(gateway),
+            rerankGateway,
+            planStrategy: planRetrievalStrategy,
+          },
+        );
       },
     );
 

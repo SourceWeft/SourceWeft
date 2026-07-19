@@ -70,6 +70,7 @@ import type {
   ThinkingStepTrace,
   ToolCallTrace,
 } from "../turn/types";
+import type { BillingScope } from "../../../shared/model-gateway/index";
 import {
   normalizeTraceParts,
   tracePartFromReasoningSegment,
@@ -1011,63 +1012,14 @@ class ContentThreadStreamService {
     private readonly invokeAgentTurn = invokeDeepAgentTurn,
     private readonly enqueueTitleJob = enqueueAutomaticThreadTitleJob,
     private readonly createErrorMessage = createThreadStreamErrorMessage,
-    billing?: ContentBillingPort,
+    /**
+     * Required. This used to be optional with a no-op fallback that reported
+     * billingMode "disabled" and metered nothing, so a construction site that
+     * forgot to wire billing silently gave usage away instead of failing.
+     */
+    billing: ContentBillingPort,
   ) {
-    this.billing = billing ??
-      (turnService as unknown as { billing?: ContentBillingPort }).billing ?? {
-        getSummary: async (teamId: string) => ({
-          teamId,
-          planFamily: "individual_free",
-          billingMode: "disabled",
-          cycleAnchorAt: new Date(0).toISOString(),
-          cycleSource: "free_account",
-          cycleStartAt: new Date(0).toISOString(),
-          cycleEndAt: new Date(0).toISOString(),
-          pages: {
-            limit: 0,
-            used: 0,
-            remaining: 0,
-            monthlyGrant: 0,
-            monthlyBalance: 0,
-            addOnBalance: 0,
-            consumedThisCycle: 0,
-            available: 0,
-          },
-          credits: {
-            monthlyGrant: 0,
-            monthlyBalance: 0,
-            addOnBalance: 0,
-            reserved: 0,
-            consumedThisCycle: 0,
-            available: 0,
-          },
-          seats: {
-            used: 0,
-            limit: 0,
-            remaining: 0,
-            activeMembers: 0,
-            pendingInvitations: 0,
-          },
-          spendLimits: {
-            softCapUsd: null,
-            hardCapUsd: null,
-          },
-        }),
-        meterConsume: async (teamId: string) => ({
-          teamId,
-          consumedCredits: 0,
-          availableCredits: 0,
-          consumedThisCycle: 0,
-          idempotencyReplayed: false,
-        }),
-        meterIngestion: async (teamId: string) => ({
-          teamId,
-          pagesConsumed: 0,
-          pagesUsed: 0,
-          pagesRemaining: 0,
-          idempotencyReplayed: false,
-        }),
-      };
+    this.billing = billing;
   }
 
   async refreshThread(input: RefreshThreadInput) {
@@ -1218,7 +1170,13 @@ class ContentThreadStreamService {
     }
     let citations: AgentCitation[] = [];
     let availableCitations: AgentCitation[] = [];
-    const meteredLlmCalls: MeteredLlmCallTrace[] = [];
+    // The turn's billing scope, captured as soon as the agent opens it. On the
+    // failure path no outcome is ever produced, so this is the only thing that
+    // still knows what the turn metered before it threw.
+    let billingScope: BillingScope | null = null;
+    const meteredLlmCallsOnFailure = () => [
+      ...(billingScope?.meteredCalls() ?? []),
+    ];
     let responseFinished = false;
     let persistedErrorMessage = false;
     let finalizedAssistantMessage: MessageRecord | null = null;
@@ -1294,6 +1252,9 @@ class ContentThreadStreamService {
         const agentEvents = this.invokeAgentTurn({
           prepared,
           billing: this.billing,
+          onBillingScope: (scope) => {
+            billingScope = scope;
+          },
           llm: prepared.llm,
           traceContext: {
             ...prepared.traceContext,
@@ -1372,13 +1333,9 @@ class ContentThreadStreamService {
           if (event.type === "done") {
             outcome = {
               ...event.outcome,
-              meteredLlmCalls: event.outcome.meteredLlmCalls ?? meteredLlmCalls,
+              meteredLlmCalls:
+                event.outcome.meteredLlmCalls ?? meteredLlmCallsOnFailure(),
             };
-            continue;
-          }
-
-          if (event.type === "billing") {
-            meteredLlmCalls.push(event.meteredLlmCall);
             continue;
           }
 
@@ -1483,7 +1440,7 @@ class ContentThreadStreamService {
               retrievalCalls: completedOutcome.retrievalCalls,
               toolCalls: completedOutcome.toolCalls,
               meteredLlmCalls:
-                completedOutcome.meteredLlmCalls ?? meteredLlmCalls,
+                completedOutcome.meteredLlmCalls ?? meteredLlmCallsOnFailure(),
               thinkingSteps: terminalTraceState.thinkingSteps,
               renderBlocks: completedOutcome.renderBlocks,
               reasoningSegments: completedOutcome.reasoningSegments,
@@ -1565,7 +1522,7 @@ class ContentThreadStreamService {
             renderBlocks: outcome?.renderBlocks,
             citations,
             availableCitations,
-            meteredLlmCalls,
+            meteredLlmCalls: meteredLlmCallsOnFailure(),
           }),
         });
         persistedErrorMessage = Boolean(errorMessage);
@@ -1684,7 +1641,7 @@ class ContentThreadStreamService {
               renderBlocks: outcome?.renderBlocks,
               citations,
               availableCitations,
-              meteredLlmCalls,
+              meteredLlmCalls: meteredLlmCallsOnFailure(),
             }),
           });
           persistedErrorMessage = Boolean(errorMessage);
@@ -1815,7 +1772,13 @@ class ContentThreadStreamService {
     let agentSpanCompleted = false;
     let traceEnded = false;
     let outcome: DeepAgentTurnOutcome | null = null;
-    const meteredLlmCalls: MeteredLlmCallTrace[] = [];
+    // The turn's billing scope, captured as soon as the agent opens it. On the
+    // failure path no outcome is ever produced, so this is the only thing that
+    // still knows what the turn metered before it threw.
+    let billingScope: BillingScope | null = null;
+    const meteredLlmCallsOnFailure = () => [
+      ...(billingScope?.meteredCalls() ?? []),
+    ];
     let traceParts: TracePart[] = prepared.preflightThinkingSteps.reduce<
       TracePart[]
     >(
@@ -1829,6 +1792,9 @@ class ContentThreadStreamService {
         for await (const event of this.invokeAgentTurn({
           prepared,
           billing: this.billing,
+          onBillingScope: (scope) => {
+            billingScope = scope;
+          },
           llm: prepared.llm,
           traceContext: {
             ...prepared.traceContext!,
@@ -1836,10 +1802,6 @@ class ContentThreadStreamService {
           },
           operation: "chat.complete",
         })) {
-          if (event.type === "billing") {
-            meteredLlmCalls.push(event.meteredLlmCall);
-            continue;
-          }
           if (event.type === "reasoning") {
             traceParts = upsertTracePart(
               traceParts,
@@ -1867,7 +1829,8 @@ class ContentThreadStreamService {
           if (event.type === "done") {
             doneOutcome = {
               ...event.outcome,
-              meteredLlmCalls: event.outcome.meteredLlmCalls ?? meteredLlmCalls,
+              meteredLlmCalls:
+                event.outcome.meteredLlmCalls ?? meteredLlmCallsOnFailure(),
             };
           }
         }
@@ -1894,7 +1857,7 @@ class ContentThreadStreamService {
           contentError,
           partialState: {
             thinkingSteps: prepared.preflightThinkingSteps,
-            meteredLlmCalls,
+            meteredLlmCalls: meteredLlmCallsOnFailure(),
           },
         });
         if (
@@ -1974,7 +1937,7 @@ class ContentThreadStreamService {
             retrievalCalls: completedOutcome.retrievalCalls,
             toolCalls: completedOutcome.toolCalls,
             meteredLlmCalls:
-              completedOutcome.meteredLlmCalls ?? meteredLlmCalls,
+              completedOutcome.meteredLlmCalls ?? meteredLlmCallsOnFailure(),
             thinkingSteps: terminalTraceState.thinkingSteps,
             renderBlocks: completedOutcome.renderBlocks,
             reasoningSegments: completedOutcome.reasoningSegments,

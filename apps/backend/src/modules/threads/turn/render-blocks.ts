@@ -44,39 +44,20 @@ export function createMessageRenderBlockBuilder() {
   let nextTextId = 1;
 
   return {
-    appendGeneratedImage(toolCallId: string) {
+    appendArtifact(toolCallId: string) {
       if (
         blocks.some(
           (block) =>
-            block.type === "generated_image" &&
-            block.toolCallId === toolCallId,
+            block.type === "artifact" && block.toolCallId === toolCallId,
         )
       ) {
         return;
       }
 
       blocks.push({
-        id: `generated-image-${toolCallId}`,
+        id: `artifact-${toolCallId}`,
         placement: "terminal",
-        type: "generated_image",
-        toolCallId,
-      });
-    },
-    appendGeneratedPresentation(toolCallId: string) {
-      if (
-        blocks.some(
-          (block) =>
-            block.type === "generated_presentation" &&
-            block.toolCallId === toolCallId,
-        )
-      ) {
-        return;
-      }
-
-      blocks.push({
-        id: `generated-presentation-${toolCallId}`,
-        placement: "terminal",
-        type: "generated_presentation",
+        type: "artifact",
         toolCallId,
       });
     },

@@ -9,6 +9,7 @@ import { logger } from "../../../../shared/logger";
 
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";
 import type { ContentBillingPort } from "../../../content/billing-port";
+import type { BillingScope } from "../../../../shared/model-gateway/index";
 import type { TraceContext } from "../../../llm-observability";
 import type { AgentCheckpointRef, PreparedThreadTurn } from "../..";
 import {
@@ -85,7 +86,7 @@ import {
   shouldSilenceEmptyApprovalResume,
 } from "./hitl-handler";
 import {
-  buildPresentationGenerationStep,
+  buildArtifactGenerationStep,
   buildPresentationProgressThinkingEvent,
   buildPresentationProgressThinkingStep,
   isPresentationGenerationCommand,
@@ -96,7 +97,7 @@ export {
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
 } from "./progress-events";
-import { flushPendingLlmCallUsage } from "./llm-call-billing";
+import { openTurnBillingScope } from "./turn-billing-scope";
 import {
   buildToolCollection,
   buildRuntimePromptContext,
@@ -114,7 +115,7 @@ const MAX_AUTO_APPROVED_SANDBOX_HITL_RESUMES = 8;
 export const testExports = {
   buildAgentRuntimeContext,
   createMessageRenderBlockBuilder,
-  buildPresentationGenerationStep,
+  buildArtifactGenerationStep,
   buildPresentationProgressThinkingStep,
   buildPresentationProgressThinkingEvent,
   buildDeepAgentTodosStep,
@@ -152,6 +153,14 @@ export async function* invokeDeepAgentTurn(input: {
   llm?: LlmExecutionConfig;
   traceContext?: TraceContext;
   operation?: "chat.stream" | "chat.complete";
+  /**
+   * Hands the turn's billing scope to the caller as soon as it exists.
+   *
+   * The caller needs it on the failure path: when a turn throws partway
+   * through, no outcome is ever produced, and the scope is the only thing still
+   * holding what was already metered.
+   */
+  onBillingScope?: (scope: BillingScope) => void;
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const runtime = createTurnRuntime({ prepared: input.prepared });
   const {
@@ -199,6 +208,20 @@ export async function* invokeDeepAgentTurn(input: {
       toolCollection,
       sandboxRuntime,
     });
+
+    // The scope spans the whole turn: agent creation, the initial stream, every
+    // tool-boundary re-entry, and HITL resumptions all settle against it.
+    const billedModel = await openTurnBillingScope({
+      prepared: input.prepared,
+      billing: input.billing,
+      llm: input.llm,
+      traceContext: input.traceContext,
+      runtime,
+    });
+    if (runtime.billingScope) {
+      input.onBillingScope?.(runtime.billingScope);
+    }
+
     const agentAssembly = await buildThreadAgentAssembly({
       prepared: input.prepared,
       llm: input.llm,
@@ -207,6 +230,7 @@ export async function* invokeDeepAgentTurn(input: {
       filesystemBackend,
       sandboxRuntime,
       runtimePrompt: runtimePromptContext.runtimePrompt,
+      model: billedModel,
     });
     const { visibleSources, selectedSourcesOmitted } = runtimePromptContext;
 
@@ -360,13 +384,6 @@ export async function* invokeDeepAgentTurn(input: {
         const { event } = toolCallSnapshot;
 
         if (event === "on_tool_start") {
-          yield* flushPendingLlmCallUsage({
-            runtime,
-            billing: input.billing,
-            prepared: input.prepared,
-            llm: input.llm,
-            reason: "tool_start",
-          });
           yield* handleToolStartStreamChunk({
             artifactIntent: input.prepared.artifactIntent,
             prepared: input.prepared,
@@ -416,13 +433,6 @@ export async function* invokeDeepAgentTurn(input: {
       break;
     }
   } catch (error) {
-    yield* flushPendingLlmCallUsage({
-      runtime,
-      billing: input.billing,
-      prepared: input.prepared,
-      llm: input.llm,
-      reason: "error",
-    });
     throw error;
   } finally {
     try {
@@ -437,13 +447,6 @@ export async function* invokeDeepAgentTurn(input: {
     }
   }
 
-  yield* flushPendingLlmCallUsage({
-    runtime,
-    billing: input.billing,
-    prepared: input.prepared,
-    llm: input.llm,
-    reason: "final_outcome",
-  });
   yield* buildFinalOutcome({
     agent,
     beforeAssistantCheckpoint,

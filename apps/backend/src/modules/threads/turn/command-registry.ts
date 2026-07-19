@@ -13,7 +13,14 @@ export type CommandSuccessCriteria =
     }
   | {
       kind: "artifact";
-      artifactType: "image" | "slides" | "video_presentation";
+      /**
+       * Taken verbatim from the capability manifest's `runtime.output.artifactType`.
+       * Deliberately not narrowed to a literal union: the set of artifact types is
+       * declared by manifests, not by this module. Consumers that need per-type
+       * behaviour (see `agent/turn/command-success.ts`) match on the specific types
+       * they know and fall back to a generic "publisher tool completed" check.
+       */
+      artifactType: string;
       toolName: string;
     };
 
@@ -32,26 +39,20 @@ type ToolCommandDefinition = {
   workflow: CapabilityCommandWorkflow;
 };
 
+/**
+ * The success criterion is whatever the manifest declared. A manifest that says
+ * `runtime.output.kind: "artifact"` gets an `artifact` criterion regardless of the
+ * artifact type it names — this module does not second-guess the declaration.
+ */
 function normalizeSuccessCriteria(
   criteria: CapabilityCommandWorkflow["successCriteria"],
 ): CommandSuccessCriteria {
   if (criteria.kind !== "artifact") {
     return criteria;
   }
-  const artifactType = criteria.artifactType;
-  if (
-    artifactType === "image" ||
-    artifactType === "slides" ||
-    artifactType === "video_presentation"
-  ) {
-    return {
-      kind: "artifact",
-      artifactType,
-      toolName: criteria.toolName,
-    };
-  }
   return {
-    kind: "tool_call",
+    kind: "artifact",
+    artifactType: criteria.artifactType,
     toolName: criteria.toolName,
   };
 }

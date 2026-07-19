@@ -19,6 +19,7 @@ import type {
   DeepAgentTurnEvent,
   DeepAgentTurnOutcome,
 } from "../agent/turn/runner";
+import type { ContentBillingPort } from "../../content/billing-port";
 import type { MessageRecord } from "../../content/types";
 import type {
   MeteredLlmCallTrace,
@@ -37,6 +38,66 @@ function parseSseData(value: string) {
     string,
     unknown
   >;
+}
+
+function createBillingPort(
+  overrides: Partial<ContentBillingPort> = {},
+): ContentBillingPort {
+  return {
+    getSummary: vi.fn(async (teamId: string) => ({
+      teamId,
+      planFamily: "individual_free",
+      billingMode: "disabled",
+      cycleAnchorAt: new Date(0).toISOString(),
+      cycleSource: "free_account",
+      cycleStartAt: new Date(0).toISOString(),
+      cycleEndAt: new Date(0).toISOString(),
+      pages: {
+        limit: 0,
+        used: 0,
+        remaining: 0,
+        monthlyGrant: 0,
+        monthlyBalance: 0,
+        addOnBalance: 0,
+        consumedThisCycle: 0,
+        available: 0,
+      },
+      credits: {
+        monthlyGrant: 0,
+        monthlyBalance: 0,
+        addOnBalance: 0,
+        reserved: 0,
+        consumedThisCycle: 0,
+        available: 0,
+      },
+      seats: {
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        activeMembers: 0,
+        pendingInvitations: 0,
+      },
+      spendLimits: {
+        softCapUsd: null,
+        hardCapUsd: null,
+      },
+    })),
+    meterConsume: vi.fn(async (teamId: string) => ({
+      teamId,
+      consumedCredits: 0,
+      availableCredits: 0,
+      consumedThisCycle: 0,
+      idempotencyReplayed: false,
+    })),
+    meterIngestion: vi.fn(async (teamId: string) => ({
+      teamId,
+      pagesConsumed: 0,
+      pagesUsed: 0,
+      pagesRemaining: 0,
+      idempotencyReplayed: false,
+    })),
+    ...overrides,
+  } as unknown as ContentBillingPort;
 }
 
 function createAssistantMessageRecord(
@@ -629,6 +690,8 @@ test("streamThreadEvents waits for delayed title update before finish", async ()
       yield { type: "done", outcome };
     },
     async () => createTitleJob({}),
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -703,6 +766,8 @@ test("streamThreadEvents uses run trace id without changing session or message i
       titleJobTraceId = input.prepared.traceContext?.traceId;
       return null;
     },
+    undefined,
+    createBillingPort(),
   );
 
   for await (const _event of service.streamThreadEvents({
@@ -741,6 +806,8 @@ test("streamThreadEvents emits pending when title is still generating", async ()
       yield { type: "done", outcome };
     },
     async () => createTitleJob({ resolve: false }),
+    undefined,
+    createBillingPort(),
   );
 
   const startedAt = Date.now();
@@ -789,6 +856,8 @@ test("streamThreadEvents includes finish reason in finish events", async () => {
       };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -847,6 +916,8 @@ test("streamThreadEvents fails confirmation finishes without confirmation payloa
       };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   await assert.rejects(
@@ -879,6 +950,8 @@ test("streamThreadEvents defaults successful finish events to stop", async () =>
       yield { type: "done", outcome: { ...outcome, finishReason: undefined } };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -924,6 +997,8 @@ test("streamThreadEvents skips title after a cancelled assistant attempt", async
       titleJobEnqueued = true;
       return createTitleJob({ title: "继续对话" });
     },
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -988,6 +1063,8 @@ test("streamThreadEvents calls onFinalized with assistant message and billing", 
       yield { type: "done", outcome: retrievalOutcome };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1056,6 +1133,8 @@ test("streamThreadEvents emits prepared thread run metadata on start", async () 
       yield { type: "done", outcome };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1116,6 +1195,8 @@ test("streamThreadEvents generates title when retrying after first failed assist
       yield { type: "done", outcome };
     },
     async () => createTitleJob({}),
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1208,6 +1289,8 @@ test("streamThreadEvents persists terminal command verification thinking steps",
       };
     },
     async () => createTitleJob({}),
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1301,6 +1384,8 @@ test("streamThreadEvents finalizes successful traces as terminal completed state
       };
     },
     async () => createTitleJob({}),
+    undefined,
+    createBillingPort(),
   );
 
   for await (const _event of service.streamThreadEvents({
@@ -1401,6 +1486,8 @@ test("streamThreadEvents persists DeepAgents todos as a visible step without gen
       };
     },
     async () => createTitleJob({}),
+    undefined,
+    createBillingPort(),
   );
 
   for await (const _event of service.streamThreadEvents({
@@ -1457,6 +1544,8 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
       yield { type: "done", outcome: { ...outcome, citations: [citation] } };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1546,6 +1635,8 @@ test("streamThreadEvents emits preflight thinking steps while preparing", async 
       };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   const iterator = service.streamThreadEvents({
@@ -1647,6 +1738,8 @@ test("streamThreadEvents preserves preflight billing for finalization", async ()
       yield { type: "done", outcome };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   for await (const _event of service.streamThreadEvents({
@@ -1694,10 +1787,6 @@ test("streamThreadEvents passes metered LLM calls to finalization", async () => 
       typeof ContentThreadStreamService
     >[0],
     async function* (): AsyncGenerator<DeepAgentTurnEvent> {
-      yield {
-        type: "billing",
-        meteredLlmCall,
-      };
       yield { type: "text-delta", delta: "Answer" };
       yield {
         type: "done",
@@ -1705,6 +1794,8 @@ test("streamThreadEvents passes metered LLM calls to finalization", async () => 
       };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   for await (const _event of service.streamThreadEvents({
@@ -1751,6 +1842,8 @@ test("streamThreadEvents sends available citations when final text uses none", a
       };
     },
     async () => null,
+    undefined,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1804,6 +1897,7 @@ test("streamThreadEvents persists send errors as assistant error messages", asyn
     },
     async () => null,
     async () => errorMessage,
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1853,6 +1947,7 @@ test("streamThreadEvents classifies sandbox execute approval errors", async () =
         },
       });
     },
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1896,6 +1991,7 @@ test("streamThreadEvents converts LangChain tool middleware failures into termin
           error: input.contentError.message,
         },
       }),
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -1964,6 +2060,7 @@ test("streamThreadEvents preserves preflight billing on persisted errors", async
         createdAt: new Date(0).toISOString(),
       };
     },
+    createBillingPort(),
   );
 
   for await (const _event of service.streamThreadEvents({
@@ -2000,13 +2097,15 @@ test("streamThreadEvents preserves metered LLM calls on persisted errors", async
     turnService as unknown as ConstructorParameters<
       typeof ContentThreadStreamService
     >[0],
-    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
-      yield {
-        type: "billing",
-        meteredLlmCall,
-      };
+    (async function* (input) {
+      // Production hands the scope over as soon as the turn opens it, before
+      // any model call can fail — so a crash still leaves the already-metered
+      // calls reachable.
+      input.onBillingScope?.({
+        meteredCalls: () => [meteredLlmCall],
+      } as never);
       throw new Error("tool exploded after model usage");
-    },
+    }) as ConstructorParameters<typeof ContentThreadStreamService>[1],
     async () => null,
     async (input) => {
       errorMeteredCalls = input.partialState?.meteredLlmCalls;
@@ -2023,6 +2122,7 @@ test("streamThreadEvents preserves metered LLM calls on persisted errors", async
         },
       });
     },
+    createBillingPort(),
   );
 
   for await (const _event of service.streamThreadEvents({
@@ -2135,6 +2235,7 @@ test("streamThreadEvents preserves partial assistant content for persisted error
         createdAt: new Date(0).toISOString(),
       };
     },
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -2279,6 +2380,7 @@ test("streamThreadEvents persists edit errors as latest assistant versions", asy
         createdAt: new Date(0).toISOString(),
       };
     },
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -2352,6 +2454,7 @@ test("streamThreadEvents closes trace as cancelled when stream is abandoned", as
         parentMessageId: null,
       });
     },
+    createBillingPort(),
   );
 
   const iterator = service.streamThreadEvents({
@@ -2433,6 +2536,7 @@ test("streamThreadEvents observes requested cancellation as cancelled, not error
       };
       return null;
     },
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];
@@ -2541,6 +2645,7 @@ test("streamThreadEvents honors cancellation after agent outcome before finaliza
     },
     async () => null,
     async () => createAssistantMessageRecord({ id: "assistant-cancelled-1" }),
+    createBillingPort(),
   );
 
   const events: Record<string, unknown>[] = [];

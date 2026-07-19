@@ -9,6 +9,7 @@ import {
   getFilesystemToolOutputError,
   getFilesystemToolStartTitle,
   getSkillInstructionDisplayMetadata,
+  getVideoPresentationToolOutputError,
   isVideoPresentationArtifactReady,
   normalizeToolOutputForObservability,
   sanitizeThreadMessageMetadataForClient,
@@ -53,6 +54,54 @@ test("video presentation ready output is marked ready", () => {
   );
 });
 
+test("video presentation failed output exposes error text", () => {
+  const failedOutput = {
+    type: "video_presentation_artifact_result",
+    artifact_url: "/artifact-preview?artifactId=artifact-1",
+    status: "failed",
+    error:
+      "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED: Storyboard provider call failed: The operation was aborted due to timeout",
+  };
+
+  assert.equal(
+    getVideoPresentationToolOutputError(failedOutput),
+    failedOutput.error,
+  );
+  assert.equal(
+    getFilesystemToolEndTitle(
+      "generate_video_presentation",
+      {},
+      failedOutput,
+    ),
+    "Video presentation failed",
+  );
+});
+
+test("unwraps LangChain ToolMessage video presentation outputs for observability", () => {
+  const structured = {
+    type: "video_presentation_processing_result",
+    artifact_id: "artifact-1",
+    status: "running",
+    stage: "planning_storyboard",
+  };
+  const output = normalizeToolOutputForObservability(
+    "generate_video_presentation",
+    {
+      type: "tool",
+      status: "success",
+      stage: "planning_storyboard",
+      artifact_id: "artifact-1",
+      content: JSON.stringify(structured),
+      lc_kwargs: {
+        content: JSON.stringify(structured),
+        status: "success",
+      },
+    },
+  );
+
+  assert.deepEqual(output, structured);
+});
+
 test("redacts skills read_file output for client observability", () => {
   const output = normalizeToolOutputForObservability(
     "read_file",
@@ -85,10 +134,14 @@ test("normalizes read_file output to display-safe bounded content", () => {
     },
   });
 
-  assert.equal(typeof output.content, "string");
-  assert.match(output.content, /^hello�x/u);
-  assert.match(output.content, /\[Output truncated for display.\]$/u);
-  assert.ok(output.content.length < 8_100);
+  // The normalizer returns `unknown` because it passes some outputs through
+  // untouched, so narrow before asserting on the normalized shape.
+  assert.ok(output && typeof output === "object" && "content" in output);
+  const { content } = output as { content: unknown };
+  assert.equal(typeof content, "string");
+  assert.match(content as string, /^hello�x/u);
+  assert.match(content as string, /\[Output truncated for display.\]$/u);
+  assert.ok((content as string).length < 8_100);
 });
 
 test("filesystem tool metadata marks skills reads as internal instructions", () => {

@@ -7,7 +7,8 @@ import {
   SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
 } from "@sourceweft/contracts";
 
-export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
+// The job name lives in modules/content/queue.ts, which is what actually
+// enqueues; a second copy here had no readers and could only drift.
 export const CHAT_RUN_STREAM_TTL_SECONDS = 24 * 60 * 60;
 
 export function isDurableChatRunKey(value: string | undefined) {

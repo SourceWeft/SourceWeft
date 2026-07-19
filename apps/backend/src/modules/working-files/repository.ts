@@ -151,7 +151,18 @@ export async function upsertWorkingFileRecord(input: {
     .returning();
 
   if (!row) {
-    throw new ContentError(500, "WORKING_FILE_UPSERT_FAILED", "Failed to upsert working file", { teamId: input.teamId, workspaceId: input.workspaceId, threadId: input.threadId });
+    throw new ContentError(
+      500,
+      "WORKING_FILE_UPSERT_FAILED",
+      "Failed to upsert working file",
+      {
+        details: {
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          threadId: input.threadId,
+        },
+      },
+    );
   }
 
   return mapWorkingFile(row);
@@ -181,7 +192,18 @@ export async function touchWorkingFileRecord(input: {
       )
       .returning();
     if (!row) {
-      throw new ContentError(500, "WORKING_FILE_TOUCH_FAILED", "Failed to touch working file", { teamId: input.teamId, workspaceId: input.workspaceId, threadId: input.threadId });
+      throw new ContentError(
+        500,
+        "WORKING_FILE_TOUCH_FAILED",
+        "Failed to touch working file",
+        {
+          details: {
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            threadId: input.threadId,
+          },
+        },
+      );
     }
     return mapWorkingFile(row);
   }

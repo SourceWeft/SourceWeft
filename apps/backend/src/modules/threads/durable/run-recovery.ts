@@ -1,0 +1,562 @@
+import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
+import {
+  findActionRunRecordById,
+  updateActionRunRecord,
+} from "../../connectors/repository";
+import { findMcpActionRun, updateMcpActionRun } from "../../mcp/repository";
+import { agentSandboxService } from "../agent/sandbox-service/service";
+import { logger } from "../../../shared/logger";
+import {
+  findChatThreadRunById,
+  finishChatThreadRun,
+  isActiveChatRunStatus,
+} from "./repository";
+import { chatRunStreamManager } from "./stream-manager";
+import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
+import {
+  finalizeTerminalSnapshotTrace,
+  getSnapshotRecord,
+  resolveTerminalStatusFromFinishedSnapshot,
+} from "./snapshot";
+import {
+  getRunApprovalPauseState,
+  isApprovalWaitingRunExpired,
+  isStaleActiveRun,
+  isTerminalRunStatus,
+  shouldCompleteApprovalRunWithoutPendingConfirmations,
+} from "./run-state";
+import {
+  updateAssistantMessageThreadRunMetadata,
+  withAssistantThreadRunMetadata,
+} from "./assistant-message-metadata";
+import {
+  CLIENT_CANCELLED_CODE,
+  CLIENT_CANCELLED_MESSAGE,
+  STALE_CHAT_RUN_CODE,
+  TOOL_APPROVAL_EXPIRED_CODE,
+  TOOL_APPROVAL_EXPIRED_MESSAGE,
+} from "./run-constants";
+
+export async function releaseSandboxLeaseForTerminalRun(
+  run: ChatThreadRunRecord,
+  reason: string,
+) {
+  await agentSandboxService
+    .releaseThreadSandboxLease({
+      context: {
+        teamId: run.teamId,
+        workspaceId: run.workspaceId,
+        threadId: run.threadId,
+        userId: run.userId,
+        messageId: run.assistantMessageId ?? run.userMessageId ?? run.id,
+        runId: run.id,
+      },
+      reason,
+    })
+    .catch((error: unknown) => {
+      logger.warn("Failed to release sandbox lease for terminal chat run", {
+        runId: run.id,
+        threadId: run.threadId,
+        workspaceId: run.workspaceId,
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+}
+
+export async function failRunBeforeMessages(
+  run: ChatThreadRunRecord,
+  error: { code: string; message: string },
+) {
+  const clientErrorMessage = sanitizeClientErrorMessage(error.message);
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({
+      type: "error",
+      code: error.code,
+      error: clientErrorMessage,
+    })}\n\n`,
+  );
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({ type: "finish" })}\n\n`,
+  );
+  return finishChatThreadRun({
+    runId: run.id,
+    teamId: run.teamId,
+    workspaceId: run.workspaceId,
+    status: "failed",
+    assistantMessageId: null,
+    snapshotJson: {
+      ...(run.snapshotJson as ChatRunSnapshot),
+      errorCode: error.code,
+      errorMessage: error.message,
+    },
+    errorCode: error.code,
+    errorMessage: error.message,
+  }).then(async (finished) => {
+    await releaseSandboxLeaseForTerminalRun(
+      finished ?? run,
+      "chat_run_failed_before_messages",
+    );
+    return finished;
+  });
+}
+
+export async function cancelRunBeforeMessages(run: ChatThreadRunRecord) {
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({
+      type: "error",
+      code: CLIENT_CANCELLED_CODE,
+      error: CLIENT_CANCELLED_MESSAGE,
+    })}\n\n`,
+  );
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({ type: "finish" })}\n\n`,
+  );
+  return finishChatThreadRun({
+    runId: run.id,
+    teamId: run.teamId,
+    workspaceId: run.workspaceId,
+    status: "cancelled",
+    assistantMessageId: run.assistantMessageId,
+    snapshotJson: {
+      ...(run.snapshotJson as ChatRunSnapshot),
+      errorCode: CLIENT_CANCELLED_CODE,
+      errorMessage: CLIENT_CANCELLED_MESSAGE,
+    },
+    errorCode: CLIENT_CANCELLED_CODE,
+    errorMessage: CLIENT_CANCELLED_MESSAGE,
+  }).then(async (finished) => {
+    await releaseSandboxLeaseForTerminalRun(
+      finished ?? run,
+      "chat_run_cancelled_before_messages",
+    );
+    return finished;
+  });
+}
+
+export async function forceCancelStoppedRun(
+  run: ChatThreadRunRecord,
+  dependencies: {
+    appendEvent?: typeof chatRunStreamManager.appendEvent;
+    findRunById?: typeof findChatThreadRunById;
+    finishRun?: typeof finishChatThreadRun;
+    updateAssistantMetadata?: typeof updateAssistantMessageThreadRunMetadata;
+  } = {},
+) {
+  if (isTerminalRunStatus(run.status)) {
+    return run;
+  }
+
+  const appendEvent =
+    dependencies.appendEvent ??
+    chatRunStreamManager.appendEvent.bind(chatRunStreamManager);
+  const finishRun = dependencies.finishRun ?? finishChatThreadRun;
+  const findRunById = dependencies.findRunById ?? findChatThreadRunById;
+  const updateAssistantMetadata =
+    dependencies.updateAssistantMetadata ??
+    updateAssistantMessageThreadRunMetadata;
+  const latestBeforeCancel = await findRunById({
+    runId: run.id,
+    teamId: run.teamId,
+    workspaceId: run.workspaceId,
+  });
+  if (isTerminalRunStatus(latestBeforeCancel?.status ?? run.status)) {
+    return latestBeforeCancel ?? run;
+  }
+  const activeRun = latestBeforeCancel ?? run;
+  const cancelledRun = {
+    ...activeRun,
+    status: "cancelled" as const,
+    errorCode: CLIENT_CANCELLED_CODE,
+    errorMessage: CLIENT_CANCELLED_MESSAGE,
+  };
+  const snapshot = withAssistantThreadRunMetadata(
+    finalizeTerminalSnapshotTrace({
+      ...getSnapshotRecord(activeRun),
+      errorCode: CLIENT_CANCELLED_CODE,
+      errorMessage: CLIENT_CANCELLED_MESSAGE,
+    }),
+    cancelledRun,
+  );
+
+  await appendEvent(
+    activeRun.streamKey,
+    `data: ${JSON.stringify({
+      type: "error",
+      code: CLIENT_CANCELLED_CODE,
+      error: CLIENT_CANCELLED_MESSAGE,
+      ...(activeRun.userMessageId
+        ? { userMessageId: activeRun.userMessageId }
+        : {}),
+      ...(activeRun.assistantMessageId
+        ? { messageId: activeRun.assistantMessageId }
+        : {}),
+    })}\n\n`,
+  );
+  await appendEvent(
+    activeRun.streamKey,
+    `data: ${JSON.stringify({ type: "finish" })}\n\n`,
+  );
+
+  const finished =
+    (await finishRun({
+      runId: activeRun.id,
+      teamId: activeRun.teamId,
+      workspaceId: activeRun.workspaceId,
+      status: "cancelled",
+      assistantMessageId: activeRun.assistantMessageId,
+      snapshotJson: snapshot,
+      errorCode: CLIENT_CANCELLED_CODE,
+      errorMessage: CLIENT_CANCELLED_MESSAGE,
+    })) ?? cancelledRun;
+  await releaseSandboxLeaseForTerminalRun(finished, "chat_run_force_cancelled");
+  const latestAfterCancel =
+    (await findRunById({
+      runId: activeRun.id,
+      teamId: activeRun.teamId,
+      workspaceId: activeRun.workspaceId,
+    })) ?? finished;
+  if (latestAfterCancel.status === "cancelled") {
+    await updateAssistantMetadata({
+      run: latestAfterCancel,
+      snapshot,
+      metadata: {
+        isCancelled: true,
+        error: CLIENT_CANCELLED_MESSAGE,
+        errorCode: CLIENT_CANCELLED_CODE,
+      },
+    });
+  }
+  return latestAfterCancel;
+}
+
+async function failStaleActiveRun(run: ChatThreadRunRecord) {
+  return failStaleActiveRunWithDependencies(run);
+}
+
+export async function failStaleActiveRunWithDependencies(
+  run: ChatThreadRunRecord,
+  dependencies: {
+    appendEvent?: typeof chatRunStreamManager.appendEvent;
+    finishRun?: typeof finishChatThreadRun;
+    updateAssistantMetadata?: typeof updateAssistantMessageThreadRunMetadata;
+  } = {},
+) {
+  const appendEvent =
+    dependencies.appendEvent ??
+    chatRunStreamManager.appendEvent.bind(chatRunStreamManager);
+  const finishRun = dependencies.finishRun ?? finishChatThreadRun;
+  const updateAssistantMetadata =
+    dependencies.updateAssistantMetadata ??
+    updateAssistantMessageThreadRunMetadata;
+  const snapshot = getSnapshotRecord(run);
+  const terminalRun = {
+    ...run,
+    status: "failed" as const,
+    errorCode: STALE_CHAT_RUN_CODE,
+    errorMessage: null,
+  };
+  const terminalSnapshot = withAssistantThreadRunMetadata(
+    {
+      ...snapshot,
+      errorCode: STALE_CHAT_RUN_CODE,
+    },
+    terminalRun,
+  );
+  await appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({ type: "finish" })}\n\n`,
+  );
+  const failedRun = await finishRun({
+    runId: run.id,
+    teamId: run.teamId,
+    workspaceId: run.workspaceId,
+    status: "failed",
+    assistantMessageId: run.assistantMessageId,
+    snapshotJson: terminalSnapshot,
+    errorCode: STALE_CHAT_RUN_CODE,
+    errorMessage: null,
+  });
+  await releaseSandboxLeaseForTerminalRun(
+    failedRun ?? terminalRun,
+    "chat_run_stale_failed",
+  );
+  if (run.assistantMessageId) {
+    await updateAssistantMetadata({
+      run: failedRun ?? terminalRun,
+      snapshot: terminalSnapshot,
+    });
+  }
+  return failedRun;
+}
+
+export async function cancelProposedConfirmationActions(
+  run: ChatThreadRunRecord,
+  error: { code: string; message: string },
+) {
+  const confirmationIds = getRunApprovalPauseState(run).confirmationIds;
+  if (confirmationIds.length === 0) {
+    return;
+  }
+
+  const results = await Promise.allSettled(
+    confirmationIds.map(async (confirmationId) => {
+      const connectorAction = await findActionRunRecordById({
+        teamId: run.teamId,
+        workspaceId: run.workspaceId,
+        actionRunId: confirmationId,
+      });
+      if (connectorAction) {
+        if (connectorAction.status === "proposed") {
+          await updateActionRunRecord({
+            teamId: run.teamId,
+            workspaceId: run.workspaceId,
+            connectorId: connectorAction.connectorId,
+            actionRunId: confirmationId,
+            status: "canceled",
+            errorCode: error.code,
+            errorMessage: error.message,
+          });
+        }
+        return;
+      }
+
+      const mcpAction = await findMcpActionRun({
+        teamId: run.teamId,
+        workspaceId: run.workspaceId,
+        actionRunId: confirmationId,
+      });
+      if (mcpAction?.status === "proposed") {
+        await updateMcpActionRun({
+          teamId: run.teamId,
+          workspaceId: run.workspaceId,
+          actionRunId: confirmationId,
+          status: "canceled",
+          errorCode: error.code,
+          errorMessage: error.message,
+        });
+      }
+    }),
+  );
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    logger.warn("Failed to cancel proposed confirmation actions", {
+      runId: run.id,
+      confirmationCount: confirmationIds.length,
+      failureCount: failures.length,
+    });
+  }
+}
+
+export async function expireApprovalWaitingRun(run: ChatThreadRunRecord) {
+  const expiredRun = {
+    ...run,
+    status: "cancelled" as const,
+    errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+    errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
+  };
+  const snapshot = withAssistantThreadRunMetadata(
+    finalizeTerminalSnapshotTrace({
+      ...getSnapshotRecord(run),
+      errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+      errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
+    }),
+    expiredRun,
+  );
+  await cancelProposedConfirmationActions(run, {
+    code: TOOL_APPROVAL_EXPIRED_CODE,
+    message: TOOL_APPROVAL_EXPIRED_MESSAGE,
+  });
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({
+      type: "error",
+      code: TOOL_APPROVAL_EXPIRED_CODE,
+      error: TOOL_APPROVAL_EXPIRED_MESSAGE,
+      ...(run.userMessageId ? { userMessageId: run.userMessageId } : {}),
+      ...(run.assistantMessageId ? { messageId: run.assistantMessageId } : {}),
+    })}\n\n`,
+  );
+  await chatRunStreamManager.appendEvent(
+    run.streamKey,
+    `data: ${JSON.stringify({ type: "finish" })}\n\n`,
+  );
+  const finished =
+    (await finishChatThreadRun({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      status: "cancelled",
+      assistantMessageId: run.assistantMessageId,
+      snapshotJson: snapshot,
+      errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+      errorMessage: TOOL_APPROVAL_EXPIRED_MESSAGE,
+    })) ?? expiredRun;
+  await releaseSandboxLeaseForTerminalRun(finished, "tool_approval_expired");
+  await updateAssistantMessageThreadRunMetadata({
+    run: finished,
+    snapshot,
+    metadata: {
+      isCancelled: true,
+      error: TOOL_APPROVAL_EXPIRED_MESSAGE,
+      errorCode: TOOL_APPROVAL_EXPIRED_CODE,
+    },
+  });
+  return (
+    (await findChatThreadRunById({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+    })) ?? finished
+  );
+}
+
+export async function expireRunIfApprovalExpired(run: ChatThreadRunRecord) {
+  if (!isApprovalWaitingRunExpired(run)) {
+    return run;
+  }
+  return expireApprovalWaitingRun(run);
+}
+
+export async function completeApprovalRunIfNoPendingConfirmations(
+  run: ChatThreadRunRecord,
+) {
+  if (!shouldCompleteApprovalRunWithoutPendingConfirmations(run)) {
+    return run;
+  }
+  const snapshot = getSnapshotRecord(run);
+  const completedRun = {
+    ...run,
+    status: "completed" as const,
+  };
+  const finished =
+    (await finishChatThreadRun({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      status: "completed",
+      assistantMessageId: run.assistantMessageId,
+      snapshotJson: withAssistantThreadRunMetadata(snapshot, completedRun),
+    })) ?? completedRun;
+  await updateAssistantMessageThreadRunMetadata({
+    run: finished,
+  });
+  return (
+    (await findChatThreadRunById({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+    })) ?? finished
+  );
+}
+
+export async function finishRunIfSnapshotIsTerminal(run: ChatThreadRunRecord) {
+  return finishRunIfSnapshotIsTerminalWithDependencies(run);
+}
+
+export async function finishRunIfSnapshotIsTerminalWithDependencies(
+  run: ChatThreadRunRecord,
+  dependencies: {
+    findRunById?: typeof findChatThreadRunById;
+    finishRun?: typeof finishChatThreadRun;
+    updateAssistantMetadata?: typeof updateAssistantMessageThreadRunMetadata;
+  } = {},
+) {
+  if (
+    !isActiveChatRunStatus(run.status) ||
+    run.status === "waiting_for_approval"
+  ) {
+    return run;
+  }
+  const snapshot = getSnapshotRecord(run);
+  const terminalStatus = resolveTerminalStatusFromFinishedSnapshot(snapshot);
+  if (!terminalStatus) {
+    return run;
+  }
+
+  const terminalRun = {
+    ...run,
+    status: terminalStatus,
+    errorCode:
+      terminalStatus === "failed"
+        ? (run.errorCode ?? "CHAT_RUN_FAILED")
+        : terminalStatus === "cancelled"
+          ? (run.errorCode ?? CLIENT_CANCELLED_CODE)
+          : run.errorCode,
+    errorMessage:
+      terminalStatus === "cancelled"
+        ? (run.errorMessage ?? CLIENT_CANCELLED_MESSAGE)
+        : run.errorMessage,
+  };
+  const finishRun = dependencies.finishRun ?? finishChatThreadRun;
+  const findRunById = dependencies.findRunById ?? findChatThreadRunById;
+  const updateAssistantMetadata =
+    dependencies.updateAssistantMetadata ??
+    updateAssistantMessageThreadRunMetadata;
+  const finished =
+    (await finishRun({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+      status: terminalStatus,
+      assistantMessageId: run.assistantMessageId,
+      snapshotJson: withAssistantThreadRunMetadata(
+        finalizeTerminalSnapshotTrace(snapshot),
+        terminalRun,
+      ),
+      errorCode: terminalRun.errorCode,
+      errorMessage: terminalRun.errorMessage,
+    })) ?? terminalRun;
+  if (terminalStatus === "failed" || terminalStatus === "cancelled") {
+    await releaseSandboxLeaseForTerminalRun(
+      finished,
+      `chat_run_snapshot_${terminalStatus}`,
+    );
+  }
+  await updateAssistantMetadata({
+    run: finished,
+    snapshot: withAssistantThreadRunMetadata(
+      finalizeTerminalSnapshotTrace(snapshot),
+      terminalRun,
+    ),
+    metadata:
+      terminalStatus === "cancelled"
+        ? {
+            isCancelled: true,
+            error: terminalRun.errorMessage ?? CLIENT_CANCELLED_MESSAGE,
+            errorCode: terminalRun.errorCode ?? CLIENT_CANCELLED_CODE,
+          }
+        : undefined,
+  });
+  return (
+    (await findRunById({
+      runId: run.id,
+      teamId: run.teamId,
+      workspaceId: run.workspaceId,
+    })) ?? finished
+  );
+}
+
+export async function failRunIfStale(run: ChatThreadRunRecord) {
+  run = await expireRunIfApprovalExpired(run);
+  run = await completeApprovalRunIfNoPendingConfirmations(run);
+  run = await finishRunIfSnapshotIsTerminal(run);
+  if (!isStaleActiveRun(run)) {
+    return run;
+  }
+
+  if (run.status === "queued" && !run.jobId) {
+    return (
+      (await failRunBeforeMessages(run, {
+        code: "CHAT_RUN_START_FAILED",
+        message: "Previous chat run failed before it started.",
+      })) ?? run
+    );
+  }
+
+  return (await failStaleActiveRun(run)) ?? run;
+}

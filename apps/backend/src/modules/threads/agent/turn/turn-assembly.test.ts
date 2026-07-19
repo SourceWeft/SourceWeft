@@ -14,6 +14,14 @@ import {
   filesystemMountsForPrompt,
 } from "./turn-assembly";
 
+const SANDBOX_PATH_POLICY_STUB = {
+  workspaceRoot: "/workspace",
+  defaultCwd: "/workspace",
+  prepareTargetRoots: ["/workspace/input", "/workspace"],
+  collectSourceRoots: ["/workspace/output", "/workspace"],
+  readWriteRoots: ["/workspace"],
+} as const;
+
 const originalSandboxConfig = structuredClone(config.sandbox);
 
 const filesystemBackend = {
@@ -190,6 +198,7 @@ test("agent backend routes VFS paths while execute stays on sandbox default", as
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
       buildRuntimePrompt: () => "",
+      pathPolicy: SANDBOX_PATH_POLICY_STUB,
     },
   });
 
@@ -238,6 +247,7 @@ test("agent backend factory passes runtime tool call id to sandbox execute", asy
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
       buildRuntimePrompt: () => "",
+      pathPolicy: SANDBOX_PATH_POLICY_STUB,
     },
   });
   const backend = await factory({
@@ -303,6 +313,7 @@ Read this before creating slides.`;
       interruptOn: {},
       downloadFile: async () => Buffer.from(""),
       buildRuntimePrompt: () => "",
+      pathPolicy: SANDBOX_PATH_POLICY_STUB,
     },
   });
 

@@ -40,7 +40,46 @@ test("renderSkillCommandWorkflow renders manifest workflow metadata", () => {
   );
 });
 
-test("renderToolCommandWorkflow falls back to tool_call for unknown artifact types", () => {
+test("renderToolCommandWorkflow keeps the artifact criterion the manifest declared", () => {
+  vi.spyOn(agentToolRegistry, "getAgentToolSlashCommand").mockReturnValue({
+    displayName: "Build mindmap",
+    enabled: true,
+    supportsCommand: true,
+  });
+
+  const workflow = renderToolCommandWorkflow({
+    arguments: "map the quarterly report",
+    canonicalName: "/mindmap",
+    displayName: "Mindmap",
+    toolName: "generate_mindmap",
+    workflow: {
+      execution: "agent",
+      promptIntro: "Build a mindmap artifact.",
+      defaultTools: ["generate_mindmap"],
+      permissionOverrides: { generate_mindmap: "allow" },
+      successCriteria: {
+        kind: "artifact",
+        // Not one of image | slides | video_presentation: the manifest declaration
+        // is authoritative, so this must stay an artifact criterion.
+        artifactType: "mindmap",
+        toolName: "generate_mindmap",
+      },
+      additionalPromptLines: [],
+    },
+  });
+
+  assert.deepEqual(workflow?.successCriteria, {
+    kind: "artifact",
+    artifactType: "mindmap",
+    toolName: "generate_mindmap",
+  });
+  assert.match(
+    workflow?.renderedPrompt ?? "",
+    /Success criteria: create a mindmap artifact using generate_mindmap\./,
+  );
+});
+
+test("renderToolCommandWorkflow keeps a non-artifact criterion as tool_call", () => {
   vi.spyOn(agentToolRegistry, "getAgentToolSlashCommand").mockReturnValue({
     displayName: "Find Notion pages",
     enabled: true,
@@ -58,8 +97,7 @@ test("renderToolCommandWorkflow falls back to tool_call for unknown artifact typ
       defaultTools: ["search_notion_pages"],
       permissionOverrides: { search_notion_pages: "allow" },
       successCriteria: {
-        kind: "artifact",
-        artifactType: "unknown_artifact",
+        kind: "tool_call",
         toolName: "search_notion_pages",
       },
       additionalPromptLines: [],
@@ -69,6 +107,51 @@ test("renderToolCommandWorkflow falls back to tool_call for unknown artifact typ
   assert.deepEqual(workflow?.successCriteria, {
     kind: "tool_call",
     toolName: "search_notion_pages",
+  });
+});
+
+test("renderSkillCommandWorkflow keeps a none criterion as none", () => {
+  const workflow = renderSkillCommandWorkflow({
+    arguments: "summarize the meeting",
+    canonicalName: "/meeting-summary",
+    displayName: "Meeting Summary",
+    skillSlug: "meeting-summary",
+    workflow: {
+      execution: "agent",
+      defaultTools: [],
+      permissionOverrides: {},
+      successCriteria: { kind: "none" },
+      additionalPromptLines: [],
+    },
+  });
+
+  assert.deepEqual(workflow?.successCriteria, { kind: "none" });
+});
+
+test("renderSkillCommandWorkflow keeps slides artifact success criteria", () => {
+  const workflow = renderSkillCommandWorkflow({
+    arguments: "build a deck about Q3",
+    canonicalName: "/ppt-deck",
+    displayName: "PPT Deck",
+    skillSlug: "ppt-deck",
+    workflow: {
+      execution: "agent",
+      promptIntro: "Create a slides artifact.",
+      defaultTools: ["publish_artifact"],
+      permissionOverrides: { publish_artifact: "allow" },
+      successCriteria: {
+        kind: "artifact",
+        artifactType: "slides",
+        toolName: "publish_artifact",
+      },
+      additionalPromptLines: [],
+    },
+  });
+
+  assert.deepEqual(workflow?.successCriteria, {
+    kind: "artifact",
+    artifactType: "slides",
+    toolName: "publish_artifact",
   });
 });
 

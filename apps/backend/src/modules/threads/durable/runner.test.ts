@@ -757,6 +757,10 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     },
   );
 
+  // Uniform: every artifact tool reconstructs a tool block (progress) plus a
+  // terminal artifact block (result); a non-artifact tool gets only a tool
+  // block. The deck artifact block appears as soon as the tool is seen, not
+  // gated on publication.
   assert.deepEqual(searchSnapshotBeforePublish.renderBlocks, [
     {
       id: "text-1",
@@ -764,10 +768,26 @@ test("run snapshots preserve generated artifact render blocks generically", () =
       text: "Here is the artifact:",
     },
     {
-      id: "generated-image-image-tool",
-      placement: "terminal",
-      type: "generated_image",
+      id: "tool-image-tool",
+      type: "tool",
       toolCallId: "image-tool",
+    },
+    {
+      id: "artifact-image-tool",
+      placement: "terminal",
+      type: "artifact",
+      toolCallId: "image-tool",
+    },
+    {
+      id: "artifact-pptx-tool",
+      placement: "terminal",
+      type: "artifact",
+      toolCallId: "pptx-tool",
+    },
+    {
+      id: "tool-pptx-tool",
+      type: "tool",
+      toolCallId: "pptx-tool",
     },
     {
       id: "tool-search-tool",
@@ -807,6 +827,8 @@ test("run snapshots preserve generated artifact render blocks generically", () =
     },
   );
 
+  // The deck's blocks already exist from when the tool first appeared, so its
+  // completion adds nothing — the artifact block was never publication-gated.
   assert.deepEqual(searchSnapshot.renderBlocks, [
     {
       id: "text-1",
@@ -814,21 +836,31 @@ test("run snapshots preserve generated artifact render blocks generically", () =
       text: "Here is the artifact:",
     },
     {
-      id: "generated-image-image-tool",
-      placement: "terminal",
-      type: "generated_image",
+      id: "tool-image-tool",
+      type: "tool",
       toolCallId: "image-tool",
+    },
+    {
+      id: "artifact-image-tool",
+      placement: "terminal",
+      type: "artifact",
+      toolCallId: "image-tool",
+    },
+    {
+      id: "artifact-pptx-tool",
+      placement: "terminal",
+      type: "artifact",
+      toolCallId: "pptx-tool",
+    },
+    {
+      id: "tool-pptx-tool",
+      type: "tool",
+      toolCallId: "pptx-tool",
     },
     {
       id: "tool-search-tool",
       type: "tool",
       toolCallId: "search-tool",
-    },
-    {
-      id: "generated-presentation-pptx-tool",
-      placement: "terminal",
-      type: "generated_presentation",
-      toolCallId: "pptx-tool",
     },
   ]);
   assert.deepEqual(searchSnapshot.toolCalls, [

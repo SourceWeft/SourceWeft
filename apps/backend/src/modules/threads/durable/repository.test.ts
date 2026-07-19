@@ -47,7 +47,13 @@ test("markChatThreadRunQueued records the job without reverting terminal status"
     userId: "user-1",
     idempotencyKey: `sourceweft-web-run:${randomUUID()}`,
     mode: "send",
-    requestJson: {},
+    requestJson: {
+      mode: "send",
+      workspaceId,
+      threadId,
+      userId: "user-1",
+      content: "hello",
+    },
   });
   assert.ok(run);
 

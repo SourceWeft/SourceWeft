@@ -2635,6 +2635,34 @@ test("final assistant text stays empty for tool-only successful turns", () => {
   );
 });
 
+test("final assistant text uses async video presentation tool content", () => {
+  assert.equal(
+    testExports.resolveFinalAssistantText({
+      assistantContent: "",
+      assistantContentFromUpdates: null,
+      hasCompletedToolOutput: true,
+      toolCalls: [
+        {
+          id: "call-1",
+          sequence: 0,
+          tool: "generate_video_presentation",
+          input: {},
+          output: {
+            type: "video_presentation_processing_result",
+            content:
+              "Video presentation project is still being generated: demo.mp4",
+            status: "running",
+          },
+          status: "completed",
+          error: null,
+          latencyMs: 120,
+        },
+      ],
+    }),
+    "Video presentation project is still being generated: demo.mp4",
+  );
+});
+
 test("final assistant text preserves natural artifact summaries", () => {
   assert.equal(
     testExports.resolveFinalAssistantText({
@@ -2701,10 +2729,12 @@ test("suppresses leaked presentation publisher outputs without suppressing natur
 });
 
 test("presentation publishing trace step stays active before tool execution", () => {
-  const step = testExports.buildPresentationGenerationStep({
+  const step = testExports.buildArtifactGenerationStep({
     phase: "planning",
+    toolName: "publish_artifact",
   });
 
+  assert.ok(step);
   assert.equal(step.id, "presentation-generation");
   assert.equal(step.title, "Publishing presentation");
   assert.equal(step.status, "in_progress");
@@ -2712,12 +2742,14 @@ test("presentation publishing trace step stays active before tool execution", ()
 });
 
 test("presentation publishing trace step records completed artifacts", () => {
-  const step = testExports.buildPresentationGenerationStep({
+  const step = testExports.buildArtifactGenerationStep({
     latencyMs: 1234,
     phase: "completed",
     toolCallId: "call-1",
+    toolName: "publish_artifact",
   });
 
+  assert.ok(step);
   assert.equal(step.title, "Published presentation");
   assert.equal(step.status, "completed");
   assert.deepEqual(step.items, ["Presentation artifact created"]);
@@ -2726,11 +2758,13 @@ test("presentation publishing trace step records completed artifacts", () => {
 });
 
 test("presentation publishing trace step records needs_content repair state", () => {
-  const step = testExports.buildPresentationGenerationStep({
+  const step = testExports.buildArtifactGenerationStep({
     phase: "repairing",
     toolCallId: "call-1",
+    toolName: "publish_artifact",
   });
 
+  assert.ok(step);
   assert.equal(step.title, "Publishing presentation");
   assert.equal(step.status, "in_progress");
   assert.deepEqual(step.items, ["Adding explicit slide content"]);
@@ -2745,6 +2779,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   const planning = testExports.buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
+      tool: "publish_artifact",
       toolCallId: "call-1",
       stage: "planning",
       title: "Launch deck",
@@ -2754,6 +2789,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   const generating = testExports.buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
+      tool: "publish_artifact",
       toolCallId: "call-1",
       stage: "generating",
       slideCount: 8,
@@ -2763,6 +2799,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   const saving = testExports.buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
+      tool: "publish_artifact",
       toolCallId: "call-1",
       stage: "saving",
       fileName: "launch-deck.html",
@@ -2772,6 +2809,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
   const ready = testExports.buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
+      tool: "publish_artifact",
       toolCallId: "call-1",
       stage: "ready",
       artifactId: "artifact-1",
@@ -2832,11 +2870,36 @@ test("video presentation progress events map to background build steps", () => {
   assert.equal(ready?.metadata?.artifactType, "video_presentation");
 });
 
+test("video presentation retry progress events include retry error context", () => {
+  const progressEvent = normalizeGeneratedPresentationProgressEvent({
+    type: "generate_video_presentation_progress",
+    toolCallId: "call-video",
+    tool: "generate_video_presentation",
+    stage: "planning_storyboard",
+    retrying: true,
+    error_message:
+      "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED: Storyboard provider call failed: The operation was aborted due to timeout",
+  });
+  assert.ok(progressEvent);
+
+  const retrying = testExports.buildPresentationProgressThinkingStep({
+    data: progressEvent.data,
+    toolCallId: "call-video",
+  });
+
+  assert.deepEqual(retrying?.items, ["Retrying video generation"]);
+  assert.match(
+    retrying?.description ?? "",
+    /Storyboard provider call failed/u,
+  );
+});
+
 test("unknown presentation progress stages do not create CoT steps", () => {
   assert.equal(
     testExports.buildPresentationProgressThinkingStep({
       data: {
         type: "publish_artifact_progress",
+      tool: "publish_artifact",
         toolCallId: "call-1",
         stage: "internal_layout_pass",
       },
@@ -2931,6 +2994,7 @@ test("custom stream handler emits generated artifact progress events", async () 
   const pptxEvents = await collectCustomStreamEvents({
     payload: {
       type: "publish_artifact_progress",
+      tool: "publish_artifact",
       toolCallId: "pptx-call",
       stage: "saving",
     },
@@ -3673,7 +3737,7 @@ test("builds generated image render blocks in event order", () => {
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText("Intro\n");
-  builder.appendGeneratedImage("tool-1");
+  builder.appendArtifact("tool-1");
   builder.appendText("\nDetails");
 
   assert.deepEqual(
@@ -3688,9 +3752,9 @@ test("builds generated image render blocks in event order", () => {
         text: "Intro\n",
       },
       {
-        id: "generated-image-tool-1",
+        id: "artifact-tool-1",
         placement: "terminal",
-        type: "generated_image",
+        type: "artifact",
         toolCallId: "tool-1",
       },
       {
@@ -3738,7 +3802,7 @@ test("builds generated presentation render blocks in event order", () => {
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText("Intro\n");
-  builder.appendGeneratedPresentation("tool-1");
+  builder.appendArtifact("tool-1");
   builder.appendText("\nHere is the deck summary.");
 
   assert.deepEqual(
@@ -3753,9 +3817,9 @@ test("builds generated presentation render blocks in event order", () => {
         text: "Intro\n",
       },
       {
-        id: "generated-presentation-tool-1",
+        id: "artifact-tool-1",
         placement: "terminal",
-        type: "generated_presentation",
+        type: "artifact",
         toolCallId: "tool-1",
       },
       {
@@ -3771,7 +3835,7 @@ test("can clear leaked planning text while preserving generated artifact blocks"
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText('{"schemaVersion":1,"slides":[]}');
-  builder.appendGeneratedPresentation("tool-1");
+  builder.appendArtifact("tool-1");
   builder.replaceText("");
 
   assert.deepEqual(
@@ -3781,9 +3845,9 @@ test("can clear leaked planning text while preserving generated artifact blocks"
     }),
     [
       {
-        id: "generated-presentation-tool-1",
+        id: "artifact-tool-1",
         placement: "terminal",
-        type: "generated_presentation",
+        type: "artifact",
         toolCallId: "tool-1",
       },
     ],
@@ -3794,7 +3858,7 @@ test("preserves render blocks when final text diverges", () => {
   const builder = testExports.createMessageRenderBlockBuilder();
 
   builder.appendText("Before citation [citation:missing]");
-  builder.appendGeneratedImage("tool-1");
+  builder.appendArtifact("tool-1");
 
   assert.deepEqual(
     testExports.finalizeMessageRenderBlocks({
@@ -3808,9 +3872,9 @@ test("preserves render blocks when final text diverges", () => {
         text: "Before citation [citation:missing]",
       },
       {
-        id: "generated-image-tool-1",
+        id: "artifact-tool-1",
         placement: "terminal",
-        type: "generated_image",
+        type: "artifact",
         toolCallId: "tool-1",
       },
     ],
