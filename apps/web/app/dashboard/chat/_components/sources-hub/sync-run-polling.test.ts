@@ -1,14 +1,51 @@
 import { describe, expect, it } from "vitest";
 import {
   ACTIVE_SYNC_RUN_POLL_MS,
+  type ActiveConnectorSyncRun,
   HIDDEN_SYNC_RUN_POLL_MS,
   IDLE_SYNC_RUN_POLL_MS,
   MAX_SYNC_RUN_ERROR_POLL_MS,
+  SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS,
   SYNC_RUN_COOLDOWN_POLL_MS,
   getConnectorSyncRunErrorDelay,
   getConnectorSyncRunPollDecision,
+  getIncrementalUpdatedAfter,
+  planConnectorSyncRunResult,
   selectConnectorSyncRunLeader,
 } from "./sync-run-polling";
+
+function tracked(
+  overrides: Partial<ActiveConnectorSyncRun> & { connectorId: string },
+): ActiveConnectorSyncRun {
+  return {
+    discoveredCount: 0,
+    indexedCount: 0,
+    failedCount: 0,
+    lastSourceUpdatedAt: null,
+    hasFinalRefreshed: false,
+    ...overrides,
+  };
+}
+
+function run(
+  id: string,
+  connectorId: string | null,
+  counts: Partial<
+    Pick<
+      ActiveConnectorSyncRun,
+      "discoveredCount" | "indexedCount" | "failedCount"
+    >
+  > = {},
+) {
+  return {
+    id,
+    connectorId,
+    discoveredCount: 0,
+    indexedCount: 0,
+    failedCount: 0,
+    ...counts,
+  };
+}
 
 describe("connector sync run polling", () => {
   it("uses active cadence while active runs are known", () => {
@@ -86,5 +123,123 @@ describe("connector sync run polling", () => {
         12_000,
       ),
     ).toBe("tab-b");
+  });
+});
+
+describe("getIncrementalUpdatedAfter", () => {
+  it("returns undefined when there is no watermark", () => {
+    expect(getIncrementalUpdatedAfter(null)).toBeUndefined();
+  });
+
+  it("subtracts the overlap window from a valid timestamp", () => {
+    const at = "2024-01-01T00:00:10.000Z";
+    expect(getIncrementalUpdatedAfter(at)).toBe(
+      new Date(
+        Date.parse(at) - SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS,
+      ).toISOString(),
+    );
+  });
+
+  it("passes through an unparseable value unchanged", () => {
+    expect(getIncrementalUpdatedAfter("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("planConnectorSyncRunResult", () => {
+  it("registers a new active run and requests a first incremental fetch", () => {
+    const plan = planConnectorSyncRunResult(
+      [run("r1", "c1", { discoveredCount: 3 })],
+      new Map(),
+    );
+    expect(plan.nextTracked.get("r1")).toMatchObject({
+      connectorId: "c1",
+      discoveredCount: 3,
+    });
+    expect(plan.incrementalTargets).toEqual([
+      { runId: "r1", connectorId: "c1", updatedAfter: undefined },
+    ]);
+    expect(plan.completedRunIds).toEqual([]);
+    expect(plan.needsCooldownConfirmation).toBe(false);
+  });
+
+  it("skips runs with unchanged counts once a watermark exists", () => {
+    const plan = planConnectorSyncRunResult(
+      [run("r1", "c1", { discoveredCount: 3 })],
+      new Map([
+        [
+          "r1",
+          tracked({
+            connectorId: "c1",
+            discoveredCount: 3,
+            lastSourceUpdatedAt: "2024-01-01T00:00:00.000Z",
+          }),
+        ],
+      ]),
+    );
+    expect(plan.incrementalTargets).toEqual([]);
+  });
+
+  it("re-fetches (with overlap) when counts change", () => {
+    const plan = planConnectorSyncRunResult(
+      [run("r1", "c1", { indexedCount: 5 })],
+      new Map([
+        [
+          "r1",
+          tracked({
+            connectorId: "c1",
+            indexedCount: 2,
+            lastSourceUpdatedAt: "2024-01-01T00:00:10.000Z",
+          }),
+        ],
+      ]),
+    );
+    expect(plan.incrementalTargets).toEqual([
+      {
+        runId: "r1",
+        connectorId: "c1",
+        updatedAfter: getIncrementalUpdatedAfter("2024-01-01T00:00:10.000Z"),
+      },
+    ]);
+  });
+
+  it("ignores runs without a connector id", () => {
+    const plan = planConnectorSyncRunResult([run("r1", null)], new Map());
+    expect(plan.nextTracked.size).toBe(0);
+    expect(plan.incrementalTargets).toEqual([]);
+  });
+
+  it("finalises a completed run and marks its connector for a full refresh", () => {
+    const plan = planConnectorSyncRunResult(
+      [],
+      new Map([["r1", tracked({ connectorId: "c1" })]]),
+    );
+    expect(plan.completedRunIds).toEqual(["r1"]);
+    expect(plan.finalRefreshConnectorIds).toEqual(["c1"]);
+    expect(plan.needsCooldownConfirmation).toBe(true);
+  });
+
+  it("does not final-refresh a connector that still has an active run", () => {
+    const plan = planConnectorSyncRunResult(
+      [run("r2", "c1")],
+      new Map([
+        ["r1", tracked({ connectorId: "c1" })],
+        ["r2", tracked({ connectorId: "c1" })],
+      ]),
+    );
+    expect(plan.completedRunIds).toEqual(["r1"]);
+    expect(plan.finalRefreshConnectorIds).toEqual([]);
+    // Non-empty poll result never triggers cooldown confirmation.
+    expect(plan.needsCooldownConfirmation).toBe(false);
+  });
+
+  it("excludes already-finalised runs from completion", () => {
+    const plan = planConnectorSyncRunResult(
+      [],
+      new Map([
+        ["r1", tracked({ connectorId: "c1", hasFinalRefreshed: true })],
+      ]),
+    );
+    expect(plan.completedRunIds).toEqual([]);
+    expect(plan.needsCooldownConfirmation).toBe(false);
   });
 });
