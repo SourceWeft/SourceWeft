@@ -98,6 +98,21 @@ importers:
       '@sourceweft/builtin-retrieval':
         specifier: workspace:*
         version: link:../../packages/builtin-retrieval
+      '@sourceweft/builtin-skill-feynman':
+        specifier: workspace:*
+        version: link:../../packages/builtin-skill-feynman
+      '@sourceweft/builtin-skill-image-generate':
+        specifier: workspace:*
+        version: link:../../packages/builtin-skill-image-generate
+      '@sourceweft/builtin-skill-meeting-summary':
+        specifier: workspace:*
+        version: link:../../packages/builtin-skill-meeting-summary
+      '@sourceweft/builtin-skill-ppt-deck':
+        specifier: workspace:*
+        version: link:../../packages/builtin-skill-ppt-deck
+      '@sourceweft/builtin-skill-video-presentation':
+        specifier: workspace:*
+        version: link:../../packages/builtin-skill-video-presentation
       '@sourceweft/builtin-tool-generate-image':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-generate-image
@@ -430,6 +445,9 @@ importers:
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
+      '@sourceweft/builtin-tool-video-presentation':
+        specifier: workspace:*
+        version: link:../../packages/builtin-tool-video-presentation
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -18442,7 +18460,7 @@ snapshots:
       jsonwebtoken: 9.0.3
       load-esm: 1.0.3
       mime-types: 2.1.35
-      retry-axios: 2.6.0(axios@1.15.0(debug@4.4.3))
+      retry-axios: 2.6.0(axios@1.15.0)
       tough-cookie: 4.1.4
     transitivePeerDependencies:
       - supports-color
@@ -20982,7 +21000,7 @@ snapshots:
       onetime: 7.0.0
       signal-exit: 4.1.0
 
-  retry-axios@2.6.0(axios@1.15.0(debug@4.4.3)):
+  retry-axios@2.6.0(axios@1.15.0):
     dependencies:
       axios: 1.15.0(debug@4.4.3)
 

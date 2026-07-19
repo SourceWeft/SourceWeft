@@ -35,7 +35,11 @@ import {
   ASSISTANT_ACTIVITY_LABEL_CLASS,
   ASSISTANT_ACTIVITY_ROW_CLASS,
 } from "./assistant-activity-layout";
-import { resolveAssistantToolCardDefaultOpen } from "./assistant-tool-card-state";
+import {
+  resolveAssistantToolCardDefaultOpen,
+  TOOL_STATUS_LABELS,
+} from "./assistant-tool-card-state";
+import type { ToolStatusKey } from "./assistant-tool-card-state";
 import { compactText, getToolOutputContent } from "./message-assets";
 import {
   getResolvedToolConfirmationMessage,
@@ -71,13 +75,13 @@ import type {
   ToolConfirmationResolution,
 } from "./types";
 
-function getStatusLabel(input: {
+function getStatusKey(input: {
   artifactSnapshot?: ArtifactStatusSnapshot;
   confirmationResolution?: ToolConfirmationResolution | null;
   toolCall: ToolCallRecord;
-}) {
+}): ToolStatusKey {
   if (input.toolCall.approvalState === "rejected") {
-    return "Rejected";
+    return "rejected";
   }
   const confirmation = getToolConfirmationOutput(input.toolCall.output);
   if (
@@ -87,7 +91,7 @@ function getStatusLabel(input: {
       confirmationResolution: input.confirmationResolution,
     })
   ) {
-    return "Needs approval";
+    return "needs-approval";
   }
   if (isDeliverableToolName(input.toolCall.tool)) {
     const generationStatus = resolveDeliverableStatus({
@@ -104,20 +108,20 @@ function getStatusLabel(input: {
         toolName: input.toolCall.tool,
       })
     ) {
-      return "Generating";
+      return "generating";
     }
     if (generationStatus === "failed") {
-      return "Failed";
+      return "failed";
     }
   }
   if (input.toolCall.status === "running") {
-    return "Running";
+    return "running";
   }
   if (input.toolCall.status === "approval_requested") {
-    return "Needs approval";
+    return "needs-approval";
   }
   if (input.toolCall.status === "error") {
-    return "Failed";
+    return "failed";
   }
   if (
     isSandboxToolResultFailure({
@@ -125,9 +129,9 @@ function getStatusLabel(input: {
       toolName: input.toolCall.tool,
     })
   ) {
-    return "Failed";
+    return "failed";
   }
-  return "Done";
+  return "done";
 }
 
 function ToolTypeIcon({ toolName }: { toolName: string }) {
@@ -166,24 +170,25 @@ function ToolTypeIcon({ toolName }: { toolName: string }) {
   }
 }
 
-function StatusIcon({ label, toolName }: { label: string; toolName: string }) {
-  if (label === "Running") {
+function StatusIcon({
+  statusKey,
+  toolName,
+}: {
+  statusKey: ToolStatusKey;
+  toolName: string;
+}) {
+  if (statusKey === "running" || statusKey === "generating") {
     return (
       <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
     );
   }
-  if (label === "Generating") {
-    return (
-      <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
-    );
-  }
-  if (label === "Failed") {
+  if (statusKey === "failed") {
     return <AlertTriangle className="size-3.5 text-destructive" />;
   }
-  if (label === "Rejected") {
+  if (statusKey === "rejected") {
     return <AlertTriangle className="size-3.5 text-orange-600" />;
   }
-  if (label === "Needs approval") {
+  if (statusKey === "needs-approval") {
     return <Clock3 className="size-3.5 text-amber-700 dark:text-amber-300" />;
   }
   return <ToolTypeIcon toolName={toolName} />;
@@ -353,11 +358,12 @@ export function AssistantToolCard({
     next.set(videoPresentationArtifactId, videoPresentationSnapshot);
     return next;
   })();
-  const statusLabel = getStatusLabel({
+  const statusKey = getStatusKey({
     artifactSnapshot: videoPresentationSnapshot,
     confirmationResolution,
     toolCall,
   });
+  const statusLabel = TOOL_STATUS_LABELS[statusKey];
   const title = getAssistantToolTitle(
     toolCall,
     toolStep,
@@ -441,7 +447,7 @@ export function AssistantToolCard({
       ? videoPresentationElapsedMs
       : toolCall.latencyMs,
   );
-  const visibleStatus = statusLabel === "Done" ? null : statusLabel;
+  const visibleStatus = statusKey === "done" ? null : statusLabel;
   const resolvedConfirmationMessage = getResolvedToolConfirmationMessage({
     confirmation,
     confirmationResolution,
@@ -450,7 +456,7 @@ export function AssistantToolCard({
   const effectiveDefaultOpen = resolveAssistantToolCardDefaultOpen({
     defaultOpen,
     hasReadFilePreview,
-    statusLabel,
+    statusKey,
   });
   const [isOpen, setIsOpen] = useState(effectiveDefaultOpen);
   const hasDetails =
@@ -483,7 +489,7 @@ export function AssistantToolCard({
         type="button"
       >
         <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
-          <StatusIcon label={statusLabel} toolName={toolCall.tool} />
+          <StatusIcon statusKey={statusKey} toolName={toolCall.tool} />
         </span>
         <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span

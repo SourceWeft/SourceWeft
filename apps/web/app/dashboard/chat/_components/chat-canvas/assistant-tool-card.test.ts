@@ -7,7 +7,7 @@ test("read_file previews do not override explicit collapsed default", () => {
     resolveAssistantToolCardDefaultOpen({
       defaultOpen: false,
       hasReadFilePreview: true,
-      statusLabel: "Done",
+      statusKey: "done",
     }),
     false,
   );
@@ -17,7 +17,7 @@ test("read_file previews auto-open when no explicit default is provided", () => 
   assert.equal(
     resolveAssistantToolCardDefaultOpen({
       hasReadFilePreview: true,
-      statusLabel: "Done",
+      statusKey: "done",
     }),
     true,
   );
@@ -27,7 +27,7 @@ test("failed tool cards auto-open by status", () => {
   assert.equal(
     resolveAssistantToolCardDefaultOpen({
       hasReadFilePreview: false,
-      statusLabel: "Failed",
+      statusKey: "failed",
     }),
     true,
   );

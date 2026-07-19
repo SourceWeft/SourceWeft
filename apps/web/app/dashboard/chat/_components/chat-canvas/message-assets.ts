@@ -154,6 +154,8 @@ export function getMessageImageParts(version: MessageVersion) {
 
   return parts.filter(
     (part): part is ChatMessageImagePart =>
+      typeof part === "object" &&
+      part !== null &&
       part.type === "image" &&
       typeof part.id === "string" &&
       typeof part.url === "string" &&

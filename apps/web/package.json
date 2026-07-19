@@ -42,6 +42,7 @@
     "@remotion/web-renderer": "^4.0.468",
     "@sourceweft/agent-tool-registry": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
+    "@sourceweft/builtin-tool-video-presentation": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/market-contracts": "workspace:*",
     "@sourceweft/market-sdk": "workspace:*",

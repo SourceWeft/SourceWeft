@@ -286,9 +286,6 @@ export async function* handleHitlStreamChunk(input: {
     }
   }
 
-  if (input.billing && input.prepared) {
-  }
-
   const finalText = runtime.assistantContent.trim();
   const finalRenderBlocks = finalizeMessageRenderBlocks({
     blocks: runtime.renderBlocks.list(),

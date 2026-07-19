@@ -516,10 +516,7 @@ function GeneratedPresentationArtifactItem({
             {isPending ? (
               <span>
                 {isVideoPresentation
-                  ? (videoProjectStageLabel ??
-                    (artifactStatus === "running"
-                      ? "Preparing video project..."
-                      : "Preparing video project..."))
+                  ? (videoProjectStageLabel ?? "Preparing video project...")
                   : isArtifactPublisher
                     ? "Publishing presentation..."
                     : "Generating presentation..."}
