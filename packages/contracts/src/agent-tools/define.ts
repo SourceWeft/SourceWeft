@@ -1,3 +1,6 @@
+import type { ArtifactProgressProtocol } from "../artifact-progress";
+import type { AgentToolPresentation } from "./presentation";
+
 export type AgentToolDomain =
   | "filesystem"
   | "retrieval"
@@ -77,6 +80,14 @@ export type AgentToolDefinitionShape = {
   defaultPermission?: AgentToolDefaultPermission;
   riskLevel?: AgentToolRiskLevel;
   slash?: AgentToolSlashCommand;
+  /**
+   * Progress reading for capabilities that produce an artifact through a
+   * background pipeline. Declared here rather than relied on as an excess
+   * property so a typo fails the build instead of silently disabling progress.
+   */
+  artifactProgress?: ArtifactProgressProtocol;
+  /** User-facing titles and summaries owned by the capability. */
+  presentation?: AgentToolPresentation;
 };
 
 export function defineAgentTool<const Tool extends AgentToolDefinitionShape>(

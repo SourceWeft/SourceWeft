@@ -1,9 +1,9 @@
 import { z } from "zod";
+import { listThreadModelCatalogResponseSchema } from "./model-catalog";
 import {
-  listThreadModelCatalogResponseSchema,
   listThreadsResponseSchema,
   threadChatPreferencesSchema,
-} from "./content";
+} from "./threads";
 import { workspaceSchema } from "./workspace";
 
 export const dashboardChatBootstrapWarningSchema = z.object({

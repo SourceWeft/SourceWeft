@@ -51,3 +51,7 @@ export type JobDetailsResponse = z.infer<typeof jobDetailsResponseSchema>;
 export type JobEvent = z.infer<typeof jobEventSchema>;
 export type JobEventsResponse = z.infer<typeof jobEventsResponseSchema>;
 export type CancelJobResponse = z.infer<typeof cancelJobResponseSchema>;
+
+/** Idempotency key prefix for runs started from the web client. */
+export const SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX = "sourceweft-web-run:";
+export const SOURCEWEFT_WEB_RUN_STOP_SUFFIX = ":stop";

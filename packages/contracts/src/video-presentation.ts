@@ -1,4 +1,44 @@
 import { z } from "zod";
+import {
+  videoPresentationPipelineStageIdSchema,
+  videoPresentationPipelineStepSchema,
+} from "./video-presentation-pipeline";
+
+export {
+  VIDEO_PRESENTATION_PIPELINE_STAGE_IDS,
+  VIDEO_PRESENTATION_STAGE_PROGRESS,
+  buildInitialVideoPresentationPipelineSteps,
+  computeVideoPresentationOverallProgress,
+  getVideoPresentationPipelineStepLabel,
+  isPipelineStageCompleted,
+  normalizeWorkerStageToPipelineStage,
+  resolveVideoPresentationPipelineStageProgress,
+  videoPresentationPipelineStageIdSchema,
+  videoPresentationPipelineStepSchema,
+  videoPresentationPipelineStepStatusSchema,
+} from "./video-presentation-pipeline";
+export type {
+  VideoPresentationPipelineStageId,
+  VideoPresentationPipelineStep,
+  VideoPresentationPipelineStepStatus,
+} from "./video-presentation-pipeline";
+
+/**
+ * Stable error codes for the video-presentation generation pipeline. The
+ * worker throws them, artifact records persist them, and clients branch on
+ * them — treat as a wire contract.
+ */
+export const VIDEO_PRESENTATION_ERROR_CODES = {
+  sandboxUnavailable: "VIDEO_PRESENTATION_SANDBOX_UNAVAILABLE",
+  sandboxExecutionFailed: "VIDEO_PRESENTATION_SANDBOX_EXECUTION_FAILED",
+  storyboardGenerationFailed: "VIDEO_PRESENTATION_STORYBOARD_GENERATION_FAILED",
+  themeAssignmentFailed: "VIDEO_PRESENTATION_THEME_ASSIGNMENT_FAILED",
+  invalidPayload: "VIDEO_PRESENTATION_INVALID_PAYLOAD",
+  generationFailed: "VIDEO_PRESENTATION_GENERATION_FAILED",
+} as const;
+
+export type VideoPresentationErrorCode =
+  (typeof VIDEO_PRESENTATION_ERROR_CODES)[keyof typeof VIDEO_PRESENTATION_ERROR_CODES];
 
 export const videoPresentationGenerationStatusSchema = z.enum([
   "pending",
@@ -19,6 +59,7 @@ export const videoPresentationGenerationStageSchema = z.enum([
   "assigning_slide_themes",
   "generating_scene_modules",
   "repairing_scene_modules",
+  "verifying_visual_quality",
   "publishing_video_project",
   "failed",
   "ready",
@@ -92,6 +133,8 @@ export const videoPresentationGenerationSchema = z.object({
   retrying: z.boolean().optional(),
   errorCode: z.string().trim().min(1).max(120).optional(),
   errorMessage: z.string().trim().min(1).max(1000).optional(),
+  checkpointStage: z.string().trim().min(1).max(120).optional(),
+  pipelineSteps: z.array(videoPresentationPipelineStepSchema).optional(),
 });
 
 export const videoPresentationProjectSchema = z.object({
@@ -102,6 +145,10 @@ export const videoPresentationProjectSchema = z.object({
   durationSeconds: z.number().min(0).default(0),
   stylePreset: videoPresentationRenderProfileSchema.shape.stylePreset,
   globalVisualDirection: z.string().trim().min(1).max(1000),
+  // Persisted style directives: without these on the payload, brand/motion
+  // requests die after storyboard planning and never reach scene generation.
+  brand: videoPresentationBrandSchema.optional(),
+  motion: videoPresentationMotionSchema.optional(),
 });
 
 export const videoPresentationAssetRefSchema = z.object({
@@ -118,7 +165,15 @@ export const videoPresentationSlideSchema = z.object({
   backgroundExplanation: z.string().trim().max(1000).optional(),
   sceneIntent: z.string().trim().min(1).max(2000),
   assetRefs: z.array(videoPresentationAssetRefSchema).default([]),
+  assetNeeds: z.array(z.string().trim().min(1).max(80)).max(4).default([]),
 });
+
+/**
+ * Extra on-screen time appended after each slide's narration so speech never
+ * gets clipped by the scene boundary (also absorbs MP3 encoder priming
+ * padding). Shared by the backend worker and the runtime composition.
+ */
+export const VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS = 0.75;
 
 export const videoPresentationAudioTrackSchema = z.object({
   slideNumber: z.number().int().min(1).max(80),
@@ -126,6 +181,7 @@ export const videoPresentationAudioTrackSchema = z.object({
   storageKey: z.string().trim().min(1),
   storageBucket: z.string().trim().min(1).optional(),
   durationSeconds: z.number().min(0),
+  durationSource: z.enum(["measured", "estimated"]).default("estimated"),
   mimeType: z.string().trim().min(1),
   fileName: z.string().trim().min(1),
 });
@@ -138,6 +194,7 @@ export const videoPresentationSceneModuleSchema = z.object({
   durationInFrames: z.number().int().min(1),
   repairAttempts: z.number().int().min(0).max(10).default(0),
   diagnostics: z.array(z.string().trim().min(1).max(1000)).default([]),
+  layoutWarnings: z.array(z.string().trim().min(1).max(1000)).default([]),
   compileStatus: z
     .enum(["pending", "compiled", "repaired", "failed"])
     .default("pending"),
@@ -211,6 +268,11 @@ export const videoPresentationCreateRequestSchema = z.object({
 export const videoPresentationProjectPayloadSchema = z.object({
   schemaVersion: z.literal(2),
   kind: z.literal("video_presentation"),
+  // Idempotency key of the originating tool call. Must survive every worker
+  // payload rewrite: findReusableVideoPresentationArtifactRecord dedupes
+  // retried tool calls by matching payload.requestKey, so dropping it causes
+  // duplicate generations (and duplicate cost) when an agent retries.
+  requestKey: z.string().trim().min(1).max(300).optional(),
   generation: videoPresentationGenerationSchema,
   project: videoPresentationProjectSchema,
   slides: z.array(videoPresentationSlideSchema).min(1).max(40),
