@@ -1,11 +1,23 @@
 import type { LucideIcon } from "lucide-react";
-import type { SourceConnector } from "@sourceweft/sdk";
+import type {
+  ConnectorWebhookConfigResponse,
+  ConnectorWebhookEvent,
+  SourceConnector,
+} from "@sourceweft/sdk";
 import type {
   GlobalIconName,
   GlobalIconTone,
 } from "@sourceweft/ui-web/components/ui/global-icon";
+import { connectorsClient } from "../../../../../../lib/sdk";
 
 export type ConnectorIcon = LucideIcon;
+
+export type ConnectorAccountItem = Awaited<
+  ReturnType<typeof connectorsClient.listAccounts>
+>["items"][number];
+
+export type ConnectorWebhookEventItem = ConnectorWebhookEvent;
+export type ConnectorWebhookConfig = ConnectorWebhookConfigResponse;
 
 export type ConnectorItem = {
   id: string;

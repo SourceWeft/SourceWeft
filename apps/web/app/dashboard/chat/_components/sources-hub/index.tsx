@@ -49,9 +49,7 @@ import {
   HttpClientError,
   type CapabilityCatalogCommand,
   type ListCapabilityCatalogResponse,
-  type ConnectorWebhookEvent,
   type ConnectorActivityItem,
-  type ConnectorWebhookConfigResponse,
   type McpToolSelection,
   type SourceConnector,
 } from "@sourceweft/sdk";
@@ -153,12 +151,15 @@ import {
 } from "./connectors/catalog";
 import { ActivityList } from "./connectors/activity";
 import type {
+  ConnectorAccountItem,
   ConnectorCatalogItem,
   ConnectorCatalogStatus,
   ConnectorCatalogStatusKind,
   ConnectorIcon,
   ConnectorItem,
   ConnectorReadinessState,
+  ConnectorWebhookConfig,
+  ConnectorWebhookEventItem,
 } from "./connectors/types";
 import {
   buildSourceSelectionStateMap,
@@ -301,10 +302,6 @@ function persistSourceTreeExpansion(input: {
   });
 }
 
-type ConnectorAccountItem = Awaited<
-  ReturnType<typeof connectorsClient.listAccounts>
->["items"][number];
-
 const WORKSPACE_CONNECTORS_CACHE_BUCKET = "connectors";
 
 type WorkspaceConnectorsCacheValue = {
@@ -314,8 +311,6 @@ type WorkspaceConnectorsCacheValue = {
   webhookEventsById: Record<string, ConnectorWebhookEventItem[]>;
 };
 
-type ConnectorWebhookEventItem = ConnectorWebhookEvent;
-type ConnectorWebhookConfig = ConnectorWebhookConfigResponse;
 const syncReadinessUiByReason: Record<
   string,
   {
