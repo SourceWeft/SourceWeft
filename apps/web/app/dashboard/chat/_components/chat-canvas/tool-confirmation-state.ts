@@ -11,7 +11,18 @@ import type {
   ToolCallRecord,
   ToolConfirmationResolution,
   VersionedMessageGroup,
+  ArtifactStatusSnapshot,
 } from "./types";
+import {
+  isArtifactSnapshotActive,
+  isToolOutputClaimingInProgress,
+  resolveMessageToolCalls,
+  resolveToolCallArtifactId,
+} from "./artifact-work-state";
+import {
+  isDeliverableGenerationActive,
+  isDeliverableToolName,
+} from "./artifact-progress";
 
 type ToolConfirmationItem = {
   confirmation: ToolConfirmationRequest;
@@ -588,6 +599,8 @@ export function shouldLockComposerForRun(input: {
     | "executing"
     | "waiting_for_approval"
     | "stopping";
+  /** Background tool/artifact work that outlives the stream (e.g. async jobs). */
+  hasActivelyRunningToolWork?: boolean;
   isStreaming: boolean;
   isWaitingForApproval: boolean;
   pendingConfirmationCount: number;
@@ -601,19 +614,41 @@ export function shouldLockComposerForRun(input: {
   ) {
     return true;
   }
+  if (input.hasActivelyRunningToolWork) {
+    return true;
+  }
   return shouldLockComposerForApproval(input);
 }
 
 export function isToolCallActivelyRunning(input: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   resolvedConfirmationIds?: Set<string>;
-  toolCall: Pick<ToolCallRecord, "output" | "status">;
+  toolCall: Pick<ToolCallRecord, "output" | "status" | "tool">;
 }) {
   if (input.toolCall.status === "running") {
     return true;
   }
 
   if (input.toolCall.status !== "approval_requested") {
-    return false;
+    const artifactId = resolveToolCallArtifactId(input.toolCall.output);
+    if (!artifactId) {
+      return false;
+    }
+    const artifactSnapshot = input.artifactStatuses?.get(artifactId);
+    if (isDeliverableToolName(input.toolCall.tool)) {
+      // Fire-and-forget deliverable rows stay "running" forever in message
+      // metadata; generation/snapshot resolution is the only reliable signal.
+      return isDeliverableGenerationActive({
+        artifactSnapshot,
+        toolCallOutput: input.toolCall.output,
+        toolCallStatus: input.toolCall.status,
+        toolName: input.toolCall.tool,
+      });
+    }
+    if (artifactSnapshot) {
+      return isArtifactSnapshotActive(artifactSnapshot);
+    }
+    return isToolOutputClaimingInProgress(input.toolCall.output);
   }
 
   const confirmation = getToolConfirmationOutput(input.toolCall.output);
@@ -622,6 +657,39 @@ export function isToolCallActivelyRunning(input: {
     isPendingToolConfirmation(confirmation) &&
     !(input.resolvedConfirmationIds ?? new Set<string>()).has(confirmation.id)
   );
+}
+
+export function hasActivelyRunningToolWork(input: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
+  messages: Array<{
+    metadata?: Record<string, unknown>;
+    toolCalls?: ToolCallRecord[];
+  }>;
+  resolvedConfirmationIds?: Set<string>;
+}) {
+  for (const message of input.messages) {
+    for (const toolCall of resolveMessageToolCalls(message)) {
+      if (
+        isToolCallActivelyRunning({
+          artifactStatuses: input.artifactStatuses,
+          resolvedConfirmationIds: input.resolvedConfirmationIds,
+          toolCall,
+        })
+      ) {
+        return true;
+      }
+    }
+  }
+
+  if (input.artifactStatuses) {
+    for (const snapshot of input.artifactStatuses.values()) {
+      if (isArtifactSnapshotActive(snapshot)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 export type {

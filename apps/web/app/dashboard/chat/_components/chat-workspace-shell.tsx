@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import {
   Sheet,
   SheetContent,
@@ -13,20 +13,7 @@ import type { ChatHubMode } from "./chat-hub-context";
 import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
 import { SourcesHub } from "./sources-hub";
 import { ArtifactPreviewPanel } from "./sources-hub";
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(false);
-
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
-}
+import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
 
 function HubSlot() {
   const context = useChatHubContext();
@@ -150,8 +137,8 @@ function ChatHubScaffold({
 }) {
   const { sourcesVisible, workspaceId, workspaceName } =
     useDashboardChatState();
-  const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
-  const isPersistentLayout = useMediaQuery("(min-width: 768px)");
+  const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
+  const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
 
   return (
     <ChatHubProvider initialValue={{ mode, workspaceId, workspaceName }}>

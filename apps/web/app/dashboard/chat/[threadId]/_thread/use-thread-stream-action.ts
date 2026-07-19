@@ -2,7 +2,6 @@
 
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
 import { type ToolApprovalResume } from "@sourceweft/sdk";
 import type { ByokModelSelection } from "../../_components/byok-state";
 import {
@@ -647,11 +646,6 @@ export function useThreadStreamAction({
           isCompletedImageArtifactToolCall,
           isCompletedPresentationArtifactToolCall,
           isCompletedWorkfileWriteToolCall,
-          isGeneratedImageArtifactToolName: (toolName) =>
-            hasAgentToolCapability(toolName, "generated_image_artifact"),
-          isPresentationArtifactToolName: (toolName) =>
-            hasAgentToolCapability(toolName, "presentation_artifact") ||
-            hasAgentToolCapability(toolName, "video_presentation_artifact"),
           markStreamingAssistantAsError,
           mergeThinkingStepRecords,
           mode: input.mode,

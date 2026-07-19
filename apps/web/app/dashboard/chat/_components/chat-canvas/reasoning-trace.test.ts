@@ -83,6 +83,41 @@ test("active presentation publishing step keeps trace in thinking state", () => 
   );
 });
 
+test("async background tool work keeps thinking title without hardcoding video copy", () => {
+  assert.equal(
+    getReasoningTraceTitle({
+      hasModelReasoning: false,
+      hasRunningToolCall: true,
+      hasTraceItems: true,
+      isStreaming: false,
+      latestDisplayStep: {
+        id: "video-presentation-generation",
+        title: "Building video presentation",
+        status: "completed",
+        items: [],
+        sequence: 2,
+      },
+    }),
+    "Thinking · Working...",
+  );
+  assert.equal(
+    getReasoningTraceTitle({
+      hasModelReasoning: false,
+      hasRunningToolCall: true,
+      hasTraceItems: true,
+      isStreaming: false,
+      latestDisplayStep: {
+        id: "sandbox-execute",
+        title: "Running command",
+        status: "in_progress",
+        items: [],
+        sequence: 2,
+      },
+    }),
+    "Thinking · Running command",
+  );
+});
+
 test("sandbox presentation publisher card waits for completed artifact URL", () => {
   assert.equal(
     shouldShowGeneratedPresentationItem({
@@ -670,6 +705,64 @@ test("completed approved connector actions keep approval details visible", () =>
       "time: 9660ms",
     ],
   );
+});
+
+test("video presentation details use pipeline elapsed time, not tool latency", () => {
+  const artifactId = "artifact-vp-1";
+  const startedAt = new Date(Date.now() - 65_000).toISOString();
+  const artifactStatuses = new Map([
+    [
+      artifactId,
+      {
+        id: artifactId,
+        status: "running",
+        createdAt: startedAt,
+        completedAt: null,
+        updatedAt: new Date().toISOString(),
+        payloadJson: {
+          generation: {
+            status: "running",
+            stage: "planning_storyboard",
+            progress: 10,
+            pipelineSteps: [
+              {
+                id: "planning_storyboard",
+                label: "Planning storyboard",
+                status: "running",
+                startedAt,
+              },
+            ],
+          },
+        },
+      } as never,
+    ],
+  ]);
+
+  const parts = getToolCallDetailParts(
+    {
+      id: "tool-vp",
+      tool: "generate_video_presentation",
+      input: {},
+      output: {
+        type: "video_presentation_processing_result",
+        artifact_id: artifactId,
+        status: "running",
+        stage: "planning_storyboard",
+        progress: 0,
+      },
+      latencyMs: 211,
+      status: "completed",
+      error: null,
+      sequence: 1,
+    },
+    undefined,
+    null,
+    artifactStatuses,
+  );
+
+  assert.ok(parts.includes("status: generating"));
+  assert.ok(parts.some((part) => /^time: \d+m?\d*s$/.test(part)));
+  assert.ok(!parts.includes("time: 211ms"));
 });
 
 test("connector action labels stay action-oriented across rejected and completed states", () => {

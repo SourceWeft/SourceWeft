@@ -1,4 +1,8 @@
-import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
+import {
+  getArtifactProgressProtocol,
+  hasAgentToolCapability,
+  isArtifactProgressOutputType,
+} from "@sourceweft/agent-tool-registry";
 import {
   normalizeWebAssetUrl,
   resolveArtifactPreviewImageUrlFromArtifact,
@@ -176,8 +180,27 @@ export function resolveMessageAssetUrl(value: unknown) {
   return normalizeAssetUrl(value);
 }
 
+function readRawToolOutputContent(output: unknown) {
+  if (output === null || output === undefined) {
+    return null;
+  }
+  if (typeof output === "string") {
+    return output;
+  }
+  if (typeof output === "object" && !Array.isArray(output)) {
+    const record = output as Record<string, unknown>;
+    if (typeof record.displayContent === "string") {
+      return record.displayContent;
+    }
+    if (typeof record.content === "string") {
+      return record.content;
+    }
+  }
+  return null;
+}
+
 function getToolOutputRecordFromContent(output: unknown) {
-  const content = getToolOutputContent(output);
+  const content = readRawToolOutputContent(output);
   if (!content) {
     return null;
   }
@@ -197,14 +220,75 @@ function getToolOutputRecordFromContent(output: unknown) {
   }
 }
 
+/**
+ * Structured progress outputs are rendered as a progress card rather than as
+ * raw text. Which `type` values qualify comes from the capability packages via
+ * the registry — adding a deliverable must not require editing this file.
+ */
+export function isArtifactProgressToolOutputType(
+  type: string | null | undefined,
+) {
+  return isArtifactProgressOutputType(type);
+}
+
+export function parseStructuredToolOutputRecord(
+  output: unknown,
+): Record<string, unknown> | null {
+  const fromContent = getToolOutputRecordFromContent(output);
+  if (
+    fromContent &&
+    isArtifactProgressToolOutputType(
+      typeof fromContent.type === "string" ? fromContent.type : null,
+    )
+  ) {
+    return fromContent;
+  }
+
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    const record = output as Record<string, unknown>;
+    if (typeof record.type === "string") {
+      return record;
+    }
+    if (fromContent && typeof fromContent.type === "string") {
+      return fromContent;
+    }
+    return record;
+  }
+
+  if (typeof output === "string") {
+    return fromContent;
+  }
+
+  return fromContent;
+}
+
+export function normalizeVideoPresentationToolOutput(output: unknown) {
+  const record = parseStructuredToolOutputRecord(output);
+  const type = typeof record?.type === "string" ? record.type : null;
+  if (!record || !isArtifactProgressToolOutputType(type)) {
+    return output;
+  }
+  return record;
+}
+
 function getToolOutputValue(output: unknown, key: string) {
+  const contentRecord = getToolOutputRecordFromContent(output);
+  const preferContent =
+    contentRecord !== null &&
+    isArtifactProgressToolOutputType(
+      typeof contentRecord.type === "string" ? contentRecord.type : null,
+    );
+
+  if (preferContent && contentRecord[key] !== undefined) {
+    return contentRecord[key];
+  }
+
   if (typeof output === "object" && output !== null) {
     const direct = (output as Record<string, unknown>)[key];
     if (direct !== undefined && direct !== null) {
       return direct;
     }
 
-    const contentRecord = getToolOutputRecordFromContent(output);
     if (contentRecord && contentRecord[key] !== undefined) {
       return contentRecord[key];
     }
@@ -212,7 +296,6 @@ function getToolOutputValue(output: unknown, key: string) {
     return null;
   }
 
-  const contentRecord = getToolOutputRecordFromContent(output);
   if (contentRecord && contentRecord[key] !== undefined) {
     return contentRecord[key];
   }
@@ -335,17 +418,10 @@ export function resolveGeneratedPresentationArtifact(
     return null;
   }
 
-  const isVideoPresentation = hasAgentToolCapability(
-    toolCall.tool,
-    "video_presentation_artifact",
-  );
-  const outputType = getToolOutputField(toolCall.output, "type");
-  if (
-    isVideoPresentation &&
-    outputType !== "video_presentation_artifact_result" &&
-    outputType !== "video_presentation_processing_result" &&
-    outputType !== "generate_video_presentation_progress"
-  ) {
+  // A deliverable's card is driven by its structured progress output; anything
+  // else it emits is not a card. Which types qualify comes from the capability.
+  const progressProtocol = getArtifactProgressProtocol(toolCall.tool);
+  if (progressProtocol && !progressProtocol.matchesOutputType(toolCall.output)) {
     return null;
   }
 
@@ -504,20 +580,21 @@ export function getToolOutputContent(output: unknown) {
     return null;
   }
 
-  if (typeof output === "string") {
-    return output;
-  }
-
-  if (typeof output === "object") {
-    const record = output as Record<string, unknown>;
-    if (typeof record.displayContent === "string") {
-      return record.displayContent;
-    }
-    if (typeof record.content === "string") {
-      return record.content;
+  const structured = parseStructuredToolOutputRecord(output);
+  if (
+    structured &&
+    isArtifactProgressToolOutputType(
+      typeof structured.type === "string" ? structured.type : undefined,
+    )
+  ) {
+    if (
+      typeof structured.content === "string" &&
+      !structured.content.trim().startsWith("{")
+    ) {
+      return structured.content;
     }
     return null;
   }
 
-  return String(output);
+  return readRawToolOutputContent(output);
 }

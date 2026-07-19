@@ -55,35 +55,6 @@ function appendWorkflowSegment(
   });
 }
 
-export function includeGeneratedImageToolInvocationBlocks(
-  blocks: MessageRenderBlock[],
-): MessageRenderBlock[] {
-  const renderedToolCallIds = new Set(
-    blocks
-      .filter((block) => block.type === "tool")
-      .map((block) => block.toolCallId),
-  );
-
-  return blocks.flatMap((block) => {
-    if (
-      block.type !== "generated_image" ||
-      renderedToolCallIds.has(block.toolCallId)
-    ) {
-      return [block];
-    }
-
-    renderedToolCallIds.add(block.toolCallId);
-    return [
-      {
-        id: `${block.id}-tool`,
-        toolCallId: block.toolCallId,
-        type: "tool" as const,
-      },
-      block,
-    ];
-  });
-}
-
 export function buildAssistantRenderSegments(
   blocks: MessageRenderBlock[],
 ): AssistantRenderSegment[] {

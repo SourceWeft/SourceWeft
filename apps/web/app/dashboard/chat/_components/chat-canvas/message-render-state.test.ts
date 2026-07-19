@@ -127,7 +127,7 @@ test("buildMessageRenderState keeps generated artifact blocks and activity tool 
     version: assistantVersion({
       content: "![generated image](sandbox:/image.png)",
       renderBlocks: [
-        { id: "block_tool_1", toolCallId: "tool_1", type: "generated_image" },
+        { id: "block_tool_1", toolCallId: "tool_1", type: "artifact" },
       ],
       toolCalls: [
         {
@@ -157,7 +157,7 @@ test("buildMessageRenderState keeps generated artifact blocks and activity tool 
   });
 
   assert.deepEqual(state.bodyBlocks, [
-    { id: "block_tool_1", toolCallId: "tool_1", type: "generated_image" },
+    { id: "block_tool_1", toolCallId: "tool_1", type: "artifact" },
   ]);
   assert.equal(state.activityItems[0]?.type, "tool");
   assert.equal(

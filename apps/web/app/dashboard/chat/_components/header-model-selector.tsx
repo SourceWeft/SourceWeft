@@ -51,27 +51,10 @@ import {
   type ByokProviderOption,
   type ByokSavedModelItem,
 } from "./byok-state";
+import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
 
 export type ModelType = "llm" | "image" | "vision";
 
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-    return window.matchMedia(query).matches;
-  });
-
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
-}
 
 export type ModelThinkingCapabilities = {
   supportsThinking: boolean;
@@ -1241,7 +1224,7 @@ export function HeaderModelSelector({
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelType>("llm");
   const [openSequence, setOpenSequence] = useState(0);
-  const isCompactModelSelector = !useMediaQuery("(min-width: 768px)");
+  const isCompactModelSelector = !useMediaQuery(BREAKPOINTS.md);
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (nextOpen) {

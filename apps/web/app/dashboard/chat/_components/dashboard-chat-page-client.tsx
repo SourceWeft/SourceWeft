@@ -60,46 +60,30 @@ import {
   resolveActiveConnectorToolState,
   type ActiveConnectorToolState,
 } from "./connector-agent-tools";
-import type { PromptInputMentionSourceLoader } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
 import type {
   ArtifactPreviewRecord,
   ChatSendInput,
-  ChatSkillItem,
-  ChatToolName,
   PromptThinkingSettings,
 } from "./chat-canvas/types";
 import type {
-  ListSkillsCatalogResponse,
   ListThreadModelCatalogResponse,
-  ListWorkspaceSkillsResponse,
   ThreadChatPreferences,
 } from "@sourceweft/contracts";
 import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body";
 import type { ArtifactListItem } from "./sources-hub";
-import { expandSelectedSources, type SourceItem } from "./source-types";
-import {
-  readStoredSourceSelection,
-  writeStoredSourceSelection,
-} from "./source-selection-storage";
+import { writeStoredSourceSelection } from "./source-selection-storage";
 import {
   setPendingThreadTurn,
   writePendingThreadTurnFallback,
   type PendingThreadTurn,
 } from "./pending-thread-turn";
-import {
-  getCachedWorkspaceSources,
-  hasCachedWorkspaceSources,
-  setCachedWorkspaceSources,
-} from "./source-library-cache";
+import { hasCachedWorkspaceSources } from "./source-library-cache";
 import {
   desktopBridge,
   handleDesktopAuthDeepLink,
 } from "../../../../lib/desktop-bridge";
 import { connectorsClient, contentClient } from "../../../../lib/sdk";
-import type {
-  ListCapabilityCatalogResponse,
-  SourceConnector,
-} from "@sourceweft/sdk";
+import type { SourceConnector } from "@sourceweft/sdk";
 import {
   ChatCanvasPanelSkeleton,
   SourcesHubPanelSkeleton,
@@ -111,15 +95,13 @@ import {
   type ChatHubRegistration,
 } from "./chat-hub-context";
 import { HUB_STABILITY_PERSISTENT_SHELL_ENABLED } from "./chat-workspace-shell-feature-flag";
-import {
-  coerceSkillIdsSelection,
-  resolveDefaultActiveSkillIds,
-  SKILL_SELECTION_LIMIT_MESSAGE,
-} from "./chat-canvas/tool-selection";
+import { useThreadSources } from "../[threadId]/_thread/use-thread-sources";
 import {
   normalizeComposerOptionsState,
   type ComposerOptionsState,
 } from "./chat-canvas/composer-options";
+import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
+import { mergeSourceIds } from "../[threadId]/_thread/thread-utils";
 
 const EMPTY_MODEL_KIND_FLAGS: Record<ModelType, boolean> = {
   llm: false,
@@ -207,103 +189,6 @@ function SourcesHubSkeleton() {
   return (
     <SourcesHubPanelSkeleton className="hidden h-full w-[410px] shrink-0 border-l md:flex" />
   );
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(false);
-
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
-}
-
-function mergeSourceIds(...sourceIdGroups: (string[] | undefined)[]) {
-  return [
-    ...new Set(
-      sourceIdGroups.flatMap((sourceIds) => sourceIds ?? []).filter(Boolean),
-    ),
-  ];
-}
-
-function removeDisabledToolSkills(input: {
-  skillIds: string[];
-  availableSkills: ChatSkillItem[];
-  disabledToolNames: ChatToolName[];
-}) {
-  if (input.disabledToolNames.length === 0) {
-    return input.skillIds;
-  }
-  const disabledToolNameSet = new Set(input.disabledToolNames);
-  return input.skillIds.filter((skillId) => {
-    const skill = input.availableSkills.find((item) => item.id === skillId);
-    return !skill?.tools?.some((toolName) =>
-      disabledToolNameSet.has(toolName as ChatToolName),
-    );
-  });
-}
-
-function catalogBuiltinSkillToChatSkill(
-  skill: ListSkillsCatalogResponse["items"][number],
-): ChatSkillItem | null {
-  if (
-    skill.sourceType !== "builtin" ||
-    skill.installable ||
-    !skill.selectionId
-  ) {
-    return null;
-  }
-  return {
-    id: skill.selectionId,
-    catalogId: skill.catalogId,
-    slug: skill.slug,
-    name: skill.name,
-    displayName: skill.displayName,
-    description: skill.description,
-    sourceType: skill.sourceType,
-    version: skill.version,
-    hasReadme: skill.hasReadme,
-    capabilities: skill.capabilities,
-    models: skill.models,
-    tools: skill.tools,
-    slash: skill.slash,
-    slashConfig: skill.slashConfig,
-    commands: skill.commands,
-    defaultConfig: skill.defaultConfig,
-    defaultEnabled: skill.defaultEnabled,
-    options: skill.options,
-  };
-}
-
-function workspaceInstalledSkillToChatSkill(
-  skill: ListWorkspaceSkillsResponse["items"][number],
-): ChatSkillItem | null {
-  return {
-    id: skill.selectionId,
-    workspaceSkillId: skill.workspaceSkillId,
-    catalogId: skill.catalogId,
-    slug: skill.slug,
-    name: skill.name,
-    displayName: skill.displayName,
-    description: skill.description,
-    sourceType: skill.sourceType,
-    version: skill.version,
-    enabled: skill.enabled,
-    hasReadme: false,
-    capabilities: skill.capabilities,
-    models: skill.models,
-    tools: skill.tools,
-    slash: skill.slash,
-    slashConfig: skill.slashConfig,
-    commands: skill.commands,
-    defaultConfig: skill.defaultConfig,
-    options: skill.options,
-  };
 }
 
 function buildPendingThinking(input: {
@@ -410,26 +295,29 @@ export function DashboardChatPageClient() {
   } = useDashboardChatState();
   const chatHubContext = useChatHubContext();
 
-  const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
-  const [activeSourceIds, setActiveSourceIds] = useState<string[]>([]);
-  const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
-  const [hubSkills, setHubSkills] = useState<ChatSkillItem[]>([]);
-  const [capabilityCatalog, setCapabilityCatalog] =
-    useState<ListCapabilityCatalogResponse | null>(null);
-  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
-  const handleSkillSelectionChange = useCallback((skillIds: string[]) => {
-    const { skillIds: nextSkillIds, wasLimited } =
-      coerceSkillIdsSelection(skillIds);
-    if (wasLimited) {
-      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
-    }
-    setActiveSkillIds(nextSkillIds);
-  }, []);
-  const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
-  const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
-  const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>(
-    [],
-  );
+  const {
+    activeMcpInstallIds,
+    activeMcpToolIds,
+    activeSkillIds,
+    activeSourceIds,
+    availableSkills,
+    hubSkills,
+    capabilityCatalog,
+    disabledToolNames,
+    effectiveActiveSkillIds,
+    handleLibrarySourcesLoad,
+    handleLibrarySourcesMerge,
+    handleSkillSelectionChange,
+    initialSourcesForWorkspace,
+    librarySources,
+    loadAvailableSkills,
+    loadSourceMentions,
+    persistActiveSourceIds,
+    selectedSources,
+    setActiveMcpInstallIds,
+    setActiveMcpToolIds,
+    setDisabledToolNames,
+  } = useThreadSources({ threadId: "current", workspaceId });
   const [activeConnectorTools, setActiveConnectorTools] =
     useState<ActiveConnectorToolState>(EMPTY_ACTIVE_CONNECTOR_TOOLS);
   const [isStartingChat, setIsStartingChat] = useState(false);
@@ -437,17 +325,11 @@ export function DashboardChatPageClient() {
   const [composerRecoveryKey, setComposerRecoveryKey] = useState(0);
   const [previewArtifact, setPreviewArtifact] =
     useState<ArtifactListItem | null>(null);
-  const isPersistentLayout = useMediaQuery("(min-width: 768px)");
-  const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
+  const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
+  const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
   const isStartingChatRef = useRef(false);
   const appliedMcpRunRef = useRef<string | null>(null);
   const handledConnectorOAuthHubRef = useRef(false);
-  const skillsLoadGenerationRef = useRef(0);
-  const capabilityCatalogLoadGenerationRef = useRef(0);
-  const initialSourcesForWorkspace = useMemo(
-    () => getCachedWorkspaceSources(workspaceId) ?? librarySources,
-    [librarySources, workspaceId],
-  );
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
   );
@@ -496,7 +378,7 @@ export function DashboardChatPageClient() {
     const oauthStatus = params.get("connector_oauth");
     if (oauthStatus === "success" || oauthStatus === "error") {
       handledConnectorOAuthHubRef.current = true;
-      if (window.matchMedia("(min-width: 768px)").matches) {
+      if (window.matchMedia(BREAKPOINTS.md).matches) {
         if (!sourcesVisible) {
           toggleSourcesVisible();
         }
@@ -525,35 +407,6 @@ export function DashboardChatPageClient() {
     },
     [],
   );
-  const loadSourceMentions = useCallback<PromptInputMentionSourceLoader>(
-    async ({ cursor, limit, query }) => {
-      if (!workspaceId) {
-        return { items: [], nextCursor: null };
-      }
-
-      const result = await contentClient.listSourceMentions(workspaceId, {
-        cursor: cursor ?? undefined,
-        limit,
-        query: query || undefined,
-      });
-      return {
-        items: result.items.map((source) => ({
-          id: source.id,
-          meta:
-            source.status === "failed"
-              ? "Processing failed"
-              : source.status === "queued" || source.status === "processing"
-                ? "Sync in progress"
-                : new Date(source.updatedAt).toLocaleString(),
-          title: source.title || "Untitled",
-          type: source.mimeType ?? source.sourceType,
-        })),
-        nextCursor: result.nextCursor,
-      };
-    },
-    [workspaceId],
-  );
-
   useBrowserLayoutEffect(() => {
     startNewChat();
   }, [startNewChat]);
@@ -585,10 +438,6 @@ export function DashboardChatPageClient() {
       window.clearTimeout(scheduler.value);
     };
   }, []);
-
-  useEffect(() => {
-    setLibrarySources(getCachedWorkspaceSources(workspaceId) ?? []);
-  }, [workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -766,128 +615,6 @@ export function DashboardChatPageClient() {
     };
   }, [router]);
 
-  const loadAvailableSkills = useCallback(async () => {
-    const loadGeneration = ++skillsLoadGenerationRef.current;
-    if (!workspaceId) {
-      setAvailableSkills([]);
-      setHubSkills([]);
-      setActiveSkillIds([]);
-      return;
-    }
-
-    const activeWorkspaceId = workspaceId;
-    try {
-      const [installedResult, catalogResult] = await Promise.all([
-        contentClient.listWorkspaceSkills(activeWorkspaceId),
-        contentClient.listSkillsCatalog(activeWorkspaceId),
-      ]);
-      if (
-        skillsLoadGenerationRef.current !== loadGeneration ||
-        activeWorkspaceId !== workspaceId
-      ) {
-        return;
-      }
-      const builtinOptionSkills = catalogResult.items
-        .map(catalogBuiltinSkillToChatSkill)
-        .filter((skill): skill is ChatSkillItem => Boolean(skill));
-      const workspaceInstalledSkills = installedResult.items
-        .map(workspaceInstalledSkillToChatSkill)
-        .filter((skill): skill is ChatSkillItem => Boolean(skill));
-      const enabledWorkspaceSkills = workspaceInstalledSkills.filter(
-        (skill) => skill.enabled,
-      );
-      const enabledSkills = [...builtinOptionSkills, ...enabledWorkspaceSkills];
-      setAvailableSkills(enabledSkills);
-      setHubSkills([...builtinOptionSkills, ...workspaceInstalledSkills]);
-
-      const optionControlledIds = new Set(
-        builtinOptionSkills.map((skill) => skill.id),
-      );
-      setActiveSkillIds((current) =>
-        resolveDefaultActiveSkillIds({
-          availableSkills: builtinOptionSkills,
-          currentSkillIds: current.filter((id) => optionControlledIds.has(id)),
-        }),
-      );
-    } catch {
-      if (skillsLoadGenerationRef.current !== loadGeneration) {
-        return;
-      }
-      setAvailableSkills([]);
-      setHubSkills([]);
-      setActiveSkillIds([]);
-    }
-  }, [workspaceId]);
-
-  useEffect(() => {
-    void loadAvailableSkills();
-  }, [loadAvailableSkills]);
-
-  useEffect(() => {
-    const loadGeneration = ++capabilityCatalogLoadGenerationRef.current;
-    if (!workspaceId) {
-      setCapabilityCatalog(null);
-      return;
-    }
-
-    const activeWorkspaceId = workspaceId;
-    void contentClient
-      .listCapabilityCatalog(activeWorkspaceId)
-      .then((result) => {
-        if (
-          capabilityCatalogLoadGenerationRef.current !== loadGeneration ||
-          activeWorkspaceId !== workspaceId
-        ) {
-          return;
-        }
-        setCapabilityCatalog(result);
-      })
-      .catch(() => {
-        if (capabilityCatalogLoadGenerationRef.current !== loadGeneration) {
-          return;
-        }
-        setCapabilityCatalog({ commands: [], tools: [] });
-      });
-  }, [workspaceId]);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      setActiveSourceIds([]);
-      return;
-    }
-
-    setActiveSourceIds(readStoredSourceSelection(workspaceId, "current"));
-  }, [workspaceId]);
-
-  const persistActiveSourceIds = useCallback(
-    (sourceIds: string[]) => {
-      setActiveSourceIds(sourceIds);
-      if (!workspaceId) {
-        return;
-      }
-
-      writeStoredSourceSelection(workspaceId, "current", sourceIds);
-    },
-    [workspaceId],
-  );
-
-  const handleLibrarySourcesLoad = useCallback(
-    (sources: SourceItem[]) => {
-      setCachedWorkspaceSources(workspaceId, sources);
-      setLibrarySources(sources);
-    },
-    [workspaceId],
-  );
-  const handleLibrarySourcesMerge = useCallback((sources: SourceItem[]) => {
-    setLibrarySources((current) => {
-      const mergedById = new Map(current.map((source) => [source.id, source]));
-      for (const source of sources) {
-        mergedById.set(source.id, source);
-      }
-      return Array.from(mergedById.values());
-    });
-  }, []);
-
   useEffect(() => {
     if (!workspaceId) {
       return;
@@ -932,16 +659,6 @@ export function DashboardChatPageClient() {
       }),
     );
   }, [hasSavedThinkingPreference, selectedModels.llm]);
-
-  const effectiveActiveSkillIds = useMemo(
-    () =>
-      removeDisabledToolSkills({
-        skillIds: activeSkillIds,
-        availableSkills,
-        disabledToolNames,
-      }),
-    [activeSkillIds, availableSkills, disabledToolNames],
-  );
 
   useEffect(() => {
     if (selectedByokModels.llm?.mode === "byok") {
@@ -1010,10 +727,6 @@ export function DashboardChatPageClient() {
 
   useDashboardShortcuts(shortcutDefinitions);
 
-  const selectedSources = expandSelectedSources(
-    librarySources,
-    activeSourceIds,
-  );
   const chatUiState = useMemo(
     () =>
       resolveChatUiState({
@@ -1050,7 +763,7 @@ export function DashboardChatPageClient() {
       setActiveMcpInstallIds(selection.installIds ?? []);
       setActiveMcpToolIds(selection.toolIds ?? []);
     },
-    [],
+    [setActiveMcpInstallIds, setActiveMcpToolIds],
   );
   const chatHubRegistration = useMemo<ChatHubRegistration>(
     () => ({
@@ -1130,7 +843,14 @@ export function DashboardChatPageClient() {
     router.replace(
       nextQuery ? `/dashboard/chat?${nextQuery}` : "/dashboard/chat",
     );
-  }, [mcpInstallIdFromQuery, router, searchParams, workspaceId]);
+  }, [
+    mcpInstallIdFromQuery,
+    router,
+    searchParams,
+    setActiveMcpInstallIds,
+    setActiveMcpToolIds,
+    workspaceId,
+  ]);
 
   const handleSendMessage = useCallback(
     async (input: ChatSendInput) => {

@@ -128,8 +128,6 @@ type RunChatStreamInput = {
     toolCall: ToolCallRecord,
     event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
   ) => boolean;
-  isGeneratedImageArtifactToolName: (toolName: string) => boolean;
-  isPresentationArtifactToolName: (toolName: string) => boolean;
   markStreamingAssistantAsError: (errorInput: {
     code?: string | null;
     error: string;
@@ -540,8 +538,6 @@ export async function runChatStream(
         toolCall,
         event as ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
       ),
-    isGeneratedImageArtifactToolName: input.isGeneratedImageArtifactToolName,
-    isPresentationArtifactToolName: input.isPresentationArtifactToolName,
     mergeThinkingStepRecords: input.mergeThinkingStepRecords,
     mode: input.mode,
     normalizeCitationRecords: input.normalizeCitationRecords,

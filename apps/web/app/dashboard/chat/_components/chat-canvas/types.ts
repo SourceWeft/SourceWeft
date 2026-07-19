@@ -67,6 +67,7 @@ export type MessageVersion = {
   finishReason?: string;
   isTextPaused?: boolean;
   isTextInterrupted?: boolean;
+  metadata?: Record<string, unknown>;
   mentionedSourceIds?: string[];
   effectiveMentionedSourceIds?: string[];
   sourceIds?: string[];
@@ -306,13 +307,7 @@ export type MessageRenderBlock =
   | {
       id: string;
       placement?: "inline" | "terminal";
-      type: "generated_image";
-      toolCallId: string;
-    }
-  | {
-      id: string;
-      placement?: "inline" | "terminal";
-      type: "generated_presentation";
+      type: "artifact";
       toolCallId: string;
     };
 

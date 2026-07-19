@@ -208,6 +208,23 @@ import {
   SKILL_SELECTION_LIMIT_MESSAGE,
   toggleSkillSelection,
 } from "../chat-canvas/tool-selection";
+import {
+  areStringArraysEqual,
+  basename,
+  formatBytes,
+  formatDuration,
+  formatJsonPreview,
+} from "./lib/format";
+import {
+  getErrorMessage,
+  isConnectorAlreadyHandledError,
+} from "./lib/errors";
+import {
+  SOURCE_FILE_ACCEPT,
+  getUploadFileLabel,
+  isSupportedUploadFile,
+} from "./lib/upload";
+import { HubEmptyState } from "./components/hub-empty-state";
 
 export { ArtifactPreviewPanel } from "../artifact-preview/artifact-preview-panel";
 export type { ArtifactListItem } from "./types";
@@ -239,117 +256,6 @@ const CONNECTOR_OAUTH_URL_PARAMS = [
   "workspace_id",
   "error",
 ] as const;
-const SOURCE_FILE_EXTENSIONS = [
-  "txt",
-  "text",
-  "md",
-  "markdown",
-  "mdx",
-  "rst",
-  "adoc",
-  "asciidoc",
-  "org",
-  "json",
-  "jsonl",
-  "ndjson",
-  "yaml",
-  "yml",
-  "toml",
-  "ini",
-  "cfg",
-  "conf",
-  "properties",
-  "xml",
-  "html",
-  "htm",
-  "xhtml",
-  "css",
-  "scss",
-  "sass",
-  "less",
-  "svg",
-  "js",
-  "jsx",
-  "ts",
-  "tsx",
-  "mjs",
-  "cjs",
-  "py",
-  "java",
-  "kt",
-  "scala",
-  "c",
-  "h",
-  "cpp",
-  "cxx",
-  "cc",
-  "hpp",
-  "cs",
-  "go",
-  "rs",
-  "rb",
-  "php",
-  "lua",
-  "swift",
-  "r",
-  "jl",
-  "sh",
-  "bash",
-  "zsh",
-  "fish",
-  "bat",
-  "cmd",
-  "ps1",
-  "sql",
-  "graphql",
-  "gql",
-  "tex",
-  "bib",
-  "log",
-  "vue",
-  "svelte",
-  "astro",
-  "tf",
-  "hcl",
-  "proto",
-  "env",
-  "gitignore",
-  "dockerignore",
-  "editorconfig",
-  "dockerfile",
-  "makefile",
-  "cmake",
-  "tsv",
-  "csv",
-  "srt",
-  "pdf",
-  "doc",
-  "docx",
-  "pptx",
-  "epub",
-  "avif",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "tif",
-  "tiff",
-  "bmp",
-  "gif",
-  "flac",
-  "mp3",
-  "mp4",
-  "mpeg",
-  "mpga",
-  "m4a",
-  "ogg",
-  "wav",
-  "webm",
-] as const;
-const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(
-  ",",
-);
-const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
 const disabledConnectorIconButtonClass =
   "disabled:pointer-events-auto disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground";
 
@@ -536,24 +442,6 @@ export type HubSkillItem = {
   tools?: string[];
 };
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof HttpClientError) {
-    return error.message || fallback;
-  }
-  if (error instanceof Error) {
-    return error.message || fallback;
-  }
-  return fallback;
-}
-
-function isConnectorAlreadyHandledError(error: unknown) {
-  return (
-    error instanceof HttpClientError &&
-    (error.code === "CONNECTOR_ALREADY_EXISTS" ||
-      error.code === "CONNECTOR_OAUTH_ACCOUNT_IN_USE")
-  );
-}
-
 function createConnectorOAuthMessageId(input: {
   workspaceId: string;
   connectorType: string;
@@ -641,94 +529,6 @@ function apiTypeToSourceType(
   return "DOC";
 }
 
-function getUploadFileExtension(fileName: string) {
-  const baseName = fileName.split(/[\\/]/).at(-1)?.trim().toLowerCase() ?? "";
-  if (!baseName) return null;
-  if (baseName === "dockerfile" || baseName.startsWith("dockerfile.")) {
-    return "dockerfile";
-  }
-  if (baseName === "makefile" || baseName.startsWith("makefile.")) {
-    return "makefile";
-  }
-  if (baseName.startsWith(".env")) return "env";
-  if (
-    baseName.startsWith(".") &&
-    SOURCE_FILE_EXTENSION_SET.has(baseName.slice(1))
-  ) {
-    return baseName.slice(1);
-  }
-  const dotIndex = baseName.lastIndexOf(".");
-  if (dotIndex < 0 || dotIndex === baseName.length - 1) return null;
-  return baseName.slice(dotIndex + 1);
-}
-
-function getUploadFileLabel(file: File) {
-  const extension = getUploadFileExtension(file.name);
-  if (!extension) return "FILE";
-  if (["pdf"].includes(extension)) return "PDF";
-  if (["doc", "docx"].includes(extension)) return "DOC";
-  if (["pptx"].includes(extension)) return "PPT";
-  if (["epub"].includes(extension)) return "EPUB";
-  if (["csv", "tsv"].includes(extension)) return "CSV";
-  if (extension === "json") return "JSON";
-  if (extension === "srt") return "SRT";
-  if (
-    [
-      "avif",
-      "png",
-      "jpg",
-      "jpeg",
-      "webp",
-      "tif",
-      "tiff",
-      "bmp",
-      "gif",
-    ].includes(extension)
-  ) {
-    return "IMG";
-  }
-  if (
-    [
-      "flac",
-      "mp3",
-      "mp4",
-      "mpeg",
-      "mpga",
-      "m4a",
-      "ogg",
-      "wav",
-      "webm",
-    ].includes(extension)
-  ) {
-    return "AUDIO";
-  }
-  return "TEXT";
-}
-
-function formatBytes(sizeBytes: number) {
-  if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024)
-    return `${Math.round(sizeBytes / 102.4) / 10} KB`;
-  return `${Math.round(sizeBytes / 1024 / 102.4) / 10} MB`;
-}
-
-function formatDuration(ms: number | null) {
-  if (ms === null) return "n/a";
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) return `${Math.round(ms / 100) / 10}s`;
-  return `${Math.round(ms / 6000) / 10}m`;
-}
-
-function formatJsonPreview(value: Record<string, unknown>) {
-  const text = JSON.stringify(value, null, 2);
-  return text.length > 1200 ? `${text.slice(0, 1200)}\n...` : text;
-}
-
-function basename(path: string) {
-  const cleaned = path.replace(/\/+$/, "");
-  return cleaned.split("/").pop() || cleaned || path;
-}
-
 function workfilePurposeLabel(purpose: WorkfileListItem["purpose"]) {
   if (purpose === "scratch") return "Scratch";
   if (purpose === "draft") return "Draft";
@@ -744,14 +544,6 @@ function workfileMatchesQuery(file: WorkfileListItem, q: string) {
     file.mimeType.toLowerCase().includes(q) ||
     workfilePurposeLabel(file.purpose).toLowerCase().includes(q)
   );
-}
-
-function isSupportedUploadFile(file: File) {
-  const extension = getUploadFileExtension(file.name);
-  if (extension && SOURCE_FILE_EXTENSION_SET.has(extension)) {
-    return true;
-  }
-  return file.type.startsWith("text/");
 }
 
 function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
@@ -1013,10 +805,6 @@ function SourceProviderBadge({
       {content}
     </button>
   );
-}
-
-function areStringArraysEqual(a: string[], b: string[]) {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 function memoComponent<T extends (...args: never[]) => unknown>(component: T) {
@@ -1553,26 +1341,6 @@ const SourceTreeRow = memoComponent(function SourceTreeRow({
     </Collapsible>
   );
 });
-
-function HubEmptyState({
-  description,
-  icon: Icon,
-  title,
-}: {
-  description: string;
-  icon: ComponentType<{ className?: string }>;
-  title: string;
-}) {
-  return (
-    <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center">
-      <Icon className="mx-auto size-5 text-muted-foreground" />
-      <h4 className="mt-3 text-sm font-medium text-foreground">{title}</h4>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        {description}
-      </p>
-    </div>
-  );
-}
 
 const WorkfilesTab = memoComponent(function WorkfilesTab({
   files,

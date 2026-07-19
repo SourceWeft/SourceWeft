@@ -29,6 +29,7 @@ import {
   getToolConfirmationItemsForRun,
   hasLiveToolConfirmationSignalForRun,
   mergeToolConfirmationResolutions,
+  hasActivelyRunningToolWork,
   shouldLockComposerForRun,
 } from "./tool-confirmation-state";
 import {
@@ -353,8 +354,23 @@ export function ChatCanvas({
   const isWaitingForApproval =
     activeThreadRun?.status === "waiting_for_approval";
   const hasPendingConfirmationItems = pendingConfirmationItems.length > 0;
+  const hasActivelyRunningToolWorkState = useMemo(
+    () =>
+      hasActivelyRunningToolWork({
+        artifactStatuses,
+        // MessageVersion keeps toolCalls on the version object; metadata is not
+        // copied onto grouped versions, so locking must use toolCalls.
+        messages: messageGroups.flatMap((group) =>
+          group.versions.map((version) => ({
+            toolCalls: version.toolCalls,
+          })),
+        ),
+      }),
+    [artifactStatuses, messageGroups],
+  );
   const isSubmitDisabledForRun = shouldLockComposerForRun({
     chatExecutionState,
+    hasActivelyRunningToolWork: hasActivelyRunningToolWorkState,
     isStreaming,
     isWaitingForApproval,
     pendingConfirmationCount: pendingConfirmationItems.length,

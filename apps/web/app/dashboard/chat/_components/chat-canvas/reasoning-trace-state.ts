@@ -3,15 +3,23 @@ import {
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
 import { isPendingToolConfirmation } from "@sourceweft/contracts";
-import { formatThoughtDuration } from "./duration-format";
+import { formatCompactDuration, formatThoughtDuration } from "./duration-format";
 import { isSandboxToolResultFailure } from "./sandbox-tool-result-display";
 import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import type {
+  ArtifactStatusSnapshot,
   ModelReasoningSegmentRecord,
   ThinkingStepRecord,
   ToolConfirmationResolution,
   ToolCallRecord,
 } from "./types";
+import {
+  isDeliverableGenerationActive,
+  isDeliverableToolName,
+  resolveDeliverableElapsedMs,
+  resolveDeliverableStatus,
+} from "./artifact-progress";
+import { resolveToolCallArtifactId } from "./artifact-work-state";
 
 function isVisionFallbackStep(step: ThinkingStepRecord) {
   return step.metadata?.strategy === "vision_fallback";
@@ -39,6 +47,17 @@ export function getReasoningTraceTitle(input: {
 
   if (input.activeStep) {
     return `Thinking · ${input.activeStep.title}`;
+  }
+
+  if (input.hasRunningToolCall && !input.isStreaming) {
+    if (
+      input.latestDisplayStep &&
+      input.latestDisplayStep.status !== "completed" &&
+      !isVisionFallbackStep(input.latestDisplayStep)
+    ) {
+      return `Thinking · ${input.latestDisplayStep.title}`;
+    }
+    return "Thinking · Working...";
   }
 
   if (input.isStreaming) {
@@ -407,6 +426,7 @@ export function getToolCallDetailParts(
   toolCall: ToolCallRecord,
   toolStep?: ThinkingStepRecord,
   confirmationResolution?: ToolConfirmationResolution | null,
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>,
 ) {
   const hitCount = getToolHitCount(toolCall, toolStep);
   const resultCount = hasAgentToolCapability(toolCall.tool, "web_query")
@@ -420,11 +440,22 @@ export function getToolCallDetailParts(
   const concurrency = hasAgentToolCapability(toolCall.tool, "web_page_fetch")
     ? getToolConcurrency(toolStep)
     : null;
-  const latencyMs =
-    toolCall.latencyMs ??
-    (typeof toolStep?.metadata?.latencyMs === "number"
-      ? toolStep.metadata.latencyMs
-      : null);
+  const artifactIdForTiming = isDeliverableToolName(toolCall.tool)
+    ? resolveToolCallArtifactId(toolCall.output)
+    : undefined;
+  const deliverableElapsedMs = artifactIdForTiming
+    ? resolveDeliverableElapsedMs({
+        artifactSnapshot: artifactStatuses?.get(artifactIdForTiming),
+        toolCallOutput: toolCall.output,
+        toolName: toolCall.tool,
+      })
+    : null;
+  const latencyMs = isDeliverableToolName(toolCall.tool)
+    ? deliverableElapsedMs
+    : (toolCall.latencyMs ??
+      (typeof toolStep?.metadata?.latencyMs === "number"
+        ? toolStep.metadata.latencyMs
+        : null));
   const imageStage = hasAgentToolCapability(toolCall.tool, "generated_image_artifact")
     ? getGeneratedImageStage(toolCall)
     : null;
@@ -470,6 +501,31 @@ export function getToolCallDetailParts(
     })
   ) {
     statusLabel = "error";
+  } else if (isDeliverableToolName(toolCall.tool)) {
+    const artifactId = resolveToolCallArtifactId(toolCall.output);
+    const artifactSnapshot = artifactId
+      ? artifactStatuses?.get(artifactId)
+      : undefined;
+    const generationStatus = resolveDeliverableStatus({
+      artifactSnapshot,
+      toolCallOutput: toolCall.output,
+      toolCallStatus: toolCall.status,
+      toolName: toolCall.tool,
+    });
+    if (
+      isDeliverableGenerationActive({
+        artifactSnapshot,
+        toolCallOutput: toolCall.output,
+        toolCallStatus: toolCall.status,
+        toolName: toolCall.tool,
+      })
+    ) {
+      statusLabel = "generating";
+    } else if (generationStatus === "failed") {
+      statusLabel = "failed";
+    } else if (generationStatus === "ready") {
+      statusLabel = "completed";
+    }
   }
   const approvalState = formatApprovalState(toolCall.approvalState);
   const executeCommandDetail = getExecuteCommandDetail(toolCall);
@@ -493,7 +549,11 @@ export function getToolCallDetailParts(
       ? `${fetchCount} ${pluralize(fetchCount, "URL")}`
       : null,
     concurrency !== null ? `concurrency: ${concurrency}` : null,
-    typeof latencyMs === "number" ? `time: ${Math.round(latencyMs)}ms` : null,
+    typeof latencyMs === "number"
+      ? isDeliverableToolName(toolCall.tool)
+        ? `time: ${formatCompactDuration(latencyMs)}`
+        : `time: ${Math.round(latencyMs)}ms`
+      : null,
   ].filter((part): part is string => part !== null);
 }
 

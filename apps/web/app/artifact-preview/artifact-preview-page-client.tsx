@@ -5,8 +5,10 @@ import Link from "next/link";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { contentClient } from "../../lib/sdk";
-import { ArtifactPreviewPanel } from "../dashboard/chat/_components/sources-hub";
-import type { ArtifactListItem } from "../dashboard/chat/_components/sources-hub";
+// Imported directly rather than through the sources-hub barrel, which would
+// pull the entire hub component into this page's bundle for one panel.
+import { ArtifactPreviewPanel } from "../dashboard/chat/_components/artifact-preview/artifact-preview-panel";
+import type { ArtifactListItem } from "../dashboard/chat/_components/sources-hub/types";
 
 const VIDEO_PRESENTATION_POLL_INTERVAL_MS = 3000;
 const VIDEO_PRESENTATION_MAX_CONSECUTIVE_POLL_FAILURES = 3;

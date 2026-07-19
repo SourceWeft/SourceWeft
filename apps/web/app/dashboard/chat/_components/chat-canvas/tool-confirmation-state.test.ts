@@ -670,6 +670,29 @@ test("composer lock follows active execution states when provided", () => {
   );
 });
 
+test("composer lock blocks while background tool work is active", () => {
+  assert.equal(
+    shouldLockComposerForRun({
+      chatExecutionState: "idle",
+      hasActivelyRunningToolWork: true,
+      isStreaming: false,
+      isWaitingForApproval: false,
+      pendingConfirmationCount: 0,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldLockComposerForRun({
+      chatExecutionState: "idle",
+      hasActivelyRunningToolWork: false,
+      isStreaming: false,
+      isWaitingForApproval: false,
+      pendingConfirmationCount: 0,
+    }),
+    false,
+  );
+});
+
 test("resolved approval requests are not treated as actively running tool calls", () => {
   const item = createConfirmationItem("action-1");
   assert.equal(
@@ -694,6 +717,47 @@ test("pending approval requests are treated as active tool calls", () => {
       },
     }),
     true,
+  );
+});
+
+test("completed tool calls stay active while linked artifact is still running", () => {
+  assert.equal(
+    isToolCallActivelyRunning({
+      toolCall: {
+        tool: "generate_video_presentation",
+        output: {
+          type: "video_presentation_processing_result",
+          artifact_id: "artifact-1",
+          status: "running",
+        },
+        status: "completed",
+      },
+    }),
+    true,
+  );
+
+  assert.equal(
+    isToolCallActivelyRunning({
+      artifactStatuses: new Map([
+        [
+          "artifact-1",
+          {
+            id: "artifact-1",
+            status: "ready",
+          } as never,
+        ],
+      ]),
+      toolCall: {
+        tool: "generate_video_presentation",
+        output: {
+          type: "video_presentation_processing_result",
+          artifact_id: "artifact-1",
+          status: "running",
+        },
+        status: "completed",
+      },
+    }),
+    false,
   );
 });
 

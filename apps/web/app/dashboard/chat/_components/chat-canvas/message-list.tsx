@@ -34,8 +34,8 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { LoadingDots } from "@sourceweft/ui-web/components/ui/loading-dots";
 import {
+  getAgentToolRenderAs,
   getAgentToolSlashCommand,
-  hasAgentToolCapability,
 } from "@sourceweft/agent-tool-registry";
 import { RawImage } from "../../../../_components/raw-image";
 import { getActionIcon } from "../action-icons";
@@ -55,10 +55,11 @@ import {
 import { AssistantToolCard } from "./assistant-tool-card";
 import {
   buildAssistantRenderSegments,
-  includeGeneratedImageToolInvocationBlocks,
   type AssistantTerminalBlock,
   type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
+import { getArtifactBlockRenderer } from "./artifact-block-registry";
+import { useArtifactStatuses } from "./use-artifact-statuses";
 import { findLastAnswerSegmentId } from "./message-evidence";
 import {
   buildMessageRenderState,
@@ -72,10 +73,6 @@ import {
   UserMessageText,
 } from "./source-rendering";
 import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
-import {
-  GeneratedImageArtifactBlock,
-  GeneratedPresentationArtifactBlock,
-} from "./reasoning-trace";
 import type {
   ArtifactStatusSnapshot,
   ArtifactPreviewRecord,
@@ -175,22 +172,6 @@ function UserMessageImageReference({ image }: { image: ChatMessageImagePart }) {
         </div>
       </AttachmentHoverCardContent>
     </AttachmentHoverCard>
-  );
-}
-
-function getFallbackGeneratedImageToolCalls(input: {
-  renderBlocks: MessageRenderState["bodyBlocks"];
-  toolCalls: MessageVersion["toolCalls"];
-}) {
-  const renderedImageToolCallIds = new Set(
-    input.renderBlocks
-      .filter((block) => block.type === "generated_image")
-      .map((block) => block.toolCallId),
-  );
-  return (input.toolCalls ?? []).filter(
-    (toolCall) =>
-      hasAgentToolCapability(toolCall.tool, "generated_image_artifact") &&
-      !renderedImageToolCallIds.has(toolCall.id),
   );
 }
 
@@ -474,13 +455,12 @@ function AssistantMessageBody({
   workspaceId?: string | null;
 }) {
   const version = renderState.raw;
-  const renderBlocks = includeGeneratedImageToolInvocationBlocks(
-    renderState.bodyBlocks,
-  );
-  const fallbackGeneratedImageToolCalls = getFallbackGeneratedImageToolCalls({
-    renderBlocks,
+  const mergedArtifactStatuses = useArtifactStatuses({
+    artifactStatuses,
     toolCalls: version.toolCalls,
+    workspaceId,
   });
+  const renderBlocks = renderState.bodyBlocks;
   const cancelledNotice =
     renderState.status === "cancelled" ? "已由用户停止生成。" : null;
   const isWorkflowRunning = renderState.status === "running";
@@ -545,21 +525,21 @@ function AssistantMessageBody({
       }
 
       return (
-        <AssistantActivityRenderItems
-          availableCitations={renderState.availableCitations}
-          items={[
-            {
-              id: block.id,
-              key: `block:${block.id}`,
-              order: 0,
-              toolCall,
-              type: "tool",
-            },
-          ]}
-          onCitationClick={onCitationClick}
-          onWorkfileClick={onWorkfileClick}
-          resolvedConfirmations={resolvedConfirmations}
-        />
+        <div>
+          <AssistantToolCard
+            artifactStatuses={mergedArtifactStatuses}
+            onWorkfileClick={onWorkfileClick}
+            resolvedConfirmations={resolvedConfirmations}
+            toolCall={toolCall}
+            workspaceId={workspaceId}
+          />
+          <WebToolResults
+            availableCitations={renderState.availableCitations}
+            onCitationClick={onCitationClick}
+            toolCall={toolCall}
+            variant="activity-row"
+          />
+        </div>
       );
     }
 
@@ -583,33 +563,30 @@ function AssistantMessageBody({
       return null;
     }
 
-    if (block.type === "generated_image") {
-      return (
-        <GeneratedImageArtifactBlock
-          onArtifactPreview={onArtifactPreview}
-          toolCall={toolCall}
-          workspaceId={workspaceId}
-        />
+    if (block.type === "artifact") {
+      const ArtifactBody = getArtifactBlockRenderer(
+        getAgentToolRenderAs(toolCall.tool),
       );
-    }
-
-    if (block.type === "generated_presentation") {
-      return (
-        <GeneratedPresentationArtifactBlock
-          artifactStatuses={artifactStatuses}
-          onArtifactPreview={onArtifactPreview}
-          toolCall={toolCall}
-          workspaceId={workspaceId}
-        />
-      );
+      if (ArtifactBody) {
+        return (
+          <ArtifactBody
+            artifactStatuses={mergedArtifactStatuses}
+            onArtifactPreview={onArtifactPreview}
+            toolCall={toolCall}
+            workspaceId={workspaceId}
+          />
+        );
+      }
     }
 
     return (
       <div>
         <AssistantToolCard
+          artifactStatuses={mergedArtifactStatuses}
           onWorkfileClick={onWorkfileClick}
           resolvedConfirmations={resolvedConfirmations}
           toolCall={toolCall}
+          workspaceId={workspaceId}
         />
         <WebToolResults
           availableCitations={renderState.availableCitations}
@@ -642,33 +619,30 @@ function AssistantMessageBody({
       return null;
     }
 
-    if (block.type === "generated_image") {
-      return (
-        <GeneratedImageArtifactBlock
-          onArtifactPreview={onArtifactPreview}
-          toolCall={toolCall}
-          workspaceId={workspaceId}
-        />
+    if (block.type === "artifact") {
+      const ArtifactBody = getArtifactBlockRenderer(
+        getAgentToolRenderAs(toolCall.tool),
       );
-    }
-
-    if (block.type === "generated_presentation") {
-      return (
-        <GeneratedPresentationArtifactBlock
-          artifactStatuses={artifactStatuses}
-          onArtifactPreview={onArtifactPreview}
-          toolCall={toolCall}
-          workspaceId={workspaceId}
-        />
-      );
+      if (ArtifactBody) {
+        return (
+          <ArtifactBody
+            artifactStatuses={mergedArtifactStatuses}
+            onArtifactPreview={onArtifactPreview}
+            toolCall={toolCall}
+            workspaceId={workspaceId}
+          />
+        );
+      }
     }
 
     return (
       <div>
         <AssistantToolCard
+          artifactStatuses={mergedArtifactStatuses}
           onWorkfileClick={onWorkfileClick}
           resolvedConfirmations={resolvedConfirmations}
           toolCall={toolCall}
+          workspaceId={workspaceId}
         />
         <WebToolResults
           availableCitations={renderState.availableCitations}
@@ -759,18 +733,6 @@ function AssistantMessageBody({
           onCitationClick={onCitationClick}
           toolCalls={version.toolCalls}
         />
-      ) : null}
-      {fallbackGeneratedImageToolCalls.length > 0 ? (
-        <div className="mt-2 max-w-3xl space-y-3">
-          {fallbackGeneratedImageToolCalls.map((toolCall) => (
-            <GeneratedImageArtifactBlock
-              key={toolCall.id}
-              onArtifactPreview={onArtifactPreview}
-              toolCall={toolCall}
-              workspaceId={workspaceId}
-            />
-          ))}
-        </div>
       ) : null}
       {shouldShowBottomLoading ? <LoadingDots className="ml-1" /> : null}
       {cancelledNotice ? (

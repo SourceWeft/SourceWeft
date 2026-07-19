@@ -7,6 +7,7 @@ import {
   isAgentToolUserDisableSupported,
   isAgentToolUserEnableSupported,
 } from "@sourceweft/agent-tool-registry";
+import { MAX_SELECTED_SKILLS_PER_TURN } from "@sourceweft/contracts/stream";
 import type { CapabilityCatalogTool } from "@sourceweft/sdk";
 import type {
   ChatSkillItem,
@@ -20,10 +21,10 @@ const WEB_ACCESS_TOOL_NAMES = new Set<string>([
   AGENT_TOOL_NAMES.webFetch,
 ]);
 
-export const MAX_SELECTED_SKILL_IDS_PER_TURN = 5;
+/** Re-exported so the composer and the API boundary cannot drift apart. */
+export const MAX_SELECTED_SKILL_IDS_PER_TURN = MAX_SELECTED_SKILLS_PER_TURN;
 
-export const SKILL_SELECTION_LIMIT_MESSAGE =
-  "You can enable at most 5 skills per message.";
+export const SKILL_SELECTION_LIMIT_MESSAGE = `You can enable at most ${MAX_SELECTED_SKILLS_PER_TURN} skills per message.`;
 
 export function normalizeSkillIdsForRequest(skillIds: readonly string[]) {
   const seen = new Set<string>();

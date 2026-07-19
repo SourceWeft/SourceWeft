@@ -26,10 +26,6 @@ import type {
   VersionedMessageGroup,
 } from "../../_components/chat-canvas";
 import {
-  hasLegacyToolOptionsMetadata,
-  LEGACY_TOOL_OPTIONS_WARNING_MESSAGE,
-} from "../../_components/chat-canvas/legacy-tool-options";
-import {
   EMPTY_ACTIVE_CONNECTOR_TOOLS,
   resolveActiveConnectorToolState,
   type ActiveConnectorToolState,
@@ -59,9 +55,13 @@ import {
   throwStreamRequestError,
 } from "./message-normalizers";
 import {
-  collectPendingVideoPresentationArtifactIds,
-  mapArtifactStatusSnapshot,
-} from "./video-presentation-artifacts";
+  collectPendingArtifacts,
+} from "../../_components/chat-canvas/artifact-progress-tracker";
+import {
+  isArtifactSnapshotTerminal,
+} from "../../_components/chat-canvas/artifact-work-state";
+import { mapArtifactStatusSnapshot } from "../../_components/chat-canvas/map-artifact-status-snapshot";
+import { hasActivelyRunningToolWork } from "../../_components/chat-canvas/tool-confirmation-state";
 import {
   buildToolConfirmationResumeStreamInput,
   createToolConfirmationResumeQueueState,
@@ -77,46 +77,12 @@ import {
 } from "./message-groups";
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
-
-function resolveUserMessageMetadata(input: {
-  groups: VersionedMessageGroup[];
-  userMessageId: string | null | undefined;
-}) {
-  if (!input.userMessageId) {
-    return undefined;
-  }
-  return input.groups
-    .filter((group) => group.role === "user")
-    .flatMap((group) => group.versions)
-    .find((version) => version.id === input.userMessageId)?.metadata;
-}
-
-function warnLegacyToolOptionsMetadata(
-  metadata: Record<string, unknown> | undefined,
-) {
-  if (hasLegacyToolOptionsMetadata(metadata)) {
-    toast.info(LEGACY_TOOL_OPTIONS_WARNING_MESSAGE);
-  }
-}
+import { BREAKPOINTS, useMediaQuery } from "../../../../../lib/use-media-query";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
 
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(false);
-
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
-}
 
 export function useThreadPageController({
   dashboardState,
@@ -151,15 +117,15 @@ export function useThreadPageController({
   );
   const threadTitle = chatItem?.title ?? "Chat";
 
-  const isPersistentLayout = useMediaQuery("(min-width: 768px)");
-  const isDesktopPanel = useMediaQuery("(min-width: 1024px)");
+  const isPersistentLayout = useMediaQuery(BREAKPOINTS.md);
+  const isDesktopPanel = useMediaQuery(BREAKPOINTS.lg);
   const handledConnectorOAuthHubRef = useRef(false);
   const [workfilesRefreshKey, setWorkfilesRefreshKey] = useState(0);
   const [artifactsRefreshKey, setArtifactsRefreshKey] = useState(0);
   const [artifactStatuses, setArtifactStatuses] = useState<
     ReadonlyMap<string, ArtifactStatusSnapshot>
   >(new Map());
-  const videoPresentationPollInFlightRef = useRef(false);
+  const artifactPollInFlightRef = useRef(false);
   const [composerInitialInput, setComposerInitialInput] = useState("");
   const [composerInitialCommand, setComposerInitialCommand] = useState<
     ChatSendInput["command"] | null
@@ -188,7 +154,7 @@ export function useThreadPageController({
     const oauthStatus = params.get("connector_oauth");
     if (oauthStatus === "success" || oauthStatus === "error") {
       handledConnectorOAuthHubRef.current = true;
-      if (window.matchMedia("(min-width: 768px)").matches) {
+      if (window.matchMedia(BREAKPOINTS.md).matches) {
         if (!sourcesVisible) {
           toggleSourcesVisible();
         }
@@ -347,25 +313,51 @@ export function useThreadPageController({
     mergeStreamingAssistantIntoMessages,
     messages,
   });
-  const pendingVideoPresentationArtifactIds = useMemo(
-    () => collectPendingVideoPresentationArtifactIds(messages),
-    [messages],
+
+  // Use merged messages to include streaming snapshot for live-turn artifact tracking
+  const mergedMessages = useMemo(
+    () => mergeStreamingAssistantIntoMessages(messages),
+    [messages], // Remove mergeStreamingAssistantIntoMessages from deps
   );
 
-  const refreshVideoPresentationArtifactStatuses = useCallback(async () => {
+  const pendingArtifacts = useMemo(
+    () => collectPendingArtifacts(mergedMessages, artifactStatuses),
+    [artifactStatuses, mergedMessages],
+  );
+
+  const pendingArtifactIds = useMemo(
+    () => pendingArtifacts.map((artifact) => artifact.artifactId),
+    [pendingArtifacts],
+  );
+
+  const hasActivelyRunningToolWorkState = useMemo(
+    () =>
+      hasActivelyRunningToolWork({
+        artifactStatuses,
+        messages: mergedMessages,
+      }),
+    [artifactStatuses, mergedMessages],
+  );
+
+  // Use ref to avoid re-creating callback when pendingArtifactIds changes
+  const pendingArtifactIdsRef = useRef<string[]>([]);
+  pendingArtifactIdsRef.current = pendingArtifactIds;
+
+  const refreshArtifactStatuses = useCallback(async () => {
+    const artifactIds = pendingArtifactIdsRef.current;
     if (
       !workspaceId ||
-      pendingVideoPresentationArtifactIds.length === 0 ||
-      videoPresentationPollInFlightRef.current
+      artifactIds.length === 0 ||
+      artifactPollInFlightRef.current
     ) {
       return;
     }
 
-    videoPresentationPollInFlightRef.current = true;
+    artifactPollInFlightRef.current = true;
     const activeWorkspaceId = workspaceId;
     try {
       const results = await Promise.allSettled(
-        pendingVideoPresentationArtifactIds.map(async (artifactId) => {
+        artifactIds.map(async (artifactId) => {
           const result = await contentClient.getArtifact(
             activeWorkspaceId,
             artifactId,
@@ -391,16 +383,15 @@ export function useThreadPageController({
         results.some(
           (result) =>
             result.status === "fulfilled" &&
-            (result.value.snapshot.status === "ready" ||
-              result.value.snapshot.status === "failed"),
+            isArtifactSnapshotTerminal(result.value.snapshot),
         )
       ) {
         setArtifactsRefreshKey((value) => value + 1);
       }
     } finally {
-      videoPresentationPollInFlightRef.current = false;
+      artifactPollInFlightRef.current = false;
     }
-  }, [pendingVideoPresentationArtifactIds, workspaceId]);
+  }, [workspaceId]); // Only depend on workspaceId, not pendingArtifactIds
 
   const clearEditingState = useCallback(() => {
     setEditingMessageId(null);
@@ -707,43 +698,21 @@ export function useThreadPageController({
     ],
   );
 
+  // Artifact progress streams through the single chat SSE: the
+  // generate_video_presentation tool blocks until the render pipeline reaches
+  // a terminal state, emitting tool-call-event progress along the way. On page
+  // reload the durable-run attach flow resumes that same stream, and
+  // refreshArtifactStatuses runs once (below) to reconcile any snapshot the
+  // page missed while closed.
   useEffect(() => {
-    if (!workspaceId || pendingVideoPresentationArtifactIds.length === 0) {
+    if (!workspaceId || pendingArtifactIds.length === 0) {
       return;
     }
-
-    void refreshVideoPresentationArtifactStatuses();
-  }, [
-    pendingVideoPresentationArtifactIds,
-    refreshVideoPresentationArtifactStatuses,
-    workspaceId,
-  ]);
-
-  useEffect(() => {
-    if (!workspaceId || pendingVideoPresentationArtifactIds.length === 0) {
-      return;
-    }
-
-    const hasPendingVideoPresentation =
-      pendingVideoPresentationArtifactIds.some((artifactId) => {
-        const status = artifactStatuses.get(artifactId)?.status ?? "pending";
-        return status === "pending" || status === "running";
-      });
-    if (!hasPendingVideoPresentation) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void refreshVideoPresentationArtifactStatuses();
-    }, 3000);
-
-    return () => window.clearInterval(timer);
-  }, [
-    artifactStatuses,
-    pendingVideoPresentationArtifactIds,
-    refreshVideoPresentationArtifactStatuses,
-    workspaceId,
-  ]);
+    void refreshArtifactStatuses();
+    // artifactIds are read from a ref inside refreshArtifactStatuses; keying
+    // on the joined ids keeps this to one reconcile per artifact set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingArtifactIds.join("\0"), refreshArtifactStatuses, workspaceId]);
 
   const handleSendMessage = useCallback(
     async (
@@ -754,7 +723,8 @@ export function useThreadPageController({
       const images = input.images ?? [];
       if (
         (!text && images.length === 0) ||
-        (chatExecutionState !== "idle" && !options?.allowWhileStreaming)
+        (chatExecutionState !== "idle" && !options?.allowWhileStreaming) ||
+        hasActivelyRunningToolWorkState
       ) {
         return;
       }
@@ -844,13 +814,6 @@ export function useThreadPageController({
         });
         const mergedEditSourceIds = mergeSourceIds(editSourceIds);
 
-        warnLegacyToolOptionsMetadata(
-          resolveUserMessageMetadata({
-            groups: messageGroups,
-            userMessageId: editingMessageId,
-          }),
-        );
-
         await streamThreadAction({
           mode: "edit",
           content: text,
@@ -887,6 +850,7 @@ export function useThreadPageController({
       editingGroupId,
       editingMessageId,
       chatExecutionState,
+      hasActivelyRunningToolWorkState,
       modelCatalogStatus,
       messageGroups,
       messages,
@@ -940,13 +904,6 @@ export function useThreadPageController({
         .flatMap((group) => group.versions)
         .find((version) => version.id === input.assistantMessageId)
         ?.sourceUserMessageId;
-
-      warnLegacyToolOptionsMetadata(
-        resolveUserMessageMetadata({
-          groups: messageGroups,
-          userMessageId: refreshUserMessageId,
-        }),
-      );
 
       await streamThreadAction({
         mode: "refresh",

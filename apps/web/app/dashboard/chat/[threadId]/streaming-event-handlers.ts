@@ -1,3 +1,4 @@
+import { getAgentToolRenderAs } from "@sourceweft/agent-tool-registry";
 import type {
   CitationRecord,
   ModelReasoningSegmentRecord,
@@ -39,8 +40,6 @@ export type StreamingEventHandlerContext<
     toolCall: ToolCallRecord,
     event: TToolEvent,
   ) => boolean;
-  isGeneratedImageArtifactToolName: (toolName: string) => boolean;
-  isPresentationArtifactToolName: (toolName: string) => boolean;
   mergeThinkingStepRecords: (
     stepsById: Map<string, ThinkingStepRecord>,
     nextStep: ThinkingStepRecord,
@@ -330,30 +329,16 @@ export function handleStreamingToolCallEvent<
   }
 
   context.streamToolCallsById.set(nextToolCall.id, nextToolCall);
-  if (
-    event.type === "tool-call-start" &&
-    context.isGeneratedImageArtifactToolName(nextToolCall.tool)
-  ) {
-    drainQueuedDeltasNow();
-    context.streamRenderBuffer.appendGeneratedImageBlock(nextToolCall.id);
-  }
-  const shouldAppendPresentationBlock =
-    context.isPresentationArtifactToolName(nextToolCall.tool) &&
-    (event.type === "tool-call-result" || event.type === "tool-call-end") &&
-    context.isCompletedPresentationArtifactToolCall(nextToolCall, event);
-  if (shouldAppendPresentationBlock) {
-    drainQueuedDeltasNow();
-    context.streamRenderBuffer.appendGeneratedPresentationBlock(
-      nextToolCall.id,
-    );
-  }
-  if (
-    event.type === "tool-call-start" &&
-    !context.isGeneratedImageArtifactToolName(nextToolCall.tool) &&
-    !context.isPresentationArtifactToolName(nextToolCall.tool)
-  ) {
+  if (event.type === "tool-call-start") {
+    // Every visible tool renders a progress tool card; tools whose capability
+    // declares a renderAs also emit a terminal artifact block (matching the
+    // backend, which emits both). Block/body selection is driven purely by
+    // getAgentToolRenderAs — never per-medium block types or capability tags.
     drainQueuedDeltasNow();
     context.streamRenderBuffer.appendToolBlock(nextToolCall.id);
+    if (getAgentToolRenderAs(nextToolCall.tool)) {
+      context.streamRenderBuffer.appendArtifactBlock(nextToolCall.id);
+    }
   }
   const traceEvent = context.resolveTraceEventFromStreamEvent({
     event,

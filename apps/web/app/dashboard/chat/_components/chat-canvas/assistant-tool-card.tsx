@@ -17,6 +17,18 @@ import {
   Wrench,
 } from "lucide-react";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import type { ArtifactStatusSnapshot } from "./types";
+import { formatCompactDuration } from "./duration-format";
+import {
+  isDeliverableGenerationActive,
+  isDeliverableToolName,
+  resolveDeliverableElapsedMs,
+  resolveDeliverableStatus,
+  shouldSuppressDeliverableOutputSummary,
+} from "./artifact-progress";
+import { resolveToolCallArtifactId } from "./artifact-work-state";
+import { useArtifactSnapshot } from "./use-artifact-snapshot";
+import { DeliverablePipeline } from "./deliverable-pipeline";
 import {
   ASSISTANT_ACTIVITY_DETAIL_CLASS,
   ASSISTANT_ACTIVITY_ICON_CLASS,
@@ -60,6 +72,7 @@ import type {
 } from "./types";
 
 function getStatusLabel(input: {
+  artifactSnapshot?: ArtifactStatusSnapshot;
   confirmationResolution?: ToolConfirmationResolution | null;
   toolCall: ToolCallRecord;
 }) {
@@ -75,6 +88,27 @@ function getStatusLabel(input: {
     })
   ) {
     return "Needs approval";
+  }
+  if (isDeliverableToolName(input.toolCall.tool)) {
+    const generationStatus = resolveDeliverableStatus({
+      artifactSnapshot: input.artifactSnapshot,
+      toolCallOutput: input.toolCall.output,
+      toolCallStatus: input.toolCall.status,
+      toolName: input.toolCall.tool,
+    });
+    if (
+      isDeliverableGenerationActive({
+        artifactSnapshot: input.artifactSnapshot,
+        toolCallOutput: input.toolCall.output,
+        toolCallStatus: input.toolCall.status,
+        toolName: input.toolCall.tool,
+      })
+    ) {
+      return "Generating";
+    }
+    if (generationStatus === "failed") {
+      return "Failed";
+    }
   }
   if (input.toolCall.status === "running") {
     return "Running";
@@ -138,6 +172,11 @@ function StatusIcon({ label, toolName }: { label: string; toolName: string }) {
       <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
     );
   }
+  if (label === "Generating") {
+    return (
+      <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
+    );
+  }
   if (label === "Failed") {
     return <AlertTriangle className="size-3.5 text-destructive" />;
   }
@@ -157,8 +196,7 @@ function formatToolDuration(latencyMs: number | null | undefined) {
   if (latencyMs < 1000) {
     return `${Math.max(1, Math.round(latencyMs))}ms`;
   }
-  const seconds = latencyMs / 1000;
-  return `${seconds >= 10 ? Math.round(seconds) : seconds.toFixed(1)}s`;
+  return formatCompactDuration(latencyMs);
 }
 
 function getOutputSummary(toolCall: ToolCallRecord) {
@@ -166,6 +204,14 @@ function getOutputSummary(toolCall: ToolCallRecord) {
     return null;
   }
   if (getReadFilePreview(toolCall)) {
+    return null;
+  }
+  if (
+    shouldSuppressDeliverableOutputSummary({
+      toolCallOutput: toolCall.output,
+      toolName: toolCall.tool,
+    })
+  ) {
     return null;
   }
   const confirmation = getToolConfirmationOutput(toolCall.output);
@@ -259,6 +305,7 @@ function SandboxOperationTimeline({
 }
 
 export function AssistantToolCard({
+  artifactStatuses,
   children,
   contentClassName,
   defaultOpen,
@@ -266,7 +313,9 @@ export function AssistantToolCard({
   resolvedConfirmations = [],
   toolCall,
   toolStep,
+  workspaceId,
 }: {
+  artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   children?: ReactNode;
   contentClassName?: string;
   defaultOpen?: boolean;
@@ -274,6 +323,7 @@ export function AssistantToolCard({
   resolvedConfirmations?: ToolConfirmationResolution[];
   toolCall: ToolCallRecord;
   toolStep?: ThinkingStepRecord;
+  workspaceId?: string | null;
 }) {
   const confirmation = getToolConfirmationOutput(toolCall.output);
   const confirmationResolution = confirmation
@@ -281,7 +331,33 @@ export function AssistantToolCard({
         (item) => item.confirmationId === confirmation.id,
       )
     : null;
-  const statusLabel = getStatusLabel({ confirmationResolution, toolCall });
+  const isVideoPresentationTool = isDeliverableToolName(toolCall.tool);
+  const videoPresentationArtifactId = isVideoPresentationTool
+    ? resolveToolCallArtifactId(toolCall.output)
+    : undefined;
+  const parentVideoPresentationSnapshot = videoPresentationArtifactId
+    ? artifactStatuses?.get(videoPresentationArtifactId)
+    : undefined;
+  const { snapshot: videoPresentationSnapshot } =
+    useArtifactSnapshot({
+      artifactSnapshot: parentVideoPresentationSnapshot,
+      enabled: isVideoPresentationTool,
+      toolCallOutput: toolCall.output,
+      workspaceId,
+    });
+  const effectiveArtifactStatuses = (() => {
+    if (!videoPresentationArtifactId || !videoPresentationSnapshot) {
+      return artifactStatuses;
+    }
+    const next = new Map(artifactStatuses ?? []);
+    next.set(videoPresentationArtifactId, videoPresentationSnapshot);
+    return next;
+  })();
+  const statusLabel = getStatusLabel({
+    artifactSnapshot: videoPresentationSnapshot,
+    confirmationResolution,
+    toolCall,
+  });
   const title = getAssistantToolTitle(
     toolCall,
     toolStep,
@@ -302,7 +378,12 @@ export function AssistantToolCard({
     : resolveWorkfileMutationPreview(toolCall);
   const detailParts = isRedactedSkillRead
     ? []
-    : getToolCallDetailParts(toolCall, toolStep, confirmationResolution);
+    : getToolCallDetailParts(
+        toolCall,
+        toolStep,
+        confirmationResolution,
+        effectiveArtifactStatuses,
+      );
   const outputSummary = getOutputSummary(toolCall);
   const collectedWorkfilePaths = isRedactedSkillRead
     ? []
@@ -327,7 +408,39 @@ export function AssistantToolCard({
     error: toolCall.error,
     toolName: toolCall.tool,
   });
-  const duration = formatToolDuration(toolCall.latencyMs);
+  const isVideoPresentationGenerating = isVideoPresentationTool
+    ? isDeliverableGenerationActive({
+        artifactSnapshot: videoPresentationSnapshot,
+        toolCallOutput: toolCall.output,
+        toolCallStatus: toolCall.status,
+        toolName: toolCall.tool,
+      })
+    : false;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isVideoPresentationGenerating) {
+      return;
+    }
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isVideoPresentationGenerating]);
+  const videoPresentationElapsedMs = isVideoPresentationTool
+    ? resolveDeliverableElapsedMs({
+        artifactSnapshot: videoPresentationSnapshot,
+        nowMs,
+        toolCallOutput: toolCall.output,
+        toolName: toolCall.tool,
+      })
+    : null;
+  // Never show the fire-and-forget tool latency (~200ms) for video presentation.
+  const duration = formatToolDuration(
+    isVideoPresentationTool
+      ? videoPresentationElapsedMs
+      : toolCall.latencyMs,
+  );
   const visibleStatus = statusLabel === "Done" ? null : statusLabel;
   const resolvedConfirmationMessage = getResolvedToolConfirmationMessage({
     confirmation,
@@ -352,7 +465,8 @@ export function AssistantToolCard({
     collectedWorkfilePaths.length > 0 ||
     (!isRedactedSkillRead && Boolean(toolStep?.detail)) ||
     Boolean(toolError) ||
-    Boolean(resolvedConfirmationMessage);
+    Boolean(resolvedConfirmationMessage) ||
+    Boolean(isVideoPresentationTool && videoPresentationArtifactId);
   const hasExpandableContent = hasDetails || Boolean(children);
 
   useEffect(() => {
@@ -464,6 +578,15 @@ export function AssistantToolCard({
           ) : null}
           {hasDetails && toolError ? (
             <p className="break-words text-destructive">{toolError}</p>
+          ) : null}
+          {isVideoPresentationTool && videoPresentationArtifactId ? (
+            <DeliverablePipeline
+              artifactSnapshot={videoPresentationSnapshot}
+              toolCallOutput={toolCall.output}
+              toolCallStatus={toolCall.status}
+              toolName={toolCall.tool}
+              workspaceId={workspaceId}
+            />
           ) : null}
           {children}
         </div>

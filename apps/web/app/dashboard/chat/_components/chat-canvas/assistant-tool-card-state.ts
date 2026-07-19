@@ -1,6 +1,7 @@
 function shouldAutoOpenToolStatus(label: string) {
   return (
     label === "Running" ||
+    label === "Generating" ||
     label === "Needs approval" ||
     label === "Failed" ||
     label === "Rejected"

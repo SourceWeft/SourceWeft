@@ -18,8 +18,6 @@ function createBaseStreamingContext(
     isCompletedImageArtifactToolCall: () => false,
     isCompletedPresentationArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
-    isGeneratedImageArtifactToolName: () => false,
-    isPresentationArtifactToolName: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send",
     normalizeCitationRecords: () => [],
@@ -77,8 +75,6 @@ test("finish event stores finish reason on the streaming assistant message", () 
       isCompletedImageArtifactToolCall: () => false,
       isCompletedPresentationArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
-      isGeneratedImageArtifactToolName: () => false,
-      isPresentationArtifactToolName: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "send",
       normalizeCitationRecords: () => [],
@@ -432,8 +428,6 @@ test("finish event preserves approval requested tool calls", () => {
       isCompletedImageArtifactToolCall: () => false,
       isCompletedPresentationArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
-      isGeneratedImageArtifactToolName: () => false,
-      isPresentationArtifactToolName: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "send",
       normalizeCitationRecords: () => [],
@@ -572,8 +566,6 @@ test("approval refresh assistant message keeps the original assistant root", () 
       isCompletedImageArtifactToolCall: () => false,
       isCompletedPresentationArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
-      isGeneratedImageArtifactToolName: () => false,
-      isPresentationArtifactToolName: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "refresh",
       normalizeCitationRecords: () => [],
@@ -693,8 +685,6 @@ test("streaming reasoning keeps interrupted model reasoning in separate segments
     isCompletedImageArtifactToolCall: () => false,
     isCompletedPresentationArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
-    isGeneratedImageArtifactToolName: () => false,
-    isPresentationArtifactToolName: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
     normalizeCitationRecords: () => [],
@@ -790,8 +780,6 @@ test("streaming reasoning deltas update one stable trace part", () => {
     isCompletedImageArtifactToolCall: () => false,
     isCompletedPresentationArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
-    isGeneratedImageArtifactToolName: () => false,
-    isPresentationArtifactToolName: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
     normalizeCitationRecords: () => [],
@@ -1020,8 +1008,6 @@ test("streaming trace events preserve live display order across tools and reason
     isCompletedImageArtifactToolCall: () => false,
     isCompletedPresentationArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
-    isGeneratedImageArtifactToolName: () => false,
-    isPresentationArtifactToolName: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
     normalizeCitationRecords: () => [],
@@ -1222,8 +1208,6 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
       toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
-    isPresentationArtifactToolName: (toolName) =>
-      toolName === "publish_artifact",
     resolveToolCallFromStreamEvent: ({ event, streamToolCallsById }) => {
       const existing = streamToolCallsById.get(event.id ?? "pptx-tool");
       const eventData = getToolEventData(event);
@@ -1331,8 +1315,22 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  assert.equal(drainCount, 0);
-  assert.deepEqual(message.metadata.renderBlocks, []);
+  // tool-call-start appends the progress tool card plus the terminal artifact
+  // block (publish_artifact renders as "pptx"), draining pending text once.
+  assert.equal(drainCount, 1);
+  assert.deepEqual(message.metadata.renderBlocks, [
+    {
+      id: "stream-tool-pptx-tool",
+      type: "tool",
+      toolCallId: "pptx-tool",
+    },
+    {
+      id: "stream-artifact-pptx-tool",
+      placement: "terminal",
+      type: "artifact",
+      toolCallId: "pptx-tool",
+    },
+  ]);
 
   testExports.handleStreamingToolCallEvent({
     context,
@@ -1351,13 +1349,20 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
     setWorkfilesRefreshKey: () => undefined,
   });
 
+  // tool-call-result no longer appends a block (emitted at start); it only
+  // triggers the artifact refresh and does not drain.
   assert.equal(drainCount, 1);
   assert.equal(refreshCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
     {
-      id: "stream-generated-presentation-pptx-tool",
+      id: "stream-tool-pptx-tool",
+      type: "tool",
+      toolCallId: "pptx-tool",
+    },
+    {
+      id: "stream-artifact-pptx-tool",
       placement: "terminal",
-      type: "generated_presentation",
+      type: "artifact",
       toolCallId: "pptx-tool",
     },
   ]);
@@ -1405,8 +1410,6 @@ test("presentation artifact result appends after earlier progress without reorde
       toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
-    isPresentationArtifactToolName: (toolName) =>
-      toolName === "publish_artifact",
     resolveToolCallFromStreamEvent: ({ event }) => {
       const eventData = getToolEventData(event);
       return {
@@ -1471,6 +1474,22 @@ test("presentation artifact result appends after earlier progress without reorde
   });
   testExports.handleStreamingToolCallEvent({
     context,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
+    event: {
+      type: "tool-call-start",
+      id: "pptx-tool",
+    },
+    refreshedArtifactToolIds,
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+  testExports.handleStreamingToolCallEvent({
+    context,
     drainQueuedDeltasNow: () => undefined,
     event: {
       type: "tool-call-result",
@@ -1484,7 +1503,9 @@ test("presentation artifact result appends after earlier progress without reorde
     setWorkfilesRefreshKey: () => undefined,
   });
 
-  assert.equal(drainCount, 0);
+  // The tool card + terminal artifact block are appended at tool-call-start,
+  // after the earlier assistant text, and are never reordered by the result.
+  assert.equal(drainCount, 1);
   assert.equal(refreshCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
     {
@@ -1493,9 +1514,14 @@ test("presentation artifact result appends after earlier progress without reorde
       text: "Before presentation. ",
     },
     {
-      id: "stream-generated-presentation-pptx-tool",
+      id: "stream-tool-pptx-tool",
+      type: "tool",
+      toolCallId: "pptx-tool",
+    },
+    {
+      id: "stream-artifact-pptx-tool",
       placement: "terminal",
-      type: "generated_presentation",
+      type: "artifact",
       toolCallId: "pptx-tool",
     },
   ]);
@@ -1534,8 +1560,6 @@ test("presentation artifact result without a published URL does not append card"
       toolCall.status === "completed" &&
       event.type === "tool-call-result" &&
       Boolean((toolCall.output as Record<string, unknown>).artifact_url),
-    isPresentationArtifactToolName: (toolName) =>
-      toolName === "publish_artifact",
     resolveToolCallFromStreamEvent: ({ event }) => ({
       id: event.id ?? "pptx-tool",
       tool: "publish_artifact",
@@ -1619,8 +1643,6 @@ test("video presentation artifact end appends shared presentation card after pro
       toolCall.tool === "generate_video_presentation" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-end",
-    isPresentationArtifactToolName: (toolName) =>
-      toolName === "generate_video_presentation",
     resolveToolCallFromStreamEvent: ({ event }) => ({
       id: event.id ?? "video-tool",
       tool: "generate_video_presentation",
@@ -1691,6 +1713,41 @@ test("video presentation artifact end appends shared presentation card after pro
     title: "ASR video",
   });
 
+  const refreshedArtifactToolIds = new Set<string>();
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => {
+      drainCount += 1;
+    },
+    event: {
+      type: "tool-call-start",
+      id: "video-tool",
+    },
+    refreshedArtifactToolIds,
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: (updater) => {
+      refreshCount = updater(refreshCount);
+    },
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  // The video tool renders as "video"; the tool card + shared terminal
+  // artifact block are appended at start (draining once), after the progress.
+  assert.equal(drainCount, 1);
+  assert.deepEqual(message.metadata.renderBlocks, [
+    {
+      id: "stream-tool-video-tool",
+      type: "tool",
+      toolCallId: "video-tool",
+    },
+    {
+      id: "stream-artifact-video-tool",
+      placement: "terminal",
+      type: "artifact",
+      toolCallId: "video-tool",
+    },
+  ]);
+
   testExports.handleStreamingToolCallEvent({
     context,
     drainQueuedDeltasNow: () => {
@@ -1700,7 +1757,7 @@ test("video presentation artifact end appends shared presentation card after pro
       type: "tool-call-end",
       id: "video-tool",
     },
-    refreshedArtifactToolIds: new Set(),
+    refreshedArtifactToolIds,
     refreshedWorkfileToolIds: new Set(),
     setArtifactsRefreshKey: (updater) => {
       refreshCount = updater(refreshCount);
@@ -1708,13 +1765,20 @@ test("video presentation artifact end appends shared presentation card after pro
     setWorkfilesRefreshKey: () => undefined,
   });
 
+  // tool-call-end only refreshes; the block sequence is unchanged and no
+  // additional drain occurs.
   assert.equal(drainCount, 1);
   assert.equal(refreshCount, 1);
   assert.deepEqual(message.metadata.renderBlocks, [
     {
-      id: "stream-generated-presentation-video-tool",
+      id: "stream-tool-video-tool",
+      type: "tool",
+      toolCallId: "video-tool",
+    },
+    {
+      id: "stream-artifact-video-tool",
       placement: "terminal",
-      type: "generated_presentation",
+      type: "artifact",
       toolCallId: "video-tool",
     },
   ]);

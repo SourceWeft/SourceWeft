@@ -28,13 +28,13 @@ test("keeps assistant text, tool block, and continued text in order", () => {
   ]);
 });
 
-test("keeps text, tool, generated presentation, and trailing text in order", () => {
+test("keeps text, tool, artifact, and trailing text in order", () => {
   const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
 
   buffer.appendText("before");
   buffer.appendToolBlock("tool-1");
   buffer.appendText("middle");
-  buffer.appendGeneratedPresentationBlock("tool-2");
+  buffer.appendArtifactBlock("tool-2");
   buffer.appendText("after");
 
   assert.deepEqual(buffer.snapshotRenderBlocks(), [
@@ -54,9 +54,9 @@ test("keeps text, tool, generated presentation, and trailing text in order", () 
       text: "middle",
     },
     {
-      id: "stream-generated-presentation-tool-2",
+      id: "stream-artifact-tool-2",
       placement: "terminal",
-      type: "generated_presentation",
+      type: "artifact",
       toolCallId: "tool-2",
     },
     {
@@ -67,24 +67,40 @@ test("keeps text, tool, generated presentation, and trailing text in order", () 
   ]);
 });
 
-test("marks generated artifact blocks as terminal placement", () => {
+test("marks artifact blocks as terminal placement", () => {
   const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
 
-  buffer.appendGeneratedImageBlock("image-tool");
-  buffer.appendGeneratedPresentationBlock("presentation-tool");
+  buffer.appendArtifactBlock("image-tool");
+  buffer.appendArtifactBlock("presentation-tool");
 
   assert.deepEqual(buffer.snapshotRenderBlocks(), [
     {
-      id: "stream-generated-image-image-tool",
+      id: "stream-artifact-image-tool",
       placement: "terminal",
-      type: "generated_image",
+      type: "artifact",
       toolCallId: "image-tool",
     },
     {
-      id: "stream-generated-presentation-presentation-tool",
+      id: "stream-artifact-presentation-tool",
       placement: "terminal",
-      type: "generated_presentation",
+      type: "artifact",
       toolCallId: "presentation-tool",
+    },
+  ]);
+});
+
+test("deduplicates artifact blocks by tool call id", () => {
+  const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
+
+  buffer.appendArtifactBlock("tool-1");
+  buffer.appendArtifactBlock("tool-1");
+
+  assert.deepEqual(buffer.snapshotRenderBlocks(), [
+    {
+      id: "stream-artifact-tool-1",
+      placement: "terminal",
+      type: "artifact",
+      toolCallId: "tool-1",
     },
   ]);
 });

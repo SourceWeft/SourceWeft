@@ -5,6 +5,7 @@ import {
 } from "@sourceweft/sdk";
 import {
   getAgentToolConnectorType,
+  getArtifactProgressProtocol,
   hasAgentToolCapability,
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
@@ -736,10 +737,32 @@ function normalizePublicToolConfirmationOutput(
   return normalized;
 }
 
+/**
+ * Unwrap a deliverable's structured progress output. Which `type` values count
+ * comes from the capability's own progress protocol, so this stays correct as
+ * capabilities are added.
+ */
+function normalizeDeliverablePublicToolOutput(
+  toolName: string,
+  output: unknown,
+) {
+  const record = toObjectRecord(output);
+  const contentRecord = getToolMessageContentRecord(output);
+  const publicRecord = contentRecord ?? record;
+  const type = toNullableString(publicRecord?.type)?.trim();
+  return getArtifactProgressProtocol(toolName)?.outputTypes.includes(type ?? "")
+    ? publicRecord
+    : output;
+}
+
 function normalizePublicToolOutput(toolName: string, output: unknown) {
   const confirmation = getToolConfirmationRecord(output);
   if (confirmation) {
     return normalizePublicToolConfirmationOutput(confirmation);
+  }
+
+  if (getArtifactProgressProtocol(toolName)) {
+    return normalizeDeliverablePublicToolOutput(toolName, output);
   }
 
   if (!isConnectorToolName(toolName)) {
@@ -1632,13 +1655,13 @@ function normalizeMessageRenderBlock(
       : null;
   }
 
-  if (record.type === "generated_image") {
+  if (record.type === "artifact") {
     const toolCallId = toNullableString(record.toolCallId);
     return toolCallId
       ? {
           id,
           ...(placement ? { placement } : {}),
-          type: "generated_image",
+          type: "artifact",
           toolCallId,
         }
       : null;
@@ -1651,18 +1674,6 @@ function normalizeMessageRenderBlock(
           id,
           ...(placement ? { placement } : {}),
           type: "tool",
-          toolCallId,
-        }
-      : null;
-  }
-
-  if (record.type === "generated_presentation") {
-    const toolCallId = toNullableString(record.toolCallId);
-    return toolCallId
-      ? {
-          id,
-          ...(placement ? { placement } : {}),
-          type: "generated_presentation",
           toolCallId,
         }
       : null;

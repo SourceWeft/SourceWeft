@@ -19,40 +19,20 @@ export function createStreamingRenderBuffer({
   const deltaBatchLimit = Math.max(1, maxDeltaBatchChars);
 
   return {
-    appendGeneratedImageBlock(toolCallId: string) {
+    appendArtifactBlock(toolCallId: string) {
       if (
         renderBlocks.some(
           (block) =>
-            block.type === "generated_image" &&
-            block.toolCallId === toolCallId,
+            block.type === "artifact" && block.toolCallId === toolCallId,
         )
       ) {
         return;
       }
 
       renderBlocks.push({
-        id: `stream-generated-image-${toolCallId}`,
+        id: `stream-artifact-${toolCallId}`,
         placement: "terminal",
-        type: "generated_image",
-        toolCallId,
-      });
-    },
-
-    appendGeneratedPresentationBlock(toolCallId: string) {
-      if (
-        renderBlocks.some(
-          (block) =>
-            block.type === "generated_presentation" &&
-            block.toolCallId === toolCallId,
-        )
-      ) {
-        return;
-      }
-
-      renderBlocks.push({
-        id: `stream-generated-presentation-${toolCallId}`,
-        placement: "terminal",
-        type: "generated_presentation",
+        type: "artifact",
         toolCallId,
       });
     },
