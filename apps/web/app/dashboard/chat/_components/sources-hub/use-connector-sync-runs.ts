@@ -1,0 +1,622 @@
+import { useCallback, useEffect, useRef } from "react";
+
+import { connectorsClient, contentClient } from "../../../../../lib/sdk";
+import type { SourceItem } from "../source-types";
+import { mapSourcesToUi } from "./source-mapping";
+import {
+  ACTIVE_SYNC_RUN_POLL_MS,
+  CONNECTOR_SYNC_RUN_CHANNEL_PREFIX,
+  SYNC_RUN_LEADER_CHECK_MS,
+  SYNC_RUN_LEADER_ELECTION_MS,
+  SYNC_RUN_LEADER_HEARTBEAT_MS,
+  type ConnectorSyncRunLeaderCandidate,
+  getConnectorSyncRunPollDecision,
+  selectConnectorSyncRunLeader,
+} from "./sync-run-polling";
+
+const SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS = 1000;
+
+type ActiveConnectorSyncRun = {
+  connectorId: string;
+  discoveredCount: number;
+  indexedCount: number;
+  failedCount: number;
+  lastSourceUpdatedAt: string | null;
+  hasFinalRefreshed: boolean;
+};
+
+type WorkspaceConnectorSyncRunsResult = Awaited<
+  ReturnType<typeof connectorsClient.listWorkspaceSyncRuns>
+>;
+
+type ConnectorSyncRunBroadcastMessage =
+  | {
+      type: "hello" | "leader-heartbeat";
+      tabId: string;
+      visible: boolean;
+      sentAt: number;
+    }
+  | {
+      type: "sync-runs-result";
+      tabId: string;
+      sentAt: number;
+      result: WorkspaceConnectorSyncRunsResult;
+    }
+  | {
+      type: "sync-runs-wake";
+      tabId: string;
+      sentAt: number;
+    };
+
+export function isDocumentVisible() {
+  return typeof document === "undefined"
+    ? true
+    : document.visibilityState !== "hidden";
+}
+
+function getIncrementalUpdatedAfter(value: string | null) {
+  if (!value) {
+    return undefined;
+  }
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return value;
+  }
+  return new Date(
+    Math.max(0, timestamp - SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS),
+  ).toISOString();
+}
+
+function createSourcesHubTabId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function parseConnectorSyncRunBroadcastMessage(
+  value: unknown,
+): ConnectorSyncRunBroadcastMessage | null {
+  if (!value || typeof value !== "object") return null;
+  const message = value as Partial<ConnectorSyncRunBroadcastMessage>;
+  if (typeof message.type !== "string" || typeof message.tabId !== "string") {
+    return null;
+  }
+  if (
+    message.type !== "hello" &&
+    message.type !== "leader-heartbeat" &&
+    message.type !== "sync-runs-result" &&
+    message.type !== "sync-runs-wake"
+  ) {
+    return null;
+  }
+  return value as ConnectorSyncRunBroadcastMessage;
+}
+
+export function useConnectorSyncRuns(input: {
+  workspaceId: string | null | undefined;
+  isPollingTab: boolean;
+  mergeIncrementalSources: (mapped: SourceItem[]) => void;
+  replaceConnectorSources: (
+    batches: Array<{ connectorId: string; items: SourceItem[] }>,
+  ) => void;
+  refreshConnectors: () => void | Promise<void>;
+}): {
+  trackConnectorSyncRun: (
+    run:
+      | {
+          id: string;
+          connectorId: string;
+          discoveredCount: number;
+          indexedCount: number;
+          failedCount: number;
+        }
+      | null
+      | undefined,
+  ) => void;
+} {
+  const {
+    workspaceId,
+    isPollingTab,
+    mergeIncrementalSources,
+    replaceConnectorSources,
+    refreshConnectors,
+  } = input;
+
+  const activeSyncRunsRef = useRef<Map<string, ActiveConnectorSyncRun>>(
+    new Map(),
+  );
+  const syncRunPollTimerRef = useRef<number | null>(null);
+  const syncRunLeaderTimerRef = useRef<number | null>(null);
+  const syncRunHeartbeatTimerRef = useRef<number | null>(null);
+  const syncRunPollInFlightRef = useRef(false);
+  const syncRunPollErrorCountRef = useRef(0);
+  const syncRunNeedsCooldownConfirmationRef = useRef(false);
+  const syncRunPollStoppedRef = useRef(false);
+  const syncRunLeaderCandidatesRef = useRef<
+    Map<string, ConnectorSyncRunLeaderCandidate>
+  >(new Map());
+  const syncRunIsLeaderRef = useRef(false);
+  const syncRunChannelRef = useRef<BroadcastChannel | null>(null);
+  const requestSyncRunPollRef = useRef<((delayMs?: number) => void) | null>(
+    null,
+  );
+  const sourcesHubTabIdRef = useRef<string | null>(null);
+  if (sourcesHubTabIdRef.current === null) {
+    sourcesHubTabIdRef.current = createSourcesHubTabId();
+  }
+
+  const trackConnectorSyncRun = useCallback(
+    (
+      run:
+        | {
+            id: string;
+            connectorId: string;
+            discoveredCount: number;
+            indexedCount: number;
+            failedCount: number;
+          }
+        | null
+        | undefined,
+    ) => {
+      if (!run) {
+        return;
+      }
+      activeSyncRunsRef.current.set(run.id, {
+        connectorId: run.connectorId,
+        discoveredCount: run.discoveredCount,
+        indexedCount: run.indexedCount,
+        failedCount: run.failedCount,
+        lastSourceUpdatedAt: null,
+        hasFinalRefreshed: false,
+      });
+      syncRunNeedsCooldownConfirmationRef.current = false;
+      syncRunPollErrorCountRef.current = 0;
+      requestSyncRunPollRef.current?.(0);
+      const tabId = sourcesHubTabIdRef.current ?? createSourcesHubTabId();
+      sourcesHubTabIdRef.current = tabId;
+      syncRunChannelRef.current?.postMessage({
+        type: "sync-runs-wake",
+        tabId,
+        sentAt: Date.now(),
+      } satisfies ConnectorSyncRunBroadcastMessage);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!workspaceId) {
+      activeSyncRunsRef.current.clear();
+      syncRunNeedsCooldownConfirmationRef.current = false;
+      syncRunPollErrorCountRef.current = 0;
+      return;
+    }
+
+    const activeWorkspaceId = workspaceId;
+    const tabId = sourcesHubTabIdRef.current ?? createSourcesHubTabId();
+    sourcesHubTabIdRef.current = tabId;
+    const leaderCandidates = syncRunLeaderCandidatesRef.current;
+    let cancelled = false;
+    syncRunPollStoppedRef.current = false;
+
+    function clearPollTimer() {
+      if (syncRunPollTimerRef.current !== null) {
+        window.clearTimeout(syncRunPollTimerRef.current);
+        syncRunPollTimerRef.current = null;
+      }
+    }
+
+    function clearHeartbeatTimer() {
+      if (syncRunHeartbeatTimerRef.current !== null) {
+        window.clearInterval(syncRunHeartbeatTimerRef.current);
+        syncRunHeartbeatTimerRef.current = null;
+      }
+    }
+
+    function postSyncRunMessage(message: ConnectorSyncRunBroadcastMessage) {
+      syncRunChannelRef.current?.postMessage(message);
+    }
+
+    function updateSelfLeaderCandidate() {
+      leaderCandidates.set(tabId, {
+        id: tabId,
+        lastSeenAt: Date.now(),
+        visible: isDocumentVisible() && isPollingTab,
+      });
+    }
+
+    function startLeaderHeartbeat() {
+      if (syncRunHeartbeatTimerRef.current !== null) {
+        return;
+      }
+      postSyncRunMessage({
+        type: "leader-heartbeat",
+        tabId,
+        visible: isDocumentVisible(),
+        sentAt: Date.now(),
+      });
+      syncRunHeartbeatTimerRef.current = window.setInterval(() => {
+        if (cancelled || !syncRunIsLeaderRef.current || !isDocumentVisible()) {
+          return;
+        }
+        postSyncRunMessage({
+          type: "leader-heartbeat",
+          tabId,
+          visible: true,
+          sentAt: Date.now(),
+        });
+      }, SYNC_RUN_LEADER_HEARTBEAT_MS);
+    }
+
+    function setSyncRunLeader(value: boolean) {
+      if (syncRunIsLeaderRef.current === value) {
+        return;
+      }
+      syncRunIsLeaderRef.current = value;
+      if (value) {
+        startLeaderHeartbeat();
+        requestSyncRunPollRef.current?.(0);
+      } else {
+        clearHeartbeatTimer();
+      }
+    }
+
+    function electSyncRunLeader() {
+      updateSelfLeaderCandidate();
+      const leaderId = selectConnectorSyncRunLeader(
+        Array.from(leaderCandidates.values()),
+        Date.now(),
+      );
+      setSyncRunLeader(leaderId === tabId);
+    }
+
+    function requestSyncRunPoll(delayMs = 0) {
+      if (
+        cancelled ||
+        syncRunPollStoppedRef.current ||
+        !isPollingTab ||
+        (syncRunChannelRef.current && !syncRunIsLeaderRef.current)
+      ) {
+        return;
+      }
+      clearPollTimer();
+      syncRunPollTimerRef.current = window.setTimeout(() => {
+        syncRunPollTimerRef.current = null;
+        void pollActiveSyncRuns();
+      }, delayMs);
+    }
+
+    requestSyncRunPollRef.current = requestSyncRunPoll;
+
+    function scheduleNextSyncRunPoll() {
+      const decision = getConnectorSyncRunPollDecision({
+        errorCount: syncRunPollErrorCountRef.current,
+        hasActiveRuns: activeSyncRunsRef.current.size > 0,
+        isVisible: isDocumentVisible(),
+        needsCooldownConfirmation: syncRunNeedsCooldownConfirmationRef.current,
+      });
+      requestSyncRunPoll(decision.delayMs);
+    }
+
+    async function handleSyncRunResult(
+      result: WorkspaceConnectorSyncRunsResult,
+    ) {
+      if (cancelled) {
+        return;
+      }
+
+      const activeRunIds = new Set(result.items.map((run) => run.id));
+      const incrementalRequests: Array<Promise<SourceItem[]>> = [];
+
+      for (const run of result.items) {
+        const connectorId = run.connectorId;
+        if (!connectorId) {
+          continue;
+        }
+        const tracked = activeSyncRunsRef.current.get(run.id) ?? {
+          connectorId,
+          discoveredCount: 0,
+          indexedCount: 0,
+          failedCount: 0,
+          lastSourceUpdatedAt: null,
+          hasFinalRefreshed: false,
+        };
+        const countsChanged =
+          run.discoveredCount !== tracked.discoveredCount ||
+          run.indexedCount !== tracked.indexedCount ||
+          run.failedCount !== tracked.failedCount;
+        activeSyncRunsRef.current.set(run.id, {
+          ...tracked,
+          connectorId,
+          discoveredCount: run.discoveredCount,
+          indexedCount: run.indexedCount,
+          failedCount: run.failedCount,
+        });
+
+        if (!countsChanged && tracked.lastSourceUpdatedAt !== null) {
+          continue;
+        }
+
+        const updatedAfter = getIncrementalUpdatedAfter(
+          tracked.lastSourceUpdatedAt,
+        );
+        incrementalRequests.push(
+          contentClient
+            .listSources(activeWorkspaceId, {
+              view: "tree",
+              connectorId,
+              syncRunId: run.id,
+              ...(updatedAfter ? { updatedAfter } : {}),
+            })
+            .then((sourcesResult) => {
+              const mapped = mapSourcesToUi(sourcesResult.items);
+              const newestUpdatedAt = sourcesResult.items
+                .map((item) => item.updatedAt)
+                .filter(Boolean)
+                .sort()
+                .at(-1);
+              const current = activeSyncRunsRef.current.get(run.id);
+              if (current && newestUpdatedAt) {
+                activeSyncRunsRef.current.set(run.id, {
+                  ...current,
+                  lastSourceUpdatedAt: newestUpdatedAt,
+                });
+              }
+              return mapped;
+            })
+            .catch(() => []),
+        );
+      }
+
+      const completedRuns = Array.from(
+        activeSyncRunsRef.current.entries(),
+      ).filter(
+        ([runId, tracked]) =>
+          !activeRunIds.has(runId) && !tracked.hasFinalRefreshed,
+      );
+
+      if (incrementalRequests.length > 0) {
+        const batches = await Promise.all(incrementalRequests);
+        if (!cancelled) {
+          mergeIncrementalSources(batches.flat());
+        }
+      }
+
+      if (completedRuns.length > 0) {
+        const completedConnectorIds = new Set(
+          completedRuns
+            .map(([, tracked]) => tracked.connectorId)
+            .filter((connectorId): connectorId is string =>
+              Boolean(connectorId),
+            ),
+        );
+        const activeConnectorIds = new Set(
+          result.items
+            .map((run) => run.connectorId)
+            .filter((connectorId): connectorId is string =>
+              Boolean(connectorId),
+            ),
+        );
+        const finalRefreshes = Array.from(completedConnectorIds)
+          .filter((connectorId) => !activeConnectorIds.has(connectorId))
+          .map((connectorId) =>
+            contentClient
+              .listSources(activeWorkspaceId, {
+                view: "tree",
+                connectorId,
+              })
+              .then((sourcesResult) => ({
+                connectorId,
+                items: mapSourcesToUi(sourcesResult.items),
+              }))
+              .catch(() => ({ connectorId, items: [] })),
+          );
+        for (const [runId, tracked] of completedRuns) {
+          activeSyncRunsRef.current.set(runId, {
+            ...tracked,
+            hasFinalRefreshed: true,
+          });
+        }
+        if (finalRefreshes.length > 0) {
+          const batches = await Promise.all(finalRefreshes);
+          if (!cancelled) {
+            replaceConnectorSources(batches);
+          }
+        }
+        for (const [runId] of completedRuns) {
+          activeSyncRunsRef.current.delete(runId);
+        }
+        if (!cancelled) {
+          void refreshConnectors();
+        }
+      }
+
+      if (result.items.length > 0) {
+        syncRunNeedsCooldownConfirmationRef.current = false;
+        return;
+      }
+      if (completedRuns.length > 0) {
+        syncRunNeedsCooldownConfirmationRef.current = true;
+        return;
+      }
+      syncRunNeedsCooldownConfirmationRef.current = false;
+    }
+
+    async function pollActiveSyncRuns() {
+      if (cancelled || !isPollingTab || syncRunPollStoppedRef.current) {
+        return;
+      }
+      if (!isDocumentVisible()) {
+        scheduleNextSyncRunPoll();
+        return;
+      }
+      if (syncRunChannelRef.current && !syncRunIsLeaderRef.current) {
+        return;
+      }
+      if (syncRunPollInFlightRef.current) {
+        requestSyncRunPoll(ACTIVE_SYNC_RUN_POLL_MS);
+        return;
+      }
+
+      syncRunPollInFlightRef.current = true;
+      try {
+        const result = await connectorsClient.listWorkspaceSyncRuns(
+          activeWorkspaceId,
+          {
+            status: "active",
+          },
+        );
+        if (cancelled) {
+          return;
+        }
+        syncRunPollErrorCountRef.current = 0;
+        postSyncRunMessage({
+          type: "sync-runs-result",
+          tabId,
+          sentAt: Date.now(),
+          result,
+        });
+        await handleSyncRunResult(result);
+      } catch {
+        syncRunPollErrorCountRef.current += 1;
+        // The regular connector/source refresh surfaces visible errors.
+      } finally {
+        syncRunPollInFlightRef.current = false;
+        if (!cancelled) {
+          scheduleNextSyncRunPoll();
+        }
+      }
+    }
+
+    if (!isPollingTab) {
+      return () => {
+        requestSyncRunPollRef.current = null;
+      };
+    }
+
+    function handleVisibilityChange() {
+      updateSelfLeaderCandidate();
+      postSyncRunMessage({
+        type: "hello",
+        tabId,
+        visible: isDocumentVisible(),
+        sentAt: Date.now(),
+      });
+      electSyncRunLeader();
+      if (!isDocumentVisible()) {
+        clearPollTimer();
+        setSyncRunLeader(false);
+        return;
+      }
+      if (syncRunIsLeaderRef.current) {
+        requestSyncRunPoll(0);
+      }
+    }
+
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        const channel = new BroadcastChannel(
+          `${CONNECTOR_SYNC_RUN_CHANNEL_PREFIX}:${activeWorkspaceId}`,
+        );
+        syncRunChannelRef.current = channel;
+        channel.onmessage = (event: MessageEvent) => {
+          const message = parseConnectorSyncRunBroadcastMessage(event.data);
+          if (!message || message.tabId === tabId) {
+            return;
+          }
+          if (message.type === "hello" || message.type === "leader-heartbeat") {
+            leaderCandidates.set(message.tabId, {
+              id: message.tabId,
+              lastSeenAt: message.sentAt,
+              visible: message.visible,
+            });
+            electSyncRunLeader();
+            return;
+          }
+          if (message.type === "sync-runs-result") {
+            syncRunPollErrorCountRef.current = 0;
+            void handleSyncRunResult(message.result);
+            return;
+          }
+          if (message.type === "sync-runs-wake") {
+            if (syncRunIsLeaderRef.current) {
+              requestSyncRunPoll(0);
+            }
+          }
+        };
+        updateSelfLeaderCandidate();
+        postSyncRunMessage({
+          type: "hello",
+          tabId,
+          visible: isDocumentVisible(),
+          sentAt: Date.now(),
+        });
+        const electionTimer = window.setTimeout(() => {
+          electSyncRunLeader();
+        }, SYNC_RUN_LEADER_ELECTION_MS);
+        syncRunLeaderTimerRef.current = window.setInterval(() => {
+          electSyncRunLeader();
+        }, SYNC_RUN_LEADER_CHECK_MS);
+        if (typeof document !== "undefined") {
+          document.addEventListener("visibilitychange", handleVisibilityChange);
+        }
+        return () => {
+          cancelled = true;
+          syncRunPollStoppedRef.current = true;
+          window.clearTimeout(electionTimer);
+          clearPollTimer();
+          clearHeartbeatTimer();
+          if (syncRunLeaderTimerRef.current !== null) {
+            window.clearInterval(syncRunLeaderTimerRef.current);
+            syncRunLeaderTimerRef.current = null;
+          }
+          if (typeof document !== "undefined") {
+            document.removeEventListener(
+              "visibilitychange",
+              handleVisibilityChange,
+            );
+          }
+          channel.close();
+          syncRunChannelRef.current = null;
+          syncRunIsLeaderRef.current = false;
+          leaderCandidates.clear();
+          if (requestSyncRunPollRef.current === requestSyncRunPoll) {
+            requestSyncRunPollRef.current = null;
+          }
+        };
+      } catch {
+        syncRunChannelRef.current = null;
+      }
+    }
+
+    syncRunIsLeaderRef.current = true;
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+    requestSyncRunPoll(0);
+    return () => {
+      cancelled = true;
+      syncRunPollStoppedRef.current = true;
+      clearPollTimer();
+      clearHeartbeatTimer();
+      if (typeof document !== "undefined") {
+        document.removeEventListener(
+          "visibilitychange",
+          handleVisibilityChange,
+        );
+      }
+      syncRunIsLeaderRef.current = false;
+      if (requestSyncRunPollRef.current === requestSyncRunPoll) {
+        requestSyncRunPollRef.current = null;
+      }
+    };
+  }, [
+    isPollingTab,
+    mergeIncrementalSources,
+    replaceConnectorSources,
+    refreshConnectors,
+    workspaceId,
+  ]);
+
+  return { trackConnectorSyncRun };
+}

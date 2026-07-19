@@ -186,18 +186,10 @@ import {
   persistSourceTreeExpansion as persistSourceTreeExpansionStorage,
   readStoredSourceTreeExpansion as readStoredSourceTreeExpansionStorage,
 } from "./storage";
-import {
-  ACTIVE_SYNC_RUN_POLL_MS,
-  CONNECTOR_SYNC_RUN_CHANNEL_PREFIX,
-  SYNC_RUN_LEADER_CHECK_MS,
-  SYNC_RUN_LEADER_ELECTION_MS,
-  SYNC_RUN_LEADER_HEARTBEAT_MS,
-  type ConnectorSyncRunLeaderCandidate,
-  getConnectorSyncRunPollDecision,
-  selectConnectorSyncRunLeader,
-} from "./sync-run-polling";
+import { mapSourcesToUi } from "./source-mapping";
 import { TypeBadge } from "./type-badge";
 import type { ArtifactListItem } from "./types";
+import { useConnectorSyncRuns } from "./use-connector-sync-runs";
 import { useVirtualRows } from "./use-virtual-rows";
 import {
   getCachedWorkspaceHubValue,
@@ -208,6 +200,23 @@ import {
   SKILL_SELECTION_LIMIT_MESSAGE,
   toggleSkillSelection,
 } from "../chat-canvas/tool-selection";
+import {
+  areStringArraysEqual,
+  basename,
+  formatBytes,
+  formatDuration,
+  formatJsonPreview,
+} from "./lib/format";
+import {
+  getErrorMessage,
+  isConnectorAlreadyHandledError,
+} from "./lib/errors";
+import {
+  SOURCE_FILE_ACCEPT,
+  getUploadFileLabel,
+  isSupportedUploadFile,
+} from "./lib/upload";
+import { HubEmptyState } from "./components/hub-empty-state";
 
 export { ArtifactPreviewPanel } from "../artifact-preview/artifact-preview-panel";
 export type { ArtifactListItem } from "./types";
@@ -230,7 +239,6 @@ const SOURCE_TREE_INDENT_PX = 10;
 const SOURCE_TREE_VIRTUALIZE_THRESHOLD = 400;
 const SOURCE_TREE_ROW_HEIGHT_PX = 40;
 const SOURCE_TREE_OVERSCAN_ROWS = 12;
-const SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS = 1000;
 const ACTIVE_SYNC_RUN_TABS = new Set<HubTab>(["Sources", "Connectors"]);
 const CONNECTOR_OAUTH_URL_PARAMS = [
   "connector_oauth",
@@ -239,117 +247,6 @@ const CONNECTOR_OAUTH_URL_PARAMS = [
   "workspace_id",
   "error",
 ] as const;
-const SOURCE_FILE_EXTENSIONS = [
-  "txt",
-  "text",
-  "md",
-  "markdown",
-  "mdx",
-  "rst",
-  "adoc",
-  "asciidoc",
-  "org",
-  "json",
-  "jsonl",
-  "ndjson",
-  "yaml",
-  "yml",
-  "toml",
-  "ini",
-  "cfg",
-  "conf",
-  "properties",
-  "xml",
-  "html",
-  "htm",
-  "xhtml",
-  "css",
-  "scss",
-  "sass",
-  "less",
-  "svg",
-  "js",
-  "jsx",
-  "ts",
-  "tsx",
-  "mjs",
-  "cjs",
-  "py",
-  "java",
-  "kt",
-  "scala",
-  "c",
-  "h",
-  "cpp",
-  "cxx",
-  "cc",
-  "hpp",
-  "cs",
-  "go",
-  "rs",
-  "rb",
-  "php",
-  "lua",
-  "swift",
-  "r",
-  "jl",
-  "sh",
-  "bash",
-  "zsh",
-  "fish",
-  "bat",
-  "cmd",
-  "ps1",
-  "sql",
-  "graphql",
-  "gql",
-  "tex",
-  "bib",
-  "log",
-  "vue",
-  "svelte",
-  "astro",
-  "tf",
-  "hcl",
-  "proto",
-  "env",
-  "gitignore",
-  "dockerignore",
-  "editorconfig",
-  "dockerfile",
-  "makefile",
-  "cmake",
-  "tsv",
-  "csv",
-  "srt",
-  "pdf",
-  "doc",
-  "docx",
-  "pptx",
-  "epub",
-  "avif",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "tif",
-  "tiff",
-  "bmp",
-  "gif",
-  "flac",
-  "mp3",
-  "mp4",
-  "mpeg",
-  "mpga",
-  "m4a",
-  "ogg",
-  "wav",
-  "webm",
-] as const;
-const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(
-  ",",
-);
-const SOURCE_FILE_EXTENSION_SET = new Set<string>(SOURCE_FILE_EXTENSIONS);
 const disabledConnectorIconButtonClass =
   "disabled:pointer-events-auto disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground";
 
@@ -383,18 +280,7 @@ function persistSourceTreeExpansion(input: {
   });
 }
 
-type SourceApiRecord = Awaited<
-  ReturnType<typeof contentClient.listSources>
->["items"][number];
 type CitationScope = "current" | "thread";
-type ActiveConnectorSyncRun = {
-  connectorId: string;
-  discoveredCount: number;
-  indexedCount: number;
-  failedCount: number;
-  lastSourceUpdatedAt: string | null;
-  hasFinalRefreshed: boolean;
-};
 type WorkfileListItem = Awaited<
   ReturnType<typeof contentClient.listWorkingFiles>
 >["items"][number];
@@ -404,27 +290,6 @@ type WorkfileDetail = Awaited<
 type ConnectorAccountItem = Awaited<
   ReturnType<typeof connectorsClient.listAccounts>
 >["items"][number];
-type WorkspaceConnectorSyncRunsResult = Awaited<
-  ReturnType<typeof connectorsClient.listWorkspaceSyncRuns>
->;
-type ConnectorSyncRunBroadcastMessage =
-  | {
-      type: "hello" | "leader-heartbeat";
-      tabId: string;
-      visible: boolean;
-      sentAt: number;
-    }
-  | {
-      type: "sync-runs-result";
-      tabId: string;
-      sentAt: number;
-      result: WorkspaceConnectorSyncRunsResult;
-    }
-  | {
-      type: "sync-runs-wake";
-      tabId: string;
-      sentAt: number;
-    };
 
 const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
 const workspaceArtifactsCursorCache = new Map<string, string | null>();
@@ -536,24 +401,6 @@ export type HubSkillItem = {
   tools?: string[];
 };
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof HttpClientError) {
-    return error.message || fallback;
-  }
-  if (error instanceof Error) {
-    return error.message || fallback;
-  }
-  return fallback;
-}
-
-function isConnectorAlreadyHandledError(error: unknown) {
-  return (
-    error instanceof HttpClientError &&
-    (error.code === "CONNECTOR_ALREADY_EXISTS" ||
-      error.code === "CONNECTOR_OAUTH_ACCOUNT_IN_USE")
-  );
-}
-
 function createConnectorOAuthMessageId(input: {
   workspaceId: string;
   connectorType: string;
@@ -616,119 +463,6 @@ function clearConnectorOAuthCompletionFromUrl() {
   );
 }
 
-function apiStatusToSourceStatus(status: string): SourceItem["status"] {
-  if (status === "indexed") return "Indexed";
-  if (status === "processing" || status === "queued") return "Syncing";
-  if (status === "failed") return "Failed";
-  return "Needs review";
-}
-
-function apiTypeToSourceType(
-  sourceType: string,
-  mimeType: string | null,
-): SourceItem["type"] {
-  if (sourceType === "directory") return "DIR";
-  if (sourceType === "web_url" || sourceType === "youtube") return "WEB";
-  if (sourceType === "note") return "NOTE";
-  if (mimeType?.includes("pdf")) return "PDF";
-  if (mimeType?.startsWith("image/")) return "IMG";
-  if (mimeType?.startsWith("audio/") || mimeType?.startsWith("video/")) {
-    return "AUDIO";
-  }
-  if (mimeType?.includes("csv")) return "CSV";
-  if (mimeType?.includes("json")) return "JSON";
-  if (mimeType?.startsWith("text/")) return "TEXT";
-  return "DOC";
-}
-
-function getUploadFileExtension(fileName: string) {
-  const baseName = fileName.split(/[\\/]/).at(-1)?.trim().toLowerCase() ?? "";
-  if (!baseName) return null;
-  if (baseName === "dockerfile" || baseName.startsWith("dockerfile.")) {
-    return "dockerfile";
-  }
-  if (baseName === "makefile" || baseName.startsWith("makefile.")) {
-    return "makefile";
-  }
-  if (baseName.startsWith(".env")) return "env";
-  if (
-    baseName.startsWith(".") &&
-    SOURCE_FILE_EXTENSION_SET.has(baseName.slice(1))
-  ) {
-    return baseName.slice(1);
-  }
-  const dotIndex = baseName.lastIndexOf(".");
-  if (dotIndex < 0 || dotIndex === baseName.length - 1) return null;
-  return baseName.slice(dotIndex + 1);
-}
-
-function getUploadFileLabel(file: File) {
-  const extension = getUploadFileExtension(file.name);
-  if (!extension) return "FILE";
-  if (["pdf"].includes(extension)) return "PDF";
-  if (["doc", "docx"].includes(extension)) return "DOC";
-  if (["pptx"].includes(extension)) return "PPT";
-  if (["epub"].includes(extension)) return "EPUB";
-  if (["csv", "tsv"].includes(extension)) return "CSV";
-  if (extension === "json") return "JSON";
-  if (extension === "srt") return "SRT";
-  if (
-    [
-      "avif",
-      "png",
-      "jpg",
-      "jpeg",
-      "webp",
-      "tif",
-      "tiff",
-      "bmp",
-      "gif",
-    ].includes(extension)
-  ) {
-    return "IMG";
-  }
-  if (
-    [
-      "flac",
-      "mp3",
-      "mp4",
-      "mpeg",
-      "mpga",
-      "m4a",
-      "ogg",
-      "wav",
-      "webm",
-    ].includes(extension)
-  ) {
-    return "AUDIO";
-  }
-  return "TEXT";
-}
-
-function formatBytes(sizeBytes: number) {
-  if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024)
-    return `${Math.round(sizeBytes / 102.4) / 10} KB`;
-  return `${Math.round(sizeBytes / 1024 / 102.4) / 10} MB`;
-}
-
-function formatDuration(ms: number | null) {
-  if (ms === null) return "n/a";
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) return `${Math.round(ms / 100) / 10}s`;
-  return `${Math.round(ms / 6000) / 10}m`;
-}
-
-function formatJsonPreview(value: Record<string, unknown>) {
-  const text = JSON.stringify(value, null, 2);
-  return text.length > 1200 ? `${text.slice(0, 1200)}\n...` : text;
-}
-
-function basename(path: string) {
-  const cleaned = path.replace(/\/+$/, "");
-  return cleaned.split("/").pop() || cleaned || path;
-}
-
 function workfilePurposeLabel(purpose: WorkfileListItem["purpose"]) {
   if (purpose === "scratch") return "Scratch";
   if (purpose === "draft") return "Draft";
@@ -744,39 +478,6 @@ function workfileMatchesQuery(file: WorkfileListItem, q: string) {
     file.mimeType.toLowerCase().includes(q) ||
     workfilePurposeLabel(file.purpose).toLowerCase().includes(q)
   );
-}
-
-function isSupportedUploadFile(file: File) {
-  const extension = getUploadFileExtension(file.name);
-  if (extension && SOURCE_FILE_EXTENSION_SET.has(extension)) {
-    return true;
-  }
-  return file.type.startsWith("text/");
-}
-
-function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
-  return items.map((item) => ({
-    id: item.id,
-    title: item.title || "Untitled",
-    sourceType: item.sourceType,
-    parentSourceId: item.parentSourceId,
-    type: apiTypeToSourceType(item.sourceType, item.mimeType),
-    status: apiStatusToSourceStatus(item.status),
-    meta:
-      item.sourceType === "directory"
-        ? "Folder"
-        : item.status === "failed"
-          ? "Processing failed"
-          : item.status === "queued" || item.status === "processing"
-            ? "Sync in progress"
-            : new Date(item.updatedAt).toLocaleString(),
-    contentText: item.contentText,
-    connectorId: item.connectorId,
-    externalUri: item.externalUri,
-    metadata: item.metadata,
-    storageKey: item.storageKey,
-    updatedAt: item.updatedAt,
-  }));
 }
 
 function appendUniqueSources(current: SourceItem[], incoming: SourceItem[]) {
@@ -800,53 +501,8 @@ function appendUniqueSources(current: SourceItem[], incoming: SourceItem[]) {
 
 const upsertSources = appendUniqueSources;
 
-function getIncrementalUpdatedAfter(value: string | null) {
-  if (!value) {
-    return undefined;
-  }
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return value;
-  }
-  return new Date(
-    Math.max(0, timestamp - SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS),
-  ).toISOString();
-}
-
-function createSourcesHubTabId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
-function isDocumentVisible() {
-  return typeof document === "undefined"
-    ? true
-    : document.visibilityState !== "hidden";
-}
-
 function shouldPollConnectorSyncRuns(tab: HubTab) {
   return ACTIVE_SYNC_RUN_TABS.has(tab);
-}
-
-function parseConnectorSyncRunBroadcastMessage(
-  value: unknown,
-): ConnectorSyncRunBroadcastMessage | null {
-  if (!value || typeof value !== "object") return null;
-  const message = value as Partial<ConnectorSyncRunBroadcastMessage>;
-  if (typeof message.type !== "string" || typeof message.tabId !== "string") {
-    return null;
-  }
-  if (
-    message.type !== "hello" &&
-    message.type !== "leader-heartbeat" &&
-    message.type !== "sync-runs-result" &&
-    message.type !== "sync-runs-wake"
-  ) {
-    return null;
-  }
-  return value as ConnectorSyncRunBroadcastMessage;
 }
 
 function mergeSourceSelectionFromTree(
@@ -1013,10 +669,6 @@ function SourceProviderBadge({
       {content}
     </button>
   );
-}
-
-function areStringArraysEqual(a: string[], b: string[]) {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 function memoComponent<T extends (...args: never[]) => unknown>(component: T) {
@@ -1553,26 +1205,6 @@ const SourceTreeRow = memoComponent(function SourceTreeRow({
     </Collapsible>
   );
 });
-
-function HubEmptyState({
-  description,
-  icon: Icon,
-  title,
-}: {
-  description: string;
-  icon: ComponentType<{ className?: string }>;
-  title: string;
-}) {
-  return (
-    <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center">
-      <Icon className="mx-auto size-5 text-muted-foreground" />
-      <h4 className="mt-3 text-sm font-medium text-foreground">{title}</h4>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        {description}
-      </p>
-    </div>
-  );
-}
 
 const WorkfilesTab = memoComponent(function WorkfilesTab({
   files,
@@ -6165,29 +5797,6 @@ export function SourcesHub({
   const manualConnectorSyncSourcesRef = useRef<
     Map<string, { knownSourceIds: Set<string> }>
   >(new Map());
-  const activeSyncRunsRef = useRef<Map<string, ActiveConnectorSyncRun>>(
-    new Map(),
-  );
-  const syncRunPollTimerRef = useRef<number | null>(null);
-  const syncRunLeaderTimerRef = useRef<number | null>(null);
-  const syncRunHeartbeatTimerRef = useRef<number | null>(null);
-  const syncRunPollInFlightRef = useRef(false);
-  const syncRunPollErrorCountRef = useRef(0);
-  const syncRunNeedsCooldownConfirmationRef = useRef(false);
-  const syncRunPollStoppedRef = useRef(false);
-  const syncRunLeaderCandidatesRef = useRef<
-    Map<string, ConnectorSyncRunLeaderCandidate>
-  >(new Map());
-  const syncRunIsLeaderRef = useRef(false);
-  const syncRunChannelRef = useRef<BroadcastChannel | null>(null);
-  const requestSyncRunPollRef = useRef<((delayMs?: number) => void) | null>(
-    null,
-  );
-  const sourcesHubTabIdRef = useRef<string | null>(null);
-  if (sourcesHubTabIdRef.current === null) {
-    sourcesHubTabIdRef.current = createSourcesHubTabId();
-  }
-
   const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([]);
 
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
@@ -6446,44 +6055,6 @@ export function SourcesHub({
       }
     },
     [onSelectionChange],
-  );
-
-  const trackConnectorSyncRun = useCallback(
-    (
-      run:
-        | {
-            id: string;
-            connectorId: string;
-            discoveredCount: number;
-            indexedCount: number;
-            failedCount: number;
-          }
-        | null
-        | undefined,
-    ) => {
-      if (!run) {
-        return;
-      }
-      activeSyncRunsRef.current.set(run.id, {
-        connectorId: run.connectorId,
-        discoveredCount: run.discoveredCount,
-        indexedCount: run.indexedCount,
-        failedCount: run.failedCount,
-        lastSourceUpdatedAt: null,
-        hasFinalRefreshed: false,
-      });
-      syncRunNeedsCooldownConfirmationRef.current = false;
-      syncRunPollErrorCountRef.current = 0;
-      requestSyncRunPollRef.current?.(0);
-      const tabId = sourcesHubTabIdRef.current ?? createSourcesHubTabId();
-      sourcesHubTabIdRef.current = tabId;
-      syncRunChannelRef.current?.postMessage({
-        type: "sync-runs-wake",
-        tabId,
-        sentAt: Date.now(),
-      } satisfies ConnectorSyncRunBroadcastMessage);
-    },
-    [],
   );
 
   function handleActiveTabChange(tab: HubTab) {
@@ -7274,443 +6845,13 @@ export function SourcesHub({
     };
   }, [workspaceId, pendingSourceIds, refreshSources]);
 
-  useEffect(() => {
-    if (!workspaceId) {
-      activeSyncRunsRef.current.clear();
-      syncRunNeedsCooldownConfirmationRef.current = false;
-      syncRunPollErrorCountRef.current = 0;
-      return;
-    }
-
-    const activeWorkspaceId = workspaceId;
-    const tabId = sourcesHubTabIdRef.current ?? createSourcesHubTabId();
-    sourcesHubTabIdRef.current = tabId;
-    const leaderCandidates = syncRunLeaderCandidatesRef.current;
-    let cancelled = false;
-    syncRunPollStoppedRef.current = false;
-
-    function clearPollTimer() {
-      if (syncRunPollTimerRef.current !== null) {
-        window.clearTimeout(syncRunPollTimerRef.current);
-        syncRunPollTimerRef.current = null;
-      }
-    }
-
-    function clearHeartbeatTimer() {
-      if (syncRunHeartbeatTimerRef.current !== null) {
-        window.clearInterval(syncRunHeartbeatTimerRef.current);
-        syncRunHeartbeatTimerRef.current = null;
-      }
-    }
-
-    function postSyncRunMessage(message: ConnectorSyncRunBroadcastMessage) {
-      syncRunChannelRef.current?.postMessage(message);
-    }
-
-    function updateSelfLeaderCandidate() {
-      leaderCandidates.set(tabId, {
-        id: tabId,
-        lastSeenAt: Date.now(),
-        visible: isDocumentVisible() && shouldPollConnectorSyncRuns(activeTab),
-      });
-    }
-
-    function startLeaderHeartbeat() {
-      if (syncRunHeartbeatTimerRef.current !== null) {
-        return;
-      }
-      postSyncRunMessage({
-        type: "leader-heartbeat",
-        tabId,
-        visible: isDocumentVisible(),
-        sentAt: Date.now(),
-      });
-      syncRunHeartbeatTimerRef.current = window.setInterval(() => {
-        if (cancelled || !syncRunIsLeaderRef.current || !isDocumentVisible()) {
-          return;
-        }
-        postSyncRunMessage({
-          type: "leader-heartbeat",
-          tabId,
-          visible: true,
-          sentAt: Date.now(),
-        });
-      }, SYNC_RUN_LEADER_HEARTBEAT_MS);
-    }
-
-    function setSyncRunLeader(value: boolean) {
-      if (syncRunIsLeaderRef.current === value) {
-        return;
-      }
-      syncRunIsLeaderRef.current = value;
-      if (value) {
-        startLeaderHeartbeat();
-        requestSyncRunPollRef.current?.(0);
-      } else {
-        clearHeartbeatTimer();
-      }
-    }
-
-    function electSyncRunLeader() {
-      updateSelfLeaderCandidate();
-      const leaderId = selectConnectorSyncRunLeader(
-        Array.from(leaderCandidates.values()),
-        Date.now(),
-      );
-      setSyncRunLeader(leaderId === tabId);
-    }
-
-    function requestSyncRunPoll(delayMs = 0) {
-      if (
-        cancelled ||
-        syncRunPollStoppedRef.current ||
-        !shouldPollConnectorSyncRuns(activeTab) ||
-        (syncRunChannelRef.current && !syncRunIsLeaderRef.current)
-      ) {
-        return;
-      }
-      clearPollTimer();
-      syncRunPollTimerRef.current = window.setTimeout(() => {
-        syncRunPollTimerRef.current = null;
-        void pollActiveSyncRuns();
-      }, delayMs);
-    }
-
-    requestSyncRunPollRef.current = requestSyncRunPoll;
-
-    function scheduleNextSyncRunPoll() {
-      const decision = getConnectorSyncRunPollDecision({
-        errorCount: syncRunPollErrorCountRef.current,
-        hasActiveRuns: activeSyncRunsRef.current.size > 0,
-        isVisible: isDocumentVisible(),
-        needsCooldownConfirmation: syncRunNeedsCooldownConfirmationRef.current,
-      });
-      requestSyncRunPoll(decision.delayMs);
-    }
-
-    async function handleSyncRunResult(
-      result: WorkspaceConnectorSyncRunsResult,
-    ) {
-      if (cancelled) {
-        return;
-      }
-
-      const activeRunIds = new Set(result.items.map((run) => run.id));
-      const incrementalRequests: Array<Promise<SourceItem[]>> = [];
-
-      for (const run of result.items) {
-        const connectorId = run.connectorId;
-        if (!connectorId) {
-          continue;
-        }
-        const tracked = activeSyncRunsRef.current.get(run.id) ?? {
-          connectorId,
-          discoveredCount: 0,
-          indexedCount: 0,
-          failedCount: 0,
-          lastSourceUpdatedAt: null,
-          hasFinalRefreshed: false,
-        };
-        const countsChanged =
-          run.discoveredCount !== tracked.discoveredCount ||
-          run.indexedCount !== tracked.indexedCount ||
-          run.failedCount !== tracked.failedCount;
-        activeSyncRunsRef.current.set(run.id, {
-          ...tracked,
-          connectorId,
-          discoveredCount: run.discoveredCount,
-          indexedCount: run.indexedCount,
-          failedCount: run.failedCount,
-        });
-
-        if (!countsChanged && tracked.lastSourceUpdatedAt !== null) {
-          continue;
-        }
-
-        const updatedAfter = getIncrementalUpdatedAfter(
-          tracked.lastSourceUpdatedAt,
-        );
-        incrementalRequests.push(
-          contentClient
-            .listSources(activeWorkspaceId, {
-              view: "tree",
-              connectorId,
-              syncRunId: run.id,
-              ...(updatedAfter ? { updatedAfter } : {}),
-            })
-            .then((sourcesResult) => {
-              const mapped = mapSourcesToUi(sourcesResult.items);
-              const newestUpdatedAt = sourcesResult.items
-                .map((item) => item.updatedAt)
-                .filter(Boolean)
-                .sort()
-                .at(-1);
-              const current = activeSyncRunsRef.current.get(run.id);
-              if (current && newestUpdatedAt) {
-                activeSyncRunsRef.current.set(run.id, {
-                  ...current,
-                  lastSourceUpdatedAt: newestUpdatedAt,
-                });
-              }
-              return mapped;
-            })
-            .catch(() => []),
-        );
-      }
-
-      const completedRuns = Array.from(
-        activeSyncRunsRef.current.entries(),
-      ).filter(
-        ([runId, tracked]) =>
-          !activeRunIds.has(runId) && !tracked.hasFinalRefreshed,
-      );
-
-      if (incrementalRequests.length > 0) {
-        const batches = await Promise.all(incrementalRequests);
-        if (!cancelled) {
-          mergeIncrementalSources(batches.flat());
-        }
-      }
-
-      if (completedRuns.length > 0) {
-        const completedConnectorIds = new Set(
-          completedRuns
-            .map(([, tracked]) => tracked.connectorId)
-            .filter((connectorId): connectorId is string =>
-              Boolean(connectorId),
-            ),
-        );
-        const activeConnectorIds = new Set(
-          result.items
-            .map((run) => run.connectorId)
-            .filter((connectorId): connectorId is string =>
-              Boolean(connectorId),
-            ),
-        );
-        const finalRefreshes = Array.from(completedConnectorIds)
-          .filter((connectorId) => !activeConnectorIds.has(connectorId))
-          .map((connectorId) =>
-            contentClient
-              .listSources(activeWorkspaceId, {
-                view: "tree",
-                connectorId,
-              })
-              .then((sourcesResult) => ({
-                connectorId,
-                items: mapSourcesToUi(sourcesResult.items),
-              }))
-              .catch(() => ({ connectorId, items: [] })),
-          );
-        for (const [runId, tracked] of completedRuns) {
-          activeSyncRunsRef.current.set(runId, {
-            ...tracked,
-            hasFinalRefreshed: true,
-          });
-        }
-        if (finalRefreshes.length > 0) {
-          const batches = await Promise.all(finalRefreshes);
-          if (!cancelled) {
-            replaceConnectorSources(batches);
-          }
-        }
-        for (const [runId] of completedRuns) {
-          activeSyncRunsRef.current.delete(runId);
-        }
-        if (!cancelled) {
-          void refreshConnectors();
-        }
-      }
-
-      if (result.items.length > 0) {
-        syncRunNeedsCooldownConfirmationRef.current = false;
-        return;
-      }
-      if (completedRuns.length > 0) {
-        syncRunNeedsCooldownConfirmationRef.current = true;
-        return;
-      }
-      syncRunNeedsCooldownConfirmationRef.current = false;
-    }
-
-    async function pollActiveSyncRuns() {
-      if (
-        cancelled ||
-        !shouldPollConnectorSyncRuns(activeTab) ||
-        syncRunPollStoppedRef.current
-      ) {
-        return;
-      }
-      if (!isDocumentVisible()) {
-        scheduleNextSyncRunPoll();
-        return;
-      }
-      if (syncRunChannelRef.current && !syncRunIsLeaderRef.current) {
-        return;
-      }
-      if (syncRunPollInFlightRef.current) {
-        requestSyncRunPoll(ACTIVE_SYNC_RUN_POLL_MS);
-        return;
-      }
-
-      syncRunPollInFlightRef.current = true;
-      try {
-        const result = await connectorsClient.listWorkspaceSyncRuns(
-          activeWorkspaceId,
-          {
-            status: "active",
-          },
-        );
-        if (cancelled) {
-          return;
-        }
-        syncRunPollErrorCountRef.current = 0;
-        postSyncRunMessage({
-          type: "sync-runs-result",
-          tabId,
-          sentAt: Date.now(),
-          result,
-        });
-        await handleSyncRunResult(result);
-      } catch {
-        syncRunPollErrorCountRef.current += 1;
-        // The regular connector/source refresh surfaces visible errors.
-      } finally {
-        syncRunPollInFlightRef.current = false;
-        if (!cancelled) {
-          scheduleNextSyncRunPoll();
-        }
-      }
-    }
-
-    if (!shouldPollConnectorSyncRuns(activeTab)) {
-      return () => {
-        requestSyncRunPollRef.current = null;
-      };
-    }
-
-    function handleVisibilityChange() {
-      updateSelfLeaderCandidate();
-      postSyncRunMessage({
-        type: "hello",
-        tabId,
-        visible: isDocumentVisible(),
-        sentAt: Date.now(),
-      });
-      electSyncRunLeader();
-      if (!isDocumentVisible()) {
-        clearPollTimer();
-        setSyncRunLeader(false);
-        return;
-      }
-      if (syncRunIsLeaderRef.current) {
-        requestSyncRunPoll(0);
-      }
-    }
-
-    if (typeof BroadcastChannel !== "undefined") {
-      try {
-        const channel = new BroadcastChannel(
-          `${CONNECTOR_SYNC_RUN_CHANNEL_PREFIX}:${activeWorkspaceId}`,
-        );
-        syncRunChannelRef.current = channel;
-        channel.onmessage = (event: MessageEvent) => {
-          const message = parseConnectorSyncRunBroadcastMessage(event.data);
-          if (!message || message.tabId === tabId) {
-            return;
-          }
-          if (message.type === "hello" || message.type === "leader-heartbeat") {
-            leaderCandidates.set(message.tabId, {
-              id: message.tabId,
-              lastSeenAt: message.sentAt,
-              visible: message.visible,
-            });
-            electSyncRunLeader();
-            return;
-          }
-          if (message.type === "sync-runs-result") {
-            syncRunPollErrorCountRef.current = 0;
-            void handleSyncRunResult(message.result);
-            return;
-          }
-          if (message.type === "sync-runs-wake") {
-            if (syncRunIsLeaderRef.current) {
-              requestSyncRunPoll(0);
-            }
-          }
-        };
-        updateSelfLeaderCandidate();
-        postSyncRunMessage({
-          type: "hello",
-          tabId,
-          visible: isDocumentVisible(),
-          sentAt: Date.now(),
-        });
-        const electionTimer = window.setTimeout(() => {
-          electSyncRunLeader();
-        }, SYNC_RUN_LEADER_ELECTION_MS);
-        syncRunLeaderTimerRef.current = window.setInterval(() => {
-          electSyncRunLeader();
-        }, SYNC_RUN_LEADER_CHECK_MS);
-        if (typeof document !== "undefined") {
-          document.addEventListener("visibilitychange", handleVisibilityChange);
-        }
-        return () => {
-          cancelled = true;
-          syncRunPollStoppedRef.current = true;
-          window.clearTimeout(electionTimer);
-          clearPollTimer();
-          clearHeartbeatTimer();
-          if (syncRunLeaderTimerRef.current !== null) {
-            window.clearInterval(syncRunLeaderTimerRef.current);
-            syncRunLeaderTimerRef.current = null;
-          }
-          if (typeof document !== "undefined") {
-            document.removeEventListener(
-              "visibilitychange",
-              handleVisibilityChange,
-            );
-          }
-          channel.close();
-          syncRunChannelRef.current = null;
-          syncRunIsLeaderRef.current = false;
-          leaderCandidates.clear();
-          if (requestSyncRunPollRef.current === requestSyncRunPoll) {
-            requestSyncRunPollRef.current = null;
-          }
-        };
-      } catch {
-        syncRunChannelRef.current = null;
-      }
-    }
-
-    syncRunIsLeaderRef.current = true;
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
-    requestSyncRunPoll(0);
-    return () => {
-      cancelled = true;
-      syncRunPollStoppedRef.current = true;
-      clearPollTimer();
-      clearHeartbeatTimer();
-      if (typeof document !== "undefined") {
-        document.removeEventListener(
-          "visibilitychange",
-          handleVisibilityChange,
-        );
-      }
-      syncRunIsLeaderRef.current = false;
-      if (requestSyncRunPollRef.current === requestSyncRunPoll) {
-        requestSyncRunPollRef.current = null;
-      }
-    };
-  }, [
-    activeTab,
+  const { trackConnectorSyncRun } = useConnectorSyncRuns({
+    workspaceId,
+    isPollingTab: shouldPollConnectorSyncRuns(activeTab),
     mergeIncrementalSources,
     replaceConnectorSources,
     refreshConnectors,
-    workspaceId,
-  ]);
+  });
 
   useEffect(() => {
     const syncingIds = sources
