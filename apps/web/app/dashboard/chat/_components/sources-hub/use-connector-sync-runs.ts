@@ -9,12 +9,12 @@ import {
   SYNC_RUN_LEADER_CHECK_MS,
   SYNC_RUN_LEADER_ELECTION_MS,
   SYNC_RUN_LEADER_HEARTBEAT_MS,
+  type ActiveConnectorSyncRun,
   type ConnectorSyncRunLeaderCandidate,
   getConnectorSyncRunPollDecision,
+  planConnectorSyncRunResult,
   selectConnectorSyncRunLeader,
 } from "./sync-run-polling";
-
-const SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS = 1000;
 
 /**
  * Injectable timer + clock surface for the polling engine. Defaults to the real
@@ -35,15 +35,6 @@ const defaultScheduler: SyncRunScheduler = {
   setInterval: (fn, ms) => window.setInterval(fn, ms),
   clearInterval: (id) => window.clearInterval(id),
   now: () => Date.now(),
-};
-
-type ActiveConnectorSyncRun = {
-  connectorId: string;
-  discoveredCount: number;
-  indexedCount: number;
-  failedCount: number;
-  lastSourceUpdatedAt: string | null;
-  hasFinalRefreshed: boolean;
 };
 
 type WorkspaceConnectorSyncRunsResult = Awaited<
@@ -73,19 +64,6 @@ export function isDocumentVisible() {
   return typeof document === "undefined"
     ? true
     : document.visibilityState !== "hidden";
-}
-
-function getIncrementalUpdatedAfter(value: string | null) {
-  if (!value) {
-    return undefined;
-  }
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return value;
-  }
-  return new Date(
-    Math.max(0, timestamp - SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS),
-  ).toISOString();
 }
 
 function createSourcesHubTabId() {
@@ -347,74 +325,41 @@ export function useConnectorSyncRuns(input: {
         return;
       }
 
-      const activeRunIds = new Set(result.items.map((run) => run.id));
-      const incrementalRequests: Array<Promise<SourceItem[]>> = [];
+      // Pure decision core: what to fetch, which runs completed, which
+      // connectors to final-refresh, and the next cooldown state.
+      const plan = planConnectorSyncRunResult(
+        result.items,
+        activeSyncRunsRef.current,
+      );
+      activeSyncRunsRef.current = plan.nextTracked;
 
-      for (const run of result.items) {
-        const connectorId = run.connectorId;
-        if (!connectorId) {
-          continue;
-        }
-        const tracked = activeSyncRunsRef.current.get(run.id) ?? {
-          connectorId,
-          discoveredCount: 0,
-          indexedCount: 0,
-          failedCount: 0,
-          lastSourceUpdatedAt: null,
-          hasFinalRefreshed: false,
-        };
-        const countsChanged =
-          run.discoveredCount !== tracked.discoveredCount ||
-          run.indexedCount !== tracked.indexedCount ||
-          run.failedCount !== tracked.failedCount;
-        activeSyncRunsRef.current.set(run.id, {
-          ...tracked,
-          connectorId,
-          discoveredCount: run.discoveredCount,
-          indexedCount: run.indexedCount,
-          failedCount: run.failedCount,
-        });
-
-        if (!countsChanged && tracked.lastSourceUpdatedAt !== null) {
-          continue;
-        }
-
-        const updatedAfter = getIncrementalUpdatedAfter(
-          tracked.lastSourceUpdatedAt,
-        );
-        incrementalRequests.push(
-          contentClient
-            .listSources(activeWorkspaceId, {
-              view: "tree",
-              connectorId,
-              syncRunId: run.id,
-              ...(updatedAfter ? { updatedAfter } : {}),
-            })
-            .then((sourcesResult) => {
-              const mapped = mapSourcesToUi(sourcesResult.items);
-              const newestUpdatedAt = sourcesResult.items
-                .map((item) => item.updatedAt)
-                .filter(Boolean)
-                .sort()
-                .at(-1);
-              const current = activeSyncRunsRef.current.get(run.id);
-              if (current && newestUpdatedAt) {
-                activeSyncRunsRef.current.set(run.id, {
-                  ...current,
-                  lastSourceUpdatedAt: newestUpdatedAt,
-                });
-              }
-              return mapped;
-            })
-            .catch(() => []),
-        );
-      }
-
-      const completedRuns = Array.from(
-        activeSyncRunsRef.current.entries(),
-      ).filter(
-        ([runId, tracked]) =>
-          !activeRunIds.has(runId) && !tracked.hasFinalRefreshed,
+      const incrementalRequests = plan.incrementalTargets.map((target) =>
+        contentClient
+          .listSources(activeWorkspaceId, {
+            view: "tree",
+            connectorId: target.connectorId,
+            syncRunId: target.runId,
+            ...(target.updatedAfter
+              ? { updatedAfter: target.updatedAfter }
+              : {}),
+          })
+          .then((sourcesResult) => {
+            const mapped = mapSourcesToUi(sourcesResult.items);
+            const newestUpdatedAt = sourcesResult.items
+              .map((item) => item.updatedAt)
+              .filter(Boolean)
+              .sort()
+              .at(-1);
+            const current = activeSyncRunsRef.current.get(target.runId);
+            if (current && newestUpdatedAt) {
+              activeSyncRunsRef.current.set(target.runId, {
+                ...current,
+                lastSourceUpdatedAt: newestUpdatedAt,
+              });
+            }
+            return mapped;
+          })
+          .catch((): SourceItem[] => []),
       );
 
       if (incrementalRequests.length > 0) {
@@ -424,40 +369,27 @@ export function useConnectorSyncRuns(input: {
         }
       }
 
-      if (completedRuns.length > 0) {
-        const completedConnectorIds = new Set(
-          completedRuns
-            .map(([, tracked]) => tracked.connectorId)
-            .filter((connectorId): connectorId is string =>
-              Boolean(connectorId),
-            ),
+      if (plan.completedRunIds.length > 0) {
+        const finalRefreshes = plan.finalRefreshConnectorIds.map((connectorId) =>
+          contentClient
+            .listSources(activeWorkspaceId, {
+              view: "tree",
+              connectorId,
+            })
+            .then((sourcesResult) => ({
+              connectorId,
+              items: mapSourcesToUi(sourcesResult.items),
+            }))
+            .catch(() => ({ connectorId, items: [] as SourceItem[] })),
         );
-        const activeConnectorIds = new Set(
-          result.items
-            .map((run) => run.connectorId)
-            .filter((connectorId): connectorId is string =>
-              Boolean(connectorId),
-            ),
-        );
-        const finalRefreshes = Array.from(completedConnectorIds)
-          .filter((connectorId) => !activeConnectorIds.has(connectorId))
-          .map((connectorId) =>
-            contentClient
-              .listSources(activeWorkspaceId, {
-                view: "tree",
-                connectorId,
-              })
-              .then((sourcesResult) => ({
-                connectorId,
-                items: mapSourcesToUi(sourcesResult.items),
-              }))
-              .catch(() => ({ connectorId, items: [] })),
-          );
-        for (const [runId, tracked] of completedRuns) {
-          activeSyncRunsRef.current.set(runId, {
-            ...tracked,
-            hasFinalRefreshed: true,
-          });
+        for (const runId of plan.completedRunIds) {
+          const tracked = activeSyncRunsRef.current.get(runId);
+          if (tracked) {
+            activeSyncRunsRef.current.set(runId, {
+              ...tracked,
+              hasFinalRefreshed: true,
+            });
+          }
         }
         if (finalRefreshes.length > 0) {
           const batches = await Promise.all(finalRefreshes);
@@ -465,7 +397,7 @@ export function useConnectorSyncRuns(input: {
             replaceConnectorSources(batches);
           }
         }
-        for (const [runId] of completedRuns) {
+        for (const runId of plan.completedRunIds) {
           activeSyncRunsRef.current.delete(runId);
         }
         if (!cancelled) {
@@ -473,15 +405,8 @@ export function useConnectorSyncRuns(input: {
         }
       }
 
-      if (result.items.length > 0) {
-        syncRunNeedsCooldownConfirmationRef.current = false;
-        return;
-      }
-      if (completedRuns.length > 0) {
-        syncRunNeedsCooldownConfirmationRef.current = true;
-        return;
-      }
-      syncRunNeedsCooldownConfirmationRef.current = false;
+      syncRunNeedsCooldownConfirmationRef.current =
+        plan.needsCooldownConfirmation;
     }
 
     async function pollActiveSyncRuns() {
