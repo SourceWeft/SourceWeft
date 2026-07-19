@@ -1,12 +1,7 @@
-import {
-  buildGatewayRequestMetadata,
-  recordGatewayOperationEvent,
-} from "../../../content/model-gateway-audit";
+import { recordGatewayOperationEvent } from "../../../content/model-gateway-audit";
 import { toContentError } from "../../../content/model-gateway-error";
-import {
-  getModelGatewayClient,
-  resolveModelGatewayProfile,
-} from "../../../../shared/model-gateway/client";
+import { resolveModelGatewayProfile } from "../../../../shared/model-gateway/client";
+import { withBilledModelGateway } from "../../../../shared/model-gateway";
 import { buildParsedDocument } from "./utils";
 import type { ProviderParseInput, ProviderParseOutcome } from "./types";
 
@@ -70,46 +65,72 @@ export async function tryParseImageWithVision(
 
     modelAlias = profile.modelAlias;
     profileAlias = profile.profileAlias;
-    const gateway = await getModelGatewayClient(profile.gatewayConfigId);
+
+    // The billing port reaches here from parsing-service for every ingestion
+    // job. Refusing to proceed without it keeps an unbilled path from opening
+    // up silently if a future caller forgets to thread it through.
+    const { billing } = input;
+    if (!billing) {
+      throw new Error(
+        "Vision extraction requires a billing port on the parse input",
+      );
+    }
+
     const dataUrl = buildImageDataUrl({
       content: input.content,
       mimeType: input.mimeType,
     });
+    const traceId = input.sourceRevisionId ?? input.sourceId;
 
-    const result = await gateway.chat.complete(
+    const result = await withBilledModelGateway(
       {
-        model: profile.modelAlias,
-        messages: [
+        billing,
+        gatewayConfigId: profile.gatewayConfigId,
+        context: {
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          actorUserId: input.userId,
+          feature: "source_ingestion",
+          // Extraction is charged per ingested page, never per token, so no
+          // credits are deducted here. The call's cost is still recorded: the
+          // wrapper synthesises the request metadata the observability sink
+          // needs (including the gateway config id) to price the generation.
+          intent: { mode: "covered", coveredBy: "covered_by_ingestion_page" },
+          scopeKind: "worker-job",
+          scopeId: traceId,
+        },
+      },
+      (gateway) =>
+        gateway.chat.complete(
           {
-            role: "user",
-            content: [
+            model: profile.modelAlias,
+            messages: [
               {
-                type: "text",
-                text: IMAGE_VISION_PROMPT,
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: dataUrl,
-                },
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: IMAGE_VISION_PROMPT,
+                  },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: dataUrl,
+                    },
+                  },
+                ],
               },
             ],
           },
-        ],
-      },
-      {
-        traceId: input.sourceRevisionId ?? input.sourceId,
-        metadata: buildGatewayRequestMetadata({
-          teamId: input.teamId,
-          workspaceId: input.workspaceId,
-          userId: input.userId,
-          feature: "source_ingestion",
-          operation: "source.image_vision_extract",
-          modelKind: "vision",
-          modelAlias: profile.modelAlias,
-          profileAlias: profile.profileAlias,
-        }),
-      },
+          {
+            traceId,
+            operation: "source.image_vision_extract",
+            modelKind: "vision",
+            gatewayConfigId: profile.gatewayConfigId,
+            profileAlias: profile.profileAlias,
+            modelAlias: profile.modelAlias,
+          },
+        ),
     );
 
     const content =

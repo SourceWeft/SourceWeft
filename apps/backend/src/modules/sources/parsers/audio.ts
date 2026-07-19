@@ -6,12 +6,11 @@ import {
   buildGatewayRequestMetadata,
   recordGatewayOperationEvent,
 } from "../../content/model-gateway-audit";
-import { meterBillableModelUsage } from "../../content/model-billing";
 import { toContentError } from "../../content/model-gateway-error";
 import {
   ensureModelConfigAvailable,
-  getModelGatewayClient,
   requireDefaultModelGatewayProfile,
+  withBilledModelGateway,
 } from "../../../shared/model-gateway/index";
 import { BaseSourceParser } from "@sourceweft/builtin-document-parsers";
 import { buildParsedDocument } from "./providers/utils";
@@ -149,37 +148,66 @@ export class AudioSourceParser extends BaseSourceParser {
   async parse(input: ParseInput): Promise<ParsedDocument> {
     await ensureModelConfigAvailable();
     const profile = await requireDefaultAsrProfile();
-    const gateway = await getModelGatewayClient(profile.gatewayConfigId);
     const startedAt = Date.now();
 
-    const result = await gateway.asr
-      .transcribe(
-        {
-          model: profile.modelAlias,
-          audio: new Uint8Array(input.content),
-          fileName: input.fileName,
-          mimeType: input.mimeType,
-          responseFormat: "verbose_json",
-          timestampGranularities: ["segment"],
-          metadata: buildAsrRequestMetadata({
-            parseInput: input,
-            modelAlias: profile.modelAlias,
-            profileAlias: profile.profileAlias,
-          }),
+    // Transcription is charged to a team, so it cannot run without knowing
+    // which one. This used to degrade to a silent unbilled transcription when
+    // any part of the context was missing; failing loudly means a caller that
+    // forgets it is found immediately rather than by a revenue shortfall.
+    const { teamId, workspaceId, userId, billing } = input;
+    if (!teamId || !workspaceId || !userId || !billing) {
+      throw new Error(
+        "ASR transcription requires teamId, workspaceId, userId and a billing port",
+      );
+    }
+
+    const result = await withBilledModelGateway(
+      {
+        billing,
+        gatewayConfigId: profile.gatewayConfigId,
+        context: {
+          teamId,
+          workspaceId,
+          actorUserId: userId,
+          feature: "ingestion.asr",
+          intent: { mode: "billed" },
+          scopeKind: "worker-job",
+          scopeId: input.sourceId ?? input.fileName,
         },
-        {
-          idempotencyKey:
-            input.idempotencyKey ||
-            `source-asr:${input.sourceId ?? input.fileName}:${input.fileSize}`,
-          traceId: input.sourceId,
-          metadata: buildAsrRequestMetadata({
-            parseInput: input,
-            modelAlias: profile.modelAlias,
+      },
+      (gateway) =>
+        gateway.asr.transcribe(
+          {
+            model: profile.modelAlias,
+            audio: new Uint8Array(input.content),
+            fileName: input.fileName,
+            mimeType: input.mimeType,
+            responseFormat: "verbose_json",
+            timestampGranularities: ["segment"],
+            metadata: buildAsrRequestMetadata({
+              parseInput: input,
+              modelAlias: profile.modelAlias,
+              profileAlias: profile.profileAlias,
+            }),
+          },
+          {
+            traceId: input.sourceId,
+            operation: "asr.transcribe",
+            modelKind: "asr",
+            gatewayConfigId: profile.gatewayConfigId,
             profileAlias: profile.profileAlias,
-          }),
-        },
-      )
-      .catch(async (error: unknown) => {
+            modelAlias: profile.modelAlias,
+            referenceId: input.sourceId
+              ? `source:${input.sourceId}:asr`
+              : `source-file:${input.fileName}:asr`,
+            // Pinned verbatim: transcriptions already metered under this key
+            // must not be charged again.
+            idempotencyKey:
+              input.idempotencyKey ||
+              `source-asr:${input.sourceId ?? input.fileName}:${input.fileSize}:credits`,
+          },
+        ),
+    ).catch(async (error: unknown) => {
         const contentError = toContentError(error);
         if (input.teamId && input.workspaceId) {
           await recordGatewayOperationEvent({
@@ -234,43 +262,6 @@ export class AudioSourceParser extends BaseSourceParser {
         },
       });
     }
-    if (input.teamId && input.workspaceId && input.userId && input.billing) {
-      await meterBillableModelUsage({
-        billing: input.billing,
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        actorUserId: input.userId,
-        feature: "ingestion.asr",
-        operation: "asr.transcribe",
-        modelKind: "asr",
-        gatewayConfigId: profile.gatewayConfigId,
-        profileAlias: profile.profileAlias,
-        modelAlias: profile.modelAlias,
-        referenceId: input.sourceId
-          ? `source:${input.sourceId}:asr`
-          : `source-file:${input.fileName}:asr`,
-        idempotencyKey:
-          input.idempotencyKey ||
-          `source-asr:${input.sourceId ?? input.fileName}:${input.fileSize}:credits`,
-        usage: result.usage,
-        metadata: {
-          traceId: input.sourceId,
-          sourceId: input.sourceId,
-          sourceRevisionId: input.sourceRevisionId,
-          fileName: input.fileName,
-          mimeType: input.mimeType,
-          fileSize: input.fileSize,
-          provider: result.provider,
-          providerModel: result.providerModel,
-          routeDecision: result.routeDecision,
-          duration: result.duration,
-          inputLengthMs: result.inputLengthMs,
-          segmentCount: result.segments?.length ?? 0,
-          wordTimestampCount: result.words?.length ?? 0,
-        },
-      });
-    }
-
     const content = formatAsrTranscriptMarkdown({
       fileName: input.fileName,
       result,

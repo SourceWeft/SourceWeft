@@ -2,16 +2,28 @@ import { planRetrievalStrategy as planStrategy } from "@sourceweft/builtin-retri
 import type { RetrievalPlannerResult, EmbeddingProfile } from "@sourceweft/builtin-retrieval";
 import { vectorSearchProvider } from "./vector";
 
+/**
+ * Fallback map for profiles that predate `annIndexName`. New embedding models
+ * should set the index name on the profile instead of being added here — this
+ * table only exists so existing profiles keep resolving their index.
+ */
 const STATIC_ANN_INDEXES: Record<string, string> = {
   "global:embedding:bge-m3-1024:1024":
     "chunk_embeddings_global_embedding_bge_m3_1024_hnsw_idx",
 };
 
-function getStaticAnnIndex(profileId: string, dimensions: number | null) {
+function resolveAnnIndexName(
+  profile: EmbeddingProfile,
+  dimensions: number | null,
+) {
   if (dimensions === null) {
     return null;
   }
-  return STATIC_ANN_INDEXES[`${profileId}:${dimensions}`] ?? null;
+  return (
+    profile.annIndexName ??
+    STATIC_ANN_INDEXES[`${profile.id}:${dimensions}`] ??
+    null
+  );
 }
 
 export function planRetrievalStrategy(
@@ -22,7 +34,7 @@ export function planRetrievalStrategy(
   return planStrategy({
     vectorStrategy: profile.vectorStrategy,
     dimensions,
-    resolveAnnIndex: (dims) => getStaticAnnIndex(profile.id, dims),
+    resolveAnnIndex: (dims) => resolveAnnIndexName(profile, dims),
     validateDimensions: (dims) => vectorSearchProvider.validateDimensions(dims),
     supportsAnn: (dims) => vectorSearchProvider.supportsAnn(dims),
   });

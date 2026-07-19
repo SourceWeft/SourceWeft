@@ -1,7 +1,9 @@
+import { config } from "../../shared/config";
 import type { ParsingConfig } from "../content/types";
 
-export const DEFAULT_PARSER_VERSION = "v2-document-provider";
-export const DEFAULT_CHUNK_SIZE = 1000;
+export const DEFAULT_PARSER_VERSION =
+  config.documentParsing.defaultParserVersion;
+export const DEFAULT_CHUNK_SIZE = config.documentParsing.defaultChunkSize;
 
 export function defaultParsingConfig(
   overrides?: Partial<ParsingConfig>,

@@ -6,6 +6,21 @@ import type {
 import type { RetrievalPipelineStage as PackageRetrievalPipelineStage } from "../pipeline-contracts";
 import type { EmbeddingProfile } from "../data-access";
 
+/**
+ * Recall/precision knobs. Every field is optional; unset fields fall back to
+ * the DEFAULT_* constants, so existing callers keep their current behaviour.
+ */
+export type RetrievalTuning = {
+  vectorTopK?: number;
+  bm25TopK?: number;
+  rrfK?: number;
+  fusionLimit?: number;
+  rerankTopN?: number;
+};
+
+/** Same shape with every value resolved, carried on the pipeline state. */
+export type ResolvedRetrievalTuning = Required<RetrievalTuning>;
+
 export type RetrievalInput = {
   workspaceId: string;
   teamId: string;
@@ -18,10 +33,24 @@ export type RetrievalInput = {
   idempotencyKey?: string;
   llm?: unknown;
   traceContext?: unknown;
+  tuning?: RetrievalTuning;
+};
+
+/**
+ * A stage that failed but did not abort the run. Surfaced in the retrieval run
+ * audit record so a persistently broken subsystem (e.g. the BM25 index) is
+ * visible instead of silently halving recall.
+ */
+export type RetrievalDegradation = {
+  stage: string;
+  reason: string;
 };
 
 export type RetrievalPipelineState = {
   input: RetrievalInput;
+  /** Resolved once so search, ranking, and the audit record agree. */
+  tuning: ResolvedRetrievalTuning;
+  degradations: RetrievalDegradation[];
   anchorSourceIds: string[];
   retrievalSourceIds: string[];
   sourceIds: string[];

@@ -1,9 +1,6 @@
 import {
   reciprocalRankFusion,
   rerankCandidates,
-  DEFAULT_FUSION_LIMIT,
-  DEFAULT_RERANK_TOP_N,
-  DEFAULT_RRF_K,
   type RerankGateway,
 } from "../index";
 import { requirePreparedRetrievalState } from "./state";
@@ -25,15 +22,15 @@ export function createRankCandidatesStage(deps: {
       const fusedCandidates = reciprocalRankFusion({
         vectorCandidates: state.candidates.vector,
         bm25Candidates: state.candidates.bm25,
-        limit: DEFAULT_FUSION_LIMIT,
-        rrfK: DEFAULT_RRF_K,
+        limit: state.tuning.fusionLimit,
+        rrfK: state.tuning.rrfK,
       });
 
       const rerankStartedAt = Date.now();
       const rerankedCandidates = await rerankCandidates({
         queryText: input.queryText,
         candidates: fusedCandidates,
-        topN: DEFAULT_RERANK_TOP_N,
+        topN: state.tuning.rerankTopN,
         gateway: deps.rerankGateway,
       });
       const rerankLatencyMs = Date.now() - rerankStartedAt;

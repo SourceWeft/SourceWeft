@@ -16,6 +16,13 @@ export interface EmbeddingProfile {
   readonly vectorStrategy: string;
   readonly isDefault: boolean;
   readonly isActive: boolean;
+  /**
+   * Name of the ANN index backing this profile's dimensionality. Absent means
+   * no ANN index exists, so the planner falls back to exact vector search.
+   * Carried on the profile so adding an embedding model does not require a
+   * code change.
+   */
+  readonly annIndexName?: string | null;
 }
 
 export interface SourceChunkEmbedding {

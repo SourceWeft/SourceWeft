@@ -1,7 +1,4 @@
 import {
-  DEFAULT_BM25_TOP_K,
-  DEFAULT_RRF_K,
-  DEFAULT_VECTOR_TOP_K,
 } from "../index";
 import type { RetrievalDataAccess } from "../data-access";
 import { requirePreparedRetrievalState } from "./state";
@@ -32,9 +29,9 @@ export function createPersistRetrievalAuditStage(deps: {
         rerankModelAlias: null,
         vectorStrategyUsed: planner.strategy,
         annIndexUsed: planner.annIndexUsed,
-        bm25TopK: DEFAULT_BM25_TOP_K,
-        vectorTopK: DEFAULT_VECTOR_TOP_K,
-        rrfK: DEFAULT_RRF_K,
+        bm25TopK: state.tuning.bm25TopK,
+        vectorTopK: state.tuning.vectorTopK,
+        rrfK: state.tuning.rrfK,
         prefilterCount: isNoSourceRun ? 0 : prepared.retrievalSourceIds.length,
         candidateCount: isNoSourceRun ? 0 : candidateCount,
         finalResultCount: state.candidates.final.length,
@@ -47,6 +44,10 @@ export function createPersistRetrievalAuditStage(deps: {
           timings: state.timings,
           gateway: state.gateway,
           contextAssembly: state.contextAssembly,
+          tuning: state.tuning,
+          ...(state.degradations.length > 0
+            ? { degradations: state.degradations }
+            : {}),
         },
       });
 

@@ -1,6 +1,4 @@
 import {
-  DEFAULT_BM25_TOP_K,
-  DEFAULT_VECTOR_TOP_K,
   type RetrievalCandidate,
 } from "../index";
 import type { RetrievalDataAccess, RetrievalEmbeddingGateway } from "../data-access";
@@ -32,6 +30,9 @@ function mergeCandidates(
 export function createSearchCandidatesStage(deps: {
   dataAccess: RetrievalDataAccess;
   embeddingGateway: RetrievalEmbeddingGateway;
+  logger?: {
+    warn?: (message: string, meta?: Record<string, unknown>) => void;
+  };
 }): RetrievalPipelineStage {
   return {
     name: "search-candidates",
@@ -71,11 +72,20 @@ export function createSearchCandidatesStage(deps: {
           teamId: input.teamId,
           workspaceId: input.workspaceId,
           queryText: input.queryText,
-          topK: DEFAULT_BM25_TOP_K,
+          topK: state.tuning.bm25TopK,
           sourceIds: retrievalSourceIds,
         });
-      } catch {
-        // BM25 search failed — vector search may still produce results
+      } catch (error) {
+        // Vector search may still produce results, so the run continues — but
+        // the failure is recorded rather than swallowed, otherwise a broken
+        // BM25 index degrades recall invisibly.
+        const reason = error instanceof Error ? error.message : String(error);
+        state.degradations.push({ stage: "bm25-search", reason });
+        deps.logger?.warn?.("retrieval.bm25.failed", {
+          workspaceId: input.workspaceId,
+          threadId: input.threadId,
+          reason,
+        });
       }
       const bm25LatencyMs = Date.now() - bm25StartedAt;
 
@@ -88,7 +98,7 @@ export function createSearchCandidatesStage(deps: {
               embeddingProfileId: profile.id,
               queryEmbedding,
               dim: planner.requestedDimensions,
-              topK: DEFAULT_VECTOR_TOP_K,
+              topK: state.tuning.vectorTopK,
               sourceIds: retrievalSourceIds,
             })
           : planner.strategy !== "bm25_only"
@@ -97,7 +107,7 @@ export function createSearchCandidatesStage(deps: {
                 workspaceId: input.workspaceId,
                 embeddingProfileId: profile.id,
                 queryEmbedding,
-                topK: DEFAULT_VECTOR_TOP_K,
+                topK: state.tuning.vectorTopK,
                 sourceIds: retrievalSourceIds,
               })
             : [];
@@ -112,7 +122,7 @@ export function createSearchCandidatesStage(deps: {
                 teamId: input.teamId,
                 workspaceId: input.workspaceId,
                 queryText: input.queryText,
-                topK: DEFAULT_BM25_TOP_K,
+                topK: state.tuning.bm25TopK,
                 sourceIds: anchorSourceIds,
               });
             } catch {
@@ -129,7 +139,7 @@ export function createSearchCandidatesStage(deps: {
                 embeddingProfileId: profile.id,
                 queryEmbedding,
                 dim: planner.requestedDimensions,
-                topK: DEFAULT_VECTOR_TOP_K,
+                topK: state.tuning.vectorTopK,
                 sourceIds: anchorSourceIds,
               })
             : await deps.dataAccess.searchChunksByVectorExact({
@@ -137,7 +147,7 @@ export function createSearchCandidatesStage(deps: {
                 workspaceId: input.workspaceId,
                 embeddingProfileId: profile.id,
                 queryEmbedding,
-                topK: DEFAULT_VECTOR_TOP_K,
+                topK: state.tuning.vectorTopK,
                 sourceIds: anchorSourceIds,
               })
           : [];

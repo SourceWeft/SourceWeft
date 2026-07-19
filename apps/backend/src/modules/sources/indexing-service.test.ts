@@ -1,0 +1,227 @@
+import { beforeEach, expect, test, vi } from "vitest";
+
+const TEAM_ID = "team_1";
+const WORKSPACE_ID = "ws_1";
+const SOURCE_ID = "src_1";
+const USER_ID = "user_1";
+
+const workspace = { id: WORKSPACE_ID, organizationId: TEAM_ID };
+const source = {
+  id: SOURCE_ID,
+  title: "Doc",
+  contentText: "hello world",
+  parsingConfig: {},
+  estimatedPages: 1,
+  parsedTokens: 10,
+};
+
+const requireContentSource = vi.fn();
+const listSourceRevisionRecords = vi.fn();
+const isLatestSourceRevision = vi.fn();
+const updateSourceStatus = vi.fn();
+const updateSourceStatusForLatestRevision = vi.fn();
+const createSourceDocumentChunksAndEmbeddings = vi.fn();
+const withBilledModelGateway = vi.fn();
+const requireDefaultModelGatewayProfile = vi.fn();
+const ensureModelConfigAvailable = vi.fn();
+const recordGatewayOperationEvent = vi.fn();
+
+vi.mock("./guards", () => ({
+  requireContentSource: (...args: unknown[]) => requireContentSource(...args),
+}));
+
+vi.mock("./repository", () => ({
+  listSourceRevisionRecords: (...args: unknown[]) =>
+    listSourceRevisionRecords(...args),
+  isLatestSourceRevision: (...args: unknown[]) =>
+    isLatestSourceRevision(...args),
+  updateSourceStatus: (...args: unknown[]) => updateSourceStatus(...args),
+  updateSourceStatusForLatestRevision: (...args: unknown[]) =>
+    updateSourceStatusForLatestRevision(...args),
+  createSourceDocumentChunksAndEmbeddings: (...args: unknown[]) =>
+    createSourceDocumentChunksAndEmbeddings(...args),
+}));
+
+vi.mock("../../shared/model-gateway/index", () => ({
+  ensureModelConfigAvailable: (...args: unknown[]) =>
+    ensureModelConfigAvailable(...args),
+  requireDefaultModelGatewayProfile: (...args: unknown[]) =>
+    requireDefaultModelGatewayProfile(...args),
+  withBilledModelGateway: (...args: unknown[]) =>
+    withBilledModelGateway(...args),
+}));
+
+vi.mock("../content/model-gateway-audit", () => ({
+  recordGatewayOperationEvent: (...args: unknown[]) =>
+    recordGatewayOperationEvent(...args),
+}));
+
+const { SourceIndexingService } = await import("./indexing-service");
+
+/** Captures what the call site handed the billing wrapper. */
+type Captured = {
+  scopeInput?: Record<string, any>;
+  embedOptions?: Record<string, any>;
+};
+
+let captured: Captured;
+let billing: {
+  meterIngestion: ReturnType<typeof vi.fn>;
+  getSummary: ReturnType<typeof vi.fn>;
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  captured = {};
+
+  requireContentSource.mockResolvedValue({ workspace, source });
+  listSourceRevisionRecords.mockResolvedValue([]);
+  isLatestSourceRevision.mockResolvedValue(true);
+  updateSourceStatus.mockResolvedValue(source);
+  updateSourceStatusForLatestRevision.mockResolvedValue(source);
+  createSourceDocumentChunksAndEmbeddings.mockResolvedValue({ source });
+  ensureModelConfigAvailable.mockResolvedValue(undefined);
+  recordGatewayOperationEvent.mockResolvedValue(undefined);
+
+  requireDefaultModelGatewayProfile.mockResolvedValue({
+    id: "global:embedding:test",
+    gatewayConfigId: "gw_1",
+    profileAlias: "default-embedding",
+    modelAlias: "test-embed",
+    vectorStrategy: "exact",
+    requestedDimensions: 1024,
+    annIndexName: null,
+  });
+
+  withBilledModelGateway.mockImplementation(
+    async (input: Record<string, any>, run: (gateway: any) => Promise<any>) => {
+      captured.scopeInput = input;
+      return run({
+        embeddings: {
+          embedBatch: async (_payload: unknown, options: any) => {
+            captured.embedOptions = options;
+            return {
+              embeddings: [[0.1, 0.2]],
+              provider: "test",
+              routeDecision: null,
+              usage: { totalTokens: 5 },
+            };
+          },
+        },
+      });
+    },
+  );
+
+  billing = {
+    meterIngestion: vi.fn().mockResolvedValue({ ok: true }),
+    getSummary: vi.fn(),
+  };
+});
+
+function makeService() {
+  return new SourceIndexingService(billing as any);
+}
+
+const chunks = [{ text: "hello world", startIndex: 0, endIndex: 11 }] as any;
+
+test("embedBatch runs through the billed wrapper as a covered ingestion call", async () => {
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    chunks,
+  });
+
+  expect(withBilledModelGateway).toHaveBeenCalledTimes(1);
+  expect(captured.scopeInput?.billing).toBe(billing);
+  expect(captured.scopeInput?.gatewayConfigId).toBe("gw_1");
+  expect(captured.scopeInput?.context).toMatchObject({
+    teamId: TEAM_ID,
+    workspaceId: WORKSPACE_ID,
+    actorUserId: USER_ID,
+    feature: "ingestion",
+    scopeKind: "worker-job",
+    intent: { mode: "covered", coveredBy: "model_kind_not_user_billed" },
+  });
+});
+
+test("embedBatch pins the pre-migration idempotency key", async () => {
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    chunks,
+  });
+
+  expect(captured.embedOptions).toMatchObject({
+    operation: "embeddings.embedBatch",
+    modelKind: "embedding",
+    gatewayConfigId: "gw_1",
+    profileAlias: "default-embedding",
+    modelAlias: "test-embed",
+    idempotencyKey: `source-index:${SOURCE_ID}:embeddings`,
+    traceId: SOURCE_ID,
+  });
+});
+
+test("an explicit idempotency key still wins for both embeddings and page billing", async () => {
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    idempotencyKey: "custom-key",
+    chunks,
+  });
+
+  expect(captured.embedOptions?.idempotencyKey).toBe("custom-key");
+  expect(billing.meterIngestion).toHaveBeenCalledWith(
+    TEAM_ID,
+    expect.objectContaining({ idempotencyKey: "custom-key" }),
+    USER_ID,
+  );
+});
+
+test("page-based ingestion billing is unchanged by the migration", async () => {
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    parsedPages: 3,
+    chunks,
+  });
+
+  expect(billing.meterIngestion).toHaveBeenCalledTimes(1);
+  expect(billing.meterIngestion).toHaveBeenCalledWith(
+    TEAM_ID,
+    {
+      workspaceId: WORKSPACE_ID,
+      feature: "ingestion",
+      referenceId: `source:${SOURCE_ID}`,
+      idempotencyKey: `source-index:${SOURCE_ID}`,
+      pages: 3,
+    },
+    USER_ID,
+  );
+});
+
+test("no embedding call is made when the profile disables vectors", async () => {
+  requireDefaultModelGatewayProfile.mockResolvedValue({
+    id: "global:embedding:test",
+    gatewayConfigId: "gw_1",
+    profileAlias: "default-embedding",
+    modelAlias: "test-embed",
+    vectorStrategy: "disabled",
+    requestedDimensions: null,
+    annIndexName: null,
+  });
+
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    chunks,
+  });
+
+  expect(withBilledModelGateway).not.toHaveBeenCalled();
+  expect(billing.meterIngestion).toHaveBeenCalledTimes(1);
+});

@@ -1,5 +1,8 @@
-import { chunkSourceContent as packageChunkSourceContent } from "@sourceweft/builtin-document-parsers";
-import type { ChunkSpec, ParsingConfig } from "./types";
+import {
+  chunkSourceContent as packageChunkSourceContent,
+  type ChunkSpec,
+  type ParsingConfig,
+} from "@sourceweft/builtin-document-parsers";
 
 export async function chunkSourceContent(
   contentText: string,

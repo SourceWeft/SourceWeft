@@ -2,12 +2,12 @@ import type { ChunkSpec } from "../content/types";
 import type { ContentBillingPort } from "../content/billing-port";
 import { ContentError } from "../content/errors";
 import { toContentError } from "../content/model-gateway-error";
-import { buildGatewayRequestMetadata, recordGatewayOperationEvent } from "../content/model-gateway-audit";
+import { recordGatewayOperationEvent } from "../content/model-gateway-audit";
 import { requireContentSource } from "./guards";
 import {
   ensureModelConfigAvailable,
-  getModelGatewayClient,
   requireDefaultModelGatewayProfile,
+  withBilledModelGateway,
 } from "../../shared/model-gateway/index";
 import { chunkSourceContent } from "./chunker";
 import { planRetrievalStrategy } from "./retrieval-planner";
@@ -94,9 +94,6 @@ export class SourceIndexingService {
 
     await ensureModelConfigAvailable();
     const profile = await requireDefaultEmbeddingProfile();
-    const embeddingGateway = await getModelGatewayClient(
-      profile.gatewayConfigId,
-    );
     const planner = planRetrievalStrategy(profile);
     const chunkSpecs =
       input.chunks ??
@@ -163,35 +160,51 @@ export class SourceIndexingService {
 
       if (chunkSpecs.length > 0 && profile.vectorStrategy !== "disabled") {
         const embedStartedAt = Date.now();
-        const result = await embeddingGateway.embeddings
-          .embedBatch(
-            {
-              model: profile.modelAlias,
-              texts: chunkSpecs.map((chunk) => chunk.text),
-              dimensions: planner.requestedDimensions ?? undefined,
-              metadata: {
-                team_id: workspace.organizationId,
-                workspace_id: workspace.id,
-                user_id: input.userId,
-                feature: "ingestion",
-                source_id: source.id,
+        const result = await withBilledModelGateway(
+          {
+            billing: this.billing,
+            gatewayConfigId: profile.gatewayConfigId,
+            context: {
+              teamId: workspace.organizationId,
+              workspaceId: workspace.id,
+              actorUserId: input.userId,
+              feature: "ingestion",
+              // Ingestion is billed per page via `meterIngestion` below, so the
+              // per-token embedding cost is recorded but never charged.
+              intent: {
+                mode: "covered",
+                coveredBy: "model_kind_not_user_billed",
               },
+              scopeKind: "worker-job",
+              scopeId: input.idempotencyKey || `source-index:${source.id}`,
             },
-            {
-              idempotencyKey:
-                input.idempotencyKey || `source-index:${source.id}:embeddings`,
-              traceId: source.id,
-              metadata: buildGatewayRequestMetadata({
-                teamId: workspace.organizationId,
-                workspaceId: workspace.id,
-                userId: input.userId,
-                feature: "ingestion",
+          },
+          (gateway) =>
+            gateway.embeddings.embedBatch(
+              {
+                model: profile.modelAlias,
+                texts: chunkSpecs.map((chunk) => chunk.text),
+                dimensions: planner.requestedDimensions ?? undefined,
+                metadata: {
+                  team_id: workspace.organizationId,
+                  workspace_id: workspace.id,
+                  user_id: input.userId,
+                  feature: "ingestion",
+                  source_id: source.id,
+                },
+              },
+              {
                 operation: "embeddings.embedBatch",
                 modelKind: "embedding",
+                gatewayConfigId: profile.gatewayConfigId,
+                profileAlias: profile.profileAlias,
                 modelAlias: profile.modelAlias,
-              }),
-            },
-          )
+                idempotencyKey:
+                  input.idempotencyKey || `source-index:${source.id}:embeddings`,
+                traceId: source.id,
+              },
+            ),
+        )
           .catch(async (error: unknown) => {
             const contentError = toContentError(error);
             await recordGatewayOperationEvent({

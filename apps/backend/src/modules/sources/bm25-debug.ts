@@ -1,6 +1,8 @@
 import { logger as defaultLogger } from "../../shared/logger";
 
-type DebugLogger = { debug: (message: string, meta?: Record<string, unknown>) => void };
+type LogFn = (message: string, meta?: Record<string, unknown>) => void;
+/** `warn` is optional so callers can pass a debug-only logger. */
+type DebugLogger = { debug: LogFn; warn?: LogFn };
 
 const CONTENT_PREVIEW_CHARS = 180;
 const MAX_RESULT_SUMMARIES = 5;
@@ -130,7 +132,7 @@ export function logBm25RecallTerms(input: Bm25RecallTermsDebugInput, log?: Debug
 
 export function logBm25Failed(input: Bm25FailedInput, log?: DebugLogger) {
   const l = log ?? defaultLogger;
-  l.warn(BM25_LOG_EVENT, {
+  (l.warn ?? l.debug)(BM25_LOG_EVENT, {
     event: "failed",
     operation: input.operation,
     error: input.error,
