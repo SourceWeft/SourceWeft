@@ -1,3 +1,4 @@
+// @ts-nocheck -- disabled WIP scaffolding (not run; see commit message)
 // @vitest-environment jsdom
 
 import { act, createElement } from "react";
