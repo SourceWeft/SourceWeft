@@ -186,6 +186,12 @@ import {
   persistSourceTreeExpansion as persistSourceTreeExpansionStorage,
   readStoredSourceTreeExpansion as readStoredSourceTreeExpansionStorage,
 } from "./storage";
+import { CitationsTab } from "./citations/tab";
+import {
+  useCitations,
+  type CitationOpenContext,
+  type ThreadCitationRecord,
+} from "./citations/use-citations";
 import { mapSourcesToUi } from "./source-mapping";
 import { TypeBadge } from "./type-badge";
 import type { ArtifactListItem } from "./types";
@@ -220,6 +226,7 @@ import { HubEmptyState } from "./components/hub-empty-state";
 
 export { ArtifactPreviewPanel } from "../artifact-preview/artifact-preview-panel";
 export type { ArtifactListItem } from "./types";
+export type { ThreadCitationRecord } from "./citations/use-citations";
 
 const tabs = [
   "Sources",
@@ -280,7 +287,6 @@ function persistSourceTreeExpansion(input: {
   });
 }
 
-type CitationScope = "current" | "thread";
 type WorkfileListItem = Awaited<
   ReturnType<typeof contentClient.listWorkingFiles>
 >["items"][number];
@@ -322,15 +328,6 @@ function cloneWorkfileItems(items: WorkfileListItem[]) {
   return cloneItems(items);
 }
 
-type DisplayCitationItem = {
-  id: string;
-  sourceTitle: string;
-  messageLabel: string;
-  excerpt: string;
-  citationRecord: CitationRecord;
-  messageId?: string;
-};
-
 type ConnectorWebhookEventItem = ConnectorWebhookEvent;
 type ConnectorWebhookConfig = ConnectorWebhookConfigResponse;
 const syncReadinessUiByReason: Record<
@@ -355,16 +352,6 @@ type ConnectorSettingsTab =
   | "danger";
 type ConnectorActivityKindFilter = "all" | "sync" | "action" | "webhook";
 
-export type ThreadCitationRecord = {
-  citation: CitationRecord;
-  id: string;
-  messageId: string;
-  messageLabel: string;
-};
-
-type CitationOpenContext = {
-  messageId?: string;
-};
 
 const searchPlaceholders: Record<HubTab, string> = {
   Sources: "Search sources...",
@@ -520,29 +507,6 @@ function mergeSourceSelectionFromTree(
   );
 
   return areStringArraysEqual(nextIds, selectedIds) ? selectedIds : nextIds;
-}
-
-function mapCitationsToUi(citations: CitationRecord[]): DisplayCitationItem[] {
-  return citations.map((citation, index) => ({
-    id: `citation-${citation.citation}-${citation.chunkId}`,
-    citationRecord: citation,
-    sourceTitle: citation.sourceTitle?.trim() || "Untitled source",
-    messageLabel: `Reference ${index + 1}`,
-    excerpt: citation.excerpt,
-  }));
-}
-
-function mapThreadCitationsToUi(
-  citations: ThreadCitationRecord[],
-): DisplayCitationItem[] {
-  return citations.map((item) => ({
-    id: item.id,
-    citationRecord: item.citation,
-    messageId: item.messageId,
-    sourceTitle: item.citation.sourceTitle?.trim() || "Untitled source",
-    messageLabel: item.messageLabel,
-    excerpt: item.citation.excerpt,
-  }));
 }
 
 function StatusDot({ status }: { status: SourceItem["status"] }) {
@@ -5297,175 +5261,6 @@ function ConnectorsTab({
   );
 }
 
-function CitationsTab({
-  activeCitationChunkId,
-  activeCitationIndex,
-  activeCitationItems,
-  citationScope,
-  currentCitationItems,
-  currentCitationMessageId,
-  filteredCitationItems,
-  mode,
-  onCitationLocate,
-  onCitationOpen,
-  onScopeChange,
-  searchQuery,
-  threadCitationItems,
-}: {
-  activeCitationChunkId: string | null;
-  activeCitationIndex: number | null;
-  activeCitationItems: DisplayCitationItem[];
-  citationScope: CitationScope;
-  currentCitationItems: DisplayCitationItem[];
-  currentCitationMessageId: string | null;
-  filteredCitationItems: DisplayCitationItem[];
-  mode: "thread" | "new";
-  onCitationLocate?: (messageId: string) => void;
-  onCitationOpen?: (
-    citation: CitationRecord,
-    context?: CitationOpenContext,
-  ) => void;
-  onScopeChange: (scope: CitationScope) => void;
-  searchQuery: string;
-  threadCitationItems: DisplayCitationItem[];
-}) {
-  return (
-    <section className="space-y-1">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <h3 className="text-xs font-medium text-foreground">Citations</h3>
-          <span className="text-[10px] text-muted-foreground">
-            {citationScope === "thread"
-              ? `${threadCitationItems.length} in thread`
-              : `${currentCitationItems.length} current`}
-          </span>
-          {searchQuery ? (
-            <span className="text-[10px] text-primary">
-              {filteredCitationItems.length} found
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      {mode === "thread" ? (
-        <div className="mb-2 grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
-          {(
-            [
-              ["current", `Current (${currentCitationItems.length})`],
-              ["thread", `Thread (${threadCitationItems.length})`],
-            ] as const
-          ).map(([scope, label]) => (
-            <button
-              className={cn(
-                "rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
-                citationScope === scope
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              key={scope}
-              onClick={() => onScopeChange(scope)}
-              type="button"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {filteredCitationItems.length === 0 ? (
-        <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-          {searchQuery
-            ? `No citations match "${searchQuery}".`
-            : citationScope === "thread"
-              ? "No citations found in this thread."
-              : "No citations used in the selected answer."}
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          {filteredCitationItems.map((citation) => {
-            const citationRecord = citation.citationRecord;
-            const displayIndex =
-              activeCitationItems.findIndex((item) => item.id === citation.id) +
-              1;
-            const isActive =
-              citationScope === "current"
-                ? activeCitationIndex === displayIndex
-                : activeCitationChunkId === citationRecord.chunkId;
-            const locateMessageId =
-              citation.messageId ??
-              (citationScope === "current" ? currentCitationMessageId : null);
-            const canLocate = Boolean(locateMessageId);
-
-            return (
-              <article
-                className={cn(
-                  "rounded-xl border bg-background p-3 shadow-xs transition-colors",
-                  isActive && "border-primary/45 bg-primary/5 shadow-sm",
-                  canLocate &&
-                    "cursor-pointer hover:border-primary/30 hover:bg-primary/5",
-                )}
-                key={citation.id}
-                onClick={() => {
-                  if (locateMessageId) {
-                    onCitationLocate?.(locateMessageId);
-                  }
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-2.5">
-                    <span className="mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary">
-                      {displayIndex}
-                    </span>
-                    <div className="min-w-0">
-                      <h4 className="truncate text-sm font-medium text-foreground">
-                        {citation.sourceTitle}
-                      </h4>
-                      <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                        {citation.messageLabel}
-                      </div>
-                    </div>
-                  </div>
-                  <Button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onCitationOpen?.(citationRecord, {
-                        messageId: locateMessageId ?? undefined,
-                      });
-                    }}
-                    size="xs"
-                    type="button"
-                    variant="outline"
-                  >
-                    <FileText className="size-3.5" />
-                    Open
-                  </Button>
-                </div>
-                <div className="mt-2 line-clamp-4 rounded-lg border border-input bg-muted/20 px-2.5 py-2 text-sm leading-6 text-foreground/90">
-                  {citation.excerpt}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function filterCitations(items: DisplayCitationItem[], searchQuery: string) {
-  const q = searchQuery.trim().toLowerCase();
-  if (!q) {
-    return items;
-  }
-  return items.filter(
-    (citation) =>
-      citation.sourceTitle.toLowerCase().includes(q) ||
-      citation.messageLabel.toLowerCase().includes(q) ||
-      citation.excerpt.toLowerCase().includes(q) ||
-      citation.citationRecord.citation.toLowerCase().includes(q),
-  );
-}
-
 function countFilteredSources(items: SourceItem[], searchQuery: string) {
   const q = searchQuery.trim().toLowerCase();
   if (!q) {
@@ -5641,7 +5436,6 @@ export function SourcesHub({
   variant?: "panel" | "drawer";
 }) {
   const [activeTab, setActiveTab] = useState<HubTab>(getLastHubActiveTab);
-  const [citationScope, setCitationScope] = useState<CitationScope>("current");
   const [searchQueries, setSearchQueries] = useState<Record<HubTab, string>>({
     Sources: "",
     Workfiles: "",
@@ -5724,20 +5518,21 @@ export function SourcesHub({
   const [workfileBusyByPath, setWorkfileBusyByPath] = useState<
     Record<string, boolean>
   >({});
-  const currentCitationItems = useMemo(
-    () => mapCitationsToUi(citations),
-    [citations],
-  );
-  const threadCitationItems = useMemo(
-    () => mapThreadCitationsToUi(threadCitations),
-    [threadCitations],
-  );
-  const activeCitationItems =
-    citationScope === "thread" ? threadCitationItems : currentCitationItems;
-  const filteredCitationItems = useMemo(
-    () => filterCitations(activeCitationItems, deferredSearchQueries.Citations),
-    [activeCitationItems, deferredSearchQueries.Citations],
-  );
+  const {
+    citationScope,
+    setCitationScope,
+    currentCitationItems,
+    threadCitationItems,
+    activeCitationItems,
+    filteredCitationItems,
+    activeCitationChunkId,
+  } = useCitations({
+    mode,
+    citations,
+    threadCitations,
+    activeCitationIndex,
+    searchQuery: deferredSearchQueries.Citations,
+  });
   const filteredSourceCount = useMemo(
     () => countFilteredSources(sources, deferredSearchQueries.Sources),
     [deferredSearchQueries.Sources, sources],
@@ -5770,9 +5565,6 @@ export function SourcesHub({
       ) ?? null
     );
   }, [connectorSettingsConnectorId, connectors]);
-  const activeCitationChunkId = activeCitationIndex
-    ? (citations[activeCitationIndex - 1]?.chunkId ?? null)
-    : null;
   const addSourceDialog = useAddSourceDialogState();
   const resetAddSourceDialog = addSourceDialog.reset;
   const [isCreateDirectoryOpen, setIsCreateDirectoryOpen] = useState(false);
@@ -6069,9 +5861,6 @@ export function SourcesHub({
     }
   }, []);
 
-  useEffect(() => {
-    setCitationScope("current");
-  }, [mode]);
 
   useEffect(() => {
     currentWorkspaceIdRef.current = workspaceId;
