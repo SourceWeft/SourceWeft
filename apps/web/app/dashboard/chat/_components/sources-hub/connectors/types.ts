@@ -64,3 +64,5 @@ export type ConnectorReadinessState = {
   reason: string;
   message: string;
 };
+
+export type ConnectorActivityKindFilter = "all" | "sync" | "action" | "webhook";
