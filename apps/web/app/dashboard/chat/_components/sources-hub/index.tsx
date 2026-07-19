@@ -1,11 +1,9 @@
 "use client";
 
 import {
-  type ComponentType,
   type CSSProperties,
   type MouseEvent,
   type ReactNode,
-  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -198,7 +196,14 @@ import {
   countFilteredSkills,
   type HubSkillItem,
 } from "./skills/use-skills";
+import { memoComponent } from "./memo-component";
 import { mapSourcesToUi } from "./source-mapping";
+import {
+  DeleteWorkfileDialog,
+  WorkfilePreviewDialog,
+} from "./workfiles/dialogs";
+import { WorkfilesTab } from "./workfiles/tab";
+import { useWorkfiles, workfileMatchesQuery } from "./workfiles/use-workfiles";
 import { TypeBadge } from "./type-badge";
 import type { ArtifactListItem } from "./types";
 import { useConnectorSyncRuns } from "./use-connector-sync-runs";
@@ -294,19 +299,12 @@ function persistSourceTreeExpansion(input: {
   });
 }
 
-type WorkfileListItem = Awaited<
-  ReturnType<typeof contentClient.listWorkingFiles>
->["items"][number];
-type WorkfileDetail = Awaited<
-  ReturnType<typeof contentClient.getWorkingFile>
->["file"];
 type ConnectorAccountItem = Awaited<
   ReturnType<typeof connectorsClient.listAccounts>
 >["items"][number];
 
 const workspaceArtifactsCache = new Map<string, ArtifactListItem[]>();
 const workspaceArtifactsCursorCache = new Map<string, string | null>();
-const threadWorkfilesCache = new Map<string, WorkfileListItem[]>();
 const WORKSPACE_ARTIFACTS_CACHE_BUCKET = "artifacts";
 const WORKSPACE_CONNECTORS_CACHE_BUCKET = "connectors";
 const WORKSPACE_MCP_CACHE_BUCKET = "mcp";
@@ -328,10 +326,6 @@ type WorkspaceMcpCacheValue = {
 };
 
 function cloneArtifactItems(items: ArtifactListItem[]) {
-  return cloneItems(items);
-}
-
-function cloneWorkfileItems(items: WorkfileListItem[]) {
   return cloneItems(items);
 }
 
@@ -439,23 +433,6 @@ function clearConnectorOAuthCompletionFromUrl() {
     window.history.state,
     "",
     `${url.pathname}${url.search}${url.hash}`,
-  );
-}
-
-function workfilePurposeLabel(purpose: WorkfileListItem["purpose"]) {
-  if (purpose === "scratch") return "Scratch";
-  if (purpose === "draft") return "Draft";
-  if (purpose === "note") return "Note";
-  if (purpose === "output_candidate") return "Candidate";
-  return "Workfile";
-}
-
-function workfileMatchesQuery(file: WorkfileListItem, q: string) {
-  return (
-    file.path.toLowerCase().includes(q) ||
-    basename(file.path).toLowerCase().includes(q) ||
-    file.mimeType.toLowerCase().includes(q) ||
-    workfilePurposeLabel(file.purpose).toLowerCase().includes(q)
   );
 }
 
@@ -625,10 +602,6 @@ function SourceProviderBadge({
       {content}
     </button>
   );
-}
-
-function memoComponent<T extends (...args: never[]) => unknown>(component: T) {
-  return memo(component as never) as unknown as T;
 }
 
 const SourceRow = memoComponent(function SourceRow({
@@ -1159,152 +1132,6 @@ const SourceTreeRow = memoComponent(function SourceTreeRow({
         </div>
       </CollapsibleContent>
     </Collapsible>
-  );
-});
-
-const WorkfilesTab = memoComponent(function WorkfilesTab({
-  files,
-  isLoading,
-  loadingError,
-  onDelete,
-  onOpen,
-  onRefresh,
-  rowBusyByPath,
-  searchQuery,
-}: {
-  files: WorkfileListItem[];
-  isLoading: boolean;
-  loadingError: string | null;
-  onDelete: (file: WorkfileListItem) => void;
-  onOpen: (file: WorkfileListItem) => void;
-  onRefresh: () => void;
-  rowBusyByPath: Record<string, boolean>;
-  searchQuery: string;
-}) {
-  const q = searchQuery.trim().toLowerCase();
-  const filtered = useMemo(
-    () => (q ? files.filter((file) => workfileMatchesQuery(file, q)) : files),
-    [files, q],
-  );
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
-        <Loader2 className="mr-2 size-3.5 animate-spin" />
-        Loading workfiles...
-      </div>
-    );
-  }
-
-  if (loadingError) {
-    return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
-        <p className="text-xs text-destructive">{loadingError}</p>
-        <Button
-          className="mt-2"
-          onClick={onRefresh}
-          size="xs"
-          type="button"
-          variant="outline"
-        >
-          <RotateCcw className="size-3.5" />
-          Retry
-        </Button>
-      </div>
-    );
-  }
-
-  if (filtered.length === 0) {
-    return (
-      <HubEmptyState
-        description={
-          searchQuery
-            ? "Try a different path, purpose, or file type."
-            : "Assistant-created plans, notes, extraction tables, calculations, drafts, and candidate outputs from complex work will appear here."
-        }
-        icon={FileText}
-        title={
-          searchQuery
-            ? `No workfiles match "${searchQuery}"`
-            : "Workfiles will appear here."
-        }
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      {filtered.map((file) => {
-        const busy = Boolean(rowBusyByPath[file.path]);
-        return (
-          <article
-            className="group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/60"
-            key={file.id}
-          >
-            <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <button
-                className="block w-full cursor-pointer truncate text-left text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                disabled={busy}
-                onClick={() => onOpen(file)}
-                title={file.path}
-                type="button"
-              >
-                {basename(file.path)}
-              </button>
-              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-                <span className="truncate">{file.path}</span>
-                <span>{formatBytes(file.sizeBytes)}</span>
-                <span>{new Date(file.updatedAt).toLocaleString()}</span>
-              </div>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {file.purpose ? (
-                  <TypeBadge label={workfilePurposeLabel(file.purpose)} />
-                ) : null}
-                <TypeBadge label={file.mimeType} />
-              </div>
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                  disabled={busy}
-                  onClick={(event) => event.stopPropagation()}
-                  size="icon-xs"
-                  title="Workfile actions"
-                  type="button"
-                  variant="ghost"
-                >
-                  {busy ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <MoreHorizontal className="size-3.5" />
-                  )}
-                  <span className="sr-only">Workfile actions</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem
-                  className="whitespace-nowrap"
-                  onClick={() => onOpen(file)}
-                >
-                  <FileText className="size-3.5" />
-                  Preview
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="whitespace-nowrap"
-                  onClick={() => onDelete(file)}
-                  variant="destructive"
-                >
-                  <Trash2 className="size-3.5" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </article>
-        );
-      })}
-    </div>
   );
 });
 
@@ -2377,44 +2204,6 @@ function ReadmeDialog({
   );
 }
 
-function WorkfilePreviewDialog({
-  onOpenChange,
-  previewWorkfile,
-}: {
-  onOpenChange: (open: boolean) => void;
-  previewWorkfile: WorkfileDetail | null;
-}) {
-  return (
-    <Dialog onOpenChange={onOpenChange} open={Boolean(previewWorkfile)}>
-      <DialogContent
-        className="grid max-h-[min(720px,calc(100svh-2rem))] w-[760px] max-w-[calc(100%-2rem)] grid-rows-[auto_minmax(0,1fr)] p-0"
-        constrainWidth={false}
-      >
-        <DialogHeader className="border-b px-5 py-4 text-left">
-          <DialogTitle>
-            {previewWorkfile ? basename(previewWorkfile.path) : "Workfile"}
-          </DialogTitle>
-          <DialogDescription>
-            {previewWorkfile
-              ? `${previewWorkfile.path} · ${formatBytes(previewWorkfile.sizeBytes)} · ${workfilePurposeLabel(previewWorkfile.purpose)}`
-              : "Assistant-created working material from this thread."}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="min-h-0 overflow-y-auto px-5 py-5">
-          {previewWorkfile ? (
-            <WorkfileContentViewer
-              className="h-full min-h-[360px]"
-              contentText={previewWorkfile.contentText}
-              mimeType={previewWorkfile.mimeType}
-              path={previewWorkfile.path}
-            />
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function DeleteSourceDialog({
   deleteSource,
   onConfirm,
@@ -2511,63 +2300,6 @@ function DeleteSelectedSourcesDialog({
           >
             {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : null}
             Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function DeleteWorkfileDialog({
-  deleteWorkfile,
-  onConfirm,
-  onOpenChange,
-  workfileBusyByPath,
-}: {
-  deleteWorkfile: WorkfileListItem | null;
-  onConfirm: () => void;
-  onOpenChange: (open: boolean) => void;
-  workfileBusyByPath: Record<string, boolean>;
-}) {
-  const isDeleting = Boolean(
-    deleteWorkfile && workfileBusyByPath[deleteWorkfile.path],
-  );
-
-  return (
-    <AlertDialog onOpenChange={onOpenChange} open={Boolean(deleteWorkfile)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete workfile?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This will remove the Workfile from this thread. This action cannot
-            be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {deleteWorkfile ? (
-          <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground">
-            <span className="line-clamp-2 break-words">
-              {deleteWorkfile.path}
-            </span>
-          </div>
-        ) : null}
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            className={buttonVariants({ variant: "destructive" })}
-            disabled={isDeleting}
-            onClick={(event) => {
-              event.preventDefault();
-              onConfirm();
-            }}
-          >
-            {isDeleting ? (
-              <>
-                <Loader2 className="size-3.5 animate-spin" />
-                Deleting...
-              </>
-            ) : (
-              "Delete"
-            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -5154,11 +4886,26 @@ export function SourcesHub({
   const skillsForHub = hubSkills ?? installedSkills;
   const [isLoading, setIsLoading] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
-  const [workfiles, setWorkfiles] = useState<WorkfileListItem[]>([]);
-  const [isLoadingWorkfiles, setIsLoadingWorkfiles] = useState(false);
-  const [workfilesLoadingError, setWorkfilesLoadingError] = useState<
-    string | null
-  >(null);
+  const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
+  const {
+    workfiles,
+    isLoadingWorkfiles,
+    workfilesLoadingError,
+    previewWorkfile,
+    setPreviewWorkfile,
+    deleteWorkfile,
+    setDeleteWorkfile,
+    workfileBusyByPath,
+    refreshWorkfiles,
+    handleOpenWorkfile,
+    handleConfirmDeleteWorkfile,
+  } = useWorkfiles({
+    mode,
+    workspaceId,
+    threadId,
+    workfilesRefreshKey,
+    currentWorkspaceIdRef,
+  });
   const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
   const [isLoadingMoreArtifacts, setIsLoadingMoreArtifacts] = useState(false);
@@ -5211,15 +4958,6 @@ export function SourcesHub({
   ] = useState(false);
   const [connectorSettingsActivityError, setConnectorSettingsActivityError] =
     useState<string | null>(null);
-  const [previewWorkfile, setPreviewWorkfile] = useState<WorkfileDetail | null>(
-    null,
-  );
-  const [deleteWorkfile, setDeleteWorkfile] = useState<WorkfileListItem | null>(
-    null,
-  );
-  const [workfileBusyByPath, setWorkfileBusyByPath] = useState<
-    Record<string, boolean>
-  >({});
   const {
     citationScope,
     setCitationScope,
@@ -5282,7 +5020,6 @@ export function SourcesHub({
     null,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const currentWorkspaceIdRef = useRef<string | null | undefined>(workspaceId);
   const loadedSourcesWorkspaceIdRef = useRef<string | null>(null);
   const initializedSourcesWorkspaceIdRef = useRef<string | null>(null);
   const sourcesRef = useRef<SourceItem[]>(initialSources);
@@ -5757,44 +5494,6 @@ export function SourcesHub({
     ],
   );
 
-  const refreshWorkfiles = useCallback(async () => {
-    if (!workspaceId || !threadId || mode !== "thread") {
-      setWorkfiles([]);
-      setWorkfilesLoadingError(null);
-      return;
-    }
-
-    const activeWorkspaceId = workspaceId;
-    const activeThreadId = threadId;
-    setIsLoadingWorkfiles(true);
-    setWorkfilesLoadingError(null);
-    try {
-      const result = await contentClient.listWorkingFiles(
-        activeWorkspaceId,
-        activeThreadId,
-      );
-      // Guard against a workspace switch in flight, matching refreshArtifacts /
-      // refreshMcpInstalls; without this, a stale workspace's workfiles could be
-      // written into the current view.
-      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
-        return;
-      }
-      setWorkfiles(result.items);
-      threadWorkfilesCache.set(
-        getThreadWorkfilesCacheKey(activeWorkspaceId, activeThreadId),
-        cloneWorkfileItems(result.items),
-      );
-    } catch (error) {
-      setWorkfilesLoadingError(
-        getErrorMessage(error, "Failed to load workfiles."),
-      );
-    } finally {
-      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
-        setIsLoadingWorkfiles(false);
-      }
-    }
-  }, [mode, threadId, workspaceId]);
-
   const refreshArtifacts = useCallback(async () => {
     if (!workspaceId) {
       setArtifacts([]);
@@ -6160,26 +5859,6 @@ export function SourcesHub({
   ]);
 
   useEffect(() => {
-    if (!workspaceId || !threadId || mode !== "thread") {
-      setWorkfiles([]);
-      setWorkfilesLoadingError(null);
-      return;
-    }
-
-    const cached = threadWorkfilesCache.get(
-      getThreadWorkfilesCacheKey(workspaceId, threadId),
-    );
-    if (cached) {
-      setWorkfiles(cloneWorkfileItems(cached));
-      setWorkfilesLoadingError(null);
-      setIsLoadingWorkfiles(false);
-      return;
-    }
-
-    void refreshWorkfiles();
-  }, [mode, refreshWorkfiles, threadId, workspaceId]);
-
-  useEffect(() => {
     if (!workspaceId) {
       setArtifacts([]);
       setArtifactsLoadingError(null);
@@ -6287,12 +5966,6 @@ export function SourcesHub({
     connectorSettingsConnectorId,
     refreshConnectorSettingsActivity,
   ]);
-
-  useEffect(() => {
-    if (workfilesRefreshKey > 0) {
-      void refreshWorkfiles();
-    }
-  }, [refreshWorkfiles, workfilesRefreshKey]);
 
   useEffect(() => {
     if (artifactsRefreshKey > 0) {
@@ -6423,15 +6096,6 @@ export function SourcesHub({
       if (busy) return { ...prev, [id]: true };
       const next = { ...prev };
       delete next[id];
-      return next;
-    });
-  }
-
-  function setWorkfileBusy(path: string, busy: boolean) {
-    setWorkfileBusyByPath((prev) => {
-      if (busy) return { ...prev, [path]: true };
-      const next = { ...prev };
-      delete next[path];
       return next;
     });
   }
@@ -7313,56 +6977,6 @@ export function SourcesHub({
     },
     [workspaceId],
   );
-
-  const handleOpenWorkfile = useCallback(
-    async (file: WorkfileListItem) => {
-      if (!workspaceId || !threadId) return;
-
-      setWorkfileBusy(file.path, true);
-      try {
-        const result = await contentClient.getWorkingFile(
-          workspaceId,
-          threadId,
-          file.path,
-        );
-        setPreviewWorkfile(result.file);
-      } catch (error) {
-        toast.error(getErrorMessage(error, "Failed to load workfile."));
-      } finally {
-        setWorkfileBusy(file.path, false);
-      }
-    },
-    [threadId, workspaceId],
-  );
-
-  const handleConfirmDeleteWorkfile = useCallback(async () => {
-    if (!workspaceId || !threadId || !deleteWorkfile) return;
-
-    setWorkfileBusy(deleteWorkfile.path, true);
-    try {
-      await contentClient.deleteWorkingFile(
-        workspaceId,
-        threadId,
-        deleteWorkfile.path,
-      );
-      toast.success("Workfile deleted.");
-      setDeleteWorkfile(null);
-      if (previewWorkfile?.path === deleteWorkfile.path) {
-        setPreviewWorkfile(null);
-      }
-      await refreshWorkfiles();
-    } catch (error) {
-      toast.error(getErrorMessage(error, "Failed to delete workfile."));
-    } finally {
-      setWorkfileBusy(deleteWorkfile.path, false);
-    }
-  }, [
-    deleteWorkfile,
-    previewWorkfile?.path,
-    refreshWorkfiles,
-    threadId,
-    workspaceId,
-  ]);
 
   const handleCreateTextSource = useCallback(async () => {
     if (!workspaceId) {
