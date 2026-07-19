@@ -1,4 +1,5 @@
 import { tool, type ToolRuntime } from "langchain";
+import { createArtifactId } from "@sourceweft/builtin-tool-publish-artifact";
 import type { ImageGenerateInput, ImageGenerateResult } from "@sourceweft/model-gateway";
 import { publishPreparedArtifact } from "@sourceweft/builtin-tool-publish-artifact";
 import { GENERATE_IMAGE_TOOL_NAME } from "./agent-tool-defs";
@@ -26,11 +27,33 @@ export const GENERATED_IMAGE_PROGRESS_EVENT_TYPE = "generate_image_progress";
 
 // ── Backend dependency interfaces ───────────────────────────────────────────
 
+/**
+ * The gateway settles billing for the call it makes, so it needs the billing
+ * identity alongside the request. The host supplies a gateway that charges;
+ * this package no longer meters separately.
+ */
+export interface ImageToolGenerateOptions {
+  traceId?: string;
+  operation: string;
+  modelKind: string;
+  gatewayConfigId: string;
+  profileAlias: string;
+  modelAlias?: string | null;
+  referenceId?: string;
+  /**
+   * Must be derived from an id allocated BEFORE this call, so that a retry of
+   * the same logical generation replays rather than charging twice.
+   */
+  idempotencyKey: string;
+  llm?: unknown;
+  billingMetadata?: Record<string, unknown>;
+}
+
 export interface ImageToolModelGateway {
   images: {
     generate(
       request: ImageGenerateInput,
-      opts?: { traceId?: string; metadata?: Record<string, unknown> },
+      opts: ImageToolGenerateOptions,
     ): Promise<ImageGenerateResult>;
   };
 }
@@ -69,30 +92,12 @@ export interface ImageToolArtifacts {
   }): Promise<ImageToolArtifactRecord>;
 }
 
-export interface ImageToolBilling {
-  meterUsage(input: {
-    teamId: string;
-    workspaceId: string;
-    actorUserId: string;
-    feature: string;
-    operation: string;
-    modelKind: string;
-    gatewayConfigId: string;
-    profileAlias: string;
-    modelAlias: string;
-    referenceId: string;
-    idempotencyKey: string;
-    usage: unknown;
-    llm: unknown;
-    metadata: Record<string, unknown>;
-  }): Promise<void>;
-}
+
 
 export interface ImageToolRuntimeDeps {
   modelGateway: ImageToolModelGateway;
   storage: ImageToolStorage;
   artifacts: ImageToolArtifacts;
-  billing: ImageToolBilling;
 }
 
 export interface ImageToolContext {
@@ -324,11 +329,38 @@ export function createGenerateImageTool(
       emitProgress("generating", {
         providerModel: request.model,
       });
+
+      // Allocated before the call, not after publishing, so the billing key
+      // exists for the call it protects. Deriving it from the published
+      // artifact used to mean a failure between generating and publishing left
+      // the tokens burned and nothing charged, and a retry produced a fresh id
+      // and therefore a fresh key.
+      const artifactId = createArtifactId();
+
       const result = await deps.modelGateway.images.generate(request, {
         traceId: ctx.traceId,
-        metadata: {
-          parentSpanId: ctx.parentSpanId,
+        operation: "images.generate",
+        modelKind: "image",
+        gatewayConfigId: ctx.profile.gatewayConfigId,
+        profileAlias: ctx.profile.profileAlias,
+        modelAlias:
+          ctx.execution?.executionMode === "BYOK"
+            ? (ctx.execution.modelAlias ??
+              ctx.execution.providerModel ??
+              ctx.profile.modelAlias)
+            : ctx.profile.modelAlias,
+        referenceId: `artifact:${artifactId}`,
+        idempotencyKey: `artifact-image:${artifactId}`,
+        llm: ctx.execution,
+        billingMetadata: {
+          traceId: ctx.traceId,
+          threadId: ctx.threadId,
+          messageId: ctx.userMessageId,
           toolCallId,
+          artifactId,
+          aspectRatio: ctx.config.aspectRatio,
+          quality: ctx.config.quality,
+          style: ctx.config.style,
         },
       });
       const image = result.images[0];
@@ -344,6 +376,7 @@ export function createGenerateImageTool(
       const fileName = `${sanitizeImageArtifactFileBase(title)}.png`;
 
       const published = await publishPreparedArtifact({
+        artifactId,
         context: {
           teamId: ctx.teamId,
           workspaceId: ctx.workspaceId,
@@ -387,7 +420,6 @@ export function createGenerateImageTool(
         },
         toolCallId,
       });
-      const artifactId = published.artifactId;
       const versionId = published.record.versionId;
       const artifactUrl = published.output.artifactUrl;
 
@@ -396,42 +428,6 @@ export function createGenerateImageTool(
         artifactUrl,
         versionId,
       });
-      await deps.billing.meterUsage({
-        teamId: ctx.teamId,
-        workspaceId: ctx.workspaceId,
-        actorUserId: ctx.userId,
-        feature: "artifact.image",
-        operation: "images.generate",
-        modelKind: "image",
-        gatewayConfigId: ctx.profile.gatewayConfigId,
-        profileAlias: ctx.profile.profileAlias,
-        modelAlias:
-          ctx.execution?.executionMode === "BYOK"
-            ? (ctx.execution.modelAlias ??
-              ctx.execution.providerModel ??
-              ctx.profile.modelAlias)
-            : ctx.profile.modelAlias,
-        referenceId: `artifact:${artifactId}`,
-        idempotencyKey: `artifact-image:${artifactId}`,
-        usage: result.usage,
-        llm: ctx.execution,
-        metadata: {
-          traceId: ctx.traceId,
-          threadId: ctx.threadId,
-          messageId: ctx.userMessageId,
-          toolCallId,
-          artifactId,
-          versionId,
-          provider: result.provider,
-          providerModel: result.providerModel,
-          routeDecision: result.routeDecision,
-          imageCount: result.images.length,
-          aspectRatio: ctx.config.aspectRatio,
-          quality: ctx.config.quality,
-          style: ctx.config.style,
-        },
-      });
-
       emitProgress("ready", {
         artifactId,
         artifactUrl,

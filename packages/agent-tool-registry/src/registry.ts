@@ -8,6 +8,8 @@ import type {
   AgentToolRiskLevel,
   AgentToolSlashCommand,
 } from "@sourceweft/contracts/agent-tools";
+import type { ArtifactProgressProtocol } from "@sourceweft/contracts/artifact-progress";
+import type { AgentToolPresentation } from "@sourceweft/contracts/agent-tools";
 import { filesystemAgentToolDefs } from "@sourceweft/builtin-vfs";
 import { webAgentToolDefs } from "@sourceweft/builtin-tool-web-search";
 import { sandboxAgentToolDefs } from "@sourceweft/builtin-tool-sandbox";
@@ -234,6 +236,20 @@ export function getAgentToolConfigKeys(value: string): readonly string[] {
   return getAgentToolConfiguration(getAgentToolDefinition(value))?.configKeys ?? [];
 }
 
+/**
+ * Retrieve the artifact progress protocol for a tool.
+ * Returns null if the tool doesn't support artifact progress tracking.
+ */
+export function getArtifactProgressProtocol(
+  toolName: string,
+): ArtifactProgressProtocol | null {
+  const tool = getAgentToolDefinition(toolName);
+  if (!tool || !("artifactProgress" in tool)) {
+    return null;
+  }
+  return (tool.artifactProgress as ArtifactProgressProtocol | undefined) ?? null;
+}
+
 export type {
   AgentToolCapability,
   AgentToolDefaultPermission,
@@ -241,3 +257,60 @@ export type {
   AgentToolDomain,
   AgentToolRiskLevel,
 };
+
+/**
+ * Whether a structured tool-output `type` belongs to any capability that
+ * contributes artifact progress. Callers use this instead of hardcoding a
+ * capability's output type names, so adding a deliverable needs no edit here.
+ */
+export function isArtifactProgressOutputType(
+  type: string | null | undefined,
+): boolean {
+  if (!type) {
+    return false;
+  }
+  return allAgentTools().some((tool) => {
+    const protocol = (tool as { artifactProgress?: ArtifactProgressProtocol })
+      .artifactProgress;
+    return protocol?.outputTypes.includes(type) ?? false;
+  });
+}
+
+/**
+ * The capability's own presentation, if it declares one. Callers that render a
+ * tool call ask here instead of branching on capability tags to pick copy.
+ */
+export function getAgentToolPresentation(
+  toolName: string,
+): AgentToolPresentation | null {
+  return getAgentToolDefinition(toolName)?.presentation ?? null;
+}
+
+/**
+ * The capability whose progress this stream event belongs to, or null when no
+ * capability claims the event type.
+ */
+export function findAgentToolForProgressEventType(
+  eventType: string | null | undefined,
+): { name: string; presentation: AgentToolPresentation } | null {
+  if (!eventType) {
+    return null;
+  }
+  for (const tool of allAgentTools()) {
+    const presentation = tool.presentation;
+    if (presentation?.progressEventTypes?.includes(eventType)) {
+      return { name: tool.name, presentation };
+    }
+  }
+  return null;
+}
+
+/**
+ * The artifact-block key a tool renders its finished result as, or null when
+ * the tool has no special artifact rendering (it shows as a plain tool card).
+ * Callers use presence to decide "artifact block vs tool block" and the value
+ * to pick a body renderer — without knowing which capabilities exist.
+ */
+export function getAgentToolRenderAs(toolName: string): string | null {
+  return getAgentToolDefinition(toolName)?.presentation?.renderAs ?? null;
+}

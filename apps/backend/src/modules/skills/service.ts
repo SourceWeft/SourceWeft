@@ -70,11 +70,11 @@ export class ContentSkillsService {
   }
 
   async listCatalog(input: { teamId: string; workspaceId: string }) {
-    let rows = await listCatalogSkillVersionsForWorkspace(input);
-    if (rows.length === 0) {
-      await this.syncBuiltinCatalog();
-    }
-    rows = await listCatalogSkillVersionsForWorkspace(input);
+    // No lazy syncBuiltinCatalog() fallback here: it only ever writes rows with
+    // sourceType 'builtin', which the filter below discards, so it could not
+    // affect this result. Builtin entries are read from the filesystem further
+    // down. The catalog is synced once at API startup (api/main.ts).
+    const rows = await listCatalogSkillVersionsForWorkspace(input);
 
     const installableRows = rows.filter(
       (row) => row.definition.sourceType !== "builtin",
@@ -138,11 +138,12 @@ export class ContentSkillsService {
         defaultConfig: skill.manifestJson.defaultConfig,
       });
     }
-    await Promise.all(
-      items.map(async (item) => {
-        item.hasReadme = Boolean(await this.getSkillReadmeContent(input, item));
-      }),
-    );
+    // `hasReadme` is deliberately left false here. Resolving it per item meant
+    // loading every skill's *entire* bundle — for builtins that is a fresh
+    // capability discovery scan plus a full read of every file — to answer one
+    // boolean the list view never renders. The only consumer is the skill
+    // detail page, and getCatalogSkillDetail fills it in from files it has
+    // already read.
     return { items };
   }
 
@@ -162,20 +163,13 @@ export class ContentSkillsService {
     }
 
     const files = await this.getSkillFiles(input, item);
+    const readmeContent =
+      files.find((file) => file.path === "README.md")?.contentText ?? null;
     return {
-      skill: item,
-      readmeContent: files.find((file) => file.path === "README.md")?.contentText ?? null,
+      skill: { ...item, hasReadme: readmeContent !== null },
+      readmeContent,
       skillContent: files.find((file) => file.path === "SKILL.md")?.contentText ?? null,
     };
-  }
-
-  private async getSkillReadmeContent(
-    input: { teamId: string; workspaceId: string },
-    item: SkillCatalogItem,
-  ) {
-    return (await this.getSkillFiles(input, item))
-      .find((file) => file.path === "README.md")
-      ?.contentText ?? null;
   }
 
   private async getSkillFiles(

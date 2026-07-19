@@ -12,6 +12,7 @@ export {
   createCapabilityAgentTools,
   publishArtifactFromSource,
 } from "./agent-tools";
+export { createArtifactId } from "./publisher";
 export {
   buildArtifactDownloadUrl,
   buildArtifactPreviewImageUrl,

@@ -269,6 +269,19 @@ function normalizeRelativePath(baseDir: string, filePath: string) {
   return path.relative(baseDir, filePath).split(path.sep).join("/");
 }
 
+/**
+ * Build output and dependency directories are not skill content. Without this
+ * denylist the walk below picks up `.turbo/*.log` and `node_modules/.bin/*`
+ * (shell scripts), reads them as UTF-8, mounts them under `/skills/<name>/`,
+ * and folds them into the bundle hash — so a turbo log write invalidates the
+ * bundle. Skills are re-read from disk every turn, so this is per-turn cost.
+ */
+const SKIP_SKILL_DIR_NAMES = new Set(["node_modules", "dist"]);
+
+function isSkippedSkillDir(name: string) {
+  return SKIP_SKILL_DIR_NAMES.has(name) || name.startsWith(".");
+}
+
 async function collectFiles(
   baseDir: string,
   currentDir = baseDir,
@@ -278,6 +291,9 @@ async function collectFiles(
   for (const entry of entries) {
     const fullPath = path.join(currentDir, entry.name);
     if (entry.isDirectory()) {
+      if (isSkippedSkillDir(entry.name)) {
+        continue;
+      }
       files.push(...(await collectFiles(baseDir, fullPath)));
     } else if (entry.isFile()) {
       files.push(fullPath);

@@ -1,4 +1,16 @@
 import { randomUUID } from "node:crypto";
+
+/**
+ * Allocates an artifact id.
+ *
+ * Exported so a caller can allocate the id *before* the work that produces the
+ * artifact, and hand the same id to `publishPreparedArtifact` afterwards. That
+ * matters for billing: an idempotency key derived from the id has to exist
+ * before the model call it is meant to make replay-safe, not after it.
+ */
+export function createArtifactId() {
+  return randomUUID();
+}
 import {
   buildArtifactDownloadUrl,
   buildArtifactPreviewImageUrl,
@@ -127,6 +139,12 @@ export type PublishPreparedArtifactOperationInput = {
   readonly services: PublishArtifactServices;
   readonly typeHandlers?: readonly ArtifactTypeHandler[];
   readonly toolCallId?: string;
+  /**
+   * Pre-allocated artifact id. Supply it when the id was needed before this
+   * call — e.g. to key billing for the model call that produced the bytes.
+   * Defaults to a freshly allocated id.
+   */
+  readonly artifactId?: string;
 };
 
 export type PublishPreparedArtifactResult = {
@@ -381,7 +399,7 @@ export async function publishPreparedArtifact(
     );
   }
 
-  const artifactId = randomUUID();
+  const artifactId = input.artifactId ?? createArtifactId();
   const storageKey = storage.buildArtifactStorageKey({
     workspaceId: input.context.workspaceId,
     artifactId,

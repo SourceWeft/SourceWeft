@@ -1,10 +1,12 @@
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { generateImagePresentation } from "./presentation";
 
 export const generateImageAgentTool = defineAgentTool({
   id: "generateImage",
   name: "generate_image",
   domain: "artifact",
   capabilities: ["artifact", "generated_image_artifact"],
+  presentation: generateImagePresentation,
   requirements: {
     modelKind: "image",
   },

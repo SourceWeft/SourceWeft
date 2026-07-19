@@ -44,13 +44,12 @@ const fixtureRecords = [
             category: "Research",
           },
           runtime: {
-            execution: "direct",
+            execution: "agent",
             promptIntro: "Search documents for the user's request.",
             tools: ["search_docs"],
             permissionOverrides: { search_docs: "allow" },
             output: {
-              kind: "tool_call",
-              toolName: "search_docs",
+              kind: "none",
             },
           },
         },
@@ -336,7 +335,7 @@ test("commands.manifest hidden visibility cannot be promoted into command list",
   );
 
   assert.equal(search?.visible, false);
-  assert.equal(search?.workflow?.successCriteria.kind, "tool_call");
+  assert.equal(search?.workflow?.successCriteria.kind, "none");
 });
 
 test("commands.workflow resolves tool command workflows from manifests", () => {
@@ -344,15 +343,12 @@ test("commands.workflow resolves tool command workflows from manifests", () => {
     normalizedFixtureRecords,
     "search_docs",
   );
-  assert.equal(searchWorkflow?.execution, "direct");
+  assert.equal(searchWorkflow?.execution, "agent");
   assert.deepEqual(searchWorkflow?.defaultTools, ["search_docs"]);
   assert.deepEqual(searchWorkflow?.permissionOverrides, {
     search_docs: "allow",
   });
-  assert.deepEqual(searchWorkflow?.successCriteria, {
-    kind: "tool_call",
-    toolName: "search_docs",
-  });
+  assert.deepEqual(searchWorkflow?.successCriteria, { kind: "none" });
 
   const publisherWorkflow = findCapabilityToolCommandWorkflow(
     normalizedFixtureRecords,

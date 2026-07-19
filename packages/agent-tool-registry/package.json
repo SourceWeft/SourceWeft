@@ -7,7 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@sourceweft/builtin-connector-notion": "workspace:*",
@@ -21,6 +22,8 @@
     "@sourceweft/contracts": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "@types/node": "^22.15.30",
+    "tsx": "^4.20.6"
   }
 }

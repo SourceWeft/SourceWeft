@@ -114,6 +114,10 @@ test("generate_image runtime persists image artifacts through the shared publish
             assert.equal(request.model, "image-default");
             assert.equal(request.responseFormat, "b64_json");
             assert.equal(opts?.traceId, "trace-1");
+            // The billing identity must be present on the call itself: the
+            // gateway settles here, so the key has to exist now rather than
+            // being derived from the artifact published afterwards.
+            billingEvents.push(opts);
             return {
               model: "gpt-image-1",
               provider: "openai",
@@ -157,11 +161,6 @@ test("generate_image runtime persists image artifacts through the shared publish
             artifactId: input.artifactId,
             versionId: "version-1",
           };
-        },
-      },
-      billing: {
-        meterUsage: async (input) => {
-          billingEvents.push(input);
         },
       },
     },
@@ -212,12 +211,20 @@ test("generate_image runtime persists image artifacts through the shared publish
   assert.equal(upload.contentType, "image/png");
   assert.equal(upload.body.toString(), generatedBytes.toString());
 
+  // Keys are pinned to the pre-allocated id, and that same id is what the
+  // artifact was published under — so a retry replays instead of charging
+  // twice, and a failure after generating still bills the tokens it burned.
+  assert.equal(billingEvents.length, 1);
   const billing = billingEvents[0] as {
     idempotencyKey: string;
     referenceId: string;
+    operation: string;
+    modelKind: string;
   };
   assert.equal(billing.referenceId, `artifact:${record.artifactId}`);
   assert.equal(billing.idempotencyKey, `artifact-image:${record.artifactId}`);
+  assert.equal(billing.operation, "images.generate");
+  assert.equal(billing.modelKind, "image");
   assert.match(String(output), /Image artifact created\./u);
   assert.match(String(output), new RegExp(`artifact_id: ${record.artifactId}`, "u"));
   assert.equal(progressEvents.length, 5);

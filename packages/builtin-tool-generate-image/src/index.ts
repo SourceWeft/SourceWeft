@@ -56,7 +56,7 @@ export {
   type ImageToolContext,
   type ImageToolRuntimeDeps,
   type ImageToolModelGateway,
+  type ImageToolGenerateOptions,
   type ImageToolStorage,
   type ImageToolArtifacts,
-  type ImageToolBilling,
 } from "./tool-runtime";

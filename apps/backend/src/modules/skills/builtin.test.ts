@@ -362,3 +362,29 @@ test("builtin skill bundles no longer include legacy skill.json", async () => {
     false,
   );
 });
+
+test("builtin skill bundles exclude build output and dependencies", async () => {
+  // `.turbo/*.log` and `node_modules/.bin/*` (shell scripts) used to be walked
+  // into the bundle: read as UTF-8, mounted under /skills/<name>/, and folded
+  // into the bundle hash, so a turbo log write invalidated it. Skills are
+  // re-read from disk every turn, so this was per-turn cost too.
+  const skill = await getBuiltinSkillBySlug("ppt-deck");
+  assert.ok(skill);
+  const bundle = await loadBuiltinSkillBundle(skill.storagePointer);
+  assert.ok(bundle);
+
+  const leaked = bundle.files
+    .map((file) => file.path)
+    .filter(
+      (filePath) =>
+        filePath.startsWith("node_modules/") ||
+        filePath.startsWith("dist/") ||
+        filePath.split("/").some((segment) => segment.startsWith(".")),
+    );
+
+  assert.deepEqual(leaked, []);
+  assert.ok(bundle.files.some((file) => file.path === "SKILL.md"));
+  assert.ok(
+    bundle.files.some((file) => file.path.startsWith("references/")),
+  );
+});

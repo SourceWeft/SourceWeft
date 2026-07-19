@@ -41,9 +41,6 @@ type CapabilityAgentToolFactoryInput = {
     readonly artifacts?: {
       readonly createImageArtifactRecord: ImageToolRuntimeDeps["artifacts"]["createRecord"];
     };
-    readonly billing?: {
-      readonly meterModelUsage: ImageToolRuntimeDeps["billing"]["meterUsage"];
-    };
     readonly modelGateway?: {
       readonly getClient: (
         gatewayConfigId: string,
@@ -99,8 +96,7 @@ export function createCapabilityAgentTools(
     !hasRequiredContext(input) ||
     !services?.modelGateway ||
     !services.storage ||
-    !services.artifacts ||
-    !services.billing
+    !services.artifacts
   ) {
     return {
       promptProviders: [imageRuntimePromptProvider],
@@ -125,9 +121,6 @@ export function createCapabilityAgentTools(
     },
     artifacts: {
       createRecord: services.artifacts.createImageArtifactRecord,
-    },
-    billing: {
-      meterUsage: services.billing.meterModelUsage,
     },
   };
 

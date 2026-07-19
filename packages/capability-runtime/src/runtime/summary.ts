@@ -11,7 +11,6 @@ export type CapabilityRegistrySummary = {
   readonly retrievalProviderCount: number;
   readonly documentParserProviderCount: number;
   readonly connectorProviderCount: number;
-  readonly artifactWriterCount: number;
   readonly diagnostics: {
     readonly errorCount: number;
     readonly warningCount: number;
@@ -55,11 +54,6 @@ export function summarizeCapabilityRegistry(
         count + getCapabilityContributions(record.manifest).connectors.length,
       0,
     ),
-    artifactWriterCount: records.reduce(
-      (count, record) =>
-        count + getCapabilityContributions(record.manifest).artifacts.length,
-      0,
-    ),
     diagnostics: {
       errorCount: diagnostics.filter(
         (diagnostic) => diagnostic.level === "error",
@@ -86,10 +80,8 @@ function countCommands(records: readonly DiscoveredCapabilityRecord[]): number {
       contributes.skills.filter((skill) => skill.command).length +
       contributes.tools.filter((tool) => tool.command).length +
       contributes.vfs.filter((provider) => provider.command).length +
-      contributes.artifacts.filter((writer) => writer.command).length +
       contributes.retrieval.filter((provider) => provider.command).length +
       contributes.documentParsers.filter((parser) => parser.command).length +
-      contributes.mcp.filter((adapter) => adapter.command).length +
       contributes.connectors.filter((connector) => connector.command).length
     );
   }, 0);

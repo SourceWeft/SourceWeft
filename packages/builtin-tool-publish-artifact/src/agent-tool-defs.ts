@@ -1,10 +1,12 @@
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { publishArtifactPresentation } from "./presentation";
 
 export const publishArtifactAgentTool = defineAgentTool({
   id: "publishArtifact",
   name: "publish_artifact",
   domain: "artifact",
   capabilities: ["artifact", "workfile_write", "presentation_artifact"],
+  presentation: publishArtifactPresentation,
   activation: {
     default: "off",
     userControl: "none",

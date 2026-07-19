@@ -10,9 +10,9 @@ import {
   listWorkspaceSkillRecordsByIds,
   loadSkillVersionBundle,
 } from "./repository";
+import { MAX_SELECTED_SKILLS_PER_TURN } from "@sourceweft/contracts/stream";
 import type { EnabledSkillDescriptor, WorkspaceSkillRecord } from "./types";
 
-const MAX_SELECTED_SKILLS_PER_TURN = 5;
 const BUILTIN_SKILL_ID_PREFIX = "builtin:";
 
 export function normalizeSkillIds(value: unknown) {

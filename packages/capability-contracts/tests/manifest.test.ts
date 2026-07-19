@@ -358,7 +358,11 @@ test("capability-manifest.invalid returns typed manifest diagnostics", () => {
   );
 });
 
-test("capability manifest rejects legacy contributes input", () => {
+test("capability manifest ignores an unknown top-level contributes key", () => {
+  // The legacy-input rejection guard was removed once every manifest had
+  // migrated to top-level contribution arrays. A stray `contributes` object is
+  // now stripped as an unknown key, and the normalized `contributes` is built
+  // from the top-level arrays alone.
   const result = parseCapabilityManifest({
     ...webSearchManifest,
     contributes: {
@@ -366,9 +370,70 @@ test("capability manifest rejects legacy contributes input", () => {
     },
   });
 
-  assert.equal(result.ok, false);
-  assert.match(
-    result.ok ? "" : result.diagnostics[0]?.message ?? "",
-    /Legacy "contributes" field is not accepted/u,
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.ok ? result.manifest.contributes.tools.map((tool) => tool.id) : [],
+    webSearchManifest.tools.map((tool) => tool.id),
   );
+});
+
+test("capability-manifest.pipeline parses a deliverable pipeline declaration", () => {
+  const manifest = capabilityManifestSchema.parse({
+    schemaVersion: 1,
+    id: "sourceweft/video-presentation-tool",
+    kind: "tool",
+    name: "Video Presentation",
+    version: "1.0.0",
+    entry: "./src/index.ts",
+    tools: [
+      {
+        id: "generate_video_presentation",
+        title: "Generate Video Presentation",
+        description: "Generate a narrated video presentation artifact.",
+        inputSchema: { type: "object" },
+        outputSchema: { type: "object" },
+        risk: "write",
+        runtime: {
+          execution: "agent",
+          tools: ["generate_video_presentation"],
+          output: {
+            kind: "artifact",
+            artifactType: "video_presentation",
+            publisherTool: "generate_video_presentation",
+          },
+          pipeline: {
+            jobName: "video-presentation-generate",
+          },
+        },
+      },
+    ],
+  });
+
+  const pipeline = manifest.contributes.tools[0]?.runtime?.pipeline;
+  assert.equal(pipeline?.jobName, "video-presentation-generate");
+  assert.equal(pipeline?.queue, "deliverables");
+});
+
+test("capability-manifest.pipeline rejects invalid job names", () => {
+  const result = capabilityManifestSchema.safeParse({
+    schemaVersion: 1,
+    id: "sourceweft/bad-pipeline",
+    kind: "tool",
+    name: "Bad",
+    version: "1.0.0",
+    tools: [
+      {
+        id: "bad_tool",
+        title: "Bad",
+        description: "Bad pipeline job name.",
+        inputSchema: { type: "object" },
+        outputSchema: { type: "object" },
+        risk: "write",
+        runtime: {
+          pipeline: { jobName: "Not A Job Name" },
+        },
+      },
+    ],
+  });
+  assert.equal(result.success, false);
 });

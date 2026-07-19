@@ -100,15 +100,10 @@ function collectCommands(
   manifest: CapabilityManifest,
 ): readonly ContributedCommand[] {
   const contributions = getCapabilityContributions(manifest);
-  const commands: ContributedCommand[] = manifest.contributes.commands.map(
-    (command, index) => ({
-      contributionId: `command:${index}`,
-      contributionTitle: null,
-      command: withDefaultCommandTitle(command, manifest.name),
-      action: { kind: "command", targetId: `command:${index}` },
-      workflow: command.workflow ?? null,
-    }),
-  );
+  // Commands are always contributed by a specific skill/tool/etc., never by the
+  // package as a whole: every entry below is derived from a contribution's
+  // `command` block.
+  const commands: ContributedCommand[] = [];
   for (const skill of contributions.skills) {
     const contributionTitle = getContributionDisplayTitle({
       fallback: manifest.name,
@@ -158,17 +153,6 @@ function collectCommands(
       null,
     );
   }
-  for (const writer of contributions.artifacts) {
-    pushContributionCommand(
-      commands,
-      "artifact",
-      writer.id,
-      writer.title,
-      writer.command,
-      writer.title,
-      null,
-    );
-  }
   for (const provider of contributions.retrieval) {
     pushContributionCommand(
       commands,
@@ -188,17 +172,6 @@ function collectCommands(
       parser.title,
       parser.command,
       parser.title,
-      null,
-    );
-  }
-  for (const adapter of contributions.mcp) {
-    pushContributionCommand(
-      commands,
-      "mcp",
-      adapter.id,
-      adapter.title,
-      adapter.command,
-      adapter.title,
       null,
     );
   }
@@ -253,7 +226,7 @@ function runtimeToCommandWorkflow(
   tools: readonly string[],
   runtime?: {
     readonly additionalPromptLines?: readonly string[];
-    readonly execution?: "agent" | "direct";
+    readonly execution?: "agent";
     readonly permissionOverrides?: Readonly<
       Record<string, "allow" | "ask" | "deny">
     >;
@@ -286,12 +259,6 @@ function runtimeOutputToSuccessCriteria(
 ): CapabilityCommandWorkflow["successCriteria"] {
   if (!output || output.kind === "none") {
     return { kind: "none" };
-  }
-  if (output.kind === "tool_call") {
-    return {
-      kind: "tool_call",
-      toolName: output.toolName,
-    };
   }
   return {
     kind: "artifact",

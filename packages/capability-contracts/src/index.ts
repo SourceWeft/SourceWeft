@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { capabilityPipelineSchema } from "./deliverable-pipeline";
+
+export * from "./deliverable-pipeline";
 
 export const capabilityDiagnosticLevelSchema = z.enum([
   "error",
@@ -15,17 +18,14 @@ export const capabilityDiagnosticCodeSchema = z.enum([
   "executor.missing",
   "provider.missing",
   "writer.missing",
-  "obsolete.unmigrated",
 ]);
 
 export const capabilityKindSchema = z.enum([
   "skill",
   "tool",
   "vfs",
-  "artifact",
   "retrieval",
   "document_parser",
-  "mcp",
   "connector",
   "composite",
 ]);
@@ -82,12 +82,14 @@ export const capabilityCommandSuccessCriteriaSchema = z.discriminatedUnion(
   ],
 );
 
+/**
+ * What completing this command produces. Note there is no `tool_call` variant:
+ * a command whose success is "the tool ran" declares `none`. The `tool_call`
+ * *success criteria* still exists downstream — the backend derives it when an
+ * artifact output names an artifactType it has no renderer for.
+ */
 export const capabilityRuntimeOutputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }),
-  z.object({
-    kind: z.literal("tool_call"),
-    toolName: contributionIdSchema,
-  }),
   z.object({
     kind: z.literal("artifact"),
     artifactType: z.string().min(1),
@@ -96,7 +98,7 @@ export const capabilityRuntimeOutputSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const capabilityCommandWorkflowSchema = z.object({
-  execution: z.enum(["agent", "direct"]),
+  execution: z.literal("agent"),
   promptIntro: z.string().min(1).optional(),
   defaultTools: z.array(contributionIdSchema).default([]),
   permissionOverrides: z
@@ -156,13 +158,19 @@ export const capabilitySkillOptionSchema = capabilityOptionSchema.extend({
 });
 
 export const capabilityRuntimeSchema = z.object({
-  execution: z.enum(["agent", "direct"]).default("agent"),
+  execution: z.literal("agent").default("agent"),
   promptIntro: z.string().min(1).optional(),
   tools: z.array(contributionIdSchema).default([]),
   permissionOverrides: z
     .record(z.string(), capabilityToolPermissionSchema)
     .default({}),
   output: capabilityRuntimeOutputSchema.optional(),
+  /**
+   * Declares that this tool produces its artifact via a background worker
+   * pipeline. The worker host registers the job name and loads the package's
+   * createDeliverablePipelines factory.
+   */
+  pipeline: capabilityPipelineSchema.optional(),
   requiredArguments: z
     .object({
       description: z.string().min(1),
@@ -219,13 +227,6 @@ export const vfsContributionSchema = z.object({
   command: capabilityCommandSchema.optional(),
 });
 
-export const artifactContributionSchema = z.object({
-  id: contributionIdSchema,
-  title: z.string().min(1),
-  artifactTypes: z.array(z.string().min(1)).default([]),
-  command: capabilityCommandSchema.optional(),
-});
-
 export const retrievalContributionSchema = z.object({
   id: contributionIdSchema,
   title: z.string().min(1),
@@ -236,12 +237,6 @@ export const documentParserContributionSchema = z.object({
   id: contributionIdSchema,
   title: z.string().min(1),
   mimeTypes: z.array(z.string().min(1)).default([]),
-  command: capabilityCommandSchema.optional(),
-});
-
-export const mcpContributionSchema = z.object({
-  id: contributionIdSchema,
-  title: z.string().min(1),
   command: capabilityCommandSchema.optional(),
 });
 
@@ -288,14 +283,11 @@ export const connectorContributionSchema = z.object({
 });
 
 export const capabilityContributesSchema = z.object({
-  commands: z.array(capabilityCommandSchema).default([]),
   skills: z.array(skillContributionSchema).default([]),
   tools: z.array(toolContributionSchema).default([]),
   vfs: z.array(vfsContributionSchema).default([]),
-  artifacts: z.array(artifactContributionSchema).default([]),
   retrieval: z.array(retrievalContributionSchema).default([]),
   documentParsers: z.array(documentParserContributionSchema).default([]),
-  mcp: z.array(mcpContributionSchema).default([]),
   connectors: z.array(connectorContributionSchema).default([]),
 });
 
@@ -307,28 +299,18 @@ const baseCapabilityManifestSchema = z.object({
   description: z.string().min(1).optional(),
   version: z.string().min(1),
   entry: z.string().min(1).optional(),
-  activation: z
-    .object({
-      onStartup: z.boolean().default(false),
-      autoEnableWhenConfigured: z.boolean().default(false),
-    })
-    .default({ onStartup: false, autoEnableWhenConfigured: false }),
   skills: z.array(skillContributionSchema).optional(),
   tools: z.array(toolContributionSchema).optional(),
   vfs: z.array(vfsContributionSchema).optional(),
-  artifacts: z.array(artifactContributionSchema).optional(),
   retrieval: z.array(retrievalContributionSchema).optional(),
   documentParsers: z.array(documentParserContributionSchema).optional(),
-  mcp: z.array(mcpContributionSchema).optional(),
   connectors: z.array(connectorContributionSchema).optional(),
   configSchema: jsonObjectSchema.default({}),
 });
 
 const contributionFieldByKind = {
-  artifact: "artifacts",
   connector: "connectors",
   document_parser: "documentParsers",
-  mcp: "mcp",
   retrieval: "retrieval",
   skill: "skills",
   tool: "tools",
@@ -339,72 +321,43 @@ const topLevelContributionFields = [
   "skills",
   "tools",
   "vfs",
-  "artifacts",
   "retrieval",
   "documentParsers",
-  "mcp",
   "connectors",
 ] as const;
 
-function rejectLegacyContributesInput(
-  input: unknown,
-  context: z.RefinementCtx,
-) {
-  if (
-    input &&
-    typeof input === "object" &&
-    !Array.isArray(input) &&
-    "contributes" in input
-  ) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message:
-        'Legacy "contributes" field is not accepted; declare contribution arrays at the top level',
-      path: ["contributes"],
-    });
-  }
-}
-
-export const capabilityManifestSchema = z
-  .unknown()
-  .superRefine(rejectLegacyContributesInput)
-  .pipe(
-    baseCapabilityManifestSchema
-      .superRefine((manifest, context) => {
-        if (manifest.kind === "composite") {
-          return;
-        }
-        const allowedField = contributionFieldByKind[manifest.kind];
-        for (const field of topLevelContributionFields) {
-          const contributions = manifest[field];
-          if (
-            field !== allowedField &&
-            Array.isArray(contributions) &&
-            contributions.length > 0
-          ) {
-            context.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: `Capability kind '${manifest.kind}' cannot declare top-level '${field}' contributions`,
-              path: [field],
-            });
-          }
-        }
-      })
-      .transform((manifest) => ({
-        ...manifest,
-        contributes: {
-          commands: [],
-          skills: manifest.skills ?? [],
-          tools: manifest.tools ?? [],
-          vfs: manifest.vfs ?? [],
-          artifacts: manifest.artifacts ?? [],
-          retrieval: manifest.retrieval ?? [],
-          documentParsers: manifest.documentParsers ?? [],
-          mcp: manifest.mcp ?? [],
-          connectors: manifest.connectors ?? [],
-        },
-      })),
-  );
+export const capabilityManifestSchema = baseCapabilityManifestSchema
+  .superRefine((manifest, context) => {
+    if (manifest.kind === "composite") {
+      return;
+    }
+    const allowedField = contributionFieldByKind[manifest.kind];
+    for (const field of topLevelContributionFields) {
+      const contributions = manifest[field];
+      if (
+        field !== allowedField &&
+        Array.isArray(contributions) &&
+        contributions.length > 0
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Capability kind '${manifest.kind}' cannot declare top-level '${field}' contributions`,
+          path: [field],
+        });
+      }
+    }
+  })
+  .transform((manifest) => ({
+    ...manifest,
+    contributes: {
+      skills: manifest.skills ?? [],
+      tools: manifest.tools ?? [],
+      vfs: manifest.vfs ?? [],
+      retrieval: manifest.retrieval ?? [],
+      documentParsers: manifest.documentParsers ?? [],
+      connectors: manifest.connectors ?? [],
+    },
+  }));
 
 export const capabilityDiagnosticSchema = z.object({
   level: capabilityDiagnosticLevelSchema,
@@ -415,6 +368,7 @@ export const capabilityDiagnosticSchema = z.object({
 });
 
 export type CapabilityManifest = z.infer<typeof capabilityManifestSchema>;
+/** Shape authors write in a manifest, before parsing applies defaults. */
 export type CapabilityManifestInput = z.input<typeof capabilityManifestSchema>;
 export type CapabilityDiagnostic = z.infer<typeof capabilityDiagnosticSchema>;
 export type CapabilityDiagnosticCode = z.infer<
@@ -437,12 +391,10 @@ export type CapabilitySkillOption = z.infer<typeof capabilitySkillOptionSchema>;
 export type SkillContribution = z.infer<typeof skillContributionSchema>;
 export type ToolContribution = z.infer<typeof toolContributionSchema>;
 export type VfsContribution = z.infer<typeof vfsContributionSchema>;
-export type ArtifactContribution = z.infer<typeof artifactContributionSchema>;
 export type RetrievalContribution = z.infer<typeof retrievalContributionSchema>;
 export type DocumentParserContribution = z.infer<
   typeof documentParserContributionSchema
 >;
-export type McpContribution = z.infer<typeof mcpContributionSchema>;
 export type ConnectorContribution = z.infer<typeof connectorContributionSchema>;
 export type ConnectorActionContribution = z.infer<typeof connectorActionSchema>;
 export type ConnectorActionRisk = z.infer<typeof connectorActionRiskSchema>;
