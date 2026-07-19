@@ -122,6 +122,16 @@ export function createCapabilityAgentTools(
             queue: {
               enqueueRender: services.queue.enqueueVideoPresentationRenderJob,
             },
+            // Follow the render pipeline until it reaches a terminal state so
+            // progress streams through the single chat SSE (runtime.writer →
+            // tool-call-event). There is no wall-clock cap here: per-stage time
+            // budgets and retries live inside the pipeline itself, which is the
+            // sole authority on failure. The wait only bails out on lost
+            // liveness (no generation updates for the stall window → worker
+            // died) or an abort signal, degrading to a processing_result.
+            // The render job runs on the separate deliverables queue, so
+            // blocking here cannot deadlock the primary worker.
+            wait: {},
           },
         ),
         categories: ["artifact"] as const,

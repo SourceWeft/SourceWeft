@@ -28,16 +28,21 @@ export function getSlideDurationInFrames(
   payload: VideoPresentationProjectPayload,
   slideNumber: number,
 ) {
-  return (
-    getSceneModuleForSlide(payload, slideNumber)?.durationInFrames ??
-    Math.max(
-      1,
-      Math.ceil(
-        (getAudioTrackForSlide(payload, slideNumber)?.durationSeconds ?? 5) *
-          payload.project.fps,
-      ),
-    )
+  const audioTrack = getAudioTrackForSlide(payload, slideNumber);
+  const audioFrames = Math.max(
+    1,
+    Math.ceil((audioTrack?.durationSeconds ?? 5) * payload.project.fps),
   );
+  const sceneFrames = getSceneModuleForSlide(
+    payload,
+    slideNumber,
+  )?.durationInFrames;
+  if (sceneFrames === undefined) {
+    return audioFrames;
+  }
+  // Safety net: a Sequence clips its <Audio>, so never let the scene run
+  // shorter than its narration even if the payload's frame count disagrees.
+  return audioTrack ? Math.max(sceneFrames, audioFrames) : sceneFrames;
 }
 
 export function getVideoDurationInFrames(

@@ -36,7 +36,7 @@ export function buildVideoPresentationProcessingResult(input: {
     artifact_id: input.artifactId,
     artifact_url: input.artifactUrl,
     ...(input.sourceJsonUrl ? { source_json_url: input.sourceJsonUrl } : {}),
-    content: `Video presentation project is still being generated: ${input.fileName}\nThe background worker is still building scene code and narration assets.`,
+    content: `Video presentation project is still being generated: ${input.fileName}\nThe background worker is still building scene code and narration assets.\nDo NOT call generate_video_presentation again for this request — the same artifact keeps building in the background and a retry would duplicate it. Tell the user generation is in progress and the artifact will become previewable when ready.`,
     file_name: input.fileName,
     ...(input.jobId ? { job_id: input.jobId } : {}),
     narration_enabled: input.narrationEnabled,

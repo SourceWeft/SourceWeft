@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { tool, type ToolRuntime } from "langchain";
+import { budgetArtifactPipelineGenerationForPublish } from "@sourceweft/contracts/artifact-pipeline";
 import type { VideoPresentationCreateRequest } from "@sourceweft/contracts/video-presentation";
 import { GENERATE_VIDEO_PRESENTATION_TOOL_NAME } from "./agent-tool-defs";
 import {
@@ -113,8 +114,19 @@ export type VideoPresentationToolLlmExecutionConfig = {
 export interface VideoPresentationToolRuntimeDeps {
   artifacts: VideoPresentationToolArtifacts;
   queue: VideoPresentationToolQueue;
+  /**
+   * When present, the tool follows the render pipeline until it reaches a
+   * terminal state instead of returning fire-and-forget. There is no total
+   * wall-clock cap by default: per-stage budgets and retries inside the
+   * pipeline are the sole authority on failure. The wait only bails out when
+   * the generation record stops changing for `stallTimeoutMs` (worker died)
+   * or the turn is aborted.
+   */
   wait?: {
     intervalMs?: number;
+    /** Bail out when the generation record is silent for this long. */
+    stallTimeoutMs?: number;
+    /** Optional hard wall-clock cap. Intended for tests only. */
     timeoutMs?: number;
   };
 }
@@ -393,8 +405,20 @@ function buildVideoPresentationFailureMessage(
 // ── Tool factory ────────────────────────────────────────────────────────────
 
 const VIDEO_PRESENTATION_RENDER_JOB = "video_presentation_render";
-const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_WAIT_INTERVAL_MS = 2_000;
+// SSE progress events carry the full generation record so the client can
+// render pipeline steps; cap the payload so a single event stays lean.
+const PROGRESS_EVENT_GENERATION_MAX_CHARS = 24_000;
+// The pipeline persists a generation update on every stage transition and
+// retry. If the record is silent for longer than the largest per-stage budget
+// (plus slack), the worker is gone and waiting further is pointless.
+const DEFAULT_WAIT_STALL_TIMEOUT_MS = 10 * 60 * 1000;
+
+function shouldBlockUntilArtifactReady(
+  deps: VideoPresentationToolRuntimeDeps,
+) {
+  return deps.wait !== undefined;
+}
 
 export function createGenerateVideoPresentationTool(
   ctx: VideoPresentationToolContext,
@@ -418,6 +442,65 @@ export function createGenerateVideoPresentationTool(
       }
       const title = args.title ?? "Video Presentation";
       const narrationEnabled = args.narration?.enabled ?? true;
+
+      // Edit run: regenerate an existing artifact in place. The worker keeps
+      // the published version untouched while running and publishes a new
+      // version of the SAME artifact on success — no new card, no reuse
+      // lookup, and a per-message job id so retries dedupe.
+      const regenerationArtifactId = args.regeneration?.artifactId?.trim();
+      if (regenerationArtifactId) {
+        const existing = await deps.artifacts.findStatus({
+          teamId: ctx.teamId,
+          workspaceId: ctx.workspaceId,
+          artifactId: regenerationArtifactId,
+        });
+        if (
+          !existing ||
+          (existing.status !== "ready" && existing.status !== "failed")
+        ) {
+          return buildVideoPresentationInputRequiredResult({
+            message:
+              "The video presentation to edit was not found or is still generating. Wait for it to finish, or start a new generation without regeneration.",
+          });
+        }
+        const editTitle = existing.title || title;
+        // BullMQ custom job ids reject ":" — use "__edit_" as the separator.
+        const editJobId = `${VIDEO_PRESENTATION_RENDER_JOB}_${regenerationArtifactId}__edit_${sanitizeVideoPresentationFileBase(ctx.userMessageId).slice(0, 40)}`;
+        await deps.queue.enqueueRender({
+          artifactId: regenerationArtifactId,
+          jobId: editJobId,
+          requestKey: `edit_${editJobId}`,
+          teamId: ctx.teamId,
+          workspaceId: ctx.workspaceId,
+          threadId: ctx.threadId,
+          userId: ctx.userId,
+          userMessageId: ctx.userMessageId,
+          title: editTitle,
+          request: args,
+          narrationEnabled,
+          traceId: ctx.traceId,
+          parentSpanId: ctx.parentSpanId,
+          toolCallId,
+          ...(ctx.llm ? { llm: ctx.llm } : {}),
+        });
+        return buildVideoPresentationProcessingResult({
+          artifactId: regenerationArtifactId,
+          artifactUrl: buildArtifactPreviewUrl({
+            workspaceId: ctx.workspaceId,
+            artifactId: regenerationArtifactId,
+          }),
+          fileName: buildVideoPresentationProjectFileName(editTitle),
+          jobId: editJobId,
+          narrationEnabled,
+          sourceJsonUrl: buildSourceJsonArtifactUrl({
+            workspaceId: ctx.workspaceId,
+            artifactId: regenerationArtifactId,
+          }),
+          stage: "planning_storyboard",
+          title: editTitle,
+        });
+      }
+
       const requestKey = buildVideoPresentationRequestKey({
         workspaceId: ctx.workspaceId,
         threadId: ctx.threadId,
@@ -472,7 +555,7 @@ export function createGenerateVideoPresentationTool(
           render_strategy: "frontend_remotion_project_to_video",
           progress: 0,
           status: "pending",
-          stage: "planning",
+          stage: "planning_storyboard",
           title,
           video_download_only: true,
           ...metadata,
@@ -498,18 +581,44 @@ export function createGenerateVideoPresentationTool(
       };
 
       const waitForArtifactReady = async () => {
-        const timeoutMs = Math.max(
+        if (!shouldBlockUntilArtifactReady(deps)) {
+          return {
+            artifact: null,
+            status: "processing" as const,
+            stage: "planning_storyboard",
+          };
+        }
+        const hardTimeoutMs =
+          typeof deps.wait?.timeoutMs === "number"
+            ? Math.max(1_000, deps.wait.timeoutMs)
+            : null;
+        const stallTimeoutMs = Math.max(
           1_000,
-          deps.wait?.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS,
+          deps.wait?.stallTimeoutMs ?? DEFAULT_WAIT_STALL_TIMEOUT_MS,
         );
         const intervalMs = Math.max(
           250,
           deps.wait?.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
         );
+        const abortSignal = runtime.signal;
         const startedAt = Date.now();
+        let lastChangeAt = Date.now();
         let lastProgressFingerprint: string | undefined;
         let lastStage: string | undefined;
-        while (Date.now() - startedAt <= timeoutMs) {
+        const shouldKeepWaiting = () => {
+          // Turn aborted (user Stop / run cancelled): degrade to
+          // processing_result; the render job keeps running in the background.
+          if (abortSignal?.aborted) {
+            return false;
+          }
+          if (hardTimeoutMs !== null && Date.now() - startedAt > hardTimeoutMs) {
+            return false;
+          }
+          // Liveness check: the pipeline persists generation updates on every
+          // stage transition/retry. A silent record means the worker is gone.
+          return Date.now() - lastChangeAt <= stallTimeoutMs;
+        };
+        while (shouldKeepWaiting()) {
           const artifact = await deps.artifacts.findStatus({
             teamId: ctx.teamId,
             workspaceId: ctx.workspaceId,
@@ -533,6 +642,10 @@ export function createGenerateVideoPresentationTool(
             const retrying = readPayloadGenerationRetrying(
               artifact.payloadJson,
             );
+            const errorMessage = readPayloadGenerationError(
+              artifact.payloadJson,
+            );
+            const generation = readPayloadGeneration(artifact.payloadJson);
             const progressFingerprint = JSON.stringify({
               attempt,
               maxAttempts,
@@ -544,6 +657,7 @@ export function createGenerateVideoPresentationTool(
             if (progressFingerprint !== lastProgressFingerprint) {
               lastProgressFingerprint = progressFingerprint;
               lastStage = stage;
+              lastChangeAt = Date.now();
               emitProgress({
                 ...(typeof attempt === "number" ? { attempt } : {}),
                 ...(typeof maxAttempts === "number"
@@ -551,6 +665,21 @@ export function createGenerateVideoPresentationTool(
                   : {}),
                 ...(typeof progress === "number" ? { progress } : {}),
                 ...(typeof retrying === "boolean" ? { retrying } : {}),
+                ...(errorMessage ? { error_message: errorMessage } : {}),
+                // Embed the full pipeline generation record (budgeted) so the
+                // chat SSE is the single source of truth for step-level
+                // progress; the client renders pipelineSteps directly from
+                // tool output without a separate progress channel.
+                ...(generation
+                  ? {
+                      generation: budgetArtifactPipelineGenerationForPublish(
+                        generation as Parameters<
+                          typeof budgetArtifactPipelineGenerationForPublish
+                        >[0],
+                        PROGRESS_EVENT_GENERATION_MAX_CHARS,
+                      ),
+                    }
+                  : {}),
                 status,
                 stage,
                 title: artifact.title || title,
@@ -589,6 +718,23 @@ export function createGenerateVideoPresentationTool(
           readStringPayloadValue(payload, "fileName") ?? fileName;
         emitProgress({ reused: true, status: existingStatus });
         if (existingStatus !== "ready") {
+          if (!shouldBlockUntilArtifactReady(deps)) {
+            emitProgress({
+              reused: true,
+              status: "running",
+              stage: "planning_storyboard",
+            });
+            return buildVideoPresentationProcessingResult({
+              artifactId,
+              artifactUrl,
+              fileName: existingFileName,
+              jobId: queueJobId,
+              narrationEnabled,
+              sourceJsonUrl,
+              stage: "planning_storyboard",
+              title: reusableArtifact.title || title,
+            });
+          }
           const waitResult = await waitForArtifactReady();
           if (waitResult.status === "ready" && waitResult.artifact) {
             const readyPayload = waitResult.artifact.payloadJson;
@@ -697,7 +843,23 @@ export function createGenerateVideoPresentationTool(
       });
 
       await deps.queue.enqueueRender(enqueuePayload);
-      emitProgress();
+      emitProgress({
+        status: "running",
+        stage: "planning_storyboard",
+      });
+
+      if (!shouldBlockUntilArtifactReady(deps)) {
+        return buildVideoPresentationProcessingResult({
+          artifactId,
+          artifactUrl,
+          fileName,
+          jobId: queueJobId,
+          narrationEnabled,
+          sourceJsonUrl,
+          stage: "planning_storyboard",
+          title,
+        });
+      }
 
       const waitResult = await waitForArtifactReady();
       if (waitResult.status === "ready" && waitResult.artifact) {
@@ -765,7 +927,7 @@ export function createGenerateVideoPresentationTool(
     {
       name: GENERATE_VIDEO_PRESENTATION_TOOL_NAME,
       description:
-        "Generate one narrated video presentation artifact from a short brief. Provide brief plus optional title, sourceDigest, audience, tone, language, durationTarget, stylePreset, renderProfile, narrationEnabled, narration, assets, and regeneration. Do not provide a storyboard or blueprint; the worker builds the Remotion project internally and waits for the ready artifact.",
+        "Generate one narrated video presentation artifact from a short brief. Provide brief plus optional title, sourceDigest, audience, tone, language, durationTarget, stylePreset, renderProfile, narrationEnabled, narration, assets, and regeneration. Do not provide a storyboard or blueprint; the worker builds the Remotion project internally and returns immediately while generation continues in the background.",
       returnDirect: true,
       schema: generateVideoPresentationSchema,
     },

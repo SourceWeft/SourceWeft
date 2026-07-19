@@ -1,4 +1,6 @@
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { videoPresentationArtifactProtocol } from "./artifact-protocol";
+import { videoPresentationPresentation } from "./presentation";
 
 export const generateVideoPresentationAgentTool = defineAgentTool({
   id: "generateVideoPresentation",
@@ -32,6 +34,8 @@ export const generateVideoPresentationAgentTool = defineAgentTool({
   },
   defaultPermission: "ask",
   riskLevel: "medium",
+  artifactProgress: videoPresentationArtifactProtocol,
+  presentation: videoPresentationPresentation,
 });
 
 /** Tool name constants — use these instead of AGENT_TOOL_NAMES */

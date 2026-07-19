@@ -1,3 +1,10 @@
+import {
+  basicSceneCheck,
+  buildSceneUserPrompt,
+  extractSceneCodeAndTitle,
+} from "./pipeline/scene-gen";
+import { narrationBudgetIssues, planVideoProject } from "./pipeline/storyboard";
+
 export { generateVideoPresentationAgentTool, generateVideoPresentationAgentToolDefs } from "./agent-tool-defs";
 
 export const builtinGenerateVideoPresentationCapability = {
@@ -8,6 +15,36 @@ export { createCapabilityAgentTools } from "./agent-tools";
 export { builtinGenerateVideoPresentationCapabilityManifest } from "./manifest";
 export { buildArtifactAssetUrl, buildArtifactPreviewUrl } from "./artifact-urls";
 export { buildVideoPresentationInitialPayload } from "./video-presentation-payload";
+export {
+  buildVideoPresentationStageView,
+  type VideoPresentationStageView,
+} from "./pipeline-digests";
+export {
+  lintSceneLayout,
+  type SceneLayoutLintResult,
+} from "./scene-lint";
+export {
+  VIDEO_PRESENTATION_THEME_DESCRIPTIONS,
+  VIDEO_PRESENTATION_THEME_PRESETS,
+  type VideoPresentationThemePreset,
+} from "./theme-presets";
+export {
+  buildVisualQaJudgePrompt,
+  parseVisualQaVerdicts,
+  visualQaVerdictsSchema,
+  type VisualQaSlideVerdict,
+} from "./visual-qa";
+export {
+  VIDEO_PRESENTATION_PIPELINE_STAGE_IDS,
+  buildInitialVideoPresentationPipelineSteps,
+  computeVideoPresentationOverallProgress,
+  getVideoPresentationPipelineStepLabel,
+  isPipelineStageCompleted,
+  normalizeWorkerStageToPipelineStage,
+  resolveVideoPresentationPipelineStageProgress,
+  type VideoPresentationPipelineStageId,
+  type VideoPresentationPipelineStep,
+} from "./pipeline-stages";
 export {
   buildVideoPresentationProjectFileName,
   sanitizeVideoPresentationFileBase,
@@ -36,3 +73,17 @@ export {
   type VideoPresentationToolContext,
   type VideoPresentationToolRuntimeDeps,
 } from "./tool-runtime";
+export {
+  createDeliverablePipelines,
+  createVideoPresentationPipelineDefinition,
+} from "./pipeline/definition";
+export { createVideoPipelineDeps, type VideoPipelineDeps } from "./pipeline/deps";
+
+/** Mirrors the backend worker's testExports for the moved pipeline core. */
+export const videoPipelineTestExports = {
+  basicSceneCheck,
+  buildSceneUserPrompt,
+  extractSceneCodeAndTitle,
+  narrationBudgetIssues,
+  planVideoProject,
+};

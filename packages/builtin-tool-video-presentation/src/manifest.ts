@@ -151,6 +151,10 @@ export const builtinGenerateVideoPresentationCapabilityManifest: CapabilityManif
               artifactType: "video_presentation",
               publisherTool: "generate_video_presentation",
             },
+            pipeline: {
+              jobName: "video-presentation-generate",
+              queue: "deliverables",
+            },
           },
         },
     ],

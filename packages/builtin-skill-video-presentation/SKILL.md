@@ -12,8 +12,23 @@ Create a SourceWeft `video_presentation` artifact from a concise brief. The
 agent does not build or pass a storyboard, blueprint, slide array, scene code,
 TSX, HTML, or executable project files. The background worker plans the
 storyboard internally, generates Remotion scene code, validates/repairs the
-project, publishes source JSON, and exposes a browser-previewable Remotion
-project for MP4/WebM export.
+project (including audio-synced timing and rendered-frame visual QA), publishes
+source JSON, and exposes a browser-previewable Remotion project for MP4/WebM
+export.
+
+Keep the default path short: write one good brief, call the tool once, report
+the result. Read a reference only when the situation below applies.
+
+## Quick Reference
+
+| Situation | What to do |
+| --- | --- |
+| Any generation request | Follow Workflow below; SKILL.md alone is enough |
+| Brief feels vague, or user gave rich source material | Read [brief-guidelines.md](references/brief-guidelines.md) |
+| User asked for a specific length, language, or voice | Read [narration-guidelines.md](references/narration-guidelines.md) |
+| User cares about visual style, branding, or art direction | Read [visual-quality.md](references/visual-quality.md) |
+| User asks for a specific style/look/风格, wants variety, or is unsure how the video should look | Read [style-gallery.md](references/style-gallery.md) and pick a recipe |
+| Editing an existing video artifact | Follow "Editing an existing presentation" below |
 
 ## Runtime Options
 
@@ -36,17 +51,46 @@ Follow explicit user instructions over defaults when they conflict.
 ## Workflow
 
 1. Build one concise `brief` from the user's request and any selected source
-   material.
-   Include optional `audience` or `tone` only when the user provides them or
-   they are obvious from context.
-2. Call `generate_video_presentation` with brief-first input:
-   `brief` plus any useful optional fields from the Tool Input Contract below.
-   Pass customization as constraints, not as prebuilt slides or code.
-3. Do not ask for clarification when the topic is sufficient; infer reasonable
+   material: topic + thesis, intended narrative arc, and constraints. One core
+   idea per slide — the worker enforces per-slide density and narration
+   budgets. Put must-include facts/numbers in `sourceDigest`, not the brief.
+   Include `audience` or `tone` only when the user provides them or they are
+   obvious from context.
+2. If the user asked for a target length, pick `durationTarget` and
+   `slideCount` so the math lands near it (per-slide ≈ 6s short / 10s medium /
+   14s long).
+3. When the user names a mood/style or the topic clearly suggests one, pick or
+   adapt a recipe from [style-gallery.md](references/style-gallery.md) and
+   pass its `visualDirection` (plus its brand/motion values) — do not leave
+   `visualDirection` empty when the user expressed any style intent.
+4. Call `generate_video_presentation` with brief-first input: `brief` plus any
+   useful optional fields from the Tool Input Contract below. Pass
+   customization as constraints, not as prebuilt slides or code.
+5. Do not ask for clarification when the topic is sufficient; infer reasonable
    defaults and proceed.
-4. After the tool succeeds, respond briefly that the video presentation project
-   is ready for browser preview/export. Do not describe it as a completed MP4.
-   The ready artifact includes a source JSON endpoint for audit/reuse.
+6. After the tool succeeds, verify the result before reporting: the artifact is
+   `ready`, the slide count matches what was requested, and the reported
+   duration is plausible for the target. Then respond briefly that the video
+   presentation project is ready for browser preview/export.
+   Do not describe it as a completed MP4. The ready artifact includes a source
+   JSON endpoint for audit/reuse.
+
+## Editing an existing presentation
+
+When the user asks to change an already-generated video presentation:
+
+1. Read the artifact's source JSON (the ready artifact's `source_json_url`)
+   to see each slide's number, title, and narration — locate exactly which
+   slides the user's request touches.
+2. Call `generate_video_presentation` with `regeneration`:
+   `{ artifactId, slideNumbers: [<only the affected slides>], instruction }`.
+   Make `instruction` specific ("shorten slide 3's on-screen text to one
+   phrase; keep the same narration topic"), not a restatement of the whole
+   brief. Omit `slideNumbers` only when the user wants the entire
+   presentation redone.
+3. The tool returns immediately with a processing result: tell the user the
+   edit is running in the background and the SAME artifact will update to a
+   new version when done. Do not call the tool again for this edit.
 
 ## Tool Input Contract
 
@@ -73,8 +117,20 @@ Allowed input fields:
 - `canvas`: optional `{ width, height, fps }`.
 - `narrationEnabled`: boolean.
 - `narration`: optional grouped narration settings.
-- `assets`: optional provided asset references.
-- `regeneration`: optional edit/regeneration instruction.
+- `assets`: optional provided asset references —
+  `[{ assetId, role }]` where `assetId` is an existing image artifact in this
+  workspace (e.g. one the user uploaded or you created with `generate_image`)
+  and `role` describes its use (e.g. `hero`, `diagrammatic_visual`,
+  `scene_background`). The pipeline copies each image into the video and
+  scenes display it; slides whose visual needs no provided asset covers may
+  get platform-generated imagery automatically (when an image model is
+  configured).
+- `regeneration`: edit an existing artifact in place —
+  `{ artifactId, instruction, slideNumbers? }`. With `slideNumbers`, ONLY
+  those slides are regenerated (untouched slides keep their narration audio
+  and scene code byte-for-byte, and only the regenerated slides are billed);
+  without `slideNumbers` all slides regenerate. Either way the SAME artifact
+  gets a new version — the previous version survives if the edit fails.
 
 ## Boundaries
 
@@ -86,3 +142,6 @@ Allowed input fields:
   ready artifact preview.
 - Do not claim success until `generate_video_presentation` returns a ready
   `video_presentation` artifact result.
+- If the tool returns a processing/still-generating result, do NOT call it
+  again for the same request — the artifact keeps building in the background
+  and a retry duplicates it. Report that generation is in progress instead.

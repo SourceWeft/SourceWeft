@@ -1,4 +1,5 @@
 import {
+  buildInitialVideoPresentationPipelineSteps,
   videoPresentationProjectPayloadSchema,
   type VideoPresentationCreateRequest,
   type VideoPresentationGenerationStage,
@@ -32,6 +33,8 @@ function buildGenerationStageSummary(stage: VideoPresentationGenerationStage) {
       return "Generating scene modules";
     case "repairing_scene_modules":
       return "Repairing scene modules";
+    case "verifying_visual_quality":
+      return "Reviewing rendered slides";
     case "publishing_video_project":
       return "Publishing video project";
     case "ready":
@@ -83,8 +86,9 @@ export function buildVideoPresentationInitialPayload(input: {
     kind: "video_presentation",
     generation: {
       status: "pending",
-      stage: "planning",
+      stage: "planning_storyboard",
       progress: 0,
+      pipelineSteps: buildInitialVideoPresentationPipelineSteps(),
     },
     project: {
       title,
@@ -129,7 +133,7 @@ export function buildVideoPresentationInitialPayload(input: {
     ),
     renderStrategy: "frontend_remotion_project_to_video",
     requestKey: input.requestKey,
-    stageSummary: buildGenerationStageSummary("planning"),
+    stageSummary: buildGenerationStageSummary("planning_storyboard"),
     videoDownloadOnly: true,
   };
 
@@ -150,7 +154,7 @@ export function buildVideoPresentationInitialPayload(input: {
     ),
     renderStrategy: "frontend_remotion_project_to_video",
     requestKey: input.requestKey,
-    stageSummary: buildGenerationStageSummary("planning"),
+    stageSummary: buildGenerationStageSummary("planning_storyboard"),
     videoDownloadOnly: true,
   };
 }

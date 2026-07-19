@@ -237,12 +237,18 @@ export async function findReusableVideoPresentationArtifactRecord(input: {
   return row ? mapArtifact(row) : null;
 }
 
+/**
+ * Publish a new ready version. Returns null when `expectedStatuses` is given
+ * and the artifact is no longer in one of them — i.e. another writer got there
+ * first. Callers that pass it must treat null as "lost the race", not failure.
+ */
 export async function markArtifactReady(input: {
   artifactId: string;
   teamId: string;
   workspaceId: string;
   userId: string;
   payload: Record<string, unknown>;
+  expectedStatuses?: ArtifactStatus[];
 }) {
   const [current] = await db
     .select({
@@ -272,7 +278,12 @@ export async function markArtifactReady(input: {
 
   const versionId = randomUUID();
 
-  await db
+  // Compare-and-swap on status, matching markArtifactRunning/markArtifactFailed.
+  // Without it two concurrent completions of the same artifact both read the
+  // same max(versionNo) above and race to insert versionNo + 1; the unique index
+  // artifact_versions_artifact_version_uq means the loser dies on an opaque
+  // constraint violation instead of a legible "someone else finished this".
+  const updated = await db
     .update(artifacts)
     .set({
       status: "ready",
@@ -288,11 +299,27 @@ export async function markArtifactReady(input: {
     })
     .where(
       and(
-        eq(artifacts.id, input.artifactId),
-        eq(artifacts.teamId, input.teamId),
-        eq(artifacts.workspaceId, input.workspaceId),
+        ...[
+          eq(artifacts.id, input.artifactId),
+          eq(artifacts.teamId, input.teamId),
+          eq(artifacts.workspaceId, input.workspaceId),
+          input.expectedStatuses && input.expectedStatuses.length > 0
+            ? or(
+                ...input.expectedStatuses.map((status) =>
+                  eq(artifacts.status, status),
+                ),
+              )
+            : undefined,
+        ].filter((condition): condition is NonNullable<typeof condition> =>
+          Boolean(condition),
+        ),
       ),
-    );
+    )
+    .returning({ id: artifacts.id });
+
+  if (updated.length === 0) {
+    return null;
+  }
 
   await db.insert(artifactVersions).values({
     id: versionId,

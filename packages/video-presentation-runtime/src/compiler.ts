@@ -15,6 +15,16 @@ import {
   type CompiledVideoPresentationScene,
 } from "./react";
 import { getAudioTrackForSlide, getSlideDurationInFrames } from "./model";
+import {
+  AssetImage,
+  BulletList,
+  QuoteBlock,
+  SAFE_MARGIN_RATIO,
+  SafeArea,
+  SplitLayout,
+  StatHero,
+  TitleBlock,
+} from "./layout";
 
 type SceneRuntimeGlobals = Record<string, unknown>;
 
@@ -53,9 +63,17 @@ function stripImportsAndExports(code: string) {
 function sceneRuntimeGlobals(): SceneRuntimeGlobals {
   return {
     AbsoluteFill,
+    AssetImage,
     Audio,
+    BulletList,
     Img,
+    QuoteBlock,
     React,
+    SAFE_MARGIN_RATIO,
+    SafeArea,
+    SplitLayout,
+    StatHero,
+    TitleBlock,
     interpolate,
     spring,
     staticFile,
