@@ -28,7 +28,7 @@ vi.mock("../../shared/queue", () => ({
 import {
   enqueueVideoPresentationGenerateJob,
   VIDEO_PRESENTATION_GENERATE_JOB,
-  VIDEO_PRESENTATION_JOB_ATTEMPTS,
+  DELIVERABLES_QUEUE_JOB_ATTEMPTS,
   type VideoPresentationGenerateJobPayload,
 } from "./queue";
 
@@ -68,7 +68,7 @@ test("video presentation jobs use the dedicated deliverables queue", async () =>
   const [name, data, options, target] = mocks.enqueueWithAudit.mock.calls[0]!;
   assert.equal(name, VIDEO_PRESENTATION_GENERATE_JOB);
   assert.equal(data.artifactId, "artifact-1");
-  assert.equal(options.attempts, VIDEO_PRESENTATION_JOB_ATTEMPTS);
+  assert.equal(options.attempts, DELIVERABLES_QUEUE_JOB_ATTEMPTS);
   assert.equal(options.backoff.type, "exponential");
   assert.equal(target.queueName, "test-deliverables");
 });

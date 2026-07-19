@@ -876,16 +876,24 @@ test("chat.complete emits generation observation events", async () => {
     provider: "openai",
     providerKind: "openai",
   });
+  // Observation attributes are a strict whitelist over request metadata.
+  // profileAlias is forwarded because a host observe sink needs it (with
+  // gatewayConfigId) to attribute a generation's cost; credentials and BYOK
+  // routing details deliberately remain excluded.
   assert.deepEqual(events[0]?.event.attributes, {
     teamId: "team-1",
     workspaceId: "workspace-1",
     modelAlias: "chat-default",
     operation: "chat.answer",
     providerModel: "gpt-4o-mini",
+    profileAlias: "private-profile",
     generationPhase: "initial_response",
     messageCount: 1,
     lastMessageRole: "user",
   });
+  const forwardedAttributes = events[0]?.event.attributes ?? {};
+  assert.equal("apiKey" in forwardedAttributes, false);
+  assert.equal("byokProvider" in forwardedAttributes, false);
   const input = events[0]?.event.input as Record<string, unknown>;
   assert.equal("metadata" in input, false);
   assert.equal(events[1]?.type, "end");

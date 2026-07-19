@@ -88,6 +88,10 @@ function buildObserveAttributes(metadata: Record<string, unknown>) {
       credentialId: readMetadataValue(metadata, "credentialId"),
       providerModel: readMetadataValue(metadata, "providerModel"),
       modelKind: readMetadataValue(metadata, "modelKind"),
+      // Host-side billing identity. The gateway does not interpret these, but
+      // forwards them so an observe sink can resolve the cost of a generation.
+      gatewayConfigId: readMetadataValue(metadata, "gatewayConfigId"),
+      profileAlias: readMetadataValue(metadata, "profileAlias"),
       routeStrategy: readMetadataValue(metadata, "routeStrategy"),
     }) ?? {}
   );

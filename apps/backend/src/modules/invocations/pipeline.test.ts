@@ -13,6 +13,7 @@ const capabilityDefinition: SelectableInvocationDefinition = {
     kind: "capability_tool",
     capabilityId: "sourceweft/generate-image",
     contributionId: "generate_image",
+    sourcePackageName: null,
       toolName: "generate_image",
   },
   semantics: {

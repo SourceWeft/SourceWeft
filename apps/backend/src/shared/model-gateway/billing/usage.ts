@@ -1,9 +1,16 @@
-import type { DeepAgentTurnOutcome } from "./events";
+/**
+ * Summing of provider usage across calls.
+ *
+ * Lives in the billing module rather than the agent turn because the billing
+ * scope is now the thing that aggregates usage, and `shared/` must not depend
+ * on `modules/`.
+ */
+import type { UsageInfo } from "@sourceweft/model-gateway";
 
 export function addUsage(
-  current: DeepAgentTurnOutcome["usage"],
-  next: DeepAgentTurnOutcome["usage"],
-): DeepAgentTurnOutcome["usage"] {
+  current: UsageInfo | undefined,
+  next: UsageInfo | undefined,
+): UsageInfo | undefined {
   if (!next) {
     return current;
   }

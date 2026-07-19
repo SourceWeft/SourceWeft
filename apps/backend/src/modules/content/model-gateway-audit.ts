@@ -250,6 +250,12 @@ export function buildGatewayRequestMetadata(input: {
     | "video";
   modelAlias?: string | null;
   profileAlias?: string | null;
+  /**
+   * Forwarded so the observability sink can price the generation. Without it
+   * (together with profileAlias and modelKind) cost resolution is skipped
+   * rather than guessed.
+   */
+  gatewayConfigId?: string | null;
   llm?: LlmExecutionConfig;
   parentSpanId?: string | null;
 }) {
@@ -282,6 +288,7 @@ export function buildGatewayRequestMetadata(input: {
     credentialId: audit.credentialId,
     providerModel: input.llm?.providerModel ?? null,
     modelKind: input.modelKind ?? null,
+    gatewayConfigId: input.gatewayConfigId ?? null,
     parentSpanId: input.parentSpanId ?? null,
     executionMode:
       typeof audit.executionMode === "string" ? audit.executionMode : null,

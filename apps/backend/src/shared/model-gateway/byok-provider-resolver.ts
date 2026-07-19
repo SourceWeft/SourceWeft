@@ -1,20 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import { config } from "../config";
-import { db, modelGatewayByokCredentials } from "@sourceweft/db";
+import {
+  db,
+  modelGatewayByokCredentials,
+  type ModelGatewayProviderKind,
+} from "@sourceweft/db";
 import { decryptSecret } from "../secrets";
 import { normalizeDefaultHeaders } from "./runtime";
 
 export type ResolvedCustomByokProvider = {
   providerName: string;
-  providerKind:
-    | "openai-compatible"
-    | "openrouter"
-    | "deepinfra"
-    | "siliconflow-cn"
-    | "openai"
-    | "anthropic"
-    | "gemini"
-    | "azure-openai";
+  providerKind: ModelGatewayProviderKind;
   baseUrl: string;
   apiKey: string;
   defaultHeaders: Record<string, string>;

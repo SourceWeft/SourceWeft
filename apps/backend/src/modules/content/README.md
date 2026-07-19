@@ -9,7 +9,7 @@ used by all content-domain modules (threads, sources, skills, artifacts, etc.).
 - `types.ts` — Domain record types (SourceRecord, ThreadRecord, MessageRecord, etc.)
 - `queue.ts` — Job type definitions and enqueue helpers (source-parse, thread-title, etc.)
 - `billing-port.ts` — `ContentBillingPort` interface (domain port for billing)
-- `model-billing.ts` — `meterBillableModelUsage()` cross-cutting billing utility
+- `model-billing.ts` — `meterBillableModelUsage()`, the billing layer's settlement primitive. Not for direct use: reach models through `withBilledModelGateway`, which settles for you.
 - `model-gateway-audit.ts` — Gateway audit metadata and `LlmExecutionConfig` types
 - `model-gateway-error.ts` — `toContentError()` gateway error normalization
 

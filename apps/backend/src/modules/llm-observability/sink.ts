@@ -177,7 +177,61 @@ async function resolveGenerationScope(
   return null;
 }
 
-export function createLlmObservabilitySink(): ObserveSink {
+/**
+ * Resolves what a generation cost the platform. Injected rather than imported
+ * so this module stays free of billing/pricing concerns, and so tests can drive
+ * the sink without a price book.
+ */
+export type GenerationCostResolver = (input: {
+  gatewayConfigId: string;
+  modelKind: string;
+  profileAlias: string;
+  usage?: ObserveGenerationEnd["usage"];
+  executionMode?: string | null;
+}) => Promise<number | null>;
+
+async function resolveGenerationCost(
+  resolveCost: GenerationCostResolver | undefined,
+  generation: ObserveGenerationEnd,
+): Promise<number | null> {
+  if (!resolveCost) {
+    return null;
+  }
+
+  const attributes = generation.attributes ?? {};
+  const gatewayConfigId = readAttributeString(attributes, "gatewayConfigId");
+  const profileAlias = readAttributeString(attributes, "profileAlias");
+  const modelKind = readAttributeString(attributes, "modelKind");
+
+  // Cost needs the host's billing identity, which only reaches the gateway when
+  // the caller went through the billed wrapper. Anything else stays uncosted
+  // rather than being attributed to the wrong price book entry.
+  if (!gatewayConfigId || !profileAlias || !modelKind) {
+    return null;
+  }
+
+  try {
+    return await resolveCost({
+      gatewayConfigId,
+      modelKind,
+      profileAlias,
+      usage: generation.usage,
+      executionMode: readAttributeString(attributes, "executionMode"),
+    });
+  } catch (error) {
+    // Cost is observability, never a reason to lose the generation record.
+    logger.warn("Failed to resolve generation cost", {
+      traceId: generation.traceId,
+      spanId: generation.spanId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+export function createLlmObservabilitySink(options?: {
+  resolveCost?: GenerationCostResolver;
+}): ObserveSink {
   return {
     async onGenerationStart(generation: ObserveGenerationStart) {
       const context = extractGenerationContext(generation);
@@ -230,11 +284,16 @@ export function createLlmObservabilitySink(): ObserveSink {
       if (!generation.traceId || !scope) {
         return;
       }
+      const providerCostUsd = await resolveGenerationCost(
+        options?.resolveCost,
+        generation,
+      );
       await endGeneration({
         traceId: generation.traceId,
         teamId: scope.teamId,
         workspaceId: scope.workspaceId,
         spanId: generation.spanId,
+        providerCostUsd,
         output: generation.output,
         outputText: generation.outputText,
         finishReason: generation.finishReason,

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { BillingError } from "./errors";
+import type { BillingRuntimeConfig } from "./types";
 
 const mockCreemInstance = { __brand: "CreemBillingProvider" } as const;
 const mockNoopInstance = { __brand: "NoopBillingProvider" } as const;
@@ -24,11 +25,12 @@ vi.mock("./providers/noop-provider", () => {
 
 import { createBillingProvider } from "./provider";
 
-function makeConfig(provider: string) {
+function makeConfig(provider: BillingRuntimeConfig["provider"]) {
   return {
     saasEnabled: false,
-    mode: "credits" as const,
-    scope: "team" as const,
+    // These tests only exercise provider dispatch; mode is inert filler.
+    mode: "disabled" as const,
+    scope: "team_enabled" as const,
     provider,
     creditsEnabled: false,
     pagesEnabled: false,

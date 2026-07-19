@@ -101,7 +101,11 @@ export async function meterBillableModelUsage(input: {
     };
   }
 
-  if (input.llm?.executionMode === "BYOK") {
+  // BYOK is classified two ways: by the per-request execution mode, and by the
+  // `modelGatewayConfigs.isBYOK` DB flag resolved inside computeProviderCost.
+  // Both surface as costSource === "byok". Checking only executionMode let
+  // gateway-level BYOK fall through to the minimum-credit floor below.
+  if (input.llm?.executionMode === "BYOK" || cost.costSource === "byok") {
     return {
       billing: zeroBilling,
       cost,

@@ -33,6 +33,7 @@ test("invocation source refs distinguish capability, skill, and MCP capabilities
       kind: "capability_tool",
       capabilityId: "sourceweft/generate-image",
       contributionId: "generate_image",
+      sourcePackageName: null,
       toolName: "generate_image",
     },
     {
@@ -99,6 +100,7 @@ test("selectable definitions model supported invocation semantics without execut
       kind: "capability_tool",
       capabilityId: "sourceweft/generate-image",
       contributionId: "generate_image",
+      sourcePackageName: null,
       toolName: "generate_image",
     },
     semantics: semantics[0] ?? {
@@ -193,6 +195,7 @@ test("invocation events cover resolution, policy, approval, handoff, result, and
     kind: "capability_tool",
     capabilityId: "sourceweft/generate-image",
     contributionId: "generate_image",
+    sourcePackageName: null,
     toolName: "generate_image",
   };
   const events: InvocationEvent[] = [

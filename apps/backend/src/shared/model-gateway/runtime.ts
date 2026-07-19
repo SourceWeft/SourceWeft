@@ -1,5 +1,7 @@
 import {
   createModelGateway,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_TIMEOUT_MS,
   type ModelGateway,
   type ModelGatewayConfig,
   type ProviderRoutingConfig,
@@ -13,15 +15,15 @@ import {
   modelGatewayConfigVersions,
   modelGatewayProviderConfigs,
   modelGatewayRoutes,
+  type ModelGatewayProviderKind,
 } from "@sourceweft/db";
 import { createLlmObservabilitySink } from "../../modules/llm-observability/sink";
+import { resolveObservedGenerationCost } from "./observed-cost";
 import { decryptSecret } from "../secrets";
 import type { RoutedGatewayConfig } from "./types";
 import { resolveCustomByokProvider } from "./byok-provider-resolver";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_RETRIES = 2;
-const OPENROUTER_APP_TITLE = "SourceWeft";
+import { OPENROUTER_APP_TITLE } from "./attribution";
 
 type ActiveConfigVersionRow = typeof modelGatewayConfigVersions.$inferSelect;
 
@@ -47,15 +49,7 @@ export function normalizeDefaultHeaders(value: unknown): Record<string, string> 
 }
 
 export function withOpenRouterAttributionHeaders(input: {
-  providerKind:
-    | "openai-compatible"
-    | "openrouter"
-    | "deepinfra"
-    | "siliconflow-cn"
-    | "openai"
-    | "anthropic"
-    | "gemini"
-    | "azure-openai";
+  providerKind: ModelGatewayProviderKind;
   defaultHeaders?: Record<string, string>;
 }) {
   const headers = {
@@ -348,16 +342,6 @@ export function assertGatewayConfigAvailable(
 export function buildRoutedModelGatewayConfig(
   configInput: RoutedGatewayConfig,
 ): ModelGatewayConfig {
-  const providerSettings = Object.values(configInput.providers);
-  const timeoutMs =
-    providerSettings.length > 0
-      ? Math.max(...providerSettings.map((provider) => provider.timeoutMs))
-      : DEFAULT_TIMEOUT_MS;
-  const maxRetries =
-    providerSettings.length > 0
-      ? Math.max(...providerSettings.map((provider) => provider.maxRetries))
-      : DEFAULT_MAX_RETRIES;
-
   return {
     providers: Object.fromEntries(
       Object.entries(configInput.providers).map(([name, provider]) => [
@@ -370,12 +354,16 @@ export function buildRoutedModelGatewayConfig(
           apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
           defaultHeaders: provider.defaultHeaders,
           supports: provider.supports,
+          // Carried per provider so one slow gateway cannot widen every other
+          // provider's timeout (previously hoisted via Math.max).
+          timeoutMs: provider.timeoutMs,
+          maxRetries: provider.maxRetries,
         },
       ]),
     ),
     modelRoutes: configInput.modelRoutes,
-    timeoutMs,
-    maxRetries,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    maxRetries: DEFAULT_MAX_RETRIES,
     allowNonDefaultAliases: false,
     resolveApiKeyRef: resolveByokApiKeyRef,
     resolveCustomByokProvider: async (input) => {
@@ -396,7 +384,9 @@ export function buildRoutedModelGatewayConfig(
         defaultHeaders: provider.defaultHeaders,
       };
     },
-    observeSink: createLlmObservabilitySink(),
+    observeSink: createLlmObservabilitySink({
+      resolveCost: resolveObservedGenerationCost,
+    }),
   };
 }
 
@@ -409,6 +399,16 @@ export function getOrCreateRoutedGatewayClient(configInput: RoutedGatewayConfig)
   }
 
   const client = createModelGateway(buildRoutedModelGatewayConfig(configInput));
+
+  // Only one config version is active at a time, so entries keyed by any other
+  // versionId can never be hit again. Without this, every config sync (catalog
+  // discovery, pricing refresh) leaks a client holding provider config and
+  // model-factory references for the lifetime of the process.
+  for (const staleKey of gatewayClientCache.keys()) {
+    if (staleKey !== cacheKey) {
+      gatewayClientCache.delete(staleKey);
+    }
+  }
 
   gatewayClientCache.set(cacheKey, {
     signature,

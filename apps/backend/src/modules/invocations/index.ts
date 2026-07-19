@@ -79,7 +79,6 @@ export type {
 // Types
 export type {
   InvocationEnvelope,
-  InvocationSelection,
   InvocationEvent,
   InvocationPlan,
 } from "./types";

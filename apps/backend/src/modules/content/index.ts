@@ -59,7 +59,10 @@ export { toContentError } from "./model-gateway-error";
 
 // Billing
 export type { ContentBillingPort } from "./billing-port";
-export { meterBillableModelUsage } from "./model-billing";
+// meterBillableModelUsage is deliberately NOT re-exported: it is the billing
+// layer's settlement primitive, reached only through the billed gateway
+// wrapper. A call site that meters by hand alongside the wrapper charges the
+// team twice whenever the two disagree on the idempotency key.
 
 // Workspace & source guards (canonical locations)
 //   import { requireContentWorkspace } from "../workspace"

@@ -10,6 +10,8 @@ export {
 
 export {
   DEFAULT_ALLOWED_MODEL_ALIASES,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_TIMEOUT_MS,
   assertModelAliasAllowed,
   createRequestConfig,
   resolveModelGatewayConfig,

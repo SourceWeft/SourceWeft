@@ -14,7 +14,7 @@ export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
 export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
 export const VIDEO_PRESENTATION_GENERATE_JOB = "video-presentation-generate";
 export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
-export const VIDEO_PRESENTATION_JOB_ATTEMPTS = 2;
+export const DELIVERABLES_QUEUE_JOB_ATTEMPTS = 1;
 const SOURCE_PARSE_JOB_BACKOFF_MS = 5_000;
 
 export type SourceParseJobPayload = {
@@ -246,7 +246,7 @@ export async function enqueueVideoPresentationGenerateJob(
       payload,
       {
         jobId: payload.jobId,
-        attempts: VIDEO_PRESENTATION_JOB_ATTEMPTS,
+        attempts: DELIVERABLES_QUEUE_JOB_ATTEMPTS,
         backoff: { type: "exponential", delay: 2_000 },
         removeOnComplete: 100,
         removeOnFail: 100,

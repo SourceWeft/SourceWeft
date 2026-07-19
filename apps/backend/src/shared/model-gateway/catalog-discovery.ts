@@ -1,5 +1,6 @@
 import { logger } from "../logger";
 import { config } from "../config";
+import { OPENROUTER_APP_TITLE } from "./attribution";
 import type { ModelGatewayProfileKind } from "./types";
 import {
   fetchLiteLLMPricing,
@@ -44,7 +45,6 @@ export type CatalogDiscoveryGateway = {
   supports: string[];
 };
 
-const OPENROUTER_APP_TITLE = "SourceWeft";
 
 const SUPPORTED_DYNAMIC_KINDS: Record<CatalogModelKind, string[]> = {
   chat: ["chat", "tool_calling"],

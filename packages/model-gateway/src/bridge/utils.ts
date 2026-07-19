@@ -182,6 +182,23 @@ function createDefaultToolBindingOptionsLangChainChatModel(input: {
   return wrapped;
 }
 
+/**
+ * Model entry points the observation shim deliberately does not wrap.
+ *
+ * langchain@1.5 drives chat models through `bindTools` and
+ * `withStructuredOutput` only — it never calls these on the model. They are
+ * listed so that an upgrade which starts using one surfaces as a warning
+ * instead of silently producing unobserved (and therefore unbilled) calls.
+ */
+const UNOBSERVED_ENTRY_POINTS = new Set([
+  "batch",
+  "generate",
+  "_generate",
+  "pipe",
+]);
+
+const warnedUnobservedEntryPoints = new Set<string>();
+
 function createObservedLangChainChatModel(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
@@ -193,10 +210,9 @@ function createObservedLangChainChatModel(input: {
     return input.model;
   }
 
-  const observed = Object.create(input.model) as LangChainChatModelLike;
+  const getName = () => input.model.getName?.() ?? input.target.providerModel;
 
-  observed.getName = () => input.model.getName?.() ?? input.target.providerModel;
-  observed.bindTools = (tools, kwargs) => {
+  const bindTools: LangChainChatModelLike["bindTools"] = (tools, kwargs) => {
     const resolvedKwargs = resolveBindToolsKwargs({
       kwargs,
       toolBindingOptions: input.payload.toolBindingOptions,
@@ -216,7 +232,32 @@ function createObservedLangChainChatModel(input: {
         : input.model,
     });
   };
-  observed.invoke = async (messages, callOptions) => {
+
+  /**
+   * `withStructuredOutput` returns a runnable, not a chat model, so the
+   * returned object's `invoke` is wrapped directly. The underlying call is made
+   * against the raw model (not the proxy) so that whatever it does internally —
+   * typically `bindTools` plus `invoke` — cannot re-enter this shim and emit a
+   * second generation for the same call.
+   */
+  const withStructuredOutput: LangChainChatModelLike["withStructuredOutput"] = (
+    schema,
+    structuredConfig,
+  ) => {
+    const structured = input.model.withStructuredOutput!(schema, structuredConfig);
+    return {
+      invoke: async (structuredInput, structuredOptions) =>
+        observeInvocation(
+          () => structured.invoke(structuredInput, structuredOptions),
+          structuredInput,
+        ),
+    };
+  };
+
+  async function observeInvocation(
+    run: () => Promise<unknown>,
+    messages: unknown,
+  ): Promise<unknown> {
       const generation = createGenerationObservation({
         operation: "chat.complete",
         payload: { ...input.payload, messages: normalizeObservedMessages(messages) },
@@ -225,7 +266,7 @@ function createObservedLangChainChatModel(input: {
       });
       await emitGenerationStart(input.config, generation.start);
       try {
-        const result = await input.model.invoke(messages, callOptions);
+        const result = await run();
         const responseMetadata = extractResponseMetadata(result as { response_metadata?: unknown });
         const reasoning = extractReasoning(result as Parameters<typeof extractReasoning>[0]);
         await emitGenerationEnd(input.config, {
@@ -266,25 +307,70 @@ function createObservedLangChainChatModel(input: {
         }));
         throw error;
       }
-    };
-  observed.stream = async (messages, callOptions) => {
-      const generation = createGenerationObservation({
-        operation: "chat.stream",
-        payload: { ...input.payload, messages: normalizeObservedMessages(messages), stream: true },
-        options: input.options,
-        target: input.target,
-      });
-      await emitGenerationStart(input.config, generation.start);
-      const stream = await input.model.stream(messages, callOptions);
-      return observeStream({
-        config: input.config,
-        generation,
-        routeDecision: input.target.routeDecision,
-        stream,
-      });
-    };
+  }
 
-  return observed;
+  const invoke: LangChainChatModelLike["invoke"] = async (messages, callOptions) =>
+    observeInvocation(() => input.model.invoke(messages, callOptions), messages);
+
+  const stream: LangChainChatModelLike["stream"] = async (messages, callOptions) => {
+    const generation = createGenerationObservation({
+      operation: "chat.stream",
+      payload: { ...input.payload, messages: normalizeObservedMessages(messages), stream: true },
+      options: input.options,
+      target: input.target,
+    });
+    await emitGenerationStart(input.config, generation.start);
+    const underlying = await input.model.stream(messages, callOptions);
+    return observeStream({
+      config: input.config,
+      generation,
+      routeDecision: input.target.routeDecision,
+      stream: underlying,
+    });
+  };
+
+  // bindTools is always exposed, even when the underlying model omits it: the
+  // handler degrades to returning the unbound model, and callers rely on the
+  // observed model (and anything derived from it) advertising bindTools.
+  const overrides: Record<string, unknown> = {
+    getName,
+    invoke,
+    stream,
+    bindTools,
+  };
+  // withStructuredOutput, by contrast, has no meaningful degraded form — the
+  // handler must call through — so it is only advertised when really available.
+  if (typeof input.model.withStructuredOutput === "function") {
+    overrides.withStructuredOutput = withStructuredOutput;
+  }
+
+  // A Proxy rather than Object.create: property reads fall through to the real
+  // model with `this` bound to the real model, so LangChain internals that touch
+  // private fields keep working, and methods added by future LangChain versions
+  // cannot silently bypass observation unnoticed.
+  return new Proxy(input.model, {
+    get(target, prop) {
+      if (typeof prop === "string") {
+        if (prop in overrides) {
+          return overrides[prop];
+        }
+        if (
+          UNOBSERVED_ENTRY_POINTS.has(prop) &&
+          !warnedUnobservedEntryPoints.has(prop)
+        ) {
+          warnedUnobservedEntryPoints.add(prop);
+          input.config.logger?.warn?.(
+            `Model entry point '${prop}' is not observed by the model gateway; its usage will be untracked.`,
+            { entryPoint: prop, providerModel: input.target.providerModel },
+          );
+        }
+      }
+      // Receiver is the raw model, not the proxy, so `this` inside pass-through
+      // methods is the real instance and private-field access keeps working.
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as LangChainChatModelLike;
 }
 
 async function* observeStream(input: {
@@ -561,12 +647,3 @@ export async function createLangChainChatModel(input: {
   return model as unknown as BaseLanguageModel;
 }
 
-/**
- * @deprecated Use createLangChainChatModel instead.
- */
-export async function createChatModelForAgent(
-  modelAlias: string,
-  config: ModelGatewayConfig,
-): Promise<BaseLanguageModel> {
-  return createLangChainChatModel({ modelAlias, config });
-}

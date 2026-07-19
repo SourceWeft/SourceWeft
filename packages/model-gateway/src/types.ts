@@ -55,12 +55,12 @@ export type ProviderKind =
   | "azure-openai"
   | (string & {});
 
-export type RoutingStrategy =
-  | "priority"
-  | "weighted-random"
-  | "least-latency"
-  | "cost-aware"
-  | "sticky-by-tenant";
+/**
+ * Only strategies implemented by selectTargetByStrategy are declared here.
+ * Adding a value without a matching implementation makes misconfiguration a
+ * runtime failure on the first request instead of a config-parse error.
+ */
+export type RoutingStrategy = "priority" | "weighted-random";
 
 export interface ByokCredentialsInput {
   provider: string;
@@ -289,6 +289,10 @@ export interface GatewayProviderConfig {
   defaultHeaders?: Record<string, string>;
   supports?: readonly string[];
   enabled?: boolean;
+  /** Falls back to the gateway-wide value when unset. */
+  timeoutMs?: number;
+  /** Falls back to the gateway-wide value when unset. */
+  maxRetries?: number;
 }
 
 export type ProviderRoutingSortBy = "price" | "throughput" | "latency";
@@ -754,6 +758,10 @@ export interface ResolvedGatewayProviderConfig {
   defaultHeaders: Record<string, string>;
   supports: readonly string[];
   enabled: boolean;
+  /** Falls back to the gateway-wide value when unset. */
+  timeoutMs?: number;
+  /** Falls back to the gateway-wide value when unset. */
+  maxRetries?: number;
 }
 
 export interface CustomByokProviderConfig {
@@ -820,6 +828,9 @@ export interface ResolvedRequestTarget {
   providerRouting?: ProviderRoutingConfig;
   routeDecision: RouteDecision;
   requestMetadata: Record<string, unknown>;
+  /** Provider-specific overrides; unset means use the gateway-wide value. */
+  timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export interface ResolvedRequestConfig {

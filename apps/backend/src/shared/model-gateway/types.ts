@@ -1,4 +1,8 @@
 import type { ProviderRoutingConfig } from "@sourceweft/model-gateway";
+import type {
+  ModelGatewayProviderKind,
+  ModelGatewayRoutingStrategy,
+} from "@sourceweft/db";
 
 export type ModelGatewayProfileKind =
   | "chat"
@@ -33,16 +37,7 @@ export type RoutedGatewayConfig = {
     string,
     {
       gatewayConfigId: string | null;
-      kind:
-        | "openai-compatible"
-        | "cloudflare-aig"
-        | "openrouter"
-        | "deepinfra"
-        | "siliconflow-cn"
-        | "openai"
-        | "anthropic"
-        | "gemini"
-        | "azure-openai";
+      kind: ModelGatewayProviderKind;
       baseUrl: string;
       apiKey?: string;
       apiKeyHeaderName?: string;
@@ -58,12 +53,13 @@ export type RoutedGatewayConfig = {
   modelRoutes: Record<
     string,
     {
-      strategy:
-        | "priority"
-        | "weighted-random"
-        | "least-latency"
-        | "cost-aware"
-        | "sticky-by-tenant";
+      strategy: ModelGatewayRoutingStrategy;
+      /**
+       * Selection candidates, NOT a failover chain. Exactly one target is
+       * chosen per request by `strategy`, and retries stay on that target —
+       * a dead provider is never swapped out mid-request. Treat `priority`
+       * as static preference ordering, not high availability.
+       */
       targets: Array<{
         provider: string;
         model: string;

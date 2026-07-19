@@ -12,6 +12,89 @@ import type { ModelProfileKind } from "./types";
 
 type PricingSnapshot = Omit<ModelPricing, "litellm_key">;
 
+/**
+ * The two config reads cost resolution needs, behind an interface so the caller
+ * chooses its own freshness/latency trade-off.
+ *
+ * Billing must use the direct (uncached) lookups: `isGatewayByok` decides
+ * whether a customer is charged at all, so a stale read is a wrong charge.
+ * Best-effort consumers that run per generation rather than per billable call —
+ * notably observability cost attribution — may use the cached variant.
+ */
+export type ProviderCostLookups = {
+  isGatewayByok(gatewayConfigId: string): Promise<boolean>;
+  getProfilePricing(
+    modelKind: ModelProfileKind,
+    profileAlias: string,
+  ): Promise<ModelPricing | undefined>;
+};
+
+export const directProviderCostLookups: ProviderCostLookups = {
+  async isGatewayByok(gatewayConfigId) {
+    const [gatewayRow] = await db
+      .select({ isBYOK: modelGatewayConfigs.isBYOK })
+      .from(modelGatewayConfigs)
+      .where(eq(modelGatewayConfigs.id, gatewayConfigId))
+      .limit(1);
+    return Boolean(gatewayRow?.isBYOK);
+  },
+  async getProfilePricing(modelKind, profileAlias) {
+    const [profileRow] = await db
+      .select({ configJson: modelGatewayProfiles.configJson })
+      .from(modelGatewayProfiles)
+      .where(
+        and(
+          eq(modelGatewayProfiles.kind, modelKind),
+          eq(modelGatewayProfiles.profileAlias, profileAlias),
+          eq(modelGatewayProfiles.isActive, true),
+        ),
+      )
+      .limit(1);
+    return profileRow?.configJson as ModelPricing | undefined;
+  },
+};
+
+/**
+ * In-process, per-key TTL memoisation of {@link directProviderCostLookups}.
+ * Not shared across processes — API and worker each hold their own — and not
+ * invalidated on config change, so a toggle takes up to `ttlMs` to be observed.
+ * That is acceptable only for consumers where a stale value costs accuracy
+ * rather than money.
+ */
+export function createCachedProviderCostLookups(
+  ttlMs = 60_000,
+  source: ProviderCostLookups = directProviderCostLookups,
+): ProviderCostLookups {
+  type Entry<T> = { value: T; expiresAt: number };
+  const byok = new Map<string, Entry<boolean>>();
+  const pricing = new Map<string, Entry<ModelPricing | undefined>>();
+
+  async function memoize<T>(
+    cache: Map<string, Entry<T>>,
+    key: string,
+    load: () => Promise<T>,
+  ): Promise<T> {
+    const entry = cache.get(key);
+    if (entry && entry.expiresAt > Date.now()) {
+      return entry.value;
+    }
+    const value = await load();
+    cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    return value;
+  }
+
+  return {
+    isGatewayByok: (gatewayConfigId) =>
+      memoize(byok, gatewayConfigId, () =>
+        source.isGatewayByok(gatewayConfigId),
+      ),
+    getProfilePricing: (modelKind, profileAlias) =>
+      memoize(pricing, `${modelKind}:${profileAlias}`, () =>
+        source.getProfilePricing(modelKind, profileAlias),
+      ),
+  };
+}
+
 export type ProviderCostResult = {
   providerCostUsd: number | null;
   pricingSnapshot: PricingSnapshot | null;
@@ -305,6 +388,8 @@ export async function computeProviderCost(input: {
   profileAlias: string;
   usage?: UsageInfo;
   llm?: LlmExecutionConfig;
+  /** Defaults to exact, uncached reads. Billing must not override this. */
+  lookups?: ProviderCostLookups;
 }): Promise<ProviderCostResult> {
   if (input.llm?.executionMode === "BYOK") {
     return {
@@ -315,13 +400,9 @@ export async function computeProviderCost(input: {
     };
   }
 
-  const [gatewayRow] = await db
-    .select({ isBYOK: modelGatewayConfigs.isBYOK })
-    .from(modelGatewayConfigs)
-    .where(eq(modelGatewayConfigs.id, input.gatewayConfigId))
-    .limit(1);
+  const lookups = input.lookups ?? directProviderCostLookups;
 
-  if (gatewayRow?.isBYOK) {
+  if (await lookups.isGatewayByok(input.gatewayConfigId)) {
     return {
       providerCostUsd: 0,
       pricingSnapshot: null,
@@ -330,19 +411,10 @@ export async function computeProviderCost(input: {
     };
   }
 
-  const [profileRow] = await db
-    .select({ configJson: modelGatewayProfiles.configJson })
-    .from(modelGatewayProfiles)
-    .where(
-      and(
-        eq(modelGatewayProfiles.kind, input.modelKind),
-        eq(modelGatewayProfiles.profileAlias, input.profileAlias),
-        eq(modelGatewayProfiles.isActive, true),
-      ),
-    )
-    .limit(1);
-
-  const pricing = profileRow?.configJson as ModelPricing | undefined;
+  const pricing = await lookups.getProfilePricing(
+    input.modelKind,
+    input.profileAlias,
+  );
   if (!pricing || pricing.price_source === "unknown") {
     const cost = computeProviderCostFromPricing({
       usage: input.usage,

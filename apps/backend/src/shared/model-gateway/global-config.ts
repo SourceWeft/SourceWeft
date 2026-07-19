@@ -4,6 +4,10 @@ import type {
   ProviderRoutingConfig,
   ProviderRoutingSort,
 } from "@sourceweft/model-gateway";
+import type {
+  ModelGatewayProviderKind,
+  ModelGatewayRoutingStrategy,
+} from "@sourceweft/db";
 
 export type GlobalGatewayEntry = {
   slug: string;
@@ -15,16 +19,7 @@ export type GlobalGatewayEntry = {
   apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;
   providerName: string;
-  providerKind:
-    | "openai-compatible"
-    | "cloudflare-aig"
-    | "openrouter"
-    | "deepinfra"
-    | "siliconflow-cn"
-    | "openai"
-    | "anthropic"
-    | "gemini"
-    | "azure-openai";
+  providerKind: ModelGatewayProviderKind;
   supports: string[];
   timeoutMs?: number;
   maxRetries?: number;
@@ -62,12 +57,7 @@ export type GlobalModelProfileEntry = {
   gatewaySlug: string;
   providerName: string;
   targetModel: string;
-  routingStrategy:
-    | "priority"
-    | "weighted-random"
-    | "least-latency"
-    | "cost-aware"
-    | "sticky-by-tenant";
+  routingStrategy: ModelGatewayRoutingStrategy;
   priority: number;
   weight: number;
   isDefault: boolean;
@@ -86,12 +76,7 @@ export type GlobalEmbeddingProfileEntry = {
   providerName: string;
   modelAlias: string;
   targetModel: string;
-  routingStrategy:
-    | "priority"
-    | "weighted-random"
-    | "least-latency"
-    | "cost-aware"
-    | "sticky-by-tenant";
+  routingStrategy: ModelGatewayRoutingStrategy;
   priority: number;
   weight: number;
   requestedDimensions: number | null;
@@ -472,19 +457,8 @@ function asStringRecord(value: unknown, fieldName: string): Record<string, strin
 function asRoutingStrategy(
   value: unknown,
   fieldName: string,
-):
-  | "priority"
-  | "weighted-random"
-  | "least-latency"
-  | "cost-aware"
-  | "sticky-by-tenant" {
-  if (
-    value === "priority" ||
-    value === "weighted-random" ||
-    value === "least-latency" ||
-    value === "cost-aware" ||
-    value === "sticky-by-tenant"
-  ) {
+): ModelGatewayRoutingStrategy {
+  if (value === "priority" || value === "weighted-random") {
     return value;
   }
 
@@ -498,16 +472,7 @@ function asRoutingStrategy(
 function asProviderKind(
   value: unknown,
   fieldName: string,
-):
-  | "openai-compatible"
-  | "cloudflare-aig"
-  | "openrouter"
-  | "deepinfra"
-  | "siliconflow-cn"
-  | "openai"
-  | "anthropic"
-  | "gemini"
-  | "azure-openai" {
+): ModelGatewayProviderKind {
   if (
     value === "openai-compatible" ||
     value === "cloudflare-aig" ||

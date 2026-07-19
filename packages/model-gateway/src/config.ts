@@ -13,8 +13,13 @@ import type {
   RoutingStrategy,
 } from "./types";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_RETRIES = 2;
+/**
+ * Gateway-wide fallbacks used whenever a provider or request does not specify
+ * its own limits. Exported so host apps resolve against the same values instead
+ * of keeping a second copy that can silently drift.
+ */
+export const DEFAULT_TIMEOUT_MS = 30_000;
+export const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_PROVIDER_NAME = "default";
 
 export const DEFAULT_ALLOWED_MODEL_ALIASES: readonly string[] = [
@@ -96,6 +101,12 @@ function normalizeProviderConfigs(
         defaultHeaders: provider.defaultHeaders ?? {},
         supports: provider.supports ?? [],
         enabled: provider.enabled ?? true,
+        ...(provider.timeoutMs !== undefined
+          ? { timeoutMs: provider.timeoutMs }
+          : {}),
+        ...(provider.maxRetries !== undefined
+          ? { maxRetries: provider.maxRetries }
+          : {}),
       },
     ] as const;
   });
@@ -487,6 +498,12 @@ export async function resolveRequestTarget(
       apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
       defaultHeaders: provider.defaultHeaders,
       supports: provider.supports,
+      ...(provider.timeoutMs !== undefined
+        ? { timeoutMs: provider.timeoutMs }
+        : {}),
+      ...(provider.maxRetries !== undefined
+        ? { maxRetries: provider.maxRetries }
+        : {}),
       routeDecision: {
         alias: `${provider.name}:${execution.model}`,
         mode,
@@ -520,6 +537,12 @@ export async function resolveRequestTarget(
       apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
       defaultHeaders: provider.defaultHeaders,
       supports: provider.supports,
+      ...(provider.timeoutMs !== undefined
+        ? { timeoutMs: provider.timeoutMs }
+        : {}),
+      ...(provider.maxRetries !== undefined
+        ? { maxRetries: provider.maxRetries }
+        : {}),
       routeDecision: {
         alias: routeKey,
         mode,
@@ -573,6 +596,12 @@ export async function resolveRequestTarget(
     apiKeyHeaderPrefix: provider.apiKeyHeaderPrefix,
     defaultHeaders: provider.defaultHeaders,
     supports: provider.supports,
+    ...(provider.timeoutMs !== undefined
+      ? { timeoutMs: provider.timeoutMs }
+      : {}),
+    ...(provider.maxRetries !== undefined
+      ? { maxRetries: provider.maxRetries }
+      : {}),
     ...(selected.providerRouting
       ? { providerRouting: selected.providerRouting }
       : {}),
@@ -600,8 +629,11 @@ export function createRequestConfig(
     apiKeyHeaderName: target.apiKeyHeaderName,
     apiKeyHeaderPrefix: target.apiKeyHeaderPrefix,
     fetch: config.fetch,
-    timeoutMs: config.timeoutMs,
-    maxRetries: config.maxRetries,
+    // Prefer the selected provider's own limits. Hoisting a gateway-wide
+    // maximum would let one slow provider (e.g. a long-running video gateway)
+    // stretch the timeout for every other provider's requests.
+    timeoutMs: target.timeoutMs ?? config.timeoutMs,
+    maxRetries: target.maxRetries ?? config.maxRetries,
     defaultHeaders: {
       ...config.defaultHeaders,
       ...target.defaultHeaders,
