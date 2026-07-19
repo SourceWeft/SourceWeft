@@ -5764,16 +5764,24 @@ export function SourcesHub({
       return;
     }
 
+    const activeWorkspaceId = workspaceId;
+    const activeThreadId = threadId;
     setIsLoadingWorkfiles(true);
     setWorkfilesLoadingError(null);
     try {
       const result = await contentClient.listWorkingFiles(
-        workspaceId,
-        threadId,
+        activeWorkspaceId,
+        activeThreadId,
       );
+      // Guard against a workspace switch in flight, matching refreshArtifacts /
+      // refreshMcpInstalls; without this, a stale workspace's workfiles could be
+      // written into the current view.
+      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+        return;
+      }
       setWorkfiles(result.items);
       threadWorkfilesCache.set(
-        getThreadWorkfilesCacheKey(workspaceId, threadId),
+        getThreadWorkfilesCacheKey(activeWorkspaceId, activeThreadId),
         cloneWorkfileItems(result.items),
       );
     } catch (error) {
@@ -5781,7 +5789,9 @@ export function SourcesHub({
         getErrorMessage(error, "Failed to load workfiles."),
       );
     } finally {
-      setIsLoadingWorkfiles(false);
+      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+        setIsLoadingWorkfiles(false);
+      }
     }
   }, [mode, threadId, workspaceId]);
 
