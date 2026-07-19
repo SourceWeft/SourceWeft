@@ -3,7 +3,7 @@ import type {
   ThreadChatRunJobResult,
 } from "../../content/queue";
 import { buildErrorTurnBilling } from "../turn/error-turn-billing";
-import { getAgentToolRenderAs, hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
+import { getAgentToolRenderAs } from "@sourceweft/agent-tool-registry";
 import { type MeterConsumeResponse } from "@sourceweft/contracts";
 import { ContentError } from "../../content/errors";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";

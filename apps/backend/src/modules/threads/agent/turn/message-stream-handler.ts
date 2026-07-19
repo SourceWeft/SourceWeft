@@ -13,7 +13,6 @@ import {
   extractReasoningFromMessageChunk,
   extractTextDeltasFromMessageChunk,
   extractUsageFromMessageChunk,
-  toObjectRecord,
 } from "./content";
 import {
   shouldSuppressLeakedCommandSpecText,
@@ -28,30 +27,6 @@ import {
 import { sanitizeFilesystemToolInputForClient } from "./output-normalizer";
 import type { TurnRuntime } from "./turn-runtime";
 import { appendReasoningChunk } from "./thinking";
-
-function readString(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function resolveGenerationId(input: {
-  callIndex: number;
-  messageChunk: unknown;
-  messageMetadata: unknown;
-}) {
-  const chunkRecord = toObjectRecord(input.messageChunk);
-  const metadataRecord = toObjectRecord(input.messageMetadata);
-  const responseMetadata = toObjectRecord(chunkRecord?.response_metadata);
-  return (
-    readString(chunkRecord, "id") ??
-    readString(responseMetadata, "id") ??
-    readString(responseMetadata, "generation_id") ??
-    readString(responseMetadata, "generationId") ??
-    readString(metadataRecord, "generation_id") ??
-    readString(metadataRecord, "generationId") ??
-    `call-${input.callIndex}`
-  );
-}
 
 export async function* handleMessagesStreamChunk(input: {
   payload: unknown;

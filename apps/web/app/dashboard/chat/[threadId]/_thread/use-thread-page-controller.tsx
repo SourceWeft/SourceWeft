@@ -23,7 +23,6 @@ import type {
   ArtifactStatusSnapshot,
   ChatSendInput,
   ToolConfirmationInterventionSignal,
-  VersionedMessageGroup,
 } from "../../_components/chat-canvas";
 import {
   EMPTY_ACTIVE_CONNECTOR_TOOLS,
@@ -314,10 +313,12 @@ export function useThreadPageController({
     messages,
   });
 
-  // Use merged messages to include streaming snapshot for live-turn artifact tracking
+  // Use merged messages to include the streaming snapshot for live-turn artifact
+  // tracking. mergeStreamingAssistantIntoMessages is memoized on the streaming
+  // snapshot, so its identity change is exactly what should recompute this.
   const mergedMessages = useMemo(
     () => mergeStreamingAssistantIntoMessages(messages),
-    [messages], // Remove mergeStreamingAssistantIntoMessages from deps
+    [messages, mergeStreamingAssistantIntoMessages],
   );
 
   const pendingArtifacts = useMemo(
@@ -911,6 +912,10 @@ export function useThreadPageController({
         skillIds: effectiveActiveSkillIds,
         searchEnabled,
         assistantMessageId: input.assistantMessageId,
+        // Bind the refresh to the user message that produced *this* assistant
+        // turn. Without it, streamThreadAction falls back to the latest user
+        // message, which mis-targets refreshes of non-latest turns.
+        userMessageId: refreshUserMessageId,
       });
     },
     [

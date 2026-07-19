@@ -462,7 +462,7 @@ function AssistantMessageBody({
   });
   const renderBlocks = renderState.bodyBlocks;
   const cancelledNotice =
-    renderState.status === "cancelled" ? "已由用户停止生成。" : null;
+    renderState.status === "cancelled" ? "Generation stopped by the user." : null;
   const isWorkflowRunning = renderState.status === "running";
   const segments = buildAssistantRenderSegments(renderBlocks);
   let lastWorkflowSegmentId: string | null = null;
