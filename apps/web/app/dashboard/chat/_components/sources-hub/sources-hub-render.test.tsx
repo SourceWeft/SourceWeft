@@ -1,9 +1,10 @@
-// @ts-nocheck -- disabled WIP scaffolding (not run; see commit message)
 // @vitest-environment jsdom
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
+
+import type { SourceItem } from "../source-types";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
@@ -11,9 +12,8 @@ import { afterEach, expect, test, vi } from "vitest";
 
 // Disable the connector sync-run polling engine entirely: its timers +
 // BroadcastChannel are what made mounting SourcesHub hang under jsdom. The
-// engine itself is covered by use-connector-sync-runs.test.ts. The returned
-// API must be referentially stable (like the real useCallback-memoized hook),
-// otherwise effects that depend on trackConnectorSyncRun re-run every render.
+// engine itself is covered by use-connector-sync-runs.test.ts. The returned API
+// must be referentially stable (like the real useCallback-memoized hook).
 const stableSyncRunApi = { trackConnectorSyncRun: () => {} };
 vi.mock("./use-connector-sync-runs", () => ({
   useConnectorSyncRuns: () => stableSyncRunApi,
@@ -21,7 +21,9 @@ vi.mock("./use-connector-sync-runs", () => ({
 }));
 
 // Stub the SDK so all mount-time refreshes resolve immediately with empty data
-// instead of hitting the network.
+// instead of hitting the network. The single shape covers every list/get call
+// the mount path makes (listSources/listArtifacts/listWorkingFiles/
+// listWorkspaceMcpInstalls/listAccounts -> items; getWorkingFile -> file; etc.).
 const emptyResult = {
   items: [],
   nextCursor: null,
@@ -57,6 +59,14 @@ let container: HTMLDivElement | null = null;
 
 type SourcesHubProps = Parameters<typeof SourcesHub>[0];
 
+// Stable prop values shared across renders. SourcesHub declares many props with
+// `= []` / `= () => {}` defaults; if those defaults run (prop omitted) they
+// produce a fresh value every render, and across the leaf-domain hooks that
+// churn drives an unbounded re-render loop that never lets `act` settle. Real
+// callers pass stable props, so the smoke test does too.
+const EMPTY: never[] = [];
+const noop = () => {};
+
 async function renderHub(props: Partial<SourcesHubProps> = {}) {
   container = document.createElement("div");
   document.body.append(container);
@@ -64,28 +74,30 @@ async function renderHub(props: Partial<SourcesHubProps> = {}) {
   root = created;
   const merged: SourcesHubProps = {
     mode: "new",
-    selectedIds: [],
-    onSelectionChange: () => {},
+    selectedIds: EMPTY,
+    onSelectionChange: noop,
     workspaceId: "ws1",
     workspaceName: "Workspace",
+    citations: EMPTY,
+    threadCitations: EMPTY,
+    installedSkills: EMPTY,
+    selectedSkillIds: EMPTY,
+    onSkillSelectionChange: noop,
+    selectedMcpInstallIds: EMPTY,
+    selectedMcpToolIds: EMPTY,
+    onMcpSelectionChange: noop,
+    disabledToolNames: EMPTY,
+    initialSources: EMPTY,
     ...props,
   };
-  // Use a synchronous act(): SourcesHub runs background window.setInterval
-  // pollers (waiting connectors, etc.) that never quiesce, so an async
-  // act(async () => ...) would wait on them forever. A sync act commits the
-  // initial render + passive effects, which is all this smoke test needs.
-  act(() => {
+  await act(async () => {
     created.render(createElement(SourcesHub, merged));
   });
-  // Let post-mount async state updates settle across a few macrotask ticks.
-  for (let i = 0; i < 4; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
   return container;
 }
 
-afterEach(() => {
-  act(() => {
+afterEach(async () => {
+  await act(async () => {
     root?.unmount();
   });
   container?.remove();
@@ -93,12 +105,12 @@ afterEach(() => {
   container = null;
 });
 
-test("mounts in new mode without hanging", async () => {
+test("mounts in new mode and renders the hub tab strip", async () => {
   const el = await renderHub({ mode: "new" });
-  expect(el.textContent).not.toBe("");
-  expect(
-    el.querySelector('[role="tablist"], [data-slot="tabs-list"]'),
-  ).not.toBe(null);
+  // The hub renders one <button> per tab; assert a couple of stable labels.
+  expect(el.textContent).toContain("Sources");
+  expect(el.textContent).toContain("Workfiles");
+  expect(el.querySelectorAll("button").length).toBeGreaterThan(3);
 });
 
 test("mounts in thread mode with a threadId", async () => {
@@ -112,26 +124,23 @@ test("mounts as a drawer variant", async () => {
 });
 
 test("mounts with initial sources provided", async () => {
-  const el = await renderHub({
-    initialSources: [
-      {
-        id: "s1",
-        title: "Doc One",
-        sourceType: "file",
-        parentSourceId: null,
-        type: "DOC",
-        status: "Indexed",
-        meta: "now",
-        contentText: null,
-        connectorId: null,
-        externalUri: null,
-        metadata: null,
-        storageKey: null,
-        updatedAt: "2024-01-01T00:00:00.000Z",
-      },
-    ],
-    initialSourcesLoaded: true,
-  });
+  const initialSources: SourceItem[] = [
+    {
+      id: "s1",
+      title: "Doc One",
+      sourceType: "file_upload",
+      parentSourceId: null,
+      type: "DOC",
+      status: "Indexed",
+      meta: "now",
+      contentText: "",
+      connectorId: null,
+      externalUri: null,
+      storageKey: null,
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    },
+  ];
+  const el = await renderHub({ initialSources, initialSourcesLoaded: true });
   expect(el.textContent).not.toBe("");
 });
 
