@@ -16,6 +16,27 @@ import {
 
 const SOURCE_SYNC_UPDATED_AFTER_OVERLAP_MS = 1000;
 
+/**
+ * Injectable timer + clock surface for the polling engine. Defaults to the real
+ * `window` timers and `Date.now`; tests pass a fake to drive the engine
+ * deterministically.
+ */
+export type SyncRunScheduler = {
+  setTimeout: (fn: () => void, ms: number) => number;
+  clearTimeout: (id: number) => void;
+  setInterval: (fn: () => void, ms: number) => number;
+  clearInterval: (id: number) => void;
+  now: () => number;
+};
+
+const defaultScheduler: SyncRunScheduler = {
+  setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimeout: (id) => window.clearTimeout(id),
+  setInterval: (fn, ms) => window.setInterval(fn, ms),
+  clearInterval: (id) => window.clearInterval(id),
+  now: () => Date.now(),
+};
+
 type ActiveConnectorSyncRun = {
   connectorId: string;
   discoveredCount: number;
@@ -101,6 +122,14 @@ export function useConnectorSyncRuns(input: {
     batches: Array<{ connectorId: string; items: SourceItem[] }>,
   ) => void;
   refreshConnectors: () => void | Promise<void>;
+  /** Omit to use real `window` timers + `Date.now`. */
+  scheduler?: SyncRunScheduler;
+  /**
+   * Builds the cross-tab coordination channel. Return `null` to fully disable
+   * cross-tab leader election (the engine then always acts as leader). Omit to
+   * use the real `BroadcastChannel`.
+   */
+  channelFactory?: (name: string) => BroadcastChannel | null;
 }): {
   trackConnectorSyncRun: (
     run:
@@ -122,6 +151,17 @@ export function useConnectorSyncRuns(input: {
     replaceConnectorSources,
     refreshConnectors,
   } = input;
+
+  // Injected timer/channel surfaces are held in refs so changing them never
+  // re-runs the polling effect; the effect and callbacks read `.current`.
+  const schedulerRef = useRef<SyncRunScheduler>(
+    input.scheduler ?? defaultScheduler,
+  );
+  schedulerRef.current = input.scheduler ?? defaultScheduler;
+  const channelFactoryRef = useRef<
+    ((name: string) => BroadcastChannel | null) | undefined
+  >(input.channelFactory);
+  channelFactoryRef.current = input.channelFactory;
 
   const activeSyncRunsRef = useRef<Map<string, ActiveConnectorSyncRun>>(
     new Map(),
@@ -178,13 +218,15 @@ export function useConnectorSyncRuns(input: {
       syncRunChannelRef.current?.postMessage({
         type: "sync-runs-wake",
         tabId,
-        sentAt: Date.now(),
+        sentAt: schedulerRef.current.now(),
       } satisfies ConnectorSyncRunBroadcastMessage);
     },
     [],
   );
 
   useEffect(() => {
+    const scheduler = schedulerRef.current;
+    const channelFactory = channelFactoryRef.current;
     if (!workspaceId) {
       activeSyncRunsRef.current.clear();
       syncRunNeedsCooldownConfirmationRef.current = false;
@@ -201,14 +243,14 @@ export function useConnectorSyncRuns(input: {
 
     function clearPollTimer() {
       if (syncRunPollTimerRef.current !== null) {
-        window.clearTimeout(syncRunPollTimerRef.current);
+        scheduler.clearTimeout(syncRunPollTimerRef.current);
         syncRunPollTimerRef.current = null;
       }
     }
 
     function clearHeartbeatTimer() {
       if (syncRunHeartbeatTimerRef.current !== null) {
-        window.clearInterval(syncRunHeartbeatTimerRef.current);
+        scheduler.clearInterval(syncRunHeartbeatTimerRef.current);
         syncRunHeartbeatTimerRef.current = null;
       }
     }
@@ -220,7 +262,7 @@ export function useConnectorSyncRuns(input: {
     function updateSelfLeaderCandidate() {
       leaderCandidates.set(tabId, {
         id: tabId,
-        lastSeenAt: Date.now(),
+        lastSeenAt: scheduler.now(),
         visible: isDocumentVisible() && isPollingTab,
       });
     }
@@ -233,9 +275,9 @@ export function useConnectorSyncRuns(input: {
         type: "leader-heartbeat",
         tabId,
         visible: isDocumentVisible(),
-        sentAt: Date.now(),
+        sentAt: scheduler.now(),
       });
-      syncRunHeartbeatTimerRef.current = window.setInterval(() => {
+      syncRunHeartbeatTimerRef.current = scheduler.setInterval(() => {
         if (cancelled || !syncRunIsLeaderRef.current || !isDocumentVisible()) {
           return;
         }
@@ -243,7 +285,7 @@ export function useConnectorSyncRuns(input: {
           type: "leader-heartbeat",
           tabId,
           visible: true,
-          sentAt: Date.now(),
+          sentAt: scheduler.now(),
         });
       }, SYNC_RUN_LEADER_HEARTBEAT_MS);
     }
@@ -265,7 +307,7 @@ export function useConnectorSyncRuns(input: {
       updateSelfLeaderCandidate();
       const leaderId = selectConnectorSyncRunLeader(
         Array.from(leaderCandidates.values()),
-        Date.now(),
+        scheduler.now(),
       );
       setSyncRunLeader(leaderId === tabId);
     }
@@ -280,7 +322,7 @@ export function useConnectorSyncRuns(input: {
         return;
       }
       clearPollTimer();
-      syncRunPollTimerRef.current = window.setTimeout(() => {
+      syncRunPollTimerRef.current = scheduler.setTimeout(() => {
         syncRunPollTimerRef.current = null;
         void pollActiveSyncRuns();
       }, delayMs);
@@ -473,7 +515,7 @@ export function useConnectorSyncRuns(input: {
         postSyncRunMessage({
           type: "sync-runs-result",
           tabId,
-          sentAt: Date.now(),
+          sentAt: scheduler.now(),
           result,
         });
         await handleSyncRunResult(result);
@@ -500,7 +542,7 @@ export function useConnectorSyncRuns(input: {
         type: "hello",
         tabId,
         visible: isDocumentVisible(),
-        sentAt: Date.now(),
+        sentAt: scheduler.now(),
       });
       electSyncRunLeader();
       if (!isDocumentVisible()) {
@@ -513,11 +555,15 @@ export function useConnectorSyncRuns(input: {
       }
     }
 
-    if (typeof BroadcastChannel !== "undefined") {
+    const channelName = `${CONNECTOR_SYNC_RUN_CHANNEL_PREFIX}:${activeWorkspaceId}`;
+    const channel = channelFactory
+      ? channelFactory(channelName)
+      : typeof BroadcastChannel !== "undefined"
+        ? new BroadcastChannel(channelName)
+        : null;
+
+    if (channel) {
       try {
-        const channel = new BroadcastChannel(
-          `${CONNECTOR_SYNC_RUN_CHANNEL_PREFIX}:${activeWorkspaceId}`,
-        );
         syncRunChannelRef.current = channel;
         channel.onmessage = (event: MessageEvent) => {
           const message = parseConnectorSyncRunBroadcastMessage(event.data);
@@ -549,12 +595,12 @@ export function useConnectorSyncRuns(input: {
           type: "hello",
           tabId,
           visible: isDocumentVisible(),
-          sentAt: Date.now(),
+          sentAt: scheduler.now(),
         });
-        const electionTimer = window.setTimeout(() => {
+        const electionTimer = scheduler.setTimeout(() => {
           electSyncRunLeader();
         }, SYNC_RUN_LEADER_ELECTION_MS);
-        syncRunLeaderTimerRef.current = window.setInterval(() => {
+        syncRunLeaderTimerRef.current = scheduler.setInterval(() => {
           electSyncRunLeader();
         }, SYNC_RUN_LEADER_CHECK_MS);
         if (typeof document !== "undefined") {
@@ -563,11 +609,11 @@ export function useConnectorSyncRuns(input: {
         return () => {
           cancelled = true;
           syncRunPollStoppedRef.current = true;
-          window.clearTimeout(electionTimer);
+          scheduler.clearTimeout(electionTimer);
           clearPollTimer();
           clearHeartbeatTimer();
           if (syncRunLeaderTimerRef.current !== null) {
-            window.clearInterval(syncRunLeaderTimerRef.current);
+            scheduler.clearInterval(syncRunLeaderTimerRef.current);
             syncRunLeaderTimerRef.current = null;
           }
           if (typeof document !== "undefined") {
