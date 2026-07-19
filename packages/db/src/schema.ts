@@ -1,5 +1,18 @@
 import { desc, sql } from "drizzle-orm";
 import {
+  artifactStatusSchema,
+  artifactTypeSchema,
+} from "@sourceweft/contracts/artifacts";
+import { messageRoleSchema } from "@sourceweft/contracts/messages";
+import {
+  sourceDocumentStatusSchema,
+  sourceIngestKindSchema,
+  sourceStatusSchema,
+  sourceTypeSchema,
+} from "@sourceweft/contracts/sources";
+import { threadRunStatusSchema } from "@sourceweft/contracts/stream";
+import { workingFilePurposeSchema } from "@sourceweft/contracts/working-files";
+import {
   type AnyPgColumn,
   bigint,
   boolean,
@@ -21,29 +34,9 @@ import {
 
 type WorkspaceRole = "workspace_admin" | "editor" | "viewer";
 type WorkspaceMembershipSource = "direct" | "inherited";
-type SourceStatus =
-  | "created"
-  | "queued"
-  | "processing"
-  | "indexed"
-  | "failed"
-  | "archived";
-type SourceIngestKind =
-  | "connector"
-  | "manual_upload"
-  | "web_url"
-  | "youtube"
-  | "note"
-  | "artifact";
-type SourceType =
-  | "manual_upload"
-  | "file_upload"
-  | "web_url"
-  | "youtube"
-  | "note"
-  | "artifact"
-  | "connector"
-  | "directory";
+type SourceStatus = (typeof sourceStatusSchema.options)[number];
+type SourceIngestKind = (typeof sourceIngestKindSchema.options)[number];
+type SourceType = (typeof sourceTypeSchema.options)[number];
 type ConnectorStatus = "active" | "paused" | "error" | "disabled";
 type ConnectorOAuthAccountStatus =
   | "active"
@@ -110,7 +103,7 @@ type McpActionRunStatus =
   | "succeeded"
   | "failed"
   | "canceled";
-type DocumentStatus = "pending" | "processing" | "ready" | "failed";
+type DocumentStatus = (typeof sourceDocumentStatusSchema.options)[number];
 type ModelGatewayProfileKind =
   | "chat"
   | "rerank"
@@ -121,7 +114,7 @@ type ModelGatewayProfileKind =
   | "image"
   | "video";
 type EmbeddingVectorStrategy = "auto" | "exact" | "disabled";
-type ModelGatewayProviderKind =
+export type ModelGatewayProviderKind =
   | "openai-compatible"
   | "cloudflare-aig"
   | "openrouter"
@@ -148,32 +141,25 @@ type ThreadModelSettings = {
   imageModelAlias?: string | null;
   visionModelAlias?: string | null;
 };
-type ModelGatewayRoutingStrategy =
-  | "priority"
-  | "weighted-random"
-  | "least-latency"
-  | "cost-aware"
-  | "sticky-by-tenant";
-type MessageRole = "user" | "assistant" | "system" | "tool";
+export type ModelGatewayRoutingStrategy = "priority" | "weighted-random";
+type MessageRole = (typeof messageRoleSchema.options)[number];
 type ThreadVisibility = "private" | "workspace" | "public_link";
 type NoteType = "manual" | "saved_response" | "generated";
-type ArtifactType =
-  | "file"
-  | "report"
-  | "slides"
-  | "mindmap"
-  | "podcast"
-  | "audio_overview"
-  | "video_overview"
-  | "video_presentation"
-  | "flashcards"
-  | "quiz"
-  | "table"
-  | "infographic"
-  | "image";
-type ArtifactStatus = "pending" | "running" | "ready" | "failed" | "archived";
+type ArtifactType = (typeof artifactTypeSchema.options)[number];
+type ArtifactStatus = (typeof artifactStatusSchema.options)[number];
 type ArtifactSourceRole = "input" | "evidence" | "output";
-type WorkingFilePurpose = "scratch" | "draft" | "note" | "output_candidate";
+/**
+ * Domain enums live in @sourceweft/contracts so the wire schema, the column
+ * type, and the CHECK constraint below cannot drift apart. The dependency only
+ * goes db -> contracts; contracts must never import db, or the web bundle would
+ * pull in drizzle/pg.
+ */
+type WorkingFilePurpose = (typeof workingFilePurposeSchema.options)[number];
+
+/** Renders enum options as a SQL literal list for CHECK constraints. */
+function sqlEnumList(options: readonly string[]) {
+  return sql.raw(options.map((value) => `'${value}'`).join(", "));
+}
 type ShareTargetType = "thread" | "artifact" | "chat_view";
 type ShareAccessLevel = "viewer" | "editor";
 type JobStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
@@ -232,14 +218,7 @@ type BillingOrderPaymentStatus =
 type OpsAlertLevel = "warn" | "error" | "critical";
 type OpsAlertStatus = "open" | "resolved";
 type LlmObservationStatus = "running" | "ok" | "error" | "cancelled";
-type ChatThreadRunStatus =
-  | "queued"
-  | "running"
-  | "cancel_requested"
-  | "waiting_for_approval"
-  | "completed"
-  | "failed"
-  | "cancelled";
+type ChatThreadRunStatus = (typeof threadRunStatusSchema.options)[number];
 type ChatThreadRunMode = "send" | "refresh" | "edit" | "resume";
 type LlmSpanKind =
   | "agent"
@@ -1344,7 +1323,7 @@ export const modelGatewayRoutes = pgTable(
     ),
     check(
       "model_gateway_routes_strategy_check",
-      sql`${table.strategy} in ('priority', 'weighted-random', 'least-latency', 'cost-aware', 'sticky-by-tenant')`,
+      sql`${table.strategy} in ('priority', 'weighted-random')`,
     ),
     check("model_gateway_routes_priority_check", sql`${table.priority} > 0`),
     check("model_gateway_routes_weight_check", sql`${table.weight} >= 0`),
@@ -2440,15 +2419,15 @@ export const sources = pgTable(
     ),
     check(
       "sources_status_check",
-      sql`${table.status} in ('created', 'queued', 'processing', 'indexed', 'failed', 'archived')`,
+      sql`${table.status} in (${sqlEnumList(sourceStatusSchema.options)})`,
     ),
     check(
       "sources_ingest_kind_check",
-      sql`${table.ingestKind} in ('connector', 'manual_upload', 'web_url', 'youtube', 'note', 'artifact')`,
+      sql`${table.ingestKind} in (${sqlEnumList(sourceIngestKindSchema.options)})`,
     ),
     check(
       "sources_source_type_check",
-      sql`${table.sourceType} in ('manual_upload', 'file_upload', 'web_url', 'youtube', 'note', 'artifact', 'connector', 'directory')`,
+      sql`${table.sourceType} in (${sqlEnumList(sourceTypeSchema.options)})`,
     ),
     check(
       "sources_connector_requirement_check",
@@ -2845,7 +2824,7 @@ export const messages = pgTable(
     }).onDelete("cascade"),
     check(
       "messages_role_check",
-      sql`${table.role} in ('user', 'assistant', 'system', 'tool')`,
+      sql`${table.role} in (${sqlEnumList(messageRoleSchema.options)})`,
     ),
     check(
       "messages_input_tokens_check",
@@ -2957,7 +2936,7 @@ export const chatThreadRuns = pgTable(
     }).onDelete("cascade"),
     check(
       "chat_thread_runs_status_check",
-      sql`${table.status} in ('queued', 'running', 'cancel_requested', 'waiting_for_approval', 'completed', 'failed', 'cancelled')`,
+      sql`${table.status} in (${sqlEnumList(threadRunStatusSchema.options)})`,
     ),
     check(
       "chat_thread_runs_mode_check",
@@ -3035,7 +3014,7 @@ export const workingFiles = pgTable(
     ),
     check(
       "working_files_purpose_check",
-      sql`${table.purpose} is null or ${table.purpose} in ('scratch', 'draft', 'note', 'output_candidate')`,
+      sql`${table.purpose} is null or ${table.purpose} in (${sqlEnumList(workingFilePurposeSchema.options)})`,
     ),
     check("working_files_size_bytes_check", sql`${table.sizeBytes} >= 0`),
     index("working_files_thread_updated_idx").on(
@@ -4227,7 +4206,7 @@ export const artifacts = pgTable(
     ),
     check(
       "artifacts_status_check",
-      sql`${table.status} in ('pending', 'running', 'ready', 'failed', 'archived')`,
+      sql`${table.status} in (${sqlEnumList(artifactStatusSchema.options)})`,
     ),
     index("artifacts_workspace_status_created_idx").on(
       table.workspaceId,

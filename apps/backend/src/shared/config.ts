@@ -530,6 +530,26 @@ export const config = {
       process.env.DOCUMENT_PARSE_PURE_TEXT_MIN_CHARS_PER_PAGE,
       80,
     ),
+    // Configurable so shipping a new parser version does not require a code
+    // change to become the default for newly ingested sources.
+    defaultParserVersion:
+      process.env.DOCUMENT_PARSE_DEFAULT_PARSER_VERSION?.trim() ||
+      "v2-document-provider",
+    defaultChunkSize: parsePositiveInteger(
+      process.env.DOCUMENT_PARSE_DEFAULT_CHUNK_SIZE,
+      1000,
+    ),
+  },
+  vectorSearch: {
+    /**
+     * Ceiling enforced by PgVectorProvider. Tied to the pgvector column/index
+     * configuration in use, not an inherent limit — raising it requires
+     * confirming the HNSW indexes can support the wider vectors.
+     */
+    maxDimensions: parsePositiveInteger(
+      process.env.VECTOR_SEARCH_MAX_DIMENSIONS,
+      2000,
+    ),
   },
   pdf2markdown: {
     apiKey: process.env.PDF2MARKDOWN_API_KEY || "",

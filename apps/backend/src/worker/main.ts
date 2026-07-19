@@ -20,7 +20,8 @@ import {
 } from "./processors/source-parse";
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
-import { processVideoPresentationGenerateJob } from "./processors/video-presentation";
+import { handleDeliverableJobFailure } from "./deliverable-host/job-failure-boundary";
+import { buildDeliverableProcessorMap } from "./deliverable-host/registry";
 import {
   failThreadRunAtProcessorBoundary,
   processThreadChatRunJob,
@@ -43,9 +44,17 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "thread-title-generate": processThreadTitleGenerateJob,
 };
 
-const deliverableProcessors: Record<string, JobProcessor> = {
-  "video-presentation-generate": processVideoPresentationGenerateJob,
-};
+// Deliverable pipelines are capability-owned: the registry discovers them
+// from capability manifests (falling back to the builtin module map inside
+// the registry). main.ts stays capability-agnostic.
+const deliverableRegistry = await buildDeliverableProcessorMap();
+const deliverableProcessors: Record<string, JobProcessor> =
+  deliverableRegistry.processors;
+const deliverableFailureCodes = deliverableRegistry.failureCodes;
+logger.info("Registered deliverable pipelines", {
+  jobNames: Object.keys(deliverableProcessors),
+  source: deliverableRegistry.source,
+});
 
 async function runIsolatedJob(
   job: Job<JobPayload>,
@@ -153,6 +162,29 @@ function registerWorkerListeners(
 
 registerWorkerListeners(primaryWorker, config.queueName);
 registerWorkerListeners(deliverablesWorker, config.deliverablesQueueName);
+
+// Deliverable jobs that die outside the processor (stalled on worker
+// restart/crash, BullMQ-level failures) never reach the host's catch block —
+// mark their artifacts failed so they don't stay "running" forever.
+deliverablesWorker.on("failed", (job: Job<JobPayload> | undefined, error: Error) => {
+  if (!job) {
+    return;
+  }
+  void (async () => {
+    const { markArtifactFailed } = await import(
+      "../modules/artifacts/repository"
+    );
+    await handleDeliverableJobFailure({
+      jobName: job.name,
+      attemptsMade: job.attemptsMade ?? 0,
+      maxAttempts: job.opts?.attempts ?? 1,
+      data: job.data,
+      error,
+      failureCodes: deliverableFailureCodes,
+      markFailed: markArtifactFailed,
+    });
+  })();
+});
 
 logger.info("Primary worker started", {
   queueName: config.queueName,

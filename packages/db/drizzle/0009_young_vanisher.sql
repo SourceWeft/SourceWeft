@@ -1,0 +1,2 @@
+ALTER TABLE "model_gateway_routes" DROP CONSTRAINT "model_gateway_routes_strategy_check";--> statement-breakpoint
+ALTER TABLE "model_gateway_routes" ADD CONSTRAINT "model_gateway_routes_strategy_check" CHECK ("model_gateway_routes"."strategy" in ('priority', 'weighted-random'));

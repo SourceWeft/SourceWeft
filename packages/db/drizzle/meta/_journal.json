@@ -64,6 +64,13 @@
       "when": 1784306501967,
       "tag": "0008_silent_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784409523608,
+      "tag": "0009_young_vanisher",
+      "breakpoints": true
     }
   ]
 }

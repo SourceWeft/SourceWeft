@@ -11,6 +11,7 @@ import {
 } from "../../modules/threads";
 import { findThreadRecord } from "../../modules/threads";
 import { contentByokService } from "../../modules/byok";
+import { billingService } from "../../modules/billing";
 import type { LlmExecutionConfig } from "../../modules/content/model-gateway-audit";
 
 async function resolveThreadTitleExecution(
@@ -93,6 +94,9 @@ export async function processThreadTitleGenerateJob(
       ...payload,
       providerModel: llm?.providerModel ?? payload.providerModel,
       llm,
+      // The job payload is serialised through BullMQ and cannot carry a port,
+      // so the processor supplies the same singleton the in-process path uses.
+      billing: billingService,
     });
   } catch (error) {
     if (!isLastAttempt) {
