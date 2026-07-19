@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { contentClient } from "../../../../../../lib/sdk";
@@ -33,6 +33,20 @@ export function useMcp(input: {
   const [isLoadingMcp, setIsLoadingMcp] = useState(false);
   const [mcpLoadingError, setMcpLoadingError] = useState<string | null>(null);
 
+  // The current selection + change callback are read through refs so
+  // refreshMcpInstalls keeps a stable identity. Otherwise an unstable
+  // onMcpSelectionChange / selection array from the caller would change the
+  // callback every render, re-run the cache-load effect every render, and its
+  // isLoading toggle would drive an infinite render loop. Pruning always runs
+  // against the latest selection, and installs are only re-fetched on workspace
+  // change (not on every selection tweak).
+  const selectedMcpInstallIdsRef = useRef(selectedMcpInstallIds);
+  selectedMcpInstallIdsRef.current = selectedMcpInstallIds;
+  const selectedMcpToolIdsRef = useRef(selectedMcpToolIds);
+  selectedMcpToolIdsRef.current = selectedMcpToolIds;
+  const onMcpSelectionChangeRef = useRef(onMcpSelectionChange);
+  onMcpSelectionChangeRef.current = onMcpSelectionChange;
+
   const refreshMcpInstalls = useCallback(async () => {
     if (!workspaceId) {
       setMcpInstalls([]);
@@ -59,15 +73,17 @@ export function useMcp(input: {
       const toolIds = new Set(
         result.items.flatMap((install) => install.tools.map((tool) => tool.id)),
       );
-      const nextInstallIds = selectedMcpInstallIds.filter((id) =>
+      const currentInstallIds = selectedMcpInstallIdsRef.current;
+      const currentToolIds = selectedMcpToolIdsRef.current;
+      const nextInstallIds = currentInstallIds.filter((id) =>
         installIds.has(id),
       );
-      const nextToolIds = selectedMcpToolIds.filter((id) => toolIds.has(id));
+      const nextToolIds = currentToolIds.filter((id) => toolIds.has(id));
       if (
-        nextInstallIds.length !== selectedMcpInstallIds.length ||
-        nextToolIds.length !== selectedMcpToolIds.length
+        nextInstallIds.length !== currentInstallIds.length ||
+        nextToolIds.length !== currentToolIds.length
       ) {
-        onMcpSelectionChange({
+        onMcpSelectionChangeRef.current({
           enabled: nextInstallIds.length > 0 || nextToolIds.length > 0,
           installIds: nextInstallIds,
           toolIds: nextToolIds,
@@ -80,13 +96,7 @@ export function useMcp(input: {
         setIsLoadingMcp(false);
       }
     }
-  }, [
-    currentWorkspaceIdRef,
-    onMcpSelectionChange,
-    selectedMcpInstallIds,
-    selectedMcpToolIds,
-    workspaceId,
-  ]);
+  }, [currentWorkspaceIdRef, workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) {
