@@ -11,30 +11,6 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { SlidesFallback } from "./slides-fallback";
-import { payloadString } from "./payload";
-
-type SlidesGenerationMode = "visual_html" | "editable_native";
-
-export function resolveSlidesGenerationMode(
-  payload: Record<string, unknown>,
-): SlidesGenerationMode {
-  const generationMode = payloadString(payload, "generationMode");
-  if (generationMode === "editable_native") {
-    return "editable_native";
-  }
-  if (generationMode === "visual_html") {
-    return "visual_html";
-  }
-  const previewRenderer = payloadString(payload, "previewRenderer");
-  if (previewRenderer === "pptxviewjs") {
-    return "editable_native";
-  }
-  if (previewRenderer === "html_iframe") {
-    return "visual_html";
-  }
-  const mimeType = payloadString(payload, "mimeType");
-  return mimeType?.startsWith("text/html") ? "visual_html" : "editable_native";
-}
 
 export function PptxViewJsPreview({
   fileUrl,

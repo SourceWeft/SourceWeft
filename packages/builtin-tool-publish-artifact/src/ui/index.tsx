@@ -27,11 +27,7 @@ export {
 } from "./artifact-block";
 export { slidesPreview } from "./slides-preview";
 export { SlidesFallback } from "./slides-fallback";
-export {
-  PptxViewJsPreview,
-  resolveSlidesGenerationMode,
-} from "./slides-pptx-preview";
-export { VisualHtmlDeckPreview } from "./slides-visual-html-preview";
+export { PptxViewJsPreview } from "./slides-pptx-preview";
 export {
   buildPublishedPresentationPreviewRecord,
   getPublishedPresentationFileName,

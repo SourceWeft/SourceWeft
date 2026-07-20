@@ -58,34 +58,3 @@ test("slides are inline-previewable regardless of MIME type", () => {
     true,
   );
 });
-
-test("only a visual HTML deck advertises the visual deck renderer", () => {
-  assert.equal(
-    slidesArtifactViewHandler.resolveRenderer?.({
-      artifact: slidesArtifact({
-        payloadJson: { generationMode: "visual_html", fileName: "deck.html" },
-      }),
-    }),
-    "visual_html_deck",
-  );
-  assert.equal(
-    slidesArtifactViewHandler.resolveRenderer?.({
-      artifact: slidesArtifact({
-        payloadJson: { generationMode: "editable_native" },
-      }),
-    }),
-    null,
-  );
-});
-
-test("a visual HTML deck keeps its payload file name", () => {
-  assert.equal(
-    slidesArtifactViewHandler.resolveFileName?.({
-      artifact: slidesArtifact({
-        title: "Visual Deck",
-        payloadJson: { fileName: "deck.html", generationMode: "visual_html" },
-      }),
-    }),
-    "deck.html",
-  );
-});

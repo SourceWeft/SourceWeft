@@ -42,61 +42,6 @@ test("slides artifact downloads use artifact title over legacy payload file name
   );
 });
 
-test("visual HTML slides artifact keeps HTML payload file name", () => {
-  const artifact = {
-    artifactType: "slides",
-    payloadJson: {
-      fileName: "deck.html",
-      generationMode: "visual_html",
-    },
-    title: "Visual Deck",
-  };
-
-  assert.equal(
-    testExports.resolveArtifactFileName(artifact as never, handlerFor("slides")),
-    "deck.html",
-  );
-});
-
-test("visual HTML slides artifact advertises visual deck renderer", () => {
-  assert.equal(
-    testExports.resolveArtifactRenderer(
-      {
-        artifactType: "slides",
-        payloadJson: {
-          generationMode: "visual_html",
-        },
-      } as never,
-      handlerFor("slides"),
-    ),
-    "visual_html_deck",
-  );
-  assert.equal(
-    testExports.resolveArtifactRenderer(
-      {
-        artifactType: "slides",
-        payloadJson: {
-          generationMode: "editable_native",
-        },
-      } as never,
-      handlerFor("slides"),
-    ),
-    null,
-  );
-  assert.equal(
-    testExports.resolveArtifactRenderer(
-      {
-        artifactType: "image",
-        payloadJson: {
-          generationMode: "visual_html",
-        },
-      } as never,
-      handlerFor("image"),
-    ),
-    null,
-  );
-});
-
 test("non-slides artifact downloads keep payload file name", () => {
   const artifact = {
     artifactType: "image",

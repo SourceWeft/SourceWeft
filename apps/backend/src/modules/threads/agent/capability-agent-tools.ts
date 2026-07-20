@@ -195,7 +195,6 @@ function createCapabilityAgentToolHostServices(
     sandboxRuntime,
     traceContext,
   } = input;
-  const fontAssetBaseUrl = config.visualDeck.fontAssetBaseUrl;
 
   return {
     artifacts: {
@@ -232,7 +231,6 @@ function createCapabilityAgentToolHostServices(
       ) => findReusableArtifactRecord(query),
     },
     citationRegistry: runtime.citationRegistry,
-    fontAssetBaseUrl,
     filesystem: filesystemBackend
       ? {
           downloadFiles: (paths: readonly string[]) =>

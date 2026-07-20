@@ -17,7 +17,6 @@ export {
   createArtifactViewHandlers,
   slidesArtifactViewHandler,
   SLIDES_ARTIFACT_TYPE,
-  VISUAL_HTML_DECK_RENDERER,
 } from "./artifact-view";
 export type { PublishArtifactToolSelection } from "./tool-selection";
 export { PUBLISH_ARTIFACT_TYPES } from "./artifact-type-handlers";

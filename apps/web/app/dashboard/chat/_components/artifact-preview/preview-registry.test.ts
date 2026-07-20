@@ -53,17 +53,7 @@ describe("resolveArtifactPreviewRenderer", () => {
       )?.id,
     ).toBe("video-file");
     expect(
-      resolveArtifactPreviewRenderer(
-        context({ artifactType: "slides" }, { generationMode: "visual_html" }),
-      )?.id,
-    ).toBe("slides-visual-html");
-    expect(
-      resolveArtifactPreviewRenderer(
-        context(
-          { artifactType: "slides" },
-          { generationMode: "editable_native" },
-        ),
-      )?.id,
+      resolveArtifactPreviewRenderer(context({ artifactType: "slides" }))?.id,
     ).toBe("slides-pptx");
     expect(
       resolveArtifactPreviewRenderer(
