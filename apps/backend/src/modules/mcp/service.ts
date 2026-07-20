@@ -196,6 +196,10 @@ function mcpConfirmationPayload(input: {
       value: input.action.requestJson,
       schema: input.tool.inputSchema,
     },
+    // `approve_always` is deliberately absent. The HITL gate cannot resolve an
+    // MCP tool's domain and risk level without contacting the install, so
+    // `respond` degrades the decision to a plain approve and records nothing —
+    // offering the button here would show the user a grant that was never made.
     decisionOptions: [
       {
         decision: "reject",

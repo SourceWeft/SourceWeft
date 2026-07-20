@@ -98,6 +98,20 @@ export function connectorActionApprovalPayload(
       label: "Approve",
       description: "Run this action once.",
     },
+    // Offered only when the action run carries the agent tool name the trust
+    // gate looks rules up by. Without it a rule could be written but never
+    // matched, so the button would promise a standing approval that silently
+    // never fires — worse than not offering it at all.
+    ...(input.action.agentToolName
+      ? [
+          {
+            decision: "approve_always" as const,
+            label: "Always allow",
+            description:
+              "Run this action now and approve the same action automatically until the grant expires.",
+          },
+        ]
+      : []),
   ];
   const providerStatus =
     input.action.status === "running"

@@ -35,6 +35,7 @@ import {
   mapSyncRun,
   mapWebhookEvent,
 } from "./mappers";
+import { agentToolTrustRuleMatches } from "./agent-tool-trust";
 import { redactConnectorSecrets } from "./security";
 import type {
   ConnectorActionRiskLevel,
@@ -1634,22 +1635,68 @@ export async function findAgentToolTrustRuleRecord(input: {
     .orderBy(desc(agentToolTrustRules.createdAt))
     .limit(50);
 
-  const connectorId = input.connectorId ?? null;
-  const targetType = input.targetType ?? null;
-  const targetId = input.targetId ?? null;
-  const match = rows.find((row) => {
-    if (row.connectorId !== connectorId) return false;
-    if ((row.targetType ?? null) !== targetType) return false;
-    if ((row.targetId ?? null) !== targetId) return false;
-    if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
-      return false;
-    }
-    return Array.isArray(row.allowedRiskLevels)
-      ? row.allowedRiskLevels.includes(input.riskLevel)
-      : false;
-  });
+  // The WHERE clause above narrows using the scope index; it is not the
+  // authority. `agentToolTrustRuleMatches` re-asserts every tenancy, status and
+  // expiry condition on the mapped record so that a future edit to the query
+  // (or a new index-driven rewrite) cannot widen which rules auto-approve.
+  const match = rows
+    .map(mapAgentToolTrustRule)
+    .find((rule) => agentToolTrustRuleMatches(rule, { ...input, now }));
 
-  return match ? mapAgentToolTrustRule(match) : null;
+  return match ?? null;
+}
+
+export async function listAgentToolTrustRuleRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  status?: AgentToolTrustRuleStatus;
+}) {
+  const rows = await db
+    .select()
+    .from(agentToolTrustRules)
+    .where(
+      and(
+        eq(agentToolTrustRules.teamId, input.teamId),
+        eq(agentToolTrustRules.workspaceId, input.workspaceId),
+        // Scoped to the owning user as well as the workspace: a trust rule is a
+        // personal grant, so one member must not be able to enumerate another
+        // member's standing approvals.
+        eq(agentToolTrustRules.userId, input.userId),
+        ...(input.status
+          ? [eq(agentToolTrustRules.status, input.status)]
+          : []),
+      ),
+    )
+    .orderBy(desc(agentToolTrustRules.createdAt))
+    .limit(200);
+
+  return rows.map(mapAgentToolTrustRule);
+}
+
+export async function revokeAgentToolTrustRuleRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  trustRuleId: string;
+}) {
+  const [row] = await db
+    .update(agentToolTrustRules)
+    .set({ status: "revoked", updatedAt: new Date() })
+    .where(
+      and(
+        eq(agentToolTrustRules.id, input.trustRuleId),
+        // Tenancy and ownership are part of the WHERE rather than checked after
+        // the read: without them a known rule id would be revocable — and, by
+        // symmetry with any future update path, mutable — across workspaces.
+        eq(agentToolTrustRules.teamId, input.teamId),
+        eq(agentToolTrustRules.workspaceId, input.workspaceId),
+        eq(agentToolTrustRules.userId, input.userId),
+      ),
+    )
+    .returning();
+
+  return row ? mapAgentToolTrustRule(row) : null;
 }
 
 export async function createAgentToolTrustRuleRecord(input: {

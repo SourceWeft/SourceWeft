@@ -243,6 +243,144 @@ export function createConnectorActionInterruptConfigs(
   return configs;
 }
 
+/**
+ * Resolves the trust-rule scope for a connector action *without* proposing an
+ * action run. The approval gate has to answer "is there a standing approval for
+ * this?" before it creates any state, so this deliberately mirrors the connector
+ * selection in `createConnectorActionApprovalRequest` but performs no writes.
+ *
+ * The risk level comes from the registered manifest, never from the caller's
+ * args: it is the value the trust rule is contained by, so letting a tool call
+ * influence it would defeat risk containment entirely.
+ *
+ * Returns `null` for anything ambiguous (unknown tool, no active connector,
+ * connector selection required). Callers must treat `null` as "prompt the
+ * user" — failing closed is the only safe direction here.
+ */
+export async function resolveConnectorActionTrustScope(
+  context: ConnectorActionToolContext,
+  input: {
+    args: Record<string, unknown>;
+    excludeConnectorTypes?: readonly string[];
+    toolName: string;
+  },
+) {
+  const match = findAgentAction({
+    excludeConnectorTypes: input.excludeConnectorTypes,
+    toolName: input.toolName,
+  });
+  if (!match || !match.action.requiresApproval || !match.action.agentToolName) {
+    return null;
+  }
+  const connectors = await listSourceConnectorRecords({
+    teamId: context.teamId,
+    workspaceId: context.workspaceId,
+  });
+  const activeConnectors =
+    activeConnectorsByType(connectors).get(match.manifest.type) ?? [];
+  if (activeConnectors.length === 0) {
+    return null;
+  }
+  const connectorId =
+    typeof input.args.connectorId === "string"
+      ? input.args.connectorId
+      : undefined;
+  let connector: SourceConnectorRecord;
+  try {
+    connector = chooseConnector({
+      connectorId,
+      connectorType: match.manifest.type,
+      connectors: activeConnectors,
+    });
+  } catch {
+    return null;
+  }
+  return {
+    domain: "connector" as const,
+    toolName: match.action.agentToolName,
+    connectorId: connector.id,
+    riskLevel: match.action.riskLevel,
+  };
+}
+
+/**
+ * Proposes and immediately approves a connector action on behalf of a matched
+ * trust rule, returning the execution ref the resumed tool call needs.
+ *
+ * This exists because a connector tool cannot simply be resumed with
+ * "approve": the tool body looks for an already-approved action run and
+ * otherwise proposes one and throws `CONNECTOR_ACTION_NOT_APPROVED`. Skipping
+ * the prompt therefore has to leave behind the same durable action run the
+ * prompt would have produced — which also means a trust-approved action is
+ * still fully auditable in `connector_action_runs`, with `approvedBy` set to
+ * the user whose rule authorised it.
+ *
+ * `connectorActionRunner.approve` re-checks `connector.action.approve` for that
+ * user, so a member who has since lost approval rights cannot keep executing
+ * through an old rule.
+ */
+export async function approveConnectorActionForTrustRule(
+  context: ConnectorActionToolContext,
+  input: {
+    args: Record<string, unknown>;
+    excludeConnectorTypes?: readonly string[];
+    toolCallId: string;
+    toolName: string;
+  },
+) {
+  const match = findAgentAction({
+    excludeConnectorTypes: input.excludeConnectorTypes,
+    toolName: input.toolName,
+  });
+  if (!match || !match.action.requiresApproval || !match.action.agentToolName) {
+    return null;
+  }
+  const connectors = await listSourceConnectorRecords({
+    teamId: context.teamId,
+    workspaceId: context.workspaceId,
+  });
+  const activeConnectors =
+    activeConnectorsByType(connectors).get(match.manifest.type) ?? [];
+  if (activeConnectors.length === 0) {
+    return null;
+  }
+  const connectorId =
+    typeof input.args.connectorId === "string"
+      ? input.args.connectorId
+      : undefined;
+  const connector = chooseConnector({
+    connectorId,
+    connectorType: match.manifest.type,
+    connectors: activeConnectors,
+  });
+  const { connectorId: _connectorId, ...requestJson } = input.args;
+  const proposed = await connectorActionRunner.propose({
+    workspaceId: context.workspaceId,
+    userId: context.userId,
+    connectorId: connector.id,
+    actionType: match.action.type,
+    agentToolName: match.action.agentToolName,
+    requestJson,
+    idempotencyKey: connectorActionIdempotencyKey({
+      context,
+      fallback: input.toolCallId,
+      toolName: input.toolName,
+    }),
+  });
+  const approved = await connectorActionRunner.approve({
+    workspaceId: context.workspaceId,
+    userId: context.userId,
+    connectorId: connector.id,
+    actionRunId: proposed.action.id,
+  });
+  return {
+    actionRunId: approved.action.id,
+    connectorId: connector.id,
+    requestJson,
+    toolName: match.action.agentToolName,
+  };
+}
+
 export async function createConnectorActionApprovalRequest(
   context: ConnectorActionToolContext,
   input: {

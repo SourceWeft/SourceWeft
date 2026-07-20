@@ -30,6 +30,8 @@ import type {
   UpdateConnectorRequest,
   RespondAgentConfirmationRequest,
   RespondAgentConfirmationResponse,
+  ListAgentToolTrustRulesResponse,
+  RevokeAgentToolTrustRuleResponse,
 } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
@@ -214,6 +216,23 @@ export class ConnectorsClient {
     return this.http.post<RespondAgentConfirmationResponse>(
       `/v1/workspaces/${encode(workspaceId)}/agent-confirmations/${encode(confirmationId)}/respond`,
       input,
+    );
+  }
+
+  /**
+   * Standing "always allow" approvals the signed-in user has granted in this
+   * workspace. Paired with {@link revokeAgentToolTrustRule}; the two exist so a
+   * trust rule is never something the user cannot inspect or take back.
+   */
+  listAgentToolTrustRules(workspaceId: string) {
+    return this.http.get<ListAgentToolTrustRulesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/agent-tool-trust-rules`,
+    );
+  }
+
+  revokeAgentToolTrustRule(workspaceId: string, trustRuleId: string) {
+    return this.http.post<RevokeAgentToolTrustRuleResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/agent-tool-trust-rules/${encode(trustRuleId)}/revoke`,
     );
   }
 

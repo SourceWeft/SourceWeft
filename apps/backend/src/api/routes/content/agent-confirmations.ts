@@ -40,6 +40,7 @@ export function registerAgentConfirmationRoutes(app: Hono) {
       decision: parsed.data.decision,
       editedArgs: parsed.data.editedArgs,
       note: parsed.data.note,
+      trust: parsed.data.trust,
     });
     await durableChatRunService.recordConfirmationResponse({
       run,
@@ -47,5 +48,37 @@ export function registerAgentConfirmationRoutes(app: Hono) {
       confirmation: result.confirmation,
     });
     return ApiResponse.success(c, result);
+  });
+
+  // A standing approval the user cannot see or cancel would be an invisible
+  // bypass of the confirmation prompt, so these two routes are a hard
+  // precondition for `approve_always` being offered anywhere in the product.
+  app.get("/agent-tool-trust-rules", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    return ApiResponse.success(
+      c,
+      await toolConfirmationRunner.listTrustRules({
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        userId: getSessionUserId(session),
+      }),
+    );
+  });
+
+  app.post("/agent-tool-trust-rules/:trustRuleId/revoke", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    return ApiResponse.success(
+      c,
+      await toolConfirmationRunner.revokeTrustRule({
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        userId: getSessionUserId(session),
+        trustRuleId: requireRouteParam(c, "trustRuleId"),
+      }),
+    );
   });
 }

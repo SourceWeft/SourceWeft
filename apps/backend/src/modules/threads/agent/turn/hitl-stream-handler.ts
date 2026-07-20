@@ -19,11 +19,13 @@ import {
 } from "./checkpoint";
 import type { DeepAgentTurnEvent } from "./events";
 import {
+  applyTrustedHitlApproval,
   buildAutoApprovedHitlResume,
   commandResumeFromHitlDecisions,
   createHitlConfirmation,
   extractHitlInterrupts,
   matchInterruptedToolCall,
+  resolveTrustedHitlApproval,
   type HitlActionBinding,
   type SandboxActionExecutionCursor,
 } from "./hitl-handler";
@@ -179,6 +181,60 @@ export async function* handleHitlStreamChunk(input: {
       beforeAssistantCheckpoint: hitlCheckpoint,
       autoApprovedHitlResumeCount,
     };
+  }
+
+  // Trust gate. Consulted after the "already approved earlier in this turn"
+  // check and *before* any confirmation is built, because building one for a
+  // connector proposes a durable action run and shows the user a prompt we have
+  // already decided not to ask. A matched rule replaces the prompt entirely; a
+  // miss falls through and the user is asked exactly as before.
+  //
+  // The same resume budget bounds this path: an auto-approved resume that keeps
+  // re-interrupting must not loop forever just because a trust rule exists.
+  if (input.autoApprovedHitlResumeCount < input.maxAutoApprovedHitlResumes) {
+    const trustedApproval = await resolveTrustedHitlApproval({
+      connectorContext: input.connectorToolContext,
+      hitlInterrupts,
+    });
+    if (
+      trustedApproval &&
+      (await applyTrustedHitlApproval({
+        approval: trustedApproval,
+        connectorContext: input.connectorToolContext,
+      }))
+    ) {
+      const autoApprovedHitlResumeCount = input.autoApprovedHitlResumeCount + 1;
+      logger.info(
+        "Agent HITL interrupt auto-approved by agent tool trust rules; resuming without a confirmation",
+        {
+          workspaceId: input.workspaceId,
+          threadId: input.threadId,
+          userId: input.userId,
+          decisionCount: trustedApproval.decisions.length,
+          trustRuleIds: trustedApproval.matches.map(
+            (match) => match.trustRuleId,
+          ),
+          autoApprovedHitlResumeCount,
+        },
+      );
+      const stream = (await input.agent.stream(
+        new Command({
+          resume: commandResumeFromHitlDecisions({
+            decisions: trustedApproval.decisions,
+            hitlInterruptId:
+              hitlInterrupts.length === 1 ? hitlInterrupts[0]?.id : undefined,
+          }),
+        }),
+        input.runConfig,
+      )) as AsyncGenerator<unknown>;
+      return {
+        kind: "replace-stream",
+        stream,
+        finalCheckpoint: hitlCheckpoint,
+        beforeAssistantCheckpoint: hitlCheckpoint,
+        autoApprovedHitlResumeCount,
+      };
+    }
   }
 
   if (!interruptCheckpoint.pending || !interruptCheckpoint.checkpoint) {

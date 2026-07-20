@@ -8,13 +8,23 @@ import type {
   ConnectorActionExecutionCursor,
 } from "../../../connectors/agent-tool-idempotency";
 import { peekConnectorActionExecutionRef } from "../../../connectors/agent-tool-idempotency";
-import { createConnectorActionApprovalRequest } from "../../../connectors/agent-tools";
+import {
+  approveConnectorActionForTrustRule,
+  createConnectorActionApprovalRequest,
+} from "../../../connectors/agent-tools";
+import {
+  findAgentToolTrustRuleForScope,
+  resolveAgentToolTrustScope,
+  touchAgentToolTrustRuleUse,
+  type AgentToolTrustScope,
+} from "../../../agent-confirmations/trust-rules";
 import { mcpService } from "../../../mcp";
 import { ContentError } from "../../../content/errors";
 import {
   getAgentToolDefinition,
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
+import { logger } from "../../../../shared/logger";
 import { toObjectRecord } from "./content";
 import { parseToolArgs, sameToolArgs } from "./output-normalizer";
 import type { ObservedAgentToolCall } from "./tool-tracker";
@@ -292,6 +302,22 @@ function createSandboxToolConfirmation(input: {
       decisionOptions: [
         { decision: "reject", label: "Reject" },
         { decision: "approve", label: "Approve" },
+        // Gated on the registry declaring a risk level, because that is exactly
+        // what `resolveAgentToolTrustScope` requires: a tool with no declared
+        // risk cannot be contained by `allowedRiskLevels`, so no rule is ever
+        // written for it and the option would be a promise the server cannot
+        // keep. The displayed risk falls back to "high" above; the trust scope
+        // deliberately does not.
+        ...(definition?.riskLevel
+          ? [
+              {
+                decision: "approve_always" as const,
+                label: "Always allow",
+                description:
+                  "Run this action now and approve the same action automatically until the grant expires.",
+              },
+            ]
+          : []),
       ],
       execution: {
         providerStatus: "not_executed",
@@ -541,6 +567,143 @@ export function buildAutoApprovedHitlResumeDecisions(input: {
   toolCalls?: ObservedAgentToolCall[];
 }): ToolApprovalResumeDecision[] | null {
   return buildAutoApprovedHitlResume(input)?.decisions ?? null;
+}
+
+export type TrustedHitlApprovalMatch = {
+  action: HitlActionRequest;
+  actionIndex: number;
+  hitlInterruptId?: string;
+  scope: AgentToolTrustScope;
+  trustRuleId: string;
+};
+
+export type TrustedHitlApproval = {
+  decisions: ToolApprovalResumeDecision[];
+  matches: TrustedHitlApprovalMatch[];
+};
+
+/**
+ * Read-only pass over an interrupt: does every single interrupted action have a
+ * live trust rule covering it?
+ *
+ * All-or-nothing on purpose. An interrupt is resumed with one decision list, so
+ * partially auto-approving would mean silently executing the covered actions
+ * while the user is still being asked about the rest — the user would approve a
+ * prompt whose siblings had already run. Returning `null` (prompt for
+ * everything) is the only behaviour that keeps the prompt honest.
+ *
+ * This function performs no writes, so bailing out costs nothing and leaves no
+ * trace: rules are only marked used once the whole interrupt is covered.
+ */
+export async function resolveTrustedHitlApproval(input: {
+  connectorContext: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+  };
+  hitlInterrupts: HitlInterruptRequest[];
+}): Promise<TrustedHitlApproval | null> {
+  const matches: TrustedHitlApprovalMatch[] = [];
+  const tenant = {
+    teamId: input.connectorContext.teamId,
+    workspaceId: input.connectorContext.workspaceId,
+    userId: input.connectorContext.userId,
+  };
+
+  try {
+    for (const interruptRequest of input.hitlInterrupts) {
+      for (const [index, action] of interruptRequest.actionRequests.entries()) {
+        const scope = await resolveAgentToolTrustScope({
+          args: action.args,
+          context: tenant,
+          toolName: action.name,
+        });
+        if (!scope) {
+          return null;
+        }
+        const rule = await findAgentToolTrustRuleForScope({ scope, tenant });
+        if (!rule) {
+          return null;
+        }
+        matches.push({
+          action,
+          actionIndex: index,
+          ...(interruptRequest.id
+            ? { hitlInterruptId: interruptRequest.id }
+            : {}),
+          scope,
+          trustRuleId: rule.id,
+        });
+      }
+    }
+  } catch (error) {
+    // A trust rule is a convenience over the approval prompt, never a
+    // requirement for it. If the lookup itself fails we ask the user, which is
+    // the same thing that happens when no rule exists — an unavailable trust
+    // store must never be able to break a turn, and it must certainly never
+    // fail in the direction of auto-approving.
+    logger.warn("Agent tool trust rule lookup failed; falling back to prompt", {
+      workspaceId: tenant.workspaceId,
+      userId: tenant.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
+  return matches.length > 0
+    ? { decisions: matches.map(() => ({ type: "approve" as const })), matches }
+    : null;
+}
+
+/**
+ * Side-effecting half of the trust gate, run only after
+ * {@link resolveTrustedHitlApproval} confirmed the whole interrupt is covered.
+ *
+ * Connector actions get a real proposed+approved action run pushed onto the
+ * execution cursor because the connector tool body refuses to execute without
+ * one; skipping that would turn a matched trust rule into a hard tool failure
+ * rather than a silent approval.
+ */
+export async function applyTrustedHitlApproval(input: {
+  approval: TrustedHitlApproval;
+  connectorContext: {
+    actionApprovalCursor?: ConnectorActionApprovalCursor;
+    actionExecutionCursor?: ConnectorActionExecutionCursor;
+    actionApprovalScope?: string;
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+  };
+}) {
+  const tenant = {
+    teamId: input.connectorContext.teamId,
+    workspaceId: input.connectorContext.workspaceId,
+    userId: input.connectorContext.userId,
+  };
+
+  for (const match of input.approval.matches) {
+    if (match.scope.connectorId) {
+      const ref = await approveConnectorActionForTrustRule(
+        input.connectorContext,
+        {
+          args: match.action.args,
+          // The approval cursor supplies the real idempotency key whenever the
+          // turn has one; this fallback only has to be stable for a retry of
+          // the same interrupt, which is why it is derived and not random.
+          toolCallId: `trust:${match.hitlInterruptId ?? "hitl"}:${match.actionIndex}:${match.action.name}`,
+          toolName: match.action.name,
+        },
+      );
+      if (!ref) {
+        return false;
+      }
+      input.connectorContext.actionExecutionCursor ??= { refs: [], value: 0 };
+      input.connectorContext.actionExecutionCursor.refs.push(ref);
+    }
+    await touchAgentToolTrustRuleUse({ trustRuleId: match.trustRuleId, tenant });
+  }
+
+  return true;
 }
 
 export async function createHitlConfirmation(input: {
