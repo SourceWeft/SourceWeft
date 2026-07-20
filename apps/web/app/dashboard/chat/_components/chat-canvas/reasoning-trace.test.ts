@@ -10,10 +10,6 @@ import {
   isToolConfirmationResolved,
   isReasoningTraceThinking,
 } from "./reasoning-trace-state";
-import {
-  getTodoListTraceItems,
-  isTodoListTraceStep,
-} from "./reasoning-trace-todos";
 import { formatThoughtDuration } from "./duration-format";
 import type { ToolConfirmationRequestOutput } from "./tool-confirmation-state";
 
@@ -114,85 +110,6 @@ test("async background tool work keeps thinking title without hardcoding video c
       },
     }),
     "Thinking · Running command",
-  );
-});
-
-test("todo list trace steps are detected from generic display metadata", () => {
-  assert.equal(
-    isTodoListTraceStep({
-      id: "deepagents:todos",
-      title: "Task plan",
-      status: "in_progress",
-      items: [],
-      metadata: {
-        display: "todo_list",
-        visibility: "user",
-      },
-    }),
-    true,
-  );
-
-  assert.equal(
-    isTodoListTraceStep({
-      id: "deepagents:todos",
-      title: "Task plan",
-      status: "in_progress",
-      items: [],
-      metadata: {
-        display: "todo_list",
-      },
-    }),
-    false,
-  );
-});
-
-test("todo list trace items normalize public todo metadata", () => {
-  assert.deepEqual(
-    getTodoListTraceItems({
-      todos: [
-        {
-          content: "Plan content structure",
-          description: "Outline the main sections",
-          id: "todo-1",
-          status: "completed",
-        },
-        {
-          content: "Generate draft",
-          status: "in_progress",
-        },
-        {
-          title: "Review final output",
-          status: "pending",
-        },
-        {
-          content: "Ignore unsupported status",
-          status: "blocked",
-        },
-      ],
-    }),
-    [
-      {
-        content: "Plan content structure",
-        description: "Outline the main sections",
-        id: "todo-1",
-        status: "completed",
-      },
-      {
-        content: "Generate draft",
-        id: "1:Generate draft",
-        status: "in_progress",
-      },
-      {
-        content: "Review final output",
-        id: "2:Review final output",
-        status: "pending",
-      },
-      {
-        content: "Ignore unsupported status",
-        id: "3:Ignore unsupported status",
-        status: "pending",
-      },
-    ],
   );
 });
 

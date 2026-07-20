@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { VIDEO_PRESENTATION_LABELLED_STAGE_IDS } from "@sourceweft/builtin-tool-video-presentation";
-import { GENERATE_VIDEO_PRESENTATION_TOOL_NAME } from "@sourceweft/builtin-tool-video-presentation/agent-tool-defs";
 import {
   canRenderVideoPresentationScenes,
   isVideoPresentationFailed,
   resolveVideoProjectStageLabel,
 } from "@sourceweft/builtin-tool-video-presentation/ui";
-import { getArtifactStageLabel } from "../chat-canvas/reasoning-trace-tools";
 
 describe("video presentation capability ui", () => {
   it("labels current worker stages", () => {
@@ -52,22 +49,9 @@ describe("video presentation capability ui", () => {
     ).toBe("Publishing video project");
   });
 
-  // Regression: the preview panel and the message trace each kept their own
-  // stage list and drifted, so one stage read two different ways.
-  it("words every stage exactly like the message trace does", () => {
-    for (const stage of VIDEO_PRESENTATION_LABELLED_STAGE_IDS) {
-      const payload = { generation: { stage } };
-      const traceLabel = getArtifactStageLabel(
-        GENERATE_VIDEO_PRESENTATION_TOOL_NAME,
-        payload,
-      );
-      expect(traceLabel, `stage ${stage} has no trace label`).toBeTruthy();
-      expect(resolveVideoProjectStageLabel(payload), `stage ${stage}`).toBe(
-        traceLabel,
-      );
-    }
-  });
-
+  // The cross-surface wording regression (preview panel vs message trace) is
+  // asserted where the words are owned:
+  // packages/builtin-tool-video-presentation/tests/stage-labels.test.ts.
   it("falls back to the capability's own preparing copy", () => {
     expect(resolveVideoProjectStageLabel({})).toBe("Preparing video project");
   });

@@ -1,7 +1,6 @@
 import { Loader2 } from "lucide-react";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
 import { groupConsecutiveToolItems } from "./assistant-activity-groups";
-import { buildAssistantActivityItems } from "./assistant-activity-items";
 import type { AssistantActivityItem } from "./assistant-activity-items";
 import {
   ASSISTANT_ACTIVITY_ICON_CLASS,
@@ -13,7 +12,6 @@ import { AssistantToolCard } from "./assistant-tool-card";
 import { WebToolResults } from "../web-tool-results";
 import type {
   CitationRecord,
-  MessageVersion,
   ToolConfirmationResolution,
 } from "./types";
 
@@ -186,65 +184,5 @@ export function AssistantActivityRenderItems({
         </div>
       ))}
     </>
-  );
-}
-
-export function AssistantActivityStack({
-  assistantText,
-  availableCitations,
-  isStreaming,
-  onCitationClick,
-  onWorkfileClick,
-  placeholderPhase,
-  isCancelled = false,
-  resolvedConfirmations = [],
-  version,
-}: {
-  assistantText?: string;
-  availableCitations?: CitationRecord[];
-  onCitationClick?: (citation: CitationRecord) => void;
-  onWorkfileClick?: (path: string) => void;
-  placeholderPhase?: AssistantActivityPlaceholderPhase | null;
-  isCancelled?: boolean;
-  isStreaming: boolean;
-  resolvedConfirmations?: ToolConfirmationResolution[];
-  version: MessageVersion;
-}) {
-  const items = buildAssistantActivityItems({
-    assistantText,
-    steps: version.thinkingSteps,
-    toolCalls: version.toolCalls,
-    traceParts: version.traceParts,
-  });
-  const shouldShowPlaceholder = Boolean(placeholderPhase) && !isCancelled;
-
-  if (items.length === 0) {
-    if (shouldShowPlaceholder) {
-      return (
-        <div className="my-1.5">
-          <AssistantActivityPlaceholder phase={placeholderPhase!} />
-        </div>
-      );
-    }
-    return null;
-  }
-
-  return (
-    <div
-      className="my-1.5 max-w-2xl space-y-1 text-sm"
-      data-assistant-activity-stack="true"
-    >
-      {shouldShowPlaceholder ? (
-        <AssistantActivityPlaceholder phase={placeholderPhase!} />
-      ) : null}
-      <AssistantActivityRenderItems
-        availableCitations={availableCitations}
-        isStreaming={isStreaming}
-        items={items}
-        onCitationClick={onCitationClick}
-        onWorkfileClick={onWorkfileClick}
-        resolvedConfirmations={resolvedConfirmations}
-      />
-    </div>
   );
 }

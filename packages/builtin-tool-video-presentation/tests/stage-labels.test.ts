@@ -10,6 +10,7 @@ import {
   getVideoPresentationStageLabel,
 } from "../src/stage-labels";
 import { videoPresentationPresentation } from "../src/presentation";
+import { resolveVideoProjectStageLabel } from "../src/ui/artifact-view";
 
 test("every stage the payload can carry has words", () => {
   for (const stage of videoPresentationGenerationStageSchema.options) {
@@ -34,6 +35,21 @@ test("stageStep reports the same words as the stage-label source", () => {
     assert.ok(step, `stage ${stage} produced no step`);
     assert.equal(step.item, getVideoPresentationStageLabel(stage), stage);
   }
+});
+
+// Regression: the preview panel and the message trace each kept their own
+// stage list and drifted, so one stage read two different ways. Both now read
+// a payload through this capability, so the words cannot diverge.
+test("payload stage copy is the same words as the stage-label source", () => {
+  for (const stage of VIDEO_PRESENTATION_LABELLED_STAGE_IDS) {
+    const label = resolveVideoProjectStageLabel({ generation: { stage } });
+    assert.ok(label, `stage ${stage} has no payload label`);
+    assert.equal(label, getVideoPresentationStageLabel(stage), `stage ${stage}`);
+  }
+});
+
+test("a payload with no stage falls back to this capability's preparing copy", () => {
+  assert.equal(resolveVideoProjectStageLabel({}), "Preparing video project");
 });
 
 test("legacy storyboard stage id folds onto its replacement", () => {
