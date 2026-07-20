@@ -267,7 +267,13 @@ export function DashboardSettingsCenterModalSkeleton({
 }: {
   activeTab?: SettingsCenterTab;
 }) {
-  const navItems: SettingsCenterTab[] = ["account", "team", "usage", "billing"];
+  const navItems: SettingsCenterTab[] = [
+    "account",
+    "team",
+    "usage",
+    "billing",
+    "approvals",
+  ];
 
   return (
     <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm">

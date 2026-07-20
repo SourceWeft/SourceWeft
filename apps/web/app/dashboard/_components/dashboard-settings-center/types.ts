@@ -1,6 +1,11 @@
 import type { billingClient } from "../../../../lib/sdk";
 
-export type SettingsCenterTab = "account" | "team" | "usage" | "billing";
+export type SettingsCenterTab =
+  | "account"
+  | "team"
+  | "usage"
+  | "billing"
+  | "approvals";
 export type BillingScope = "personal" | "team";
 export type BillingInterval = "monthly" | "yearly";
 export type BillingSummary = Awaited<ReturnType<typeof billingClient.getSummary>>;

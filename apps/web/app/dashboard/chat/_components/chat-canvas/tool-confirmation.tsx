@@ -8,6 +8,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import type { ToolConfirmationDecision as ToolConfirmationWireDecision } from "@sourceweft/sdk";
 import {
   Confirmation,
   ConfirmationAccepted,
@@ -39,6 +40,15 @@ import {
   type ToolConfirmationItem,
   type ToolConfirmationRequestOutput,
 } from "./tool-confirmation-state";
+import {
+  buildTrustPayload,
+  defaultTrustDurationChoiceId,
+  describeDecisionOutcome,
+  getConfirmationDecisionOptions,
+  hasAlwaysAllowOption,
+  trustDurationChoices,
+  type ToolConfirmationDecisionOption,
+} from "./tool-confirmation-trust";
 import type { ToolConfirmationResolution } from "./types";
 import type {
   ToolConfirmationDecision,
@@ -98,6 +108,20 @@ function confirmationStatusToApproval(
   return { id };
 }
 
+function decisionButtonVariant(
+  decision: ToolConfirmationDecisionOption["decision"],
+) {
+  if (decision === "reject") {
+    return "destructive" as const;
+  }
+  // "Always allow" is the wider grant, so it is the quieter button: the
+  // one-off approve stays the visually default choice.
+  if (decision === "approve_always") {
+    return "outline" as const;
+  }
+  return "default" as const;
+}
+
 function canDecide(
   confirmation: ToolConfirmationRequestOutput,
   state: ConfirmationState,
@@ -143,6 +167,9 @@ function ToolConfirmationPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [trustDurationId, setTrustDurationId] = useState(
+    defaultTrustDurationChoiceId,
+  );
   const submittedConfirmationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -155,6 +182,11 @@ function ToolConfirmationPanel({
   const requestLines = requestDetailLines(confirmation, toolCallInput);
   const commandText = sandboxExecuteCommandText({ confirmation, toolCallInput });
   const threadRunId = item.threadRunId ?? activeThreadRun?.id ?? null;
+  // Decisions are whatever the server offered for this confirmation. The card
+  // has no list of its own, so a producer that never offers `approve_always`
+  // can never grow an "Always allow" button by accident.
+  const decisionOptions = getConfirmationDecisionOptions(confirmation);
+  const offersAlwaysAllow = hasAlwaysAllowOption(confirmation);
   const respondable = canDecide(
     confirmation,
     state,
@@ -163,7 +195,7 @@ function ToolConfirmationPanel({
     threadRunId,
   );
 
-  async function respond(decision: ToolConfirmationDecision) {
+  async function respond(decision: ToolConfirmationWireDecision) {
     if (submittedConfirmationIdRef.current === confirmation.id) {
       return;
     }
@@ -178,6 +210,11 @@ function ToolConfirmationPanel({
     submittedConfirmationIdRef.current = confirmation.id;
     setHasSubmitted(true);
     const isRejectDecision = decision === "reject";
+    // Everything downstream of the card only distinguishes "it ran" from "it
+    // did not"; `approve_always` is a wire decision, not a third outcome.
+    const settledDecision: ToolConfirmationDecision = isRejectDecision
+      ? "reject"
+      : "approve";
     setIsBusy(true);
     setState("approval-responded");
     setApproval({
@@ -187,6 +224,8 @@ function ToolConfirmationPanel({
         ? "Rejected in SourceWeft."
         : "Approved in SourceWeft.",
     });
+    // Optimistic copy never mentions remembering: only the server's response
+    // can say whether a standing approval was actually created.
     setMessage(
       isRejectDecision
         ? "Rejected in SourceWeft. The action was not run."
@@ -201,13 +240,23 @@ function ToolConfirmationPanel({
           confirmation,
           threadRunId,
           assistantMessageId: item.assistantMessageId,
+          ...(decision === "approve_always"
+            ? { trust: buildTrustPayload(trustDurationId) }
+            : {}),
         },
       );
       const status = result.confirmation.status;
+      // `trustRule` is the only truthful signal that anything was remembered.
+      // It is absent whenever the server degraded `approve_always` to a plain
+      // approve, and the copy has to follow it rather than the button pressed.
+      const outcomeMessage = describeDecisionOutcome({
+        decision,
+        trustRule: result.trustRule ?? null,
+      });
       if (isRejectDecision || status === "rejected") {
         setState("output-denied");
         setMessage("Rejected in SourceWeft. The action was not run.");
-        onSettled?.({ decision, item, result });
+        onSettled?.({ decision: settledDecision, item, result });
       } else if (status === "failed") {
         setState("output-error");
         setMessage("Action failed.");
@@ -219,12 +268,8 @@ function ToolConfirmationPanel({
           approved: !isRejectDecision,
           reason: "Approved in SourceWeft.",
         });
-        setMessage(
-          isRejectDecision
-            ? "Rejected in SourceWeft. The action was not run."
-            : "Approved in SourceWeft.",
-        );
-        onSettled?.({ decision, item, result });
+        setMessage(outcomeMessage);
+        onSettled?.({ decision: settledDecision, item, result });
       }
     } catch (error) {
       const errorMessage =
@@ -319,20 +364,38 @@ function ToolConfirmationPanel({
           </ConfirmationTitle>
         </div>
       ) : null}
-      <ConfirmationActions>
-        <ConfirmationAction
-          disabled={!respondable}
-          onClick={() => void respond("reject")}
-          variant="destructive"
-        >
-          Reject
-        </ConfirmationAction>
-        <ConfirmationAction
-          disabled={!respondable}
-          onClick={() => void respond("approve")}
-        >
-          {isBusy ? "Approving..." : "Approve"}
-        </ConfirmationAction>
+      <ConfirmationActions className="flex-wrap">
+        {offersAlwaysAllow ? (
+          <label className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+            Remember for
+            <select
+              aria-label="How long to remember this approval"
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+              disabled={!respondable}
+              onChange={(event) => setTrustDurationId(event.target.value)}
+              value={trustDurationId}
+            >
+              {trustDurationChoices.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {decisionOptions.map((option) => (
+          <ConfirmationAction
+            disabled={!respondable}
+            key={option.decision}
+            onClick={() => void respond(option.decision)}
+            {...(option.description ? { title: option.description } : {})}
+            variant={decisionButtonVariant(option.decision)}
+          >
+            {isBusy && option.decision !== "reject"
+              ? "Approving..."
+              : option.label}
+          </ConfirmationAction>
+        ))}
       </ConfirmationActions>
     </Confirmation>
   );

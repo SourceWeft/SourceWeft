@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { LayoutGrid, Receipt, User, Users, X } from "lucide-react";
+import { LayoutGrid, Receipt, ShieldCheck, User, Users, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { AccountPanel } from "./account-panel";
 import { BillingPanel } from "./billing-panel";
 import { TeamPanel } from "./team-panel";
+import { TrustRulesPanel } from "./trust-rules-panel";
 import { UsagePanel } from "./usage-panel";
 import type { BillingScope, SettingsCenterTab } from "./types";
 
@@ -23,6 +24,7 @@ const menuItems: Array<{
   { key: "team", label: "Team", icon: Users },
   { key: "usage", label: "Usage", icon: LayoutGrid },
   { key: "billing", label: "Billing", icon: Receipt },
+  { key: "approvals", label: "Approvals", icon: ShieldCheck },
 ];
 
 export function DashboardSettingsCenterModal({
@@ -151,6 +153,7 @@ export function DashboardSettingsCenterModal({
               )}
               {activeTab === "usage" && <UsagePanel />}
               {activeTab === "billing" && <BillingPanel />}
+              {activeTab === "approvals" && <TrustRulesPanel />}
             </div>
           </div>
         </div>

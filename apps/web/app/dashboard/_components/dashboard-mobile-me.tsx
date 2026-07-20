@@ -9,6 +9,7 @@ import {
   CreditCard,
   LayoutGrid,
   LogOut,
+  ShieldCheck,
   User,
   Users,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import {
   AccountPanel,
   BillingPanel,
   TeamPanel,
+  TrustRulesPanel,
   UsagePanel,
   type SettingsCenterTab,
 } from "./dashboard-settings-center-modal";
@@ -60,6 +62,12 @@ const panelItems: Array<{
     description: "Subscription, plan, and billing portal",
     icon: CreditCard,
   },
+  {
+    key: "approvals",
+    label: "Approvals",
+    description: "Actions you chose to always allow",
+    icon: ShieldCheck,
+  },
 ];
 
 const panelTitleByKey: Record<MobileMePanel, string> = {
@@ -67,6 +75,7 @@ const panelTitleByKey: Record<MobileMePanel, string> = {
   team: "Team",
   usage: "Usage",
   billing: "Billing",
+  approvals: "Approvals",
 };
 
 function getInitials(name?: string, email?: string) {
@@ -265,6 +274,7 @@ export function DashboardMobileMe() {
             ) : null}
             {activePanel === "usage" ? <UsagePanel /> : null}
             {activePanel === "billing" ? <BillingPanel /> : null}
+            {activePanel === "approvals" ? <TrustRulesPanel /> : null}
           </div>
         ) : null}
       </div>
