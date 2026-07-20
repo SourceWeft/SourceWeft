@@ -1,6 +1,10 @@
+import {
+  buildArtifactRestUrl,
+  isSafeFlatArtifactAssetFileName,
+  type ArtifactResource,
+} from "@sourceweft/contracts/artifact-urls";
 import { NextResponse, type NextRequest } from "next/server";
 import { apiBaseUrl } from "../../../lib/api-base-url";
-import { stripExecutableVisualDeckHtmlForExport } from "../../../lib/visual-deck/export/html-sanitize";
 
 const VISUAL_DECK_HTML_CSP = [
   "sandbox allow-scripts allow-downloads allow-forms allow-popups",
@@ -34,14 +38,6 @@ const GENERIC_HTML_ARTIFACT_CSP = [
 
 function badRequest(message: string) {
   return new NextResponse(message, { status: 400 });
-}
-
-function isSafeFlatArtifactAssetFileName(fileName: string) {
-  const normalized = fileName.trim();
-  if (!normalized || normalized === "." || normalized === "..") {
-    return false;
-  }
-  return !normalized.includes("/") && !normalized.includes("\\") && !normalized.includes("..");
 }
 
 export function patchVisualDeckHtml(html: string) {
@@ -265,16 +261,23 @@ export async function proxyArtifactFile(request: NextRequest) {
     return badRequest("asset must be previewImage when provided.");
   }
 
-  let upstreamAction = isDownload ? "download" : "file";
+  let resource: ArtifactResource = isDownload
+    ? { kind: "download" }
+    : { kind: "file" };
   if (asset === "previewImage") {
-    upstreamAction = "preview-image";
+    resource = { kind: "previewImage" };
   } else if (assetFileName) {
-    upstreamAction = `assets/${encodeURIComponent(assetFileName)}`;
+    resource = { fileName: assetFileName, kind: "asset" };
   }
-  const upstreamUrl = new URL(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/${upstreamAction}`,
-    apiBaseUrl,
-  );
+  const upstreamPath = buildArtifactRestUrl({
+    artifactId,
+    resource,
+    workspaceId,
+  });
+  if (!upstreamPath) {
+    return badRequest("assetFileName must be a flat artifact asset file name.");
+  }
+  const upstreamUrl = new URL(upstreamPath, apiBaseUrl);
   const response = await fetch(upstreamUrl, {
     cache: "no-store",
     headers: {

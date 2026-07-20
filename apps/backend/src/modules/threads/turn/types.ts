@@ -7,16 +7,7 @@ import type { AgentCitation } from "../agent/citation-registry";
 import type { ContentBillingPort } from "../../content/billing-port";
 import type { LlmExecutionConfig } from "../../content/model-gateway-audit";
 import type { EnabledSkillDescriptor } from "../../skills/types";
-import type {
-  ArtifactIntentDecision,
-  GenerateImageToolSelection,
-  ImageModelCapabilities,
-} from "@sourceweft/builtin-tool-generate-image";
-import type {
-  GenerateVideoPresentationToolSelection,
-  PublishArtifactToolSelection,
-} from "../../artifacts/types";
-import type { RuntimeModelGatewayProfile } from "../../../shared/model-gateway/types";
+import type { ThreadModelKind } from "../model-settings";
 import type { TraceContext } from "../../llm-observability";
 import { runToolRetrieval } from "../agent/turn/retrieval-runner";
 import type { MessageRecord } from "../../content/types";
@@ -66,19 +57,17 @@ export type MessageContentJson = {
 };
 
 /**
- * Per-turn tool settings input.
+ * Per-turn tool settings input: one opaque entry per tool name, plus the few
+ * keys the turn pipeline owns itself.
+ *
+ * Deliberately untyped per capability. Each tool's selection shape is the
+ * capability's own vocabulary, and it is the capability's `turnSelection` hook
+ * that reads it — listing the shapes here would only let the pipeline reach
+ * into a capability it must not know about, and would grow with every new
+ * deliverable.
  */
 export type ThreadToolsSelection = {
   skillRuntimeConfig?: Record<string, Record<string, unknown>>;
-  [AGENT_TOOL_NAMES.generateImage]?: GenerateImageToolSelection;
-  [AGENT_TOOL_NAMES.publishArtifact]?: PublishArtifactToolSelection;
-  [AGENT_TOOL_NAMES.generateVideoPresentation]?: GenerateVideoPresentationToolSelection;
-  [AGENT_TOOL_NAMES.webSearch]?: {
-    enabled?: boolean;
-  };
-  [AGENT_TOOL_NAMES.webFetch]?: {
-    enabled?: boolean;
-  };
   [key: string]: unknown;
 };
 
@@ -150,7 +139,16 @@ export type ResolvedThreadCommand = {
   workflow?: ResolvedCommandWorkflow;
 };
 
-export type StreamThreadEventInput = {
+/**
+ * Pre-`llm`/`image`/`vision` way of naming a profile per model kind, kept for
+ * older clients. Written as one entry per model kind rather than a hand-listed
+ * pair so the turn pipeline can read whichever kind a tool asks about.
+ */
+export type LegacyThreadProfileAliasInput = Partial<
+  Record<`${ThreadModelKind}ProfileAlias`, string | null>
+>;
+
+export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
   workspaceId: string;
   threadId: string;
   userId: string;
@@ -167,8 +165,6 @@ export type StreamThreadEventInput = {
   llm?: LlmExecutionConfig;
   image?: LlmExecutionConfig;
   vision?: LlmExecutionConfig;
-  imageProfileAlias?: string | null;
-  visionProfileAlias?: string | null;
   userMessageParentId?: string | null;
   assistantMessageParentId?: string | null;
   agentMode?: "continue" | "replay" | "fork";
@@ -232,12 +228,14 @@ export type PreparedThreadTurn = {
   toolPermissions: Record<string, ToolPermission>;
   effectiveTools: ThreadToolsSelection;
   runtimeTools: Record<string, PreparedRuntimeTool>;
-  generateImageTool: GenerateImageToolSelection | undefined;
-  artifactIntent: ArtifactIntentDecision;
-  imageProfile: {
-    profile: RuntimeModelGatewayProfile;
-    capabilities: ImageModelCapabilities;
-  } | null;
+  /**
+   * What each capability's turn preflight parked for its own tool, keyed by
+   * tool name. Opaque here on purpose: the pipeline stores it and the same
+   * capability reads it back when the tool is bound. Three capability-shaped
+   * fields used to sit in this spot; a fourth deliverable would have added a
+   * fourth.
+   */
+  turnState: Record<string, unknown>;
   timezone: string;
   userMessage: MessageRecord;
   runTraceId: string;

@@ -167,7 +167,6 @@ test("tool stream handler leaves generic tool logging to middleware", async () =
 
     await collectToolStreamEvents(
       handleToolStartStreamChunk({
-        artifactIntent: undefined as never,
         prepared,
         runtime,
         snapshot: {
@@ -239,7 +238,6 @@ test("skill instruction read stream labels use selected skill display name", asy
 
   const startEvents = await collectToolStreamEvents(
     handleToolStartStreamChunk({
-      artifactIntent: undefined as never,
       prepared,
       runtime,
       snapshot: {
@@ -2863,10 +2861,10 @@ test("video presentation progress events map to background build steps", () => {
   assert.equal(progressEvent.tool, "generate_video_presentation");
   assert.equal(planning?.id, "video-presentation-generation");
   assert.equal(planning?.title, "Building video presentation");
-  assert.deepEqual(planning?.items, ["Planning video presentation artifact"]);
+  assert.deepEqual(planning?.items, ["Planning video scenes"]);
   assert.deepEqual(generating?.items, ["Building video project"]);
   assert.equal(ready?.title, "Video presentation ready");
-  assert.deepEqual(ready?.items, ["Video project ready"]);
+  assert.deepEqual(ready?.items, ["Ready for browser video export"]);
   assert.equal(ready?.metadata?.artifactType, "video_presentation");
 });
 
@@ -3918,19 +3916,23 @@ test("runtime prompt treats image auto mode as available but optional", () => {
     artifactToolRuntimePromptProviders: [
       imageRuntimePromptProvider as ArtifactToolRuntimePromptProvider,
     ],
-    artifactIntent: {
-      kind: "image",
-      shouldInjectTool: true,
-      source: "explicit_tool",
-      confidence: 0.55,
-      reason:
-        "User-facing image generation controls configured generate_image.",
-      config: {
-        aspectRatio: "auto",
-        quality: "auto",
-        style: "auto",
+    turnState: {
+      generate_image: {
+        artifactIntent: {
+          kind: "image",
+          shouldInjectTool: true,
+          source: "explicit_tool",
+          confidence: 0.55,
+          reason:
+            "User-facing image generation controls configured generate_image.",
+          config: {
+            aspectRatio: "auto",
+            quality: "auto",
+            style: "auto",
+          },
+          warnings: [],
+        },
       },
-      warnings: [],
     },
   });
 
@@ -3948,18 +3950,22 @@ test("runtime prompt blocks sandbox fallback when image generation is unavailabl
     artifactToolRuntimePromptProviders: [
       imageRuntimePromptProvider as ArtifactToolRuntimePromptProvider,
     ],
-    artifactIntent: {
-      kind: "image",
-      shouldInjectTool: false,
-      source: "skill",
-      confidence: 0.82,
-      reason: "A selected skill declares generate_image.",
-      config: {
-        aspectRatio: "auto",
-        quality: "auto",
-        style: "auto",
+    turnState: {
+      generate_image: {
+        artifactIntent: {
+          kind: "image",
+          shouldInjectTool: false,
+          source: "skill",
+          confidence: 0.82,
+          reason: "A selected skill declares generate_image.",
+          config: {
+            aspectRatio: "auto",
+            quality: "auto",
+            style: "auto",
+          },
+          warnings: ["image_model_unavailable"],
+        },
       },
-      warnings: ["image_model_unavailable"],
     },
   });
 

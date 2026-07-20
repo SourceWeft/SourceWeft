@@ -1,8 +1,14 @@
+import {
+  ARTIFACT_FILE_PROXY_ROUTE as ARTIFACT_FILE_API_ROUTE,
+  ARTIFACT_PREVIEW_PAGE_ROUTE,
+  LEGACY_ARTIFACT_PREVIEW_PROXY_ROUTE as LEGACY_ARTIFACT_PREVIEW_API_ROUTE,
+  buildArtifactPreviewUrl,
+  buildArtifactProxyUrl,
+  isSafeFlatArtifactAssetFileName as isSafeFlatArtifactAssetFileNameContract,
+  type ArtifactResource,
+} from "@sourceweft/contracts/artifact-urls";
 import { apiBaseUrl } from "../../../../lib/sdk";
 
-const ARTIFACT_FILE_API_ROUTE = "/api/artifact-file";
-const LEGACY_ARTIFACT_PREVIEW_API_ROUTE = "/api/artifact-preview";
-const ARTIFACT_PREVIEW_PAGE_ROUTE = "/artifact-preview";
 const ARTIFACT_FILE_ROUTE_PATTERN =
   /^\/v1\/workspaces\/([^/]+)\/artifacts\/([^/]+)\/(file|download)\/?$/;
 const ARTIFACT_ASSET_ROUTE_PATTERN =
@@ -35,39 +41,21 @@ type ParsedArtifactRoute =
       workspaceId: string;
     };
 
-export function isSafeFlatArtifactAssetFileName(fileName: string) {
-  const normalized = fileName.trim();
-  if (!normalized || normalized === "." || normalized === "..") {
-    return false;
-  }
-  return !normalized.includes("/") && !normalized.includes("\\") && !normalized.includes("..");
-}
+export const isSafeFlatArtifactAssetFileName =
+  isSafeFlatArtifactAssetFileNameContract;
 
-function buildArtifactUrl(input: {
-  artifactId: string;
+function artifactResource(input: {
   asset?: "previewImage";
   assetFileName?: string;
   download?: boolean;
-  route: string;
-  workspaceId: string;
-}) {
-  const params = new URLSearchParams({
-    artifactId: input.artifactId,
-    workspaceId: input.workspaceId,
-  });
-  if (input.download) {
-    params.set("download", "1");
-  }
-  if (input.asset) {
-    params.set("asset", input.asset);
+}): ArtifactResource {
+  if (input.asset === "previewImage") {
+    return { kind: "previewImage" };
   }
   if (input.assetFileName) {
-    if (!isSafeFlatArtifactAssetFileName(input.assetFileName)) {
-      return null;
-    }
-    params.set("assetFileName", input.assetFileName);
+    return { fileName: input.assetFileName, kind: "asset" };
   }
-  return `${input.route}?${params.toString()}`;
+  return input.download ? { kind: "download" } : { kind: "file" };
 }
 
 export function resolveArtifactProxyFileUrl(input: {
@@ -76,7 +64,13 @@ export function resolveArtifactProxyFileUrl(input: {
   download?: boolean;
   workspaceId: string;
 }) {
-  return buildArtifactUrl({ ...input, route: ARTIFACT_FILE_API_ROUTE }) ?? "";
+  return (
+    buildArtifactProxyUrl({
+      artifactId: input.artifactId,
+      resource: artifactResource(input),
+      workspaceId: input.workspaceId,
+    }) ?? ""
+  );
 }
 
 export function resolveArtifactPreviewImageUrl(input: {
@@ -165,11 +159,7 @@ export function resolveArtifactPageUrl(input: {
   artifactId: string;
   workspaceId: string;
 }) {
-  return buildArtifactUrl({
-    artifactId: input.artifactId,
-    route: ARTIFACT_PREVIEW_PAGE_ROUTE,
-    workspaceId: input.workspaceId,
-  }) ?? "";
+  return buildArtifactPreviewUrl(input);
 }
 
 export function resolveArtifactProxyAssetUrl(input: {
@@ -177,10 +167,9 @@ export function resolveArtifactProxyAssetUrl(input: {
   fileName: string;
   workspaceId: string;
 }) {
-  return buildArtifactUrl({
+  return buildArtifactProxyUrl({
     artifactId: input.artifactId,
-    assetFileName: input.fileName,
-    route: ARTIFACT_FILE_API_ROUTE,
+    resource: { fileName: input.fileName, kind: "asset" },
     workspaceId: input.workspaceId,
   });
 }

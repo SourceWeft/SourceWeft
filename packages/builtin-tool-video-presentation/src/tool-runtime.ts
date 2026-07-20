@@ -51,6 +51,11 @@ export interface VideoPresentationToolArtifacts {
     title: string;
     prompt: string;
     payload: unknown;
+    /**
+     * Same value the payload carries, handed to the host as its own field so
+     * reuse can match a column instead of scanning payloads.
+     */
+    requestKey: string;
   }): Promise<void>;
   findStatus(input: {
     teamId: string;
@@ -840,6 +845,7 @@ export function createGenerateVideoPresentationTool(
         title,
         prompt: payload.prompt,
         payload,
+        requestKey,
       });
 
       await deps.queue.enqueueRender(enqueuePayload);

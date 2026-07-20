@@ -2,6 +2,7 @@ import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import {
   AGENT_TOOLS,
   getAgentToolDefinition,
+  getAgentToolTurnSelection,
 } from "@sourceweft/agent-tool-registry";
 import type { ResolvedThreadCommand, StreamThreadEventInput } from "./types";
 import type { CapabilityToolListItem } from "@sourceweft/capability-runtime";
@@ -12,7 +13,12 @@ import { resolveToolCommandName } from "./thread-command";
 import type { SelectedSkillRuntimeContract } from "./active-skill-runtime";
 
 type ToolSelectionOptions = {
-  readonly forceGenerateImage?: boolean;
+  /**
+   * The user named this tool (slash command, prompt marker, tool command)
+   * rather than it being pulled in as a workflow default. Capabilities express
+   * what that implies through `turnSelection.directInvokeDefaults`.
+   */
+  readonly directInvoke?: boolean;
 };
 
 function selectedToolRecord(
@@ -42,7 +48,7 @@ export function resolveMarkerToolSelection(
       continue;
     }
     next = enableToolSelection(next, resolveToolCommandName(marker.value), {
-      forceGenerateImage: true,
+      directInvoke: true,
     });
   }
   return next;
@@ -57,7 +63,7 @@ export function mergeCommandTools(
   for (const toolName of command?.workflow?.defaultTools ?? []) {
     if (!isToolDenied(tools, toolName)) {
       next = enableToolSelection(next, toolName, {
-        forceGenerateImage: isToolCommand,
+        directInvoke: isToolCommand,
       });
     }
   }
@@ -67,7 +73,7 @@ export function mergeCommandTools(
   return isToolDenied(tools, command.toolName)
     ? next
     : enableToolSelection(next, command.toolName, {
-        forceGenerateImage: true,
+        directInvoke: true,
       });
 }
 
@@ -107,16 +113,6 @@ export function enableToolSelection(
   if (!toolName) {
     return tools;
   }
-  if (toolName === AGENT_TOOL_NAMES.generateImage) {
-    return {
-      ...(tools ?? {}),
-      [AGENT_TOOL_NAMES.generateImage]: {
-        ...((tools ?? {})[AGENT_TOOL_NAMES.generateImage] ?? {}),
-        enabled: true,
-        ...(options.forceGenerateImage ? { mode: "generate" as const } : {}),
-      },
-    };
-  }
   if (toolName === AGENT_TOOL_NAMES.webSearch) {
     return {
       ...(tools ?? {}),
@@ -131,6 +127,9 @@ export function enableToolSelection(
       [toolName]: {
         ...(selectedToolRecord(tools, toolName) ?? {}),
         enabled: true,
+        ...(options.directInvoke
+          ? (getAgentToolTurnSelection(toolName)?.directInvokeDefaults ?? {})
+          : {}),
       },
     };
   }
@@ -276,8 +275,8 @@ export function resolveToolPermissions(input: {
     }
   }
   const explicitWebAccessEnabled =
-    input.tools?.[AGENT_TOOL_NAMES.webSearch]?.enabled ??
-    input.tools?.[AGENT_TOOL_NAMES.webFetch]?.enabled;
+    selectedToolEnabled(input.tools, AGENT_TOOL_NAMES.webSearch) ??
+    selectedToolEnabled(input.tools, AGENT_TOOL_NAMES.webFetch);
   if (typeof explicitWebAccessEnabled === "boolean") {
     setPermission(
       AGENT_TOOL_NAMES.webSearch,

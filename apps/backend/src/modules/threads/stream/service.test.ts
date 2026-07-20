@@ -546,22 +546,7 @@ const prepared: PreparedThreadTurn = {
   toolPermissions: {},
   effectiveTools: {},
   runtimeTools: {},
-  generateImageTool: undefined,
-  artifactIntent: {
-    kind: null,
-    shouldInjectTool: false,
-    source: "none",
-    confidence: 0,
-    reason:
-      "generate_image is available for this turn when the model decides a visual artifact is needed.",
-    config: {
-      aspectRatio: "auto",
-      quality: "auto",
-      style: "auto",
-    },
-    warnings: [],
-  },
-  imageProfile: null,
+  turnState: {},
   timezone: "UTC",
   runTraceId: "user-message-1",
   userMessage: {

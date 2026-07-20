@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import { stripExecutableVisualDeckHtmlForExport } from "./html-sanitize";
+import { stripExecutableVisualDeckHtmlForExport } from "@sourceweft/builtin-tool-publish-artifact/visual-deck/html-sanitize";
 
 describe("stripExecutableVisualDeckHtmlForExport", () => {
   it("removes executable script surfaces while preserving deck content", () => {

@@ -9,7 +9,6 @@ import {
   getReasoningTraceTitle,
   isToolConfirmationResolved,
   isReasoningTraceThinking,
-  shouldShowGeneratedPresentationItem,
 } from "./reasoning-trace-state";
 import {
   getTodoListTraceItems,
@@ -115,49 +114,6 @@ test("async background tool work keeps thinking title without hardcoding video c
       },
     }),
     "Thinking · Running command",
-  );
-});
-
-test("sandbox presentation publisher card waits for completed artifact URL", () => {
-  assert.equal(
-    shouldShowGeneratedPresentationItem({
-      fileUrl: null,
-      isArtifactPublisher: true,
-      isVideoPresentation: false,
-      previewArtifact: null,
-      status: "running",
-    }),
-    false,
-  );
-  assert.equal(
-    shouldShowGeneratedPresentationItem({
-      fileUrl: null,
-      isArtifactPublisher: true,
-      isVideoPresentation: false,
-      previewArtifact: null,
-      status: "approval_requested",
-    }),
-    false,
-  );
-  assert.equal(
-    shouldShowGeneratedPresentationItem({
-      fileUrl: "/artifact-preview?artifactId=artifact-1",
-      isArtifactPublisher: true,
-      isVideoPresentation: false,
-      previewArtifact: null,
-      status: "completed",
-    }),
-    true,
-  );
-  assert.equal(
-    shouldShowGeneratedPresentationItem({
-      fileUrl: null,
-      isArtifactPublisher: true,
-      isVideoPresentation: false,
-      previewArtifact: null,
-      status: "completed",
-    }),
-    false,
   );
 });
 

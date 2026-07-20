@@ -1,32 +1,11 @@
-export function buildArtifactPreviewUrl(input: {
-  readonly artifactId: string;
-  readonly workspaceId: string;
-}): string {
-  const params = new URLSearchParams({
-    artifactId: input.artifactId,
-    workspaceId: input.workspaceId,
-  });
-  return `/artifact-preview?${params.toString()}`;
-}
-
-export function buildPptxArtifactUrl(input: {
-  readonly artifactId: string;
-  readonly workspaceId: string;
-}): string {
-  return buildArtifactPreviewUrl(input);
-}
-
-export function buildSourceJsonArtifactUrl(input: {
-  readonly artifactId: string;
-  readonly workspaceId: string;
-}): string {
-  return `/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifactId)}/source.json`;
-}
-
-export function buildArtifactAssetUrl(input: {
-  readonly artifactId: string;
-  readonly fileName: string;
-  readonly workspaceId: string;
-}): string {
-  return `/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifactId)}/assets/${encodeURIComponent(input.fileName)}`;
-}
+/**
+ * Artifact URL construction lives in `@sourceweft/contracts/artifact-urls` —
+ * this file used to hold one of five byte-identical copies of
+ * `buildArtifactPreviewUrl`. Kept as a re-export so the package's public entry
+ * point keeps its names.
+ */
+export {
+  buildArtifactAssetUrl,
+  buildArtifactPreviewUrl,
+  buildArtifactSourceJsonUrl as buildSourceJsonArtifactUrl,
+} from "@sourceweft/contracts/artifact-urls";

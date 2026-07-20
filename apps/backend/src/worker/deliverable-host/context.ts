@@ -1,3 +1,7 @@
+import {
+  ARTIFACT_MIME_TYPES,
+  mimeTypeForPath,
+} from "@sourceweft/contracts/artifact-files";
 import type {
   DeliverableHostContext,
   DeliverableJobEnvelope,
@@ -51,7 +55,16 @@ export type DeliverableArtifactsAdapter = {
     artifactId: string;
     teamId: string;
     workspaceId: string;
-  }): Promise<{ payloadJson?: unknown } | null>;
+  }): Promise<{
+    payloadJson?: unknown;
+    /**
+     * The artifact's published version pointer, read in the same row read that
+     * supplies the payload. An edit run carries it to markReady as its
+     * optimistic lock, so the base it regenerated from and the base it
+     * republishes onto are guaranteed to be the same one.
+     */
+    currentVersionNo?: number;
+  } | null>;
   markFailed(input: {
     artifactId: string;
     teamId?: string;
@@ -68,7 +81,11 @@ export type DeliverableArtifactsAdapter = {
     workspaceId: string;
     userId: string;
     payload: Record<string, unknown>;
+    previewStorageKey?: string;
+    previewMetadata?: Record<string, unknown>;
     expectedStatuses?: Array<"pending" | "running" | "ready" | "failed">;
+    /** Optimistic lock on the artifact's published version (edit runs). */
+    expectedVersionNo?: number;
   }): Promise<{ artifactId: string; versionId: string } | null>;
   markRunning(input: {
     artifactId: string;
@@ -505,17 +522,7 @@ export function createDefaultDeliverableRuntimeResolver(input: {
           };
         },
       },
-      storage: {
-        buildArtifactStorageKey: storage.buildArtifactStorageKey,
-        getBucketName: storage.getContentStorageBucketName,
-        upload: async (uploadInput) => {
-          await storage.uploadArtifactObject({
-            body: Buffer.from(uploadInput.body),
-            contentType: uploadInput.contentType,
-            key: uploadInput.key,
-          });
-        },
-      },
+      storage: storage.artifactStorage,
       audio: {
         probeDurationSeconds: (probeInput) =>
           probeAudioDurationSeconds({
@@ -561,9 +568,10 @@ export function createDefaultDeliverableRuntimeResolver(input: {
             const mimeType =
               typeof payload?.mimeType === "string"
                 ? payload.mimeType
-                : recordShape.storageKey.endsWith(".png")
-                  ? "image/png"
-                  : "image/jpeg";
+                : mimeTypeForPath(
+                    recordShape.storageKey,
+                    ARTIFACT_MIME_TYPES.jpeg,
+                  );
             return {
               data: Buffer.isBuffer(body) ? body : Buffer.from(body as never),
               mimeType,

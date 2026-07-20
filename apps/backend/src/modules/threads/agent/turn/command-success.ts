@@ -4,7 +4,12 @@ import type {
   PreparedThreadTurn,
   ToolCallTrace,
 } from "../..";
-import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
+import {
+  hasAgentToolCapability,
+  isArtifactProgressProcessingOutputType,
+  isArtifactProgressResultOutputType,
+  isArtifactProgressTerminalOutputType,
+} from "@sourceweft/agent-tool-registry";
 import { extractToolOutputField } from "./output-normalizer";
 import {
   looksLikeArtifactUrlLeakText,
@@ -35,13 +40,16 @@ export function isCommandSuccessSatisfied(input: {
           );
         }
         if (criteria.artifactType === "video_presentation") {
+          // A background deliverable satisfies the criteria once the job is
+          // running (accepted for processing) or once it finished ready — a
+          // terminal record with any other status is a failure, not a success.
           const outputType = extractToolOutputField(call.output, "type");
           return Boolean(
             extractToolOutputField(call.output, "artifact_id") &&
               extractToolOutputField(call.output, "artifact_url") &&
               extractToolOutputField(call.output, "job_id") &&
-              (outputType === "video_presentation_processing_result" ||
-                (outputType === "video_presentation_artifact_result" &&
+              (isArtifactProgressProcessingOutputType(outputType) ||
+                (isArtifactProgressTerminalOutputType(outputType) &&
                   extractToolOutputField(call.output, "status") === "ready")),
           );
         }
@@ -190,11 +198,10 @@ function resolveToolOnlyAssistantText(toolCalls: ToolCallTrace[]) {
     if (call.status !== "completed" || call.error) {
       continue;
     }
+    // Only a result record carries user-facing prose worth promoting to the
+    // assistant turn; a progress tick reports no outcome to speak of.
     const outputType = extractToolOutputField(call.output, "type");
-    if (
-      outputType !== "video_presentation_processing_result" &&
-      outputType !== "video_presentation_artifact_result"
-    ) {
+    if (!isArtifactProgressResultOutputType(outputType)) {
       continue;
     }
     const content = extractToolOutputField(call.output, "content");

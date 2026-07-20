@@ -4,6 +4,7 @@ import {
   type DeliverableHostLogger,
   type DeliverableJobEnvelope,
 } from "@sourceweft/capability-contracts";
+import type { ArtifactStorage } from "@sourceweft/contracts/artifact-storage";
 import {
   VIDEO_PRESENTATION_ERROR_CODES,
   type VideoPresentationCreateRequest,
@@ -76,19 +77,7 @@ export type VideoPipelineDeps = {
       text: string;
     }): Promise<{ audio: Uint8Array; mimeType: string }>;
   };
-  storage: {
-    buildArtifactStorageKey(input: {
-      artifactId: string;
-      fileName: string;
-      workspaceId: string;
-    }): string;
-    getBucketName(): string;
-    upload(input: {
-      body: Uint8Array;
-      contentType: string;
-      key: string;
-    }): Promise<void>;
-  };
+  storage: ArtifactStorage;
   audio: {
     probeDurationSeconds(input: {
       buffer: Uint8Array;

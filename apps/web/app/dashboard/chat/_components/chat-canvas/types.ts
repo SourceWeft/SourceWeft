@@ -1,7 +1,4 @@
-import {
-  AGENT_TOOL_NAMES,
-  type AgentToolName,
-} from "@sourceweft/agent-tool-registry";
+import { type AgentToolName } from "@sourceweft/agent-tool-registry";
 import {
   type ChatInputImage,
   type ChatMessageImagePart,
@@ -15,6 +12,14 @@ import {
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
 
 export type { ChatMessageImagePart };
+
+// The artifact record shapes are the shared UI contract now: capability
+// packages render these surfaces, so their vocabulary cannot live in the app.
+export type {
+  ArtifactPreviewRecord,
+  ArtifactStatusSnapshot,
+  ToolCallView,
+} from "@sourceweft/contracts/artifact-ui";
 
 export type ChatSendInput = {
   content: string;
@@ -203,72 +208,6 @@ export type CitationRecord = {
   excerpt: string;
   content?: string;
   externalUri?: string;
-};
-
-export type ArtifactPreviewRecord = {
-  id: string;
-  teamId: string;
-  workspaceId: string;
-  threadId: string | null;
-  artifactType:
-    | "file"
-    | "report"
-    | "slides"
-    | "mindmap"
-    | "podcast"
-    | "audio_overview"
-    | "video_overview"
-    | "video_presentation"
-    | "flashcards"
-    | "quiz"
-    | "table"
-    | "infographic"
-    | "image";
-  status: "pending" | "running" | "ready" | "failed" | "archived";
-  title: string | null;
-  promptText: string | null;
-  payloadJson: Record<string, unknown>;
-  storageBucket: string | null;
-  storageKey: string | null;
-  previewStorageKey: string | null;
-  previewMetadataJson: Record<string, unknown>;
-  errorCode: string | null;
-  errorMessage: string | null;
-  createdBy: string | null;
-  completedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  previewUrl: string | null;
-  capabilities: {
-    canOpenFile: boolean;
-    canDownloadFile: boolean;
-    canPreviewInline: boolean;
-    canRenderClientVideo: boolean;
-  };
-};
-
-export type ArtifactStatusSnapshot = {
-  artifactType: ArtifactPreviewRecord["artifactType"];
-  capabilities: ArtifactPreviewRecord["capabilities"];
-  completedAt: string | null;
-  createdAt: string;
-  createdBy: string | null;
-  errorCode: string | null;
-  errorMessage: string | null;
-  id: string;
-  payloadJson: Record<string, unknown>;
-  previewUrl: string | null;
-  promptText: string | null;
-  previewMetadataJson: Record<string, unknown>;
-  previewStorageKey: string | null;
-  storageBucket: string | null;
-  storageKey: string | null;
-  status: ArtifactPreviewRecord["status"];
-  teamId: string;
-  threadId: string | null;
-  title: string | null;
-  updatedAt: string;
-  workspaceId: string;
 };
 
 export type ToolCallRecord = {

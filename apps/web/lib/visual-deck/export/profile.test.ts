@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveLegacyVisualDeckProfile,
   resolveVisualDeckExportProfile,
-} from "./profile";
+} from "@sourceweft/builtin-tool-publish-artifact/visual-deck/profile";
 
 describe("resolveVisualDeckExportProfile", () => {
   it("uses explicit new payload slide and pptx metadata", () => {

@@ -2,6 +2,7 @@ import type { Job } from "bullmq";
 import {
   isDeliverablePipelineErrorLike,
   type DeliverablePipelineDefinition,
+  type DeliverablePreviewImage,
   type DeliverableStageViewPatch,
 } from "@sourceweft/capability-contracts";
 import type { ArtifactPipelineStep } from "@sourceweft/contracts/artifact-pipeline";
@@ -99,6 +100,12 @@ export function createDeliverableProcessor<
       );
     }
 
+    // Captured from the same row read that supplies the payload, and never
+    // re-read: it is the version this run is about to regenerate from, so
+    // taking it any later would let an edit that published mid-run pass the
+    // check it exists to fail.
+    const baseVersionNo = artifact.currentVersionNo;
+
     let state: TState;
     try {
       state = definition.loadState(artifact.payloadJson);
@@ -138,6 +145,12 @@ export function createDeliverableProcessor<
     }
 
     const scratch: Record<string, unknown> = {};
+    // Set by any stage via api.setPreviewImage; persisted onto the artifact
+    // record at publish time. Null means "keep the existing thumbnail". Held in
+    // a ref because control-flow analysis ignores assignments made in closures.
+    const previewImageRef: { current: DeliverablePreviewImage | null } = {
+      current: null,
+    };
 
     const persistGeneration = async () => {
       // Edit runs keep the published version untouched while regenerating:
@@ -254,6 +267,9 @@ export function createDeliverableProcessor<
                   });
                   await persistGeneration();
                 },
+                setPreviewImage: (image) => {
+                  previewImageRef.current = image;
+                },
               },
             });
           },
@@ -281,14 +297,28 @@ export function createDeliverableProcessor<
         workspaceId: envelope.workspaceId,
         userId: envelope.userId,
         payload: readyPayload,
+        ...(previewImageRef.current
+          ? {
+              previewStorageKey: previewImageRef.current.storageKey,
+              previewMetadata: previewImageRef.current.metadata,
+            }
+          : {}),
         // Create runs own the transition out of pending/running, so a status
         // outside that set means a duplicate delivery already published. Edit
         // runs deliberately republish an artifact that is already ready, so
-        // status cannot distinguish them — guarding those needs version-based
-        // locking, not this.
-        ...(runMode === "edit"
-          ? {}
-          : { expectedStatuses: ["pending", "running"] as const }),
+        // status alone cannot spot a duplicate edit — that is what
+        // expectedVersionNo is for: the run republishes onto exactly the
+        // version it read at the top, or it loses. The status set stays on top
+        // of it so an edit still cannot publish onto a failed artifact, which
+        // no version check would have caught (a failed artifact keeps its
+        // version pointer).
+        expectedStatuses:
+          runMode === "edit"
+            ? (["ready", "running", "pending"] as const)
+            : (["pending", "running"] as const),
+        ...(runMode === "edit" && baseVersionNo !== undefined
+          ? { expectedVersionNo: baseVersionNo }
+          : {}),
       });
 
       if (!result) {

@@ -6,42 +6,16 @@ import {
   type VideoPresentationProjectPayload,
 } from "@sourceweft/contracts/video-presentation";
 import { buildArtifactPreviewUrl } from "./artifact-urls";
+import { getVideoPresentationStageLabel } from "./stage-labels";
 import { compactArtifactText } from "./artifact-text";
 import { stripVideoPresentationMarkdown } from "./video-presentation-files";
 
+/**
+ * Stage words come from the capability's one stage-label source; this used to
+ * be a hand-maintained switch and drifted from what the UI showed.
+ */
 function buildGenerationStageSummary(stage: VideoPresentationGenerationStage) {
-  switch (stage) {
-    case "planning":
-      return "Planning video project";
-    case "generating_project_code":
-      return "Generating project code";
-    case "installing_project":
-      return "Installing project dependencies";
-    case "typechecking_project":
-      return "Typechecking project";
-    case "rendering_smoke_preview":
-      return "Rendering smoke preview";
-    case "planning_storyboard":
-      return "Planning storyboard";
-    case "materializing_assets":
-      return "Preparing visual assets";
-    case "generating_audio_tracks":
-      return "Generating narration";
-    case "assigning_slide_themes":
-      return "Assigning slide themes";
-    case "generating_scene_modules":
-      return "Generating scene modules";
-    case "repairing_scene_modules":
-      return "Repairing scene modules";
-    case "verifying_visual_quality":
-      return "Reviewing rendered slides";
-    case "publishing_video_project":
-      return "Publishing video project";
-    case "ready":
-      return "Ready";
-    case "failed":
-      return "Failed";
-  }
+  return getVideoPresentationStageLabel(stage) ?? "Preparing video project";
 }
 
 export function buildVideoPresentationInitialPayload(input: {

@@ -4167,6 +4167,32 @@ export const artifacts = pgTable(
     }),
     artifactType: text("artifact_type").$type<ArtifactType>().notNull(),
     status: text("status").$type<ArtifactStatus>().notNull().default("pending"),
+    /**
+     * Pointer to the newest row in `artifact_versions` for this artifact, and
+     * the token an edit run compare-and-swaps on.
+     *
+     * `artifact_versions` remains the sole authority on version numbers: this
+     * column is written only from inside the same transaction that inserts the
+     * new version, after the CAS, to the number that insert used. It exists
+     * because status alone cannot tell two concurrent edits apart — both see
+     * `ready` — so without it the unique index on
+     * (artifact_id, version_no) is the only guard and the loser dies on an
+     * opaque constraint violation instead of losing the race legibly.
+     *
+     * 0 means "no version yet": a `pending` row that has not published once.
+     */
+    currentVersionNo: integer("current_version_no").notNull().default(0),
+    /**
+     * Caller-supplied idempotency token ("the artifact for this request"),
+     * lifted out of `payload_json` so it can be indexed. Nullable: most writes
+     * do not ask for idempotency, and the column carries no meaning for them.
+     *
+     * Deliberately NOT unique. A unique constraint here would have to ignore
+     * status, and a two-phase writer whose `open` is retried would then collide
+     * with its own in-flight `pending` row. De-duplication is a lookup before
+     * the write in the artifact writer instead.
+     */
+    requestKey: text("request_key"),
     title: text("title"),
     promptText: text("prompt_text"),
     payloadJson: jsonb("payload_json")
@@ -4217,6 +4243,16 @@ export const artifacts = pgTable(
       table.threadId,
       desc(table.createdAt),
     ),
+    check(
+      "artifacts_current_version_no_check",
+      sql`${table.currentVersionNo} >= 0`,
+    ),
+    // Serves the writer's idempotency lookup, which must run before any byte is
+    // uploaded. Partial so it costs nothing for the overwhelming majority of
+    // rows, which carry no request key.
+    index("artifacts_workspace_type_request_key_idx")
+      .on(table.workspaceId, table.artifactType, table.requestKey)
+      .where(sql`${table.requestKey} is not null`),
   ],
 );
 

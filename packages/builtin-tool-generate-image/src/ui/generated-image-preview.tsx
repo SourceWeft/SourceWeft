@@ -36,7 +36,7 @@ import {
   TooltipTrigger,
 } from "@sourceweft/ui-web/components/ui/tooltip";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { RawImage } from "../../../../_components/raw-image";
+import { RawImage } from "@sourceweft/ui-web/raw-image";
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;

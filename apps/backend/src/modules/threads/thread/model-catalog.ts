@@ -9,13 +9,10 @@ import {
 } from "@sourceweft/db";
 import { requireContentWorkspace } from "../../workspace/guards";
 import {
+  normalizeThreadModelSettings,
   THREAD_KIND_BY_MODEL_KIND,
-  type ThreadModelSettings,
 } from "../model-settings";
-import {
-  resolveImageModelCapabilities,
-  type ImageModelCapabilities,
-} from "@sourceweft/builtin-tool-generate-image";
+import { agentToolModelCatalogAnnotations } from "@sourceweft/agent-tool-registry";
 
 type ThreadModelCatalogEntry = {
   kind: "llm" | "image" | "vision";
@@ -41,7 +38,11 @@ type ThreadModelCatalogEntry = {
     reasoningEffort: boolean;
     includeReasoning: boolean;
     supportSources: string[];
-    imageGeneration?: ImageModelCapabilities;
+    /**
+     * Whatever the capabilities that drive this model kind say about it. The
+     * catalog does not know the keys or the shapes — it only carries them.
+     */
+    [annotation: string]: unknown;
   };
 };
 
@@ -240,14 +241,7 @@ export async function listThreadModelCatalog(input: {
       });
   }
 
-  const defaults: ThreadModelSettings = {
-    llmProfileAlias: null,
-    imageProfileAlias: null,
-    visionProfileAlias: null,
-    llmModelAlias: null,
-    imageModelAlias: null,
-    visionModelAlias: null,
-  };
+  const defaults = normalizeThreadModelSettings(undefined);
 
   const kinds: Record<"llm" | "image" | "vision", ThreadModelCatalogEntry[]> = {
     llm: [],
@@ -290,8 +284,8 @@ export async function listThreadModelCatalog(input: {
       configJson,
       profileKind,
     });
-    if (threadKind === "image") {
-      directCapabilities.imageGeneration = resolveImageModelCapabilities({
+    for (const annotation of agentToolModelCatalogAnnotations(profileKind)) {
+      directCapabilities[annotation.key] = annotation.describe({
         configJson,
         providerKind: route?.providerKind,
         modelId: route?.targetModel,
@@ -320,18 +314,8 @@ export async function listThreadModelCatalog(input: {
     });
 
     if (row.isDefault) {
-      if (threadKind === "llm") {
-        defaults.llmProfileAlias = row.profileAlias;
-        defaults.llmModelAlias = row.modelAlias;
-      }
-      if (threadKind === "image") {
-        defaults.imageProfileAlias = row.profileAlias;
-        defaults.imageModelAlias = row.modelAlias;
-      }
-      if (threadKind === "vision") {
-        defaults.visionProfileAlias = row.profileAlias;
-        defaults.visionModelAlias = row.modelAlias;
-      }
+      defaults[`${threadKind}ProfileAlias`] = row.profileAlias;
+      defaults[`${threadKind}ModelAlias`] = row.modelAlias;
     }
   }
 

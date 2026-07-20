@@ -1,18 +1,10 @@
 import {
-  AGENT_TOOL_NAMES,
   findAgentToolForProgressEventType,
   getAgentToolPresentation,
   hasAgentToolCapability,
 } from "@sourceweft/agent-tool-registry";
-import {
-  GENERATE_VIDEO_PRESENTATION_TOOL_NAME,
-  type ArtifactGenerationPhase,
-} from "@sourceweft/contracts/agent-tools";
-import type {
-  CommandSuccessCriteria,
-  ThinkingStepTrace,
-  ToolCallTrace,
-} from "../..";
+import type { ArtifactGenerationPhase } from "@sourceweft/contracts/agent-tools";
+import type { ThinkingStepTrace, ToolCallTrace } from "../..";
 import { toObjectRecord } from "./content";
 import type { DeepAgentTurnEvent } from "./events";
 
@@ -22,25 +14,12 @@ export type GeneratedArtifactProgressEvent = {
   data: Record<string, unknown>;
 };
 
-export const PUBLISH_ARTIFACT_PROGRESS_EVENT_TYPE =
-  "publish_artifact_progress";
-
 const ACTIVE_ARTIFACT_GENERATION_PHASES = new Set<ArtifactGenerationPhase>([
   "planning",
   "generating",
   "saving",
   "repairing",
 ]);
-
-export function isPresentationGenerationCommand(
-  criteria: CommandSuccessCriteria,
-) {
-  return (
-    criteria.kind === "artifact" &&
-    criteria.artifactType === "slides" &&
-    hasAgentToolCapability(criteria.toolName, "presentation_artifact")
-  );
-}
 
 /**
  * One step builder for every long-running artifact capability. The wording is
@@ -175,13 +154,9 @@ export function buildPresentationProgressThinkingEvent(input: {
     step: Omit<ThinkingStepTrace, "sequence">,
   ) => ThinkingStepTrace;
 }): Extract<DeepAgentTurnEvent, { type: "thinking-step" }> | null {
-  if (
-    !hasAgentToolCapability(input.progressEvent.tool, "presentation_artifact") &&
-    !hasAgentToolCapability(
-      input.progressEvent.tool,
-      "video_presentation_artifact",
-    )
-  ) {
+  // Admit any capability that reports in-turn generation steps, rather than the
+  // two that happened to exist when this was written.
+  if (!getAgentToolPresentation(input.progressEvent.tool)?.generationStep) {
     return null;
   }
 
@@ -207,7 +182,11 @@ export function normalizeGeneratedImageProgressEvent(
   const eventOwner = findAgentToolForProgressEventType(
     typeof record?.type === "string" ? record.type : null,
   );
-  if (!record || eventOwner?.name !== AGENT_TOOL_NAMES.generateImage) {
+  if (
+    !record ||
+    !eventOwner ||
+    !hasAgentToolCapability(eventOwner.name, "generated_image_artifact")
+  ) {
     return null;
   }
 
@@ -219,7 +198,7 @@ export function normalizeGeneratedImageProgressEvent(
     return null;
   }
 
-  const tool = AGENT_TOOL_NAMES.generateImage;
+  const tool = eventOwner.name;
 
   return {
     toolCallId,

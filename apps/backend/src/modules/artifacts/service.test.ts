@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
+import { videoPresentationArtifactViewHandler } from "@sourceweft/builtin-tool-video-presentation";
+import { slidesArtifactViewHandler } from "@sourceweft/builtin-tool-publish-artifact";
 import { testExports } from "./service";
+import { createArtifactViewHandlerRegistry } from "./view-handlers";
+
+const handlers = createArtifactViewHandlerRegistry([
+  slidesArtifactViewHandler,
+  videoPresentationArtifactViewHandler,
+]);
+
+function handlerFor(artifactType: string) {
+  return handlers.handlerFor(artifactType);
+}
 
 vi.mock("../workspace/guards", () => ({
   requireContentWorkspace: vi.fn(),
@@ -25,7 +37,7 @@ test("slides artifact downloads use artifact title over legacy payload file name
   };
 
   assert.equal(
-    testExports.resolveArtifactFileName(artifact as never),
+    testExports.resolveArtifactFileName(artifact as never, handlerFor("slides")),
     "费曼学习法-用教别人的方式真正学会.pptx",
   );
 });
@@ -41,37 +53,46 @@ test("visual HTML slides artifact keeps HTML payload file name", () => {
   };
 
   assert.equal(
-    testExports.resolveArtifactFileName(artifact as never),
+    testExports.resolveArtifactFileName(artifact as never, handlerFor("slides")),
     "deck.html",
   );
 });
 
 test("visual HTML slides artifact advertises visual deck renderer", () => {
   assert.equal(
-    testExports.resolveArtifactRenderer({
-      artifactType: "slides",
-      payloadJson: {
-        generationMode: "visual_html",
-      },
-    } as never),
+    testExports.resolveArtifactRenderer(
+      {
+        artifactType: "slides",
+        payloadJson: {
+          generationMode: "visual_html",
+        },
+      } as never,
+      handlerFor("slides"),
+    ),
     "visual_html_deck",
   );
   assert.equal(
-    testExports.resolveArtifactRenderer({
-      artifactType: "slides",
-      payloadJson: {
-        generationMode: "editable_native",
-      },
-    } as never),
+    testExports.resolveArtifactRenderer(
+      {
+        artifactType: "slides",
+        payloadJson: {
+          generationMode: "editable_native",
+        },
+      } as never,
+      handlerFor("slides"),
+    ),
     null,
   );
   assert.equal(
-    testExports.resolveArtifactRenderer({
-      artifactType: "image",
-      payloadJson: {
-        generationMode: "visual_html",
-      },
-    } as never),
+    testExports.resolveArtifactRenderer(
+      {
+        artifactType: "image",
+        payloadJson: {
+          generationMode: "visual_html",
+        },
+      } as never,
+      handlerFor("image"),
+    ),
     null,
   );
 });
@@ -116,7 +137,7 @@ test("artifact capabilities distinguish files from image artifacts", () => {
       canOpenFile: true,
       canDownloadFile: true,
       canPreviewInline: true,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   );
   assert.deepEqual(
@@ -129,7 +150,7 @@ test("artifact capabilities distinguish files from image artifacts", () => {
       canOpenFile: false,
       canDownloadFile: false,
       canPreviewInline: false,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   );
 });
@@ -148,7 +169,7 @@ test("generic file artifact preview capability follows MIME type", () => {
       canOpenFile: true,
       canDownloadFile: true,
       canPreviewInline: true,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   );
   assert.deepEqual(
@@ -164,7 +185,7 @@ test("generic file artifact preview capability follows MIME type", () => {
       canOpenFile: true,
       canDownloadFile: true,
       canPreviewInline: true,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   );
   assert.deepEqual(
@@ -180,7 +201,7 @@ test("generic file artifact preview capability follows MIME type", () => {
       canOpenFile: true,
       canDownloadFile: true,
       canPreviewInline: true,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   );
   assert.deepEqual(
@@ -196,7 +217,7 @@ test("generic file artifact preview capability follows MIME type", () => {
       canOpenFile: true,
       canDownloadFile: true,
       canPreviewInline: false,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   );
   assert.deepEqual(
@@ -213,24 +234,91 @@ test("generic file artifact preview capability follows MIME type", () => {
       canOpenFile: true,
       canDownloadFile: true,
       canPreviewInline: false,
-      canRenderClientVideo: false,
+      canRenderClientSide: false,
     },
   );
 });
 
-test("video presentation artifact advertises browser render capability", () => {
+test("a registered takeover makes an artifact client-renderable without a file", () => {
+  const registry = handlers;
+  const artifact = {
+    artifactType: "video_presentation",
+    status: "running",
+    storageKey: null,
+  };
+
   assert.deepEqual(
-    testExports.buildArtifactCapabilities({
-      artifactType: "video_presentation",
-      status: "running",
-      storageKey: null,
-    } as never),
+    testExports.buildArtifactCapabilities(
+      artifact as never,
+      registry.handlerFor(artifact.artifactType),
+    ),
     {
       canOpenFile: true,
       canDownloadFile: false,
       canPreviewInline: false,
-      canRenderClientVideo: true,
+      canRenderClientSide: true,
     },
+  );
+  // Failed artifacts render nothing, takeover or not.
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities(
+      { ...artifact, status: "failed" } as never,
+      registry.handlerFor(artifact.artifactType),
+    ),
+    {
+      canOpenFile: false,
+      canDownloadFile: false,
+      canPreviewInline: false,
+      canRenderClientSide: false,
+    },
+  );
+  // No takeover registered for the type: generic file fallback only.
+  assert.deepEqual(
+    testExports.buildArtifactCapabilities(artifact as never, registry.handlerFor("file")),
+    {
+      canOpenFile: false,
+      canDownloadFile: false,
+      canPreviewInline: false,
+      canRenderClientSide: false,
+    },
+  );
+});
+
+test("artifact asset resolution delegates payload shapes to the type handler", () => {
+  const registry = handlers;
+  const artifact = {
+    artifactType: "video_presentation",
+    status: "ready",
+    storageBucket: "content",
+    storageKey: null,
+    payloadJson: {
+      audioTracks: [
+        {
+          fileName: "scene-1.mp3",
+          mimeType: "audio/mpeg",
+          storageKey: "workspaces/w1/artifacts/a1/scene-1.mp3",
+        },
+      ],
+    },
+  };
+
+  assert.deepEqual(
+    testExports.resolveArtifactAsset(
+      artifact as never,
+      "scene-1.mp3",
+      registry.handlerFor(artifact.artifactType),
+    ),
+    {
+      contentType: "audio/mpeg",
+      fileName: "scene-1.mp3",
+      storageBucket: "content",
+      storageKey: "workspaces/w1/artifacts/a1/scene-1.mp3",
+    },
+  );
+  // Without the handler the backend knows nothing about that payload shape.
+  assert.equal(
+    testExports.resolveArtifactAsset(artifact as never, "scene-1.mp3"),
+    null,
   );
 });
 

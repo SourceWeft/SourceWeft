@@ -67,9 +67,11 @@ vi.mock("../../modules/artifacts/repository", () => ({
 }));
 
 vi.mock("../../modules/sources/storage", () => ({
-  buildArtifactStorageKey: vi.fn(),
-  getContentStorageBucketName: vi.fn(),
-  uploadArtifactObject: vi.fn(),
+  artifactStorage: {
+    buildArtifactStorageKey: vi.fn(),
+    getBucketName: vi.fn(),
+    upload: vi.fn(),
+  },
   downloadArtifactObject: vi.fn(),
 }));
 

@@ -33,6 +33,7 @@ export type {
 } from "./billing/context";
 export type { BillingScope } from "./billing/scope";
 export { BillingAdmissionError } from "./billing/admission";
+export { ModelGatewayError } from "./errors";
 export { resolveByokProviderRuntime } from "./runtime";
 export { resolveModelCapabilitiesFromLitellm } from "./pricing";
 export type {

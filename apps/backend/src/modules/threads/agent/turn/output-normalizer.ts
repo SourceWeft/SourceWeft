@@ -4,7 +4,10 @@ import {
   AGENT_TOOL_NAMES,
   getAgentToolConnectorType,
   getAgentToolPresentation,
+  getArtifactProgressProtocol,
   hasAgentToolCapability,
+  isArtifactProgressOutputType,
+  isArtifactProgressTerminalOutputType,
   isAgentToolDomain,
 } from "@sourceweft/agent-tool-registry";
 import { normalizeToolInput } from "./tool-utils";
@@ -167,21 +170,23 @@ export function extractToolOutputText(output: unknown) {
   return null;
 }
 
-function isVideoPresentationToolOutputRecord(record: Record<string, unknown>) {
-  const type =
-    typeof record.type === "string" ? record.type.trim().toLowerCase() : "";
-  return (
-    type === "video_presentation_processing_result" ||
-    type === "video_presentation_artifact_result" ||
-    type === "generate_video_presentation_progress"
+/**
+ * Whether a structured tool output belongs to a capability that reports
+ * artifact progress. The registry owns which `type` values those are — the
+ * capability declares them alongside its progress protocol — so this stays
+ * true for any deliverable added later.
+ */
+function isArtifactProgressToolOutputRecord(record: Record<string, unknown>) {
+  return isArtifactProgressOutputType(
+    typeof record.type === "string" ? record.type.trim().toLowerCase() : "",
   );
 }
 
 export function extractToolOutputField(output: unknown, key: string) {
   const records = collectToolOutputRecords(output);
   const orderedRecords = [
-    ...records.filter((record) => isVideoPresentationToolOutputRecord(record)),
-    ...records.filter((record) => !isVideoPresentationToolOutputRecord(record)),
+    ...records.filter((record) => isArtifactProgressToolOutputRecord(record)),
+    ...records.filter((record) => !isArtifactProgressToolOutputRecord(record)),
   ];
   for (const record of orderedRecords) {
     const direct = record[key];
@@ -848,16 +853,18 @@ export function isVideoPresentationArtifactReady(output: unknown) {
   );
 }
 
-export function getVideoPresentationToolOutputError(output: unknown) {
+/**
+ * The failure message of a background deliverable, if its output is a terminal
+ * record reporting failure. Which `type` values are terminal is the
+ * capability's business, so ask the registry rather than naming them here.
+ */
+export function getArtifactProgressToolOutputError(output: unknown) {
   if (output === undefined) {
     return null;
   }
   const type = extractToolOutputField(output, "type")?.toLowerCase().trim();
   const status = extractToolOutputField(output, "status")?.toLowerCase().trim();
-  if (
-    type !== "video_presentation_artifact_result" ||
-    status !== "failed"
-  ) {
+  if (!isArtifactProgressTerminalOutputType(type) || status !== "failed") {
     return null;
   }
   const error =
@@ -867,12 +874,16 @@ export function getVideoPresentationToolOutputError(output: unknown) {
   return error && error.trim().length > 0 ? error.trim() : null;
 }
 
-function normalizeVideoPresentationToolOutputForObservability(
+/**
+ * Traces of a deliverable tool keep the structured progress record itself, not
+ * the wrapper it arrived in, so observability shows what the capability said.
+ */
+function normalizeArtifactProgressToolOutputForObservability(
   output: unknown,
 ): unknown {
   const records = collectToolOutputRecords(output);
   for (const record of records) {
-    if (isVideoPresentationToolOutputRecord(record)) {
+    if (isArtifactProgressToolOutputRecord(record)) {
       return record;
     }
   }
@@ -893,8 +904,10 @@ export function normalizeToolOutputForObservability(
     return redactedOutput;
   }
 
-  if (hasAgentToolCapability(toolName, "video_presentation_artifact")) {
-    return normalizeVideoPresentationToolOutputForObservability(output);
+  // The collapsing below is defined by the artifact-progress protocol, so every
+  // pipeline-backed capability should get it, not just the first one that did.
+  if (getArtifactProgressProtocol(toolName)) {
+    return normalizeArtifactProgressToolOutputForObservability(output);
   }
 
   if (isAgentToolDomain(toolName, "web")) {

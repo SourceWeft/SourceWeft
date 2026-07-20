@@ -1,7 +1,3 @@
-export type PublishArtifactToolSelection = {
-  enabled?: boolean;
-};
-
 export type GenerateVideoPresentationToolSelection = {
   enabled?: boolean;
   language?: string;

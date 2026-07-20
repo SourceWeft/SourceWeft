@@ -29,6 +29,7 @@ the result. Read a reference only when the situation below applies.
 | User cares about visual style, branding, or art direction | Read [visual-quality.md](references/visual-quality.md) |
 | User asks for a specific style/look/风格, wants variety, or is unsure how the video should look | Read [style-gallery.md](references/style-gallery.md) and pick a recipe |
 | Editing an existing video artifact | Follow "Editing an existing presentation" below |
+| User asks about the artifact's thumbnail/preview image | Read "Preview image" below |
 
 ## Runtime Options
 
@@ -74,6 +75,19 @@ Follow explicit user instructions over defaults when they conflict.
    presentation project is ready for browser preview/export.
    Do not describe it as a completed MP4. The ready artifact includes a source
    JSON endpoint for audit/reuse.
+
+## Preview image
+
+The pipeline renders slide stills while checking visual quality and stores the
+first one as the artifact's preview image — the same thumbnail slot every
+artifact type uses, so it shows up in artifact lists and chat cards without any
+extra step from you. It is not part of the payload; do not look for it in the
+source JSON.
+
+The preview image is **best-effort**: the sandbox may fail to render stills, in
+which case the artifact simply has no thumbnail. Never promise one, and never
+treat its absence as a generation failure — the artifact is still fully valid
+and playable.
 
 ## Editing an existing presentation
 

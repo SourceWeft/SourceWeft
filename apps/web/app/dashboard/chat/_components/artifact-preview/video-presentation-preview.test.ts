@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { VIDEO_PRESENTATION_LABELLED_STAGE_IDS } from "@sourceweft/builtin-tool-video-presentation";
+import { GENERATE_VIDEO_PRESENTATION_TOOL_NAME } from "@sourceweft/builtin-tool-video-presentation/agent-tool-defs";
 import {
   canRenderVideoPresentationScenes,
   isVideoPresentationFailed,
   resolveVideoProjectStageLabel,
-} from "./video-presentation-preview";
+} from "@sourceweft/builtin-tool-video-presentation/ui";
+import { getArtifactStageLabel } from "../chat-canvas/reasoning-trace-tools";
 
-describe("video presentation preview adapter", () => {
+describe("video presentation capability ui", () => {
   it("labels current worker stages", () => {
     expect(
       resolveVideoProjectStageLabel({
@@ -21,7 +24,7 @@ describe("video presentation preview adapter", () => {
       resolveVideoProjectStageLabel({
         generation: { stage: "typechecking_project" },
       }),
-    ).toBe("Typechecking generated project");
+    ).toBe("Typechecking project");
     expect(
       resolveVideoProjectStageLabel({
         generation: { stage: "rendering_smoke_preview" },
@@ -46,7 +49,27 @@ describe("video presentation preview adapter", () => {
       resolveVideoProjectStageLabel({
         generation: { stage: "publishing_video_project" },
       }),
-    ).toBe("Finalizing video project");
+    ).toBe("Publishing video project");
+  });
+
+  // Regression: the preview panel and the message trace each kept their own
+  // stage list and drifted, so one stage read two different ways.
+  it("words every stage exactly like the message trace does", () => {
+    for (const stage of VIDEO_PRESENTATION_LABELLED_STAGE_IDS) {
+      const payload = { generation: { stage } };
+      const traceLabel = getArtifactStageLabel(
+        GENERATE_VIDEO_PRESENTATION_TOOL_NAME,
+        payload,
+      );
+      expect(traceLabel, `stage ${stage} has no trace label`).toBeTruthy();
+      expect(resolveVideoProjectStageLabel(payload), `stage ${stage}`).toBe(
+        traceLabel,
+      );
+    }
+  });
+
+  it("falls back to the capability's own preparing copy", () => {
+    expect(resolveVideoProjectStageLabel({})).toBe("Preparing video project");
   });
 
   it("only allows render/export when all generated scenes compiled cleanly", () => {

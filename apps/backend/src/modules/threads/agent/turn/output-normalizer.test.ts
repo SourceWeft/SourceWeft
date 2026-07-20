@@ -9,7 +9,7 @@ import {
   getFilesystemToolOutputError,
   getFilesystemToolStartTitle,
   getSkillInstructionDisplayMetadata,
-  getVideoPresentationToolOutputError,
+  getArtifactProgressToolOutputError,
   isVideoPresentationArtifactReady,
   normalizeToolOutputForObservability,
   sanitizeThreadMessageMetadataForClient,
@@ -64,7 +64,7 @@ test("video presentation failed output exposes error text", () => {
   };
 
   assert.equal(
-    getVideoPresentationToolOutputError(failedOutput),
+    getArtifactProgressToolOutputError(failedOutput),
     failedOutput.error,
   );
   assert.equal(

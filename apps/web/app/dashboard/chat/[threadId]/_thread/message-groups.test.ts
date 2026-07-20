@@ -7,7 +7,7 @@ import {
   findActiveThreadRunMessage,
   findLatestActiveThreadRunMessage,
   hasRenderBlocksMetadata,
-  isCompletedPresentationArtifactToolCall,
+  isCompletedArtifactToolCall,
   normalizeToolCallRecord,
   resolveRenderBlocksFromMetadata,
   resolveToolCallFromStreamEvent,
@@ -234,7 +234,7 @@ test("raw tool schema failures are sanitized for persisted error versions", () =
 
 test("completed presentation publisher with error is not treated as artifact card ready", () => {
   assert.equal(
-    isCompletedPresentationArtifactToolCall(
+    isCompletedArtifactToolCall(
       {
         id: "tool-1",
         tool: "publish_artifact",
@@ -249,6 +249,92 @@ test("completed presentation publisher with error is not treated as artifact car
         error: "publish failed",
       },
       { type: "tool-call-result", id: "tool-1" },
+    ),
+    false,
+  );
+});
+
+/**
+ * Readiness is the owning capability's call, not this file's. These cases pin
+ * the three answers the contract allows: "not until my worker says ready"
+ * (video), "a URL is the artifact" (deck) and no opinion at all (image).
+ */
+function artifactToolCall(
+  tool: string,
+  output: unknown,
+): Parameters<typeof isCompletedArtifactToolCall>[0] {
+  return {
+    id: "tool-1",
+    tool,
+    input: {},
+    output,
+    latencyMs: 10,
+    status: "completed",
+    error: null,
+  };
+}
+
+const RESULT_EVENT = { type: "tool-call-result", id: "tool-1" } as const;
+
+test("video presentation is not artifact-ready until its worker reports ready", () => {
+  assert.equal(
+    isCompletedArtifactToolCall(
+      artifactToolCall("generate_video_presentation", {
+        artifact_url: "/artifact-preview?artifactId=artifact-1",
+        status: "running",
+      }),
+      RESULT_EVENT,
+    ),
+    false,
+  );
+
+  assert.equal(
+    isCompletedArtifactToolCall(
+      artifactToolCall("generate_video_presentation", {
+        artifact_url: "/artifact-preview?artifactId=artifact-1",
+        status: "ready",
+      }),
+      RESULT_EVENT,
+    ),
+    true,
+  );
+});
+
+test("published deck is artifact-ready on a returned URL, and not without one", () => {
+  assert.equal(
+    isCompletedArtifactToolCall(
+      artifactToolCall("publish_artifact", { status: "needs_content" }),
+      RESULT_EVENT,
+    ),
+    false,
+  );
+
+  assert.equal(
+    isCompletedArtifactToolCall(
+      artifactToolCall("publish_artifact", {
+        artifact_url: "/artifact-preview?artifactId=artifact-1",
+      }),
+      RESULT_EVENT,
+    ),
+    true,
+  );
+});
+
+test("a capability with no readiness opinion is ready once the call completes", () => {
+  assert.equal(
+    isCompletedArtifactToolCall(
+      artifactToolCall("generate_image", { artifact_id: "artifact-1" }),
+      RESULT_EVENT,
+    ),
+    true,
+  );
+});
+
+test("tools that declare no renderAs never trigger an artifact refresh", () => {
+  assert.equal(
+    isCompletedArtifactToolCall(
+      artifactToolCall("web_search", { results: [] }),
+      RESULT_EVENT,
     ),
     false,
   );

@@ -1,4 +1,5 @@
 import type { Job } from "bullmq";
+import type { DeliverableJobEnvelope } from "@sourceweft/capability-contracts";
 import { config } from "../../shared/config";
 import {
   deliverablesQueue,
@@ -12,7 +13,6 @@ export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
 export const CONNECTOR_SYNC_JOB = "connector-sync";
 export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
 export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
-export const VIDEO_PRESENTATION_GENERATE_JOB = "video-presentation-generate";
 export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
 export const DELIVERABLES_QUEUE_JOB_ATTEMPTS = 1;
 const SOURCE_PARSE_JOB_BACKOFF_MS = 5_000;
@@ -92,22 +92,30 @@ export type ConnectorSyncJobPayload = {
   targetExternalIds?: string[];
 };
 
-export type VideoPresentationGenerateJobPayload = {
-  artifactId: string;
-  jobId: string;
-  requestKey: string;
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-  userId: string;
-  userMessageId: string;
-  title: string;
-  request: Record<string, unknown>;
-  narrationEnabled: boolean;
-  traceId?: string;
-  parentSpanId?: string;
-  toolCallId?: string;
-  llm?: LlmExecutionConfig;
+/**
+ * Payload of a deliverable job, as the dispatch side sees it.
+ *
+ * The base is the same `DeliverableJobEnvelope` the worker host consumes — the
+ * two halves of one round trip, declared once in `capability-contracts`. Fields
+ * beyond it are the dispatching capability's own business (a request key, a
+ * narration flag, whatever its pipeline reads back out of `request`): they are
+ * carried through untouched and never interpreted here.
+ */
+export type DeliverableJobPayload = DeliverableJobEnvelope & {
+  readonly llm?: LlmExecutionConfig;
+  readonly [key: string]: unknown;
+};
+
+export type EnqueueDeliverableJobInput = {
+  /**
+   * BullMQ job name, supplied by the capability from its own manifest
+   * (`contributes.tools[].runtime.pipeline.jobName`) — the same field the
+   * worker's pipeline registry reads to build its processor map.
+   */
+  readonly jobName: string;
+  /** Idempotency key: one job id, one run. */
+  readonly jobId: string;
+  readonly payload: DeliverableJobPayload;
 };
 
 export type ThreadChatRunJobResult =
@@ -224,10 +232,20 @@ export async function enqueueConnectorSyncJob(
   }
 }
 
-export async function enqueueVideoPresentationGenerateJob(
-  payload: VideoPresentationGenerateJobPayload,
-) {
-  const existing = await deliverablesQueue.getJob(payload.jobId);
+/**
+ * Dispatch half of the deliverable round trip: capability-agnostic.
+ *
+ * The host names no capability and no job — it takes the job name the
+ * capability declared, the id it chose, and the payload it built, applies the
+ * deliverables queue's shared retry/idempotency policy, and enqueues. An
+ * existing non-failed job is returned as is; a failed one is retried in place.
+ */
+export async function enqueueDeliverableJob({
+  jobName,
+  jobId,
+  payload,
+}: EnqueueDeliverableJobInput) {
+  const existing = await deliverablesQueue.getJob(jobId);
   if (existing) {
     const state = await existing.getState();
     if (state !== "failed") {
@@ -242,10 +260,10 @@ export async function enqueueVideoPresentationGenerateJob(
 
   try {
     return await enqueueWithAudit(
-      VIDEO_PRESENTATION_GENERATE_JOB,
+      jobName,
       payload,
       {
-        jobId: payload.jobId,
+        jobId,
         attempts: DELIVERABLES_QUEUE_JOB_ATTEMPTS,
         backoff: { type: "exponential", delay: 2_000 },
         removeOnComplete: 100,
@@ -257,7 +275,7 @@ export async function enqueueVideoPresentationGenerateJob(
       },
     );
   } catch (error) {
-    const duplicate = await deliverablesQueue.getJob(payload.jobId);
+    const duplicate = await deliverablesQueue.getJob(jobId);
     if (duplicate) {
       return duplicate;
     }

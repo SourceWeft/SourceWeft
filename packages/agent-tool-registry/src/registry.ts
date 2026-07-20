@@ -8,8 +8,16 @@ import type {
   AgentToolRiskLevel,
   AgentToolSlashCommand,
 } from "@sourceweft/contracts/agent-tools";
-import type { ArtifactProgressProtocol } from "@sourceweft/contracts/artifact-progress";
-import type { AgentToolPresentation } from "@sourceweft/contracts/agent-tools";
+import type {
+  ArtifactProgressOutputRole,
+  ArtifactProgressProtocol,
+} from "@sourceweft/contracts/artifact-progress";
+import type {
+  AgentToolModelCatalogAnnotation,
+  AgentToolPresentation,
+  AgentToolTurnPreflight,
+  AgentToolTurnSelection,
+} from "@sourceweft/contracts/agent-tools";
 import { filesystemAgentToolDefs } from "@sourceweft/builtin-vfs";
 import { webAgentToolDefs } from "@sourceweft/builtin-tool-web-search";
 import { sandboxAgentToolDefs } from "@sourceweft/builtin-tool-sandbox";
@@ -269,11 +277,61 @@ export function isArtifactProgressOutputType(
   if (!type) {
     return false;
   }
-  return allAgentTools().some((tool) => {
+  return getArtifactProgressOutputRole(type) !== null;
+}
+
+/**
+ * The role a structured tool-output `type` plays in its capability's progress
+ * protocol, or null when no capability claims the type. Callers that need to
+ * tell a finished job from a queued one ask for the role instead of matching
+ * a capability's `type` names, so adding a deliverable needs no edit here.
+ */
+export function getArtifactProgressOutputRole(
+  type: string | null | undefined,
+): ArtifactProgressOutputRole | null {
+  if (!type) {
+    return null;
+  }
+  for (const tool of allAgentTools()) {
     const protocol = (tool as { artifactProgress?: ArtifactProgressProtocol })
       .artifactProgress;
-    return protocol?.outputTypes.includes(type) ?? false;
-  });
+    const role = protocol?.outputTypeRoles[type];
+    if (role) {
+      return role;
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether the output reports a finished job — the record carrying the final
+ * status, success or failure.
+ */
+export function isArtifactProgressTerminalOutputType(
+  type: string | null | undefined,
+): boolean {
+  return getArtifactProgressOutputRole(type) === "terminal";
+}
+
+/**
+ * Whether the output reports a job accepted and now running in the background.
+ */
+export function isArtifactProgressProcessingOutputType(
+  type: string | null | undefined,
+): boolean {
+  return getArtifactProgressOutputRole(type) === "processing";
+}
+
+/**
+ * Whether the output is a result record — the job was either accepted or has
+ * finished — as opposed to an intermediate progress tick that reports no
+ * outcome of its own.
+ */
+export function isArtifactProgressResultOutputType(
+  type: string | null | undefined,
+): boolean {
+  const role = getArtifactProgressOutputRole(type);
+  return role === "processing" || role === "terminal";
 }
 
 /**
@@ -303,6 +361,82 @@ export function findAgentToolForProgressEventType(
     }
   }
   return null;
+}
+
+/**
+ * The capability's own turn-selection hook, if it declares one. Callers that
+ * prepare a turn ask here instead of importing a capability's normalizer.
+ */
+export function getAgentToolTurnSelection(
+  toolName: string,
+): AgentToolTurnSelection | null {
+  return getAgentToolDefinition(toolName)?.turnSelection ?? null;
+}
+
+/**
+ * Every registered tool that regularizes its own per-turn selection. The turn
+ * pipeline iterates this instead of calling capability-specific resolvers, so
+ * adding a capability needs no edit there.
+ */
+export function agentToolTurnSelections(): readonly {
+  readonly name: string;
+  readonly turnSelection: AgentToolTurnSelection;
+}[] {
+  return allAgentTools().flatMap((tool) =>
+    tool.turnSelection ? [{ name: tool.name, turnSelection: tool.turnSelection }] : [],
+  );
+}
+
+/**
+ * Every registered tool that has work to settle before the agent runs, paired
+ * with the model kind it declared. The turn pipeline iterates this and injects
+ * host services scoped to that kind, so no capability is named there.
+ */
+export function agentToolTurnPreflights(): readonly {
+  readonly name: string;
+  readonly modelKind: string | null;
+  readonly defaultEnabled: boolean;
+  readonly turnPreflight: AgentToolTurnPreflight;
+}[] {
+  return allAgentTools().flatMap((tool) =>
+    tool.turnPreflight
+      ? [
+          {
+            name: tool.name,
+            modelKind: getAgentToolRequirements(tool)?.modelKind ?? null,
+            defaultEnabled: tool.activation.default === "always",
+            turnPreflight: tool.turnPreflight,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
+ * The preflight hook a single tool declares, if any. Callers holding a tool
+ * name — a streaming tool call, a bind-time lookup — ask here instead of
+ * importing the capability that owns the name.
+ */
+export function getAgentToolTurnPreflight(
+  toolName: string,
+): AgentToolTurnPreflight | null {
+  return getAgentToolDefinition(toolName)?.turnPreflight ?? null;
+}
+
+/**
+ * Every annotation a capability contributes to model-catalog rows of the given
+ * model kind. The catalog builder folds these into a row's `capabilities`
+ * record without knowing what any of them mean.
+ */
+export function agentToolModelCatalogAnnotations(
+  modelKind: string,
+): readonly AgentToolModelCatalogAnnotation[] {
+  return allAgentTools().flatMap((tool) =>
+    tool.modelCatalog &&
+    getAgentToolRequirements(tool)?.modelKind === modelKind
+      ? [tool.modelCatalog]
+      : [],
+  );
 }
 
 /**

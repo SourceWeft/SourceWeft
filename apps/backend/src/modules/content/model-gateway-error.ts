@@ -1,4 +1,4 @@
-import { ModelGatewayError } from "@sourceweft/model-gateway";
+import { ModelGatewayError } from "../../shared/model-gateway/errors";
 import { ContentError } from "./errors";
 
 const RETRYABLE_CONTENT_ERROR_CODES = new Set([

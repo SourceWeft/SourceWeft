@@ -63,7 +63,10 @@ export function useThreadPreviews({
       setPreviewSource(null);
       setPreviewWorkfile(null);
       setPreviewCitation(null);
-      setPreviewArtifact(artifact);
+      // Same row, two type sources: the UI contract keeps `artifactType` an
+      // open string (capabilities own which types exist) while the generated
+      // API client still spells it as a closed union.
+      setPreviewArtifact(artifact as ArtifactListItem);
       if (!sourcesVisible) {
         toggleSourcesVisible();
       }

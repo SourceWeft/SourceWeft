@@ -3,22 +3,16 @@ import {
   imageRuntimePromptProvider,
   type ImageToolRuntimeDeps,
 } from "./tool-runtime";
-import type { ArtifactImageConfig } from "./image-types";
+import { readGenerateImageTurnState } from "./turn-preflight";
 
 type CapabilityAgentToolFactoryInput = {
   readonly toolIds?: readonly string[];
   readonly context?: {
-    readonly artifactIntent?: {
-      readonly shouldInjectTool?: boolean;
-      readonly config?: ArtifactImageConfig;
-    };
-    readonly imageProfile?: {
-      readonly profile?: {
-        readonly gatewayConfigId: string;
-        readonly profileAlias: string;
-        readonly modelAlias: string;
-      };
-    };
+    /**
+     * Everything the turn's preflights parked, keyed by tool name. The host
+     * carries it without reading it; we take our own entry out of it here.
+     */
+    readonly turnState?: Readonly<Record<string, unknown>>;
     readonly isToolDenied?: (toolName: string) => boolean;
     readonly parentSpanId?: string;
     readonly runtimeTools?: Readonly<
@@ -39,22 +33,24 @@ type CapabilityAgentToolFactoryInput = {
   };
   readonly services?: {
     readonly artifacts?: {
-      readonly createImageArtifactRecord: ImageToolRuntimeDeps["artifacts"]["createRecord"];
+      readonly publishArtifact?: ImageToolRuntimeDeps["artifacts"]["publishArtifact"];
     };
     readonly modelGateway?: {
       readonly getClient: (
         gatewayConfigId: string,
       ) => Promise<ImageToolRuntimeDeps["modelGateway"]>;
     };
-    readonly storage?: {
-      readonly buildArtifactStorageKey: ImageToolRuntimeDeps["storage"]["buildStorageKey"];
-      readonly getContentStorageBucketName: ImageToolRuntimeDeps["storage"]["getBucketName"];
-      readonly uploadArtifactObject: ImageToolRuntimeDeps["storage"]["upload"];
-    };
   };
 };
 
 const GENERATE_IMAGE_TOOL_ID = "generate_image";
+
+function turnState(input: CapabilityAgentToolFactoryInput) {
+  return readGenerateImageTurnState(
+    input.context?.turnState,
+    GENERATE_IMAGE_TOOL_ID,
+  );
+}
 
 function runtimeToolOptions(input: CapabilityAgentToolFactoryInput) {
   const runtimeTool = input.context?.runtimeTools?.[GENERATE_IMAGE_TOOL_ID];
@@ -84,19 +80,20 @@ export function createCapabilityAgentTools(
 ) {
   const context = input.context;
   const services = input.services;
-  const profile = context?.imageProfile?.profile;
-  const config = context?.artifactIntent?.config;
+  const state = turnState(input);
+  const profile = state?.imageProfile?.profile;
+  const config = state?.artifactIntent?.config;
   const options = runtimeToolOptions(input);
   if (
     !includesTool(input, GENERATE_IMAGE_TOOL_ID) ||
+    !context ||
     context?.isToolDenied?.(GENERATE_IMAGE_TOOL_ID) === true ||
-    context?.artifactIntent?.shouldInjectTool !== true ||
+    state?.artifactIntent?.shouldInjectTool !== true ||
     !profile ||
     !config ||
     !hasRequiredContext(input) ||
     !services?.modelGateway ||
-    !services.storage ||
-    !services.artifacts
+    !services.artifacts?.publishArtifact
   ) {
     return {
       promptProviders: [imageRuntimePromptProvider],
@@ -105,6 +102,7 @@ export function createCapabilityAgentTools(
   }
 
   const modelGateway = services.modelGateway;
+  const publishArtifact = services.artifacts.publishArtifact;
   const deps: ImageToolRuntimeDeps = {
     modelGateway: {
       images: {
@@ -114,14 +112,7 @@ export function createCapabilityAgentTools(
         },
       },
     },
-    storage: {
-      buildStorageKey: services.storage.buildArtifactStorageKey,
-      getBucketName: services.storage.getContentStorageBucketName,
-      upload: services.storage.uploadArtifactObject,
-    },
-    artifacts: {
-      createRecord: services.artifacts.createImageArtifactRecord,
-    },
+    artifacts: { publishArtifact },
   };
 
   return {

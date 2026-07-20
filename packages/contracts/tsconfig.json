@@ -9,6 +9,6 @@
       "@sourceweft/market-contracts": ["../market-contracts/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules"]
 }

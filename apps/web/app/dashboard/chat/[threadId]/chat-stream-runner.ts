@@ -116,11 +116,7 @@ type RunChatStreamInput = {
   getStreamingAssistantMessageId: () => string;
   images?: ChatSendInput["images"];
   assistantMessageId?: string | null;
-  isCompletedImageArtifactToolCall: (
-    toolCall: ToolCallRecord,
-    event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
-  ) => boolean;
-  isCompletedPresentationArtifactToolCall: (
+  isCompletedArtifactToolCall: (
     toolCall: ToolCallRecord,
     event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
   ) => boolean;
@@ -523,13 +519,8 @@ export async function runChatStream(
   const streamingEventHandlerContext = createStreamingEventHandlerContext({
     appendReasoningChunk: input.appendReasoningChunk,
     durableRunKey: input.durableRunKey,
-    isCompletedImageArtifactToolCall: (toolCall, event) =>
-      input.isCompletedImageArtifactToolCall(
-        toolCall,
-        event as ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
-      ),
-    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
-      input.isCompletedPresentationArtifactToolCall(
+    isCompletedArtifactToolCall: (toolCall, event) =>
+      input.isCompletedArtifactToolCall(
         toolCall,
         event as ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
       ),

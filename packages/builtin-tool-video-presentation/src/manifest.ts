@@ -1,4 +1,5 @@
 import type { CapabilityManifestInput } from "@sourceweft/capability-contracts";
+import { VIDEO_PRESENTATION_PIPELINE_JOB_NAME } from "./artifact-records";
 
 const videoPresentationInputSchema = {
   type: "object",
@@ -152,7 +153,7 @@ export const builtinGenerateVideoPresentationCapabilityManifest: CapabilityManif
               publisherTool: "generate_video_presentation",
             },
             pipeline: {
-              jobName: "video-presentation-generate",
+              jobName: VIDEO_PRESENTATION_PIPELINE_JOB_NAME,
               queue: "deliverables",
             },
           },

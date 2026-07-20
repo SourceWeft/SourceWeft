@@ -1,5 +1,6 @@
 import {
   getAgentToolPresentation,
+  getAgentToolTurnPreflight,
   getAgentToolRenderAs,
   hasAgentToolCapability,
   isAgentToolDomain,
@@ -42,16 +43,13 @@ import {
   getFilesystemToolMetadata,
   getFilesystemToolOutputError,
   getFilesystemToolStartTitle,
-  getVideoPresentationToolOutputError,
+  getArtifactProgressToolOutputError,
   getWebToolEndTitle,
   getWebToolInputMetadata,
   getWebToolMetadata,
   getWebToolOutputError,
   getWebToolStartTitle,
   extractToolOutputField,
-  hasPresentationArtifactUrl,
-  isPresentationArtifactInputRequiredOutput,
-  isVideoPresentationArtifactReady,
   normalizeToolOutputForObservability,
   redactFilesystemToolOutputForClient,
   sanitizeFilesystemToolInputForClient,
@@ -71,7 +69,6 @@ function getSkillInstructionDisplayOptions(
 }
 
 export async function* handleToolStartStreamChunk(input: {
-  artifactIntent: PreparedThreadTurn["artifactIntent"];
   prepared: PreparedThreadTurn;
   runtime: TurnRuntime;
   snapshot: ToolsStreamToolCallSnapshot;
@@ -114,13 +111,11 @@ export async function* handleToolStartStreamChunk(input: {
       normalizedInput.title.trim().length > 0
         ? { title: normalizedInput.title.trim() }
         : {}),
-      ...(input.artifactIntent?.kind === "image"
-        ? {
-            aspectRatio: input.artifactIntent.config?.aspectRatio,
-            quality: input.artifactIntent.config?.quality,
-            style: input.artifactIntent.config?.style,
-          }
-        : {}),
+      // Whatever this tool's own preflight settled about the shape of the
+      // result. Looked up by the name already in hand; never named here.
+      ...(getAgentToolTurnPreflight(toolName)?.readProgressSeed?.(
+        input.prepared.turnState[toolName],
+      ) ?? {}),
     });
     if (progressEvent) {
       const toolCallEvent = buildGeneratedArtifactProgressToolCallEvent({
@@ -199,10 +194,10 @@ export async function* handleToolStartStreamChunk(input: {
       toolCall: nextToolCall,
     };
   }
-  if (
-    hasAgentToolCapability(toolName, "presentation_artifact") ||
-    hasAgentToolCapability(toolName, "video_presentation_artifact")
-  ) {
+  // Any capability that reports a generation step gets one; buildArtifactGenerationStep
+  // already returns null for the rest, so naming capabilities here would only
+  // exclude future ones.
+  {
     const step = buildArtifactGenerationStep({
       phase: "generating",
       toolCallId,
@@ -380,7 +375,7 @@ export async function* handleToolEndStreamChunk(input: {
   const outputError =
     connectorContentError?.message ??
     getConnectorToolOutputError(output) ??
-    getVideoPresentationToolOutputError(output) ??
+    getArtifactProgressToolOutputError(output) ??
     getFilesystemToolOutputError(toolName, output) ??
     (isAgentToolDomain(toolName, "web") ? getWebToolOutputError(output) : null);
   const toolStatus: "completed" | "error" = outputError ? "error" : "completed";
@@ -458,36 +453,21 @@ export async function* handleToolEndStreamChunk(input: {
     status: toolStatus,
     toolCall: nextToolCall,
   };
-  if (
-    hasAgentToolCapability(toolName, "presentation_artifact") ||
-    hasAgentToolCapability(toolName, "video_presentation_artifact")
-  ) {
-    const isVideoPresentation = hasAgentToolCapability(
-      toolName,
-      "video_presentation_artifact",
-    );
-    const completed = toolStatus === "completed";
-    const hasArtifact = isVideoPresentation
-      ? isVideoPresentationArtifactReady(output)
-      : completed && hasPresentationArtifactUrl(output);
-    const needsContent =
-      completed && isPresentationArtifactInputRequiredOutput(output);
-    const isRunningVideo =
-      isVideoPresentation &&
-      completed &&
-      hasPresentationArtifactUrl(output) &&
-      !hasArtifact &&
-      extractToolOutputField(output, "status") === "running";
+  // The phase is the capability's to read — it owns the status vocabulary and
+  // whether a URL alone counts as done. The host only asks.
+  const completionPhase = getAgentToolPresentation(
+    toolName,
+  )?.artifactCompletionPhase?.({
+    toolInput: nextToolCall.input,
+    toolOutput: output,
+    readOutputField: extractToolOutputField,
+    status: toolStatus,
+  });
+  if (completionPhase) {
     const step = buildArtifactGenerationStep({
       error: outputError,
       latencyMs,
-      phase: hasArtifact
-        ? "completed"
-        : needsContent
-          ? "repairing"
-          : isRunningVideo
-            ? "saving"
-            : "failed",
+      phase: completionPhase,
       toolCallId,
       toolName,
     });

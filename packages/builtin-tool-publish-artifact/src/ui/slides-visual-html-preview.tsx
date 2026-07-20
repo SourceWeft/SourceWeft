@@ -1,3 +1,13 @@
+"use client";
+
+/**
+ * The visual HTML deck preview: a self-contained deck rendered in a sandboxed
+ * iframe, with this capability's browser-side export actions above it.
+ *
+ * NOTE: unreachable today — nothing on the write side stores
+ * `generationMode: "visual_html"` in a slides payload. Carried over verbatim
+ * from the app-owned version; removing it is a separate decision.
+ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileCode2, FileType2, Loader2, Video } from "lucide-react";
 import { toast } from "sonner";
@@ -7,16 +17,14 @@ import {
   exportVisualDeckHtml,
   exportVisualDeckPptx,
   exportVisualDeckVideo,
-} from "../../../../../../lib/visual-deck/export/browser";
-import { resolveVisualDeckExportProfile } from "../../../../../../lib/visual-deck/export/profile";
-import type { ArtifactPreviewRenderer } from "../types";
-import { resolveSlidesGenerationMode } from "./slides-pptx-preview";
+} from "../visual-deck/browser";
+import { resolveVisualDeckExportProfile } from "../visual-deck/profile";
 
 const VISUAL_DECK_CONTROLS_HEIGHT = 48;
 const VIDEO_EXPORT_SECONDS_PER_SLIDE = 2;
 const VIDEO_EXPORT_TRANSITION_SECONDS = 0.3;
 
-function VisualHtmlDeckPreview({
+export function VisualHtmlDeckPreview({
   payload,
   previewUrl,
   title,
@@ -246,20 +254,3 @@ function VisualHtmlDeckPreview({
     </div>
   );
 }
-
-export const slidesVisualHtmlPreviewRenderer: ArtifactPreviewRenderer = {
-  id: "slides-visual-html",
-  match: ({ artifact, payload, proxyFileUrl }) =>
-    artifact.artifactType === "slides" &&
-    artifact.status === "ready" &&
-    Boolean(proxyFileUrl) &&
-    resolveSlidesGenerationMode(payload) === "visual_html",
-  render: ({ payload, proxyFileUrl, title }) =>
-    proxyFileUrl ? (
-      <VisualHtmlDeckPreview
-        payload={payload}
-        previewUrl={proxyFileUrl}
-        title={title}
-      />
-    ) : null,
-};

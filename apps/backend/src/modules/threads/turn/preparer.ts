@@ -38,6 +38,9 @@ import {
   pruneUnavailableThreadModelAliases,
   resolveThreadModelSettingsSnapshots,
   validateThreadModelSettings,
+  MODEL_KIND_BY_THREAD_KIND,
+  type ThreadModelKind,
+  type ThreadModelSettings,
 } from "../model-settings";
 import {
   collapseSupersededMessages,
@@ -96,12 +99,7 @@ import {
   resolveSelectedSkills,
   normalizeSkillIds,
 } from "../../skills/selection";
-import { isAgentToolEnabledByDefault } from "@sourceweft/agent-tool-registry";
-import {
-  resolveGenerateImageIntentDecision,
-  resolveImageModelCapabilities,
-  type GenerateImageToolSelection,
-} from "@sourceweft/builtin-tool-generate-image";
+import { runTurnPreflights } from "./turn-preflight";
 import {
   buildChatImageStorageKey,
   downloadChatImageObject,
@@ -113,8 +111,7 @@ import {
   buildRuntimeTools,
   buildTurnOptionsSnapshot,
   readSkillRuntimeConfig,
-  resolveGenerateImageToolSelection,
-  resolveGenerateVideoPresentationToolSelection,
+  resolveTurnToolSelections,
   resolveWebSearchEnabled,
 } from "./tool-selection";
 import type {
@@ -148,6 +145,19 @@ const VISION_FALLBACK_DESCRIPTION_OPERATION = "vision.describe";
 const VISION_FALLBACK_IDEMPOTENCY_PREFIX = "vision-fallback";
 const PREFLIGHT_VISION_CAPABILITY_SEQUENCE = -2;
 const PREFLIGHT_VISION_FALLBACK_SEQUENCE = -1;
+
+const THREAD_MODEL_KINDS = Object.keys(
+  MODEL_KIND_BY_THREAD_KIND,
+) as readonly ThreadModelKind[];
+
+/**
+ * Model kinds a single request may override the profile of. Listed by model
+ * kind rather than by capability: the request carries one image override and
+ * one vision override no matter how many tools consume them.
+ */
+const REQUESTABLE_THREAD_MODEL_KINDS = ["image", "vision"] as const;
+type RequestableThreadModelKind =
+  (typeof REQUESTABLE_THREAD_MODEL_KINDS)[number];
 
 function resolveInvocationSkillId(input: {
   enabledSkills: readonly EnabledSkillDescriptor[];
@@ -255,91 +265,6 @@ type VisionFallbackBillingItem = {
    */
   meteredCall: MeteredModelCallTrace | null;
 };
-
-type ResolvedGenerateImageProfile = {
-  profile: NonNullable<Awaited<ReturnType<typeof resolveModelGatewayProfile>>>;
-  capabilities: ReturnType<typeof resolveImageModelCapabilities>;
-};
-
-async function resolveGenerateImageProfile(input: {
-  readonly byokExecution?: GenerateImageToolSelection["execution"];
-  readonly explicit: boolean;
-  readonly hasByokExecution?: boolean;
-  readonly requestedProfileAlias?: string | null;
-  readonly requestedModelAlias?: string | null;
-  readonly threadModelSettings: Awaited<
-    ReturnType<typeof resolveThreadModelSettingsSnapshots>
-  >;
-}): Promise<ResolvedGenerateImageProfile | null> {
-  let profile = await resolveModelGatewayProfile({
-    kind: "image",
-    requestedProfileAlias:
-      input.requestedModelAlias || input.hasByokExecution
-        ? undefined
-        : input.requestedProfileAlias === null
-          ? undefined
-          : input.requestedProfileAlias ??
-            input.threadModelSettings.imageProfileAlias,
-    requestedModelAlias: input.hasByokExecution
-      ? undefined
-      : input.requestedModelAlias,
-    defaultRequired:
-      input.requestedProfileAlias || input.requestedModelAlias
-        ? false
-        : input.explicit && !input.hasByokExecution,
-  });
-  if (!profile && input.requestedProfileAlias && !input.requestedModelAlias) {
-    profile = await resolveModelGatewayProfile({
-      kind: "image",
-      defaultRequired: input.explicit && !input.hasByokExecution,
-    });
-  }
-  if (!profile && input.hasByokExecution) {
-    profile = await resolveModelGatewayProfile({
-      kind: "image",
-      requestedProfileAlias: input.threadModelSettings.imageProfileAlias,
-      defaultRequired: false,
-    });
-  }
-  if (!profile && input.hasByokExecution && input.byokExecution) {
-    const now = new Date().toISOString();
-    const modelAlias =
-      input.byokExecution.modelAlias ??
-      input.byokExecution.providerModel ??
-      input.byokExecution.byokModelId ??
-      "byok-image";
-    const profileAlias = `byok:image:${input.byokExecution.byokModelId ?? modelAlias}`;
-    const providerKind = input.byokExecution.providerHint ?? undefined;
-    profile = {
-      id: `byok:image:${profileAlias}`,
-      kind: "image",
-      gatewayConfigId: "",
-      profileAlias,
-      modelAlias,
-      requestedDimensions: null,
-      vectorStrategy: "auto",
-      isDefault: false,
-      isActive: true,
-      configJson: {
-        ...(providerKind ? { providerKind } : {}),
-        targetModel: modelAlias,
-      },
-      createdAt: now,
-      updatedAt: now,
-    };
-  }
-  if (!profile) {
-    return null;
-  }
-
-  return {
-    profile,
-    capabilities: resolveImageModelCapabilities({
-      profile,
-      modelId: profile.modelAlias,
-    }),
-  };
-}
 
 type VisionFallbackResult = {
   agentMessageContent: string;
@@ -1560,11 +1485,11 @@ export async function prepareThreadTurn(
     toolsWithInvocation,
     await listCapabilityTools(),
   );
-  const generateImageTool = resolveGenerateImageToolSelection(
+  // Every capability regularizes its own selection; the pipeline just collects
+  // the results keyed by tool name.
+  const turnToolSelections = resolveTurnToolSelections(
     toolsWithCapabilityDefaults,
   );
-  const generateVideoPresentationTool =
-    resolveGenerateVideoPresentationToolSelection(toolsWithCapabilityDefaults);
   const imageExecution =
     input.image?.executionMode === "BYOK"
       ? await resolvePreparedByokExecution({
@@ -1583,31 +1508,87 @@ export async function prepareThreadTurn(
           expectedModelType: "vision",
         })
       : input.vision;
-  const effectiveGenerateImageTool =
-    imageExecution?.executionMode === "BYOK"
+
+  await assertSourcesExist({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    sourceIds: Array.from(
+      new Set([...selectedSourceIds, ...mentionedSourceIds]),
+    ),
+  });
+
+  const requestedThreadProfiles = Object.fromEntries(
+    REQUESTABLE_THREAD_MODEL_KINDS.map((kind) => [
+      kind,
+      resolveRequestedThreadProfileAlias({
+        execution: input[kind],
+        legacyProfileAlias: input[`${kind}ProfileAlias`],
+        kind,
+      }),
+    ]),
+  ) as Record<
+    RequestableThreadModelKind,
+    ReturnType<typeof resolveRequestedThreadProfileAlias>
+  >;
+  const persistedThreadSettingsWithSnapshots =
+    await resolveThreadModelSettingsSnapshots(persistedThreadSettings);
+  const normalizedThreadSettings = await pruneUnavailableThreadModelAliases(
+    normalizeThreadModelSettings({
+      ...persistedThreadSettingsWithSnapshots,
+      ...Object.fromEntries(
+        REQUESTABLE_THREAD_MODEL_KINDS.flatMap((kind) =>
+          requestedThreadProfiles[kind].provided
+            ? [[`${kind}ProfileAlias`, requestedThreadProfiles[kind].profileAlias]]
+            : [],
+        ),
+      ),
+    }),
+  );
+  await validateThreadModelSettings(normalizedThreadSettings);
+  const normalizedThreadSettingsWithSnapshots =
+    await resolveThreadModelSettingsSnapshots(normalizedThreadSettings);
+
+  // The turn's facts are settled; every capability that has async work of its
+  // own now gets one shot at them. What comes back replaces its selection and
+  // is otherwise opaque — the pipeline files it under the tool's name.
+  const preflight = await runTurnPreflights({
+    selections: turnToolSelections,
+    command: resolvedCommand
       ? {
-          ...(generateImageTool ?? {}),
-          enabled: generateImageTool?.enabled ?? true,
-          execution: imageExecution,
-          ...(imageExecution.modelAlias
-            ? { modelAlias: imageExecution.modelAlias }
-            : imageExecution.providerModel
-              ? { modelAlias: imageExecution.providerModel }
-              : {}),
+          kind: resolvedCommand.kind,
+          ...(resolvedCommand.toolName
+            ? { toolName: resolvedCommand.toolName }
+            : {}),
         }
-      : generateImageTool;
+      : null,
+    enabledSkills,
+    executionByModelKind: {
+      image: imageExecution,
+      vision: visionExecution,
+    },
+    requestedProfileAliasByModelKind: Object.fromEntries(
+      REQUESTABLE_THREAD_MODEL_KINDS.flatMap((kind) =>
+        requestedThreadProfiles[kind].provided
+          ? [[kind, requestedThreadProfiles[kind].profileAlias ?? null]]
+          : [],
+      ),
+    ),
+    threadProfileAliasByModelKind: Object.fromEntries(
+      THREAD_MODEL_KINDS.map((threadKind) => [
+        MODEL_KIND_BY_THREAD_KIND[threadKind],
+        normalizedThreadSettingsWithSnapshots[`${threadKind}ProfileAlias`],
+      ]),
+    ),
+  });
+
   const webAccessEnabled = resolveWebSearchEnabled({
     tools: toolsWithCapabilityDefaults,
     enabledSkills,
   });
-  const toolOverrides: Record<string, unknown> = {};
-  if (effectiveGenerateImageTool) {
-    toolOverrides[AGENT_TOOL_NAMES.generateImage] = effectiveGenerateImageTool;
-  }
-  if (generateVideoPresentationTool) {
-    toolOverrides[AGENT_TOOL_NAMES.generateVideoPresentation] =
-      generateVideoPresentationTool;
-  }
+  const toolOverrides: Record<string, unknown> = {
+    ...turnToolSelections,
+    ...preflight.selections,
+  };
   const effectiveTools = buildEffectiveToolsSelection({
     baseTools: toolsWithCapabilityDefaults,
     skillIds: selectedSkillIds,
@@ -1626,69 +1607,6 @@ export async function prepareThreadTurn(
   });
   const commandSuccessCriteria = resolvedCommand?.workflow?.successCriteria;
   const mcpTools = {};
-
-  await assertSourcesExist({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    sourceIds: Array.from(
-      new Set([...selectedSourceIds, ...mentionedSourceIds]),
-    ),
-  });
-
-  const requestedImageProfile = resolveRequestedThreadProfileAlias({
-    execution: input.image,
-    legacyProfileAlias: input.imageProfileAlias,
-    kind: "image",
-  });
-  const requestedVisionProfile = resolveRequestedThreadProfileAlias({
-    execution: input.vision,
-    legacyProfileAlias: input.visionProfileAlias,
-    kind: "vision",
-  });
-  const persistedThreadSettingsWithSnapshots =
-    await resolveThreadModelSettingsSnapshots(persistedThreadSettings);
-  const normalizedThreadSettings = await pruneUnavailableThreadModelAliases(
-    normalizeThreadModelSettings({
-      ...persistedThreadSettingsWithSnapshots,
-      ...(requestedImageProfile.provided
-        ? { imageProfileAlias: requestedImageProfile.profileAlias }
-        : {}),
-      ...(requestedVisionProfile.provided
-        ? { visionProfileAlias: requestedVisionProfile.profileAlias }
-        : {}),
-    }),
-  );
-  await validateThreadModelSettings(normalizedThreadSettings);
-  const normalizedThreadSettingsWithSnapshots =
-    await resolveThreadModelSettingsSnapshots(normalizedThreadSettings);
-  const shouldRunImageArtifactIntent = !(
-    resolvedCommand?.kind === "tool" &&
-    resolvedCommand.toolName !== AGENT_TOOL_NAMES.generateImage
-  );
-  const imageToolDecision = await resolveGenerateImageIntentDecision({
-    tools:
-      shouldRunImageArtifactIntent && effectiveGenerateImageTool
-        ? { [AGENT_TOOL_NAMES.generateImage]: effectiveGenerateImageTool }
-        : undefined,
-    enabledSkills,
-    profileContext: normalizedThreadSettingsWithSnapshots,
-    defaultToolEnabled: isAgentToolEnabledByDefault(
-      AGENT_TOOL_NAMES.generateImage,
-    ),
-    toolName: AGENT_TOOL_NAMES.generateImage,
-    resolveImageProfile: async (request) =>
-      resolveGenerateImageProfile({
-        threadModelSettings:
-          request.context ?? normalizedThreadSettingsWithSnapshots,
-        explicit: request.explicit,
-        hasByokExecution: request.hasByokExecution,
-        byokExecution: request.byokExecution,
-        requestedProfileAlias: requestedImageProfile.provided
-          ? requestedImageProfile.profileAlias
-          : undefined,
-        requestedModelAlias: request.requestedModelAlias,
-      }),
-  });
   const profileAlias = resolvedChatModel.profileAlias;
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);
@@ -1800,8 +1718,8 @@ export async function prepareThreadTurn(
           text: agentText,
           images: savedImages,
           onThinkingStep: input.onPreflightThinkingStep,
-          requestedVisionProfileAlias: requestedVisionProfile.provided
-            ? requestedVisionProfile.profileAlias
+          requestedVisionProfileAlias: requestedThreadProfiles.vision.provided
+            ? requestedThreadProfiles.vision.profileAlias
             : undefined,
           threadVisionProfileAlias: normalizedThreadSettings.visionProfileAlias,
           visionExecution,
@@ -1850,7 +1768,9 @@ export async function prepareThreadTurn(
             }
           : {}),
         options: buildTurnOptionsSnapshot({ tools: effectiveTools }),
-        artifactIntent: imageToolDecision.decision,
+        // Whatever the capabilities asked to have on the record. The pipeline
+        // carries the fields without reading them.
+        ...preflight.messageMetadata,
         versionOf: input.userMessageParentId ?? null,
       },
     }));
@@ -1877,20 +1797,14 @@ export async function prepareThreadTurn(
       : {},
   );
 
-  if (
-    persistedResolvedThreadSettings.llmProfileAlias !==
-      originalThreadSettings.llmProfileAlias ||
-    persistedResolvedThreadSettings.llmModelAlias !==
-      originalThreadSettings.llmModelAlias ||
-    persistedResolvedThreadSettings.imageProfileAlias !==
-      originalThreadSettings.imageProfileAlias ||
-    persistedResolvedThreadSettings.imageModelAlias !==
-      originalThreadSettings.imageModelAlias ||
-    persistedResolvedThreadSettings.visionProfileAlias !==
-      originalThreadSettings.visionProfileAlias ||
-    persistedResolvedThreadSettings.visionModelAlias !==
-      originalThreadSettings.visionModelAlias
-  ) {
+  const threadModelSettingsChanged = (
+    Object.keys(persistedResolvedThreadSettings) as (keyof ThreadModelSettings)[]
+  ).some(
+    (key) =>
+      persistedResolvedThreadSettings[key] !== originalThreadSettings[key],
+  );
+
+  if (threadModelSettingsChanged) {
     const updatedThread = await updateThreadModelSettingsRecord({
       threadId: thread.id,
       teamId: workspace.organizationId,
@@ -1972,9 +1886,7 @@ export async function prepareThreadTurn(
     toolPermissions,
     effectiveTools,
     runtimeTools,
-    generateImageTool: effectiveGenerateImageTool,
-    artifactIntent: imageToolDecision.decision,
-    imageProfile: imageToolDecision.imageProfile,
+    turnState: preflight.turnState,
     timezone,
     userMessage: userMessageWithTraceId,
     runTraceId,

@@ -1,4 +1,5 @@
-import { apiBaseUrl } from "../../api-base-url";
+/// <reference path="./dom-to-pptx.d.ts" />
+import { artifactRenderHost } from "@sourceweft/contracts/artifact-ui";
 import { stripExecutableVisualDeckHtmlForExport } from "./html-sanitize";
 import {
   resolveVisualDeckDocumentExportProfile,
@@ -728,7 +729,9 @@ async function waitForVideoFrame(frameMs: number) {
 }
 
 function resolveAssetFetchUrl(value: string) {
-  return value.startsWith("/v1/") ? `${apiBaseUrl}${value}` : value;
+  // Backend-relative asset paths are absolutized by the app shell; the export
+  // pipeline must reach the API directly rather than through an artifact route.
+  return artifactRenderHost().resolveApiAssetUrl(value);
 }
 
 async function prepareVideoAudio(input: {

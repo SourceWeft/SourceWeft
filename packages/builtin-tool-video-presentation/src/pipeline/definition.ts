@@ -14,11 +14,13 @@ import {
   type VideoPresentationPipelineStep,
   type VideoPresentationProjectPayload,
 } from "@sourceweft/contracts/video-presentation";
+import { VIDEO_PRESENTATION_PIPELINE_JOB_NAME } from "../artifact-records";
 import { buildVideoPresentationStageView } from "../pipeline-digests";
 import { generateAudioTracks } from "./audio";
 import { MAX_ERROR_MESSAGE_LENGTH } from "./config";
 import { createVideoPipelineDeps, type VideoPipelineDeps } from "./deps";
 import { attachReadySourceJson } from "./finalize";
+import { uploadCoverImage } from "./preview-images";
 import { buildProjectCodePayload } from "./project-code";
 import { runGeneratedProject } from "./sandbox-project";
 import {
@@ -47,7 +49,7 @@ export function createVideoPresentationPipelineDefinition(options?: {
 }): DeliverablePipelineDefinition<VideoPresentationProjectPayload> {
   return {
     id: "video_presentation",
-    jobName: "video-presentation-generate",
+    jobName: VIDEO_PRESENTATION_PIPELINE_JOB_NAME,
     artifactType: "video_presentation",
     stages: videoPipelineStages,
     defaultErrorCode: VIDEO_PRESENTATION_ERROR_CODES.generationFailed,
@@ -422,6 +424,34 @@ export function createVideoPresentationPipelineDefinition(options?: {
           const durationSeconds = Number(
             (durationInFrames / state.project.fps).toFixed(2),
           );
+
+          // Store a cover still as the artifact thumbnail. Best-effort end to
+          // end: a resumed run with no stills in scratch, or a sandbox that
+          // never rendered any, simply leaves the existing thumbnail alone.
+          const projectRun = scratch.projectRun as
+            | ProjectRunResults
+            | undefined;
+          if (projectRun?.stills?.length) {
+            try {
+              const coverImage = await uploadCoverImage({
+                artifactId: job.artifactId,
+                deps,
+                payload: state,
+                stills: projectRun.stills,
+                workspaceId: job.workspaceId,
+              });
+              if (coverImage) {
+                api.setPreviewImage(coverImage);
+              }
+            } catch (error) {
+              deps.logger.warn("video_presentation_cover_image_failed", {
+                artifactId: job.artifactId,
+                jobId: job.jobId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
           state = videoPresentationProjectPayloadSchema.parse({
             ...state,
             project: {

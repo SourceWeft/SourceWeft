@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeVisualDeckSlidesForExport,
   visualDeckSlideBackgroundColor,
-} from "./html-normalize";
+} from "@sourceweft/builtin-tool-publish-artifact/visual-deck/html-normalize";
 
 function mountDeck(markup: string, css = "") {
   document.head.innerHTML = css ? `<style>${css}</style>` : "";

@@ -90,6 +90,18 @@ export const publishArtifactPresentation: AgentToolPresentation = {
     }
     return "Published deck";
   },
+  // Publishing is synchronous: a returned artifact URL is the artifact, but
+  // only on a call that actually ended cleanly. The tool can also finish having
+  // asked for slide content instead, which is a repair, not a failure.
+  artifactCompletionPhase(context) {
+    if (context.status !== "completed") {
+      return "failed";
+    }
+    if (hasArtifactUrl(context)) {
+      return "completed";
+    }
+    return needsSlideContent(context) ? "repairing" : "failed";
+  },
   stageStep({ stageId }) {
     return SHARED_STAGE_STEPS[stageId] ?? null;
   },

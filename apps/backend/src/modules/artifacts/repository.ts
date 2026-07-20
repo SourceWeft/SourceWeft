@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { artifacts, artifactVersions, db } from "@sourceweft/db";
 
 type ArtifactRow = typeof artifacts.$inferSelect;
 type ArtifactStatus = ArtifactRow["status"];
+type ArtifactType = ArtifactRow["artifactType"];
 
 function mapArtifact(row: ArtifactRow) {
   return {
@@ -13,6 +14,8 @@ function mapArtifact(row: ArtifactRow) {
     threadId: row.threadId,
     artifactType: row.artifactType,
     status: row.status,
+    currentVersionNo: row.currentVersionNo,
+    requestKey: row.requestKey,
     title: row.title,
     promptText: row.promptText,
     payloadJson: row.payloadJson ?? {},
@@ -29,8 +32,15 @@ function mapArtifact(row: ArtifactRow) {
   };
 }
 
-export async function createImageArtifactRecord(input: {
+/**
+ * Insert an already-produced artifact row plus its first version. The host
+ * owns the row shape (ids, storage pointers, versioning); which artifact type
+ * it is and what the payload contains come from the capability that produced
+ * it.
+ */
+export async function createReadyArtifactRecord(input: {
   artifactId: string;
+  artifactType: ArtifactType;
   teamId: string;
   workspaceId: string;
   threadId: string;
@@ -38,87 +48,57 @@ export async function createImageArtifactRecord(input: {
   title: string;
   prompt: string;
   payload: Record<string, unknown>;
-  storageBucket: string;
-  storageKey: string;
-}) {
-  const versionId = randomUUID();
-  const now = new Date();
-
-  await db.insert(artifacts).values({
-    id: input.artifactId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    threadId: input.threadId,
-    artifactType: "image",
-    status: "ready",
-    title: input.title,
-    promptText: input.prompt,
-    payloadJson: input.payload,
-    storageBucket: input.storageBucket,
-    storageKey: input.storageKey,
-    createdBy: input.userId,
-    completedAt: now,
-  });
-
-  await db.insert(artifactVersions).values({
-    id: versionId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    artifactId: input.artifactId,
-    versionNo: 1,
-    contentJson: input.payload,
-    createdBy: input.userId,
-  });
-
-  return {
-    artifactId: input.artifactId,
-    versionId,
-  };
-}
-
-export async function createSlidesArtifactRecord(input: {
-  artifactId: string;
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-  userId: string;
-  title: string;
-  prompt: string;
-  payload: Record<string, unknown>;
-  storageBucket: string;
-  storageKey: string;
+  /**
+   * Nullable because a file is no longer the centre of an artifact: a
+   * client-rendered type publishes a payload and never a stored file. The
+   * column has always been nullable; the signature required it only because
+   * every caller happened to be a file publisher.
+   */
+  storageBucket?: string | null;
+  storageKey?: string | null;
   previewStorageKey?: string | null;
   previewMetadata?: Record<string, unknown> | null;
+  /** Idempotency token, when the caller asked for "the artifact for this request". */
+  requestKey?: string | null;
 }) {
   const versionId = randomUUID();
   const now = new Date();
 
-  await db.insert(artifacts).values({
-    id: input.artifactId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    threadId: input.threadId,
-    artifactType: "slides",
-    status: "ready",
-    title: input.title,
-    promptText: input.prompt,
-    payloadJson: input.payload,
-    storageBucket: input.storageBucket,
-    storageKey: input.storageKey,
-    previewStorageKey: input.previewStorageKey ?? null,
-    previewMetadataJson: input.previewMetadata ?? {},
-    createdBy: input.userId,
-    completedAt: now,
-  });
+  // The row and its first version are one fact, not two. Written separately, a
+  // failure between them leaves a status=ready artifact with zero versions —
+  // readable by the API, unopenable by any version-based reader.
+  await db.transaction(async (tx) => {
+    await tx.insert(artifacts).values({
+      id: input.artifactId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      threadId: input.threadId,
+      artifactType: input.artifactType,
+      status: "ready",
+      // Written here rather than derived later: the version row inserted below
+      // is version 1, and the pointer must agree with it from the first commit.
+      currentVersionNo: 1,
+      requestKey: input.requestKey ?? null,
+      title: input.title,
+      promptText: input.prompt,
+      payloadJson: input.payload,
+      storageBucket: input.storageBucket ?? null,
+      storageKey: input.storageKey ?? null,
+      previewStorageKey: input.previewStorageKey ?? null,
+      previewMetadataJson: input.previewMetadata ?? {},
+      createdBy: input.userId,
+      completedAt: now,
+    });
 
-  await db.insert(artifactVersions).values({
-    id: versionId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    artifactId: input.artifactId,
-    versionNo: 1,
-    contentJson: input.payload,
-    createdBy: input.userId,
+    await tx.insert(artifactVersions).values({
+      id: versionId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      artifactId: input.artifactId,
+      versionNo: 1,
+      contentJson: input.payload,
+      createdBy: input.userId,
+    });
   });
 
   return {
@@ -127,8 +107,13 @@ export async function createSlidesArtifactRecord(input: {
   };
 }
 
-export async function createFileArtifactRecord(input: {
+/**
+ * Insert a not-yet-produced artifact row. Which artifact type it is, and what
+ * goes into the payload, is the caller's (i.e. the capability's) business.
+ */
+export async function createPendingArtifactRecord(input: {
   artifactId: string;
+  artifactType: ArtifactType;
   teamId: string;
   workspaceId: string;
   threadId: string;
@@ -136,61 +121,19 @@ export async function createFileArtifactRecord(input: {
   title: string;
   prompt: string;
   payload: Record<string, unknown>;
-  storageBucket: string;
-  storageKey: string;
-}) {
-  const versionId = randomUUID();
-  const now = new Date();
-
-  await db.insert(artifacts).values({
-    id: input.artifactId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    threadId: input.threadId,
-    artifactType: "file",
-    status: "ready",
-    title: input.title,
-    promptText: input.prompt,
-    payloadJson: input.payload,
-    storageBucket: input.storageBucket,
-    storageKey: input.storageKey,
-    createdBy: input.userId,
-    completedAt: now,
-  });
-
-  await db.insert(artifactVersions).values({
-    id: versionId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    artifactId: input.artifactId,
-    versionNo: 1,
-    contentJson: input.payload,
-    createdBy: input.userId,
-  });
-
-  return {
-    artifactId: input.artifactId,
-    versionId,
-  };
-}
-
-export async function createPendingVideoPresentationArtifactRecord(input: {
-  artifactId: string;
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-  userId: string;
-  title: string;
-  prompt: string;
-  payload: Record<string, unknown>;
+  /** Idempotency token, when the caller asked for "the artifact for this request". */
+  requestKey?: string | null;
 }) {
   await db.insert(artifacts).values({
     id: input.artifactId,
     teamId: input.teamId,
     workspaceId: input.workspaceId,
     threadId: input.threadId,
-    artifactType: "video_presentation",
+    artifactType: input.artifactType,
     status: "pending",
+    // No version has been published yet; markArtifactReady moves it to 1.
+    currentVersionNo: 0,
+    requestKey: input.requestKey ?? null,
     title: input.title,
     promptText: input.prompt,
     payloadJson: input.payload,
@@ -198,12 +141,36 @@ export async function createPendingVideoPresentationArtifactRecord(input: {
   });
 }
 
-export async function findReusableVideoPresentationArtifactRecord(input: {
+/**
+ * Find the most recent artifact in a thread a caller may reuse instead of
+ * creating a new one. The host scans the thread's rows of the requested type;
+ * which statuses qualify and what makes a row a match are supplied by the
+ * caller, since both are capability-specific.
+ *
+ * Every predicate the caller can express is pushed into SQL, and the LIMIT is
+ * applied to *matching* rows. It used to fetch the newest 20 rows and filter
+ * status/payload in JS, which silently missed a perfectly reusable row as soon
+ * as a thread accumulated 20 newer artifacts of the same type — the reuse
+ * simply stopped working, quietly, on exactly the busy threads that needed it.
+ *
+ * `matchesPayload` remains for callers whose match cannot be expressed as a
+ * column, but it is a residual filter over SQL-narrowed rows, never the only
+ * one; pass `requestKey` when the match is an idempotency token, which is the
+ * indexed path.
+ */
+export async function findReusableArtifactRecord(input: {
   teamId: string;
   workspaceId: string;
   threadId: string;
-  requestKey: string;
+  artifactType: ArtifactType;
+  statuses: readonly ArtifactStatus[];
+  limit?: number;
+  requestKey?: string;
+  matchesPayload?: (payload: Record<string, unknown>) => boolean;
 }) {
+  if (input.statuses.length === 0) {
+    return null;
+  }
   const rows = await db
     .select()
     .from(artifacts)
@@ -212,35 +179,88 @@ export async function findReusableVideoPresentationArtifactRecord(input: {
         eq(artifacts.teamId, input.teamId),
         eq(artifacts.workspaceId, input.workspaceId),
         eq(artifacts.threadId, input.threadId),
-        eq(artifacts.artifactType, "video_presentation"),
+        eq(artifacts.artifactType, input.artifactType),
+        inArray(artifacts.status, [...input.statuses]),
+        ...(input.requestKey === undefined
+          ? []
+          : [eq(artifacts.requestKey, input.requestKey)]),
       ),
     )
     .orderBy(desc(artifacts.createdAt))
-    .limit(20);
+    // Without a residual JS filter one row is all a caller can use; with one,
+    // the limit bounds how many candidates it may inspect.
+    .limit(input.matchesPayload ? (input.limit ?? 20) : 1);
 
-  const row = rows.find((candidate) => {
-    if (
-      candidate.status !== "pending" &&
-      candidate.status !== "running" &&
-      candidate.status !== "ready"
-    ) {
-      return false;
-    }
-    const payload = candidate.payloadJson;
-    return (
-      payload &&
-      typeof payload === "object" &&
-      !Array.isArray(payload) &&
-      (payload as Record<string, unknown>).requestKey === input.requestKey
-    );
-  });
+  const row = input.matchesPayload
+    ? rows.find((candidate) => {
+        const payload = candidate.payloadJson;
+        return Boolean(
+          payload &&
+            typeof payload === "object" &&
+            !Array.isArray(payload) &&
+            input.matchesPayload!(payload as Record<string, unknown>),
+        );
+      })
+    : rows[0];
   return row ? mapArtifact(row) : null;
 }
 
 /**
- * Publish a new ready version. Returns null when `expectedStatuses` is given
- * and the artifact is no longer in one of them — i.e. another writer got there
- * first. Callers that pass it must treat null as "lost the race", not failure.
+ * Resolve an idempotency token to the artifact it already produced, workspace-
+ * wide. Separate from `findReusableArtifactRecord` because idempotency is not
+ * thread-scoped: "the artifact for this request" is the same artifact whichever
+ * thread asks again.
+ *
+ * Callers must run this *before* uploading any bytes — a de-duplicated publish
+ * that still wrote its objects has left orphans in the bucket for an artifact
+ * it did not create.
+ */
+export async function findArtifactRecordByRequestKey(input: {
+  teamId: string;
+  workspaceId: string;
+  artifactType: ArtifactType;
+  requestKey: string;
+  statuses: readonly ArtifactStatus[];
+}) {
+  if (input.statuses.length === 0) {
+    return null;
+  }
+  const [row] = await db
+    .select()
+    .from(artifacts)
+    .where(
+      and(
+        eq(artifacts.teamId, input.teamId),
+        eq(artifacts.workspaceId, input.workspaceId),
+        eq(artifacts.artifactType, input.artifactType),
+        eq(artifacts.requestKey, input.requestKey),
+        inArray(artifacts.status, [...input.statuses]),
+      ),
+    )
+    .orderBy(desc(artifacts.createdAt))
+    .limit(1);
+
+  if (!row) {
+    return null;
+  }
+  const [latestVersion] = await db
+    .select({ id: artifactVersions.id })
+    .from(artifactVersions)
+    .where(eq(artifactVersions.artifactId, row.id))
+    .orderBy(desc(artifactVersions.versionNo))
+    .limit(1);
+
+  return {
+    ...mapArtifact(row),
+    latestVersionId: latestVersion?.id ?? null,
+  };
+}
+
+/**
+ * Publish a new ready version. Returns null when `expectedStatuses` or
+ * `expectedVersionNo` is given and no longer matches — i.e. another writer got
+ * there first. Callers that pass either must treat null as "lost the race",
+ * not failure.
  */
 export async function markArtifactReady(input: {
   artifactId: string;
@@ -248,90 +268,142 @@ export async function markArtifactReady(input: {
   workspaceId: string;
   userId: string;
   payload: Record<string, unknown>;
+  /**
+   * Set by pipelines that produce their own thumbnail. Omitted means "keep
+   * whatever preview the artifact already has".
+   */
+  previewStorageKey?: string;
+  previewMetadata?: Record<string, unknown>;
+  /**
+   * Set by a two-phase completion that produced the artifact's own stored file
+   * only in its second phase. Omitted means "keep whatever the row already
+   * points at", which is what every pre-existing caller wants.
+   */
+  storageBucket?: string;
+  storageKey?: string;
   expectedStatuses?: ArtifactStatus[];
+  /**
+   * Optimistic lock for a run that republishes an artifact which is already
+   * `ready` (an edit). Status cannot separate two concurrent edits — both see
+   * `ready` — so the run carries the `current_version_no` it read when it
+   * loaded the payload, and the CAS fails if anything published since.
+   */
+  expectedVersionNo?: number;
 }) {
-  const [current] = await db
-    .select({
-      storageBucket: artifacts.storageBucket,
-      storageKey: artifacts.storageKey,
-      previewMetadataJson: artifacts.previewMetadataJson,
-      previewStorageKey: artifacts.previewStorageKey,
-    })
-    .from(artifacts)
-    .where(
-      and(
-        eq(artifacts.id, input.artifactId),
-        eq(artifacts.teamId, input.teamId),
-        eq(artifacts.workspaceId, input.workspaceId),
-      ),
-    )
-    .limit(1);
-
-  const [latestVersion] = await db
-    .select({
-      versionNo: artifactVersions.versionNo,
-    })
-    .from(artifactVersions)
-    .where(eq(artifactVersions.artifactId, input.artifactId))
-    .orderBy(desc(artifactVersions.versionNo))
-    .limit(1);
-
   const versionId = randomUUID();
 
-  // Compare-and-swap on status, matching markArtifactRunning/markArtifactFailed.
-  // Without it two concurrent completions of the same artifact both read the
-  // same max(versionNo) above and race to insert versionNo + 1; the unique index
-  // artifact_versions_artifact_version_uq means the loser dies on an opaque
-  // constraint violation instead of a legible "someone else finished this".
-  const updated = await db
-    .update(artifacts)
-    .set({
-      status: "ready",
-      payloadJson: input.payload,
-      errorCode: null,
-      errorMessage: null,
-      completedAt: new Date(),
-      updatedAt: new Date(),
-      storageBucket: current?.storageBucket ?? null,
-      storageKey: current?.storageKey ?? null,
-      previewStorageKey: current?.previewStorageKey ?? null,
-      previewMetadataJson: current?.previewMetadataJson ?? {},
-    })
-    .where(
-      and(
-        ...[
+  // Status flip and version insert are one publish. Split across two
+  // statements, a crash in between leaves status=ready with the previous
+  // version as the newest row — the payload and the version history disagree
+  // forever.
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({
+        storageBucket: artifacts.storageBucket,
+        storageKey: artifacts.storageKey,
+        previewMetadataJson: artifacts.previewMetadataJson,
+        previewStorageKey: artifacts.previewStorageKey,
+      })
+      .from(artifacts)
+      .where(
+        and(
           eq(artifacts.id, input.artifactId),
           eq(artifacts.teamId, input.teamId),
           eq(artifacts.workspaceId, input.workspaceId),
-          input.expectedStatuses && input.expectedStatuses.length > 0
-            ? or(
-                ...input.expectedStatuses.map((status) =>
-                  eq(artifacts.status, status),
-                ),
-              )
-            : undefined,
-        ].filter((condition): condition is NonNullable<typeof condition> =>
-          Boolean(condition),
         ),
-      ),
-    )
-    .returning({ id: artifacts.id });
+      )
+      .limit(1)
+      // Take the row lock before deciding what to carry forward, so a
+      // concurrent publisher cannot swap storage pointers underneath us.
+      .for("update");
 
-  if (updated.length === 0) {
-    return null;
-  }
+    // Compare-and-swap on status, matching markArtifactRunning/markArtifactFailed.
+    // Without it two concurrent completions of the same artifact both race to
+    // insert the next versionNo; the unique index
+    // artifact_versions_artifact_version_uq means the loser dies on an opaque
+    // constraint violation instead of a legible "someone else finished this".
+    const updated = await tx
+      .update(artifacts)
+      .set({
+        status: "ready",
+        payloadJson: input.payload,
+        errorCode: null,
+        errorMessage: null,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+        storageBucket: input.storageBucket ?? current?.storageBucket ?? null,
+        storageKey: input.storageKey ?? current?.storageKey ?? null,
+        previewStorageKey:
+          input.previewStorageKey ?? current?.previewStorageKey ?? null,
+        previewMetadataJson:
+          input.previewStorageKey && input.previewMetadata
+            ? input.previewMetadata
+            : (current?.previewMetadataJson ?? {}),
+      })
+      .where(
+        and(
+          ...[
+            eq(artifacts.id, input.artifactId),
+            eq(artifacts.teamId, input.teamId),
+            eq(artifacts.workspaceId, input.workspaceId),
+            input.expectedStatuses && input.expectedStatuses.length > 0
+              ? or(
+                  ...input.expectedStatuses.map((status) =>
+                    eq(artifacts.status, status),
+                  ),
+                )
+              : undefined,
+            input.expectedVersionNo === undefined
+              ? undefined
+              : eq(artifacts.currentVersionNo, input.expectedVersionNo),
+          ].filter((condition): condition is NonNullable<typeof condition> =>
+            Boolean(condition),
+          ),
+        ),
+      )
+      .returning({ id: artifacts.id });
 
-  await db.insert(artifactVersions).values({
-    id: versionId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    artifactId: input.artifactId,
-    versionNo: (latestVersion?.versionNo ?? 0) + 1,
-    contentJson: input.payload,
-    createdBy: input.userId,
+    if (updated.length === 0) {
+      return null;
+    }
+
+    // Read max(versionNo) only after the CAS succeeded and inside the same
+    // transaction: reading it earlier put it outside the window the CAS
+    // protects, so two publishers could compute the same next version.
+    const [latestVersion] = await tx
+      .select({
+        versionNo: artifactVersions.versionNo,
+      })
+      .from(artifactVersions)
+      .where(eq(artifactVersions.artifactId, input.artifactId))
+      .orderBy(desc(artifactVersions.versionNo))
+      .limit(1);
+
+    const versionNo = (latestVersion?.versionNo ?? 0) + 1;
+
+    await tx.insert(artifactVersions).values({
+      id: versionId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      artifactId: input.artifactId,
+      versionNo,
+      contentJson: input.payload,
+      createdBy: input.userId,
+    });
+
+    // The pointer is advanced here and nowhere else: same transaction, after
+    // the CAS, to the number this transaction's version insert actually used.
+    // Moved outside the transaction it would disagree with artifact_versions in
+    // precisely the race the CAS exists to catch, and moved before the CAS it
+    // would be computed from a number two publishers can both read.
+    await tx
+      .update(artifacts)
+      .set({ currentVersionNo: versionNo })
+      .where(eq(artifacts.id, input.artifactId))
+      .returning({ id: artifacts.id });
+
+    return { artifactId: input.artifactId, versionId, versionNo };
   });
-
-  return { artifactId: input.artifactId, versionId };
 }
 
 export async function markArtifactRunning(input: {

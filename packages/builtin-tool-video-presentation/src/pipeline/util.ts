@@ -1,3 +1,8 @@
+import {
+  extensionForMimeType,
+  sanitizeArtifactStorageSegment,
+} from "@sourceweft/contracts/artifact-files";
+import { VIDEO_PRESENTATION_FILE_BASE_FALLBACK } from "../video-presentation-files";
 import { MAX_DIAGNOSTIC_LENGTH } from "./config";
 import type { ProjectExecutionResult } from "./deps";
 
@@ -48,16 +53,17 @@ export function normalizeProjectExecutionResults(input: {
   };
 }
 
+/**
+ * ASCII-only segment for storage keys, sandbox directory names, job ids and
+ * tool-call ids. These are the video pipeline's genuinely ASCII-bound values —
+ * user-visible file names use `sanitizeVideoPresentationFileBase`, which keeps
+ * unicode.
+ */
 export function safeStorageSegment(value: string) {
-  return (
-    value
-      .normalize("NFKC")
-      .trim()
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80) || "video-presentation"
-  );
+  return sanitizeArtifactStorageSegment(value, {
+    fallback: VIDEO_PRESENTATION_FILE_BASE_FALLBACK,
+    maxLength: 80,
+  });
 }
 
 export function shellQuote(value: string) {
@@ -73,10 +79,13 @@ export function artifactAssetUrl(input: {
   return `/v1/workspaces/${encodeURIComponent(input.workspaceId)}/artifacts/${encodeURIComponent(input.artifactId)}/assets/${encodeURIComponent(input.fileName)}`;
 }
 
-export function imageExtensionForMimeType(mimeType: string) {
-  if (mimeType.includes("png")) return "png";
-  if (mimeType.includes("webp")) return "webp";
-  if (mimeType.includes("gif")) return "gif";
-  if (mimeType.includes("svg")) return "svg";
-  return "jpg";
+/**
+ * Extension (with leading dot) for a rendered still or fetched asset.
+ *
+ * This used to match by substring, which classified anything merely containing
+ * "gif" — `application/x-gif-thing` — as a GIF. Matching is exact now and
+ * unknown types fall back to `.jpg`, which is what the sandbox renderer emits.
+ */
+export function imageExtensionForMimeType(mimeType: string | undefined | null) {
+  return extensionForMimeType(mimeType, ".jpg");
 }

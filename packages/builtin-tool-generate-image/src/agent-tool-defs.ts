@@ -1,5 +1,8 @@
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { normalizeGenerateImageToolSelection } from "./image-config";
+import { resolveImageModelCapabilities } from "./image-capabilities";
 import { generateImagePresentation } from "./presentation";
+import { generateImageTurnPreflight } from "./turn-preflight";
 
 export const generateImageAgentTool = defineAgentTool({
   id: "generateImage",
@@ -24,6 +27,24 @@ export const generateImageAgentTool = defineAgentTool({
   },
   defaultPermission: "allow",
   riskLevel: "low",
+  turnSelection: {
+    normalize: (raw) => normalizeGenerateImageToolSelection(raw),
+    // Asking for this tool by name means "make a picture", never "edit the one
+    // already attached" — the host only knows the invocation was explicit.
+    directInvokeDefaults: { mode: "generate" },
+  },
+  // Whether a picture can be made at all this turn depends on the workspace's
+  // image models and the user's key, which only an async host lookup answers.
+  turnPreflight: generateImageTurnPreflight,
+  modelCatalog: {
+    key: "imageGeneration",
+    describe: (input) =>
+      resolveImageModelCapabilities({
+        configJson: input.configJson,
+        providerKind: input.providerKind,
+        modelId: input.modelId,
+      }),
+  },
 });
 
 /** Tool name constants — use these instead of AGENT_TOOL_NAMES */

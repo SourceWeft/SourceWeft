@@ -12,18 +12,25 @@ import type { DeliverableStateLike } from "./stage-runner";
  * artifact_versions_artifact_version_uq would reject with an opaque
  * constraint violation).
  *
- * Edit runs are exempt: they deliberately republish an artifact that is
- * already `ready`, so status cannot distinguish a legitimate edit from a
- * duplicate. Guarding those needs version-based locking.
+ * Edit runs deliberately republish an artifact that is already `ready`, so
+ * status cannot distinguish a legitimate edit from a duplicate edit — both see
+ * `ready`. That is what `expectedVersionNo` is for: the run republishes onto
+ * exactly the version it read when it loaded the payload, or it loses. The
+ * status guard stays on top of it, widened to include `ready`, because no
+ * version check would stop an edit republishing onto a `failed` artifact (a
+ * failure leaves the version pointer alone).
  */
 
 type MarkReadyCall = {
   expectedStatuses?: readonly string[];
+  expectedVersionNo?: number;
 };
 
 function buildProcessor(input: {
   markReadyResult: { artifactId: string; versionId: string } | null;
   mode?: "create" | "edit";
+  /** The artifact's published version at the moment the run loads it. */
+  currentVersionNo?: number;
   calls: { markReady: MarkReadyCall[]; markFailed: number };
 }) {
   const definition = {
@@ -53,7 +60,12 @@ function buildProcessor(input: {
   const resolveRuntime = (async () => ({
     ctx: {} as never,
     artifacts: {
-      find: async () => ({ payloadJson: {} }),
+      find: async () => ({
+        payloadJson: {},
+        ...(input.currentVersionNo === undefined
+          ? {}
+          : { currentVersionNo: input.currentVersionNo }),
+      }),
       markFailed: async () => {
         input.calls.markFailed += 1;
         return true;
@@ -61,6 +73,9 @@ function buildProcessor(input: {
       markReady: async (markInput: MarkReadyCall) => {
         input.calls.markReady.push({
           expectedStatuses: markInput.expectedStatuses,
+          ...("expectedVersionNo" in markInput
+            ? { expectedVersionNo: markInput.expectedVersionNo }
+            : {}),
         });
         return input.markReadyResult;
       },
@@ -112,15 +127,72 @@ test("losing the publish race reports superseded without failing the artifact", 
   assert.equal(calls.markFailed, 0);
 });
 
-test("edit runs omit the status guard because they republish a ready artifact", async () => {
+test("edit runs widen the status guard to include ready instead of dropping it", async () => {
   const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
   const processor = buildProcessor({
     markReadyResult: { artifactId: "artifact-1", versionId: "version-2" },
     mode: "edit",
+    currentVersionNo: 3,
     calls,
   });
 
   await processor(JOB);
 
-  assert.equal(calls.markReady[0]?.expectedStatuses, undefined);
+  // `failed` is deliberately absent: an edit must not republish an artifact
+  // that a failure already terminated.
+  assert.deepEqual(calls.markReady[0]?.expectedStatuses, [
+    "ready",
+    "running",
+    "pending",
+  ]);
+});
+
+test("an edit locks on the version it loaded, so a second edit cannot win twice", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  const processor = buildProcessor({
+    markReadyResult: { artifactId: "artifact-1", versionId: "version-4" },
+    mode: "edit",
+    currentVersionNo: 3,
+    calls,
+  });
+
+  await processor(JOB);
+
+  // Read at load time, carried to the publish minutes later: whatever the row
+  // says then, this run only publishes if version 3 is still the published one.
+  assert.equal(calls.markReady[0]?.expectedVersionNo, 3);
+});
+
+test("the second of two concurrent edits is superseded rather than colliding", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  // Both runs loaded version 3; the other one published version 4 first, so
+  // this CAS matches nothing.
+  const processor = buildProcessor({
+    markReadyResult: null,
+    mode: "edit",
+    currentVersionNo: 3,
+    calls,
+  });
+
+  const result = (await processor(JOB)) as { status: string };
+
+  assert.equal(result.status, "superseded");
+  // The loser must not damage the winner's artifact, and must not die on the
+  // artifact_versions unique index — the failure mode the version lock removes.
+  assert.equal(calls.markFailed, 0);
+});
+
+test("create runs carry no version lock", async () => {
+  const calls = { markReady: [] as MarkReadyCall[], markFailed: 0 };
+  const processor = buildProcessor({
+    markReadyResult: { artifactId: "artifact-1", versionId: "version-1" },
+    currentVersionNo: 0,
+    calls,
+  });
+
+  await processor(JOB);
+
+  // A create run has no base version to lock against; the status guard already
+  // means "nobody else has finished this".
+  assert.equal("expectedVersionNo" in (calls.markReady[0] ?? {}), false);
 });

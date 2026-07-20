@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { sanitizeArtifactStorageSegment } from "@sourceweft/contracts/artifact-files";
+import type { ArtifactStorage } from "@sourceweft/contracts/artifact-storage";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "../../shared/config";
@@ -29,12 +31,24 @@ const s3Client = new S3Client({
   forcePathStyle: config.s3.forcePathStyle,
 });
 
+/**
+ * Object keys stay ASCII even though the display file name may not: the shared
+ * sanitizer preserves unicode for `Content-Disposition` (which encodes it), and
+ * this is the pass that keeps it out of the key itself.
+ */
+function storageKeyFileName(fileName: string) {
+  return sanitizeArtifactStorageSegment(fileName, {
+    fallback: "file",
+    maxLength: 120,
+  });
+}
+
 export function buildSourceStorageKey(input: {
   workspaceId: string;
   sourceId: string;
   fileName: string;
 }) {
-  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const sanitizedName = storageKeyFileName(input.fileName);
   return `workspaces/${input.workspaceId}/sources/${input.sourceId}/${randomUUID()}-${sanitizedName}`;
 }
 
@@ -43,7 +57,7 @@ export function buildArtifactStorageKey(input: {
   artifactId: string;
   fileName: string;
 }) {
-  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const sanitizedName = storageKeyFileName(input.fileName);
   return `workspaces/${input.workspaceId}/artifacts/${input.artifactId}/${randomUUID()}-${sanitizedName}`;
 }
 
@@ -53,7 +67,7 @@ export function buildChatImageStorageKey(input: {
   imageId: string;
   fileName: string;
 }) {
-  const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const sanitizedName = storageKeyFileName(input.fileName);
   return `workspaces/${input.workspaceId}/chat-images/${input.messageId}/${input.imageId}-${randomUUID()}-${sanitizedName}`;
 }
 
@@ -74,7 +88,7 @@ export async function uploadSourceObject(input: {
 
 export async function uploadArtifactObject(input: {
   key: string;
-  body: Buffer;
+  body: Uint8Array;
   contentType: string;
   signal?: AbortSignal;
 }) {
@@ -88,6 +102,17 @@ export async function uploadArtifactObject(input: {
     { abortSignal: input.signal },
   );
 }
+
+/**
+ * The single `ArtifactStorage` implementation. Capability tools and the
+ * deliverable worker host both receive this object as-is; nobody re-spells the
+ * member names on the way in.
+ */
+export const artifactStorage: ArtifactStorage = {
+  buildArtifactStorageKey,
+  getBucketName: getContentStorageBucketName,
+  upload: uploadArtifactObject,
+};
 
 export async function uploadChatImageObject(input: {
   key: string;

@@ -1,9 +1,17 @@
+"use client";
+
+/**
+ * The editable-PowerPoint preview: the published `.pptx` drawn slide by slide
+ * in the browser.
+ *
+ * Which stored decks land here is decided in `./slides-preview`; this file only
+ * knows how to draw one.
+ */
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { SlidesFallback } from "../fallbacks";
-import type { ArtifactPreviewRenderer } from "../types";
-import { payloadString } from "../utils";
+import { SlidesFallback } from "./slides-fallback";
+import { payloadString } from "./payload";
 
 type SlidesGenerationMode = "visual_html" | "editable_native";
 
@@ -28,7 +36,7 @@ export function resolveSlidesGenerationMode(
   return mimeType?.startsWith("text/html") ? "visual_html" : "editable_native";
 }
 
-function PptxViewJsPreview({
+export function PptxViewJsPreview({
   fileUrl,
   title,
 }: {
@@ -179,23 +187,3 @@ function PptxViewJsPreview({
     </div>
   );
 }
-
-export const slidesPptxPreviewRenderer: ArtifactPreviewRenderer = {
-  id: "slides-pptx",
-  match: ({ artifact, payload, proxyFileUrl }) =>
-    artifact.artifactType === "slides" &&
-    artifact.status === "ready" &&
-    Boolean(proxyFileUrl) &&
-    resolveSlidesGenerationMode(payload) === "editable_native",
-  render: ({ proxyFileUrl, title }) =>
-    proxyFileUrl ? <PptxViewJsPreview fileUrl={proxyFileUrl} title={title} /> : null,
-};
-
-export const slidesFallbackPreviewRenderer: ArtifactPreviewRenderer = {
-  id: "slides-fallback",
-  match: ({ artifact, pageUrl }) =>
-    artifact.artifactType === "slides" &&
-    artifact.status === "ready" &&
-    Boolean(pageUrl),
-  render: () => <SlidesFallback />,
-};

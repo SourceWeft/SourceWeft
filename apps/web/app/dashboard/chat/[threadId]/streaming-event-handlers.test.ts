@@ -15,8 +15,7 @@ function createBaseStreamingContext(
   return {
     appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
     durableRunKey: "sourceweft-web-run:run-1",
-    isCompletedImageArtifactToolCall: () => false,
-    isCompletedPresentationArtifactToolCall: () => false,
+    isCompletedArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send",
@@ -72,8 +71,7 @@ test("finish event stores finish reason on the streaming assistant message", () 
     context: {
       appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
       durableRunKey: "sourceweft-web-run:run-1",
-      isCompletedImageArtifactToolCall: () => false,
-      isCompletedPresentationArtifactToolCall: () => false,
+      isCompletedArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "send",
@@ -425,8 +423,7 @@ test("finish event preserves approval requested tool calls", () => {
     context: {
       appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
       durableRunKey: "sourceweft-web-run:run-1",
-      isCompletedImageArtifactToolCall: () => false,
-      isCompletedPresentationArtifactToolCall: () => false,
+      isCompletedArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "send",
@@ -563,8 +560,7 @@ test("approval refresh assistant message keeps the original assistant root", () 
     context: {
       appendReasoningChunk: (current, next) => `${current ?? ""}${next}`,
       durableRunKey: "sourceweft-web-run:approval",
-      isCompletedImageArtifactToolCall: () => false,
-      isCompletedPresentationArtifactToolCall: () => false,
+      isCompletedArtifactToolCall: () => false,
       isCompletedWorkfileWriteToolCall: () => false,
       mergeThinkingStepRecords: () => undefined,
       mode: "refresh",
@@ -682,8 +678,7 @@ test("streaming reasoning keeps interrupted model reasoning in separate segments
     appendReasoningChunk: (current: string | undefined, next: string) =>
       `${current ?? ""}${next}`,
     durableRunKey: "sourceweft-web-run:run-1",
-    isCompletedImageArtifactToolCall: () => false,
-    isCompletedPresentationArtifactToolCall: () => false,
+    isCompletedArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
@@ -777,8 +772,7 @@ test("streaming reasoning deltas update one stable trace part", () => {
     appendReasoningChunk: (current: string | undefined, next: string) =>
       current ? `${current}${next}` : next,
     durableRunKey: "sourceweft-web-run:run-1",
-    isCompletedImageArtifactToolCall: () => false,
-    isCompletedPresentationArtifactToolCall: () => false,
+    isCompletedArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
@@ -1005,8 +999,7 @@ test("streaming trace events preserve live display order across tools and reason
     appendReasoningChunk: (current: string | undefined, next: string) =>
       `${current ?? ""}${next}`,
     durableRunKey: "sourceweft-web-run:run-1",
-    isCompletedImageArtifactToolCall: () => false,
-    isCompletedPresentationArtifactToolCall: () => false,
+    isCompletedArtifactToolCall: () => false,
     isCompletedWorkfileWriteToolCall: () => false,
     mergeThinkingStepRecords: () => undefined,
     mode: "send" as const,
@@ -1204,7 +1197,7 @@ test("presentation artifact tool calls render a card and refresh artifacts", () 
   let refreshCount = 0;
   let drainCount = 0;
   const context = createBaseStreamingContext({
-    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+    isCompletedArtifactToolCall: (toolCall, event) =>
       toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
@@ -1406,7 +1399,7 @@ test("presentation artifact result appends after earlier progress without reorde
   streamRenderBuffer.appendText("Before presentation. ");
   let drainCount = 0;
   const context = createBaseStreamingContext({
-    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+    isCompletedArtifactToolCall: (toolCall, event) =>
       toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result",
@@ -1555,7 +1548,7 @@ test("presentation artifact result without a published URL does not append card"
   });
   let refreshCount = 0;
   const context = createBaseStreamingContext({
-    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+    isCompletedArtifactToolCall: (toolCall, event) =>
       toolCall.tool === "publish_artifact" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-result" &&
@@ -1639,7 +1632,7 @@ test("video presentation artifact end appends shared presentation card after pro
   let drainCount = 0;
   let refreshCount = 0;
   const context = createBaseStreamingContext({
-    isCompletedPresentationArtifactToolCall: (toolCall, event) =>
+    isCompletedArtifactToolCall: (toolCall, event) =>
       toolCall.tool === "generate_video_presentation" &&
       toolCall.status === "completed" &&
       event.type === "tool-call-end",

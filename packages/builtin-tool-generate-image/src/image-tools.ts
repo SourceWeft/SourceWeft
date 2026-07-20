@@ -1,4 +1,10 @@
+import {
+  extensionForMimeType,
+  sanitizeArtifactFileBase,
+} from "@sourceweft/contracts/artifact-files";
 import { z } from "zod";
+
+const IMAGE_FILE_BASE_FALLBACK = "generated-image";
 
 export type ArtifactImageConfigLike = {
   readonly aspectRatio: string;
@@ -11,12 +17,66 @@ export const generateImageSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
 });
 
+/**
+ * Where a generated image artifact came from, as persisted under
+ * `payload_json.source`.
+ *
+ * This `source` is NOT `ArtifactSourceSchema` from
+ * `@sourceweft/builtin-tool-publish-artifact` — the two only collide on a field
+ * name. That one is a discriminated union of *byte locations*
+ * (`sandbox_path` | `work_file`), every variant of which carries a `path` and is
+ * handed to `adapterForSource` to be read from. This one is *provenance*: which
+ * tool produced the bytes that are already in hand. A generated image has no
+ * path to read from, so it belongs in neither the union nor its adapters —
+ * adding `generated_image` there would only produce
+ * "source.kind is not supported" at the first read attempt.
+ *
+ * It used to be an unvalidated object literal that reached
+ * `publishPreparedArtifact`, which skips the zod parse `publishArtifact` runs,
+ * so a value no schema recognized was persisted for as long as nobody looked.
+ */
+export const GeneratedImageProvenanceSchema = z.object({
+  kind: z.literal("generated_image"),
+  tool: z.string().min(1),
+});
+
+export type GeneratedImageProvenance = z.infer<
+  typeof GeneratedImageProvenanceSchema
+>;
+
+export function generatedImageProvenance(
+  toolName: string,
+): GeneratedImageProvenance {
+  return GeneratedImageProvenanceSchema.parse({
+    kind: "generated_image",
+    tool: toolName,
+  });
+}
+
+/**
+ * Image download names used to be lowercased and stripped of every non-ASCII
+ * character, so a title like "Résumé Q3" landed as `r-sum-q3` while the same
+ * title published through another capability kept its letters. It now shares
+ * the artifact-wide naming rule.
+ */
 export function sanitizeImageArtifactFileBase(value: string): string {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return normalized.length > 0 ? normalized : "generated-image";
+  return sanitizeArtifactFileBase(value, {
+    fallback: IMAGE_FILE_BASE_FALLBACK,
+  });
+}
+
+/**
+ * Providers are free to return JPEG or WebP; naming every download `.png`
+ * produced files whose extension contradicted their bytes, which then drove the
+ * wrong Content-Type on re-upload and download.
+ *
+ * Unknown image types fall back to `.png` only because that is what callers
+ * already assumed — the mismatch is at least no worse than before.
+ */
+export function imageFileExtensionForMimeType(
+  mimeType: string | undefined | null,
+): string {
+  return extensionForMimeType(mimeType, ".png");
 }
 
 export function buildImageRuntimePromptLines(input: {

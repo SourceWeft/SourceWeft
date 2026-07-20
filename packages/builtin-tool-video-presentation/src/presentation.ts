@@ -2,10 +2,7 @@ import type {
   AgentToolPresentation,
   ArtifactGenerationPhase,
 } from "@sourceweft/contracts/agent-tools";
-import {
-  getVideoPresentationPipelineStepLabel,
-  type VideoPresentationPipelineStageId,
-} from "@sourceweft/contracts/video-presentation";
+import { getVideoPresentationStageLabel } from "./stage-labels";
 
 function hasArtifactUrl(
   context: Parameters<AgentToolPresentation["title"]>[0],
@@ -37,23 +34,30 @@ const VIDEO_STEP_TITLES: Record<string, string> = {
 };
 
 /**
- * Which generation phase each pipeline stage reports as. Labels are NOT listed
- * here — they come from the pipeline stage table via
- * getVideoPresentationPipelineStepLabel, so the streamed step and the persisted
- * pipelineSteps cannot disagree.
+ * Which generation phase each stage the worker reports maps onto. Labels are
+ * NOT listed here — they come from getVideoPresentationStageLabel, so the
+ * streamed step, the persisted pipelineSteps and the web surfaces cannot
+ * disagree. Every stage the payload can carry is listed, because the web
+ * clients read their stage copy back out of stageStep().
  */
 const STAGE_PHASES: Record<string, ArtifactGenerationPhase> = {
+  planning: "planning",
   generating_project_code: "generating",
   installing_project: "generating",
   typechecking_project: "generating",
   rendering_smoke_preview: "generating",
   planning_storyboard: "generating",
+  // Legacy id for planning_storyboard, still present in stored payloads.
+  normalizing_blueprint: "generating",
   materializing_assets: "generating",
   generating_audio_tracks: "generating",
   assigning_slide_themes: "generating",
   generating_scene_modules: "generating",
   repairing_scene_modules: "repairing",
+  verifying_visual_quality: "generating",
   publishing_video_project: "saving",
+  ready: "completed",
+  failed: "failed",
 };
 
 /** Stages every deliverable reports, worded for this capability. */
@@ -67,6 +71,8 @@ const SHARED_STAGE_STEPS: Record<
     description: "The worker is building the video presentation project.",
   },
   retrying: { item: "Retrying video generation", phase: "generating" },
+  // What a client shows before the job reports any stage of its own.
+  preparing: { item: "Preparing video project", phase: "planning" },
 };
 
 export const videoPresentationPresentation: AgentToolPresentation = {
@@ -103,20 +109,29 @@ export const videoPresentationPresentation: AgentToolPresentation = {
     }
     return "Video presentation ready";
   },
+  // The call returns as soon as the project is queued, so a URL alone means
+  // nothing here — only the worker's own status does. The call's own status is
+  // deliberately not consulted: the job outlives it, and a queued project still
+  // reaches "ready" after a call that ended badly.
+  artifactCompletionPhase(context) {
+    if (!hasArtifactUrl(context)) {
+      return "failed";
+    }
+    const status = context.readOutputField(context.toolOutput, "status");
+    if (status === "ready") {
+      return "completed";
+    }
+    // Queued and still rendering — the artifact row exists, the video does not.
+    return status === "running" ? "saving" : "failed";
+  },
   stageStep({ stageId }) {
     const shared = SHARED_STAGE_STEPS[stageId];
     if (shared) {
       return shared;
     }
     const phase = STAGE_PHASES[stageId];
-    return phase
-      ? {
-          item: getVideoPresentationPipelineStepLabel(
-            stageId as VideoPresentationPipelineStageId,
-          ),
-          phase,
-        }
-      : null;
+    const item = getVideoPresentationStageLabel(stageId);
+    return phase && item ? { item, phase } : null;
   },
   generationStep({ phase, error }) {
     return {

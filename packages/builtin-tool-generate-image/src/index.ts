@@ -1,4 +1,8 @@
-export { generateImageAgentTool, generateImageAgentToolDefs } from "./agent-tool-defs";
+export {
+  generateImageAgentTool,
+  generateImageAgentToolDefs,
+  GENERATE_IMAGE_TOOL_NAME,
+} from "./agent-tool-defs";
 
 export const builtinGenerateImageCapability = {
   id: "sourceweft/generate-image",
@@ -23,6 +27,11 @@ export {
 } from "./image-config";
 export { resolveImageModelCapabilities } from "./image-capabilities";
 export {
+  generateImageTurnPreflight,
+  readGenerateImageTurnState,
+  type GenerateImageTurnState,
+} from "./turn-preflight";
+export {
   resolveGenerateImageIntentDecision,
   type GenerateImageEnabledSkillDescriptor,
   type GenerateImageIntentDecisionInput,
@@ -45,8 +54,12 @@ export {
   buildImageRuntimePromptLines,
   buildImageToolResult,
   generateImageSchema,
+  generatedImageProvenance,
+  GeneratedImageProvenanceSchema,
+  imageFileExtensionForMimeType,
   sanitizeImageArtifactFileBase,
 } from "./image-tools";
+export type { GeneratedImageProvenance } from "./image-tools";
 export type { ArtifactImageConfigLike } from "./image-tools";
 export {
   createGenerateImageTool,
@@ -57,6 +70,5 @@ export {
   type ImageToolRuntimeDeps,
   type ImageToolModelGateway,
   type ImageToolGenerateOptions,
-  type ImageToolStorage,
   type ImageToolArtifacts,
 } from "./tool-runtime";

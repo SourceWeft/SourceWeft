@@ -1,5 +1,9 @@
 import {
+  ARTIFACT_LIMITS,
   ARTIFACT_MIME_TYPES,
+  isArtifactImageMimeType,
+} from "@sourceweft/contracts/artifact-files";
+import {
   extensionForPath,
   fileNameForPathOrTitle,
   fileNameForTitle,
@@ -50,14 +54,6 @@ export type ArtifactTypeHandler = {
   }) => ArtifactTypeHandlerResult;
 };
 
-const MAX_PPTX_BYTES = 100 * 1024 * 1024;
-const MAX_FILE_BYTES = 100 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
-const SUPPORTED_IMAGE_MIME_TYPES = new Set<string>([
-  ARTIFACT_MIME_TYPES.png,
-  ARTIFACT_MIME_TYPES.jpeg,
-  ARTIFACT_MIME_TYPES.webp,
-]);
 
 const slidesTypeHandler: ArtifactTypeHandler = {
   artifactType: "slides",
@@ -83,10 +79,10 @@ const slidesTypeHandler: ArtifactTypeHandler = {
     if (source.bytes.byteLength === 0) {
       throw new ArtifactPublishError("PPTX_PACKAGE_INVALID", "file is empty");
     }
-    if (source.bytes.byteLength > MAX_PPTX_BYTES) {
+    if (source.bytes.byteLength > ARTIFACT_LIMITS.pptxBytes) {
       throw new ArtifactPublishError(
         "PPTX_OUTPUT_TOO_LARGE",
-        `${source.bytes.byteLength} bytes exceeds limit of ${MAX_PPTX_BYTES} bytes`,
+        `${source.bytes.byteLength} bytes exceeds limit of ${ARTIFACT_LIMITS.pptxBytes} bytes`,
       );
     }
     validatePptxPackage(source.bytes);
@@ -146,10 +142,10 @@ const fileTypeHandler: ArtifactTypeHandler = {
     if (source.bytes.byteLength === 0) {
       throw new ArtifactPublishError("ARTIFACT_FILE_EMPTY", "file is empty");
     }
-    if (source.bytes.byteLength > MAX_FILE_BYTES) {
+    if (source.bytes.byteLength > ARTIFACT_LIMITS.fileBytes) {
       throw new ArtifactPublishError(
         "ARTIFACT_FILE_TOO_LARGE",
-        `${source.bytes.byteLength} bytes exceeds limit of ${MAX_FILE_BYTES} bytes`,
+        `${source.bytes.byteLength} bytes exceeds limit of ${ARTIFACT_LIMITS.fileBytes} bytes`,
       );
     }
 
@@ -208,15 +204,15 @@ const imageTypeHandler: ArtifactTypeHandler = {
     if (source.bytes.byteLength === 0) {
       throw new ArtifactPublishError("ARTIFACT_FILE_EMPTY", "file is empty");
     }
-    if (source.bytes.byteLength > MAX_IMAGE_BYTES) {
+    if (source.bytes.byteLength > ARTIFACT_LIMITS.imageBytes) {
       throw new ArtifactPublishError(
         "ARTIFACT_FILE_TOO_LARGE",
-        `${source.bytes.byteLength} bytes exceeds limit of ${MAX_IMAGE_BYTES} bytes`,
+        `${source.bytes.byteLength} bytes exceeds limit of ${ARTIFACT_LIMITS.imageBytes} bytes`,
       );
     }
 
     const contentType = source.mimeType || mimeTypeForPath(source.path);
-    if (!SUPPORTED_IMAGE_MIME_TYPES.has(contentType)) {
+    if (!isArtifactImageMimeType(contentType)) {
       throw new ArtifactPublishError(
         "ARTIFACT_SOURCE_INVALID",
         `expected image MIME type, received ${contentType}`,
@@ -266,6 +262,16 @@ const imageTypeHandler: ArtifactTypeHandler = {
     };
   },
 };
+
+/**
+ * Artifact types this capability publishes. Exported so hosts can bind their
+ * generic artifact-row primitives without spelling out type names themselves.
+ */
+export const PUBLISH_ARTIFACT_TYPES = {
+  slides: "slides",
+  file: "file",
+  image: "image",
+} as const;
 
 export const artifactTypeHandlers = [
   slidesTypeHandler,

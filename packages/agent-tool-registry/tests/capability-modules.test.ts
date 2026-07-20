@@ -29,6 +29,8 @@ const PACKAGES_ROOT = join(
 const ENTRY_FACTORIES = [
   "createCapabilityAgentTools",
   "createDeliverablePipelines",
+  "createArtifactViewHandlers",
+  "createArtifactWriteHandlers",
 ];
 
 /**

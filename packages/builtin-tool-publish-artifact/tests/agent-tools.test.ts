@@ -37,20 +37,42 @@ function services(input?: {
       ? Buffer.from("preview-bytes")
       : validPptxBuffer(),
   );
+  // The host now offers one generic, type-parameterised primitive. The
+  // per-type mocks below are the test's own view of it: `createReadyArtifact`
+  // routes on the artifact type the publisher passes, so the assertions keep
+  // checking both the routing and the record input.
+  const createFileArtifactRecord = vi.fn().mockResolvedValue({
+    artifactId: "artifact-1",
+    versionId: "version-1",
+  });
+  const createSlidesArtifactRecord = vi.fn().mockResolvedValue({
+    artifactId: "artifact-1",
+    versionId: "version-1",
+  });
+  const createImageArtifactRecord = vi.fn().mockResolvedValue({
+    artifactId: "artifact-1",
+    versionId: "version-1",
+  });
+  const createReadyArtifact = vi.fn(
+    (artifactType: string, recordInput: Record<string, unknown>) => {
+      if (artifactType === "slides") {
+        return createSlidesArtifactRecord(recordInput);
+      }
+      if (artifactType === "file") {
+        return createFileArtifactRecord(recordInput);
+      }
+      if (artifactType === "image") {
+        return createImageArtifactRecord(recordInput);
+      }
+      throw new Error(`unexpected artifact type ${artifactType}`);
+    },
+  );
   return {
     artifacts: {
-      createFileArtifactRecord: vi.fn().mockResolvedValue({
-        artifactId: "artifact-1",
-        versionId: "version-1",
-      }),
-      createSlidesArtifactRecord: vi.fn().mockResolvedValue({
-        artifactId: "artifact-1",
-        versionId: "version-1",
-      }),
-      createImageArtifactRecord: vi.fn().mockResolvedValue({
-        artifactId: "artifact-1",
-        versionId: "version-1",
-      }),
+      createReadyArtifact,
+      createFileArtifactRecord,
+      createSlidesArtifactRecord,
+      createImageArtifactRecord,
     },
     sandbox: {
       downloadCurrentFile: input?.download ?? defaultDownload,
@@ -62,8 +84,8 @@ function services(input?: {
         .mockImplementation((input: { fileName: string }) =>
           `artifacts/workspace-1/artifact-1/${input.fileName}`,
         ),
-      getContentStorageBucketName: vi.fn().mockReturnValue("content"),
-      uploadArtifactObject: vi.fn().mockResolvedValue(undefined),
+      getBucketName: vi.fn().mockReturnValue("content"),
+      upload: vi.fn().mockResolvedValue(undefined),
     },
   };
 }
@@ -273,7 +295,7 @@ test("publish_artifact tool returns recoverable error when slides omit preview i
       "previewImage is required for slides artifacts; use PREVIEW_IMAGE_PATH from final PPTX visual QA",
     recoverable: true,
   });
-  assert.equal(mockedServices.storage.uploadArtifactObject.mock.calls.length, 0);
+  assert.equal(mockedServices.storage.upload.mock.calls.length, 0);
   assert.equal(
     mockedServices.artifacts.createSlidesArtifactRecord.mock.calls.length,
     0,
@@ -659,7 +681,7 @@ test("publishArtifactFromSource stores slides artifact records", async () => {
   assert.equal(output.generation_mode, "editable_native");
   assert.equal(output.editable, true);
   assert.equal(
-    mockedServices.storage.uploadArtifactObject.mock.calls.length,
+    mockedServices.storage.upload.mock.calls.length,
     2,
   );
   assert.equal(
@@ -721,15 +743,15 @@ test("publishArtifactFromSource stores slides preview images as companion assets
   );
   assert.match(output.preview_image_url!, new RegExp(output.artifactId));
   assert.equal(
-    mockedServices.storage.uploadArtifactObject.mock.calls.length,
+    mockedServices.storage.upload.mock.calls.length,
     2,
   );
   assert.equal(
-    mockedServices.storage.uploadArtifactObject.mock.calls[1]?.[0].key,
+    mockedServices.storage.upload.mock.calls[1]?.[0].key,
     "artifacts/workspace-1/artifact-1/preview.jpg",
   );
   assert.equal(
-    mockedServices.storage.uploadArtifactObject.mock.calls[1]?.[0].contentType,
+    mockedServices.storage.upload.mock.calls[1]?.[0].contentType,
     "image/jpeg",
   );
   const recordInput =
@@ -784,7 +806,12 @@ test("publishArtifactFromSource rejects invalid slides preview images", async ()
   );
 });
 
-test("publishArtifactFromSource rejects oversized slides preview images", async () => {
+test("publishArtifactFromSource publishes without a preview when the preview image is oversized", async () => {
+  // Behavior change: an oversized preview used to abort the whole publish with
+  // ARTIFACT_PREVIEW_IMAGE_TOO_LARGE, throwing away the deck to protect a
+  // thumbnail. The thumbnail is an enhancement, so it is now dropped instead.
+  // Malformed previews still reject (see the test above) — those are input
+  // errors the caller should hear about.
   const mockedServices = services({
     download: vi.fn(async ({ sandboxPath }: { sandboxPath: string }) =>
       sandboxPath.endsWith(".jpg")
@@ -793,34 +820,33 @@ test("publishArtifactFromSource rejects oversized slides preview images", async 
     ),
   });
 
-  await assert.rejects(
-    () =>
-      publishArtifactFromSource({
-        context,
-        services: mockedServices,
-        input: slidesInput({
-          title: "Deck With Large Preview",
-          source: {
-            kind: "sandbox_path",
-            path: "/workspace/Presentation.pptx",
-          },
-          previewImage: {
-            source: {
-              kind: "sandbox_path",
-              path: "/workspace/qa/preview.jpg",
-            },
-          },
-        }),
-      }),
-    (error) =>
-      error instanceof PptxOutputError &&
-      error.code === "ARTIFACT_PREVIEW_IMAGE_TOO_LARGE",
-  );
-  assert.equal(mockedServices.storage.uploadArtifactObject.mock.calls.length, 0);
-  assert.equal(
-    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls.length,
-    0,
-  );
+  const output = await publishArtifactFromSource({
+    context,
+    services: mockedServices,
+    input: slidesInput({
+      title: "Deck With Large Preview",
+      source: {
+        kind: "sandbox_path",
+        path: "/workspace/Presentation.pptx",
+      },
+      previewImage: {
+        source: {
+          kind: "sandbox_path",
+          path: "/workspace/qa/preview.jpg",
+        },
+      },
+    }),
+  });
+
+  assert.equal(output.ok, true);
+  assert.equal(output.artifactType, "slides");
+  assert.equal(output.preview_image_url, undefined);
+  // Only the deck itself is uploaded; the preview never reaches storage.
+  assert.equal(mockedServices.storage.upload.mock.calls.length, 1);
+  const recordInput =
+    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0];
+  assert.equal(recordInput?.previewStorageKey, null);
+  assert.equal(recordInput?.previewMetadata, null);
 });
 
 test("publishArtifact publishes slides from work_file source", async () => {
@@ -862,7 +888,7 @@ test("publishArtifact publishes slides from work_file source", async () => {
     "work_file",
   );
   assert.equal(
-    mockedServices.storage.uploadArtifactObject.mock.calls[0]?.[0].contentType,
+    mockedServices.storage.upload.mock.calls[0]?.[0].contentType,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   );
 });
@@ -949,7 +975,7 @@ test("publishArtifact publishes HTML file artifacts from work_file source", asyn
     "/workfiles/example.html",
   );
   assert.equal(
-    mockedServices.storage.uploadArtifactObject.mock.calls[0]?.[0].contentType,
+    mockedServices.storage.upload.mock.calls[0]?.[0].contentType,
     "text/html",
   );
 });
@@ -1030,7 +1056,7 @@ test("publishPreparedArtifact rejects slides without preview image", async () =>
       error.code === "ARTIFACT_PREVIEW_IMAGE_INVALID" &&
       /previewImage is required/u.test(error.message),
   );
-  assert.equal(mockedServices.storage.uploadArtifactObject.mock.calls.length, 0);
+  assert.equal(mockedServices.storage.upload.mock.calls.length, 0);
   assert.equal(
     mockedServices.artifacts.createSlidesArtifactRecord.mock.calls.length,
     0,

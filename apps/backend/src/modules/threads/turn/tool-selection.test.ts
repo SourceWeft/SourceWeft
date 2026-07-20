@@ -8,8 +8,7 @@ import {
   buildTurnOptionsSnapshot,
   readWebAccessOverride,
   resolveConnectorToolSelections,
-  resolveGenerateImageToolSelection,
-  resolveGenerateVideoPresentationToolSelection,
+  resolveTurnToolSelections,
   resolveWebSearchEnabled,
 } from "./tool-selection";
 import type { EnabledSkillDescriptor } from "../../skills/types";
@@ -62,9 +61,9 @@ test("readWebAccessOverride reads web fetch fallback", () => {
   assert.equal(readWebAccessOverride({ web_fetch: { enabled: false } }), false);
 });
 
-test("resolveGenerateImageToolSelection reads generate_image selection only", () => {
+test("resolveTurnToolSelections reads generate_image selection only", () => {
   assert.deepEqual(
-    resolveGenerateImageToolSelection({
+    resolveTurnToolSelections({
       generate_image: {
         enabled: true,
         modelAlias: "image-model",
@@ -72,9 +71,11 @@ test("resolveGenerateImageToolSelection reads generate_image selection only", ()
       },
     }),
     {
-      enabled: true,
-      modelAlias: "image-model",
-      config: { aspectRatio: "1:1", quality: "standard" },
+      generate_image: {
+        enabled: true,
+        modelAlias: "image-model",
+        config: { aspectRatio: "1:1", quality: "standard" },
+      },
     },
   );
 });
@@ -155,26 +156,32 @@ test("buildRuntimeTools exposes generic options without enabled flag", () => {
   );
 });
 
-test("video presentation runtime config becomes tool options", () => {
+test("video presentation selection comes from the explicit tool entry only", () => {
   const tools: ThreadToolsSelection = {
     skillRuntimeConfig: {
       "builtin:video-presentation": {
-        slideCount: 5,
-        stylePreset: "technical",
-        visualDensity: "dense",
-        durationTarget: "short",
-        language: "zh-CN",
-        visualDirection: "chalkboard classroom",
-        motionPacing: "dynamic",
-        canvasFps: 30,
-        narrationEnabled: false,
+        slideCount: 9,
+        stylePreset: "editorial",
+        visualDirection: "ignored legacy runtime config",
       },
     },
     generate_video_presentation: {
       enabled: true,
+      slideCount: 5,
+      visualDirection: "chalkboard classroom",
+      renderProfile: {
+        stylePreset: "technical",
+        visualDensity: "dense",
+        durationTarget: "short",
+        language: "zh-CN",
+      },
+      motion: { pacing: "dynamic" },
+      canvas: { fps: 30 },
+      narration: { enabled: false },
     },
   };
-  const selection = resolveGenerateVideoPresentationToolSelection(tools);
+  const selection =
+    resolveTurnToolSelections(tools).generate_video_presentation;
 
   assert.deepEqual(selection, {
     enabled: true,
@@ -204,24 +211,43 @@ test("video presentation runtime config becomes tool options", () => {
   }).generate_video_presentation;
   assert.ok(runtimeTool);
   assert.deepEqual(runtimeTool.options, {
-      slideCount: 5,
-      visualDirection: "chalkboard classroom",
-      renderProfile: {
-        stylePreset: "technical",
-        visualDensity: "dense",
-        durationTarget: "short",
-        language: "zh-CN",
-      },
-      motion: {
-        pacing: "dynamic",
-      },
-      canvas: {
-        fps: 30,
-      },
-      narration: {
-        enabled: false,
-      },
+    slideCount: 5,
+    visualDirection: "chalkboard classroom",
+    renderProfile: {
+      stylePreset: "technical",
+      visualDensity: "dense",
+      durationTarget: "short",
+      language: "zh-CN",
     },
+    motion: {
+      pacing: "dynamic",
+    },
+    canvas: {
+      fps: 30,
+    },
+    narration: {
+      enabled: false,
+    },
+  });
+});
+
+test("video presentation disabled selection stays disabled without runtime values", () => {
+  assert.deepEqual(
+    resolveTurnToolSelections({
+      skillRuntimeConfig: {
+        "builtin:video-presentation": { slideCount: 9, stylePreset: "editorial" },
+      },
+      generate_video_presentation: { enabled: false },
+    }).generate_video_presentation,
+    { enabled: false },
+  );
+  assert.equal(
+    resolveTurnToolSelections({
+      skillRuntimeConfig: {
+        "builtin:video-presentation": { slideCount: 9 },
+      },
+    }).generate_video_presentation,
+    undefined,
   );
 });
 

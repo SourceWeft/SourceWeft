@@ -3,8 +3,8 @@
   "id": "sourceweft/video-presentation",
   "kind": "skill",
   "name": "Video Presentation",
-  "description": "Create narrated video presentation artifacts from source material with storyboard planning, visual asset planning, scene-code generation, audio narration, and browser-based preview/export.",
-  "version": "1.1.0",
+  "description": "Create narrated video presentation artifacts from source material with storyboard planning, visual asset planning, scene-code generation, audio narration, a rendered preview image, and browser-based preview/export.",
+  "version": "1.2.0",
   "entry": "./src/index.ts",
   "skills": [
     {
@@ -167,7 +167,8 @@
           "Read a file under /skills/video-presentation/references/ only when SKILL.md's Quick Reference says the situation applies (rich source material, explicit length/language/voice asks, visual-style asks, or edits).",
           "Only pass brief plus optional title/sourceDigest/audience/tone/language/stylePreset/durationTarget/renderProfile/slideCount/visualDirection/brand/motion/canvas/narrationEnabled/narration/assets/regeneration.",
           "Do not claim the final MP4/WebM has been rendered server-side; browser export happens from the ready artifact preview.",
-          "If generate_video_presentation returns a processing/still-generating result, do not call it again for the same request; report that generation continues in the background."
+          "If generate_video_presentation returns a processing/still-generating result, do not call it again for the same request; report that generation continues in the background.",
+          "The pipeline stores a cover still as the artifact preview image automatically; it is best-effort and may be absent, so never promise a thumbnail."
         ]
       },
       "command": {

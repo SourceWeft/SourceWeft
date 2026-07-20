@@ -242,13 +242,34 @@ export type ArtifactPublishErrorCode =
 
 export type PptxOutputErrorCode = ArtifactPublishErrorCode;
 
+/**
+ * Infrastructure faults: the agent did nothing wrong and nothing it can change
+ * about its next call will help. Telling it these are recoverable makes it
+ * retry a dead dependency in a loop, burning the turn.
+ *
+ * Everything else is a fault in what the agent supplied — a bad path, an
+ * unsupported type, an oversized or malformed file — which it can fix and
+ * retry, so those stay recoverable.
+ */
+const UNRECOVERABLE_ARTIFACT_PUBLISH_ERROR_CODES = new Set<string>([
+  "ARTIFACT_STORAGE_UNAVAILABLE",
+  "ARTIFACT_RECORD_UNAVAILABLE",
+  "SANDBOX_UNAVAILABLE",
+]);
+
+export function isRecoverableArtifactPublishErrorCode(
+  code: ArtifactPublishErrorCode,
+): boolean {
+  return !UNRECOVERABLE_ARTIFACT_PUBLISH_ERROR_CODES.has(code);
+}
+
 export const PublishArtifactErrorOutputSchema = z.object({
   ok: z.literal(false),
   type: z.literal("presentation_artifact_error"),
   status: z.literal("failed"),
   code: z.enum(ARTIFACT_PUBLISH_ERROR_CODES),
   message: z.string(),
-  recoverable: z.literal(true),
+  recoverable: z.boolean(),
 });
 
 export type PublishArtifactErrorOutput = z.infer<

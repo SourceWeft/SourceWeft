@@ -13,6 +13,8 @@ export * from "./working-files";
 export * from "./model-catalog";
 export * from "./byok";
 export * from "./misc";
+export * from "./artifact-errors";
+export * from "./artifact-write";
 export * from "./artifact-pipeline";
 export * from "./artifact-progress";
 export * from "./video-presentation";
