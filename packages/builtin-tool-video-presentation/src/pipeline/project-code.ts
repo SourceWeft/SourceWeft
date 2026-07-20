@@ -264,6 +264,25 @@ export function buildProjectCodePayload(
             fps: payload.project.fps,
             height: payload.project.height,
             scenes: sceneModules.map((scene) => ({
+              // KNOWN GAP — this number is the same one the scene length was
+              // derived from, so `render-smoke`'s "scene is long enough for its
+              // narration" check cannot catch the case it most needs to.
+              // `scene.durationInFrames` is
+              // `ceil((track.durationSeconds + tail padding) * fps)`
+              // (`scene-gen.ts`), and `track.durationSeconds` is the *probed*
+              // length — except when probing failed, where `audio.ts` records
+              // `estimateNarrationDurationSeconds(transcript)` and
+              // `durationSource: "estimated"`. An estimate that is short leaves
+              // the scene short by exactly the same amount, both sides of the
+              // comparison agree, and the mp4 ships with the tail of that
+              // slide's speech cut off at the <Sequence> boundary.
+              //
+              // Not fixed here because the fix belongs upstream, not in the
+              // manifest: either refuse to render an mp4 for a deck with any
+              // `durationSource: "estimated"` track, or probe the staged bytes
+              // again at render time (they are in hand by then) and re-derive
+              // the scene length from the measured value. Both change what the
+              // audio stage guarantees, which is a separate decision.
               audioDurationSeconds:
                 payload.audioTracks.find(
                   (track) => track.slideNumber === scene.slideNumber,

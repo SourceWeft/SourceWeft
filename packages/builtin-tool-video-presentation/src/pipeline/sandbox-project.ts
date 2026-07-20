@@ -29,6 +29,7 @@ import {
   renderedVideoSandboxPath,
   renderVideoSlideNumbers,
   sceneChunkCommand,
+  type RenderVideoFailureReason,
   type RenderVideoReport,
 } from "./render-video";
 import { safeStorageSegment, shellQuote } from "./util";
@@ -40,15 +41,18 @@ const {
 
 /**
  * Opt-in request for a server-side mp4 render, off unless a caller passes it.
- * Nothing in the pipeline sets this today: the mp4 path is staged ahead of the
- * preview flip, so the default run is byte-for-byte the run that shipped
- * before it existed.
+ * A run that omits it is byte-for-byte the run that shipped before the mp4 path
+ * existed, which is what keeps the browser-preview path unaffected.
  */
 export type RenderVideoRequest = {
   /**
    * Narration to stage under the project's `public/audio/` so the mp4 carries
    * sound. The sandbox cannot reach the artifact asset route, so the bytes must
-   * be uploaded; when this is empty the render is silent.
+   * be uploaded.
+   *
+   * It is either empty (a deck that was never meant to speak) or complete —
+   * one entry per rendered scene. Partial narration is rejected below rather
+   * than rendered: see `narration_missing`.
    */
   narration?: ReadonlyArray<{
     slideNumber: number;
@@ -86,7 +90,7 @@ export async function runGeneratedProject(input: {
   job: DeliverableJobEnvelope;
   payload: VideoPresentationProjectPayload;
   request: VideoPresentationCreateRequest;
-  /** Opt-in mp4 render; no stage passes it yet. */
+  /** Opt-in mp4 render; `installing_project` passes it (see RenderVideoRequest). */
   renderVideo?: RenderVideoRequest;
 }) {
   const runProject = input.deps.sandbox?.runProject;
@@ -258,8 +262,39 @@ export async function runProjectInSession(input: {
         // retry; shipping a truncated deck silently misrepresents it. Stopping
         // early also avoids burning sandbox time on chunks nothing will join.
         const slideNumbers = renderVideoSlideNumbers(input.payload);
-        let renderable = slideNumbers.length > 0;
+
+        // Audio-coverage invariant, checked before a single frame is rendered.
+        //
+        // Narration is mounted inside each scene's <Sequence> (see
+        // `project-code.ts`), so a track staged for a slide that has no scene
+        // module is never mounted and never reaches the mix, and a scene with
+        // no staged track plays silent. Either way the mp4 renders fine and
+        // *sounds* wrong, which is the one failure this path must not ship.
+        // If this check goes, a renumbered or partially-narrated deck produces
+        // a finished-looking video that is quiet in the middle.
+        const narrationSlides = (input.renderVideo.narration ?? []).map(
+          (track) => track.slideNumber,
+        );
+        const narrationCovers =
+          narrationSlides.length === 0 ||
+          (narrationSlides.length === slideNumbers.length &&
+            slideNumbers.every((slideNumber) =>
+              narrationSlides.includes(slideNumber),
+            ));
+        if (!narrationCovers) {
+          warnUnavailable({
+            reason: "narration_missing" satisfies RenderVideoFailureReason,
+            stage: "stage-narration",
+            narrationSlides,
+            slideNumbers,
+          });
+        }
+
+        let renderable = narrationCovers && slideNumbers.length > 0;
         for (const slideNumber of slideNumbers) {
+          if (!renderable) {
+            break;
+          }
           const command = sceneChunkCommand(slideNumber);
           const sceneRun = await run(command);
           const chunk = sceneRun.ok
@@ -316,6 +351,18 @@ export async function runProjectInSession(input: {
                 ? "timeout"
                 : "concat_failed",
             diagnostics: videoRun.diagnostics.slice(0, 3),
+          });
+        } else if (narrationSlides.length > 0 && !report.hasAudio) {
+          // The concat script derives `hasAudio` from the manifest it actually
+          // read, so this is the end-to-end confirmation that the narration we
+          // staged survived into the generated project and the mix. A render
+          // that *succeeded* but reports no audio is not a success: it is the
+          // silent-deliverable case, and it degrades to no video like any
+          // other failure rather than being persisted.
+          warnUnavailable({
+            reason: "narration_missing" satisfies RenderVideoFailureReason,
+            stage: "concat-video",
+            narrationSlides,
           });
         } else if (report.byteLength > MAX_RENDERED_VIDEO_BYTES) {
           // Never pull a file past the sandbox's per-file collect budget into

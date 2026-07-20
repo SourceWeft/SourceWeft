@@ -105,9 +105,10 @@ export type VideoPipelineDeps = {
       request: VideoPresentationCreateRequest;
       job: DeliverableJobEnvelope;
       /**
-       * Opt-in server-side mp4 render. Omitted by every caller today: the
-       * sandbox render path is staged ahead of the preview flip, so leaving it
-       * unset must keep the run exactly as it was.
+       * Opt-in server-side mp4 render, passed by the `installing_project`
+       * stage. It is omitted when narration could not be assembled in full, so
+       * leaving it unset must keep the run exactly as it was before this path
+       * existed — that omission is the degradation.
        */
       renderVideo?: RenderVideoRequest;
     }): Promise<{

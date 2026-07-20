@@ -16,13 +16,17 @@ import {
 } from "@sourceweft/contracts/video-presentation";
 import { VIDEO_PRESENTATION_PIPELINE_JOB_NAME } from "../artifact-records";
 import { buildVideoPresentationStageView } from "../pipeline-digests";
-import { generateAudioTracks } from "./audio";
+import { generateAudioTracks, stageNarrationForRender } from "./audio";
 import { MAX_ERROR_MESSAGE_LENGTH } from "./config";
 import { createVideoPipelineDeps, type VideoPipelineDeps } from "./deps";
 import { attachReadySourceJson } from "./finalize";
 import { uploadCoverImage } from "./preview-images";
 import { buildProjectCodePayload } from "./project-code";
-import { runGeneratedProject } from "./sandbox-project";
+import { renderVideoSlideNumbers, uploadRenderedVideo } from "./render-video";
+import {
+  runGeneratedProject,
+  type RenderedVideoResult,
+} from "./sandbox-project";
 import {
   generateSceneModules,
   repairSceneModules,
@@ -38,11 +42,17 @@ import {
   materializeAssets,
   planVideoProject,
   regenerateStoryboardSlides,
+  requestNarrationEnabled,
 } from "./storyboard";
 import { assignSlideThemes } from "./themes";
 import { normalizeProjectExecutionResults, truncateText } from "./util";
 
-type ProjectRunResults = ReturnType<typeof normalizeProjectExecutionResults>;
+// Instantiated with the real render result rather than the default type
+// parameter: the publishing stage reads `video.report` off what it finds in
+// scratch, so the mp4's shape has to survive the round trip through `scratch`.
+type ProjectRunResults = ReturnType<
+  typeof normalizeProjectExecutionResults<RenderedVideoResult>
+>;
 
 export function createVideoPresentationPipelineDefinition(options?: {
   runProject?: NonNullable<VideoPipelineDeps["sandbox"]>["runProject"];
@@ -271,12 +281,41 @@ export function createVideoPresentationPipelineDefinition(options?: {
         }
 
         case "installing_project": {
+          // Narration bytes for the server-side mp4 render. The tracks were
+          // uploaded two stages ago and only their pointers survive on the
+          // payload, so they are read back through the storage port here — the
+          // sandbox has no network path to the asset route.
+          //
+          // Incomplete narration means no mp4 at all: `renderVideo` is omitted
+          // and the run is exactly the run that shipped before this path
+          // existed. The artifact still publishes and the browser preview still
+          // plays every track from its assetUrl; what must never happen is a
+          // finished-looking mp4 that is silent, so this degrades to "no video"
+          // rather than to "quiet video".
+          const narration = await stageNarrationForRender({
+            payload: state,
+            slideNumbers: renderVideoSlideNumbers(state),
+            storage: deps.storage,
+            narrationExpected: requestNarrationEnabled(request),
+          });
+          if (!narration.ok) {
+            deps.logger.warn("video_presentation_render_narration_unavailable", {
+              artifactId: job.artifactId,
+              jobId: job.jobId,
+              reason: narration.reason,
+              slideNumber: narration.slideNumber,
+              detail: narration.detail,
+            });
+          }
           const run = normalizeProjectExecutionResults(
             await runGeneratedProject({
               deps,
               job,
               payload: state,
               request,
+              ...(narration.ok
+                ? { renderVideo: { narration: narration.tracks } }
+                : {}),
             }),
           );
           scratch.projectRun = run;
@@ -452,6 +491,37 @@ export function createVideoPresentationPipelineDefinition(options?: {
             }
           }
 
+          // Store the server-rendered mp4 beside the cover still, on the same
+          // artifact-asset route. Best-effort in the same way: an upload that
+          // fails leaves `renderedVideo` unset and the presentation publishes.
+          //
+          // `renderedVideo` is always taken from *this* run and never carried
+          // forward. An edit run re-renders every scene, so a previously stored
+          // mp4 describes a deck that no longer exists; keeping it would show
+          // the old video under the new payload. Unsetting it falls back to the
+          // browser preview, which is always current.
+          let renderedVideo:
+            | Awaited<ReturnType<typeof uploadRenderedVideo>>
+            | undefined;
+          if (projectRun?.video) {
+            try {
+              renderedVideo = await uploadRenderedVideo({
+                artifactId: job.artifactId,
+                payload: state,
+                report: projectRun.video.report,
+                storage: deps.storage,
+                video: projectRun.video.data,
+                workspaceId: job.workspaceId,
+              });
+            } catch (error) {
+              deps.logger.warn("video_presentation_rendered_video_failed", {
+                artifactId: job.artifactId,
+                jobId: job.jobId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
           state = videoPresentationProjectPayloadSchema.parse({
             ...state,
             project: {
@@ -463,6 +533,7 @@ export function createVideoPresentationPipelineDefinition(options?: {
               slideCount: state.slides.length,
               durationSeconds,
             },
+            renderedVideo: renderedVideo ?? undefined,
           });
           return state;
         }

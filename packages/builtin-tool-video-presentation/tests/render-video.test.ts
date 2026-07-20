@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { videoPresentationProjectPayloadSchema } from "@sourceweft/contracts/video-presentation";
 import { videoPresentationArtifactViewHandler } from "../src/artifact-view";
+import { stageNarrationForRender } from "../src/pipeline/audio";
 import { buildProjectCodePayload } from "../src/pipeline/project-code";
 import {
   classifyRenderVideoFailure,
@@ -300,6 +301,26 @@ function renderStdout(command: string) {
   return undefined;
 }
 
+/** Same stdout, but the join reports the mp4 as carrying narration. */
+function narratedRenderStdout(command: string) {
+  if (command.includes("concat-video")) {
+    return `Combining chunks\n${JSON.stringify({
+      ...JSON.parse(RENDER_REPORT_LINE),
+      hasAudio: true,
+    })}`;
+  }
+  return renderStdout(command);
+}
+
+/** Staged narration covering exactly these slides. */
+function narrationFor(slideNumbers: readonly number[]) {
+  return slideNumbers.map((slideNumber) => ({
+    slideNumber,
+    fileName: `slide-${slideNumber}.mp3`,
+    data: new Uint8Array([9]),
+  }));
+}
+
 /** The mp4-producing commands, in the order they were issued. */
 function renderCommands(commands: readonly string[]) {
   return commands.flatMap((command) => {
@@ -334,7 +355,7 @@ test("a run that does not ask for an mp4 never invokes the renderer", async () =
 test("the opt-in render runs one command per scene, then mixes and joins", async () => {
   const video = new Uint8Array([1, 2, 3, 4]);
   const fake = fakeSession({
-    stdoutFor: renderStdout,
+    stdoutFor: narratedRenderStdout,
     downloads: {
       "/workspace/video-presentation-artifact-1/out/video.mp4": video,
     },
@@ -344,20 +365,18 @@ test("the opt-in render runs one command per scene, then mixes and joins", async
     logger,
     job,
     payload: payloadFixture(3),
-    renderVideo: {
-      narration: [
-        {
-          slideNumber: 1,
-          fileName: "slide-1.mp3",
-          data: new Uint8Array([9]),
-        },
-      ],
-    },
+    // Narration covers every rendered scene; a partial set is refused (below).
+    renderVideo: { narration: narrationFor([1, 2, 3]) },
   });
 
   assert.ok(
     fake.uploaded.includes(
       "/workspace/video-presentation-artifact-1/public/audio/slide-1.mp3",
+    ),
+  );
+  assert.ok(
+    fake.uploaded.includes(
+      "/workspace/video-presentation-artifact-1/public/audio/slide-3.mp3",
     ),
   );
   // Scenes in playback order, then the single narration mix, then the join.
@@ -386,6 +405,7 @@ test("the opt-in render runs one command per scene, then mixes and joins", async
   assert.deepEqual(result.video?.data, video);
   assert.equal(result.video?.report.durationInFrames, 90);
   assert.equal(result.video?.report.width, 1920);
+  assert.equal(result.video?.report.hasAudio, true);
   // Install/typecheck/smoke results are unaffected by the extra steps.
   assert.equal(result.install.ok, true);
   assert.equal(result.smoke.ok, true);
@@ -764,4 +784,347 @@ test("a stored mp4 resolves as an artifact asset; payloads without one do not", 
     }),
     null,
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Narration staging                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The pipeline uploads narration two stages before it renders, so the bytes
+ * have to come back out of storage. This fake is that store: a key that was
+ * never written reads as absent, exactly as the port specifies.
+ */
+function fakeNarrationStorage(
+  objects: Record<string, Uint8Array | "missing" | Error>,
+) {
+  const requests: Array<{ key: string; bucket?: string | null; maxBytes?: number }> =
+    [];
+  return {
+    requests,
+    storage: {
+      buildArtifactStorageKey: ({ fileName }: { fileName: string }) => fileName,
+      getBucketName: () => "content",
+      upload: async () => undefined,
+      download: async (input: {
+        key: string;
+        bucket?: string | null;
+        maxBytes?: number;
+      }) => {
+        requests.push(input);
+        const object = objects[input.key];
+        if (object instanceof Error) {
+          throw object;
+        }
+        if (object === undefined || object === "missing") {
+          return null;
+        }
+        return { body: object, contentType: "audio/mpeg" };
+      },
+    } as never,
+  };
+}
+
+function narratedPayload(slideCount: number) {
+  const base = payloadFixture(slideCount);
+  return videoPresentationProjectPayloadSchema.parse({
+    ...base,
+    audioTracks: base.slides.map((slide) => ({
+      slideNumber: slide.slideNumber,
+      assetUrl: `/assets/track-${slide.slideNumber}.mp3`,
+      storageKey: `key-${slide.slideNumber}`,
+      storageBucket: "content",
+      durationSeconds: 2,
+      durationSource: "measured",
+      mimeType: "audio/mpeg",
+      fileName: `Quarterly-Review-slide-${slide.slideNumber}.mp3`,
+    })),
+  });
+}
+
+const tooLarge = Object.assign(new Error("too large"), {
+  code: "ARTIFACT_ATTACHMENT_TOO_LARGE",
+});
+
+test("narration is re-fetched by storage key and staged one file per scene", async () => {
+  const payload = narratedPayload(3);
+  const fake = fakeNarrationStorage({
+    "key-1": new Uint8Array([1]),
+    "key-2": new Uint8Array([2, 2]),
+    "key-3": new Uint8Array([3, 3, 3]),
+  });
+  const result = await stageNarrationForRender({
+    payload,
+    slideNumbers: renderVideoSlideNumbers(payload),
+    storage: fake.storage,
+    narrationExpected: true,
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.ok ? result.tracks.map((track) => track.fileName) : null,
+    ["slide-1.mp3", "slide-2.mp3", "slide-3.mp3"],
+  );
+  assert.deepEqual(
+    result.ok ? result.tracks.map((track) => [...track.data]) : null,
+    [[1], [2, 2], [3, 3, 3]],
+  );
+  // The recorded bucket is used, not the port's default.
+  assert.deepEqual(
+    fake.requests.map((request) => request.bucket),
+    ["content", "content", "content"],
+  );
+  // The download budget is the port's ceiling across the WHOLE deck, tightened
+  // as tracks arrive — a 40 slide deck must not be able to pull 40x it.
+  const budgets = fake.requests.map((request) => request.maxBytes ?? 0);
+  assert.ok(budgets[0]! > budgets[1]! && budgets[1]! > budgets[2]!);
+  assert.equal(budgets[0]! - budgets[1]!, 1);
+});
+
+test("a narration object that is gone refuses; it never renders silent", async () => {
+  const payload = narratedPayload(2);
+  const fake = fakeNarrationStorage({
+    "key-1": new Uint8Array([1]),
+    "key-2": "missing",
+  });
+  const result = await stageNarrationForRender({
+    payload,
+    slideNumbers: renderVideoSlideNumbers(payload),
+    storage: fake.storage,
+    narrationExpected: true,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok ? null : result.reason, "object_missing");
+  assert.equal(result.ok ? null : result.slideNumber, 2);
+});
+
+test("each narration failure mode is refused, and named apart", async () => {
+  const payload = narratedPayload(1);
+  const cases: Array<[Record<string, Uint8Array | "missing" | Error>, string]> = [
+    [{ "key-1": tooLarge as never }, "oversized"],
+    [{ "key-1": new Error("connection reset") as never }, "download_failed"],
+    [{ "key-1": new Uint8Array(0) }, "object_empty"],
+    [{}, "object_missing"],
+  ];
+  for (const [objects, reason] of cases) {
+    const result = await stageNarrationForRender({
+      payload,
+      slideNumbers: renderVideoSlideNumbers(payload),
+      storage: fakeNarrationStorage(objects).storage,
+      narrationExpected: true,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.ok ? null : result.reason, reason);
+  }
+});
+
+test("a rendered scene with no narration track at all is refused", async () => {
+  // Three scenes, narration for two: the third would play silent.
+  const base = narratedPayload(3);
+  const payload = videoPresentationProjectPayloadSchema.parse({
+    ...base,
+    audioTracks: base.audioTracks.filter((track) => track.slideNumber !== 3),
+  });
+  const result = await stageNarrationForRender({
+    payload,
+    slideNumbers: renderVideoSlideNumbers(payload),
+    storage: fakeNarrationStorage({
+      "key-1": new Uint8Array([1]),
+      "key-2": new Uint8Array([2]),
+    }).storage,
+    narrationExpected: true,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok ? null : result.reason, "track_missing");
+  assert.equal(result.ok ? null : result.slideNumber, 3);
+});
+
+test("a deck that opted out of narration stages nothing and reads no objects", async () => {
+  const payload = payloadFixture(2);
+  const fake = fakeNarrationStorage({});
+  const result = await stageNarrationForRender({
+    payload,
+    slideNumbers: renderVideoSlideNumbers(payload),
+    storage: fake.storage,
+    narrationExpected: false,
+  });
+  assert.deepEqual(result, { ok: true, tracks: [] });
+  assert.deepEqual(fake.requests, []);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Audio/video alignment                                                      */
+/* -------------------------------------------------------------------------- */
+
+test("the audio mix and the video chunks share one frame cursor", () => {
+  const payload = narratedPayload(3);
+  const project = buildProjectCodePayload(payload, {
+    narrationFiles: [1, 2, 3].map((slideNumber) => ({
+      slideNumber,
+      fileName: `slide-${slideNumber}.mp3`,
+    })),
+  });
+  const manifest = JSON.parse(
+    fileContent(project.files, "video-presentation.manifest.json"),
+  );
+  const scene = fileContent(project.files, "src/VideoScene.tsx");
+
+  // Both cursors walk the SAME list in the SAME order: VideoScene positions
+  // each <Sequence> (and the <Audio> inside it) by accumulating durations in
+  // sceneEntries order, and render-scene derives its frameRange by accumulating
+  // durations in manifest order. If these two orders ever diverge, every chunk
+  // after the first is cut from the wrong part of the timeline while the audio
+  // — mixed once over the whole composition — stays where it was, and the
+  // result is a video whose narration is off by whole slides.
+  const composedOrder = [...scene.matchAll(/\{ slideNumber: (\d+),/gu)].map(
+    (match) => Number(match[1]),
+  );
+  const manifestOrder = manifest.scenes.map(
+    (entry: { slideNumber: number }) => entry.slideNumber,
+  );
+  assert.deepEqual(composedOrder, manifestOrder);
+  assert.deepEqual(composedOrder, renderVideoSlideNumbers(payload));
+
+  // The whole-deck audio pass covers exactly the concatenated chunks: the join
+  // passes framesPerChunk = manifest.durationInFrames, so the single audio file
+  // is treated as one chunk spanning the entire composition. That is only true
+  // while the composition length equals the sum of the scene lengths.
+  const total = manifest.scenes.reduce(
+    (sum: number, entry: { durationInFrames: number }) =>
+      sum + entry.durationInFrames,
+    0,
+  );
+  assert.equal(manifest.durationInFrames, total);
+  assert.match(scene, new RegExp(`return ${total};`));
+  assert.match(
+    fileContent(project.files, "scripts/concat-video.mjs"),
+    /framesPerChunk: manifest\.durationInFrames/,
+  );
+
+  // The file the manifest names per slide is the file the composition mounts,
+  // so the mix contains the track the scene was timed against.
+  for (const entry of manifest.scenes) {
+    assert.match(
+      scene,
+      new RegExp(
+        `slideNumber: ${entry.slideNumber},[^\\n]*narrationFile: "${entry.narrationFile}"`,
+      ),
+    );
+  }
+});
+
+test("every scene is long enough for its narration (the smoke invariant)", () => {
+  const payload = narratedPayload(2);
+  const manifest = JSON.parse(
+    fileContent(
+      buildProjectCodePayload(payload).files,
+      "video-presentation.manifest.json",
+    ),
+  );
+  // Same comparison scripts/render-smoke.mjs makes; a scene shorter than its
+  // narration has the tail of its speech cut off by the Sequence boundary.
+  for (const entry of manifest.scenes) {
+    assert.ok(
+      entry.durationInFrames >=
+        Math.ceil(entry.audioDurationSeconds * manifest.fps),
+      `slide ${entry.slideNumber} is shorter than its narration`,
+    );
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* A render that succeeds with the wrong audio is not a success               */
+/* -------------------------------------------------------------------------- */
+
+test("partial narration is refused before any frame is rendered", async () => {
+  const collected = collectingLogger();
+  const fake = fakeSession({ stdoutFor: narratedRenderStdout });
+  const result = await runProjectInSession({
+    session: fake.session as never,
+    logger: collected.logger,
+    job,
+    payload: payloadFixture(3),
+    // Slide 2 has no staged track: it would play silent in a finished-looking
+    // video, and nothing on the payload could say so.
+    renderVideo: { narration: narrationFor([1, 3]) },
+  });
+  assert.equal(result.video, undefined);
+  assert.deepEqual(renderCommands(fake.commands), []);
+  assert.equal(
+    collected.warnings.find(
+      (entry) => entry.message === "video_presentation_render_video_unavailable",
+    )?.meta?.reason,
+    "narration_missing",
+  );
+  // Still a degradation: the presentation publishes without an mp4.
+  assert.equal(result.smoke.ok, true);
+});
+
+test("narration staged for a slide with no scene is refused", async () => {
+  const collected = collectingLogger();
+  const fake = fakeSession({ stdoutFor: narratedRenderStdout });
+  const result = await runProjectInSession({
+    session: fake.session as never,
+    logger: collected.logger,
+    job,
+    payload: payloadFixture(2),
+    // Slide 3 is not mounted by any <Sequence>, so its audio never reaches the
+    // mix even though the file was uploaded.
+    renderVideo: { narration: narrationFor([1, 2, 3]) },
+  });
+  assert.equal(result.video, undefined);
+  assert.equal(
+    collected.warnings.find(
+      (entry) => entry.message === "video_presentation_render_video_unavailable",
+    )?.meta?.reason,
+    "narration_missing",
+  );
+});
+
+test("a render that reports no audio for a narrated deck is not kept", async () => {
+  const collected = collectingLogger();
+  const fake = fakeSession({
+    // Everything succeeds — the join even produces a file — but it reports the
+    // mp4 as silent. That is the failure this whole path exists to catch.
+    stdoutFor: renderStdout,
+    downloads: {
+      "/workspace/video-presentation-artifact-1/out/video.mp4": new Uint8Array([
+        1,
+      ]),
+    },
+  });
+  const result = await runProjectInSession({
+    session: fake.session as never,
+    logger: collected.logger,
+    job,
+    payload: payloadFixture(2),
+    renderVideo: { narration: narrationFor([1, 2]) },
+  });
+  assert.equal(result.video, undefined);
+  assert.ok(!fake.downloaded.some((path) => path.endsWith("video.mp4")));
+  const warning = collected.warnings.find(
+    (entry) => entry.message === "video_presentation_render_video_unavailable",
+  );
+  assert.equal(warning?.meta?.reason, "narration_missing");
+  assert.equal(warning?.meta?.stage, "concat-video");
+});
+
+test("a silent deck still renders and is kept", async () => {
+  const fake = fakeSession({
+    stdoutFor: renderStdout,
+    downloads: {
+      "/workspace/video-presentation-artifact-1/out/video.mp4": new Uint8Array([
+        7,
+      ]),
+    },
+  });
+  const result = await runProjectInSession({
+    session: fake.session as never,
+    logger,
+    job,
+    payload: payloadFixture(2),
+    renderVideo: { narration: [] },
+  });
+  assert.equal(result.video?.report.hasAudio, false);
+  assert.deepEqual([...(result.video?.data ?? [])], [7]);
 });

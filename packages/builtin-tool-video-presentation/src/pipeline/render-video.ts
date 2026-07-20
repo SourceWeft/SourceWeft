@@ -14,9 +14,11 @@
  * deliberately not being raised. This module owns the command strings and the
  * report/failure vocabulary for that sequence; `sandbox-project.ts` runs it.
  *
- * Everything here is additive and opt-in: no pipeline stage asks for an mp4
- * yet, and no consumer reads one. This module is the render + storage half of
- * that future flip.
+ * The pipeline now asks for the mp4 (`definition.ts` stages
+ * `installing_project` and `publishing_video_project`) and persists it as
+ * `payload.renderedVideo`. The browser preview has NOT been switched over: both
+ * paths exist until someone flips the UI and deletes the compiler, so a payload
+ * without `renderedVideo` must stay a complete, playable presentation.
  */
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
 import type {
@@ -72,7 +74,15 @@ export type RenderVideoFailureReason =
   /** Chunks exist but joining them failed; there is no complete mp4. */
   | "concat_failed"
   /** The concat command succeeded but printed no readable video report. */
-  | "unreadable_render_report";
+  | "unreadable_render_report"
+  /**
+   * The render produced a file, but its narration is missing or does not cover
+   * every scene. This one is not "no video" — it is a video that would play —
+   * and it is refused anyway: a deck that looks finished and says nothing (or
+   * goes quiet on slide 4) is worse than falling back to the browser preview,
+   * which still has every track. See the checks in `sandbox-project.ts`.
+   */
+  | "narration_missing";
 
 /**
  * A single sandbox command may run for `SOURCEWEFT_SANDBOX_COMMAND_TIMEOUT_MS`
