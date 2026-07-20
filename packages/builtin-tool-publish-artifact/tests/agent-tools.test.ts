@@ -93,6 +93,9 @@ function services(input?: {
         ),
       getBucketName: vi.fn().mockReturnValue("content"),
       upload: vi.fn().mockResolvedValue(undefined),
+      // Publishing only writes; the port requires a reader, and "nothing is
+      // stored" is the honest answer for a fake that keeps no bytes.
+      download: vi.fn().mockResolvedValue(null),
     },
   };
 }

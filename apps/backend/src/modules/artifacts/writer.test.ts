@@ -85,6 +85,11 @@ const storage = {
       byteLength: input.body.byteLength,
     });
   },
+  // The writer never reads objects back; present only because the port
+  // requires it, so a stub that fails loudly is better than a plausible one.
+  download: async () => {
+    throw new Error("writer must not download stored objects");
+  },
 };
 
 const repository = {

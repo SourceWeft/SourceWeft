@@ -387,6 +387,16 @@ function makeDeps(
       buildArtifactStorageKey: ({ artifactId, fileName, workspaceId }) =>
         `workspaces/${workspaceId}/artifacts/${artifactId}/${fileName}`,
       getBucketName: () => "content",
+      // Reading back what a stage uploaded: the fake store is the upload log,
+      // so a key that was never uploaded reads as absent, exactly as S3 would.
+      download: async ({ key }) => {
+        const uploaded = repositoryState.storageUploads.find(
+          (entry) => entry.key === key,
+        );
+        return uploaded
+          ? { body: new Uint8Array(0), contentType: uploaded.contentType }
+          : null;
+      },
       upload: async (uploadInput) => {
         repositoryState.storageUploads.push({
           contentType: uploadInput.contentType,

@@ -172,7 +172,9 @@ export type DeliverableHostContext = {
    * declaration and the one every other site imports. It is inlined here only
    * because this package deliberately carries no workspace dependencies (see
    * the module header); keep the two in sync — they are assignable in both
-   * directions today.
+   * directions today, and that is pinned by a type-level test in the one place
+   * that can see both declarations
+   * (`apps/backend/src/modules/sources/storage.test.ts`).
    */
   readonly storage: {
     buildArtifactStorageKey(input: {
@@ -186,6 +188,22 @@ export type DeliverableHostContext = {
       contentType: string;
       key: string;
     }): Promise<void>;
+    /**
+     * Read back an object this port wrote — `null` when the key does not exist.
+     * A pipeline stage needs it because per-run `scratch` does not survive a
+     * job resume, so bytes an earlier stage uploaded are otherwise gone.
+     *
+     * `maxBytes` only tightens the port's own ceiling
+     * (`ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES`, 25MB); the implementation clamps
+     * it, so a pipeline cannot widen how much it may buffer. Exceeding the
+     * ceiling throws rather than resolving null — "too big" must not be
+     * indistinguishable from "not there".
+     */
+    download(input: {
+      bucket?: string | null;
+      key: string;
+      maxBytes?: number;
+    }): Promise<{ body: Uint8Array; contentType: string } | null>;
   };
   readonly audio: {
     probeDurationSeconds(input: {

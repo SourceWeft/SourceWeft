@@ -35,7 +35,8 @@
     "./model-catalog": "./src/model-catalog.ts",
     "./byok": "./src/byok.ts",
     "./misc": "./src/misc.ts",
-    "./capabilities": "./src/capabilities.ts"
+    "./capabilities": "./src/capabilities.ts",
+    "./capability-host-services": "./src/capability-host-services.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
