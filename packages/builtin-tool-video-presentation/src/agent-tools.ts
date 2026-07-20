@@ -19,10 +19,22 @@ import {
  * package's own descriptors.
  */
 type HostArtifactServices = {
-  readonly createPendingArtifact: (
-    artifactType: string,
-    input: Parameters<VideoPresentationToolArtifacts["createPending"]>[0],
-  ) => Promise<unknown>;
+  readonly openArtifact: (input: {
+    readonly context: {
+      readonly teamId: string;
+      readonly workspaceId: string;
+      readonly threadId: string;
+      readonly userId: string;
+    };
+    readonly artifactId?: string;
+    readonly spec: {
+      readonly artifactType: string;
+      readonly title: string;
+      readonly prompt?: string;
+      readonly payload: Record<string, unknown>;
+      readonly idempotency?: { readonly requestKey: string };
+    };
+  }) => Promise<{ readonly artifactId: string }>;
   readonly findArtifact: VideoPresentationToolArtifacts["findStatus"];
   readonly findReusableArtifact: (query: {
     readonly teamId: string;
@@ -116,10 +128,23 @@ function createRuntimeDeps(
           threadId: input.threadId,
           ...videoPresentationReusableArtifactQuery(input),
         }),
-      createPending: (input) =>
-        artifacts
-          .createPendingArtifact(VIDEO_PRESENTATION_ARTIFACT_TYPE, input)
-          .then(() => undefined),
+      openArtifact: (input) =>
+        artifacts.openArtifact({
+          context: {
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            threadId: input.threadId,
+            userId: input.userId,
+          },
+          artifactId: input.artifactId,
+          spec: {
+            artifactType: VIDEO_PRESENTATION_ARTIFACT_TYPE,
+            title: input.title,
+            prompt: input.prompt,
+            payload: input.payload,
+            idempotency: { requestKey: input.requestKey },
+          },
+        }),
       findStatus: artifacts.findArtifact,
     },
     queue: {

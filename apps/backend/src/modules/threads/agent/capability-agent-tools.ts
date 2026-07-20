@@ -14,7 +14,7 @@ import {
   findArtifactRecord,
   findReusableArtifactRecord,
 } from "../../artifacts/repository";
-import { publishArtifact } from "../../artifacts/publish";
+import { openArtifact, publishArtifact } from "../../artifacts/publish";
 import { enqueueDeliverableJob } from "../../content/queue";
 import { artifactStorage } from "../../sources/storage";
 import { createDefaultWebProvider } from "../../sources/web-provider";
@@ -203,6 +203,11 @@ function createCapabilityAgentToolHostServices(
        * names no artifact type: what is written is whatever the spec says.
        */
       publishArtifact,
+      /**
+       * The two-phase half of the same door, for a capability whose artifact
+       * outlives the call that asked for it.
+       */
+      openArtifact,
       /**
        * The generic artifact-row primitives. Each takes the artifact type as a
        * parameter rather than carrying it in its name: a capability knows its
