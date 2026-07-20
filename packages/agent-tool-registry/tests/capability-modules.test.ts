@@ -30,6 +30,8 @@ const ENTRY_FACTORIES = [
   "createCapabilityAgentTools",
   "createDeliverablePipelines",
   "createArtifactViewHandlers",
+  "createConnectorAdapters",
+  "createHostWebProvider",
 ];
 
 /**

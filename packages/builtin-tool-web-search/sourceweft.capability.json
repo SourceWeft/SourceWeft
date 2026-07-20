@@ -5,6 +5,9 @@
   "name": "Web Search",
   "version": "0.1.0",
   "entry": "./src/index.ts",
+  "hostServices": [
+    "web_provider"
+  ],
   "tools": [
     {
       "id": "web_search",

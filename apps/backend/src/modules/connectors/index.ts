@@ -1,7 +1,10 @@
 import { billingService } from "../billing";
 import { ConnectorActionRunner } from "./action-runner";
 import { ConnectorOAuthService } from "./oauth-service";
-import { registerBuiltinConnectorAdapters } from "./register-builtin-adapters";
+import {
+  connectorAdaptersReady,
+  registerBuiltinConnectorAdapters,
+} from "./register-builtin-adapters";
 import { ConnectorService } from "./service";
 import { ConnectorSyncOrchestrator } from "./sync-orchestrator";
 import { ConnectorWebhookService } from "./webhook-service";
@@ -26,7 +29,11 @@ export type {
   OAuthTokenSet,
 } from "./types";
 
-registerBuiltinConnectorAdapters();
+// Kicked off at import so the common path is warm by the time a request lands;
+// entrypoints await `connectorAdaptersReady()` before serving.
+void registerBuiltinConnectorAdapters();
+
+export { connectorAdaptersReady };
 
 export const connectorService = new ConnectorService();
 export const connectorOAuthService = new ConnectorOAuthService();

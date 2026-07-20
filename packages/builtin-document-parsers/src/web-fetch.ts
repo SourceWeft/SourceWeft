@@ -64,13 +64,16 @@ export class WebFetchSourceParser extends BaseSourceParser {
   readonly supportedMimeTypes = [WEB_FETCH_SOURCE_MIME_TYPE] as const;
 
   constructor(
-    private readonly createProvider: () => WebFetchProviderLike | null,
+    private readonly createProvider: () =>
+      | WebFetchProviderLike
+      | null
+      | Promise<WebFetchProviderLike | null>,
   ) {
     super();
   }
 
   async parse(input: ParseInput): Promise<ParsedDocument> {
-    const provider = this.createProvider();
+    const provider = await this.createProvider();
     if (!provider) {
       throw new ParserContentError(
         503,

@@ -33,6 +33,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
   string,
   CapabilityEntryModuleLoader
 > = {
+  "@sourceweft/builtin-connector-notion": () =>
+    import("@sourceweft/builtin-connector-notion"),
   "@sourceweft/builtin-retrieval": () =>
     import("@sourceweft/builtin-retrieval"),
   "@sourceweft/builtin-tool-generate-image": () =>

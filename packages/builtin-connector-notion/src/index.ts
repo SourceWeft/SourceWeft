@@ -30,3 +30,4 @@ export {
   createNotionConnectorAdapter,
   type NotionAdapterRuntimeConfig,
 } from "./adapter";
+export { createConnectorAdapters } from "./host-services";

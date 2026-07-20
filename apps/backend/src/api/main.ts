@@ -10,10 +10,14 @@ import { closeQueue } from "../shared/queue";
 import { createApp } from "./app";
 import { contentSkillsService } from "../modules/skills";
 import { agentSandboxService } from "../modules/threads";
+import { connectorAdaptersReady } from "../modules/connectors";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 await ensureModelConfigAvailable();
 await contentSkillsService.syncBuiltinCatalog();
+// Connectors are contributed by capabilities, so registering them reads
+// manifests. Await it before serving so the registry is never consulted empty.
+await connectorAdaptersReady();
 
 const app = createApp();
 

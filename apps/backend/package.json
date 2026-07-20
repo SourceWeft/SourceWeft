@@ -60,8 +60,6 @@
     "@sourceweft/builtin-skill-meeting-summary": "workspace:*",
     "@sourceweft/builtin-skill-ppt-deck": "workspace:*",
     "@sourceweft/builtin-skill-video-presentation": "workspace:*",
-    "@sourceweft/builtin-tool-generate-image": "workspace:*",
-    "@sourceweft/builtin-tool-publish-artifact": "workspace:*",
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
     "@sourceweft/builtin-tool-video-presentation": "workspace:*",
     "@sourceweft/builtin-tool-web-search": "workspace:*",

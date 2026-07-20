@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
-import { videoPresentationArtifactViewHandler } from "@sourceweft/builtin-tool-video-presentation";
-import { slidesArtifactViewHandler } from "@sourceweft/builtin-tool-publish-artifact";
 import { testExports } from "./service";
 import { createArtifactViewHandlerRegistry } from "./view-handlers";
+import {
+  createSyntheticFileArtifactViewHandler,
+  createSyntheticTakeoverArtifactViewHandler,
+  SYNTHETIC_FILE_ARTIFACT_TYPE,
+  SYNTHETIC_FILE_EXTENSION,
+  SYNTHETIC_TAKEOVER_ARTIFACT_TYPE,
+} from "../../test/synthetic-capability";
 
+/**
+ * Driven by a synthetic capability, not a real one. Every assertion below is
+ * about the host: whether it asks the handler before falling back, and what it
+ * concludes when no handler claims the type. Binding a real capability here
+ * made these tests fail whenever that capability changed a file extension.
+ */
 const handlers = createArtifactViewHandlerRegistry([
-  slidesArtifactViewHandler,
-  videoPresentationArtifactViewHandler,
+  createSyntheticFileArtifactViewHandler(),
+  createSyntheticTakeoverArtifactViewHandler(),
 ]);
 
 function handlerFor(artifactType: string) {
@@ -27,22 +38,25 @@ vi.mock("./repository", () => ({
   listArtifactRecords: vi.fn(),
 }));
 
-test("slides artifact downloads use artifact title over legacy payload file name", () => {
+test("a handler's download name wins over the payload file name", () => {
   const artifact = {
-    artifactType: "slides",
+    artifactType: SYNTHETIC_FILE_ARTIFACT_TYPE,
     payloadJson: {
-      fileName: "generated-pptx.pptx",
+      fileName: "generated-legacy-name.bin",
     },
     title: "费曼学习法：用教别人的方式真正学会",
   };
 
   assert.equal(
-    testExports.resolveArtifactFileName(artifact as never, handlerFor("slides")),
-    "费曼学习法-用教别人的方式真正学会.pptx",
+    testExports.resolveArtifactFileName(
+      artifact as never,
+      handlerFor(SYNTHETIC_FILE_ARTIFACT_TYPE),
+    ),
+    `费曼学习法：用教别人的方式真正学会${SYNTHETIC_FILE_EXTENSION}`,
   );
 });
 
-test("non-slides artifact downloads keep payload file name", () => {
+test("artifact downloads keep the payload file name when no handler claims the type", () => {
   const artifact = {
     artifactType: "image",
     payloadJson: {
@@ -187,7 +201,7 @@ test("generic file artifact preview capability follows MIME type", () => {
 test("a registered takeover makes an artifact client-renderable without a file", () => {
   const registry = handlers;
   const artifact = {
-    artifactType: "video_presentation",
+    artifactType: SYNTHETIC_TAKEOVER_ARTIFACT_TYPE,
     status: "running",
     storageKey: null,
   };
@@ -232,12 +246,12 @@ test("a registered takeover makes an artifact client-renderable without a file",
 test("artifact asset resolution delegates payload shapes to the type handler", () => {
   const registry = handlers;
   const artifact = {
-    artifactType: "video_presentation",
+    artifactType: SYNTHETIC_TAKEOVER_ARTIFACT_TYPE,
     status: "ready",
     storageBucket: "content",
     storageKey: null,
     payloadJson: {
-      audioTracks: [
+      syntheticAssets: [
         {
           fileName: "scene-1.mp3",
           mimeType: "audio/mpeg",
@@ -270,7 +284,7 @@ test("artifact asset resolution delegates payload shapes to the type handler", (
 test("artifact preview image metadata resolves from structured fields", () => {
   assert.deepEqual(
     testExports.resolveArtifactPreviewImage({
-      artifactType: "slides",
+      artifactType: SYNTHETIC_FILE_ARTIFACT_TYPE,
       status: "ready",
       storageBucket: "content",
       previewStorageKey: "workspaces/workspace-1/artifacts/artifact-1/preview.jpg",

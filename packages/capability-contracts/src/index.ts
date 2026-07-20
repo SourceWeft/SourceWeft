@@ -30,6 +30,22 @@ export const capabilityKindSchema = z.enum([
   "composite",
 ]);
 
+/**
+ * Host-level services a capability supplies an implementation for.
+ *
+ * Distinct from a contribution: a contribution is something the *agent* can
+ * reach (a tool, a skill), whereas a host service is something the *host* runs
+ * on. Declaring it here is what lets the host find the implementation without
+ * naming the package — it loads the entry module of every capability that
+ * declares the service and calls the matching factory in
+ * `@sourceweft/contracts/capability-host-services`.
+ *
+ * Connector adapters are deliberately absent: a connector capability already
+ * declares itself through its `connectors` contributions, so re-declaring it
+ * here would be a second source of truth for the same fact.
+ */
+export const capabilityHostServiceSchema = z.enum(["web_provider"]);
+
 export const capabilityRiskSchema = z.enum([
   "read",
   "write",
@@ -305,6 +321,7 @@ const baseCapabilityManifestSchema = z.object({
   retrieval: z.array(retrievalContributionSchema).optional(),
   documentParsers: z.array(documentParserContributionSchema).optional(),
   connectors: z.array(connectorContributionSchema).optional(),
+  hostServices: z.array(capabilityHostServiceSchema).default([]),
   configSchema: jsonObjectSchema.default({}),
 });
 
@@ -398,6 +415,7 @@ export type DocumentParserContribution = z.infer<
 export type ConnectorContribution = z.infer<typeof connectorContributionSchema>;
 export type ConnectorActionContribution = z.infer<typeof connectorActionSchema>;
 export type ConnectorActionRisk = z.infer<typeof connectorActionRiskSchema>;
+export type CapabilityHostService = z.infer<typeof capabilityHostServiceSchema>;
 
 export type ParseCapabilityManifestResult =
   | {

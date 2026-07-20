@@ -27,9 +27,13 @@ import {
   processThreadChatRunJob,
 } from "./processors/thread-chat-run";
 import { agentSandboxService } from "../modules/threads";
+import { connectorAdaptersReady } from "../modules/connectors";
 
 await syncGlobalModelGatewayConfig({ syncPricing: false });
 await ensureModelConfigAvailable();
+// Connectors are contributed by capabilities, so registering them reads
+// manifests. Await it before serving so the registry is never consulted empty.
+await connectorAdaptersReady();
 
 type JobPayload = Record<string, unknown>;
 type JobProcessor = (job: Job<JobPayload>) => Promise<unknown>;

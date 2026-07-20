@@ -9,6 +9,10 @@ import { toBackendParsedDocument, type ParseInput } from "./types";
 
 const WEB_FETCH_SOURCE_TIMEOUT_MS = 60_000;
 
+/**
+ * Source ingestion gets a far longer fetch budget than a live turn does. The
+ * budget is the host's call; which provider honours it is the capability's.
+ */
 function createWebFetchSourceProvider() {
   return createDefaultWebProvider({
     fetchTimeoutMs: WEB_FETCH_SOURCE_TIMEOUT_MS,

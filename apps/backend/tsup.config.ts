@@ -13,6 +13,7 @@ export default defineConfig({
   minify: false,
   noExternal: [
     /^@sourceweft\/agent-tool-registry(\/.*)?$/,
+    /^@sourceweft\/builtin-connector-notion(\/.*)?$/,
     /^@sourceweft\/builtin-document-parsers(\/.*)?$/,
     /^@sourceweft\/builtin-retrieval(\/.*)?$/,
     /^@sourceweft\/builtin-tool-generate-image(\/.*)?$/,

@@ -432,9 +432,29 @@ export const config = {
       process.env.SOURCEWEFT_SANDBOX_TTL_SECONDS,
       3600,
     ),
+    // Timeout for commands issued inside a conversational turn. The command
+    // text there comes from the model, so this is the limit that stops one
+    // runaway command from holding a sandbox; raise it and every model-issued
+    // command gets the longer hold.
     commandTimeoutMs: parsePositiveInteger(
       process.env.SOURCEWEFT_SANDBOX_COMMAND_TIMEOUT_MS,
       120000,
+    ),
+    // Timeout for deterministic host-issued batch work (installs, type checks,
+    // renders). 8 minutes because that is the longest per-stage budget any
+    // deliverable pipeline declares today: a command allowed to outrun the
+    // stage containing it can only wedge that stage.
+    batchCommandTimeoutMs: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_BATCH_COMMAND_TIMEOUT_MS,
+      480000,
+    ),
+    // Absolute cap every command budget is clamped to. 10 minutes: comfortably
+    // above the longest host stage above, and far below the sandbox TTL
+    // (`ttlSeconds`, 1h) so no command can outlive the sandbox it runs in. This
+    // exists so a mis-set budget env var cannot pin a sandbox indefinitely.
+    maxCommandTimeoutMs: parsePositiveInteger(
+      process.env.SOURCEWEFT_SANDBOX_MAX_COMMAND_TIMEOUT_MS,
+      600000,
     ),
     maxOutputChars: parsePositiveInteger(
       process.env.SOURCEWEFT_SANDBOX_MAX_OUTPUT_CHARS,
@@ -557,11 +577,6 @@ export const config = {
       process.env.PDF2MARKDOWN_REQUEST_TIMEOUT_MS,
       30000,
     ),
-  },
-  webProviders: {
-    anycrawl: {
-      apiKey: process.env.ANYCRAWL_API_KEY?.trim() || "",
-    },
   },
   market: {
     mode: parseMarketMode(process.env.MARKET_MODE, "disabled"),
@@ -718,14 +733,6 @@ export const config = {
     storagePointerPrefix:
       process.env.SOURCEWEFT_CAPABILITY_STORAGE_POINTER_PREFIX?.trim() ||
       "capability-package:",
-  },
-  connectors: {
-    notion: {
-      redirectUri: process.env.NOTION_REDIRECT_URI?.trim() || undefined,
-      clientId: process.env.NOTION_CLIENT_ID?.trim() ?? "",
-      clientSecret: process.env.NOTION_CLIENT_SECRET?.trim() ?? "",
-      webhookSecret: process.env.NOTION_WEBHOOK_SECRET?.trim() ?? "",
-    },
   },
   ops: {
     alertsEnabled: parseBoolean(process.env.BACKEND_ALERTS_ENABLED, true),

@@ -1,4 +1,7 @@
-import type { AgentToolReusableArtifactQuery } from "@sourceweft/contracts/agent-tools";
+import type {
+  AgentToolReusableArtifactQuery,
+  AgentToolWebProvider,
+} from "@sourceweft/contracts/agent-tools";
 import {
   createPendingArtifactRecord,
   createReadyArtifactRecord,
@@ -11,7 +14,6 @@ import {
   type DeliverableJobPayload,
 } from "../../../content/queue";
 import { artifactStorage } from "../../../sources/storage";
-import { createDefaultWebProvider } from "../../../sources/web-provider";
 import { logger } from "../../../../shared/logger";
 import { createAgentToolModelGatewayService } from "../../../../shared/model-gateway";
 import { runToolRetrieval } from "../turn/retrieval-runner";
@@ -42,6 +44,14 @@ type ReusableArtifactRecordQuery = Parameters<
  */
 export function createCapabilityAgentToolHostServices(
   input: CapabilityAgentToolsForTurnInput,
+  /**
+   * Host-supplied services that have to be resolved before the bag is built.
+   * The web provider comes from a capability entry module, so resolving it is
+   * async; it is passed in rather than fetched here so this builder stays the
+   * synchronous, excess-property-checked literal the architecture guard relies
+   * on.
+   */
+  hostProviders: { webProvider: AgentToolWebProvider | null },
 ): CapabilityAgentToolHostServices {
   const {
     prepared,
@@ -188,6 +198,6 @@ export function createCapabilityAgentToolHostServices(
         }
       : undefined,
     storage: artifactStorage,
-    webProvider: createDefaultWebProvider(),
+    webProvider: hostProviders.webProvider,
   };
 }

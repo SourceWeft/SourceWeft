@@ -5,6 +5,7 @@ export const builtinWebSearchCapability = {
 } as const;
 
 export { createCapabilityAgentTools } from "./agent-tools";
+export { createHostWebProvider } from "./host-services";
 export { createWebTools } from "./web-tools";
 export { validatePublicHttpUrl } from "./url-safety";
 export type {

@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { testExports as agentTestExports } from "..";
-import { imageRuntimePromptProvider } from "@sourceweft/builtin-tool-generate-image";
-import { createCapabilityAgentTools as createPublishArtifactTools } from "@sourceweft/builtin-tool-publish-artifact";
 import {
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
@@ -31,6 +29,11 @@ import type { DeepAgentTurnEvent } from "./events";
 import type { PreparedThreadTurn } from "../..";
 import type { ConnectorActionExecutionCursor } from "../../../connectors/agent-tool-idempotency";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
+import {
+  createSyntheticRuntimePromptProvider,
+  SYNTHETIC_PROMPT_MARKER,
+  SYNTHETIC_TOOL_NAME,
+} from "../../../../test/synthetic-capability";
 
 async function collectMessageStreamEvents(
   input: Parameters<typeof handleMessagesStreamChunk>[0],
@@ -80,51 +83,6 @@ function toolNames(tools: readonly unknown[]) {
     }
     return name;
   });
-}
-
-function publishArtifactPromptProviders(
-  toolName = AGENT_TOOL_NAMES.publishArtifact,
-) {
-  return createPublishArtifactTools({
-    toolIds: [toolName],
-    context: {
-      shouldBindAgentTool: (candidate: string) => candidate === toolName,
-      teamId: "team-1",
-      workspaceId: "workspace-1",
-      threadId: "thread-1",
-      userId: "user-1",
-      userMessageId: "message-1",
-    },
-    services: {
-      artifacts: {},
-      sandbox: {
-        downloadCurrentFile: async () => Buffer.from("pptx"),
-      },
-      storage: {},
-    },
-  } as never).promptProviders;
-}
-
-function publishArtifactRuntimeTools(
-  selection: Record<string, unknown>,
-  toolName = AGENT_TOOL_NAMES.publishArtifact,
-) {
-  const normalizedSelection = {
-    ...selection,
-    enabled: typeof selection.enabled === "boolean" ? selection.enabled : true,
-  };
-  const { enabled, ...options } = normalizedSelection;
-  const isEnabled = enabled !== false;
-  return {
-    [toolName]: {
-      toolName,
-      enabled: isEnabled,
-      permission: "allow" as const,
-      shouldBind: isEnabled,
-      selection: normalizedSelection,
-      options,
-    },
-  };
 }
 
 async function* emptyAgentStream() {}
@@ -3909,75 +3867,6 @@ test("command success accepts structured presentation artifact output", () => {
   );
 });
 
-test("runtime prompt treats image auto mode as available but optional", () => {
-  const prompt = testExports.buildAgentRuntimeContext({
-    timezone: "UTC",
-    availableArtifactTools: ["generate_image"],
-    artifactToolRuntimePromptProviders: [
-      imageRuntimePromptProvider as ArtifactToolRuntimePromptProvider,
-    ],
-    turnState: {
-      generate_image: {
-        artifactIntent: {
-          kind: "image",
-          shouldInjectTool: true,
-          source: "explicit_tool",
-          confidence: 0.55,
-          reason:
-            "User-facing image generation controls configured generate_image.",
-          config: {
-            aspectRatio: "auto",
-            quality: "auto",
-            style: "auto",
-          },
-          warnings: [],
-        },
-      },
-    },
-  });
-
-  assert.match(prompt, /generate_image is available in auto mode/);
-  assert.match(prompt, /decide semantically from the user's goal/);
-  assert.match(prompt, /Never claim an image was created/);
-  assert.match(prompt, /do not include image markdown or raw artifact URLs/);
-  assert.match(prompt, /otherwise answer normally/);
-});
-
-test("runtime prompt blocks sandbox fallback when image generation is unavailable", () => {
-  const prompt = testExports.buildAgentRuntimeContext({
-    timezone: "UTC",
-    availableArtifactTools: [],
-    artifactToolRuntimePromptProviders: [
-      imageRuntimePromptProvider as ArtifactToolRuntimePromptProvider,
-    ],
-    turnState: {
-      generate_image: {
-        artifactIntent: {
-          kind: "image",
-          shouldInjectTool: false,
-          source: "skill",
-          confidence: 0.82,
-          reason: "A selected skill declares generate_image.",
-          config: {
-            aspectRatio: "auto",
-            quality: "auto",
-            style: "auto",
-          },
-          warnings: ["image_model_unavailable"],
-        },
-      },
-    },
-  });
-
-  assert.match(prompt, /generate_image is not available for this turn/);
-  assert.match(prompt, /image_model_unavailable/);
-  assert.match(prompt, /Briefly tell the user that image generation is unavailable/);
-  assert.doesNotMatch(prompt, /sandbox tools/);
-  assert.doesNotMatch(prompt, /filesystem scripts/);
-  assert.doesNotMatch(prompt, /code drawing as a substitute/);
-  assert.doesNotMatch(prompt, /generate_image is available in auto mode/);
-});
-
 test("runtime prompt exposes invoked skill runtime config", () => {
   const prompt = testExports.buildAgentRuntimeContext({
     timezone: "UTC",
@@ -4010,87 +3899,6 @@ test("runtime prompt exposes invoked skill runtime config", () => {
   assert.match(prompt, /visualDensity: dense/);
   assert.match(prompt, /language: zh-CN/);
   assert.match(prompt, /slideCount: 10/);
-});
-
-test("runtime prompt does not expose publisher tool generation options", () => {
-  const prompt = testExports.buildAgentRuntimeContext({
-    timezone: "UTC",
-    availableArtifactTools: ["publish_artifact"],
-    artifactToolRuntimePromptProviders: publishArtifactPromptProviders(),
-  });
-
-  assert.match(
-    prompt,
-    /Use `publish_artifact` only after the output file has already been generated; for slides, content QA plus visual QA must have passed\./,
-  );
-  assert.match(prompt, /artifactType=file/);
-  assert.match(prompt, /rendered slide image count and visual QA result/);
-  assert.match(prompt, /QA_IMAGE_COUNT/);
-  assert.match(prompt, /PREVIEW_IMAGE_PATH/);
-  assert.match(prompt, /previewImage/);
-  assert.match(prompt, /does not search the QA directory automatically/);
-  assert.doesNotMatch(prompt, /stylePreset:/);
-  assert.doesNotMatch(prompt, /visualDensity:/);
-  assert.doesNotMatch(prompt, /language:/);
-  assert.doesNotMatch(prompt, /slideCount:/);
-  assert.doesNotMatch(prompt, /<ppt_deck_options>/);
-});
-
-test("PPTX publisher capability omits prompt guidance when tool is not bound", () => {
-  const result = createPublishArtifactTools({
-    toolIds: [AGENT_TOOL_NAMES.publishArtifact],
-    context: {
-      shouldBindAgentTool: () => false,
-      teamId: "team-1",
-      workspaceId: "workspace-1",
-      threadId: "thread-1",
-      userId: "user-1",
-      userMessageId: "message-1",
-    },
-    services: {
-      artifacts: {},
-      sandbox: {
-        downloadCurrentFile: async () => Buffer.from("pptx"),
-      },
-      storage: {},
-    },
-  } as never);
-
-  assert.deepEqual(result.promptProviders, []);
-  assert.deepEqual(result.tools, []);
-});
-
-test("runtime prompt omits PPTX publisher guidance when disabled", () => {
-  const result = createPublishArtifactTools({
-    toolIds: [AGENT_TOOL_NAMES.publishArtifact],
-    context: {
-      runtimeTools: publishArtifactRuntimeTools({
-        enabled: false,
-      }),
-      shouldBindAgentTool: (toolName: string) =>
-        toolName === AGENT_TOOL_NAMES.publishArtifact,
-      teamId: "team-1",
-      workspaceId: "workspace-1",
-      threadId: "thread-1",
-      userId: "user-1",
-      userMessageId: "message-1",
-    },
-    services: {
-      artifacts: {},
-      storage: {},
-    },
-  } as never);
-  const prompt = testExports.buildAgentRuntimeContext({
-    timezone: "UTC",
-    availableArtifactTools: ["publish_artifact"],
-    artifactToolRuntimePromptProviders: result.promptProviders,
-    runtimeTools: publishArtifactRuntimeTools({
-      enabled: false,
-    }),
-  });
-
-  assert.doesNotMatch(prompt, /publish_artifact` only after/);
-  assert.doesNotMatch(prompt, /<ppt_deck_options>/);
 });
 
 test("skill commands bind workflow default artifact tools", () => {
@@ -4154,4 +3962,53 @@ test("non-command active skill turns bind runtime-selected artifact tools", () =
     }),
     false,
   );
+});
+
+/**
+ * The host's half of the runtime-prompt contract: whatever a capability's
+ * provider returns is appended to the artifact-tools section, verbatim and
+ * unfiltered, and the section appears even when no artifact tool is bound.
+ *
+ * Driven by a synthetic provider on purpose. Asserting a real capability's
+ * prompt wording here tested the capability, not this function, and broke on
+ * copy edits made in another package; those assertions now live with the
+ * providers that produce them (see the generate-image and publish-artifact
+ * packages' prompt-provider tests).
+ */
+test("runtime prompt appends capability provider lines verbatim", () => {
+  const prompt = testExports.buildAgentRuntimeContext({
+    timezone: "UTC",
+    availableArtifactTools: [SYNTHETIC_TOOL_NAME],
+    artifactToolRuntimePromptProviders: [
+      createSyntheticRuntimePromptProvider() as ArtifactToolRuntimePromptProvider,
+    ],
+  });
+
+  assert.ok(prompt.includes(`Available artifact tools this turn: ${SYNTHETIC_TOOL_NAME}.`));
+  assert.ok(prompt.includes(SYNTHETIC_PROMPT_MARKER));
+});
+
+test("runtime prompt keeps provider lines when no artifact tool is bound", () => {
+  const prompt = testExports.buildAgentRuntimeContext({
+    timezone: "UTC",
+    availableArtifactTools: [],
+    artifactToolRuntimePromptProviders: [
+      createSyntheticRuntimePromptProvider() as ArtifactToolRuntimePromptProvider,
+    ],
+  });
+
+  assert.ok(prompt.includes(SYNTHETIC_PROMPT_MARKER));
+});
+
+test("runtime prompt omits the artifact-tools section when nothing contributes", () => {
+  const prompt = testExports.buildAgentRuntimeContext({
+    timezone: "UTC",
+    availableArtifactTools: [],
+    artifactToolRuntimePromptProviders: [
+      createSyntheticRuntimePromptProvider([]) as ArtifactToolRuntimePromptProvider,
+    ],
+  });
+
+  assert.ok(!prompt.includes("Available artifact tools this turn"));
+  assert.ok(!prompt.includes(SYNTHETIC_PROMPT_MARKER));
 });

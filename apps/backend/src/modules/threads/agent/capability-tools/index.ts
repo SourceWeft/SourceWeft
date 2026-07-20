@@ -1,6 +1,7 @@
 import { getCapabilityContributions } from "@sourceweft/capability-runtime";
 import { listCapabilityRecords } from "../../turn/capability-command-workflows";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
+import { createDefaultWebProvider } from "../../../sources/web-provider";
 import { createCapabilityAgentToolHostServices } from "./host-services";
 import { loadCapabilityAgentToolModule } from "./module-loader";
 import { normalizeFactoryResult } from "./normalize";
@@ -28,7 +29,9 @@ export async function createCapabilityAgentToolsForTurn(
   input: CapabilityAgentToolsForTurnInput,
 ): Promise<CapabilityAgentToolsForTurn> {
   const records = await listCapabilityRecords();
-  const services = createCapabilityAgentToolHostServices(input);
+  const services = createCapabilityAgentToolHostServices(input, {
+    webProvider: await createDefaultWebProvider(),
+  });
   const context = createCapabilityAgentToolTurnContext(input);
   const tools: AgentTurnTool[] = [];
   const artifactTools: AgentTurnTool[] = [];

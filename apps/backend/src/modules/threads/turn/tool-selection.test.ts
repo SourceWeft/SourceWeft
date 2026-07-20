@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { notionAgentToolDefs } from "@sourceweft/builtin-connector-notion";
 import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import {
   buildEffectiveToolsSelection,
@@ -14,7 +13,22 @@ import {
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import type { ThreadToolsSelection } from "./types";
 
-registerAgentTools(notionAgentToolDefs);
+import {
+  SYNTHETIC_CONNECTOR_DELETE_TOOL,
+  SYNTHETIC_CONNECTOR_READ_TOOL,
+  SYNTHETIC_CONNECTOR_TYPE,
+  SYNTHETIC_CONNECTOR_WRITE_TOOL,
+  syntheticConnectorAgentToolDefs,
+} from "../../../test/synthetic-capability";
+
+/**
+ * Connector tool selection is host logic keyed off the tool definitions the
+ * registry holds — the host asks a tool which connector type it belongs to and
+ * keeps only that connector's selections. A synthetic connector supplies those
+ * definitions, so these assertions cannot be broken (or accidentally satisfied)
+ * by a real connector's tool set.
+ */
+registerAgentTools(syntheticConnectorAgentToolDefs);
 
 function skill(input: Partial<EnabledSkillDescriptor>): EnabledSkillDescriptor {
   return {
@@ -97,7 +111,10 @@ test("buildTurnOptionsSnapshot stores effective canonical tool selections", () =
           visualDensity: "dense",
         },
       },
-      search_notion_pages: { enabled: true, connectorId: "connector_1" },
+      [SYNTHETIC_CONNECTOR_READ_TOOL]: {
+        enabled: true,
+        connectorId: "connector_1",
+      },
     },
     skillIds: ["skill-1"],
     webAccessEnabled: true,
@@ -121,7 +138,10 @@ test("buildTurnOptionsSnapshot stores effective canonical tool selections", () =
           visualDensity: "dense",
         },
       },
-      search_notion_pages: { enabled: true, connectorId: "connector_1" },
+      [SYNTHETIC_CONNECTOR_READ_TOOL]: {
+        enabled: true,
+        connectorId: "connector_1",
+      },
     },
   });
 });
@@ -251,17 +271,26 @@ test("video presentation disabled selection stays disabled without runtime value
   );
 });
 
-test("resolveConnectorToolSelections keeps notion connector tool selections only", () => {
+test("resolveConnectorToolSelections keeps one connector's tool selections only", () => {
   const tools: ThreadToolsSelection = {
-    search_notion_pages: { enabled: true, connectorId: "connector_1" },
-    delete_notion_page: { enabled: true },
-    create_notion_page: { enabled: false },
+    [SYNTHETIC_CONNECTOR_READ_TOOL]: {
+      enabled: true,
+      connectorId: "connector_1",
+    },
+    [SYNTHETIC_CONNECTOR_DELETE_TOOL]: { enabled: true },
+    [SYNTHETIC_CONNECTOR_WRITE_TOOL]: { enabled: false },
     web_search: { enabled: true },
   };
 
-  assert.deepEqual(resolveConnectorToolSelections(tools, "notion"), {
-    search_notion_pages: { enabled: true, connectorId: "connector_1" },
-    delete_notion_page: { enabled: true },
-    create_notion_page: { enabled: false },
-  });
+  assert.deepEqual(
+    resolveConnectorToolSelections(tools, SYNTHETIC_CONNECTOR_TYPE),
+    {
+      [SYNTHETIC_CONNECTOR_READ_TOOL]: {
+        enabled: true,
+        connectorId: "connector_1",
+      },
+      [SYNTHETIC_CONNECTOR_DELETE_TOOL]: { enabled: true },
+      [SYNTHETIC_CONNECTOR_WRITE_TOOL]: { enabled: false },
+    },
+  );
 });

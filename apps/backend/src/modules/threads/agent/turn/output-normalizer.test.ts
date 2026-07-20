@@ -15,16 +15,24 @@ import {
   sanitizeThreadMessageMetadataForClient,
   sanitizeFilesystemToolInputForClient,
 } from "./output-normalizer";
-import { buildVideoPresentationProcessingResult } from "@sourceweft/builtin-tool-video-presentation";
 
+/**
+ * The output shapes below are written out as literals rather than built with a
+ * capability's result builder. What is under test is the host's reading of a
+ * tool output — that `status: "running"` beats the presence of an artifact_url
+ * — and building the fixture with the real builder made this test fail whenever
+ * that capability changed a field it does not read.
+ */
 test("video presentation running output with artifact_url is not ready", () => {
-  const runningOutput = buildVideoPresentationProcessingResult({
-    artifactId: "artifact-1",
-    artifactUrl: "/artifact-preview?artifactId=artifact-1",
-    fileName: "demo.video-presentation.json",
-    narrationEnabled: true,
+  const runningOutput = {
+    type: "video_presentation_processing_result",
+    artifact_id: "artifact-1",
+    artifact_url: "/artifact-preview?artifactId=artifact-1",
+    file_name: "demo.video-presentation.json",
+    narration_enabled: true,
+    status: "running",
     title: "Demo",
-  });
+  };
 
   assert.equal(isVideoPresentationArtifactReady(runningOutput), false);
   assert.equal(
