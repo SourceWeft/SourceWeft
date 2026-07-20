@@ -2,7 +2,6 @@ import { tool, type ToolRuntime } from "langchain";
 import { PUBLISH_ARTIFACT_TOOL_NAME } from "./agent-tool-defs";
 import {
   publishArtifact,
-  type CreateReadyArtifactRecord,
   type PublishArtifactServices,
 } from "./publisher";
 import {
@@ -40,9 +39,7 @@ type CapabilityAgentToolFactoryInput = {
     readonly workspaceId?: string;
   };
   readonly services?: {
-    readonly artifacts?: {
-      readonly createReadyArtifact?: CreateReadyArtifactRecord;
-    };
+    readonly artifacts?: PublishArtifactServices["artifacts"];
     readonly sandbox?: {
       readonly allowedReadRoots?: readonly string[];
       readonly downloadCurrentFile: (input: {

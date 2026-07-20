@@ -37,39 +37,44 @@ function services(input?: {
       ? Buffer.from("preview-bytes")
       : validPptxBuffer(),
   );
-  // The host now offers one generic, type-parameterised primitive. The
-  // per-type mocks below are the test's own view of it: `createReadyArtifact`
-  // routes on the artifact type the publisher passes, so the assertions keep
-  // checking both the routing and the record input.
+  // The host offers one function. The per-type mocks below are the test's own
+  // view of it: `publishArtifact` routes on the artifact type in the spec, so
+  // the assertions keep checking both the routing and the spec that was built.
   const createFileArtifactRecord = vi.fn().mockResolvedValue({
     artifactId: "artifact-1",
     versionId: "version-1",
+    reused: false,
   });
   const createSlidesArtifactRecord = vi.fn().mockResolvedValue({
     artifactId: "artifact-1",
     versionId: "version-1",
+    reused: false,
   });
   const createImageArtifactRecord = vi.fn().mockResolvedValue({
     artifactId: "artifact-1",
     versionId: "version-1",
+    reused: false,
   });
-  const createReadyArtifact = vi.fn(
-    (artifactType: string, recordInput: Record<string, unknown>) => {
+  const publishArtifact = vi.fn(
+    (publishInput: {
+      spec: { artifactType: string } & Record<string, unknown>;
+    }) => {
+      const { artifactType } = publishInput.spec;
       if (artifactType === "slides") {
-        return createSlidesArtifactRecord(recordInput);
+        return createSlidesArtifactRecord(publishInput);
       }
       if (artifactType === "file") {
-        return createFileArtifactRecord(recordInput);
+        return createFileArtifactRecord(publishInput);
       }
       if (artifactType === "image") {
-        return createImageArtifactRecord(recordInput);
+        return createImageArtifactRecord(publishInput);
       }
       throw new Error(`unexpected artifact type ${artifactType}`);
     },
   );
   return {
     artifacts: {
-      createReadyArtifact,
+      publishArtifact,
       createFileArtifactRecord,
       createSlidesArtifactRecord,
       createImageArtifactRecord,
@@ -680,30 +685,19 @@ test("publishArtifactFromSource stores slides artifact records", async () => {
   assert.equal(output.file_name, output.fileName);
   assert.equal(output.generation_mode, "editable_native");
   assert.equal(output.editable, true);
-  assert.equal(
-    mockedServices.storage.upload.mock.calls.length,
-    2,
-  );
+  // The bytes are handed over, not uploaded here: storage is the host's.
+  assert.equal(mockedServices.storage.upload.mock.calls.length, 0);
   assert.equal(
     mockedServices.artifacts.createSlidesArtifactRecord.mock.calls.length,
     1,
   );
-  assert.equal(
-    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0]
-      .payload.source.path,
-    "/workspace/Presentation.pptx",
-  );
-  assert.equal(
-    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0]
-      .previewStorageKey,
-    "artifacts/workspace-1/artifact-1/preview.jpg",
-  );
-  assert.equal(
-    "previewImage" in
-      mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0]
-        .payload,
-    false,
-  );
+  const published =
+    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0].spec;
+  assert.equal(published.payload.source.path, "/workspace/Presentation.pptx");
+  assert.equal(published.attachments?.length, 1);
+  assert.equal(published.attachments?.[0]?.role, "primary");
+  assert.equal(published.preview?.fileName, "preview.jpg");
+  assert.equal("previewImage" in published.payload, false);
 });
 
 test("publishArtifactFromSource stores slides preview images as companion assets", async () => {
@@ -742,34 +736,14 @@ test("publishArtifactFromSource stores slides preview images as companion assets
     /^\/api\/artifact-file\?artifactId=[^&]+&workspaceId=workspace-1&asset=previewImage$/u,
   );
   assert.match(output.preview_image_url!, new RegExp(output.artifactId));
-  assert.equal(
-    mockedServices.storage.upload.mock.calls.length,
-    2,
-  );
-  assert.equal(
-    mockedServices.storage.upload.mock.calls[1]?.[0].key,
-    "artifacts/workspace-1/artifact-1/preview.jpg",
-  );
-  assert.equal(
-    mockedServices.storage.upload.mock.calls[1]?.[0].contentType,
-    "image/jpeg",
-  );
-  const recordInput =
-    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0];
-  assert.equal(
-    recordInput?.previewStorageKey,
-    "artifacts/workspace-1/artifact-1/preview.jpg",
-  );
-  assert.deepEqual(
-    recordInput?.previewMetadata,
-    {
-      altText: "First slide",
-      byteLength: "jpeg-bytes".length,
-      fileName: "preview.jpg",
-      mimeType: "image/jpeg",
-    },
-  );
-  assert.equal("previewImage" in (recordInput?.payload ?? {}), false);
+  assert.equal(mockedServices.storage.upload.mock.calls.length, 0);
+  const published =
+    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0].spec;
+  assert.equal(published?.preview?.fileName, "preview.jpg");
+  assert.equal(published?.preview?.contentType, "image/jpeg");
+  assert.equal(published?.preview?.altText, "First slide");
+  assert.equal(published?.preview?.bytes.byteLength, "jpeg-bytes".length);
+  assert.equal("previewImage" in (published?.payload ?? {}), false);
 });
 
 test("publishArtifactFromSource rejects invalid slides preview images", async () => {
@@ -841,12 +815,11 @@ test("publishArtifactFromSource publishes without a preview when the preview ima
   assert.equal(output.ok, true);
   assert.equal(output.artifactType, "slides");
   assert.equal(output.preview_image_url, undefined);
-  // Only the deck itself is uploaded; the preview never reaches storage.
-  assert.equal(mockedServices.storage.upload.mock.calls.length, 1);
-  const recordInput =
-    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0];
-  assert.equal(recordInput?.previewStorageKey, null);
-  assert.equal(recordInput?.previewMetadata, null);
+  // The oversized preview is dropped before the write, so none is handed over.
+  assert.equal(mockedServices.storage.upload.mock.calls.length, 0);
+  const published =
+    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0].spec;
+  assert.equal(published?.preview, undefined);
 });
 
 test("publishArtifact publishes slides from work_file source", async () => {
@@ -882,13 +855,11 @@ test("publishArtifact publishes slides from work_file source", async () => {
   assert.equal(output.ok, true);
   assert.equal(output.artifactType, "slides");
   assert.equal(output.generation_mode, "editable_native");
+  const published =
+    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0].spec;
+  assert.equal(published?.payload.source.kind, "work_file");
   assert.equal(
-    mockedServices.artifacts.createSlidesArtifactRecord.mock.calls[0]?.[0]
-      .payload.source.kind,
-    "work_file",
-  );
-  assert.equal(
-    mockedServices.storage.upload.mock.calls[0]?.[0].contentType,
+    published?.attachments?.[0]?.contentType,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   );
 });
@@ -920,7 +891,7 @@ test("publishArtifact publishes generic file artifacts from sandbox source", asy
     1,
   );
   assert.equal(
-    mockedServices.artifacts.createFileArtifactRecord.mock.calls[0]?.[0]
+    mockedServices.artifacts.createFileArtifactRecord.mock.calls[0]?.[0].spec
       .payload.source.path,
     "/workspace/output/table.csv",
   );
@@ -964,20 +935,11 @@ test("publishArtifact publishes HTML file artifacts from work_file source", asyn
     mockedServices.artifacts.createFileArtifactRecord.mock.calls.length,
     1,
   );
-  assert.equal(
-    mockedServices.artifacts.createFileArtifactRecord.mock.calls[0]?.[0]
-      .payload.source.kind,
-    "work_file",
-  );
-  assert.equal(
-    mockedServices.artifacts.createFileArtifactRecord.mock.calls[0]?.[0]
-      .payload.source.path,
-    "/workfiles/example.html",
-  );
-  assert.equal(
-    mockedServices.storage.upload.mock.calls[0]?.[0].contentType,
-    "text/html",
-  );
+  const published =
+    mockedServices.artifacts.createFileArtifactRecord.mock.calls[0]?.[0].spec;
+  assert.equal(published?.payload.source.kind, "work_file");
+  assert.equal(published?.payload.source.path, "/workfiles/example.html");
+  assert.equal(published?.attachments?.[0]?.contentType, "text/html");
 });
 
 test("publishPreparedArtifact publishes generated image bytes", async () => {
@@ -1016,16 +978,13 @@ test("publishPreparedArtifact publishes generated image bytes", async () => {
     mockedServices.artifacts.createImageArtifactRecord.mock.calls.length,
     1,
   );
-  assert.equal(
-    mockedServices.artifacts.createImageArtifactRecord.mock.calls[0]?.[0]
-      .payload.source.kind,
-    "generated_image",
-  );
-  assert.equal(
-    mockedServices.artifacts.createImageArtifactRecord.mock.calls[0]?.[0]
-      .payload.storageKey,
-    "artifacts/workspace-1/artifact-1/generated-image.png",
-  );
+  const published =
+    mockedServices.artifacts.createImageArtifactRecord.mock.calls[0]?.[0].spec;
+  assert.equal(published?.payload.source.kind, "generated_image");
+  // The storage key is the host's to choose now, so the payload no longer
+  // carries one — the attachment is what says where the bytes came from.
+  assert.equal("storageKey" in published.payload, false);
+  assert.equal(published?.attachments?.[0]?.fileName, "generated-image.png");
 });
 
 test("publishPreparedArtifact rejects slides without preview image", async () => {
