@@ -21,9 +21,14 @@ import {
 } from "./project-code";
 import {
   classifyRenderVideoFailure,
+  CONCAT_VIDEO_COMMAND,
   MAX_RENDERED_VIDEO_BYTES,
+  NARRATION_AUDIO_COMMAND,
   parseRenderVideoReport,
+  parseSceneChunkReport,
   renderedVideoSandboxPath,
+  renderVideoSlideNumbers,
+  sceneChunkCommand,
   type RenderVideoReport,
 } from "./render-video";
 import { safeStorageSegment, shellQuote } from "./util";
@@ -232,26 +237,90 @@ export async function runProjectInSession(input: {
       // command timeout, output cap, per-execute lock and cleanup policy
       // unchanged). Best-effort exactly like stills: a failed or oversized
       // render yields no video, never a pipeline failure.
+      //
+      // The render is a sequence of commands rather than one: N scene chunks,
+      // then the narration mix, then the join. Each command carries the budget
+      // of one scene instead of the whole deck, which is the only way it fits
+      // inside the sandbox's 120s per-command timeout (deliberately unraised).
       if (input.renderVideo && rendererInstall.ok) {
-        const videoRun = await run("pnpm run render-video");
-        const report = videoRun.ok
-          ? parseRenderVideoReport(videoRun.stdout)
-          : null;
-        if (!videoRun.ok || !report) {
+        const warnUnavailable = (meta: Record<string, unknown>) => {
           input.logger.warn("video_presentation_render_video_unavailable", {
             artifactId: input.job.artifactId,
             jobId: input.job.jobId,
+            ...meta,
+          });
+        };
+
+        // Chunks are rendered in playback order and the first failure stops the
+        // sequence. A scene is never skipped to salvage the rest: the payload
+        // has no way to say "this video is missing slide 4", so a short mp4
+        // would be presented as the finished deliverable. Refusing costs a
+        // retry; shipping a truncated deck silently misrepresents it. Stopping
+        // early also avoids burning sandbox time on chunks nothing will join.
+        const slideNumbers = renderVideoSlideNumbers(input.payload);
+        let renderable = slideNumbers.length > 0;
+        for (const slideNumber of slideNumbers) {
+          const command = sceneChunkCommand(slideNumber);
+          const sceneRun = await run(command);
+          const chunk = sceneRun.ok
+            ? parseSceneChunkReport(sceneRun.stdout, slideNumber)
+            : null;
+          if (!sceneRun.ok || !chunk) {
+            // A single scene that still outruns the 120s budget lands here as
+            // `timeout`; it is reported per slide so an operator can see which
+            // scene is too heavy rather than "the render is too slow".
+            warnUnavailable({
+              reason: sceneRun.ok
+                ? "unreadable_scene_report"
+                : classifyRenderVideoFailure(sceneRun),
+              slideNumber,
+              diagnostics: sceneRun.diagnostics.slice(0, 3),
+            });
+            renderable = false;
+            break;
+          }
+        }
+
+        // Narration is mixed once for the whole deck (see
+        // PROJECT_NARRATION_AUDIO_PATH); the command is a cheap no-op for a
+        // silent deck, so it is not conditioned on the narration option here.
+        if (renderable) {
+          const audioRun = await run(NARRATION_AUDIO_COMMAND);
+          if (!audioRun.ok) {
+            warnUnavailable({
+              reason: classifyRenderVideoFailure(audioRun),
+              stage: "render-audio",
+              diagnostics: audioRun.diagnostics.slice(0, 3),
+            });
+            renderable = false;
+          }
+        }
+
+        const videoRun = renderable
+          ? await run(CONCAT_VIDEO_COMMAND)
+          : { ok: false, diagnostics: [], stdout: "", stderr: "" };
+        const report =
+          renderable && videoRun.ok
+            ? parseRenderVideoReport(videoRun.stdout)
+            : null;
+        if (!renderable) {
+          // Already warned with the specific reason above; no chunks are
+          // downloaded and no partial mp4 exists to mistake for a whole one.
+        } else if (!videoRun.ok || !report) {
+          warnUnavailable({
             reason: videoRun.ok
               ? "unreadable_render_report"
-              : classifyRenderVideoFailure(videoRun),
+              : // The join is a stream copy, so a failure here is a broken or
+                // missing chunk far more often than a slow command.
+                classifyRenderVideoFailure(videoRun) === "timeout"
+                ? "timeout"
+                : "concat_failed",
             diagnostics: videoRun.diagnostics.slice(0, 3),
           });
         } else if (report.byteLength > MAX_RENDERED_VIDEO_BYTES) {
           // Never pull a file past the sandbox's per-file collect budget into
           // the worker's heap; the ceiling is the sandbox's, not ours to raise.
-          input.logger.warn("video_presentation_render_video_unavailable", {
-            artifactId: input.job.artifactId,
-            jobId: input.job.jobId,
+          warnUnavailable({
             reason: "oversized",
             byteLength: report.byteLength,
           });
@@ -262,9 +331,7 @@ export async function runProjectInSession(input: {
           if (download?.content && !download.error) {
             video = { data: download.content, report };
           } else {
-            input.logger.warn("video_presentation_render_video_unavailable", {
-              artifactId: input.job.artifactId,
-              jobId: input.job.jobId,
+            warnUnavailable({
               reason: "download_failed",
               error: download?.error ?? "missing",
             });

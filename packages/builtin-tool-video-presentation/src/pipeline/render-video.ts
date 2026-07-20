@@ -8,6 +8,12 @@
  * rendered by `@remotion/renderer` *inside* the sandbox — the same mechanism
  * the visual-QA stills path already uses successfully.
  *
+ * The render is split across sandbox commands — one per scene, one for the
+ * narration mix, one to join them — because a single sandbox command may only
+ * run for `SOURCEWEFT_SANDBOX_COMMAND_TIMEOUT_MS` (120s) and that limit is
+ * deliberately not being raised. This module owns the command strings and the
+ * report/failure vocabulary for that sequence; `sandbox-project.ts` runs it.
+ *
  * Everything here is additive and opt-in: no pipeline stage asks for an mp4
  * yet, and no consumer reads one. This module is the render + storage half of
  * that future flip.
@@ -60,14 +66,22 @@ export type RenderVideoFailureReason =
   | "renderer_unavailable"
   | "oversized"
   | "download_failed"
-  | "render_failed";
+  | "render_failed"
+  /** A scene command succeeded but printed no readable chunk report. */
+  | "unreadable_scene_report"
+  /** Chunks exist but joining them failed; there is no complete mp4. */
+  | "concat_failed"
+  /** The concat command succeeded but printed no readable video report. */
+  | "unreadable_render_report";
 
 /**
  * A single sandbox command may run for `SOURCEWEFT_SANDBOX_COMMAND_TIMEOUT_MS`
  * (120s by default) and the provider surfaces the overrun as
- * `SANDBOX_COMMAND_TIMEOUT`. Full-length renders will hit this; the constraint
- * is deliberately not relaxed here — it is reported so the flip to mp4 previews
- * can decide how to live within it.
+ * `SANDBOX_COMMAND_TIMEOUT`. Splitting the render per scene buys headroom but
+ * does not remove the ceiling: one heavy scene can still exceed it, and that
+ * arrives here as `timeout` for the scene's own command. The constraint is
+ * deliberately not relaxed — it is classified so the caller can degrade
+ * honestly instead of shipping a short video.
  */
 export function classifyRenderVideoFailure(input: {
   diagnostics: readonly string[];
@@ -87,8 +101,102 @@ export function classifyRenderVideoFailure(input: {
   return "render_failed";
 }
 
+/* -------------------------------------------------------------------------- */
+/* Command sequence                                                           */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Parse the single JSON line `scripts/render-video.mjs` prints. Anything the
+ * The slides an mp4 render must cover, in playback order.
+ *
+ * Deliberately derived the same way `buildProjectCodePayload` derives the
+ * composition: a payload with no scene modules is rendered as a single
+ * title-card slide 1, so the render must ask for that slide and not for
+ * nothing. Any divergence between these two would mean concatenating a
+ * different set of scenes than the composition contains.
+ */
+export function renderVideoSlideNumbers(
+  payload: VideoPresentationProjectPayload,
+): number[] {
+  return payload.sceneModules.length > 0
+    ? payload.sceneModules.map((scene) => scene.slideNumber)
+    : [1];
+}
+
+/**
+ * One scene, one command — the whole point of the split. `--` keeps pnpm from
+ * eating the slide number as one of its own flags.
+ */
+export function sceneChunkCommand(slideNumber: number) {
+  return `pnpm run render-scene -- ${slideNumber}`;
+}
+
+/** Whole-deck narration mix; a no-op inside the script when there is none. */
+export const NARRATION_AUDIO_COMMAND = "pnpm run render-audio";
+
+/** Stream-copy join of the per-scene chunks into the deliverable mp4. */
+export const CONCAT_VIDEO_COMMAND = "pnpm run concat-video";
+
+export type SceneChunkReport = {
+  slideNumber: number;
+  file: string;
+  byteLength: number;
+  from: number;
+  to: number;
+  reused: boolean;
+};
+
+/**
+ * Parse the single JSON line `scripts/render-scene.mjs` prints.
+ *
+ * A chunk that cannot be confirmed is treated as absent: the concat step would
+ * fail on it anyway, and failing here means the remaining scenes are never
+ * rendered for nothing.
+ */
+export function parseSceneChunkReport(
+  stdout: string | undefined,
+  expectedSlideNumber: number,
+): SceneChunkReport | null {
+  if (!stdout) {
+    return null;
+  }
+  for (const line of stdout.split("\n").reverse()) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{") || !trimmed.includes('"render-scene"')) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      record.ok !== true ||
+      record.slideNumber !== expectedSlideNumber ||
+      typeof record.file !== "string" ||
+      typeof record.byteLength !== "number" ||
+      typeof record.from !== "number" ||
+      typeof record.to !== "number" ||
+      record.byteLength <= 0 ||
+      record.to < record.from
+    ) {
+      return null;
+    }
+    return {
+      slideNumber: expectedSlideNumber,
+      file: record.file,
+      byteLength: record.byteLength,
+      from: Math.round(record.from),
+      to: Math.round(record.to),
+      reused: record.reused === true,
+    };
+  }
+  return null;
+}
+
+/**
+ * Parse the single JSON line `scripts/concat-video.mjs` prints. Anything the
  * script did not emit exactly (partial output, an interleaved renderer log
  * line, a truncated stdout) yields null rather than a half-populated report.
  */

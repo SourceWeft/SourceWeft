@@ -18,8 +18,37 @@ export type ProjectNarrationFile = {
 /** Directory (relative to the project root) narration is staged into. */
 export const PROJECT_NARRATION_DIR = "public/audio";
 
-/** Where `render-video` writes the mp4, relative to the project root. */
+/** Where `concat-video` writes the finished mp4, relative to the project root. */
 export const PROJECT_RENDERED_VIDEO_PATH = "out/video.mp4";
+
+/**
+ * Per-scene video chunks, one file per slide, written by `render-scene`.
+ *
+ * They are MPEG-TS rather than mp4 because that is the one container ffmpeg can
+ * join with the `concat:` protocol without re-encoding — which is exactly what
+ * `combineChunks` does for an h264 output (`canConcatVideoSeamlessly` is true
+ * only for h264). Chunks are therefore never a deliverable on their own; they
+ * are only ever the input to `concat-video`.
+ */
+export const PROJECT_SCENE_CHUNK_DIR = "out/scenes";
+
+/**
+ * Whole-deck narration mix, written by `render-audio`. Audio is rendered in one
+ * pass rather than per scene on purpose: `combineChunks` reassembles audio
+ * assuming every chunk is the *same* length (`i * chunkDurationInSeconds`), and
+ * our scenes are not equal-length, so per-scene audio chunks would be stitched
+ * at the wrong offsets. One audio file spanning the whole composition is the
+ * degenerate — and correct — case of that assumption.
+ */
+export const PROJECT_NARRATION_AUDIO_PATH = "out/audio.aac";
+
+/**
+ * Bundle output directory. Every per-scene command has to bundle before it can
+ * render, so the bundle is aimed at a stable path instead of a fresh temp dir
+ * per command; when the bundler's on-disk cache hits, later scenes skip most of
+ * that work. A miss costs only the bundle time the command would have paid anyway.
+ */
+export const PROJECT_BUNDLE_DIR = "out/bundle";
 
 export function buildProjectCodePayload(
   payload: VideoPresentationProjectPayload,
@@ -182,7 +211,12 @@ export function buildProjectCodePayload(
               build: "tsc -p tsconfig.json --noEmit",
               "render-smoke": "node scripts/render-smoke.mjs",
               "render-stills": "node scripts/render-stills.mjs",
-              "render-video": "node scripts/render-video.mjs",
+              // The mp4 is produced by N+2 commands, never one: one per scene,
+              // one for the narration mix, one to join them. See the scripts
+              // themselves for why it is split that way.
+              "render-scene": "node scripts/render-scene.mjs",
+              "render-audio": "node scripts/render-audio.mjs",
+              "concat-video": "node scripts/concat-video.mjs",
             },
             dependencies: {
               remotion: "^4.0.0",
@@ -272,7 +306,7 @@ export function buildProjectCodePayload(
           "  if (!Number.isInteger(scene.durationInFrames) || scene.durationInFrames <= 0) {",
           "    throw new Error(`invalid duration for slide ${scene.slideNumber}`);",
           "  }",
-          "  if (typeof scene.audioDurationSeconds === \"number\" && scene.durationInFrames < Math.ceil(scene.audioDurationSeconds * manifest.fps)) {",
+          '  if (typeof scene.audioDurationSeconds === "number" && scene.durationInFrames < Math.ceil(scene.audioDurationSeconds * manifest.fps)) {',
           "    throw new Error(`slide ${scene.slideNumber}: narration (${scene.audioDurationSeconds}s) exceeds scene duration (${scene.durationInFrames} frames @ ${manifest.fps}fps)`);",
           "  }",
           "}",
@@ -308,41 +342,192 @@ export function buildProjectCodePayload(
         ].join("\n"),
       },
       {
-        // Renders the whole composition to an mp4 with @remotion/renderer, the
-        // same server-side renderer the stills path already proves works in the
+        // Renders ONE scene to a video chunk with @remotion/renderer — the same
+        // server-side renderer the stills path already proves works in the
         // sandbox. This is the execution site the browser `new Function` scene
         // compiler is meant to be replaced by: model-authored scene code only
         // ever runs here, behind the sandbox boundary.
         //
-        // It is dormant until something invokes `pnpm run render-video`; the
-        // pipeline stages as they stand never do.
-        path: "scripts/render-video.mjs",
+        // Why one scene per invocation and not the whole composition: every
+        // sandbox command is killed at `SOURCEWEFT_SANDBOX_COMMAND_TIMEOUT_MS`
+        // (120s) and that limit is deliberately not being raised. A whole-deck
+        // render blows through it; a single scene is the largest unit that
+        // plausibly fits. The split is not an optimisation, it is the only
+        // thing that keeps each command inside the budget.
+        //
+        // Chunks are rendered muted: narration is mixed once by `render-audio`
+        // (see PROJECT_NARRATION_AUDIO_PATH for why per-scene audio chunks
+        // would be stitched at the wrong offsets).
+        //
+        // Dormant until something invokes `pnpm run render-scene`; the pipeline
+        // stages as they stand never do.
+        path: "scripts/render-scene.mjs",
         content: [
-          'import { mkdirSync, readFileSync, statSync } from "node:fs";',
+          'import { createHash } from "node:crypto";',
+          'import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";',
+          'import { bundle } from "@remotion/bundler";',
+          'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
+          "",
+          "const slideNumber = Number(process.argv[2]);",
+          "if (!Number.isInteger(slideNumber)) {",
+          "  throw new Error(`render-scene expects a slide number, got ${JSON.stringify(process.argv[2])}`);",
+          "}",
+          'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
+          "// The scene's frame range inside the single composition: scenes are laid",
+          "// out back to back by VideoScene, so the offset is the sum of every",
+          "// earlier scene's duration. Rendering a frameRange of the real",
+          "// composition (rather than a per-scene composition) is what keeps every",
+          "// chunk encoded with identical parameters, which is what makes the",
+          "// concat a stream copy instead of a re-encode.",
+          "let from = 0;",
+          "let scene = null;",
+          "for (const entry of manifest.scenes) {",
+          "  if (entry.slideNumber === slideNumber) {",
+          "    scene = entry;",
+          "    break;",
+          "  }",
+          "  from += entry.durationInFrames;",
+          "}",
+          "if (!scene) {",
+          "  throw new Error(`no scene for slide ${slideNumber}`);",
+          "}",
+          "// Remotion's frameRange end is inclusive.",
+          "const to = from + scene.durationInFrames - 1;",
+          `const chunkDir = new URL("../${PROJECT_SCENE_CHUNK_DIR}/", import.meta.url).pathname;`,
+          "mkdirSync(chunkDir, { recursive: true });",
+          "const chunkFile = `${chunkDir}scene-${slideNumber}.ts`;",
+          "const sidecarFile = `${chunkDir}scene-${slideNumber}.json`;",
+          "// Resumability: chunks survive on the sandbox filesystem between",
+          "// commands, so a rerun after a mid-deck failure re-renders only what is",
+          "// missing. The sidecar records the exact scene source and frame range a",
+          "// chunk was produced from, so an edited scene is never silently reused.",
+          'const digest = createHash("sha256").update(readFileSync(new URL(`../${scene.file}`, import.meta.url))).digest("hex");',
+          "const sidecar = JSON.stringify({ digest, from, to });",
+          "const reused =",
+          "  existsSync(chunkFile) &&",
+          "  existsSync(sidecarFile) &&",
+          "  statSync(chunkFile).size > 0 &&",
+          '  readFileSync(sidecarFile, "utf8") === sidecar;',
+          "if (!reused) {",
+          "  // Bundling resolves staticFile() against publicDir; create it even when",
+          "  // there is no narration so the bundler never trips over a missing path.",
+          '  const publicDir = new URL("../public", import.meta.url).pathname;',
+          "  mkdirSync(publicDir, { recursive: true });",
+          "  await ensureBrowser();",
+          `  const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir, outDir: new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname });`,
+          '  const composition = await selectComposition({ serveUrl, id: "video-presentation" });',
+          "  // Concurrency is left at the renderer's default (derived from the",
+          "  // sandbox's own CPU count) rather than pinned here: the sandbox owns its",
+          "  // resource budget and this script must not widen it.",
+          "  await renderMedia({",
+          '    codec: "h264-ts",',
+          "    composition,",
+          "    frameRange: [from, to],",
+          "    muted: true,",
+          "    outputLocation: chunkFile,",
+          "    serveUrl,",
+          "  });",
+          "  writeFileSync(sidecarFile, sidecar);",
+          "}",
+          `console.log(JSON.stringify({ ok: true, stage: "render-scene", slideNumber, file: \`${PROJECT_SCENE_CHUNK_DIR}/scene-\${slideNumber}.ts\`, byteLength: statSync(chunkFile).size, from, to, reused }));`,
+        ].join("\n"),
+      },
+      {
+        // Renders the narration for the WHOLE composition in one pass, to a
+        // single aac file. This is the one remaining whole-deck command, and it
+        // is affordable because an audio-only render rasterises no frames — the
+        // browser only has to evaluate the timeline to collect audio assets.
+        //
+        // It is skipped entirely when the deck has no narration.
+        path: "scripts/render-audio.mjs",
+        content: [
+          'import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";',
           'import { bundle } from "@remotion/bundler";',
           'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
           "",
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
-          "// Bundling resolves staticFile() against publicDir; create it even when",
-          "// there is no narration so the bundler never trips over a missing path.",
-          'const publicDir = new URL("../public", import.meta.url).pathname;',
-          "mkdirSync(publicDir, { recursive: true });",
-          "await ensureBrowser();",
-          'const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir });',
-          'const composition = await selectComposition({ serveUrl, id: "video-presentation" });',
-          'mkdirSync(new URL("../out", import.meta.url), { recursive: true });',
+          "const hasNarration = manifest.scenes.some((scene) => Boolean(scene.narrationFile));",
+          `const output = new URL("../${PROJECT_NARRATION_AUDIO_PATH}", import.meta.url).pathname;`,
+          "if (!hasNarration) {",
+          `  console.log(JSON.stringify({ ok: true, stage: "render-audio", file: null, byteLength: 0, reused: false }));`,
+          "} else {",
+          "  // Same resume rule as the scene chunks: an audio mix already on disk is",
+          "  // reused, so a retry after a failed scene does not re-render it.",
+          "  const reused = existsSync(output) && statSync(output).size > 0;",
+          "  if (!reused) {",
+          '    const publicDir = new URL("../public", import.meta.url).pathname;',
+          "    mkdirSync(publicDir, { recursive: true });",
+          '    mkdirSync(new URL("../out", import.meta.url).pathname, { recursive: true });',
+          "    await ensureBrowser();",
+          `    const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir, outDir: new URL("../${PROJECT_BUNDLE_DIR}", import.meta.url).pathname });`,
+          '    const composition = await selectComposition({ serveUrl, id: "video-presentation" });',
+          "    await renderMedia({",
+          '      codec: "aac",',
+          "      composition,",
+          "      outputLocation: output,",
+          "      serveUrl,",
+          "    });",
+          "  }",
+          `  console.log(JSON.stringify({ ok: true, stage: "render-audio", file: ${JSON.stringify(PROJECT_NARRATION_AUDIO_PATH)}, byteLength: statSync(output).size, reused }));`,
+          "}",
+        ].join("\n"),
+      },
+      {
+        // Joins the per-scene chunks (and the narration mix, if any) into the
+        // deliverable mp4 with @remotion/renderer's `combineChunks` — the same
+        // primitive Remotion Lambda uses to stitch its distributed chunks.
+        //
+        // For an h264 output `combineChunks` concatenates video with ffmpeg's
+        // `concat:` protocol and `-c:v copy`: a stream copy, no re-encode, which
+        // is only sound because every chunk came from one frameRange of one
+        // composition and so shares codec, resolution, fps and encoder settings.
+        // That also makes this command cheap — it is I/O, not encoding — so it
+        // is not a realistic threat to the 120s command budget even for long decks.
+        //
+        // `framesPerChunk` describes the *audio* chunking, not the video: audio
+        // arrives as one file covering the whole composition, so the chunk
+        // length is the composition length. Passing the per-scene lengths here
+        // is impossible (the option is a single number) and would be wrong.
+        //
+        // Refuses to emit anything if a chunk is missing: a short video that
+        // looks complete is worse than no video.
+        path: "scripts/concat-video.mjs",
+        content: [
+          'import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";',
+          'import { combineChunks } from "@remotion/renderer";',
+          "",
+          'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
+          `mkdirSync(new URL("../${PROJECT_SCENE_CHUNK_DIR}/", import.meta.url).pathname, { recursive: true });`,
+          "const videoFiles = manifest.scenes.map((scene) => {",
+          `  const file = new URL(\`../${PROJECT_SCENE_CHUNK_DIR}/scene-\${scene.slideNumber}.ts\`, import.meta.url).pathname;`,
+          "  if (!existsSync(file) || statSync(file).size === 0) {",
+          "    throw new Error(`missing chunk for slide ${scene.slideNumber}: ${file}`);",
+          "  }",
+          "  return file;",
+          "});",
+          "if (videoFiles.length === 0) {",
+          '  throw new Error("no scene chunks to concatenate");',
+          "}",
+          `const audioFile = new URL("../${PROJECT_NARRATION_AUDIO_PATH}", import.meta.url).pathname;`,
+          "const hasNarration = manifest.scenes.some((scene) => Boolean(scene.narrationFile));",
+          "if (hasNarration && !(existsSync(audioFile) && statSync(audioFile).size > 0)) {",
+          '  throw new Error("narrated deck is missing its rendered audio mix");',
+          "}",
+          "const audioFiles = hasNarration ? [audioFile] : [];",
           `const output = new URL("../${PROJECT_RENDERED_VIDEO_PATH}", import.meta.url).pathname;`,
-          "// Concurrency is left at the renderer's default (derived from the",
-          "// sandbox's own CPU count) rather than pinned here: the sandbox owns its",
-          "// resource budget and this script must not widen it.",
-          "await renderMedia({",
+          "await combineChunks({",
+          '  audioCodec: "aac",',
+          "  audioFiles,",
           '  codec: "h264",',
-          "  composition,",
+          "  compositionDurationInFrames: manifest.durationInFrames,",
+          "  fps: manifest.fps,",
+          "  framesPerChunk: manifest.durationInFrames,",
           "  outputLocation: output,",
-          "  serveUrl,",
+          "  preferLossless: false,",
+          "  videoFiles,",
           "});",
           "const stats = statSync(output);",
-          `console.log(JSON.stringify({ ok: true, stage: "render-video", file: ${JSON.stringify(PROJECT_RENDERED_VIDEO_PATH)}, byteLength: stats.size, durationInFrames: composition.durationInFrames, fps: composition.fps, width: composition.width, height: composition.height, hasAudio: manifest.scenes.some((scene) => Boolean(scene.narrationFile)) }));`,
+          `console.log(JSON.stringify({ ok: true, stage: "render-video", file: ${JSON.stringify(PROJECT_RENDERED_VIDEO_PATH)}, byteLength: stats.size, durationInFrames: manifest.durationInFrames, fps: manifest.fps, width: manifest.width, height: manifest.height, hasAudio: hasNarration, sceneCount: videoFiles.length }));`,
         ].join("\n"),
       },
     ],
