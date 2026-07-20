@@ -1,3 +1,4 @@
+import type { AgentToolRetrievalChunk } from "@sourceweft/contracts/agent-tools";
 import {
   SEARCH_SOURCES_TOOL_NAME,
   GREP_TOOL_NAME,
@@ -6,12 +7,12 @@ import {
   GLOB_TOOL_NAME,
 } from "@sourceweft/contracts/agent-tools";
 
-export type RetrievalChunk = {
-  readonly citation: string;
-  readonly chunkId: string;
-  readonly content: string;
-  readonly sourceTitle?: string;
-};
+/**
+ * One citable chunk. Aliased rather than re-declared: the host produces these
+ * and this package formats them, so a second copy of the shape could only
+ * drift away from the one the host is typed against.
+ */
+export type RetrievalChunk = AgentToolRetrievalChunk;
 
 function compactChunkContent(content: string) {
   return content.replace(/\s+/g, " ").trim().slice(0, 1000);

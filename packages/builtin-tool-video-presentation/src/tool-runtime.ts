@@ -39,7 +39,8 @@ export interface VideoPresentationToolArtifacts {
   }): Promise<{
     id: string;
     status: string;
-    title: string;
+    /** Nullable in the host's row; every reader below falls back to its own title. */
+    title: string | null;
     payloadJson?: unknown;
   } | null>;
   /**
@@ -74,7 +75,7 @@ export interface VideoPresentationToolArtifacts {
   }): Promise<{
     id: string;
     status: string;
-    title: string;
+    title: string | null;
     payloadJson?: unknown;
     errorMessage?: string | null;
   } | null>;
@@ -294,7 +295,8 @@ function sleep(ms: number) {
 type VideoPresentationArtifactSnapshot = {
   id: string;
   status: string;
-  title: string;
+  /** Nullable, like the host row it is read from; readers fall back to their own title. */
+  title: string | null;
   payloadJson?: unknown;
   errorMessage?: string | null;
 };

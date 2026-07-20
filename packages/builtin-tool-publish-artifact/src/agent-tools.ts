@@ -1,9 +1,11 @@
 import { tool, type ToolRuntime } from "langchain";
+import type {
+  AgentToolArtifactServices,
+  AgentToolHostServices,
+  AgentToolTurnContext,
+} from "@sourceweft/contracts/agent-tools";
 import { PUBLISH_ARTIFACT_TOOL_NAME } from "./agent-tool-defs";
-import {
-  publishArtifact,
-  type PublishArtifactServices,
-} from "./publisher";
+import { publishArtifact, type PublishArtifactServices } from "./publisher";
 import {
   ArtifactPublishError,
   isRecoverableArtifactPublishErrorCode,
@@ -17,42 +19,29 @@ import {
 
 const PUBLISH_ARTIFACT_TOOL_ID = "publish_artifact";
 
+/** What this capability asks of the host, taken out of the shared contract. */
 type CapabilityAgentToolFactoryInput = {
   readonly toolIds?: readonly string[];
-  readonly context?: {
-    readonly isToolDenied?: (toolName: string) => boolean;
-    readonly runtimeTools?: Readonly<
-      Record<
-        string,
-        {
-          readonly enabled?: boolean;
-          readonly options?: unknown;
-          readonly selection?: unknown;
-        }
-      >
-    >;
-    readonly shouldBindAgentTool?: (toolName: string) => boolean;
-    readonly teamId?: string;
-    readonly threadId?: string;
-    readonly userId?: string;
-    readonly userMessageId?: string;
-    readonly workspaceId?: string;
-  };
+  readonly context?: Partial<
+    Pick<
+      AgentToolTurnContext,
+      | "isToolDenied"
+      | "runtimeTools"
+      | "shouldBindAgentTool"
+      | "teamId"
+      | "threadId"
+      | "userId"
+      | "userMessageId"
+      | "workspaceId"
+    >
+  >;
   readonly services?: {
-    readonly artifacts?: PublishArtifactServices["artifacts"];
-    readonly sandbox?: {
-      readonly allowedReadRoots?: readonly string[];
-      readonly downloadCurrentFile: (input: {
-        sandboxPath: string;
-      }) => Promise<Buffer | Uint8Array>;
-    };
-    readonly filesystem?: PublishArtifactServices["filesystem"];
-    readonly storage?: PublishArtifactServices["storage"];
-    readonly logger?: {
-      info: (msg: string, meta?: Record<string, unknown>) => void;
-      warn: (msg: string, meta?: Record<string, unknown>) => void;
-      error: (msg: string, meta?: Record<string, unknown>) => void;
-    };
+    /** One member of the artifact port: this tool publishes, nothing else. */
+    readonly artifacts?: Pick<AgentToolArtifactServices, "publishArtifact">;
+    readonly sandbox?: AgentToolHostServices["sandbox"];
+    readonly filesystem?: AgentToolHostServices["filesystem"];
+    readonly storage?: AgentToolHostServices["storage"];
+    readonly logger?: AgentToolHostServices["logger"];
   };
 };
 
@@ -268,8 +257,7 @@ function formatPublishInputValidationMessage(error: {
   const messages = error.issues.map((issue) => {
     const path =
       issue.path.length > 0 ? issue.path.map(String).join(".") : "input";
-    const reason =
-      issue.message === "Required" ? "is required" : issue.message;
+    const reason = issue.message === "Required" ? "is required" : issue.message;
     return `${path} ${reason}`;
   });
   return [...new Set(messages)].join("; ");
@@ -380,9 +368,11 @@ export function createCapabilityAgentTools(
       ): Promise<string> => {
         const toolCallId = langchainToolCallIdFromRuntime(runtime);
         const normalizedArgs = normalizePublishToolInput(args);
-        const parsedResult = PublishArtifactInputSchema.safeParse(normalizedArgs);
+        const parsedResult =
+          PublishArtifactInputSchema.safeParse(normalizedArgs);
         if (!parsedResult.success) {
-          const inputShapeIssues = collectPublishInputShapeIssues(normalizedArgs);
+          const inputShapeIssues =
+            collectPublishInputShapeIssues(normalizedArgs);
           const message =
             inputShapeIssues.length > 0
               ? `${inputShapeIssues.join("; ")}; ${receivedSourceShapeSummary(args)}`

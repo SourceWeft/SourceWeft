@@ -25,6 +25,11 @@ export type {
   BilledModelGateway,
   BilledRequestOptions,
 } from "./billed-client";
+export { createAgentToolModelGatewayService } from "./agent-tool-client";
+export type {
+  AgentToolBilledGatewaySurface,
+  AgentToolModelGatewayScope,
+} from "./agent-tool-client";
 export type {
   BillingIntent,
   CoveredReason,

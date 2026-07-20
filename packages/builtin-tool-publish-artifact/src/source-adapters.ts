@@ -1,4 +1,8 @@
 import { Buffer } from "node:buffer";
+import type {
+  AgentToolFilesystemServices,
+  AgentToolSandboxServices,
+} from "@sourceweft/contracts/agent-tools";
 import {
   ArtifactPublishError,
   type ArtifactSource,
@@ -12,39 +16,14 @@ export type ArtifactSourceBytes = {
   readonly source: ArtifactSource;
 };
 
-type ReadRawResult = {
-  readonly data?: {
-    readonly content: string | readonly string[] | Uint8Array | Buffer;
-    readonly mimeType?: string;
-  };
-  readonly error?: unknown;
-};
-
+/**
+ * Where the bytes come from, as the host lends them: a sandbox file or a
+ * mounted agent filesystem. Both ports are declared in the shared contract, so
+ * what this adapter reads and what the host passes are one declaration.
+ */
 export type ArtifactSourceServices = {
-  readonly sandbox?: {
-    readonly allowedReadRoots?: readonly string[];
-    readonly downloadCurrentFile: (input: {
-      sandboxPath: string;
-    }) => Promise<Buffer | Uint8Array>;
-  };
-  readonly filesystem?: {
-    readonly readRaw?: (path: string) => Promise<ReadRawResult> | ReadRawResult;
-    readonly downloadFiles?: (
-      paths: readonly string[],
-    ) =>
-      | Promise<
-          readonly {
-            readonly path: string;
-            readonly content: Uint8Array | Buffer | null;
-            readonly error?: unknown;
-          }[]
-        >
-      | readonly {
-          readonly path: string;
-          readonly content: Uint8Array | Buffer | null;
-          readonly error?: unknown;
-        }[];
-  };
+  readonly sandbox?: AgentToolSandboxServices;
+  readonly filesystem?: AgentToolFilesystemServices;
 };
 
 export type ArtifactSourceAdapter = {

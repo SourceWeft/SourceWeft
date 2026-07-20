@@ -1,3 +1,8 @@
+import type { ModelGateway } from "@sourceweft/model-gateway";
+import type {
+  AgentToolHostServices,
+  AgentToolTurnContext,
+} from "@sourceweft/contracts/agent-tools";
 import {
   createGenerateImageTool,
   imageRuntimePromptProvider,
@@ -5,45 +10,53 @@ import {
 } from "./tool-runtime";
 import { readGenerateImageTurnState } from "./turn-preflight";
 
+/**
+ * The kinds of model this capability calls, which is what it binds the host's
+ * gateway surface to. The host exposes every kind its gateway has; naming only
+ * `images` here is how this package states its actual dependency, and how a
+ * host that stopped serving image generation would break its build rather than
+ * this tool at runtime.
+ */
+type ImageModelSurface = Pick<ModelGateway, "images">;
+
+/**
+ * What this capability asks of the host, taken out of the shared contract.
+ * `context` is `Partial` because tests and older hosts pass a fraction of it;
+ * every field below is still checked against the one declaration the host is
+ * annotated with.
+ */
 type CapabilityAgentToolFactoryInput = {
   readonly toolIds?: readonly string[];
-  readonly context?: {
-    /**
-     * Everything the turn's preflights parked, keyed by tool name. The host
-     * carries it without reading it; we take our own entry out of it here.
-     */
-    readonly turnState?: Readonly<Record<string, unknown>>;
-    readonly isToolDenied?: (toolName: string) => boolean;
-    readonly parentSpanId?: string;
-    readonly runtimeTools?: Readonly<
-      Record<
-        string,
-        {
-          readonly options?: unknown;
-          readonly selection?: unknown;
-        }
-      >
-    >;
-    readonly teamId?: string;
-    readonly threadId?: string;
-    readonly traceId?: string;
-    readonly userId?: string;
-    readonly userMessageId?: string;
-    readonly workspaceId?: string;
-  };
-  readonly services?: {
-    readonly artifacts?: {
-      readonly publishArtifact?: ImageToolRuntimeDeps["artifacts"]["publishArtifact"];
-    };
-    readonly modelGateway?: {
-      readonly getClient: (
-        gatewayConfigId: string,
-      ) => Promise<ImageToolRuntimeDeps["modelGateway"]>;
-    };
-  };
+  readonly context?: Partial<
+    Pick<
+      AgentToolTurnContext,
+      | "turnState"
+      | "isToolDenied"
+      | "parentSpanId"
+      | "runtimeTools"
+      | "teamId"
+      | "threadId"
+      | "traceId"
+      | "userId"
+      | "userMessageId"
+      | "workspaceId"
+    >
+  >;
+  readonly services?: Partial<
+    Pick<AgentToolHostServices<ImageModelSurface>, "artifacts" | "modelGateway">
+  >;
 };
 
 const GENERATE_IMAGE_TOOL_ID = "generate_image";
+
+/**
+ * The label this capability's model spend settles under.
+ *
+ * It is passed to the host with every client request because the host cannot
+ * know it: it once hardcoded this exact string, which meant any other
+ * capability's generation would have been billed as an image artifact.
+ */
+const GENERATE_IMAGE_BILLING_FEATURE = "artifact.image";
 
 function turnState(input: CapabilityAgentToolFactoryInput) {
   return readGenerateImageTurnState(
@@ -107,7 +120,10 @@ export function createCapabilityAgentTools(
     modelGateway: {
       images: {
         generate: async (request, opts) => {
-          const client = await modelGateway.getClient(profile.gatewayConfigId);
+          const client = await modelGateway.getClient({
+            gatewayConfigId: profile.gatewayConfigId,
+            feature: GENERATE_IMAGE_BILLING_FEATURE,
+          });
           return client.images.generate(request, opts);
         },
       },

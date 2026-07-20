@@ -1,3 +1,8 @@
+import type {
+  AgentToolArtifactServices,
+  AgentToolQueueServices,
+  AgentToolTurnContext,
+} from "@sourceweft/contracts/agent-tools";
 import {
   VIDEO_PRESENTATION_PIPELINE_JOB_NAME,
   videoPresentationReusableArtifactQuery,
@@ -17,69 +22,39 @@ import {
  * type-parameterised, named after no capability. Which artifact type they
  * address and what makes a row reusable are supplied below, from this
  * package's own descriptors.
+ *
+ * Narrowed out of the shared contract rather than restated, so asking for a
+ * primitive the host does not lend is a compile error here instead of a tool
+ * that fails to bind on a live turn.
  */
-type HostArtifactServices = {
-  readonly openArtifact: (input: {
-    readonly context: {
-      readonly teamId: string;
-      readonly workspaceId: string;
-      readonly threadId: string;
-      readonly userId: string;
-    };
-    readonly artifactId?: string;
-    readonly spec: {
-      readonly artifactType: string;
-      readonly title: string;
-      readonly prompt?: string;
-      readonly payload: Record<string, unknown>;
-      readonly idempotency?: { readonly requestKey: string };
-    };
-  }) => Promise<{ readonly artifactId: string }>;
-  readonly findArtifact: VideoPresentationToolArtifacts["findStatus"];
-  readonly findReusableArtifact: (query: {
-    readonly teamId: string;
-    readonly workspaceId: string;
-    readonly threadId: string;
-    readonly artifactType: string;
-    readonly statuses: readonly string[];
-    readonly requestKey?: string;
-  }) => ReturnType<VideoPresentationToolArtifacts["findReusable"]>;
-};
+type HostArtifactServices = Pick<
+  AgentToolArtifactServices,
+  "openArtifact" | "findArtifact" | "findReusableArtifact"
+>;
 
 /** Host-side deliverable dispatch: the job name comes from our manifest. */
-type HostQueueServices = {
-  readonly enqueueDeliverableJob: (input: {
-    readonly jobName: string;
-    readonly jobId: string;
-    readonly payload: Record<string, unknown>;
-  }) => Promise<unknown>;
-};
+type HostQueueServices = AgentToolQueueServices;
 
+/** What this capability asks of the host, taken out of the shared contract. */
 type CapabilityAgentToolFactoryInput = {
   readonly manifest?: unknown;
   readonly toolIds?: readonly string[];
-  readonly context?: {
-    readonly isToolDenied?: (toolName: string) => boolean;
-    readonly parentSpanId?: string;
-    readonly runtimeTools?: Readonly<
-      Record<
-        string,
-        {
-          readonly enabled?: boolean;
-          readonly options?: unknown;
-          readonly selection?: unknown;
-        }
-      >
-    >;
-    readonly shouldBindAgentTool?: (toolName: string) => boolean;
-    readonly sourceUserMessageId?: string;
-    readonly teamId?: string;
-    readonly threadId?: string;
-    readonly traceId?: string;
-    readonly userId?: string;
-    readonly userMessageId?: string;
-    readonly workspaceId?: string;
-  };
+  readonly context?: Partial<
+    Pick<
+      AgentToolTurnContext,
+      | "isToolDenied"
+      | "parentSpanId"
+      | "runtimeTools"
+      | "shouldBindAgentTool"
+      | "sourceUserMessageId"
+      | "teamId"
+      | "threadId"
+      | "traceId"
+      | "userId"
+      | "userMessageId"
+      | "workspaceId"
+    >
+  >;
   readonly services?: {
     readonly artifacts?: HostArtifactServices;
     readonly queue?: HostQueueServices;
@@ -162,7 +137,8 @@ function createRuntimeDeps(
 const GENERATE_VIDEO_PRESENTATION_TOOL_ID = "generate_video_presentation";
 
 function runtimeToolOptions(input: CapabilityAgentToolFactoryInput) {
-  const runtimeTool = input.context?.runtimeTools?.[GENERATE_VIDEO_PRESENTATION_TOOL_ID];
+  const runtimeTool =
+    input.context?.runtimeTools?.[GENERATE_VIDEO_PRESENTATION_TOOL_ID];
   const options = runtimeTool?.options ?? runtimeTool?.selection;
   return options && typeof options === "object" && !Array.isArray(options)
     ? (options as VideoPresentationToolContext["defaultRequest"] & {
@@ -191,7 +167,8 @@ export function createCapabilityAgentTools(
 ) {
   const context = input.context;
   const services = input.services;
-  const runtimeTool = context?.runtimeTools?.[GENERATE_VIDEO_PRESENTATION_TOOL_ID];
+  const runtimeTool =
+    context?.runtimeTools?.[GENERATE_VIDEO_PRESENTATION_TOOL_ID];
   const options = runtimeToolOptions(input);
   if (
     !includesTool(input, GENERATE_VIDEO_PRESENTATION_TOOL_ID) ||

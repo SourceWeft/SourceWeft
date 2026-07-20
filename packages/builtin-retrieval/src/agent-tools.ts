@@ -1,19 +1,20 @@
+import type {
+  AgentToolHostServices,
+  AgentToolTurnContext,
+} from "@sourceweft/contracts/agent-tools";
 import { createRetrievalTool } from "./tool-runtime";
-import type { RetrievalChunk } from "./tool-format";
 
+/**
+ * What this capability asks of the host, taken out of the shared contract
+ * rather than restated here. Both halves are `Partial` because a host older
+ * than this package — or a test standing one up — may pass less than the
+ * contract promises; what matters is that nothing can be asked for that the
+ * contract does not offer.
+ */
 type CapabilityAgentToolFactoryInput = {
   readonly toolIds?: readonly string[];
-  readonly context?: {
-    readonly isToolDenied?: (toolName: string) => boolean;
-  };
-  readonly services?: {
-    readonly retrieval?: {
-      readonly searchSources: (
-        query: string,
-        runtime?: { toolCallId?: string; toolName?: string },
-      ) => Promise<RetrievalChunk[]>;
-    };
-  };
+  readonly context?: Partial<Pick<AgentToolTurnContext, "isToolDenied">>;
+  readonly services?: Partial<Pick<AgentToolHostServices, "retrieval">>;
 };
 
 const SEARCH_SOURCES_TOOL_ID = "search_sources";

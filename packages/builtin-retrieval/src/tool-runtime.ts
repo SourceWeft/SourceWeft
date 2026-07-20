@@ -12,7 +12,7 @@ export function createRetrievalTool(input: {
       toolCallId?: string;
       toolName?: string;
     },
-  ) => Promise<RetrievalChunk[]>;
+  ) => Promise<readonly RetrievalChunk[]>;
 }) {
   return tool(
     async ({ query }: { query: string }, runtime: ToolRuntime) => {

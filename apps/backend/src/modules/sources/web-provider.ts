@@ -1,4 +1,4 @@
-import type { WebProvider } from "@sourceweft/builtin-tool-web-search";
+import type { AgentToolWebProvider } from "@sourceweft/contracts/agent-tools";
 import {
   AnyCrawlWebProvider,
   type AnyCrawlWebProviderOptions,
@@ -7,7 +7,7 @@ import { config } from "../../shared/config";
 
 export function createDefaultWebProvider(
   options: AnyCrawlWebProviderOptions = {},
-): WebProvider | null {
+): AgentToolWebProvider | null {
   const apiKey = config.webProviders.anycrawl.apiKey;
   if (!apiKey) {
     return null;

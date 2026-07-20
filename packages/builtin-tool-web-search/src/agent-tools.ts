@@ -1,16 +1,18 @@
-import type { WebCitationRegistry, WebProvider } from "./types";
+import type {
+  AgentToolHostServices,
+  AgentToolTurnContext,
+} from "@sourceweft/contracts/agent-tools";
 import { createWebTools } from "./web-tools";
 
+/** What this capability asks of the host, taken out of the shared contract. */
 type CapabilityAgentToolFactoryInput = {
   readonly toolIds?: readonly string[];
-  readonly context?: {
-    readonly isToolDenied?: (toolName: string) => boolean;
-    readonly webAccessEnabled?: boolean;
-  };
-  readonly services?: {
-    readonly citationRegistry?: WebCitationRegistry;
-    readonly webProvider?: WebProvider | null;
-  };
+  readonly context?: Partial<
+    Pick<AgentToolTurnContext, "isToolDenied" | "webAccessEnabled">
+  >;
+  readonly services?: Partial<
+    Pick<AgentToolHostServices, "citationRegistry" | "webProvider">
+  >;
 };
 
 const WEB_SEARCH_TOOL_ID = "web_search";
@@ -44,8 +46,10 @@ export function createCapabilityAgentTools(
     (tool) =>
       includesTool(input, tool.name) &&
       !isDenied(input, tool.name) &&
-      (tool.name !== WEB_SEARCH_TOOL_ID || includesTool(input, WEB_SEARCH_TOOL_ID)) &&
-      (tool.name !== WEB_FETCH_TOOL_ID || includesTool(input, WEB_FETCH_TOOL_ID)),
+      (tool.name !== WEB_SEARCH_TOOL_ID ||
+        includesTool(input, WEB_SEARCH_TOOL_ID)) &&
+      (tool.name !== WEB_FETCH_TOOL_ID ||
+        includesTool(input, WEB_FETCH_TOOL_ID)),
   );
 
   return {
