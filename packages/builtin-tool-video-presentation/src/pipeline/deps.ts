@@ -11,7 +11,11 @@ import {
   type VideoPresentationProjectPayload,
 } from "@sourceweft/contracts/video-presentation";
 import { videoPresentationSandboxError } from "./errors";
-import { runProjectInSession } from "./sandbox-project";
+import {
+  runProjectInSession,
+  type RenderedVideoResult,
+  type RenderVideoRequest,
+} from "./sandbox-project";
 
 /**
  * Structural chat message type. The pipeline only ever constructs
@@ -100,11 +104,18 @@ export type VideoPipelineDeps = {
       payload: VideoPresentationProjectPayload;
       request: VideoPresentationCreateRequest;
       job: DeliverableJobEnvelope;
+      /**
+       * Opt-in server-side mp4 render. Omitted by every caller today: the
+       * sandbox render path is staged ahead of the preview flip, so leaving it
+       * unset must keep the run exactly as it was.
+       */
+      renderVideo?: RenderVideoRequest;
     }): Promise<{
       install: ProjectExecutionResult;
       typecheck: ProjectExecutionResult;
       smoke: ProjectExecutionResult;
       stills?: Array<{ slideNumber: number; data: Uint8Array }>;
+      video?: RenderedVideoResult;
     }>;
   };
 };
@@ -153,6 +164,9 @@ export function createVideoPipelineDeps(
                 logger: ctx.logger,
                 job: runInput.job,
                 payload: runInput.payload,
+                ...(runInput.renderVideo
+                  ? { renderVideo: runInput.renderVideo }
+                  : {}),
               });
             },
           }

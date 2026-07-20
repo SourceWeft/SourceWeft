@@ -186,6 +186,32 @@ export const videoPresentationAudioTrackSchema = z.object({
   fileName: z.string().trim().min(1),
 });
 
+/**
+ * An mp4 rendered server-side (inside the sandbox) and stored as an artifact
+ * asset, served from the same `/artifacts/:id/assets/:fileName` route the
+ * narration tracks use.
+ *
+ * Optional on the payload because it is produced by an opt-in render path: a
+ * payload without it is a normal, complete video presentation. It exists so the
+ * preview can eventually play a file the platform rendered instead of compiling
+ * model-authored scene code in the browser — until that flip happens, nothing
+ * writes this field.
+ */
+export const videoPresentationRenderedVideoSchema = z.object({
+  assetUrl: z.string().trim().min(1),
+  storageKey: z.string().trim().min(1),
+  storageBucket: z.string().trim().min(1).optional(),
+  fileName: z.string().trim().min(1),
+  mimeType: z.string().trim().min(1),
+  byteLength: z.number().int().min(1),
+  durationInFrames: z.number().int().min(1),
+  fps: z.number().int().min(1),
+  width: z.number().int().min(1),
+  height: z.number().int().min(1),
+  /** True when the render muxed the narration tracks into the mp4. */
+  hasAudio: z.boolean().default(false),
+});
+
 export const videoPresentationSceneModuleSchema = z.object({
   slideNumber: z.number().int().min(1).max(80),
   title: z.string().trim().min(1).max(180),
@@ -283,6 +309,9 @@ export const videoPresentationProjectPayloadSchema = z.object({
     slideCount: 0,
     durationSeconds: 0,
   }),
+  // Set only by the sandbox mp4 render path; absent on every payload produced
+  // by the browser-preview era, so every reader must treat it as optional.
+  renderedVideo: videoPresentationRenderedVideoSchema.optional(),
   renderProfile: videoPresentationRenderProfileSchema,
   themeAssignments: z.array(videoPresentationThemeAssignmentSchema).default([]),
   sourceDigest: z.string().trim().min(1).max(50_000),
@@ -364,6 +393,9 @@ export type VideoPresentationAudioTrack = z.infer<
 >;
 export type VideoPresentationSceneModule = z.infer<
   typeof videoPresentationSceneModuleSchema
+>;
+export type VideoPresentationRenderedVideo = z.infer<
+  typeof videoPresentationRenderedVideoSchema
 >;
 export type VideoPresentationAsset = z.infer<
   typeof videoPresentationAssetSchema

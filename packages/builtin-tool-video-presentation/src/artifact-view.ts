@@ -36,6 +36,29 @@ function resolveVideoPresentationAsset(input: {
     return null;
   }
 
+  // A server-rendered mp4, when one exists, is served from the same asset
+  // route as narration. Payloads written before the sandbox render path exists
+  // simply have no `renderedVideo`, so this branch never matches for them.
+  const renderedVideo = toObjectRecord(payload.renderedVideo);
+  if (
+    renderedVideo &&
+    renderedVideo.fileName === fileName &&
+    typeof renderedVideo.storageKey === "string"
+  ) {
+    return {
+      contentType:
+        typeof renderedVideo.mimeType === "string"
+          ? renderedVideo.mimeType
+          : BINARY_MIME_TYPE,
+      fileName,
+      storageBucket:
+        typeof renderedVideo.storageBucket === "string"
+          ? renderedVideo.storageBucket
+          : artifact.storageBucket,
+      storageKey: renderedVideo.storageKey,
+    };
+  }
+
   const audioTracks = Array.isArray(payload.audioTracks)
     ? payload.audioTracks
     : [];

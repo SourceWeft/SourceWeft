@@ -3,7 +3,38 @@ import type { VideoPresentationProjectPayload } from "@sourceweft/contracts/vide
 import { VIDEO_SCENE_COMPONENT_NAME } from "./config";
 import { normalizeSceneProjectCode } from "./scene-gen";
 
-export function buildProjectCodePayload(payload: VideoPresentationProjectPayload) {
+/**
+ * Narration file the sandbox has (or will have) staged under the generated
+ * project's `public/` directory. Supplying these is what makes the mp4 render
+ * carry sound: the composition can only reach audio through `staticFile`,
+ * because the sandbox has no network access to the artifact asset route.
+ */
+export type ProjectNarrationFile = {
+  slideNumber: number;
+  /** Base name inside `public/audio/`, e.g. `slide-3.mp3`. */
+  fileName: string;
+};
+
+/** Directory (relative to the project root) narration is staged into. */
+export const PROJECT_NARRATION_DIR = "public/audio";
+
+/** Where `render-video` writes the mp4, relative to the project root. */
+export const PROJECT_RENDERED_VIDEO_PATH = "out/video.mp4";
+
+export function buildProjectCodePayload(
+  payload: VideoPresentationProjectPayload,
+  options?: {
+    /**
+     * Omit for the default (silent) project — the output is then byte-identical
+     * to what the pipeline persists, which is why the mp4 path can add audio
+     * without changing the payload every other stage writes.
+     */
+    narrationFiles?: ReadonlyArray<ProjectNarrationFile>;
+  },
+) {
+  const narrationBySlide = new Map(
+    (options?.narrationFiles ?? []).map((file) => [file.slideNumber, file]),
+  );
   const sceneModules =
     payload.sceneModules.length > 0
       ? payload.sceneModules
@@ -44,7 +75,9 @@ export function buildProjectCodePayload(payload: VideoPresentationProjectPayload
     title: scene.title,
     durationInFrames: scene.durationInFrames,
     componentName: `Slide${scene.slideNumber}`,
+    narrationFile: narrationBySlide.get(scene.slideNumber)?.fileName ?? null,
   }));
+  const hasNarration = sceneEntries.some((scene) => scene.narrationFile);
   const totalDurationInFrames = sceneModules.reduce(
     (sum, scene) => sum + scene.durationInFrames,
     0,
@@ -61,13 +94,17 @@ export function buildProjectCodePayload(payload: VideoPresentationProjectPayload
         path: "src/VideoScene.tsx",
         content: [
           'import React from "react";',
-          'import { AbsoluteFill, Sequence } from "remotion";',
+          // `Audio`/`staticFile` are only imported when narration is staged, so
+          // the silent project keeps exactly the imports it always had.
+          hasNarration
+            ? 'import { AbsoluteFill, Audio, Sequence, staticFile } from "remotion";'
+            : 'import { AbsoluteFill, Sequence } from "remotion";',
           sceneImports,
           "",
           "const sceneEntries = [",
           ...sceneEntries.map(
             (scene) =>
-              `  { slideNumber: ${scene.slideNumber}, title: ${JSON.stringify(scene.title)}, durationInFrames: ${scene.durationInFrames}, Component: ${scene.componentName} },`,
+              `  { slideNumber: ${scene.slideNumber}, title: ${JSON.stringify(scene.title)}, durationInFrames: ${scene.durationInFrames}, Component: ${scene.componentName}${hasNarration ? `, narrationFile: ${JSON.stringify(scene.narrationFile)}` : ""} },`,
           ),
           "] as const;",
           "",
@@ -90,6 +127,14 @@ export function buildProjectCodePayload(payload: VideoPresentationProjectPayload
           "            key={scene.slideNumber}",
           "          >",
           "            <SceneComponent />",
+          // Narration rides inside the scene's Sequence so it starts with the
+          // slide and is cut off at the slide boundary, exactly like the
+          // browser player composes it.
+          ...(hasNarration
+            ? [
+                '            {scene.narrationFile ? <Audio src={staticFile("audio/" + scene.narrationFile)} /> : null}',
+              ]
+            : []),
           "          </Sequence>",
           "        );",
           "      })}",
@@ -137,6 +182,7 @@ export function buildProjectCodePayload(payload: VideoPresentationProjectPayload
               build: "tsc -p tsconfig.json --noEmit",
               "render-smoke": "node scripts/render-smoke.mjs",
               "render-stills": "node scripts/render-stills.mjs",
+              "render-video": "node scripts/render-video.mjs",
             },
             dependencies: {
               remotion: "^4.0.0",
@@ -190,6 +236,15 @@ export function buildProjectCodePayload(payload: VideoPresentationProjectPayload
                 )?.durationSeconds ?? null,
               durationInFrames: scene.durationInFrames,
               file: `src/scenes/Slide${scene.slideNumber}.tsx`,
+              // Only present on an mp4 render: the smoke check and the stills
+              // renderer never look at it, and its absence keeps the manifest
+              // identical to the silent build.
+              ...(hasNarration
+                ? {
+                    narrationFile:
+                      narrationBySlide.get(scene.slideNumber)?.fileName ?? null,
+                  }
+                : {}),
               slideNumber: scene.slideNumber,
               title: scene.title,
             })),
@@ -250,6 +305,44 @@ export function buildProjectCodePayload(payload: VideoPresentationProjectPayload
           "  frameCursor += scene.durationInFrames;",
           "}",
           'console.log(JSON.stringify({ ok: true, stage: "render-stills", rendered }));',
+        ].join("\n"),
+      },
+      {
+        // Renders the whole composition to an mp4 with @remotion/renderer, the
+        // same server-side renderer the stills path already proves works in the
+        // sandbox. This is the execution site the browser `new Function` scene
+        // compiler is meant to be replaced by: model-authored scene code only
+        // ever runs here, behind the sandbox boundary.
+        //
+        // It is dormant until something invokes `pnpm run render-video`; the
+        // pipeline stages as they stand never do.
+        path: "scripts/render-video.mjs",
+        content: [
+          'import { mkdirSync, readFileSync, statSync } from "node:fs";',
+          'import { bundle } from "@remotion/bundler";',
+          'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
+          "",
+          'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
+          "// Bundling resolves staticFile() against publicDir; create it even when",
+          "// there is no narration so the bundler never trips over a missing path.",
+          'const publicDir = new URL("../public", import.meta.url).pathname;',
+          "mkdirSync(publicDir, { recursive: true });",
+          "await ensureBrowser();",
+          'const serveUrl = await bundle({ entryPoint: new URL("../src/index.ts", import.meta.url).pathname, publicDir });',
+          'const composition = await selectComposition({ serveUrl, id: "video-presentation" });',
+          'mkdirSync(new URL("../out", import.meta.url), { recursive: true });',
+          `const output = new URL("../${PROJECT_RENDERED_VIDEO_PATH}", import.meta.url).pathname;`,
+          "// Concurrency is left at the renderer's default (derived from the",
+          "// sandbox's own CPU count) rather than pinned here: the sandbox owns its",
+          "// resource budget and this script must not widen it.",
+          "await renderMedia({",
+          '  codec: "h264",',
+          "  composition,",
+          "  outputLocation: output,",
+          "  serveUrl,",
+          "});",
+          "const stats = statSync(output);",
+          `console.log(JSON.stringify({ ok: true, stage: "render-video", file: ${JSON.stringify(PROJECT_RENDERED_VIDEO_PATH)}, byteLength: stats.size, durationInFrames: composition.durationInFrames, fps: composition.fps, width: composition.width, height: composition.height, hasAudio: manifest.scenes.some((scene) => Boolean(scene.narrationFile)) }));`,
         ].join("\n"),
       },
     ],

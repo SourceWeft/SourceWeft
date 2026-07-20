@@ -39,17 +39,23 @@ export function truncateProjectExecutionResult(
   };
 }
 
-export function normalizeProjectExecutionResults(input: {
+export function normalizeProjectExecutionResults<
+  TVideo = { data: Uint8Array; report: unknown },
+>(input: {
   install: ProjectExecutionResult;
   typecheck: ProjectExecutionResult;
   smoke: ProjectExecutionResult;
   stills?: Array<{ slideNumber: number; data: Uint8Array }>;
+  video?: TVideo;
 }) {
   return {
     install: truncateProjectExecutionResult(input.install),
     typecheck: truncateProjectExecutionResult(input.typecheck),
     smoke: truncateProjectExecutionResult(input.smoke),
     stills: input.stills ?? [],
+    // Binary render output passes through untouched — truncation applies to
+    // diagnostics, never to bytes. Absent unless the opt-in mp4 render ran.
+    ...(input.video ? { video: input.video } : {}),
   };
 }
 
